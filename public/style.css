@@ -492,6 +492,20 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .find-box .find-count:empty, .find-box .chat-find:placeholder-shown ~ .find-step { display: none; }
 .find-box .find-step { padding: 0.1rem 0.45rem; font-size: 0.85em; }
 @media (max-width: 800px) { .find-box .chat-find, .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 7rem; } }
+/* Phones: the title gets the first line; the state, buttons and find box share the second, the state giving way. */
+@media (max-width: 800px) {
+  .ticket-head > .row { gap: 0.4rem 0.45rem; }
+  .ticket-head > .row > h2 { flex: 1 0 calc(100% - 1.1rem); min-width: 0; }
+  .ticket-head > .row > .muted { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
+  .ticket-head > .row > .spacer { display: none; }
+  .ticket-head > .row > button, .ticket-head > .row > .find-box { flex: none; white-space: nowrap; }
+  .find-box .chat-find, .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 6.5rem; }
+  /* While a search is typed, its count and arrows need room too. */
+  .find-box { gap: 0.15rem; }
+  .find-box .chat-find:not(:placeholder-shown) { width: 5.5rem; }
+  .find-box .find-count { min-width: 0; }
+  .find-box .find-step { padding: 0.1rem 0.3rem; }
+}
 /* Keep the thread bar on one line on wider screens: a long title gives way to the find box and buttons. */
 @media (min-width: 801px) {
   .ticket-head > .row { flex-wrap: nowrap; }

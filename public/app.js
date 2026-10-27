@@ -1911,11 +1911,14 @@ function renderTicketHead() {
       if (await setStatus(t.id, 'closed')) location.hash = `#/p/${t.project_id}`;
     } }, 'Close ticket'));
   }
+  const state = (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '');
+  // Titled too, since phones may cut it short to keep the buttons beside it.
+  const stateLabel = h('span', { class: 'muted', title: state }, state);
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
       h('h2', {}, threadFullName(t)),
-      h('span', { class: 'muted' }, (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '')),
+      stateLabel,
       h('span', { class: 'spacer' }), ...actions, view.findEl ?? '',
       // Leaves the thread as it is and goes back to the project's coordinator.
       coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the coordinator', 'aria-label': 'Back to the coordinator' }, '×')),

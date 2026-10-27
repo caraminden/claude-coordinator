@@ -143,6 +143,8 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 }
 .ticket-head .meta { color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ticket-head button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
+.ticket-head .close-view { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: 6px; font-size: 1.4rem; line-height: 1; color: var(--muted); text-decoration: none; }
+.ticket-head .close-view:hover, .ticket-head .close-view:focus-visible { background: var(--line); color: var(--ink); }
 .log { display: flex; flex-direction: column; gap: 0.6rem; }
 .msg { border-radius: 10px; padding: 0.6rem 0.85rem; background: var(--panel); border: 1px solid var(--line); overflow-wrap: anywhere; }
 .msg.user { background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }

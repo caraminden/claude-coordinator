@@ -46,7 +46,8 @@ button {
   padding: 0.45rem 0.9rem;
   cursor: pointer;
 }
-button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+button.secondary, a.button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+a.button { display: inline-block; text-decoration: none; border-radius: 6px; padding: 0.2rem 0.65rem; font-size: 0.85em; }
 button:disabled { opacity: 0.5; cursor: default; }
 input, textarea, select {
   background: var(--panel);
@@ -78,6 +79,7 @@ code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0
 #me button { margin-left: 0.5rem; padding: 0.2rem 0.6rem; font-size: 0.85em; }
 
 main { max-width: 1200px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+main:has(> .split) { max-width: 1560px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; }
 .login { max-width: 360px; margin: 10vh auto; }
 .login h1 { margin-top: 0; font-size: 1.3rem; }
@@ -212,22 +214,77 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .msg .images { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.4rem 0 0.2rem; }
 .msg .images img { display: block; max-height: 14rem; max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
 
-/* Project view: threads sidebar beside the chat */
-.split { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+/* Project view: artifacts shelf and threads sidebar beside the main panel */
+.split { display: grid; grid-template-columns: minmax(180px, 230px) minmax(230px, 300px) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
 /* Sticky can't move past the bottom of .split, which ends main's 3rem bottom padding above the
-   page end. Keep the sidebar short enough (1rem top gap + 3rem) that the chat reaching the bottom
-   never drags it up, and keep wheel/touch scrolls inside it from chaining to the page. */
-.sidebar { position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
-.sidebar > summary { display: none; cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; }
+   page end. Keep the side panels short enough (1rem top gap + 3rem) that the chat reaching the bottom
+   never drags them up, and keep wheel/touch scrolls inside them from chaining to the page. */
+.sidebar, .shelf { position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
+.sidebar > summary, .shelf > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; }
+.sidebar > summary { display: none; }
+.shelf { border-right: 1px solid var(--line); padding-right: 0.9rem; }
+.shelf .column { margin-top: 1rem; }
+.shelf .small { font-size: 0.82em; margin: 0; }
+.view-all { display: flex; justify-content: space-between; text-decoration: none; color: var(--accent); font-size: 0.9em; padding: 0.3rem 0.5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.view-all:hover, .view-all.active { border-color: var(--accent); }
+.view-all .count, .chip .count { color: var(--muted); }
+.artifact-item { display: flex; gap: 0.5rem; align-items: center; text-decoration: none; padding: 0.3rem 0.4rem; border-radius: 6px; min-width: 0; }
+.artifact-item:hover { background: var(--panel); }
+.artifact-item.active { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.artifact-item.missing { opacity: 0.6; }
+.artifact-item .text { display: flex; flex-direction: column; min-width: 0; }
+.artifact-item .name { font-size: 0.88em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.artifact-item .meta { font-size: 0.75em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.badge { flex: none; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.03em; min-width: 2.6rem; text-align: center; padding: 0.15rem 0.25rem; border-radius: 4px; color: #fff; background: var(--closed); }
+.badge.k-markdown, .badge.k-text { background: #4b5563; }
+.badge.k-pdf { background: #b91c1c; }
+.badge.k-image { background: #7c3aed; }
+.badge.k-video { background: #0e7490; }
+.badge.k-audio { background: #15803d; }
+.badge.k-html { background: #c2410c; }
+.badge.big { font-size: 1rem; padding: 0.4rem 0.6rem; }
+
+/* Artifacts in the main panel */
+.artifacts-main { min-width: 0; }
+.artifacts-main .ticket-head input[type=search] { margin-top: 0.6rem; }
+.artifacts-main .ticket-head .meta a { color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem; }
+.chip { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.65rem; font-size: 0.82em; }
+.chip.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.artifact-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.artifact-card { position: relative; display: block; text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.5rem 0.6rem 0.6rem; min-width: 0; }
+.artifact-card:hover { border-color: var(--accent); }
+.artifact-card.missing { opacity: 0.6; }
+.artifact-card .preview { height: 110px; display: flex; align-items: center; justify-content: center; background: var(--code-bg); border-radius: 6px; overflow: hidden; margin-bottom: 0.45rem; }
+.artifact-card .preview img { width: 100%; height: 100%; object-fit: cover; }
+.artifact-card .name { font-weight: 600; font-size: 0.92em; overflow-wrap: anywhere; }
+.artifact-card .meta { color: var(--muted); font-size: 0.78em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.artifact-card .pin { position: absolute; top: 0.8rem; right: 0.9rem; }
+button.pin { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; width: 1.9rem; height: 1.9rem; padding: 0; line-height: 1; font-size: 1rem; }
+button.pin:hover { color: var(--accent); border-color: var(--accent); }
+button.pin.on { color: var(--accent); }
+.artifact-body { min-width: 0; }
+.artifact-media { display: block; max-width: 100%; max-height: 75vh; border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); }
+.artifact-frame { width: 100%; height: 75vh; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.artifact-text { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.doc { padding: 1rem 1.25rem; }
 .sidebar details.new { margin: 0 0 1rem; }
 .sidebar details.new form { margin-top: 0.5rem; }
 .sidebar .column { margin-top: 1rem; }
 .ticket-card.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
 .ticket-card.coordinator .title::before { content: "◆ "; color: var(--accent); }
 .chat { min-width: 0; }
+/* Medium screens: stack the artifacts and threads in one column so the main panel keeps its width. */
+@media (min-width: 801px) and (max-width: 1150px) {
+  .split { grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); }
+  .split > .shelf { grid-column: 1; grid-row: 1; position: static; max-height: none; border-right: 0; padding-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+  .split > .sidebar { grid-column: 1; grid-row: 2; position: static; max-height: none; }
+  .split > section { grid-column: 2; grid-row: 1 / span 2; }
+}
 @media (max-width: 800px) {
   .split { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
-  .sidebar { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+  .sidebar, .shelf { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+  .shelf { border-right: 0; padding-right: 0; }
   .sidebar > summary { display: list-item; }
 }
 

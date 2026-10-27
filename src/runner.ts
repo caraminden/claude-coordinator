@@ -147,6 +147,8 @@ export class Runner {
   private broadcast: Broadcast;
   private claudeBin: string;
   private coordinatorEnv: CoordinatorEnv;
+  /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
+  onFilesMayChange: (ticketId: number) => void = () => {};
 
   constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
@@ -284,6 +286,7 @@ export class Runner {
         this.emit(ticket.id, 'error', { text: `claude exited with code ${code}${detail ? `:\n${detail}` : ''}` });
       }
       this.setStatus(ticket.id, status);
+      this.onFilesMayChange(ticket.id);
       this.next(ticket.id);
     });
   }
@@ -315,6 +318,9 @@ export class Runner {
       this.broadcastTicket(ticketId);
     }
     this.emit(ticketId, 'claude', slim);
+    if (ev.type === 'user' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'tool_result')) {
+      this.onFilesMayChange(ticketId);
+    }
   }
 
   /** Task-list state for a ticket, rebuilt from its stored events the first time it is needed. */

@@ -1,11 +1,14 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
 import { createHash, randomBytes } from 'node:crypto';
-import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { readFile, readdir, mkdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { extname, join, normalize } from 'node:path';
+import { basename, extname, join, normalize, sep } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { homedir } from 'node:os';
+import { artifactType, findArtifacts } from './src/artifacts.ts';
 import { AGENT_NAME, Auth, type Session } from './src/auth.ts';
-import { Store, type Project, type Ticket } from './src/db.ts';
+import { Store, type Artifact, type Project, type Ticket } from './src/db.ts';
 import { Runner } from './src/runner.ts';
 import { cloneProject, createTicketDir, projectDir, removeProjectDir } from './src/workspace.ts';
 
@@ -66,6 +69,117 @@ const runner = new Runner(
   process.env.CLAUDE_BIN ?? 'claude',
 );
 runner.recover();
+
+// ---------- artifacts ----------
+
+// Rescan a ticket's folder shortly after it may have written files, at most once per delay.
+const SCAN_DELAY_MS = 2000;
+const scanTimers = new Map<number, NodeJS.Timeout>();
+const scanning = new Map<number, Promise<void>>();
+
+function scheduleScan(ticketId: number) {
+  if (scanTimers.has(ticketId)) return;
+  scanTimers.set(ticketId, setTimeout(() => {
+    scanTimers.delete(ticketId);
+    scanArtifacts(ticketId).catch((err) => console.error(`Artifact scan of ticket ${ticketId} failed:`, err));
+  }, SCAN_DELAY_MS));
+}
+
+async function scanArtifacts(ticketId: number) {
+  // One scan per ticket at a time; a request during a scan waits for it, then rescans.
+  while (scanning.has(ticketId)) await scanning.get(ticketId);
+  const job = (async () => {
+    const ticket = store.getTicket(ticketId);
+    if (!ticket?.cwd) return;
+    const found = await findArtifacts(ticket.cwd, !!ticket.branch);
+    if (store.syncArtifacts(ticket, found)) broadcast({ type: 'artifacts', projectId: ticket.project_id });
+  })();
+  scanning.set(ticketId, job);
+  try {
+    await job;
+  } finally {
+    scanning.delete(ticketId);
+  }
+}
+
+runner.onFilesMayChange = scheduleScan;
+// Pick up anything made while the server was down (or before artifacts existed), one ticket at a time.
+(async () => {
+  for (const p of store.listProjects()) {
+    for (const t of store.listTickets(p.id)) {
+      await scanArtifacts(t.id).catch((err) => console.error(`Artifact scan of ticket ${t.id} failed:`, err));
+    }
+  }
+})();
+
+function artifactView(a: Artifact & { ticket_title?: string; ticket_kind?: string }) {
+  const ticket = a.ticket_title === undefined ? store.getTicket(a.ticket_id) : null;
+  return {
+    ...a,
+    name: basename(a.path),
+    kind: artifactType(a.path)?.kind ?? 'text',
+    ticket_title: a.ticket_title ?? ticket?.title ?? '',
+    ticket_kind: a.ticket_kind ?? ticket?.kind ?? 'ticket',
+  };
+}
+
+/** Content-Security-Policy for an artifact opened directly or framed by the app. */
+function artifactCsp(kind: string): string {
+  // Tickets write these files, so never let them run as the app: sandboxed pages get an opaque
+  // origin with no cookies or API access. HTML may still run its own scripts (canvases, demos).
+  if (kind === 'html') return "sandbox allow-scripts allow-popups allow-forms allow-modals; frame-ancestors 'self'";
+  // Chrome's PDF viewer refuses to load in a sandbox; PDFs can't script the page anyway.
+  if (kind === 'pdf') return "frame-ancestors 'self'";
+  return "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'self'";
+}
+
+async function serveArtifact(req: IncomingMessage, res: ServerResponse, a: Artifact, ticket: Ticket, download: boolean) {
+  const type = artifactType(a.path);
+  if (!type) throw new HttpError(404, 'Not found');
+  let file: string;
+  let size: number;
+  try {
+    // Resolve symlinks so the file must really be inside the ticket's folder.
+    const root = await realpath(ticket.cwd);
+    file = await realpath(join(ticket.cwd, a.path));
+    if (!file.startsWith(root + sep)) throw new Error('outside');
+    const st = await stat(file);
+    if (!st.isFile()) throw new Error('not a file');
+    size = st.size;
+  } catch {
+    throw new HttpError(404, 'That file is no longer there');
+  }
+  const headers: Record<string, string | number> = {
+    'Content-Type': type.mime,
+    'Content-Security-Policy': artifactCsp(type.kind),
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'same-origin',
+    'Cache-Control': 'private, no-cache',
+    'Accept-Ranges': 'bytes',
+  };
+  if (download) headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(basename(a.path))}`;
+  // Byte ranges, so videos can seek (Safari won't play them without).
+  let start = 0;
+  let end = size - 1;
+  const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+  if (range && (range[1] || range[2])) {
+    if (range[1]) {
+      start = Number(range[1]);
+      if (range[2]) end = Math.min(end, Number(range[2]));
+    } else {
+      start = Math.max(0, size - Number(range[2]));
+    }
+    if (start > end || start >= size) {
+      res.writeHead(416, { ...headers, 'Content-Range': `bytes */${size}` });
+      return res.end();
+    }
+    res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
+  } else {
+    res.writeHead(200, { ...headers, 'Content-Length': size });
+  }
+  if (req.method === 'HEAD' || size === 0) return res.end();
+  await pipeline(createReadStream(file, { start, end }), res).catch(() => {});
+}
 
 class HttpError extends Error {
   status: number;
@@ -334,6 +448,33 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     }
     runner.send(id, session.name, message);
     return json(res, 201, ticketView(id));
+  }
+
+  m = pathname.match(/^\/api\/projects\/(\d+)\/artifacts$/);
+  if (m && method === 'GET') {
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such project');
+    return json(res, 200, store.listArtifacts(project.id).map(artifactView));
+  }
+
+  m = pathname.match(/^\/api\/artifacts\/(\d+)(\/[a-z]+)?$/);
+  if (m) {
+    const a = store.getArtifact(Number(m[1]));
+    if (!a) throw new HttpError(404, 'No such artifact');
+    const action = m[2] ?? '';
+    if (action === '' && method === 'GET') {
+      return json(res, 200, { artifact: artifactView(a), project: store.getProject(a.project_id) });
+    }
+    if (action === '/raw' && (method === 'GET' || method === 'HEAD')) {
+      return serveArtifact(req, res, a, store.getTicket(a.ticket_id)!, url.searchParams.has('download'));
+    }
+    if (action === '/pin' && method === 'POST') {
+      const body = await readJson(req);
+      store.setArtifactPinned(a.id, body.pinned ? session.name : null);
+      broadcast({ type: 'artifacts', projectId: a.project_id });
+      const updated = store.getArtifact(a.id);
+      return json(res, 200, updated ? artifactView(updated) : null);
+    }
   }
 
   m = pathname.match(/^\/api\/tickets\/(\d+)\/images\/([^/]+)$/);

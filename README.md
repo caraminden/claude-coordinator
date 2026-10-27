@@ -55,6 +55,14 @@ Planned next: runners on other people's own Claude logins.
   (`mcp__<name>__…`): a small stdio proxy (`src/machine-mcp.ts`) relays through the app
   (`src/machines.ts`), and the agent runs a separate copy of the MCP server per session.
   Tokens are stored hashed; a new token or removing the machine disconnects it.
+- **GitHub** wakes a thread about its pull request. `src/github.ts` polls each open
+  thread's branch for its newest PR with one `gh api graphql` call, one thread at a time
+  (every 2 minutes while a PR is open, backing off to 15 while nothing changes; 30 for
+  threads without one; every turn's end looks again soon). A CI verdict on the head commit,
+  a new review or comment, or a merge or close is sent into the thread as a message from
+  "GitHub". The gh account is the threads' own, so its remarks, merges and closes during that
+  thread's turns are skipped, as are bots. Handled events are kept in `github_seen`, so
+  nothing is sent twice, and a PR's first look sends nothing.
 - Projects with a repo URL are cloned once; each ticket gets
   `git worktree add -b ticket/<id>-<slug>` from the default branch.
 
@@ -72,6 +80,7 @@ uses the built-in `node:sqlite`.
 | `src/machines.ts` | Relays MCP traffic between thread turns and connected machines |
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server |
 | `public/machine-agent.mjs` | Agent people run on their own computers to connect them |
+| `src/github.ts` | Watches threads' pull requests and messages them about CI, reviews and merges |
 | `src/workspace.ts` | Clones project repos, creates per-ticket worktrees |
 | `src/instructions.ts` | Finds Claude Code instruction and memory files to import as project instructions |
 | `src/db.ts` | SQLite schema and queries |

@@ -180,6 +180,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     '- title: the short ask, about 30 characters ("Usage bar in the top bar"), no number, tag or emoji. Your starting title may just be the opening words of the first message; replace it early in your first turn with the short ask.',
     '- tag: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet). Set it once the kind of work is clear, following any project conventions, and change it if the work changes kind; leave it unset for one-off questions.',
     '- At the end of every turn, set state and note: state ready (done, ready to merge or pick up), try (ready for people to try), parked, blocked (on something outside the thread) or outside (work still running elsewhere), or null when you are simply waiting on an answer; note is one terse line, max 60 chars, on where things stand ("needs a pick: tabs or list"). The state clears when the next turn starts.',
+    'When your branch has an open GitHub pull request, the app watches it and messages you as "[GitHub]: ..." when CI on its head commit passes or fails, someone reviews or comments, or it is merged or closed, so you need not wait on CI in a turn; act on those messages as the project expects (fix a red build, answer a review).',
     'Give every Bash call a short plain-English description (like "Run the test suite").',
     'When the thread\'s work is done and should be closed (for example when project instructions say to close after shipping), call the `close_self` tool (mcp__thread) near the end of your turn: the thread closes once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not close a thread whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can close, even if its brief says to close.',
     ...showingFiles(ticket, filesDir, sharedDir),
@@ -291,6 +292,8 @@ export class Runner {
   machines: () => Machine[] = () => [];
   /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
   onFilesMayChange: (ticketId: number) => void = () => {};
+  /** Called when a turn's process has exited, however the turn ended. */
+  onTurnEnd: (ticketId: number) => void = () => {};
   /** Approve / Deny cards waiting on people, for projects with approval rules. */
   approvals: Approvals;
 
@@ -534,6 +537,7 @@ export class Runner {
         this.setStatus(ticket.id, status);
       }
       this.onFilesMayChange(ticket.id);
+      this.onTurnEnd(ticket.id);
       // Re-read the ticket: the turn may have given it its first (or a new) session id.
       const after = this.store.getTicket(ticket.id);
       // Only a turn that ran on Claude Code's default effort says what "Default" means for this thread.

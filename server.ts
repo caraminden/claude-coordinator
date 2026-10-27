@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact, linkedPaths } from './src/artifacts.ts';
 import { AGENT_NAME, Auth, threadMayCall, type Session } from './src/auth.ts';
 import { branchStatus, type BranchStatus } from './src/branch.ts';
+import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
 import { cleanPluginDirs, cleanRules, lines } from './src/approvals.ts';
@@ -214,6 +215,11 @@ async function ticketBranch(ticketId: number, maxPrAge = PR_TTL_MS): Promise<Bra
   if (cached && cached.json !== json) broadcast({ type: 'branch', ticketId, status });
   return status;
 }
+
+// Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
+const github = new GithubWatcher(store, (ticketId, text) => runner.send(ticketId, GITHUB_NAME, text));
+github.start();
+runner.onTurnEnd = (ticketId) => github.poke(ticketId);
 
 /** After a turn's tool calls (commits, merges, `gh pr create`), look again shortly. */
 function scheduleBranchCheck(ticketId: number) {
@@ -614,7 +620,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const ip = clientIp(req);
     const body = await readJson(req);
     const name = cleanName(body.name);
-    if (name.toLowerCase() === AGENT_NAME.toLowerCase()) throw new HttpError(400, 'That name is reserved');
+    if ([AGENT_NAME, GITHUB_NAME].some((n) => n.toLowerCase() === name.toLowerCase())) throw new HttpError(400, 'That name is reserved');
     // Checked right before the password (no await in between) so parallel bursts are counted.
     if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
     if (!auth.checkPassword(ip, String(body.password ?? ''))) throw new HttpError(401, 'Wrong password');

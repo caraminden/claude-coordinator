@@ -1,5 +1,6 @@
 // Claude Coordinator front end: hash-routed views over the JSON API, live via SSE.
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
+import { linkThreadRefs } from './threadrefs.js';
 
 const app = document.getElementById('app');
 const crumbs = document.getElementById('crumbs');
@@ -132,6 +133,22 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
+/** Link "#12" in some HTML to thread 12 of the project on screen, titled with its name when known. */
+function threadRefsHtml(html) {
+  if (view?.kind !== 'project') return html;
+  return linkThreadRefs(html, view.projectId, (n) => {
+    for (const t of view.tickets.values()) if (t.number === n) return threadLabel(t);
+    return null;
+  });
+}
+
+/** Plain text as nodes, with its "#12"s linked (see threadRefsHtml). */
+function threadRefs(text) {
+  const span = document.createElement('span');
+  span.innerHTML = threadRefsHtml(escapeHtml(String(text ?? '')));
+  return [...span.childNodes];
+}
+
 /**
  * Markdown in chat messages: the document renderer below (tables, headings, lists, quotes…), with
  * single line breaks kept as typed. With `ticketId`, links to paths in that thread's folders become
@@ -169,6 +186,7 @@ function markdownDoc(src, opts = {}) {
         : `<span class="link" title="${href}">${text}</span>`)
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>');
+    html = threadRefsHtml(html);
     return html.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
   };
   const isItem = (l) => /^\s*([-*+]|\d+\.)\s+/.test(l);
@@ -1856,17 +1874,37 @@ function actionEl(action) {
   const el = h('details', { class: `act ${state}` },
     h('summary', {},
       h('span', { class: 'st', title: { pending: 'In progress', err: 'Failed', ok: 'Done' }[state] }, state === 'pending' ? '…' : state === 'err' ? '✗' : '·'),
-      h('span', { class: 'what' }, actionLabel(block)),
-      why ? h('span', { class: 'why' }, ` — failed: ${why}`) : ''));
+      h('span', { class: 'what' }, threadRefs(actionLabel(block))),
+      why ? h('span', { class: 'why' }, ` — failed: ${why}`) : '',
+      ticketActionRef(action) ? [' → ', ...threadRefs(`#${ticketActionRef(action).number}`)] : ''));
   el.addEventListener('toggle', () => {
     if (!el.open || el.querySelector('.body')) return;
     const input = block.input || {};
     const body = h('div', { class: 'body' },
       h('pre', {}, block.name === 'Bash' && input.command ? `$ ${input.command}` : JSON.stringify(input, null, 2)));
-    if (action.result) body.append(h('pre', { class: action.result.is_error ? 'err' : '' }, resultString(action.result) || '(no output)'));
+    if (action.result) body.append(h('pre', { class: action.result.is_error ? 'err' : '' }, threadRefs(resultString(action.result) || '(no output)')));
     el.append(body);
   });
   return el;
+}
+
+/**
+ * The thread a coordinator tool call created or messaged, from its result ("Created #15 …",
+ * "Sent. #12 …"), as { verb, number }; null for other calls and failures.
+ */
+function ticketActionRef({ block, result }) {
+  if (!result || result.is_error || !block.name.startsWith('mcp__coordinator__')) return null;
+  const text = Array.isArray(result.content) ? result.content.map((c) => c?.text ?? '').join('\n') : String(result.content ?? '');
+  const m = /^(Created|Sent\.|Updated\.) #(\d+)\b/.exec(text);
+  return m ? { verb: { Created: 'Created', 'Sent.': 'Messaged', 'Updated.': 'Updated' }[m[1]], number: Number(m[2]) } : null;
+}
+
+/** "Created #15 · Messaged #12": links to the threads some work created or messaged, or null. */
+function ticketActionLinks(acts) {
+  const refs = acts.map(ticketActionRef).filter(Boolean);
+  if (!refs.length) return null;
+  return h('li', { class: 'thread-refs' }, h('span', { class: 'st' }, '→'),
+    refs.flatMap((r, i) => [i ? ' · ' : '', `${r.verb} `, ...threadRefs(`#${r.number}`)]));
 }
 
 /** Claude's own words from while a step was underway, shortened to a couple of lines. */
@@ -1902,7 +1940,8 @@ function phaseRows(acts, running) {
   return [
     h('ul', { class: 'phases' }, phases.map((ph) => h('li', { class: ph.ongoing ? 'ongoing' : '' },
       h('span', { class: 'st' }, ph.ongoing ? '◐' : '✓'), ph.text,
-      h('span', { class: 'muted' }, ` · ${ph.count} action${ph.count === 1 ? '' : 's'}${ph.failed ? `, ${ph.failed} failed along the way` : ''}`)))),
+      h('span', { class: 'muted' }, ` · ${ph.count} action${ph.count === 1 ? '' : 's'}${ph.failed ? `, ${ph.failed} failed along the way` : ''}`))),
+      ticketActionLinks(acts)),
     cmds,
   ];
 }
@@ -2038,7 +2077,7 @@ function appendEvent(event, scroll = true) {
   } else if (event.kind === 'question') {
     nodes.push(questionCard(event.ticket_id, data));
   } else if (event.kind === 'note') {
-    nodes.push(h('div', { class: 'note' }, data.text));
+    nodes.push(h('div', { class: 'note' }, threadRefs(data.text)));
   } else if (event.kind === 'error') {
     nodes.push(h('div', { class: 'note error' }, data.text));
   } else if (event.kind === 'claude') {

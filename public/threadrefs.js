@@ -1,0 +1,30 @@
+// "#12" in any text the UI shows becomes a link to thread 12 of the current project.
+// Pure string work, so it can be tested without a browser.
+
+/**
+ * A standalone #N: not part of a word, URL, path, HTML entity (&#39;) or another #, and not a
+ * GitHub-style "PR #12" / "issue #12", which mean something else.
+ */
+const THREAD_REF = /(?<![\w&/#.:?=+-])(?<!\b(?:PRs?|[Ii]ssues?|[Pp]ull [Rr]equests?|[Pp]ulls?)\s)#(\d{1,6})(?![\w#/-])/g;
+
+/** Where thread `number` of project `projectId` lives (see threadHref in app.js). */
+export const threadNumberHref = (projectId, number) => `#/p/${projectId}/t/${number}`;
+
+/**
+ * Link #N references in a string of HTML. Only text between tags is touched, and nothing inside
+ * an existing <a>, <code> or <pre>, so links, code and attributes are left alone. `titleOf(n)` may
+ * give a hover title for a thread it knows; numbers it doesn't know still link, and opening one
+ * that doesn't exist shows the usual "There is no thread #N" message.
+ */
+export function linkThreadRefs(html, projectId, titleOf = () => null) {
+  if (projectId == null || !html.includes('#')) return html;
+  return html.replace(/(<(a|code|pre)\b[\s\S]*?<\/\2>|<[^>]*>)|([^<]+)/gi, (all, tag, _name, text) => {
+    if (tag) return all;
+    return text.replace(THREAD_REF, (ref, n) => {
+      const title = titleOf(Number(n));
+      return `<a class="thread-ref" href="${threadNumberHref(projectId, Number(n))}"${title ? ` title="${escapeAttr(title)}"` : ''}>${ref}</a>`;
+    });
+  });
+}
+
+const escapeAttr = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);

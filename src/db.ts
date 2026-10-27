@@ -53,6 +53,17 @@ export interface Artifact {
   missing: number;
 }
 
+/** A file of Claude Code session state, gzipped; `path` is relative to the Claude config dir. */
+export interface ClaudeStateRow {
+  path: string;
+  project_id: number;
+  /** Null for state the whole project shares (auto-memory). */
+  ticket_id: number | null;
+  size: number;
+  mtime: number;
+  data?: Uint8Array;
+}
+
 export interface EventRow {
   id: number;
   ticket_id: number;
@@ -106,6 +117,15 @@ CREATE TABLE IF NOT EXISTS artifacts (
   UNIQUE (ticket_id, path)
 );
 CREATE INDEX IF NOT EXISTS artifacts_project ON artifacts(project_id, mtime);
+CREATE TABLE IF NOT EXISTS claude_state (
+  path TEXT PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  ticket_id INTEGER REFERENCES tickets(id),
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  data BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS claude_state_owner ON claude_state(project_id, ticket_id);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -236,6 +256,7 @@ export class Store {
   deleteTicket(id: number) {
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
@@ -330,6 +351,33 @@ export class Store {
       throw err;
     }
     return changed;
+  }
+
+  /** Session state rows without their data: a ticket's own, or the project's shared ones (ticketId null). */
+  listClaudeState(projectId: number, ticketId: number | null): ClaudeStateRow[] {
+    return (ticketId === null
+      ? this.db.prepare('SELECT path, project_id, ticket_id, size, mtime FROM claude_state WHERE project_id = ? AND ticket_id IS NULL').all(projectId)
+      : this.db.prepare('SELECT path, project_id, ticket_id, size, mtime FROM claude_state WHERE project_id = ? AND ticket_id = ?').all(projectId, ticketId)
+    ) as unknown as ClaudeStateRow[];
+  }
+
+  getClaudeState(path: string, withData = false): ClaudeStateRow | undefined {
+    const cols = withData ? '*' : 'path, project_id, ticket_id, size, mtime';
+    return this.db.prepare(`SELECT ${cols} FROM claude_state WHERE path = ?`).get(path) as unknown as ClaudeStateRow | undefined;
+  }
+
+  putClaudeState(row: Required<ClaudeStateRow>) {
+    this.db
+      .prepare(
+        `INSERT INTO claude_state (path, project_id, ticket_id, size, mtime, data) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(path) DO UPDATE SET project_id = excluded.project_id, ticket_id = excluded.ticket_id,
+           size = excluded.size, mtime = excluded.mtime, data = excluded.data`,
+      )
+      .run(row.path, row.project_id, row.ticket_id, row.size, row.mtime, row.data);
+  }
+
+  deleteClaudeState(path: string) {
+    this.db.prepare('DELETE FROM claude_state WHERE path = ?').run(path);
   }
 
   listEvents(ticketId: number, afterId = 0): EventRow[] {

@@ -1,13 +1,14 @@
 # Claude Coordinator
 
 A shared web UI for running headless Claude Code sessions as **tickets**. Several
-people sign in, see a board of a project's tickets (running, waiting for input,
-errored, closed), and chat with any ticket. Each ticket is one Claude Code
-session working in its own git worktree.
+people sign in, open a project, and talk to its **coordinator**: a long-lived
+Claude session that creates, messages, renames and closes the project's other
+tickets. A sidebar lists the tickets (running, waiting for input, errored,
+closed), and any ticket can also be opened and chatted with directly. Each
+ticket is one Claude Code session working in its own git worktree.
 
 This is the proof-of-concept stage: tickets, chat, live output and a board.
-Planned next: approve/deny buttons for permission requests, a long-lived
-coordinator ticket that creates and messages other tickets, artifacts, and
+Planned next: approve/deny buttons for permission requests, artifacts, and
 runners on other people's own Claude logins.
 
 ## How it works
@@ -19,6 +20,11 @@ runners on other people's own Claude logins.
   server-sent events.
 - Messages sent while a turn is running are queued and sent together as the
   next turn. Messages reach Claude as `[Name]: text`.
+- Opening a project creates its coordinator ticket on first visit. Its turns
+  run with an extra MCP server (`src/mcp.ts`) whose tools call this app's API
+  with a bearer token that only reaches that project's tickets (never the
+  coordinator itself). The token is passed in the environment, not on the
+  command line, so other users on the box can't read it from `ps`.
 - Projects with a repo URL are cloned once; each ticket gets
   `git worktree add -b ticket/<id>-<slug>` from the default branch.
 
@@ -31,6 +37,7 @@ uses the built-in `node:sqlite`.
 | --- | --- |
 | `server.ts` | HTTP server, JSON API, SSE stream, static files |
 | `src/runner.ts` | Spawns `claude` turns, parses stream-json, queues messages |
+| `src/mcp.ts` | MCP server giving the coordinator its ticket-management tools |
 | `src/workspace.ts` | Clones project repos, creates per-ticket worktrees |
 | `src/db.ts` | SQLite schema and queries |
 | `src/auth.ts` | Shared-password login, signed session cookies |
@@ -67,8 +74,12 @@ ticket currently uses Cara's account.
 Headless turns can't show a permission prompt, so each ticket picks a mode when
 it is created:
 
-- **acceptEdits** (default): edits files freely; tools that need approval,
-  such as most shell commands, are refused.
-- **bypassPermissions**: full access as the service user. Use only for tasks
-  you trust.
+- **bypassPermissions** (default, for tickets started by hand or by the
+  coordinator): full access as the service user.
+- **acceptEdits**: edits files freely; tools that need approval, such as most
+  shell commands, are refused.
 - **plan**: read and plan only.
+
+The coordinator itself runs in `acceptEdits` with only its MCP tools
+pre-approved, so it can read the code and manage tickets but can't run shell
+commands; it hands the real work to tickets.

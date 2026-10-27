@@ -3,16 +3,21 @@ import { readFile, mkdir } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { homedir } from 'node:os';
-import { Auth, type Session } from './src/auth.ts';
-import { Store } from './src/db.ts';
+import { AGENT_NAME, Auth, type Session } from './src/auth.ts';
+import { Store, type Project, type Ticket } from './src/db.ts';
 import { Runner } from './src/runner.ts';
-import { cloneProject, createTicketDir, removeProjectDir } from './src/workspace.ts';
+import { cloneProject, createTicketDir, projectDir, removeProjectDir } from './src/workspace.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
 const DATA_DIR = process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator');
 const PUBLIC_DIR = join(import.meta.dirname, 'public');
 const PERMISSION_MODES = ['acceptEdits', 'bypassPermissions', 'plan', 'default'];
+// Headless turns can't ask for approval, so anything short of full access refuses most shell commands.
+const DEFAULT_PERMISSION_MODE = 'bypassPermissions';
+// The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
+const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
+const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 
 await mkdir(DATA_DIR, { recursive: true });
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
@@ -43,7 +48,16 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'same-origin',
 };
 
-const runner = new Runner(store, broadcast, process.env.CLAUDE_BIN ?? 'claude');
+const runner = new Runner(
+  store,
+  broadcast,
+  (ticket) => ({
+    COORDINATOR_API: `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${PORT}`,
+    COORDINATOR_TOKEN: auth.agentToken(ticket.id),
+    COORDINATOR_PROJECT: String(ticket.project_id),
+  }),
+  process.env.CLAUDE_BIN ?? 'claude',
+);
 runner.recover();
 
 class HttpError extends Error {
@@ -108,6 +122,35 @@ function ticketView(id: number) {
   return { ...t, queued: runner.queued(id) };
 }
 
+/** The project's coordinator ticket, created the first time someone opens the project. */
+async function ensureCoordinator(project: Project): Promise<Ticket> {
+  const existing = store.getCoordinator(project.id);
+  if (existing) return existing;
+  const cwd = join(projectDir(DATA_DIR, project.id), 'coordinator');
+  await mkdir(cwd, { recursive: true });
+  try {
+    const t = store.createTicket({
+      project_id: project.id,
+      kind: 'coordinator',
+      title: 'Coordinator',
+      permission_mode: COORDINATOR_PERMISSION_MODE,
+      created_by: AGENT_NAME,
+    });
+    store.setTicketDir(t.id, cwd, null);
+  } catch {
+    // Lost a race with a concurrent request; the unique index kept a single coordinator.
+  }
+  return store.getCoordinator(project.id)!;
+}
+
+/** The project a coordinator's token may act on, or null for a signed-in person. */
+function agentProject(session: Session): number | null {
+  if (session.agent === undefined) return null;
+  const t = store.getTicket(session.agent);
+  if (t?.kind !== 'coordinator') throw new HttpError(403, 'Not a coordinator');
+  return t.project_id;
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -136,6 +179,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const ip = clientIp(req);
     const body = await readJson(req);
     const name = cleanName(body.name);
+    if (name.toLowerCase() === AGENT_NAME.toLowerCase()) throw new HttpError(400, 'That name is reserved');
     // Checked right before the password (no await in between) so parallel bursts are counted.
     if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
     if (!auth.checkPassword(ip, String(body.password ?? ''))) throw new HttpError(401, 'Wrong password');
@@ -161,6 +205,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
 
   if (pathname === '/api/me') return json(res, 200, { name: session.name });
 
+  // A coordinator may only touch its own project's tickets, and not itself.
+  const scope = agentProject(session);
+  const inScope = (projectId: number) => {
+    if (scope !== null && scope !== projectId) throw new HttpError(403, 'Outside this coordinator\'s project');
+  };
+  if (scope !== null && !/^\/api\/(projects\/\d+(\/tickets)?|tickets\/\d+(\/[a-z]+)?)$/.test(pathname)) {
+    throw new HttpError(403, 'Not available to the coordinator');
+  }
+
   if (pathname === '/api/stream') {
     if (clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
@@ -176,7 +229,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
 
   if (pathname === '/api/projects') {
     if (method === 'GET') {
-      return json(res, 200, store.listProjects().map((p) => ({ ...p, tickets: store.listTickets(p.id).length })));
+      return json(res, 200, store.listProjects().map((p) => ({ ...p, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length })));
     }
     if (method === 'POST') {
       const body = await readJson(req);
@@ -206,18 +259,24 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   if (m && method === 'GET') {
     const project = store.getProject(Number(m[1]));
     if (!project) throw new HttpError(404, 'No such project');
-    const tickets = store.listTickets(project.id).map((t) => ({ ...t, queued: runner.queued(t.id) }));
-    return json(res, 200, { project, tickets });
+    inScope(project.id);
+    const coordinator = await ensureCoordinator(project);
+    const tickets = store
+      .listTickets(project.id)
+      .filter((t) => t.kind === 'ticket')
+      .map((t) => ({ ...t, queued: runner.queued(t.id) }));
+    return json(res, 200, { project, coordinator: ticketView(coordinator.id), tickets });
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/tickets$/);
   if (m && method === 'POST') {
     const project = store.getProject(Number(m[1]));
     if (!project) throw new HttpError(404, 'No such project');
+    inScope(project.id);
     const body = await readJson(req);
     const title = str(body.title, 'Title', 120);
     const message = str(body.message, 'First message', 100_000);
-    const mode = PERMISSION_MODES.includes(body.permissionMode) ? body.permissionMode : 'acceptEdits';
+    const mode = PERMISSION_MODES.includes(body.permissionMode) ? body.permissionMode : DEFAULT_PERMISSION_MODE;
     // Insert first so concurrent creates get distinct ids, then build the working dir.
     const { id } = store.createTicket({ project_id: project.id, title, permission_mode: mode, created_by: session.name });
     try {
@@ -236,8 +295,22 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const id = Number(m[1]);
     const action = m[2] ?? '';
     const ticket = ticketView(id);
+    inScope(ticket.project_id);
+    if (scope !== null && method !== 'GET' && ticket.kind === 'coordinator') {
+      throw new HttpError(403, 'The coordinator cannot act on itself');
+    }
     if (action === '' && method === 'GET') {
       return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
+    }
+    if (action === '' && method === 'PATCH') {
+      const body = await readJson(req);
+      const title = str(body.title, 'Title', 120);
+      if (title !== ticket.title) {
+        store.updateTicket(id, { title });
+        runner.emit(id, 'note', { text: `${session.name} renamed this ticket from "${ticket.title}" to "${title}".` });
+        runner.broadcastTicket(id);
+      }
+      return json(res, 200, ticketView(id));
     }
     if (action === '/events' && method === 'GET') {
       return json(res, 200, store.listEvents(id, Number(url.searchParams.get('after') ?? 0)));
@@ -253,6 +326,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (action === '/status' && method === 'POST') {
       const body = await readJson(req);
       if (body.status !== 'closed' && body.status !== 'idle') throw new HttpError(400, 'Status must be closed or idle');
+      if (ticket.kind === 'coordinator') throw new HttpError(400, 'The coordinator cannot be closed');
       if (runner.isRunning(id)) throw new HttpError(409, 'Stop the ticket before closing it');
       store.updateTicket(id, { status: body.status });
       runner.emit(id, 'note', { text: `${session.name} ${body.status === 'closed' ? 'closed' : 'reopened'} this ticket.` });

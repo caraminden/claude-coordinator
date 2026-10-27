@@ -136,3 +136,18 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 .composer { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 1rem; }
 .composer textarea { min-height: 4.5rem; resize: vertical; }
 .composer .row { margin-top: 0.5rem; }
+
+/* Project view: threads sidebar beside the chat */
+.split { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.sidebar { position: sticky; top: 4rem; max-height: calc(100vh - 5rem); overflow-y: auto; }
+.sidebar > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; }
+.sidebar details.new { margin: 0 0 1rem; }
+.sidebar details.new form { margin-top: 0.5rem; }
+.sidebar .column { margin-top: 1rem; }
+.ticket-card.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.ticket-card.coordinator .title::before { content: "◆ "; color: var(--accent); }
+.chat { min-width: 0; }
+@media (max-width: 800px) {
+  .split { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .sidebar { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+}

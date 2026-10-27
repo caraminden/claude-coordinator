@@ -107,11 +107,17 @@ function connectStream() {
 }
 
 async function resync() {
-  if (view?.kind !== 'ticket') return route();
+  if (view?.kind !== 'project') return route();
   // Refresh in place so a half-typed message in the composer survives.
   try {
-    const { ticket } = await api(`/api/tickets/${view.id}`);
+    const [{ coordinator, tickets }, { ticket }] = await Promise.all([
+      api(`/api/projects/${view.projectId}`),
+      api(`/api/tickets/${view.id}`),
+    ]);
+    view.coordinator = coordinator;
+    view.tickets = new Map(tickets.map((t) => [t.id, t]));
     view.ticket = ticket;
+    renderSidebar();
     renderTicketHead();
     await catchUpEvents();
   } catch {}
@@ -123,17 +129,18 @@ async function catchUpEvents() {
 }
 
 function onTicketUpdate(ticket) {
-  if (view?.kind === 'board' && view.id === ticket.project_id) {
-    view.tickets.set(ticket.id, ticket);
-    renderBoard();
-  } else if (view?.kind === 'ticket' && view.id === ticket.id) {
+  if (view?.kind !== 'project' || view.projectId !== ticket.project_id) return;
+  if (ticket.kind === 'coordinator') view.coordinator = ticket;
+  else view.tickets.set(ticket.id, ticket);
+  renderSidebar();
+  if (view.id === ticket.id) {
     view.ticket = ticket;
     renderTicketHead();
   }
 }
 
 function onEvent(event) {
-  if (view?.kind !== 'ticket' || view.id !== event.ticket_id) return;
+  if (view?.kind !== 'project' || view.id !== event.ticket_id) return;
   if (event.id <= view.lastEventId) return;
   appendEvent(event);
 }
@@ -145,7 +152,7 @@ async function route() {
   const hash = location.hash || '#/';
   let m;
   try {
-    if ((m = hash.match(/^#\/p\/(\d+)$/))) await showBoard(Number(m[1]));
+    if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/t\/(\d+)$/))) await showTicket(Number(m[1]));
     else await showProjects();
   } catch (err) {
@@ -234,23 +241,95 @@ async function showProjects() {
   );
 }
 
-// ---------- board ----------
+// ---------- project: threads sidebar + chat ----------
 
-async function showBoard(projectId) {
-  const { project, tickets } = await api(`/api/projects/${projectId}`);
-  view = { kind: 'board', id: projectId, project, tickets: new Map(tickets.map((t) => [t.id, t])) };
-  crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', project.name);
+const isCoordinator = (t) => t.kind === 'coordinator';
 
+function statusLabel(t) {
+  if (isCoordinator(t) && t.status === 'new') return 'Ready';
+  return STATUS_LABEL[t.status];
+}
+
+async function showTicket(ticketId) {
+  const { ticket } = await api(`/api/tickets/${ticketId}`);
+  // The coordinator lives at the project's own address.
+  if (isCoordinator(ticket)) return location.replace(`#/p/${ticket.project_id}`);
+  await showProject(ticket.project_id, ticketId);
+}
+
+/** A project page: its threads on the side, and a chat with the coordinator (or the chosen ticket). */
+async function showProject(projectId, ticketId = null) {
+  const { project, coordinator, tickets } = await api(`/api/projects/${projectId}`);
+  const chatId = ticketId ?? coordinator.id;
+  const [{ ticket }, events] = await Promise.all([
+    api(`/api/tickets/${chatId}`),
+    api(`/api/tickets/${chatId}/events`),
+  ]);
+  view = {
+    kind: 'project', projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
+    id: chatId, ticket, lastEventId: 0, tools: new Map(),
+  };
+  crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ',
+    ...(ticketId ? [h('a', { href: `#/p/${project.id}` }, project.name), ' / ', `#${ticket.id}`] : [project.name]));
+
+  const narrow = matchMedia('(max-width: 800px)').matches;
+  const sidebar = h('details', { class: 'sidebar', open: !narrow },
+    h('summary', {}, project.name, h('span', { class: 'muted', id: 'thread-count' })),
+    newTicketForm(projectId),
+    h('div', { id: 'threads' }));
+
+  const textarea = h('textarea', {
+    placeholder: isCoordinator(ticket)
+      ? 'Ask the coordinator to start, check on, or close tickets… (Ctrl+Enter to send)'
+      : 'Message this ticket… (Ctrl+Enter to send)',
+  });
+  const sendBtn = h('button', { type: 'submit' }, 'Send');
+  const form = h('form', { class: 'composer' }, textarea,
+    h('div', { class: 'row' }, h('span', { class: 'muted', id: 'composer-hint' }), h('span', { class: 'spacer' }), sendBtn));
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) form.requestSubmit();
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = textarea.value.trim();
+    if (!text) return;
+    sendBtn.disabled = true;
+    try {
+      await api(`/api/tickets/${chatId}/messages`, { method: 'POST', body: { text } });
+      textarea.value = '';
+    } catch (ex) {
+      alertNote(ex.message);
+    } finally {
+      sendBtn.disabled = false;
+    }
+  });
+
+  const log = h('div', { class: 'log', id: 'log' });
+  if (isCoordinator(ticket) && !events.length) {
+    log.append(h('div', { class: 'note' },
+      'This is the project coordinator. It keeps track of the threads on the left and can create, message, rename and close them for you.'));
+  }
+  app.replaceChildren(h('div', { class: 'split' }, sidebar,
+    h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, form)));
+  renderSidebar();
+  renderTicketHead();
+  for (const ev of events) appendEvent(ev, false);
+  window.scrollTo(0, document.body.scrollHeight);
+  // Events broadcast while the snapshot was loading arrived before `view` existed.
+  await catchUpEvents();
+}
+
+function newTicketForm(projectId) {
   const form = h('form', {},
     h('label', {}, 'Title', h('input', { name: 'title', required: true, maxlength: 120 })),
     h('label', {}, 'First message', h('textarea', { name: 'message', required: true, rows: 5, placeholder: 'What should this thread work on?' })),
     h('label', {}, 'Permissions',
       h('select', { name: 'permissionMode' },
-        h('option', { value: 'acceptEdits' }, 'Edit files; ask before running commands (commands are refused for now)'),
         h('option', { value: 'bypassPermissions' }, 'Full access: edit files and run any command'),
+        h('option', { value: 'acceptEdits' }, 'Edit files only; shell commands are refused'),
         h('option', { value: 'plan' }, 'Plan only: read and plan, no changes'))),
     h('p', { class: 'error', hidden: true }),
-    h('button', { type: 'submit' }, 'Start ticket'));
+    h('button', { type: 'submit' }, 'Start thread'));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = form.querySelector('button');
@@ -268,81 +347,38 @@ async function showBoard(projectId) {
       btn.disabled = false;
     }
   });
-
-  app.replaceChildren(
-    h('div', { class: 'row' }, h('h2', {}, project.name), h('span', { class: 'muted' }, project.repo_url || '')),
-    h('details', { class: 'new', open: !tickets.length }, h('summary', {}, 'New ticket'), h('div', { class: 'card' }, form)),
-    h('div', { class: 'board', id: 'board' }),
-  );
-  renderBoard();
+  return h('details', { class: 'new' }, h('summary', {}, 'New thread'), form);
 }
 
-function renderBoard() {
-  const board = document.getElementById('board');
-  if (!board) return;
+function renderSidebar() {
+  const el = document.getElementById('threads');
+  if (!el) return;
   const tickets = [...view.tickets.values()].sort((a, b) => b.updated_at - a.updated_at);
-  board.replaceChildren(...COLUMNS.map((col) => {
-    const items = tickets.filter((t) => col.match(t.status));
-    if (col.key === 'closed' && !items.length) return '';
-    return h('section', { class: 'column' },
-      h('h3', {}, h('span', { class: `dot ${col.key === 'waiting' ? 'idle' : col.key}` }), col.label, h('span', { class: 'count' }, items.length)),
-      items.length ? items.map(ticketCard) : h('p', { class: 'muted' }, 'None'));
-  }));
+  const open = tickets.filter((t) => t.status !== 'closed').length;
+  document.getElementById('thread-count').textContent = ` · ${open} open`;
+  el.replaceChildren(
+    ticketCard(view.coordinator, `#/p/${view.projectId}`),
+    ...COLUMNS.map((col) => {
+      const items = tickets.filter((t) => col.match(t.status));
+      if (!items.length) return '';
+      return h('section', { class: 'column' },
+        h('h3', {}, h('span', { class: `dot ${col.key === 'waiting' ? 'idle' : col.key}` }), col.label, h('span', { class: 'count' }, items.length)),
+        items.map((t) => ticketCard(t)));
+    }),
+    tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or use New thread.'));
 }
 
-function ticketCard(t) {
-  return h('a', { class: `card ticket-card s-${t.status}`, href: `#/t/${t.id}` },
-    h('div', { class: 'title' }, `#${t.id} ${t.title}`),
+function ticketCard(t, href = `#/t/${t.id}`) {
+  const coord = isCoordinator(t);
+  return h('a', { class: `card ticket-card s-${t.status}${coord ? ' coordinator' : ''}${view.id === t.id ? ' active' : ''}`, href },
+    h('div', { class: 'title' }, coord ? 'Coordinator' : `#${t.id} ${t.title}`),
     t.last_activity ? h('div', { class: 'activity' }, t.last_activity) : '',
     h('div', { class: 'meta' }, [
-      STATUS_LABEL[t.status],
+      statusLabel(t),
       t.queued ? `${t.queued} queued` : '',
-      `by ${t.created_by}`,
+      coord ? '' : `by ${t.created_by}`,
       ago(t.updated_at),
     ].filter(Boolean).join(' · ')));
-}
-
-// ---------- ticket ----------
-
-async function showTicket(ticketId) {
-  const [{ ticket, project }, events] = await Promise.all([
-    api(`/api/tickets/${ticketId}`),
-    api(`/api/tickets/${ticketId}/events`),
-  ]);
-  view = { kind: 'ticket', id: ticketId, ticket, project, lastEventId: 0, tools: new Map() };
-  crumbs.replaceChildren(
-    h('a', { href: '#/' }, 'Projects'), ' / ',
-    h('a', { href: `#/p/${project.id}` }, project.name), ' / ',
-    `#${ticket.id}`);
-
-  const textarea = h('textarea', { placeholder: 'Message this ticket… (Ctrl+Enter to send)' });
-  const sendBtn = h('button', { type: 'submit' }, 'Send');
-  const form = h('form', { class: 'composer' }, textarea,
-    h('div', { class: 'row' }, h('span', { class: 'muted', id: 'composer-hint' }), h('span', { class: 'spacer' }), sendBtn));
-  textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) form.requestSubmit();
-  });
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const text = textarea.value.trim();
-    if (!text) return;
-    sendBtn.disabled = true;
-    try {
-      await api(`/api/tickets/${ticketId}/messages`, { method: 'POST', body: { text } });
-      textarea.value = '';
-    } catch (ex) {
-      alertNote(ex.message);
-    } finally {
-      sendBtn.disabled = false;
-    }
-  });
-
-  app.replaceChildren(h('div', { class: 'ticket-head', id: 'ticket-head' }), h('div', { class: 'log', id: 'log' }), form);
-  renderTicketHead();
-  for (const ev of events) appendEvent(ev, false);
-  window.scrollTo(0, document.body.scrollHeight);
-  // Events broadcast while the snapshot was loading arrived before `view` existed.
-  await catchUpEvents();
 }
 
 function alertNote(text) {
@@ -353,9 +389,12 @@ function renderTicketHead() {
   const el = document.getElementById('ticket-head');
   if (!el) return;
   const t = view.ticket;
+  const coord = isCoordinator(t);
   const actions = [];
   if (t.status === 'running') {
     actions.push(h('button', { class: 'secondary', onclick: () => api(`/api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));
+  } else if (coord) {
+    // The coordinator stays open for the life of the project.
   } else if (t.status === 'closed') {
     actions.push(h('button', { class: 'secondary', onclick: () => setStatus(t.id, 'idle') }, 'Reopen'));
   } else {
@@ -364,15 +403,13 @@ function renderTicketHead() {
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
-      h('h2', {}, `#${t.id} ${t.title}`),
-      h('span', { class: 'muted' }, STATUS_LABEL[t.status] + (t.queued ? ` · ${t.queued} queued` : '')),
+      h('h2', {}, coord ? 'Coordinator' : `#${t.id} ${t.title}`),
+      h('span', { class: 'muted' }, statusLabel(t) + (t.queued ? ` · ${t.queued} queued` : '')),
       h('span', { class: 'spacer' }), ...actions),
-    h('div', { class: 'meta' }, [
-      t.branch ? `branch ${t.branch}` : null,
-      `permissions: ${t.permission_mode}`,
-      `started by ${t.created_by}`,
-      t.cwd,
-    ].filter(Boolean).join(' · ')));
+    h('div', { class: 'meta' }, (coord
+      ? ["Manages this project's threads"]
+      : [t.branch ? `branch ${t.branch}` : null, `permissions: ${t.permission_mode}`, `started by ${t.created_by}`, t.cwd]
+    ).filter(Boolean).join(' · ')));
   const hint = document.getElementById('composer-hint');
   if (hint) hint.textContent = t.status === 'running' ? 'Messages sent now run after the current turn.' : '';
 }
@@ -387,6 +424,10 @@ async function setStatus(id, status) {
 
 function toolSummary(block) {
   const i = block.input || {};
+  if (block.name.startsWith('mcp__coordinator__')) {
+    const arg = [i.ticket_id ? `#${i.ticket_id}` : '', i.title || i.text || ''].filter(Boolean).join(' ');
+    return [h('b', {}, block.name.slice('mcp__coordinator__'.length).replace(/_/g, ' ')), ' ', arg.split('\n')[0].slice(0, 140)];
+  }
   const arg = i.command || i.file_path || i.path || i.pattern || i.url || i.query || i.description || i.prompt || '';
   return [h('b', {}, block.name), ' ', String(arg).split('\n')[0].slice(0, 140)];
 }

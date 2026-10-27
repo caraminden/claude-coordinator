@@ -1,9 +1,11 @@
 // Runs ticket turns as headless `claude -p` processes, one turn per process.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
+const MCP_SERVER = join(import.meta.dirname, 'mcp.ts');
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
@@ -48,13 +50,14 @@ function describeActivity(ev: any): string | null {
   const blocks: any[] = ev.message?.content ?? [];
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
-    if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) return b.text.trim().split('\n')[0].slice(0, 160);
+    if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) return b.text.trim().split('\n')[0].replace(/\*\*|`/g, '').slice(0, 160);
     if (b.type === 'tool_use') return `Using ${b.name}`;
   }
   return null;
 }
 
 function systemPrompt(project: Project, ticket: Ticket): string {
+  if (ticket.kind === 'coordinator') return coordinatorPrompt(project);
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the project repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this ticket.';
@@ -67,6 +70,22 @@ function systemPrompt(project: Project, ticket: Ticket): string {
   ].join('\n');
 }
 
+function coordinatorPrompt(project: Project): string {
+  return [
+    `You are the coordinator for project "${project.name}" in Claude Coordinator, a shared web app where several people chat with Claude Code sessions called tickets.`,
+    'People open the project and talk to you first. You keep track of the project\'s tickets and manage them with the `coordinator` MCP tools: list_tickets, read_ticket, create_ticket, message_ticket, update_ticket, close_ticket, reopen_ticket and stop_ticket.',
+    'Each ticket is a separate Claude Code session with its own git worktree and branch. Hand real work (code changes, investigations) to tickets rather than doing it yourself; give each new ticket a clear title and a self-contained first message, since it cannot see this conversation.',
+    'Tickets run in the background. To see progress, read them; do not wait or poll in a loop. Close tickets when people agree they are done.',
+    project.repo_dir
+      ? `The project's main checkout is at ${project.repo_dir} and ticket worktrees are under ${join(project.repo_dir, '..', 'tickets')}. You may read them for context, but do not edit, commit or switch branches there.`
+      : 'This project has no git repo; each ticket gets a plain folder.',
+    'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short and end each turn with what you did and what, if anything, you need from them.',
+  ].join('\n');
+}
+
+/** Extra process setup for coordinator turns: how its MCP server reaches the API. */
+export type CoordinatorEnv = (ticket: Ticket) => Record<string, string>;
+
 export class Runner {
   private procs = new Map<number, ChildProcess>();
   private queues = new Map<number, QueuedMessage[]>();
@@ -74,10 +93,12 @@ export class Runner {
   private store: Store;
   private broadcast: Broadcast;
   private claudeBin: string;
+  private coordinatorEnv: CoordinatorEnv;
 
-  constructor(store: Store, broadcast: Broadcast, claudeBin = 'claude') {
+  constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
     this.broadcast = broadcast;
+    this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
   }
 
@@ -147,8 +168,15 @@ export class Runner {
       '--append-system-prompt', systemPrompt(project, ticket),
     ];
     if (ticket.session_id) args.push('--resume', ticket.session_id);
+    let env = process.env;
+    if (ticket.kind === 'coordinator') {
+      // The token travels in the environment (which the MCP server inherits), never on the command line.
+      const mcp = { mcpServers: { coordinator: { type: 'stdio', command: process.execPath, args: [MCP_SERVER] } } };
+      args.push('--mcp-config', JSON.stringify(mcp), '--allowedTools', 'mcp__coordinator');
+      env = { ...process.env, ...this.coordinatorEnv(ticket) };
+    }
 
-    const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+    const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     this.procs.set(ticket.id, proc);
     this.setStatus(ticket.id, 'running');
     // If claude exits before reading its prompt, the write fails with EPIPE; the close handler reports it.

@@ -169,7 +169,7 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
    page end. Keep the sidebar short enough (1rem top gap + 3rem) that the chat reaching the bottom
    never drags it up, and keep wheel/touch scrolls inside it from chaining to the page. */
 .sidebar { position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
-.sidebar > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; }
+.sidebar > summary { display: none; cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; }
 .sidebar details.new { margin: 0 0 1rem; }
 .sidebar details.new form { margin-top: 0.5rem; }
 .sidebar .column { margin-top: 1rem; }
@@ -179,6 +179,7 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 @media (max-width: 800px) {
   .split { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   .sidebar { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+  .sidebar > summary { display: list-item; }
 }
 
 .update-banner {

@@ -923,17 +923,30 @@ function renderSidebar() {
     tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or use New thread.'));
 }
 
+/** A compact thread row (status is its coloured edge): title, who started it, queued messages and age, then the latest activity. */
 function ticketCard(t, href = threadHref(t)) {
   const coord = isCoordinator(t);
-  return h('a', { class: `card ticket-card s-${t.status}${coord ? ' coordinator' : ''}${(view.id ?? view.fileTicket?.id) === t.id ? ' active' : ''}`, href },
-    h('div', { class: 'title' }, threadLabel(t)),
-    t.last_activity ? h('div', { class: 'activity' }, t.last_activity) : '',
-    h('div', { class: 'meta' }, [
-      statusLabel(t),
-      t.queued ? `${t.queued} queued` : '',
-      coord ? '' : `by ${t.created_by}`,
-      ago(t.updated_at),
-    ].filter(Boolean).join(' · ')));
+  const details = [
+    threadLabel(t),
+    [statusLabel(t), t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, `updated ${ago(t.updated_at)}`].filter(Boolean).join(' · '),
+    t.last_activity,
+  ].filter(Boolean).join('\n');
+  return h('a', { class: `card ticket-card s-${t.status}${coord ? ' coordinator' : ''}${(view.id ?? view.fileTicket?.id) === t.id ? ' active' : ''}`, href, title: details },
+    h('div', { class: 'top' },
+      h('span', { class: 'title' }, threadLabel(t)),
+      t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
+      coord ? '' : h('span', { class: 'avatar' }, (t.created_by || '?').slice(0, 1).toUpperCase()),
+      h('span', { class: 'when' }, shortAgo(t.updated_at))),
+    t.last_activity ? h('div', { class: 'activity' }, t.last_activity) : '');
+}
+
+/** "now", "5m", "3h", "2d": ages for tight spaces. */
+function shortAgo(ms) {
+  const s = Math.round((Date.now() - ms) / 1000);
+  if (s < 60) return 'now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
 }
 
 // ---------- artifacts ----------

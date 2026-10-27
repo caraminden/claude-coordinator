@@ -285,6 +285,13 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .shelf .account { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 0.6rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.9em; }
 .shelf .account .usage .track { flex: 1; width: auto; }
 .shelf .account button { padding: 0.15rem 0.6rem; font-size: 0.85em; }
+/* Push notifications on this device, and a per-project mute once they are on */
+.shelf .account .push { display: flex; flex-direction: column; gap: 0.1rem; }
+.shelf .account .toggle { display: flex; align-items: center; gap: 0.45rem; margin: 0; padding: 0.15rem 0; color: var(--ink); font-size: 1em; cursor: pointer; }
+.shelf .account .toggle[hidden] { display: none; }
+.shelf .account .toggle input { width: auto; margin: 0; accent-color: var(--accent); flex: none; }
+.shelf .account .toggle:has(input:disabled) { color: var(--muted); cursor: default; }
+.shelf .account .push .hint { color: var(--muted); font-size: 0.9em; padding: 0.15rem 0; }
 .shelf .column h3 .more { font-size: 0.85em; text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--accent); text-decoration: none; }
 .nav-item { display: block; text-decoration: none; padding: 0.3rem 0.5rem; border-radius: 6px; font-size: 0.92em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nav-item:hover { background: var(--panel); }

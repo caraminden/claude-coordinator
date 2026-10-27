@@ -296,6 +296,8 @@ export class Runner {
   onTurnEnd: (ticketId: number) => void = () => {};
   /** Approve / Deny cards waiting on people, for projects with approval rules. */
   approvals: Approvals;
+  /** Called when a turn fails (not when someone stops it), with the error shown in the chat. */
+  onTurnError: (ticketId: number, text: string) => void = () => {};
 
   constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
@@ -491,13 +493,16 @@ export class Runner {
 
     let sawResult = false;
     let resultIsError = false;
+    // A failed turn's own words on what went wrong, which say more than the exit code.
+    let resultError: string | null = null;
     const stderr: string[] = [];
 
     createInterface({ input: proc.stdout! }).on('line', (line) => {
       try {
-        this.handleLine(ticket.id, line, (isError) => {
+        this.handleLine(ticket.id, line, (isError, result) => {
           sawResult = true;
           resultIsError = isError;
+          if (isError && result) resultError = result;
         });
       } catch (err: any) {
         this.emit(ticket.id, 'note', { text: `Could not process output line: ${err.message}` });
@@ -523,7 +528,9 @@ export class Runner {
       } else if (!sawResult || code !== 0 || resultIsError) {
         status = 'error';
         const detail = stderr.slice(-10).join('\n');
-        this.emit(ticket.id, 'error', { text: `claude exited with code ${code}${detail ? `:\n${detail}` : ''}` });
+        const text = `claude exited with code ${code}${detail ? `:\n${detail}` : ''}`;
+        this.emit(ticket.id, 'error', { text });
+        this.onTurnError(ticket.id, resultError ?? text);
       }
       const closing = this.closing.has(ticket.id);
       const reason = this.closing.get(ticket.id);
@@ -554,7 +561,7 @@ export class Runner {
     });
   }
 
-  private handleLine(ticketId: number, line: string, onResult: (isError: boolean) => void) {
+  private handleLine(ticketId: number, line: string, onResult: (isError: boolean, result: string | null) => void) {
     if (!line.trim()) return;
     let ev: any;
     try {
@@ -569,7 +576,7 @@ export class Runner {
     if (ev.session_id && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
     }
-    if (ev.type === 'result') onResult(!!ev.is_error);
+    if (ev.type === 'result') onResult(!!ev.is_error, typeof ev.result === 'string' ? ev.result : null);
     // Likewise the model: remembered from turns that ran without one chosen.
     const t = ev.type === 'system' && ev.subtype === 'init' && typeof ev.model === 'string' ? this.store.getTicket(ticketId) : null;
     if (t && !t.model && ev.model !== t.last_model) {

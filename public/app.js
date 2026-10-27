@@ -637,6 +637,8 @@ function start(name) {
 }
 
 async function logout() {
+  // Notifications on this device were for the person signing out.
+  await pushOff().catch(() => {});
   await api('/api/logout', { method: 'POST', body: {} });
   eventCache.clear();
   clearTimeout(streamTimer);
@@ -644,6 +646,107 @@ async function logout() {
   stream = null;
   me = null;
   renderLogin();
+}
+
+// ---------- push notifications ----------
+
+// Web Push reaches this device with the app closed, for decisions, blockers and results only
+// (question cards, failed turns, threads set ready, try or blocked); see src/push.ts.
+const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+async function pushSubscription() {
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+
+/** The browser's VAPID key as pushManager.subscribe wants it. */
+function keyBytes(b64) {
+  const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+/** Ask for permission (only ever from a click), subscribe this browser and register it for you. */
+async function pushOn() {
+  if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications are blocked for this site in the browser settings');
+  const { publicKey } = await api('/api/push/key');
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  // A subscription made with another key (an older data dir) can't be used; start over.
+  const key = sub?.options?.applicationServerKey;
+  if (sub && key && btoa(String.fromCharCode(...new Uint8Array(key))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') !== publicKey) {
+    await sub.unsubscribe();
+    sub = null;
+  }
+  sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+  return api('/api/push/subscription', { method: 'PUT', body: { subscription: sub.toJSON() } });
+}
+
+async function pushOff() {
+  if (!pushSupported) return;
+  const sub = await pushSubscription();
+  if (!sub) return;
+  await api('/api/push/subscription', { method: 'DELETE', body: { endpoint: sub.endpoint } });
+  await sub.unsubscribe();
+}
+
+/** "Notify me on this device", and once on, a mute for this project; in the account box. */
+function pushControls(project) {
+  if (!pushSupported) return null;
+  const on = h('input', { type: 'checkbox' });
+  const mute = h('input', { type: 'checkbox' });
+  const hint = h('span', { class: 'hint', hidden: true });
+  const muteRow = h('label', { class: 'toggle', hidden: true, title: 'Stop notifications from this project on this device' }, mute, `Mute ${project.name} here`);
+  const el = h('div', { class: 'push' },
+    h('label', { class: 'toggle', title: 'Questions for you, failed turns, and threads that are ready or blocked' }, on, 'Notify me on this device'),
+    muteRow, hint);
+  const show = (state, err) => {
+    on.checked = state.subscribed;
+    mute.checked = state.muted.includes(project.id);
+    muteRow.hidden = !state.subscribed;
+    const denied = Notification.permission === 'denied';
+    on.disabled = denied && !state.subscribed;
+    hint.textContent = err ?? (denied && !state.subscribed ? 'Blocked for this site in the browser settings' : '');
+    hint.hidden = !hint.textContent;
+  };
+  const busy = async (fn) => {
+    on.disabled = mute.disabled = true;
+    try {
+      show(await fn());
+    } catch (ex) {
+      await refresh(ex.message);
+    } finally {
+      mute.disabled = false;
+      if (Notification.permission !== 'denied') on.disabled = false;
+    }
+  };
+  /** Show where this browser stands (and `err`, if a change just failed). */
+  async function refresh(err) {
+    const sub = await pushSubscription().catch(() => null);
+    const state = sub && await api('/api/push/subscription', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => null);
+    show(state ?? { subscribed: false, muted: [] }, err);
+  }
+  on.addEventListener('change', () => busy(async () => {
+    if (!on.checked) {
+      await pushOff();
+      return { subscribed: false, muted: [] };
+    }
+    return pushOn();
+  }));
+  mute.addEventListener('change', () => busy(async () => {
+    const sub = await pushSubscription();
+    return api('/api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, projectId: project.id, muted: mute.checked } });
+  }));
+  refresh();
+  return el;
+}
+
+// Clicking a notification while the app is open: the service worker asks this tab to show the thread.
+if (pushSupported) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type !== 'open' || typeof e.data.url !== 'string') return;
+    const hash = new URL(e.data.url, location.href).hash;
+    if (hash && location.hash !== hash) location.hash = hash;
+  });
 }
 
 // ---------- projects ----------
@@ -833,7 +936,8 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     h('section', { class: 'account' },
       h('div', { class: 'row' }, h('strong', {}, me), h('span', { class: 'spacer' }),
         h('button', { class: 'secondary small', onclick: logout }, 'Sign out')),
-      usageMeter()),
+      usageMeter(),
+      pushControls(project)),
     h('section', { class: 'column' },
       h('h3', {}, 'Projects', h('span', { class: 'spacer' }), h('a', { class: 'more', href: '#/' }, 'All')),
       projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
@@ -2840,7 +2944,7 @@ setInterval(() => {
 }, 30_000);
 
 api('/api/me').then((r) => start(r.name)).catch(() => {});
-// The service worker only makes the app installable (home screen, full screen); it caches nothing.
+// The service worker makes the app installable (home screen, full screen) and shows push notifications; it caches nothing.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 // Only in the installed app, so browser tabs look and behave as before: colour the title/status bar
 // like the top bar, and on Android shrink the page when the keyboard opens so the composer stays in view.

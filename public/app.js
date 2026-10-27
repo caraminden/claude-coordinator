@@ -1916,7 +1916,7 @@ function renderTicketHead() {
       h('span', { class: `dot ${t.status}` }),
       h('h2', {}, threadFullName(t)),
       h('span', { class: 'muted' }, (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '')),
-      h('span', { class: 'spacer' }), view.findEl ?? '', ...actions,
+      h('span', { class: 'spacer' }), ...actions, view.findEl ?? '',
       // Leaves the thread as it is and goes back to the project's coordinator.
       coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the coordinator', 'aria-label': 'Back to the coordinator' }, '×')),
     view.progressEl);

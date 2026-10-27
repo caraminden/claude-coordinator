@@ -1,5 +1,5 @@
 // Claude Coordinator front end: hash-routed views over the JSON API, live via SSE.
-import { actionLabel, applyEvent, createProgress, progressLine, stepInfo } from './progress.js';
+import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, summarizeActions } from './progress.js';
 
 const app = document.getElementById('app');
 const crumbs = document.getElementById('crumbs');
@@ -563,6 +563,8 @@ async function showProject(projectId, main = { kind: 'chat', ticketId: null }) {
     ui: progressUi(chatId),
     actions: new Map(), // tool_use_id -> { block, taskId, result }
     turnActions: [], // actions of the current (or last) turn, in order
+    typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite' }), // below the chat log
+    sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
   };
   const projectLink = h('a', { href: `#/p/${project.id}` }, project.name);
   const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
@@ -663,6 +665,10 @@ function chatSection(chatId, ticket, events) {
     if (!text && !attachments.items.length) return;
     sendBtn.disabled = true;
     sending++;
+    // Acknowledge the message straight away; the server's reply and the stream catch up after.
+    view.sendingTo = chatId;
+    renderTyping();
+    if (followChat) scrollToBottom();
     try {
       const sent = attachments.items.slice();
       const images = sent.map(({ mediaType, data }) => ({ mediaType, data }));
@@ -682,6 +688,10 @@ function chatSection(chatId, ticket, events) {
     } catch (ex) {
       alertNote(ex.message);
     } finally {
+      if (view?.sendingTo === chatId) {
+        view.sendingTo = null;
+        renderTyping();
+      }
       sendBtn.disabled = false;
       sending--;
       reloadWhenIdle();
@@ -693,7 +703,7 @@ function chatSection(chatId, ticket, events) {
     log.append(h('div', { class: 'note' },
       'This is the project coordinator. It keeps track of the threads on the left and can create, message, rename and close them for you.'));
   }
-  return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, form);
+  return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);
 }
 
 function newTicketForm(projectId) {
@@ -1108,6 +1118,7 @@ function renderTicketHead() {
     h('div', { class: 'stats', id: 'ticket-stats' }),
     view.progressEl);
   renderStats();
+  renderTyping();
   const hint = document.getElementById('composer-hint');
   if (hint) hint.textContent = t.status === 'running' ? 'Messages sent now run after the current turn.' : '';
   scheduleProgress();
@@ -1140,22 +1151,38 @@ async function setStatus(id, status) {
 
 const STEP_ICON = { completed: '✓', in_progress: '◐', pending: '○' };
 
-/** A collapsed tool call; its input and output are only built when it is opened. */
+function resultString(result) {
+  return typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
+}
+
+/**
+ * One tool call as a plain sentence ("Edited runner.ts", "Run the tests — failed: …"). The raw
+ * command and output sit one click deeper and are only built when opened.
+ */
 function actionEl(action) {
   const { block, result } = action;
   const state = !result ? 'pending' : result.is_error ? 'err' : 'ok';
-  const el = h('details', { class: `tool ${state}` },
-    h('summary', {}, h('span', { class: 'st' }, state === 'pending' ? '…' : state === 'err' ? '✗' : '·'), ' ', actionLabel(block)));
+  const why = state === 'err' ? resultString(result).replace(/<\/?tool_use_error>/g, '').trim().split('\n')[0].slice(0, 120) : '';
+  const el = h('details', { class: `act ${state}` },
+    h('summary', {},
+      h('span', { class: 'st', title: { pending: 'In progress', err: 'Failed', ok: 'Done' }[state] }, state === 'pending' ? '…' : state === 'err' ? '✗' : '·'),
+      h('span', { class: 'what' }, actionLabel(block)),
+      why ? h('span', { class: 'why' }, ` — failed: ${why}`) : ''));
   el.addEventListener('toggle', () => {
     if (!el.open || el.querySelector('.body')) return;
-    const body = h('div', { class: 'body' }, h('pre', {}, JSON.stringify(block.input, null, 2)));
-    if (action.result) {
-      const out = typeof action.result.content === 'string' ? action.result.content : JSON.stringify(action.result.content);
-      body.append(h('div', { class: 'muted' }, action.result.is_error ? 'Error:' : 'Result:'), h('pre', {}, out));
-    }
+    const input = block.input || {};
+    const body = h('div', { class: 'body' },
+      h('pre', {}, block.name === 'Bash' && input.command ? `$ ${input.command}` : JSON.stringify(input, null, 2)));
+    if (action.result) body.append(h('pre', { class: action.result.is_error ? 'err' : '' }, resultString(action.result) || '(no output)'));
     el.append(body);
   });
   return el;
+}
+
+/** Claude's own words from while a step was underway, shortened to a couple of lines. */
+function stepNote(text) {
+  const short = text.length > 280 ? `${text.slice(0, 279).replace(/\s+\S*$/, '')}…` : text;
+  return h('p', { class: 'step-note' }, short.replace(/[*`#]/g, ''));
 }
 
 function actionList(actions) {
@@ -1207,13 +1234,16 @@ function renderProgress() {
     const steps = p.tasks.map((t) => {
       const acts = all.filter((a) => a.taskId === t.id);
       const isCurrent = t === current;
+      const recap = summarizeActions(acts) || (t.status === 'pending' ? 'Not started yet' : 'Nothing done yet');
       const el = h('details', { class: `step ${t.status}${isCurrent && !running ? ' paused' : ''}`, open: view.ui.openSteps.has(t.id) || null },
         h('summary', {},
           h('span', { class: 'icon' }, STEP_ICON[t.status] ?? '○'),
           h('span', { class: 'subject' }, t.subject),
           isCurrent ? h('span', { class: 'muted' }, running ? (t.activeForm ? ` — ${t.activeForm}…` : '') : ' — paused') : '',
-          h('span', { class: 'muted n' }, acts.length ? `${acts.length} action${acts.length === 1 ? '' : 's'}` : t.status === 'pending' ? 'not started' : '')),
-        acts.length ? actionList(acts) : h('p', { class: 'muted empty' }, 'No actions yet.'));
+          acts.length ? h('span', { class: 'muted n' }, `${acts.length} action${acts.length === 1 ? '' : 's'}`) : '',
+          h('span', { class: 'recap' }, recap)),
+        t.note ? stepNote(t.note) : '',
+        acts.length ? actionList(acts) : '');
       el.addEventListener('toggle', () => (el.open ? view.ui.openSteps.add(t.id) : view.ui.openSteps.delete(t.id)));
       return el;
     });
@@ -1221,8 +1251,9 @@ function renderProgress() {
     const looseEl = loose.length
       ? h('details', { class: 'step loose', open: (view.ui.looseOpen ?? !p.tasks.length) || null },
           h('summary', {}, h('span', { class: 'icon' }, '⋯'),
-            h('span', { class: 'subject' }, p.tasks.length ? 'Other actions this turn' : running ? 'Actions this turn' : 'Actions last turn'),
-            h('span', { class: 'muted n' }, String(loose.length))),
+            h('span', { class: 'subject' }, p.tasks.length ? 'Other work this turn' : running ? 'Work this turn' : 'Work last turn'),
+            h('span', { class: 'muted n' }, `${loose.length} action${loose.length === 1 ? '' : 's'}`),
+            h('span', { class: 'recap' }, summarizeActions(loose))),
           actionList(loose))
       : '';
     if (looseEl) looseEl.addEventListener('toggle', () => (view.ui.looseOpen = looseEl.open));
@@ -1300,7 +1331,7 @@ function appendEvent(event, scroll = true) {
       if (acts.length) {
         const end = h('details', { class: 'turn-end' }, h('summary', {}, bits.join(' · ')));
         end.addEventListener('toggle', () => {
-          if (end.open && !end.querySelector('.actions')) end.append(actionList(acts));
+          if (end.open && !end.querySelector('.actions')) end.append(h('p', { class: 'recap' }, summarizeActions(acts)), actionList(acts));
         });
         nodes.push(end);
       } else {
@@ -1311,7 +1342,26 @@ function appendEvent(event, scroll = true) {
   }
 
   log.append(...nodes);
+  renderTyping();
   if (scroll && followChat) scrollToBottom();
+}
+
+/** "Claude is thinking…" under the chat while a turn runs, so a sent message is visibly being worked on. */
+function renderTyping() {
+  const el = view?.typingEl;
+  if (!el || !view.ticket) return;
+  const t = view.ticket;
+  const show = t.status === 'running' || view.sendingTo === t.id;
+  const wasHidden = el.hidden;
+  el.hidden = !show;
+  if (!show) return;
+  const last = view.turnActions.at(-1);
+  const busy = t.status === 'running' && last && !last.result;
+  el.replaceChildren(
+    h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
+    h('span', {}, busy ? `Claude is working · ${actionLabel(last.block)}` : 'Claude is thinking…'),
+    t.queued ? h('span', { class: 'muted' }, ` · ${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn`) : '');
+  if (wasHidden && followChat) scrollToBottom();
 }
 
 // ---------- boot ----------

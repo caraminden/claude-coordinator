@@ -72,7 +72,6 @@ code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0
   top: 0;
   z-index: 5;
 }
-.brand { font-weight: 650; text-decoration: none; }
 #crumbs { flex: 1; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #crumbs a { text-decoration: none; }
 #me { color: var(--muted); font-size: 0.9em; }
@@ -394,7 +393,7 @@ button.pin.on { color: var(--accent); }
     border-bottom: 0;
     border-right: 1px solid var(--line);
   }
-  .topbar .brand, .topbar #crumbs, .topbar #me, .topbar .usage { writing-mode: vertical-rl; }
+  .topbar #crumbs, .topbar #me, .topbar .usage { writing-mode: vertical-rl; }
   #crumbs { flex: 1; min-height: 0; }
   #me { display: flex; align-items: center; gap: 0.6rem; }
   #me button { margin: 0; padding: 0.6rem 0.2rem; }

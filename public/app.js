@@ -811,10 +811,9 @@ const MAX_TEXT_PREVIEW = 2 * 1024 * 1024;
 const ARTIFACT_FILTERS = [
   { key: 'all', label: 'All', match: () => true },
   { key: 'pinned', label: 'Pinned', match: (a) => !!a.pinned_at },
-  { key: 'docs', label: 'Documents', match: (a) => ['markdown', 'text', 'pdf'].includes(a.kind) },
-  { key: 'images', label: 'Images', match: (a) => a.kind === 'image' },
-  { key: 'media', label: 'Video & audio', match: (a) => a.kind === 'video' || a.kind === 'audio' },
+  { key: 'docs', label: 'Documents', match: (a) => a.kind === 'markdown' || a.kind === 'pdf' },
   { key: 'web', label: 'Web pages', match: (a) => a.kind === 'html' },
+  { key: 'canvas', label: 'Canvases', match: (a) => a.kind === 'canvas' },
 ];
 
 const rawUrl = (a) => `/api/artifacts/${a.id}/raw?v=${a.mtime}`;
@@ -897,7 +896,7 @@ function renderShelf() {
       pinned.length ? pinned.map(item) : h('p', { class: 'muted small' }, 'Pin artifacts with ☆ to keep them here.')),
     h('section', { class: 'column' },
       h('h3', {}, 'Recent'),
-      recent.length ? recent.map(item) : h('p', { class: 'muted small' }, 'Files threads create (docs, images, videos, pages…) show up here.')));
+      recent.length ? recent.map(item) : h('p', { class: 'muted small' }, 'Documents, pages and canvases that threads create show up here.')));
 }
 
 /** Main panel: every artifact in the project, searchable, with pin toggles. */
@@ -938,15 +937,13 @@ function renderArtifactResults() {
   if (!results.length) {
     el.replaceChildren(h('p', { class: 'muted' }, view.artifacts.length
       ? 'Nothing matches.'
-      : 'No artifacts yet. When threads create documents, images, videos or web pages in their folders, they appear here.'));
+      : 'No artifacts yet. When threads create documents, web pages or canvases in their folders, they appear here.'));
     return;
   }
   el.replaceChildren(...results.map((a) => {
     const dir = a.path.includes('/') ? a.path.slice(0, a.path.lastIndexOf('/') + 1) : '';
     return h('a', { class: `artifact-card${a.missing ? ' missing' : ''}`, href: `#/a/${a.id}`, title: a.path },
-      h('div', { class: 'preview' }, a.kind === 'image' && !a.missing
-        ? h('img', { src: rawUrl(a), alt: '', loading: 'lazy' })
-        : h('span', { class: `badge big k-${a.kind}` }, extOf(a))),
+      h('div', { class: 'preview' }, h('span', { class: `badge big k-${a.kind}` }, extOf(a))),
       pinButton(a),
       h('div', { class: 'name' }, a.name),
       dir ? h('div', { class: 'meta path' }, dir) : '',
@@ -962,12 +959,6 @@ function artifactViewer(a) {
   const src = rawUrl(a);
   if (a.missing) {
     body.append(h('p', { class: 'muted' }, 'This file is no longer in the thread\'s folder. Unpin it to remove it from the list.'));
-  } else if (a.kind === 'image') {
-    body.append(h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { class: 'artifact-media', src, alt: a.name })));
-  } else if (a.kind === 'video') {
-    body.append(h('video', { class: 'artifact-media', src, controls: true, preload: 'metadata' }));
-  } else if (a.kind === 'audio') {
-    body.append(h('audio', { src, controls: true, preload: 'metadata' }));
   } else if (a.kind === 'html') {
     // Sandboxed (here and by the server's CSP) so a page a thread wrote can't act as the app.
     body.append(h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals', title: a.name }));
@@ -984,9 +975,14 @@ function artifactViewer(a) {
       const imageUrl = (href) => (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(href) || href.startsWith('/')
         ? null
         : `/api/artifacts/${a.id}/rel?path=${encodeURIComponent(href.split('#')[0])}&v=${a.mtime}`);
+      let shown = text;
+      if (a.kind === 'canvas') {
+        // JSON Canvas files are JSON; lay them out readably.
+        try { shown = JSON.stringify(JSON.parse(text), null, 2); } catch {}
+      }
       body.replaceChildren(a.kind === 'markdown'
         ? h('div', { class: 'msg doc' }, markdownDoc(text, imageUrl))
-        : h('pre', { class: 'artifact-text' }, text));
+        : h('pre', { class: 'artifact-text' }, shown));
     }).catch((err) => body.replaceChildren(h('p', { class: 'error' }, `Could not load: ${err.message}`)));
   }
   return section;

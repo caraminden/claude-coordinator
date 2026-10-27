@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { basename, extname, join, normalize, posix, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { homedir } from 'node:os';
-import { artifactType, findArtifacts } from './src/artifacts.ts';
+import { fileType, findArtifacts, isArtifact } from './src/artifacts.ts';
 import { AGENT_NAME, Auth, type Session } from './src/auth.ts';
 import { Store, type Artifact, type Project, type Ticket } from './src/db.ts';
 import { Runner } from './src/runner.ts';
@@ -104,6 +104,8 @@ async function scanArtifacts(ticketId: number) {
 
 runner.onFilesMayChange = scheduleScan;
 // Pick up anything made while the server was down (or before artifacts existed), one ticket at a time.
+// Rows for file types that no longer count as artifacts go first, pinned or not.
+store.pruneArtifacts(isArtifact);
 (async () => {
   for (const p of store.listProjects()) {
     for (const t of store.listTickets(p.id)) {
@@ -117,7 +119,7 @@ function artifactView(a: Artifact & { ticket_title?: string; ticket_kind?: strin
   return {
     ...a,
     name: basename(a.path),
-    kind: artifactType(a.path)?.kind ?? 'text',
+    kind: fileType(a.path)?.kind ?? 'text',
     ticket_title: a.ticket_title ?? ticket?.title ?? '',
     ticket_kind: a.ticket_kind ?? ticket?.kind ?? 'ticket',
     ticket_number: a.ticket_number ?? ticket?.number ?? null,
@@ -136,7 +138,7 @@ function artifactCsp(kind: string): string {
 
 /** Serve a file from a ticket's folder; `path` is relative to it and must be an artifact type. */
 async function serveArtifact(req: IncomingMessage, res: ServerResponse, ticket: Ticket, path: string, download: boolean) {
-  const type = artifactType(path);
+  const type = fileType(path);
   if (!type) throw new HttpError(404, 'Not found');
   let file: string;
   let size: number;

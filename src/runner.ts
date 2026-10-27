@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
-import { claudeConfigDir, lastEffort, restoreSession, saveSession } from './sessions.ts';
+import { claudeConfigDir, lastEffort, projectSlug, restoreSession, saveSession } from './sessions.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -130,7 +130,7 @@ function describeActivity(ev: any): string | null {
 }
 
 /** How a session can put files in front of people: links in its reply that the app turns into previews. */
-function showingFiles(ticket: Ticket, filesDir: string | null): string[] {
+function showingFiles(ticket: Ticket, filesDir: string | null, sharedDir: string | null): string[] {
   const where = filesDir ? `inside your working directory or in ${filesDir}` : 'inside your working directory';
   return [
     `You can show people files (documents, images, GIFs, videos, web pages, PDFs) by linking them in your reply with a path ${where}; the app turns those links into previews that open the file in place of the chat:`,
@@ -140,6 +140,9 @@ function showingFiles(ticket: Ticket, filesDir: string | null): string[] {
       ? `Put files you fetch from elsewhere or make only to show people (not part of the work in your branch) in ${filesDir}, so they never end up in a commit. Files elsewhere on disk can't be shown; copy them there first.`
       : '',
     'Linking a file is the only way people see it; they cannot browse your folders. Files you link are also listed in the project\'s artifacts, so link only what is meant for people, not files you made for your own use (test pages, scratch notes, fixtures).',
+    sharedDir
+      ? `${sharedDir} is a folder every thread in the project and the coordinator can read and write. Put handoffs, specs and notes that other threads should be able to find there (for example a handoff file a fresh thread can start from), and look there before starting related work. Keep scratch files, build output and secrets out of it. Documents and pages in it are listed as Shared in the project's artifacts.`
+      : '',
   ].filter(Boolean);
 }
 
@@ -156,8 +159,8 @@ function projectInstructions(project: Project): string[] {
   ];
 }
 
-function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, ticketsDir: string, machines: Machine[] = []): string {
-  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir), ...showingFiles(ticket, filesDir), ...projectInstructions(project)].join('\n');
+export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: Machine[] = []): string {
+  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir), ...showingFiles(ticket, filesDir, sharedDir), ...projectInstructions(project)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the project repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this ticket.';
@@ -179,7 +182,7 @@ function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null,
     '- At the end of every turn, set state and note: state ready (done, ready to merge or pick up), try (ready for people to try), parked, blocked (on something outside the thread) or outside (work still running elsewhere), or null when you are simply waiting on an answer; note is one terse line, max 60 chars, on where things stand ("needs a pick: tabs or list"). The state clears when the next turn starts.',
     'Give every Bash call a short plain-English description (like "Run the test suite").',
     'When the thread\'s work is done and should be closed (for example when project instructions say to close after shipping), call the `close_self` tool (mcp__thread) near the end of your turn: the thread closes once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not close a thread whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can close, even if its brief says to close.',
-    ...showingFiles(ticket, filesDir),
+    ...showingFiles(ticket, filesDir, sharedDir),
     ...machineTools(machines),
     ...approvalNote(project),
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
@@ -218,8 +221,11 @@ const READ_ONLY_GIT = [
  * plain reads (grep, cat, ls, find) in added directories, and `git -C <dir> <read-only command>` is
  * allowed per folder. Each rule pins the exact folder as a prefix, since `*` in a rule would also
  * match `git -C x commit -m "fix log"`. Anything else that would ask for approval is denied.
+ * Two more folders are added with no deny rule, so acceptEdits lets the coordinator read and write
+ * files in them (tried with a real run, the memory folder included; other shell commands are still
+ * denied): the project's shared folder and the repo's Claude Code memory.
  */
-export function coordinatorAccess(repoDir: string | null, ticketsDir: string): { addDirs: string[]; settings: object } {
+export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null): { addDirs: string[]; settings: object } {
   let ticketDirs: string[] = [];
   try {
     ticketDirs = readdirSync(ticketsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(ticketsDir, d.name));
@@ -228,9 +234,10 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string): {
   }
   const roots = repoDir ? [repoDir, ticketsDir] : [ticketsDir];
   const gitDirs = repoDir ? [repoDir, ...ticketDirs] : [];
+  const writable = [sharedDir, memoryDir].filter((d): d is string => !!d);
   return {
     // Adding the parent tickets/ folder also covers worktrees made after the turn starts.
-    addDirs: roots,
+    addDirs: [...roots, ...writable],
     settings: {
       permissions: {
         // `//` makes the path absolute. Edit rules also cover Write, NotebookEdit and Bash commands that write there.
@@ -241,7 +248,7 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string): {
   };
 }
 
-function coordinatorPrompt(project: Project, ticketsDir: string): string {
+function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: string | null): string {
   return [
     `You are the coordinator for project "${project.name}" in Claude Coordinator, a shared web app where several people chat with Claude Code sessions called tickets.`,
     'People open the project and talk to you first. You keep track of the project\'s tickets and manage them with the `coordinator` MCP tools: list_tickets, read_ticket, create_ticket, message_ticket, update_ticket, close_ticket, reopen_ticket and stop_ticket.',
@@ -252,6 +259,9 @@ function coordinatorPrompt(project: Project, ticketsDir: string): string {
     project.repo_dir
       ? `The project's main checkout is at ${project.repo_dir} and ticket worktrees are under ${ticketsDir} (one folder per ticket). You may read them for context, but do not edit, commit or switch branches there: edits there are denied. Search and read them with Read and with read-only Bash such as \`grep -rn … | head\`; for git, use \`git -C <folder> log\` (or status, diff, show, blame, branch -a), since \`cd <folder> && git …\` is denied.`
       : `This project has no git repo; each ticket gets a plain folder under ${ticketsDir}. You may read them for context, but do not edit them: edits there are denied.`,
+    memoryDir
+      ? `You can read and write files (Read, Write, Edit) in the project's shared folder, described below, and in ${memoryDir}, the project's Claude Code memory that its threads load too. Keep what is worth remembering across conversations in the memory as short topic files with an index in MEMORY.md. You still cannot run shell commands.`
+      : '',
     'When you need people to decide between clear options, ask with your `ask_question` tool: it shows a card in this chat they answer with a click. Then end your turn; the answers arrive as the next message.',
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short and end each turn with what you did and what, if anything, you need from them.',
   ].join('\n');
@@ -273,6 +283,8 @@ export class Runner {
   private coordinatorEnv: CoordinatorEnv;
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
   filesDir: (ticket: Ticket) => string | null = () => null;
+  /** The folder every thread and the coordinator of a project can read and write, for handoffs and notes. */
+  sharedDir: (project: Project) => string | null = () => null;
   /** The folder that holds a project's ticket folders, which the coordinator may read. */
   ticketsDir: (project: Project) => string = (project) => join(project.repo_dir ?? '.', '..', 'tickets');
   /** Machines online now; a thread's turn gets each one's MCP tools. */
@@ -399,6 +411,19 @@ export class Runner {
     } catch {
       filesDir = null;
     }
+    let sharedDir = this.sharedDir(project);
+    try {
+      if (sharedDir) mkdirSync(sharedDir, { recursive: true });
+    } catch {
+      sharedDir = null;
+    }
+    // Claude Code keeps auto-memory under the main checkout's folder, shared by the project's worktrees.
+    let memoryDir = project.repo_dir && ticket.kind === 'coordinator' ? join(claudeConfigDir(process.env), 'projects', projectSlug(project.repo_dir), 'memory') : null;
+    try {
+      if (memoryDir) mkdirSync(memoryDir, { recursive: true });
+    } catch {
+      memoryDir = null;
+    }
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now.
     const machines = ticket.kind === 'coordinator' ? [] : this.machines();
     // Tool calls matching the project's approval rules wait for a person (threads only).
@@ -409,16 +434,16 @@ export class Runner {
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', ticket.permission_mode,
-      '--append-system-prompt', systemPrompt(project, ticket, filesDir, this.ticketsDir(project), machines),
+      '--append-system-prompt', systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines),
       // Nobody can answer a permission prompt in a headless turn; deny instead of waiting on one.
       // With approval rules, their prompts become Approve / Deny cards instead.
       ...permissionArgs(rules),
     ];
     // Lets edit-only sessions write there too, not just in their working directory.
-    const addDirs = filesDir ? [filesDir] : [];
+    const addDirs = [filesDir, sharedDir].filter((d): d is string => !!d);
     if (ticket.kind === 'coordinator') {
-      const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project));
-      addDirs.push(...access.addDirs);
+      const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project), sharedDir, memoryDir);
+      addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
       args.push('--settings', JSON.stringify(access.settings));
     }
     if (addDirs.length) args.push('--add-dir', ...addDirs);

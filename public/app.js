@@ -88,8 +88,12 @@ const fileExt = (path) => (baseName(path).includes('.') ? baseName(path).split('
 const isLocalPath = (href) => !/^[a-z][a-z0-9+.-]*:|^\/\/|^#/i.test(href);
 const fileUrl = (ticketId, path) => `/api/tickets/${ticketId}/file?path=${encodeURIComponent(path)}`;
 const fileHref = (ticketId, path) => `#/f/${ticketId}/${encodeURIComponent(path)}`;
+const sharedUrl = (projectId, path) => `/api/projects/${projectId}/shared/file?path=${encodeURIComponent(path)}`;
+const sharedHref = (projectId, path) => `#/s/${projectId}/${encodeURIComponent(path)}`;
 /** A linked path short enough for a card: a thread's shared folder by name, other absolute paths by their tail. */
 function shortPath(path) {
+  const projectShared = /\/shared\/project\/(.+)$/.exec(path);
+  if (projectShared) return `project shared/${projectShared[1]}`;
   const shared = /\/shared\/\d+\/(.+)$/.exec(path);
   if (shared) return `shared files/${shared[1]}`;
   return path.startsWith('/') ? `…/${path.split('/').slice(-2).join('/')}` : path;
@@ -575,6 +579,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
+    else if ((m = hash.match(/^#\/s\/(\d+)\/(.+)$/))) await showSharedFile(Number(m[1]), decodeURIComponent(m[2]));
     else if ((m = hash.match(/^#\/f\/(\d+)\/(.+)$/))) await showFile(Number(m[1]), decodeURIComponent(m[2]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/t\/(\d+)$/))) await showProject(Number(m[1]), { kind: 'chat', number: Number(m[2]) });
     else if ((m = hash.match(/^#\/t\/(\d+)$/))) await showTicket(Number(m[1]));
@@ -734,6 +739,14 @@ async function showFile(ticketId, path) {
   await showProject(ticket.project_id, { kind: 'file', ticket, file: { ...file, path } });
 }
 
+/** A file in the project's shared folder, opened from the Shared group of the artifacts panel. */
+async function showSharedFile(projectId, path) {
+  const file = await api(`/api/projects/${projectId}/shared/file?info&path=${encodeURIComponent(path)}`).catch((err) => ({
+    missing: err.message, name: baseName(path), kind: fileKind(path) ?? 'text', display_path: `project shared/${path}`,
+  }));
+  await showProject(projectId, { kind: 'shared', file: { ...file, path } });
+}
+
 async function showArtifact(artifactId) {
   const { artifact } = await api(`/api/artifacts/${artifactId}`);
   await showProject(artifact.project_id, { kind: 'artifact', artifact });
@@ -767,6 +780,7 @@ function renderCrumbs(main) {
       : main.kind === 'approvals' ? [projectLink, ' / ', 'Approvals']
       : main.kind === 'machines' ? [projectLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
+      : main.kind === 'shared' ? [projectLink, ' / ', 'Shared', ' / ', main.file.name]
       : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Coordinator' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
           : [project.name]));
@@ -782,10 +796,11 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   if (main.kind === 'chat' && view?.kind === 'project' && view.projectId === projectId && document.getElementById('threads')) {
     if (await switchChat(main, seq)) return;
   }
-  const [{ project, coordinator, tickets, seen }, artifacts, projects, machines] = await Promise.all([
+  const [{ project, coordinator, tickets, seen }, artifacts, shared, projects, machines] = await Promise.all([
     api(`/api/projects/${projectId}`),
     // An empty shelf beats a broken page if the server is older than this front end.
     api(`/api/projects/${projectId}/artifacts`).catch(() => []),
+    api(`/api/projects/${projectId}/shared`).catch(() => []),
     api('/api/projects').catch(() => []),
     api('/api/machines').catch(() => []),
   ]);
@@ -801,7 +816,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   view = {
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
-    artifacts, artifactId: main.artifact?.id ?? null, machines,
+    artifacts, shared, artifactId: main.artifact?.id ?? null, machines,
     file: main.file ?? null, fileTicket: main.ticket ?? null,
     ...chatView(chatId, ticket),
   };
@@ -852,6 +867,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'file' ? fileViewer(main.ticket, main.file)
+        : main.kind === 'shared' ? sharedViewer(main.file)
         : chatSection(chatId, ticket, events);
 
   // .panels only becomes a box of its own when both panels are collapsed, so their tabs can share
@@ -866,6 +882,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   if (main.kind === 'artifacts') renderArtifactResults();
   if (main.kind === 'artifact') renderArtifactHead();
   if (main.kind === 'file') renderFileHead();
+  if (main.kind === 'shared') renderSharedHead();
   if (!chatId) return window.scrollTo(0, 0);
   await mountChat(chatId, ticket, events);
 }
@@ -879,9 +896,9 @@ async function switchChat(main, seq) {
   if (!chatId) return false;
   const [{ ticket }, events] = await Promise.all([api(`/api/tickets/${chatId}`), loadEvents(chatId)]);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
-  const { kind, projectId, project, coordinator, tickets, seen, artifacts, showClosed } = view;
+  const { kind, projectId, project, coordinator, tickets, seen, artifacts, shared, showClosed } = view;
   view = {
-    kind, main: 'chat', projectId, project, coordinator, tickets, seen, artifacts, showClosed,
+    kind, main: 'chat', projectId, project, coordinator, tickets, seen, artifacts, shared, showClosed,
     artifactId: null, file: null, fileTicket: null,
     ...chatView(chatId, ticket),
   };
@@ -1364,6 +1381,7 @@ function renderBranch(status) {
 // ---------- artifacts ----------
 
 const RECENT_ARTIFACTS = 5;
+const RECENT_SHARED = 8;
 const MAX_TEXT_PREVIEW = 2 * 1024 * 1024;
 const ARTIFACT_FILTERS = [
   { key: 'all', label: 'All', match: () => true },
@@ -1396,13 +1414,17 @@ async function refreshArtifacts() {
   if (view?.kind !== 'project') return;
   const projectId = view.projectId;
   try {
-    const artifacts = await api(`/api/projects/${projectId}/artifacts`);
-    if (view?.kind === 'project' && view.projectId === projectId) setArtifacts(artifacts);
+    const [artifacts, shared] = await Promise.all([
+      api(`/api/projects/${projectId}/artifacts`),
+      api(`/api/projects/${projectId}/shared`).catch(() => []),
+    ]);
+    if (view?.kind === 'project' && view.projectId === projectId) setArtifacts(artifacts, shared);
   } catch {}
 }
 
-function setArtifacts(artifacts) {
+function setArtifacts(artifacts, shared = view.shared) {
   view.artifacts = artifacts;
+  view.shared = shared;
   renderShelf();
   if (view.main === 'artifacts') renderArtifactResults();
   if (view.main === 'artifact') renderArtifactHead();
@@ -1445,14 +1467,24 @@ function renderShelf() {
     h('span', { class: 'text' },
       h('span', { class: 'name' }, a.name),
       h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? 'Coordinator' : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
-  const sub = (title, count, items, empty) => h('div', { class: 'sub' },
+  const sub = (title, count, items, empty, render = item) => h('div', { class: 'sub' },
     h('h4', {}, title, count ? h('span', { class: 'count' }, count) : ''),
-    items.length ? items.map(item) : h('p', { class: 'muted small' }, empty));
+    items.length ? items.map(render) : h('p', { class: 'muted small' }, empty));
   el.replaceChildren(h('section', { class: 'column' },
     h('h3', {}, 'Artifacts', h('span', { class: 'spacer' }),
       h('a', { class: `browse${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts`, title: `Browse all ${all.length} artifacts` }, 'Browse')),
     sub('Pinned', pinned.length, pinned, 'Pin artifacts with ☆ to keep them here.'),
-    sub('Recent', 0, recent, 'Documents, pages and canvases that threads create show up here.')));
+    sub('Recent', 0, recent, 'Documents, pages and canvases that threads create show up here.'),
+    sub('Shared', view.shared.length, view.shared.slice(0, RECENT_SHARED), 'Handoffs and notes in the project\'s shared folder show up here.', sharedItem)));
+}
+
+/** A document or page in the project's shared folder, as a row of the artifacts panel. */
+function sharedItem(f) {
+  return h('a', { class: `artifact-item${view.main === 'shared' && view.file?.path === f.path ? ' active' : ''}`, href: sharedHref(view.projectId, f.path), title: f.display_path },
+    h('span', { class: `badge k-${f.kind}` }, extOf(f)),
+    h('span', { class: 'text' },
+      h('span', { class: 'name' }, f.name),
+      h('span', { class: 'meta' }, f.path.includes('/') ? `${f.path.slice(0, f.path.lastIndexOf('/'))} · ${ago(f.mtime)}` : ago(f.mtime))));
 }
 
 /** Main panel: every artifact in the project, searchable, with pin toggles. */
@@ -1529,6 +1561,31 @@ function fileViewer(ticket, file) {
   return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'file-head' }), body);
 }
 
+/** Main panel: a file from the project's shared folder. */
+function sharedViewer(file) {
+  const body = h('div', { class: 'artifact-body' });
+  if (file.missing) body.append(h('p', { class: 'muted' }, `${file.missing}.`));
+  else renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p) });
+  return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body);
+}
+
+function renderSharedHead() {
+  const el = document.getElementById('shared-head');
+  if (!el) return;
+  const { file } = view;
+  const src = `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`;
+  el.replaceChildren(
+    h('div', { class: 'row' },
+      h('span', { class: `badge k-${file.kind}` }, fileExt(file.name)),
+      h('h2', {}, file.name),
+      h('span', { class: 'spacer' }),
+      file.missing ? '' : h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open'),
+      file.missing ? '' : h('a', { class: 'button secondary', href: `${src}&download` }, 'Download')),
+    h('div', { class: 'meta' },
+      file.display_path, ' · in the folder every thread and the coordinator share',
+      file.missing ? ' · not found' : ` · ${formatSize(file.size)} · updated ${ago(file.mtime)}`));
+}
+
 function renderFileHead() {
   const el = document.getElementById('file-head');
   if (!el) return;
@@ -1552,7 +1609,7 @@ function renderFileHead() {
 }
 
 /** Show a file in `body` by its kind. Markdown's relative image links load from next to it. */
-function renderFileBody(body, { kind, src, size, name, path, ticketId }) {
+function renderFileBody(body, { kind, src, size, name, path, ticketId, urlFor = (p) => fileUrl(ticketId, p) }) {
   if (kind === 'image') {
     body.append(h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { class: 'artifact-media', src, alt: name })));
   } else if (kind === 'video') {
@@ -1572,7 +1629,7 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId }) {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       const text = await res.text();
       const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-      const imageUrl = (href) => (isLocalPath(href) ? fileUrl(ticketId, joinPath(dir, href.split('#')[0])) : null);
+      const imageUrl = (href) => (isLocalPath(href) ? urlFor(joinPath(dir, href.split('#')[0])) : null);
       let shown = text;
       if (kind === 'canvas') {
         // JSON Canvas files are JSON; lay them out readably.

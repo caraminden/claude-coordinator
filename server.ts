@@ -16,7 +16,7 @@ import { cleanPluginDirs, cleanRules, lines } from './src/approvals.ts';
 import { instructionSources } from './src/instructions.ts';
 import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, hashToken, newToken } from './src/machines.ts';
 import { Runner, slimEvent } from './src/runner.ts';
-import { cloneProject, createTicketDir, projectDir, removeProjectDir } from './src/workspace.ts';
+import { cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -102,6 +102,26 @@ function scheduleScan(ticketId: number) {
   }, SCAN_DELAY_MS));
 }
 
+/** The documents and pages in a project's shared folder, newest first, paths relative to it. */
+async function sharedFiles(projectId: number) {
+  const dir = projectSharedDir(DATA_DIR, projectId);
+  const files = await findArtifacts(dir, false);
+  return files.sort((a, b) => b.mtime - a.mtime).map((f) => ({
+    ...f, name: basename(f.path), kind: fileType(f.path)?.kind ?? 'text', display_path: `project shared/${f.path}`,
+  }));
+}
+
+// What each project's shared folder held at the last scan, so a change can tell open pages to refresh.
+const sharedSeen = new Map<number, string>();
+
+async function scanShared(projectId: number) {
+  const sig = JSON.stringify((await sharedFiles(projectId)).map((f) => [f.path, f.size, f.mtime]));
+  if (sharedSeen.get(projectId) === sig) return;
+  // The first look after a start only records what is there.
+  if (sharedSeen.has(projectId)) broadcast({ type: 'artifacts', projectId });
+  sharedSeen.set(projectId, sig);
+}
+
 async function scanArtifacts(ticketId: number) {
   // One scan per ticket at a time; a request during a scan waits for it, then rescans.
   while (scanning.has(ticketId)) await scanning.get(ticketId);
@@ -120,6 +140,7 @@ async function scanArtifacts(ticketId: number) {
     const pinned = new Set(store.pinnedArtifactPaths(ticketId));
     const shown = found.filter((f) => linked.has(isAbsolute(f.path) ? f.path : join(ticket.cwd, f.path)) || pinned.has(f.path));
     if (store.syncArtifacts(ticket, shown)) broadcast({ type: 'artifacts', projectId: ticket.project_id });
+    await scanShared(ticket.project_id);
   })();
   scanning.set(ticketId, job);
   try {
@@ -134,6 +155,7 @@ runner.onFilesMayChange = (ticketId) => {
   scheduleBranchCheck(ticketId);
 };
 runner.filesDir = sharedDir;
+runner.sharedDir = (project) => projectSharedDir(DATA_DIR, project.id);
 runner.ticketsDir = (project) => join(projectDir(DATA_DIR, project.id), 'tickets');
 // Threads stored before events were slimmed carry megabytes of thinking and usage data nobody
 // reads; slim them once so opening a long thread downloads only what the chat shows.
@@ -233,6 +255,8 @@ function sharedDir(ticket: Ticket): string {
 
 /** A path as people should see it: relative to the working directory, or under "shared files". */
 function displayPath(ticket: Ticket, path: string): string {
+  const projectShared = projectSharedDir(DATA_DIR, ticket.project_id) + sep;
+  if (path.startsWith(projectShared)) return `project shared/${path.slice(projectShared.length)}`;
   const shared = sharedDir(ticket) + sep;
   if (path.startsWith(shared)) return `shared files/${path.slice(shared.length)}`;
   if (ticket.cwd && path.startsWith(ticket.cwd + sep)) return path.slice(ticket.cwd.length + 1);
@@ -241,29 +265,34 @@ function displayPath(ticket: Ticket, path: string): string {
 
 /**
  * Find a file a ticket may show: `path` is absolute or relative to its working directory, and must
- * resolve (symlinks included) to a servable file type inside the working directory or shared folder.
+ * resolve (symlinks included) to a servable file type inside the working directory, its shared
+ * folder or the project's shared folder.
  */
-async function resolveTicketFile(ticket: Ticket, path: string) {
+function resolveTicketFile(ticket: Ticket, path: string) {
+  return resolveFile(ticket.cwd, [ticket.cwd, sharedDir(ticket), projectSharedDir(DATA_DIR, ticket.project_id)], path);
+}
+
+/** The file at `path` (absolute or relative to `cwd`) if it is a servable type inside one of `roots`. */
+async function resolveFile(cwd: string, roots: string[], path: string) {
   const type = fileType(path);
-  if (!type || !ticket.cwd || path.includes('\0')) return null;
+  if (!type || !cwd || path.includes('\0')) return null;
   try {
-    const file = await realpath(isAbsolute(path) ? path : join(ticket.cwd, path));
-    for (const root of [ticket.cwd, sharedDir(ticket)]) {
+    const file = await realpath(isAbsolute(path) ? path : join(cwd, path));
+    for (const root of roots) {
       const real = await realpath(root).catch(() => null);
       if (!real || !file.startsWith(real + sep)) continue;
       const st = await stat(file);
       if (!st.isFile()) return null;
       // The path the ticket used, made absolute, so artifact rows and links agree.
-      const abs = isAbsolute(path) ? normalize(path) : join(ticket.cwd, path);
+      const abs = isAbsolute(path) ? normalize(path) : join(cwd, path);
       return { file, abs, type, size: st.size, mtime: Math.round(st.mtimeMs) };
     }
   } catch {}
   return null;
 }
 
-/** Serve a file a ticket may show (see resolveTicketFile), with byte ranges and a sandboxing CSP. */
-async function serveArtifact(req: IncomingMessage, res: ServerResponse, ticket: Ticket, path: string, download: boolean) {
-  const found = await resolveTicketFile(ticket, path);
+/** Serve a file found by resolveFile, with byte ranges and a sandboxing CSP. */
+async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: Awaited<ReturnType<typeof resolveFile>>, path: string, download: boolean) {
   if (!found) throw new HttpError(404, 'That file is no longer there');
   const { file, type, size } = found;
   const headers: Record<string, string | number> = {
@@ -774,6 +803,23 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     return json(res, 200, store.listArtifacts(project.id).map(artifactView));
   }
 
+  m = pathname.match(/^\/api\/projects\/(\d+)\/shared(\/file)?$/);
+  if (m && (method === 'GET' || (method === 'HEAD' && m[2]))) {
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such project');
+    if (!m[2]) return json(res, 200, await sharedFiles(project.id));
+    // One file of the folder, by path relative to it (or ?info for its details).
+    const dir = projectSharedDir(DATA_DIR, project.id);
+    const path = url.searchParams.get('path') ?? '';
+    const found = await resolveFile(dir, [dir], path);
+    if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
+    if (!url.searchParams.has('info')) return serveArtifact(req, res, found, path, url.searchParams.has('download'));
+    return json(res, 200, {
+      path, name: basename(found.abs), display_path: `project shared/${path}`,
+      kind: found.type.kind, size: found.size, mtime: found.mtime,
+    });
+  }
+
   m = pathname.match(/^\/api\/artifacts\/(\d+)(\/[a-z]+)?$/);
   if (m) {
     const a = store.getArtifact(Number(m[1]));
@@ -783,7 +829,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       return json(res, 200, { artifact: artifactView(a), project: store.getProject(a.project_id) });
     }
     if (action === '/raw' && (method === 'GET' || method === 'HEAD')) {
-      return serveArtifact(req, res, store.getTicket(a.ticket_id)!, a.path, url.searchParams.has('download'));
+      return serveArtifact(req, res, await resolveTicketFile(store.getTicket(a.ticket_id)!, a.path), a.path, url.searchParams.has('download'));
     }
     if (action === '/pin' && method === 'POST') {
       const body = await readJson(req);
@@ -856,7 +902,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (action === '/file' && (method === 'GET' || method === 'HEAD')) {
       // A file the ticket linked in its reply: ?path= as written there; ?info for its details.
       const path = url.searchParams.get('path') ?? '';
-      if (!url.searchParams.has('info')) return serveArtifact(req, res, ticket, path, url.searchParams.has('download'));
+      if (!url.searchParams.has('info')) return serveArtifact(req, res, await resolveTicketFile(ticket, path), path, url.searchParams.has('download'));
       const found = await resolveTicketFile(ticket, path);
       if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
       const relPath = found.abs.startsWith(ticket.cwd + sep) ? found.abs.slice(ticket.cwd.length + 1) : found.abs;

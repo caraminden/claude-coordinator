@@ -10,6 +10,8 @@
   --error: #b91c1c;
   --closed: #6b7280;
   --code-bg: #f1efe9;
+  --yours-bg: #fbf0c9;
+  --stuck-bg: #fbdcdc;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -25,6 +27,8 @@
     --error: #f87171;
     --closed: #9ca3af;
     --code-bg: #2a2926;
+    --yours-bg: color-mix(in srgb, #fbbf24 16%, #201f1d);
+    --stuck-bg: color-mix(in srgb, #f87171 18%, #201f1d);
     color-scheme: dark;
   }
 }
@@ -435,6 +439,11 @@ button.pin.on { color: var(--accent); }
 .thread-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }
 .thread-row:hover { border-color: var(--line); }
 .thread-row.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+/* Waiting on you: yellow (red when stuck), over the zebra striping, a bit stronger when open. */
+.thread-row.yours, .thread-group .thread-row.yours { background: var(--yours-bg); }
+.thread-row.yours.stuck, .thread-group .thread-row.yours.stuck { background: var(--stuck-bg); }
+.thread-row.yours.active, .thread-group .thread-row.yours.active { background: color-mix(in srgb, var(--waiting) 12%, var(--yours-bg)); }
+.thread-row.yours.stuck.active, .thread-group .thread-row.yours.stuck.active { background: color-mix(in srgb, var(--error) 10%, var(--stuck-bg)); }
 .thread-row .name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; }
 .thread-row .num { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
 .thread-row.coordinator { margin-top: 0.1rem; }

@@ -1144,7 +1144,9 @@ function threadRow(t, href = threadHref(t), hit = null) {
     note,
   ].filter(Boolean).join('\n');
   const active = (view.id ?? view.fileTicket?.id) === t.id;
-  return h('a', { class: `thread-row s-${t.status}${coord ? ' coordinator' : ''}${active ? ' active' : ''}`, href, title: details },
+  // Rows waiting on you get a tinted background (red when the thread is stuck), so they stand out.
+  const yours = !coord && st.rank === 0 ? ` yours${st.cls === 'st' ? ' stuck' : ''}` : '';
+  return h('a', { class: `thread-row s-${t.status}${coord ? ' coordinator' : ''}${yours}${active ? ' active' : ''}`, href, title: details },
     h('span', { class: 'name' }, coord ? 'Coordinator' : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     h('span', { class: `state ${st.cls}` }, st.cell),

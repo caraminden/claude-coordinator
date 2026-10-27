@@ -9,8 +9,15 @@ export interface Project {
   name: string;
   repo_url: string | null;
   repo_dir: string | null;
+  /** Standing rules every turn in the project gets, coordinator included; '' for none. */
+  instructions: string;
+  instructions_updated_by: string | null;
+  instructions_updated_at: number | null;
   created_at: number;
 }
+
+/** Longest project instructions the app accepts, the same cap as Claude Code's own projects. */
+export const MAX_INSTRUCTIONS = 16_000;
 
 /** Models a thread can be set to (null = Claude Code's default), and effort levels for `claude --effort`. */
 export const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'] as const;
@@ -159,6 +166,9 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'effort', 'ALTER TABLE tickets ADD COLUMN effort TEXT'],
   ['tickets', 'last_model', 'ALTER TABLE tickets ADD COLUMN last_model TEXT'],
   ['tickets', 'last_effort', 'ALTER TABLE tickets ADD COLUMN last_effort TEXT'],
+  ['projects', 'instructions', "ALTER TABLE projects ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"],
+  ['projects', 'instructions_updated_by', 'ALTER TABLE projects ADD COLUMN instructions_updated_by TEXT'],
+  ['projects', 'instructions_updated_at', 'ALTER TABLE projects ADD COLUMN instructions_updated_at INTEGER'],
 ];
 
 export class Store {
@@ -233,6 +243,12 @@ export class Store {
 
   setProjectRepoDir(id: number, dir: string) {
     this.db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(dir, id);
+  }
+
+  setProjectInstructions(id: number, instructions: string, by: string) {
+    this.db
+      .prepare('UPDATE projects SET instructions = ?, instructions_updated_by = ?, instructions_updated_at = ? WHERE id = ?')
+      .run(instructions, by, Date.now(), id);
   }
 
   deleteProject(id: number) {

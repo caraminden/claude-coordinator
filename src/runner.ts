@@ -120,8 +120,21 @@ function showingFiles(ticket: Ticket, filesDir: string | null): string[] {
   ].filter(Boolean);
 }
 
+/** The project's standing instructions, set by people in the app; last, so they read as the final word. */
+function projectInstructions(project: Project): string[] {
+  const text = project.instructions?.trim();
+  if (!text) return [];
+  return [
+    '',
+    `# Project instructions for "${project.name}"`,
+    'People set these in the project\'s settings. They apply to every thread in the project and to the coordinator, and take precedence over the defaults above:',
+    '',
+    text,
+  ];
+}
+
 function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null): string {
-  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project), ...showingFiles(ticket, filesDir)].join('\n');
+  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project), ...showingFiles(ticket, filesDir), ...projectInstructions(project)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the project repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this ticket.';
@@ -144,6 +157,7 @@ function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null)
     'Give every Bash call a short plain-English description (like "Run the test suite").',
     ...showingFiles(ticket, filesDir),
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
+    ...projectInstructions(project),
   ].join('\n');
 }
 
@@ -151,6 +165,7 @@ function coordinatorPrompt(project: Project): string {
   return [
     `You are the coordinator for project "${project.name}" in Claude Coordinator, a shared web app where several people chat with Claude Code sessions called tickets.`,
     'People open the project and talk to you first. You keep track of the project\'s tickets and manage them with the `coordinator` MCP tools: list_tickets, read_ticket, create_ticket, message_ticket, update_ticket, close_ticket, reopen_ticket and stop_ticket.',
+    'The project instructions (shown at the end of this prompt when set) reach you and every ticket on its next turn. When people ask you to add, change or drop a standing rule for the whole project, read the current text with get_project_instructions and save the full new text with set_project_instructions; tell them what changed.',
     'Each ticket is a separate Claude Code session with its own git worktree and branch. Hand real work (code changes, investigations) to tickets rather than doing it yourself; give each new ticket a self-contained first message, since it cannot see this conversation.',
     'Ticket titles are the short ask, about 30 characters ("Usage bar in the top bar"), with no number, tag or emoji; the app shows the number and the tickets label themselves as they work. Give each new ticket a tag: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet); none for one-off questions. You can fix a ticket\'s title, tag, state or note with update_ticket.',
     'Tickets run in the background. To see progress, read them; do not wait or poll in a loop. Close tickets when people agree they are done.',

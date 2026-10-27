@@ -35,6 +35,13 @@ runners on other people's own Claude logins.
   with a bearer token that only reaches that project's tickets (never the
   coordinator itself). The token is passed in the environment, not on the
   command line, so other users on the box can't read it from `ps`.
+- Each project can have **instructions** (up to 16,000 characters), edited from the
+  overview panel. They're appended to the system prompt of the coordinator and every
+  ticket, so they apply from each one's next turn. "Import from Claude Code" lists
+  the instruction and memory files of the login the app runs as (`~/.claude/CLAUDE.md`
+  and `rules/`, the repo's `CLAUDE.md` files, and auto-memory) to add with a tick.
+  A file upload or a paste works too. The coordinator can read and change them
+  with its `get_project_instructions` and `set_project_instructions` tools.
 - Projects with a repo URL are cloned once; each ticket gets
   `git worktree add -b ticket/<id>-<slug>` from the default branch.
 
@@ -49,6 +56,7 @@ uses the built-in `node:sqlite`.
 | `src/runner.ts` | Spawns `claude` turns, parses stream-json, queues messages |
 | `src/mcp.ts` | MCP server giving the coordinator its ticket-management tools |
 | `src/workspace.ts` | Clones project repos, creates per-ticket worktrees |
+| `src/instructions.ts` | Finds Claude Code instruction and memory files to import as project instructions |
 | `src/db.ts` | SQLite schema and queries |
 | `src/auth.ts` | Shared-password login, signed session cookies |
 | `public/` | Front end (vanilla JS, no build) |

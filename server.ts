@@ -11,7 +11,8 @@ import { fileType, findArtifacts, isArtifact } from './src/artifacts.ts';
 import { AGENT_NAME, Auth, type Session } from './src/auth.ts';
 import { branchStatus, type BranchStatus } from './src/branch.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
-import { EFFORTS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
+import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
+import { instructionSources } from './src/instructions.ts';
 import { Runner } from './src/runner.ts';
 import { cloneProject, createTicketDir, projectDir, removeProjectDir } from './src/workspace.ts';
 
@@ -626,6 +627,37 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     // When this person last looked at each thread, so rows they have already seen can be shown quieter.
     const seen = session.agent === undefined ? store.seenTimes(session.name, project.id) : {};
     return json(res, 200, { project, coordinator: ticketView(coordinator.id), tickets, seen });
+  }
+
+  if (m && method === 'PATCH') {
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such project');
+    inScope(project.id);
+    const body = await readJson(req);
+    if (typeof body.instructions !== 'string') throw new HttpError(400, 'instructions must be text');
+    const instructions = body.instructions.replace(/\r\n/g, '\n').trim();
+    if (instructions.length > MAX_INSTRUCTIONS) {
+      throw new HttpError(400, `Instructions are ${instructions.length.toLocaleString('en')} characters; the limit is ${MAX_INSTRUCTIONS.toLocaleString('en')}`);
+    }
+    if (instructions !== project.instructions) {
+      store.setProjectInstructions(project.id, instructions, session.name);
+      const coordinator = store.getCoordinator(project.id);
+      if (coordinator) {
+        runner.emit(coordinator.id, 'note', {
+          text: `${session.name} ${instructions ? 'updated' : 'cleared'} the project instructions; they apply from each thread's next turn.`,
+        });
+      }
+    }
+    const saved = store.getProject(project.id)!;
+    broadcast({ type: 'project', project: saved });
+    return json(res, 200, saved);
+  }
+
+  m = pathname.match(/^\/api\/projects\/(\d+)\/instructions\/sources$/);
+  if (m && method === 'GET') {
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such project');
+    return json(res, 200, { sources: await instructionSources(project, claudeConfigDir(process.env), DATA_DIR), max: MAX_INSTRUCTIONS });
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/tickets$/);

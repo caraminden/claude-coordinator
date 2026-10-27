@@ -140,6 +140,17 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
   },
   ASK_QUESTION,
+  {
+    name: 'get_project_instructions',
+    description: "Read the project instructions: the standing rules people set for this project, which every ticket and you receive in the system prompt.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_project_instructions',
+    description:
+      'Replace the project instructions with new text (max 16,000 characters; empty clears them). They reach every ticket, and you, from its next turn. Read the current text first and send the whole new version, not just the change.',
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string' } }, required: ['instructions'] },
+  },
 ];
 
 async function call(method: string, path: string, body?: object): Promise<any> {
@@ -242,6 +253,16 @@ async function runTool(name: string, args: any): Promise<string> {
         permissionMode: args.permission_mode,
       });
       return `Created ${ticketLine(t)}`;
+    }
+    case 'get_project_instructions': {
+      const { project } = await call('GET', `/api/projects/${PROJECT}`);
+      if (!project.instructions) return 'This project has no instructions yet.';
+      const by = project.instructions_updated_by ? ` (last changed by ${project.instructions_updated_by})` : '';
+      return `Project instructions${by}:\n\n${project.instructions}`;
+    }
+    case 'set_project_instructions': {
+      const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: String(args.instructions ?? '') });
+      return project.instructions ? `Saved (${project.instructions.length} characters).` : 'Cleared the project instructions.';
     }
     case 'message_ticket':
       return `Sent. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/messages`, { text: args.text }))}`;

@@ -358,6 +358,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'event') onEvent(msg.event);
     if (msg.type === 'artifacts') onArtifactsChanged(msg.projectId);
+    if (msg.type === 'project') onProjectUpdate(msg.project);
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };
   es.onerror = () => {
@@ -538,6 +539,7 @@ async function route() {
   try {
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/instructions$/))) await showProject(Number(m[1]), { kind: 'instructions' });
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
     else if ((m = hash.match(/^#\/f\/(\d+)\/(.+)$/))) await showFile(Number(m[1]), decodeURIComponent(m[2]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/t\/(\d+)$/))) await showProject(Number(m[1]), { kind: 'chat', number: Number(m[2]) });
@@ -720,6 +722,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
   crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', ...(
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
+      : main.kind === 'instructions' ? [projectLink, ' / ', 'Instructions']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Coordinator' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
         : chatId !== coordinator.id ? [projectLink, ' / ', `#${ticket.number ?? ticket.id}`]
@@ -741,6 +744,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
       h('h3', {}, 'Projects', h('span', { class: 'spacer' }), h('a', { class: 'more', href: '#/' }, 'All')),
       projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
         h('span', { class: 'name' }, p.name)))),
+    h('div', { id: 'instructions-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     h('summary', { title: 'Show or hide threads' }, h('span', { class: 'label' }, 'Threads')),
@@ -760,6 +764,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     sidebar.open = panelOpen('threads');
   };
   const section = main.kind === 'artifacts' ? artifactBrowser()
+    : main.kind === 'instructions' ? instructionsEditor()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'file' ? fileViewer(main.ticket, main.file)
         : chatSection(chatId, ticket, events);
@@ -768,6 +773,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   // one slim sticky column; otherwise the panels sit directly in the grid.
   app.replaceChildren(h('div', { class: 'split' }, h('div', { class: 'panels' }, shelf, sidebar), section));
   renderUsage();
+  renderInstructionsShelf();
   renderShelf();
   renderSidebar();
   if (main.kind === 'artifacts') renderArtifactResults();
@@ -1473,6 +1479,178 @@ function renderArtifactHead() {
       h('a', { href: threadHref(artifactThread(a)) }, threadName(a)),
       a.missing ? ' · missing' : ` · ${formatSize(a.size)} · updated ${ago(a.mtime)}`,
       a.pinned_at ? ` · pinned by ${a.pinned_by}` : ''));
+}
+
+// ---------- project instructions ----------
+
+const MAX_INSTRUCTIONS = 16000;
+const count = (n) => n.toLocaleString('en');
+
+function onProjectUpdate(project) {
+  if (view?.kind !== 'project' || view.projectId !== project.id) return;
+  view.project = project;
+  renderInstructionsShelf();
+  const text = document.getElementById('instructions-text');
+  // Someone else saved: show their text unless this tab has edits of its own.
+  if (text && !text.hasAttribute('data-draft')) text.value = project.instructions;
+  renderInstructionsHead();
+}
+
+/** Overview panel: whether the project has instructions, and a way to edit them. */
+function renderInstructionsShelf() {
+  const el = document.getElementById('instructions-shelf');
+  if (!el) return;
+  const p = view.project;
+  const text = p.instructions ?? '';
+  const first = text.split('\n').map((l) => l.replace(/^[#>*\-\s]+/, '').trim()).find(Boolean);
+  el.replaceChildren(h('section', { class: 'column' },
+    h('h3', {}, 'Instructions', h('span', { class: 'spacer' }),
+      h('a', { class: `browse${view.main === 'instructions' ? ' active' : ''}`, href: `#/p/${view.projectId}/instructions` }, text ? 'Edit' : 'Add')),
+    text
+      ? h('a', { class: 'instructions-peek', href: `#/p/${view.projectId}/instructions` },
+        h('span', { class: 'name' }, first ?? ''),
+        h('span', { class: 'meta' }, `${count(text.length)} chars${p.instructions_updated_by ? ` · ${p.instructions_updated_by}, ${ago(p.instructions_updated_at)}` : ''}`))
+      : h('p', { class: 'muted small' }, 'Standing rules every thread and the coordinator follow. Import them from Claude Code.')));
+}
+
+function renderInstructionsHead() {
+  const el = document.getElementById('instructions-head');
+  if (!el) return;
+  const p = view.project;
+  el.replaceChildren(
+    h('div', { class: 'row' }, h('h2', {}, 'Project instructions'), h('span', { class: 'spacer' }),
+      h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the coordinator', 'aria-label': 'Close' }, '×')),
+    h('div', { class: 'meta' },
+      'The coordinator and every thread get these in their system prompt, from their next turn.',
+      p.instructions_updated_by ? ` Last changed by ${p.instructions_updated_by} ${ago(p.instructions_updated_at)}.` : ''));
+}
+
+/** Main panel: edit the project's instructions, or import them from Claude Code. */
+function instructionsEditor() {
+  const p = view.project;
+  const textarea = h('textarea', {
+    id: 'instructions-text', class: 'instructions-text', spellcheck: 'false',
+    placeholder: 'What the project is for, where the work happens (branches, PR names), how a thread checks its work, what needs a go-ahead first…',
+  });
+  textarea.value = p.instructions ?? '';
+  const counter = h('span', { class: 'muted counter' });
+  const status = h('span', { class: 'muted', role: 'status' });
+  const save = h('button', { type: 'button' }, 'Save');
+  const discard = h('button', { type: 'button', class: 'secondary' }, 'Discard');
+  const sync = () => {
+    const dirty = textarea.value.trim() !== (view.project.instructions ?? '').trim();
+    // Marked as a draft only while it differs, so the app still reloads for an update otherwise.
+    textarea.toggleAttribute('data-draft', dirty);
+    const n = textarea.value.trim().length;
+    counter.textContent = `${count(n)} / ${count(MAX_INSTRUCTIONS)}`;
+    counter.classList.toggle('over', n > MAX_INSTRUCTIONS);
+    save.disabled = !dirty || n > MAX_INSTRUCTIONS;
+    discard.disabled = !dirty;
+  };
+  textarea.addEventListener('input', () => {
+    status.textContent = '';
+    sync();
+  });
+  save.onclick = async () => {
+    save.disabled = true;
+    status.textContent = 'Saving…';
+    try {
+      view.project = await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { instructions: textarea.value } });
+      textarea.value = view.project.instructions;
+      status.textContent = 'Saved. Threads pick this up on their next turn.';
+      renderInstructionsShelf();
+      renderInstructionsHead();
+    } catch (err) {
+      status.textContent = err.message;
+    }
+    sync();
+  };
+  discard.onclick = () => {
+    textarea.value = view.project.instructions ?? '';
+    status.textContent = '';
+    sync();
+  };
+
+  /** Put imported text at the end of what's there (or in place of it), then let people review and save. */
+  const insert = (parts, replace) => {
+    const add = parts.map((x) => x.trim()).filter(Boolean).join('\n\n');
+    if (!add) return;
+    textarea.value = replace || !textarea.value.trim() ? add : `${textarea.value.trimEnd()}\n\n${add}`;
+    textarea.focus();
+    textarea.scrollTop = textarea.scrollHeight;
+    status.textContent = 'Imported. Review it, then Save.';
+    sync();
+  };
+
+  const fileInput = h('input', { type: 'file', accept: '.md,.markdown,.txt,text/markdown,text/plain', multiple: true, hidden: true });
+  fileInput.onchange = async () => {
+    const files = [...fileInput.files];
+    fileInput.value = '';
+    insert(await Promise.all(files.map((f) => f.text())), false);
+  };
+  const picker = h('div', { class: 'import-picker', hidden: true });
+  const importButton = h('button', { type: 'button', class: 'secondary' }, 'Import from Claude Code…');
+  importButton.onclick = () => {
+    if (!picker.hidden) return (picker.hidden = true);
+    picker.hidden = false;
+    loadInstructionSources(picker, insert);
+  };
+
+  const section = h('section', { class: 'artifacts-main instructions-main' },
+    h('div', { class: 'ticket-head', id: 'instructions-head' }),
+    h('div', { class: 'instructions-tools' },
+      importButton,
+      h('button', { type: 'button', class: 'secondary', onclick: () => fileInput.click() }, 'Import a file…'),
+      fileInput,
+      h('span', { class: 'muted small' }, 'Or paste: from a Claude Code project at claude.ai/code, copy Project settings › Memory › Project instructions.')),
+    picker,
+    textarea,
+    h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter));
+  sync();
+  setTimeout(() => {
+    renderInstructionsHead();
+    textarea.focus();
+  });
+  return section;
+}
+
+/** The import picker: this app's Claude Code instruction and memory files, to tick and add. */
+async function loadInstructionSources(el, insert) {
+  el.replaceChildren(h('p', { class: 'muted small' }, 'Looking for Claude Code instructions and memory…'));
+  let sources;
+  try {
+    ({ sources } = await api(`/api/projects/${view.projectId}/instructions/sources`));
+  } catch (err) {
+    el.replaceChildren(h('p', { class: 'error' }, `Could not list Claude Code files: ${err.message}`));
+    return;
+  }
+  if (!sources.length) {
+    el.replaceChildren(h('p', { class: 'muted small' }, 'No Claude Code instructions or memory files found for this login. Import a file or paste instead.'));
+    return;
+  }
+  const picked = new Set();
+  const add = h('button', { type: 'button', disabled: true }, 'Add to instructions');
+  const replace = h('button', { type: 'button', class: 'secondary', disabled: true }, 'Replace instructions');
+  const update = () => {
+    add.disabled = replace.disabled = !picked.size;
+    add.textContent = picked.size > 1 ? `Add ${picked.size} to instructions` : 'Add to instructions';
+  };
+  const chosen = () => sources.filter((s) => picked.has(s.id)).map((s) => s.content);
+  add.onclick = () => insert(chosen(), false);
+  replace.onclick = () => insert(chosen(), true);
+  const groups = [...new Set(sources.map((s) => s.group))];
+  el.replaceChildren(
+    ...groups.map((g) => h('div', { class: 'sub' }, h('h4', {}, g),
+      sources.filter((s) => s.group === g).map((s) => {
+        const box = h('input', { type: 'checkbox', onchange: () => { box.checked ? picked.add(s.id) : picked.delete(s.id); update(); } });
+        return h('details', { class: 'import-source' },
+          h('summary', {},
+            h('label', {}, box, h('span', { class: 'name' }, s.label)),
+            h('span', { class: 'meta' }, `${s.path} · ${count(s.content.length)} chars${s.truncated ? ' (cut short)' : ''}`),
+            s.note ? h('span', { class: 'meta hint' }, s.note) : ''),
+          h('pre', {}, s.content));
+      }))),
+    h('div', { class: 'row' }, add, replace, h('span', { class: 'muted small' }, 'Click a name to preview it.')));
 }
 
 // ---------- pasted images ----------

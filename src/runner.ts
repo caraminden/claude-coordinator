@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
-import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine } from '../public/progress.js';
+import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
 const MCP_SERVER = join(import.meta.dirname, 'mcp.ts');
@@ -135,6 +135,10 @@ function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null)
     '- Mark each task in_progress with TaskUpdate when you start it. When you finish it, mark it completed and set metadata.outcome to one plain sentence on what it found, decided or changed.',
     '- If the plan changes, add, reword or delete tasks so the list stays true.',
     'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
+    'The project\'s threads list groups threads by kind and shows each as one line: number, short title, state, note. Keep yours accurate with the `set_thread_status` tool (mcp__thread):',
+    '- title: the short ask, about 30 characters ("Usage bar in the top bar"), no number, tag or emoji. Shorten a long title you were given once you know what the work is.',
+    '- tag: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet). Set it once the kind of work is clear, and change it if the work changes kind; leave it unset for one-off questions.',
+    '- At the end of every turn, set state and note: state ready (done, ready to merge or pick up), try (ready for people to try), parked, blocked (on something outside the thread) or outside (work still running elsewhere), or null when you are simply waiting on an answer; note is one terse line, max 60 chars, on where things stand ("needs a pick: tabs or list"). The state clears when the next turn starts.',
     'Give every Bash call a short plain-English description (like "Run the test suite").',
     ...showingFiles(ticket, filesDir),
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
@@ -145,7 +149,8 @@ function coordinatorPrompt(project: Project): string {
   return [
     `You are the coordinator for project "${project.name}" in Claude Coordinator, a shared web app where several people chat with Claude Code sessions called tickets.`,
     'People open the project and talk to you first. You keep track of the project\'s tickets and manage them with the `coordinator` MCP tools: list_tickets, read_ticket, create_ticket, message_ticket, update_ticket, close_ticket, reopen_ticket and stop_ticket.',
-    'Each ticket is a separate Claude Code session with its own git worktree and branch. Hand real work (code changes, investigations) to tickets rather than doing it yourself; give each new ticket a clear title and a self-contained first message, since it cannot see this conversation.',
+    'Each ticket is a separate Claude Code session with its own git worktree and branch. Hand real work (code changes, investigations) to tickets rather than doing it yourself; give each new ticket a self-contained first message, since it cannot see this conversation.',
+    'Ticket titles are the short ask, about 30 characters ("Usage bar in the top bar"), with no number, tag or emoji; the app shows the number and the tickets label themselves as they work. Give each new ticket a tag: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet); none for one-off questions. You can fix a ticket\'s title, tag, state or note with update_ticket.',
     'Tickets run in the background. To see progress, read them; do not wait or poll in a loop. Close tickets when people agree they are done.',
     project.repo_dir
       ? `The project's main checkout is at ${project.repo_dir} and ticket worktrees are under ${join(project.repo_dir, '..', 'tickets')}. You may read them for context, but do not edit, commit or switch branches there.`
@@ -184,6 +189,12 @@ export class Runner {
 
   queued(ticketId: number): number {
     return this.queues.get(ticketId)?.length ?? 0;
+  }
+
+  /** A ticket as the API shows it: plus queued messages and its task-list steps. */
+  view(ticket: Ticket) {
+    const { total, done } = stepInfo(this.progressFor(ticket.id));
+    return { ...ticket, queued: this.queued(ticket.id), steps: total ? { done, total } : null };
   }
 
   /** Mark turns that were cut off by a server restart. */
@@ -265,12 +276,15 @@ export class Runner {
     if (ticket.session_id) args.push('--resume', ticket.session_id);
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
     let env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
-    if (ticket.kind === 'coordinator') {
-      // The token travels in the environment (which the MCP server inherits), never on the command line.
-      const mcp = { mcpServers: { coordinator: { type: 'stdio', command: process.execPath, args: [MCP_SERVER] } } };
-      args.push('--mcp-config', JSON.stringify(mcp), '--allowedTools', 'mcp__coordinator');
-      env = { ...env, ...this.coordinatorEnv(ticket) };
-    }
+    // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
+    // title, tag, state and note. The token travels in the environment (which the MCP server
+    // inherits), never on the command line.
+    const role = ticket.kind === 'coordinator' ? 'coordinator' : 'thread';
+    const mcp = { mcpServers: { [role]: { type: 'stdio', command: process.execPath, args: [MCP_SERVER] } } };
+    args.push('--mcp-config', JSON.stringify(mcp), '--allowedTools', `mcp__${role}`);
+    env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
+    // A state describes where the last turn left things; a new turn makes it stale.
+    if (ticket.state) this.store.updateTicket(ticket.id, { state: null });
 
     const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     this.procs.set(ticket.id, proc);
@@ -386,7 +400,7 @@ export class Runner {
 
   broadcastTicket(ticketId: number) {
     const ticket = this.store.getTicket(ticketId);
-    if (ticket) this.broadcast({ type: 'ticket', ticket: { ...ticket, queued: this.queued(ticketId) } });
+    if (ticket) this.broadcast({ type: 'ticket', ticket: this.view(ticket) });
   }
 
   emit(ticketId: number, kind: string, data: unknown): EventRow {

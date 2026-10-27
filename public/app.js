@@ -6,12 +6,23 @@ const crumbs = document.getElementById('crumbs');
 const meEl = document.getElementById('me');
 
 const STATUS_LABEL = { running: 'Running', idle: 'Waiting for you', new: 'Starting', error: 'Error', closed: 'Closed' };
-const COLUMNS = [
-  { key: 'waiting', label: 'Waiting for you', match: (s) => s === 'idle' || s === 'new' },
-  { key: 'running', label: 'Running', match: (s) => s === 'running' },
-  { key: 'error', label: 'Error', match: (s) => s === 'error' },
-  { key: 'closed', label: 'Closed', match: (s) => s === 'closed' },
-];
+// Thread naming and the threads list follow Delve's Custom view: threads are grouped by kind of
+// work, and each is one compact row of number + short ask, a state, and a terse note.
+const TAGS = {
+  feature: { emoji: '🛠️', label: 'Feature', section: 'Features' },
+  bug: { emoji: '🐛', label: 'Bug', section: 'Bugs' },
+  design: { emoji: '🎨', label: 'Design', section: 'Design' },
+  process: { emoji: '⚙️', label: 'Process', section: 'Process' },
+  idea: { emoji: '💡', label: 'Idea', section: 'Ideas' },
+};
+const SECTIONS = ['feature', 'bug', 'design', 'process', null, 'idea']; // null: untagged, "Other"
+const STATES = {
+  ready: { emoji: '✅', label: 'Ready to merge or pick up' },
+  try: { emoji: '🧪', label: 'Ready for you to try' },
+  parked: { emoji: '🧊', label: 'Parked' },
+  blocked: { emoji: '⛔', label: 'Blocked on something outside the thread' },
+  outside: { emoji: '⏳', label: 'Waiting on work running elsewhere' },
+};
 
 let me = null;
 let view = null; // { kind, id, ... } for the current screen
@@ -621,6 +632,13 @@ function statusLabel(t) {
 const threadHref = (t) =>
   isCoordinator(t) ? `#/p/${t.project_id}` : t.number == null ? `#/t/${t.id}` : `#/p/${t.project_id}/t/${t.number}`;
 const threadLabel = (t) => (isCoordinator(t) ? 'Coordinator' : `#${t.number ?? t.id} ${t.title}`);
+/** The full name, Delve style: "🛠️ 12 FEATURE: Usage bar ✅". */
+function threadFullName(t) {
+  if (isCoordinator(t)) return 'Coordinator';
+  const tag = TAGS[t.tag];
+  const state = t.status !== 'running' && STATES[t.state];
+  return [tag?.emoji, t.number ?? t.id, tag ? `${tag.label.toUpperCase()}: ${t.title}` : t.title, state?.emoji].filter(Boolean).join(' ');
+}
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 async function showTicket(ticketId) {
@@ -853,7 +871,11 @@ function chatSection(chatId, ticket, events) {
 
 function newTicketForm(projectId) {
   const form = h('form', {},
-    h('label', {}, 'Title', h('input', { name: 'title', required: true, maxlength: 120, 'data-draft': true })),
+    h('label', {}, 'Title', h('input', { name: 'title', required: true, maxlength: 120, placeholder: 'The short ask, about 30 characters', 'data-draft': true })),
+    h('label', {}, 'Kind',
+      h('select', { name: 'tag' },
+        h('option', { value: '' }, 'Other (one-off question, review…)'),
+        Object.entries(TAGS).map(([value, t]) => h('option', { value }, `${t.emoji} ${t.label}`)))),
     h('label', {}, 'First message', h('textarea', { name: 'message', required: true, rows: 5, placeholder: 'What should this thread work on? (Enter to send, Shift+Enter for a new line)', 'data-draft': true })),
     h('label', {}, 'Permissions',
       h('select', { name: 'permissionMode' },
@@ -868,8 +890,9 @@ function newTicketForm(projectId) {
     form.title.value = draft.title ?? '';
     form.message.value = draft.message ?? '';
     if (draft.permissionMode) form.permissionMode.value = draft.permissionMode;
+    if (draft.tag) form.tag.value = draft.tag;
   }
-  const fields = () => ({ title: form.title.value, message: form.message.value, permissionMode: form.permissionMode.value });
+  const fields = () => ({ title: form.title.value, tag: form.tag.value || null, message: form.message.value, permissionMode: form.permissionMode.value });
   form.addEventListener('input', () => saveDraft(draftKey, form.title.value || form.message.value ? fields() : null));
   form.message.addEventListener('keydown', (e) => {
     // Same as the chat composer: Enter sends, Shift+Enter adds a line, IME composition is left alone.
@@ -905,39 +928,73 @@ function newTicketForm(projectId) {
 function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el) return;
-  const tickets = [...view.tickets.values()].sort((a, b) => b.updated_at - a.updated_at);
+  const tickets = [...view.tickets.values()];
+  const open = tickets.filter((t) => t.status !== 'closed');
+  const closed = tickets.filter((t) => t.status === 'closed').sort((a, b) => b.updated_at - a.updated_at);
+  const sections = SECTIONS.map((tag) => {
+    const rows = open.filter((t) => (TAGS[t.tag] ? t.tag : null) === tag).sort(byUrgency);
+    if (!rows.length) return '';
+    return h('section', { class: `thread-group g-${tag ?? 'other'}` },
+      h('h3', {}, tag ? TAGS[tag].section : 'Other'), rows.map((t) => threadRow(t)));
+  });
+  let closedGroup = '';
+  if (closed.length) {
+    // Closed threads stay out of the way but can still be opened and reopened.
+    closedGroup = h('details', { class: 'thread-group g-closed', open: view.showClosed }, h('summary', {}, 'Closed'), closed.map((t) => threadRow(t)));
+    closedGroup.addEventListener('toggle', () => { view.showClosed = closedGroup.open; });
+  }
   el.replaceChildren(
-    ticketCard(view.coordinator, `#/p/${view.projectId}`),
-    ...COLUMNS.map((col) => {
-      const items = tickets.filter((t) => col.match(t.status));
-      if (!items.length) return '';
-      const heading = [h('span', { class: `dot ${col.key === 'waiting' ? 'idle' : col.key}` }), col.label, h('span', { class: 'count' }, items.length)];
-      if (col.key === 'closed') {
-        // Closed threads stay out of the way but can still be opened and reopened.
-        const closed = h('details', { class: 'column closed', open: view.showClosed }, h('summary', {}, heading), items.map((t) => ticketCard(t)));
-        closed.addEventListener('toggle', () => { view.showClosed = closed.open; });
-        return closed;
-      }
-      return h('section', { class: 'column' }, h('h3', {}, heading), items.map((t) => ticketCard(t)));
-    }),
+    threadRow(view.coordinator, `#/p/${view.projectId}`),
+    ...sections, closedGroup,
     tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or use New thread.'));
 }
 
-/** A compact thread row (status is its coloured edge): title, who started it, queued messages and age, then the latest activity. */
-function ticketCard(t, href = threadHref(t)) {
+/** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked. */
+function byUrgency(a, b) {
+  const ra = rowState(a).rank, rb = rowState(b).rank;
+  if (ra !== rb) return ra - rb;
+  return ra === 0 ? a.updated_at - b.updated_at : b.updated_at - a.updated_at;
+}
+
+/**
+ * A thread's state cell: ❓ / ✅ / 🧪 when it is your move (with how long it has waited), ● x/y while
+ * Claude works, ⏳ ⛔ when it waits on something else, 🧊 parked, ⚠️ stuck.
+ */
+function rowState(t) {
+  const steps = t.steps ? ` ${t.steps.done}/${t.steps.total}` : '';
+  const waited = () => {
+    const days = Date.now() - t.updated_at >= 86_400_000;
+    return h('b', { class: days ? 'st' : 'm' }, shortAgo(t.updated_at));
+  };
+  if (t.status === 'running' || t.status === 'new') return { rank: 1, cls: 'w', cell: [`●${steps}`], label: 'Claude is working' };
+  if (t.status === 'error') return { rank: 0, cls: 'st', cell: ['⚠️'], label: 'Stuck: the last turn failed' };
+  if (t.status === 'closed') return { rank: 5, cls: 'm', cell: ['✓'], label: 'Closed' };
+  const state = STATES[t.state];
+  if (t.state === 'parked') return { rank: 4, cls: 'm', cell: [state.emoji], label: state.label };
+  if (t.state === 'outside') return { rank: 2, cls: 'w', cell: [`${state.emoji}${steps}`], label: state.label };
+  if (t.state === 'blocked') return { rank: 2, cls: 'st', cell: [state.emoji], label: state.label };
+  if (state) return { rank: 0, cls: 'ok', cell: [state.emoji, ' ', waited()], label: state.label };
+  return { rank: 0, cls: 'q', cell: ['❓ ', waited()], label: 'Your move' };
+}
+
+/** One compact row: number + short ask and the state on top, the thread's note (or what it is doing) below. */
+function threadRow(t, href = threadHref(t)) {
   const coord = isCoordinator(t);
+  // The coordinator is always there to talk to; only show when it is busy.
+  const st = coord && t.status !== 'running' ? { cls: '', cell: [], label: statusLabel(t) } : rowState(t);
+  const working = st.cls === 'w' || st.cls === 'm';
+  const note = (t.status === 'running' ? t.last_activity : t.note || t.last_activity) || '';
   const details = [
-    threadLabel(t),
-    [statusLabel(t), t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, `updated ${ago(t.updated_at)}`].filter(Boolean).join(' · '),
-    t.last_activity,
+    threadFullName(t),
+    [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, `updated ${ago(t.updated_at)}`].filter(Boolean).join(' · '),
+    note,
   ].filter(Boolean).join('\n');
-  return h('a', { class: `card ticket-card s-${t.status}${coord ? ' coordinator' : ''}${(view.id ?? view.fileTicket?.id) === t.id ? ' active' : ''}`, href, title: details },
-    h('div', { class: 'top' },
-      h('span', { class: 'title' }, threadLabel(t)),
-      t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
-      coord ? '' : h('span', { class: 'avatar' }, (t.created_by || '?').slice(0, 1).toUpperCase()),
-      h('span', { class: 'when' }, shortAgo(t.updated_at))),
-    t.last_activity ? h('div', { class: 'activity' }, t.last_activity) : '');
+  const active = (view.id ?? view.fileTicket?.id) === t.id;
+  return h('a', { class: `thread-row s-${t.status}${coord ? ' coordinator' : ''}${active ? ' active' : ''}`, href, title: details },
+    h('span', { class: 'name' }, coord ? 'Coordinator' : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
+    t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
+    h('span', { class: `state ${st.cls}` }, st.cell),
+    note ? h('span', { class: `note${working ? ' t' : ''}` }, note) : '');
 }
 
 /** "now", "5m", "3h", "2d": ages for tight spaces. */
@@ -1303,8 +1360,8 @@ function renderTicketHead() {
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
-      h('h2', {}, threadLabel(t)),
-      h('span', { class: 'muted' }, statusLabel(t) + (t.queued ? ` · ${t.queued} queued` : '')),
+      h('h2', {}, threadFullName(t)),
+      h('span', { class: 'muted' }, (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '')),
       h('span', { class: 'spacer' }), ...actions,
       // Leaves the thread as it is and goes back to the project's coordinator.
       coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the coordinator', 'aria-label': 'Back to the coordinator' }, '×')),

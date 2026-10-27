@@ -6,6 +6,9 @@ import { createInterface } from 'node:readline';
 const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
 const TOKEN = process.env.COORDINATOR_TOKEN ?? '';
 const PROJECT = Number(process.env.COORDINATOR_PROJECT);
+// 'coordinator' manages the project's tickets; 'thread' lets a ticket label itself.
+const ROLE = process.env.COORDINATOR_ROLE === 'thread' ? 'thread' : 'coordinator';
+const TICKET = Number(process.env.COORDINATOR_TICKET);
 const MAX_TEXT = 4000;
 
 const PERMISSION_MODE = {
@@ -14,6 +17,21 @@ const PERMISSION_MODE = {
   description:
     'bypassPermissions (default): full access, can run any command. acceptEdits: edit files but shell commands are refused. plan: read and plan only.',
 };
+const TITLE = { type: 'string', description: 'The short ask, about 30 characters, e.g. "Usage bar in the top bar". No number, tag or emoji.' };
+const TAG = {
+  type: ['string', 'null'],
+  enum: ['feature', 'bug', 'design', 'process', 'idea', null],
+  description:
+    'What kind of work: feature (new or changed behaviour), bug (something broken), design (look and layout), process (how we work: tooling, prompts, docs, setup), idea (exploring or planning, no code yet). null for one-off questions and reviews.',
+};
+const STATE = {
+  type: ['string', 'null'],
+  enum: ['ready', 'try', 'parked', 'blocked', 'outside', null],
+  description:
+    'Where the turn leaves things, for the threads list: ready (done; ready to merge or pick up), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the thread, not a person\'s answer), outside (work still running somewhere this thread cannot wait on, like CI). null when it is simply people\'s turn to answer, which the list shows by itself. Cleared automatically when the next turn starts.',
+};
+const NOTE = { type: ['string', 'null'], description: 'One terse line on where things stand, max 60 chars, e.g. "needs a pick: tabs or a list" or "merged, live after restart". No names or prefixes.' };
+
 const TICKET_ID = { type: 'integer', description: 'Ticket number in this project, e.g. 12 for #12 (as shown by list_tickets)' };
 
 const TOOLS = [
@@ -41,7 +59,8 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Short title (max 120 chars); also used for the branch name' },
+        title: { ...TITLE, description: `${TITLE.description} Also used for the branch name.` },
+        tag: TAG,
         message: { type: 'string', description: 'First message to the new ticket' },
         permission_mode: PERMISSION_MODE,
       },
@@ -59,11 +78,11 @@ const TOOLS = [
   },
   {
     name: 'update_ticket',
-    description: "Rename a ticket. (The branch keeps its original name.)",
+    description: "Change a ticket's title, tag, state or note; leave out what should stay. (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, title: { type: 'string' } },
-      required: ['ticket_id', 'title'],
+      properties: { ticket_id: TICKET_ID, title: TITLE, tag: TAG, state: STATE, note: NOTE },
+      required: ['ticket_id'],
     },
   },
   {
@@ -101,7 +120,9 @@ function clip(s: string): string {
 function ticketLine(t: any): string {
   return [
     `#${t.number} ${t.title}`,
-    `status: ${t.status}${t.queued ? ` (${t.queued} queued)` : ''}`,
+    t.tag ? `tag: ${t.tag}` : '',
+    `status: ${t.status}${t.state ? `, ${t.state}` : ''}${t.queued ? ` (${t.queued} queued)` : ''}`,
+    t.note ? `note: ${t.note}` : '',
     t.branch ? `branch: ${t.branch}` : '',
     `by ${t.created_by}`,
     t.last_activity ? `latest: ${t.last_activity}` : '',
@@ -139,7 +160,25 @@ async function id(args: any): Promise<number> {
   return ticket.id;
 }
 
+/** The label fields a call sets; ones left out stay as they are. */
+function labelFields(args: any) {
+  const out: Record<string, unknown> = {};
+  for (const k of ['title', 'tag', 'state', 'note']) if (args[k] !== undefined) out[k] = args[k];
+  return out;
+}
+
+const THREAD_TOOLS = [
+  {
+    name: 'set_thread_status',
+    description:
+      "Label this thread for the project's threads list: its short title, kind of work, and where things stand. Leave out what should stay. Call it when the work's kind becomes clear, and at the end of a turn whenever the state or note changes.",
+    inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE } },
+  },
+];
+
 async function runTool(name: string, args: any): Promise<string> {
+  // Each role may only call its own tools.
+  if (!(ROLE === 'thread' ? THREAD_TOOLS : TOOLS).some((t) => t.name === name)) throw new Error(`Unknown tool ${name}`);
   switch (name) {
     case 'list_tickets': {
       const { tickets } = await call('GET', `/api/projects/${PROJECT}`);
@@ -157,6 +196,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'create_ticket': {
       const t = await call('POST', `/api/projects/${PROJECT}/tickets`, {
         title: args.title,
+        tag: args.tag ?? null,
         message: args.message,
         permissionMode: args.permission_mode,
       });
@@ -165,7 +205,9 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'message_ticket':
       return `Sent. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/messages`, { text: args.text }))}`;
     case 'update_ticket':
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { title: args.title }))}`;
+      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, labelFields(args)))}`;
+    case 'set_thread_status':
+      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}`;
     case 'close_ticket':
       return `Closed. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed' }))}`;
     case 'reopen_ticket':
@@ -197,7 +239,7 @@ async function handle(req: any) {
         },
       });
     } else if (method === 'tools/list') {
-      reply({ id: rid, result: { tools: TOOLS } });
+      reply({ id: rid, result: { tools: ROLE === 'thread' ? THREAD_TOOLS : TOOLS } });
     } else if (method === 'tools/call') {
       try {
         const text = await runTool(params?.name, params?.arguments ?? {});

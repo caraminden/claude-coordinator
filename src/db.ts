@@ -12,10 +12,20 @@ export interface Project {
   created_at: number;
 }
 
+export const TICKET_TAGS = ['feature', 'bug', 'design', 'process', 'idea'] as const;
+export type TicketTag = (typeof TICKET_TAGS)[number];
+/** ready: done, ready to merge or pick up · try: ready for people to try · parked: on hold on purpose ·
+ * blocked: stuck on something outside the thread · outside: work still running elsewhere (CI, someone's machine). */
+export const TICKET_STATES = ['ready', 'try', 'parked', 'blocked', 'outside'] as const;
+export type TicketState = (typeof TICKET_STATES)[number];
+
 export interface Ticket {
   id: number;
   project_id: number;
   number: number | null; // shown as #n; counts up per project, null for the coordinator
+  tag: TicketTag | null; // what kind of work, for grouping the threads list
+  state: TicketState | null; // set by the thread at the end of a turn; cleared when the next turn starts
+  note: string | null; // the thread's own one-line status, ≤ 60 chars
   kind: TicketKind;
   title: string;
   status: TicketStatus;
@@ -106,6 +116,9 @@ CREATE TABLE IF NOT EXISTS settings (
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
   ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
+  ['tickets', 'tag', 'ALTER TABLE tickets ADD COLUMN tag TEXT'],
+  ['tickets', 'state', 'ALTER TABLE tickets ADD COLUMN state TEXT'],
+  ['tickets', 'note', 'ALTER TABLE tickets ADD COLUMN note TEXT'],
 ];
 
 export class Store {
@@ -204,15 +217,15 @@ export class Store {
   }
 
   /** Insert a ticket with no working directory yet; call setTicketDir once it exists. */
-  createTicket(t: Pick<Ticket, 'project_id' | 'title' | 'permission_mode' | 'created_by'> & { kind?: TicketKind }): Ticket {
+  createTicket(t: Pick<Ticket, 'project_id' | 'title' | 'permission_mode' | 'created_by'> & { kind?: TicketKind; tag?: TicketTag | null }): Ticket {
     const now = Date.now();
     const kind = t.kind ?? 'ticket';
     const r = this.db
       .prepare(
-        `INSERT INTO tickets (project_id, kind, number, title, status, cwd, permission_mode, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'new', '', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (project_id, kind, number, tag, title, status, cwd, permission_mode, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'new', '', ?, ?, ?, ?)`,
       )
-      .run(t.project_id, kind, kind === 'coordinator' ? null : this.nextNumber(t.project_id), t.title, t.permission_mode, t.created_by, now, now);
+      .run(t.project_id, kind, kind === 'coordinator' ? null : this.nextNumber(t.project_id), t.tag ?? null, t.title, t.permission_mode, t.created_by, now, now);
     return this.getTicket(Number(r.lastInsertRowid))!;
   }
 
@@ -226,7 +239,7 @@ export class Store {
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
-  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title'>>) {
+  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'tag' | 'state' | 'note'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');

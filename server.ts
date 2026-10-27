@@ -8,7 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact } from './src/artifacts.ts';
 import { AGENT_NAME, Auth, type Session } from './src/auth.ts';
-import { Store, type Artifact, type Project, type Ticket } from './src/db.ts';
+import { Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
 import { Runner } from './src/runner.ts';
 import { cloneProject, createTicketDir, projectDir, removeProjectDir } from './src/workspace.ts';
 
@@ -265,6 +265,13 @@ function isSecure(req: IncomingMessage): boolean {
   return req.headers['x-forwarded-proto'] === 'https';
 }
 
+/** One of a fixed set of values, or null when empty. */
+function oneOf(v: unknown, allowed: readonly string[], field: string): string | null {
+  if (v === null || v === '') return null;
+  if (typeof v !== 'string' || !allowed.includes(v)) throw new HttpError(400, `${field} must be one of: ${allowed.join(', ')}`);
+  return v;
+}
+
 function str(v: unknown, field: string, max = 200): string {
   if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `${field} is required`);
   if (v.length > max) throw new HttpError(400, `${field} is too long`);
@@ -274,7 +281,7 @@ function str(v: unknown, field: string, max = 200): string {
 function ticketView(id: number) {
   const t = store.getTicket(id);
   if (!t) throw new HttpError(404, 'No such ticket');
-  return { ...t, queued: runner.queued(id) };
+  return runner.view(t);
 }
 
 /** The project's coordinator ticket, created the first time someone opens the project. */
@@ -299,10 +306,15 @@ async function ensureCoordinator(project: Project): Promise<Ticket> {
 }
 
 /** The project a coordinator's token may act on, or null for a signed-in person. */
-function agentProject(session: Session): number | null {
+function agentProject(session: Session, method: string, pathname: string): number | null {
   if (session.agent === undefined) return null;
   const t = store.getTicket(session.agent);
-  if (t?.kind !== 'coordinator') throw new HttpError(403, 'Not a coordinator');
+  if (!t) throw new HttpError(403, 'No such ticket');
+  // A ticket's own token may only read and update that ticket (its title, tag, state and note).
+  if (t.kind !== 'coordinator') {
+    if (pathname !== `/api/tickets/${t.id}` || (method !== 'GET' && method !== 'PATCH')) throw new HttpError(403, 'A thread may only update itself');
+    return t.project_id;
+  }
   return t.project_id;
 }
 
@@ -400,7 +412,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   if (pathname === '/api/me') return json(res, 200, { name: session.name });
 
   // A coordinator may only touch its own project's tickets, and not itself.
-  const scope = agentProject(session);
+  const scope = agentProject(session, method, pathname);
   const inScope = (projectId: number) => {
     if (scope !== null && scope !== projectId) throw new HttpError(403, 'Outside this coordinator\'s project');
   };
@@ -458,7 +470,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const tickets = store
       .listTickets(project.id)
       .filter((t) => t.kind === 'ticket')
-      .map((t) => ({ ...t, queued: runner.queued(t.id) }));
+      .map((t) => runner.view(t));
     return json(res, 200, { project, coordinator: ticketView(coordinator.id), tickets });
   }
 
@@ -472,7 +484,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const message = str(body.message, 'First message', 100_000);
     const mode = PERMISSION_MODES.includes(body.permissionMode) ? body.permissionMode : DEFAULT_PERMISSION_MODE;
     // Insert first so concurrent creates get distinct ids, then build the working dir.
-    const { id, number } = store.createTicket({ project_id: project.id, title, permission_mode: mode, created_by: session.name });
+    const tag = oneOf(body.tag ?? null, TICKET_TAGS, 'Tag') as TicketTag | null;
+    const { id, number } = store.createTicket({ project_id: project.id, title, tag, permission_mode: mode, created_by: session.name });
     try {
       const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number!, title);
       store.setTicketDir(id, dir.cwd, dir.branch);
@@ -541,11 +554,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
     }
     if (action === '' && method === 'PATCH') {
+      // Any of title, tag, state and note; null (or "") clears tag, state and note.
       const body = await readJson(req);
-      const title = str(body.title, 'Title', 120);
-      if (title !== ticket.title) {
-        store.updateTicket(id, { title });
-        runner.emit(id, 'note', { text: `${session.name} renamed this ticket from "${ticket.title}" to "${title}".` });
+      const fields: Partial<Pick<Ticket, 'title' | 'tag' | 'state' | 'note'>> = {};
+      if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
+      if (body.tag !== undefined) fields.tag = oneOf(body.tag, TICKET_TAGS, 'Tag') as TicketTag | null;
+      if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
+      if (body.note !== undefined) fields.note = body.note ? str(body.note, 'Note', 60) : null;
+      for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === ticket[k]) delete fields[k];
+      if (Object.keys(fields).length) {
+        store.updateTicket(id, fields);
+        const who = session.agent === id ? 'Claude' : session.name;
+        if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this ticket from "${ticket.title}" to "${fields.title}".` });
         runner.broadcastTicket(id);
       }
       return json(res, 200, ticketView(id));

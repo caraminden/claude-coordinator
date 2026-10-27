@@ -386,6 +386,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'event') onEvent(msg.event);
     if (msg.type === 'artifacts') onArtifactsChanged(msg.projectId);
+    if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };
   es.onerror = () => {
     // EventSource retries dropped connections itself, but gives up for good on a non-200
@@ -487,6 +488,7 @@ async function resync() {
     if (!chat) return;
     view.ticket = chat.ticket;
     renderTicketHead();
+    if (view.ticket.branch) refreshBranch(view.id);
     await catchUpEvents();
   } catch {}
 }
@@ -690,12 +692,14 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     id: chatId, ticket, lastEventId: 0,
     progress: createProgress(),
     progressEl: h('div', { class: 'progress', hidden: true }), // lives in the thread bar
+    findEl: chatId ? chatFindBox() : null, // lives in the thread bar too, so it survives re-renders
     ui: progressUi(chatId),
     actions: new Map(), // tool_use_id -> { block, taskId, result }
     turnActions: [], // actions of the current (or last) turn, in order
     typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite' }), // below the chat log
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
     pendingMessages: [], // { el, text } shown on send, replaced by the server's copy
+    branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
   };
   const projectLink = h('a', { href: `#/p/${project.id}` }, project.name);
   const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
@@ -726,6 +730,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     h('summary', { title: 'Show or hide threads' }, h('span', { class: 'label' }, 'Threads')),
     newTicketForm(projectId),
+    threadSearchBox(projectId),
     h('div', { id: 'threads' }));
   // Don't hide a half-written new thread behind a collapsed sidebar.
   if (sidebar.querySelector('details.new').open) sidebar.open = true;
@@ -756,7 +761,12 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   if (!chatId) return window.scrollTo(0, 0);
   renderTicketHead();
   for (const ev of events) appendEvent(ev, false);
+  if (ticket.branch) refreshBranch(chatId);
   restoreScroll(chatId);
+  if (pendingFind) {
+    view.findEl?.find(pendingFind);
+    pendingFind = '';
+  }
   try {
     if (sessionStorage.getItem('cc-refocus')) {
       sessionStorage.removeItem('cc-refocus');
@@ -929,6 +939,7 @@ function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el) return;
   const tickets = [...view.tickets.values()];
+  if (threadSearch.q) return renderThreadResults(el, tickets.sort((a, b) => b.updated_at - a.updated_at));
   const open = tickets.filter((t) => t.status !== 'closed');
   const closed = tickets.filter((t) => t.status === 'closed').sort((a, b) => b.updated_at - a.updated_at);
   const sections = SECTIONS.map((tag) => {
@@ -947,6 +958,146 @@ function renderSidebar() {
     threadRow(view.coordinator, `#/p/${view.projectId}`),
     ...sections, closedGroup,
     tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or use New thread.'));
+}
+
+// ---------- search ----------
+
+// The threads search, kept across thread switches within a project.
+const threadSearch = { projectId: null, q: '', hits: new Map(), seq: 0, timer: null };
+// Text to find in the next chat that opens, set when a search result is clicked.
+let pendingFind = '';
+
+function threadSearchBox(projectId) {
+  if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '', hits: new Map() });
+  const input = h('input', { type: 'search', class: 'thread-search', placeholder: 'Search threads and what was said…', value: threadSearch.q, autocomplete: 'off' });
+  input.addEventListener('input', () => {
+    threadSearch.q = input.value.trim();
+    renderSidebar();
+    clearTimeout(threadSearch.timer);
+    threadSearch.timer = setTimeout(() => fetchThreadHits(projectId), 250);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && input.value) {
+      input.value = '';
+      input.dispatchEvent(new Event('input'));
+    }
+  });
+  if (threadSearch.q) fetchThreadHits(projectId);
+  return input;
+}
+
+/** Ask the server which threads mention the text anywhere in their conversation. */
+async function fetchThreadHits(projectId) {
+  const q = threadSearch.q;
+  const seq = ++threadSearch.seq;
+  let hits = [];
+  if (q.length >= 2) {
+    try {
+      hits = await api(`/api/projects/${projectId}/search?q=${encodeURIComponent(q)}`);
+    } catch {
+      hits = [];
+    }
+  }
+  if (seq !== threadSearch.seq || threadSearch.projectId !== projectId) return;
+  threadSearch.hits = new Map(hits.map((hit) => [hit.ticketId, hit]));
+  if (view?.kind === 'project' && view.projectId === projectId) renderSidebar();
+}
+
+/** Search results: threads whose title or details match, or whose conversation mentions the text. */
+function renderThreadResults(el, tickets) {
+  const q = threadSearch.q.toLowerCase();
+  const results = [view.coordinator, ...tickets].filter((t) => {
+    const fields = [threadLabel(t), t.created_by, t.last_activity];
+    return fields.some((f) => f?.toLowerCase().includes(q)) || threadSearch.hits.has(t.id);
+  });
+  el.replaceChildren(
+    h('section', { class: 'column' },
+      h('h3', {}, 'Results', h('span', { class: 'count' }, results.length)),
+      results.length
+        ? results.map((t) => {
+            const hit = threadSearch.hits.get(t.id);
+            const card = threadRow(t, t === view.coordinator ? `#/p/${view.projectId}` : threadHref(t), hit);
+            // Open the thread with its find box already on the text.
+            card.addEventListener('click', () => { pendingFind = hit ? threadSearch.q : ''; });
+            return card;
+          })
+        : h('p', { class: 'muted small' }, threadSearch.q.length < 2 ? 'Keep typing to search conversations too.' : 'No threads mention that.')));
+}
+
+/** Wrap matches of the text inside el in <mark>, returning the marks in document order. */
+function highlight(el, text) {
+  const marks = [];
+  if (!text) return marks;
+  const needle = text.toLowerCase();
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (let node of nodes) {
+    let i;
+    while ((i = node.data.toLowerCase().indexOf(needle)) >= 0) {
+      const match = node.splitText(i);
+      node = match.splitText(needle.length);
+      const mark = h('mark', { class: 'find' });
+      match.replaceWith(mark);
+      mark.append(match);
+      marks.push(mark);
+    }
+  }
+  return marks;
+}
+
+function clearHighlights(el) {
+  for (const mark of el.querySelectorAll('mark.find')) mark.replaceWith(...mark.childNodes);
+  el.normalize();
+}
+
+/** Find in the open conversation: highlights every match, Enter / ↓ for the next, Shift+Enter / ↑ for the previous. */
+function chatFindBox() {
+  const input = h('input', { type: 'search', class: 'chat-find', placeholder: 'Find in chat', autocomplete: 'off' });
+  const count = h('span', { class: 'find-count muted' });
+  const state = { marks: [], at: -1 };
+  const show = (i) => {
+    if (!state.marks.length) return;
+    state.marks[state.at]?.classList.remove('current');
+    state.at = (i + state.marks.length) % state.marks.length;
+    const mark = state.marks[state.at];
+    mark.classList.add('current');
+    // Open any collapsed block it is in, then bring it to the middle of the screen.
+    for (let d = mark.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true;
+    mark.scrollIntoView({ block: 'center' });
+    count.textContent = `${state.at + 1}/${state.marks.length}`;
+  };
+  const run = () => {
+    const log = document.getElementById('log');
+    if (!log) return;
+    clearHighlights(log);
+    const q = input.value.trim();
+    state.marks = q ? [...log.querySelectorAll('.msg, .note')].flatMap((m) => highlight(m, q)) : [];
+    state.at = -1;
+    count.textContent = q ? (state.marks.length ? `0/${state.marks.length}` : 'none') : '';
+    // Start from the newest match, nearest where you usually are.
+    if (state.marks.length) show(state.marks.length - 1);
+  };
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      show(state.at + (e.key === 'Enter' && e.shiftKey ? -1 : 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      show(state.at - 1);
+    } else if (e.key === 'Escape') {
+      input.value = '';
+      run();
+    }
+  });
+  const step = (d) => h('button', { type: 'button', class: 'secondary find-step', title: d < 0 ? 'Previous match' : 'Next match', onclick: () => show(state.at + d) }, d < 0 ? '↑' : '↓');
+  const box = h('span', { class: 'find-box' }, input, count, step(-1), step(1));
+  box.find = (text) => {
+    input.value = text;
+    run();
+  };
+  return box;
 }
 
 /** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked. */
@@ -978,7 +1129,7 @@ function rowState(t) {
 }
 
 /** One compact row: number + short ask and the state on top, the thread's note (or what it is doing) below. */
-function threadRow(t, href = threadHref(t)) {
+function threadRow(t, href = threadHref(t), hit = null) {
   const coord = isCoordinator(t);
   // The coordinator is always there to talk to; only show when it is busy.
   const st = coord && t.status !== 'running' ? { cls: '', cell: [], label: statusLabel(t) } : rowState(t);
@@ -994,7 +1145,14 @@ function threadRow(t, href = threadHref(t)) {
     h('span', { class: 'name' }, coord ? 'Coordinator' : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     h('span', { class: `state ${st.cls}` }, st.cell),
-    note ? h('span', { class: `note${working ? ' t' : ''}` }, note) : '');
+    hit ? snippetLine(hit) : note ? h('span', { class: `note${working ? ' t' : ''}` }, note) : '');
+}
+
+/** A search hit's snippet, with the searched text highlighted. */
+function snippetLine(hit) {
+  const el = h('span', { class: 'note hit' }, hit.snippet, hit.matches > 1 ? h('span', { class: 'more' }, ` +${hit.matches - 1}`) : '');
+  highlight(el, threadSearch.q);
+  return el;
 }
 
 /** "now", "5m", "3h", "2d": ages for tight spaces. */
@@ -1004,6 +1162,36 @@ function shortAgo(ms) {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
+}
+
+// ---------- branch and pull request ----------
+
+async function refreshBranch(ticketId) {
+  try {
+    const { status } = await api(`/api/tickets/${ticketId}/branch`);
+    if (view?.kind === 'project' && view.id === ticketId) renderBranch(status);
+  } catch {}
+}
+
+/** "PR #12 · merged" (linked), or for work merged without a PR, the branch and whether main has it. */
+function renderBranch(status) {
+  const el = view.branchEl;
+  const parts = [];
+  if (status?.pr) {
+    const { pr } = status;
+    const state = pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : pr.draft ? 'draft' : 'open';
+    parts.push(
+      h('a', { href: pr.url, target: '_blank', rel: 'noopener', title: pr.title, onclick: (e) => e.stopPropagation() }, `PR #${pr.number}`),
+      h('span', { class: `state ${state}` }, state));
+    if (pr.state === 'OPEN' && status.merged) parts.push(`merged into ${status.base}`);
+  } else if (status && !status.empty) {
+    parts.push(h('span', { class: 'branch', title: status.branch }, status.branch));
+    parts.push(status.merged
+      ? h('span', { class: 'state merged' }, `merged into ${status.base}`)
+      : h('span', { class: 'state open' }, `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}`));
+  }
+  el.replaceChildren(...parts);
+  el.hidden = !parts.length;
 }
 
 // ---------- artifacts ----------
@@ -1362,7 +1550,7 @@ function renderTicketHead() {
       h('span', { class: `dot ${t.status}` }),
       h('h2', {}, threadFullName(t)),
       h('span', { class: 'muted' }, (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '')),
-      h('span', { class: 'spacer' }), ...actions,
+      h('span', { class: 'spacer' }), view.findEl ?? '', ...actions,
       // Leaves the thread as it is and goes back to the project's coordinator.
       coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the coordinator', 'aria-label': 'Back to the coordinator' }, '×')),
     view.progressEl);
@@ -1603,14 +1791,15 @@ function appendEvent(event, scroll = true) {
       if (data.duration_ms) bits.push(`${Math.round(data.duration_ms / 1000)}s`);
       if (acts.length) bits.push(`${acts.length} action${acts.length === 1 ? '' : 's'}`);
       if (data.total_cost_usd) bits.push(`$${data.total_cost_usd.toFixed(2)}`);
+      // The branch status rides on the newest turn's line, so it moves down as turns finish.
       if (acts.length) {
-        const end = h('details', { class: 'turn-end' }, h('summary', {}, bits.join(' · ')));
+        const end = h('details', { class: 'turn-end' }, h('summary', {}, view.branchEl, bits.join(' · ')));
         end.addEventListener('toggle', () => {
           if (end.open && !end.querySelector('.phases')) end.append(...phaseRows(acts, false));
         });
         nodes.push(end);
       } else {
-        nodes.push(h('div', { class: 'turn-end' }, bits.join(' · ')));
+        nodes.push(h('div', { class: 'turn-end' }, view.branchEl, bits.join(' · ')));
       }
       if (data.is_error && data.result) nodes.push(h('div', { class: 'note error' }, data.result));
     }

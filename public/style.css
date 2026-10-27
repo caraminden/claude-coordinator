@@ -229,6 +229,11 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 
 /* Project view: artifacts shelf and threads sidebar beside the main panel */
 .split { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+.panels { display: contents; }
+/* Both collapsed: one sticky column with the two tabs stacked, and the main panel takes the rest. */
+.split:not(:has(> .panels > details[open])) { grid-template-columns: auto minmax(0, 1fr); }
+.panels:not(:has(> details[open])) { display: flex; flex-direction: column; gap: 0.5rem; position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); }
+.panels:not(:has(> details[open])) > details { position: static; }
 .shelf[open] { width: clamp(180px, 16vw, 230px); }
 .sidebar[open] { width: clamp(230px, 20vw, 300px); }
 /* Sticky can't move past the bottom of .split, which ends main's 3rem bottom padding above the
@@ -323,17 +328,20 @@ button.pin.on { color: var(--accent); }
   .split { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto 1fr; }
   .shelf[open], .sidebar[open] { width: clamp(220px, 24vw, 280px); }
   /* Stacked in one column: a closed panel beside an open one is just a header row. */
-  .split:has(> details[open]) > details:not([open]) { width: auto; }
-  .split:has(> details[open]) > details:not([open]) > summary { writing-mode: horizontal-tb; border: 0; background: none; padding: 0; margin-bottom: 0.5rem; }
-  .split:has(> details[open]) > details:not([open]) > summary::after { content: '›'; order: 0; margin: 0; }
-  .split > .shelf { grid-column: 1; grid-row: 1; position: static; max-height: none; border-right: 0; padding-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
-  .split > .sidebar { grid-column: 1; grid-row: 2; position: static; max-height: none; }
+  .panels:has(> details[open]) > details:not([open]) { width: auto; }
+  .panels:has(> details[open]) > details:not([open]) > summary { writing-mode: horizontal-tb; border: 0; background: none; padding: 0; margin-bottom: 0.5rem; }
+  .panels:has(> details[open]) > details:not([open]) > summary::after { content: '›'; order: 0; margin: 0; }
+  .panels > .shelf { grid-column: 1; grid-row: 1; position: static; max-height: none; border-right: 0; padding-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+  .panels > .sidebar { grid-column: 1; grid-row: 2; position: static; max-height: none; }
   .split > section { grid-column: 2; grid-row: 1 / span 2; }
+  .panels:not(:has(> details[open])) > .shelf { border-bottom: 0; padding-bottom: 0; }
 }
 @media (max-width: 800px) {
   .split { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   .sidebar, .shelf { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
   .shelf { border-right: 0; padding-right: 0; }
+  .panels:not(:has(> details[open])) { position: static; gap: 0; }
+  .split:not(:has(> .panels > details[open])) { grid-template-columns: minmax(0, 1fr); }
   .shelf[open], .sidebar[open], .sidebar:not([open]), .shelf:not([open]) { width: auto; }
   .sidebar:not([open]) > summary, .shelf:not([open]) > summary { writing-mode: horizontal-tb; border: 0; background: none; padding: 0; }
   .sidebar > summary::after, .shelf > summary::after { content: '▾'; }

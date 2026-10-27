@@ -622,7 +622,9 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : chatSection(chatId, ticket, events);
 
-  app.replaceChildren(h('div', { class: 'split' }, shelf, sidebar, section));
+  // .panels only becomes a box of its own when both panels are collapsed, so their tabs can share
+  // one slim sticky column; otherwise the panels sit directly in the grid.
+  app.replaceChildren(h('div', { class: 'split' }, h('div', { class: 'panels' }, shelf, sidebar), section));
   renderShelf();
   renderSidebar();
   if (main.kind === 'artifacts') renderArtifactResults();

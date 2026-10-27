@@ -381,6 +381,42 @@ async function saveImages(ticket: Ticket, raw: unknown): Promise<{ name: string;
   }));
 }
 
+// ---------- search ----------
+
+/** What people and Claude said in an event, for searching (not tool calls or their output). */
+function spokenText(kind: string, data: any): string {
+  if (kind === 'user_message') return typeof data?.text === 'string' ? data.text : '';
+  if (data?.type !== 'assistant') return '';
+  return (data.message?.content ?? []).filter((b: any) => b?.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
+}
+
+/** Threads in a project whose conversation mentions the text: the newest match per thread, with a snippet. */
+function searchProject(projectId: number, q: string) {
+  const needle = q.toLowerCase();
+  const hits = new Map<number, { ticketId: number; eventId: number; at: number; snippet: string; matches: number }>();
+  // SQL narrows by the raw JSON; the check below keeps only real hits in the spoken text.
+  for (const ev of store.findEvents(projectId, q)) {
+    let text: string;
+    try {
+      text = spokenText(ev.kind, JSON.parse(ev.data));
+    } catch {
+      continue;
+    }
+    const at = text.toLowerCase().indexOf(needle);
+    if (at < 0) continue;
+    const hit = hits.get(ev.ticket_id);
+    if (hit) {
+      hit.matches++;
+      continue;
+    }
+    const start = Math.max(0, at - 50);
+    const end = Math.min(text.length, at + needle.length + 70);
+    const snippet = (start ? '…' : '') + text.slice(start, end).replace(/\s+/g, ' ').trim() + (end < text.length ? '…' : '');
+    hits.set(ev.ticket_id, { ticketId: ev.ticket_id, eventId: ev.id, at: ev.created_at, snippet, matches: 1 });
+  }
+  return [...hits.values()].slice(0, 100);
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -518,6 +554,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     }
     runner.send(id, session.name, message);
     return json(res, 201, ticketView(id));
+  }
+
+  m = pathname.match(/^\/api\/projects\/(\d+)\/search$/);
+  if (m && method === 'GET') {
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such project');
+    const q = (url.searchParams.get('q') ?? '').trim().slice(0, 200);
+    return json(res, 200, q.length < 2 ? [] : searchProject(project.id, q));
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/artifacts$/);

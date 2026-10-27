@@ -32,3 +32,16 @@ test('titles known threads and needs a project', () => {
     '<a class="thread-ref" href="#/p/2/t/3" title="#3 Fix &quot;it&quot;">#3</a>');
   assert.equal(linkThreadRefs('#3', null), '#3');
 });
+
+test('inAppHash keeps links into this app in the app', async () => {
+  const { inAppHash } = await import('../public/threadrefs.js');
+  const here = new URL('https://cara.apps.webplatformisbestplatform.net/#/p/2');
+  assert.equal(inAppHash('#/p/2/t/11', here), '#/p/2/t/11');
+  assert.equal(inAppHash('https://cara.apps.webplatformisbestplatform.net/#/p/2/t/11', here), '#/p/2/t/11');
+  assert.equal(inAppHash('/#/a/5', here), '#/a/5');
+  assert.equal(inAppHash('https://example.com/#/p/2/t/11', here), null);
+  assert.equal(inAppHash('https://cara.apps.webplatformisbestplatform.net/other#/p/2', here), null);
+  assert.equal(inAppHash('https://cara.apps.webplatformisbestplatform.net/api/x', here), null);
+  assert.equal(inAppHash('#section', here), null);
+  assert.equal(inAppHash('http://[bad', here), null);
+});

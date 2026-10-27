@@ -1,6 +1,6 @@
 // Claude Coordinator front end: hash-routed views over the JSON API, live via SSE.
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
-import { linkThreadRefs } from './threadrefs.js';
+import { inAppHash, linkThreadRefs } from './threadrefs.js';
 
 const app = document.getElementById('app');
 const crumbs = document.getElementById('crumbs');
@@ -181,9 +181,14 @@ function markdownDoc(src, opts = {}) {
           ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img src="${escapeHtml(url)}" alt="${alt}" title="${alt}" loading="lazy"></a>`
           : `<span class="muted">[image: ${alt}]</span>`;
       })
-      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, text, href) => /^https?:\/\//.test(href)
-        ? `<a href="${href}" target="_blank" rel="noopener">${text}</a>`
-        : `<span class="link" title="${href}">${text}</span>`)
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, text, href) => {
+        // Links into this app (a thread, an artifact…) switch view in place; others open a new tab.
+        const route = inAppHash(unescapeHtml(href), location);
+        if (route) return `<a href="${escapeHtml(route)}">${text}</a>`;
+        return /^https?:\/\//.test(href)
+          ? `<a href="${href}" target="_blank" rel="noopener">${text}</a>`
+          : `<span class="link" title="${href}">${text}</span>`;
+      })
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>');
     html = threadRefsHtml(html);
@@ -569,6 +574,19 @@ async function route() {
 }
 
 window.addEventListener('hashchange', route);
+
+// A plain click on any link into this app (even a full https://… one, or one marked to open a new
+// tab) switches view through the router instead of opening a tab or reloading the page.
+// Ctrl/Cmd/Shift/middle-click still open it in a new tab or window.
+document.addEventListener('click', (e) => {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = e.target.closest?.('a[href]');
+  if (!a || a.hasAttribute('download')) return;
+  const hash = inAppHash(a.getAttribute('href'), location);
+  if (!hash) return;
+  e.preventDefault();
+  if (location.hash !== hash) location.hash = hash;
+});
 
 // ---------- login ----------
 

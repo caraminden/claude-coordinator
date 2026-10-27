@@ -28,3 +28,16 @@ export function linkThreadRefs(html, projectId, titleOf = () => null) {
 }
 
 const escapeAttr = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+/**
+ * The in-app route ("#/p/2/t/11") a link points at, if it stays in this app: a bare "#/…" route,
+ * or an absolute URL on this page (same origin and path) whose hash is a route. Null otherwise,
+ * so links elsewhere keep opening in a new tab.
+ */
+export function inAppHash(href, here) {
+  if (/^#\//.test(href)) return href;
+  let url;
+  try { url = new URL(href, here.href); } catch { return null; }
+  if (url.origin !== here.origin || url.pathname !== here.pathname || url.search !== here.search) return null;
+  return /^#\/./.test(url.hash) || url.hash === '#/' ? url.hash : null;
+}

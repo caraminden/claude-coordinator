@@ -14,6 +14,7 @@ import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
 import { instructionSources } from './src/instructions.ts';
 import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, hashToken, newToken } from './src/machines.ts';
+import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { cloneProject, createTicketDir, projectDir, removeProjectDir } from './src/workspace.ts';
 
@@ -83,6 +84,20 @@ const runner = new Runner(
 runner.recover();
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 runner.machines = () => machines.online();
+
+// ---------- push notifications ----------
+
+const pusher = new Pusher(store, loadVapidKeys(DATA_DIR));
+// Push services may contact the sender at this address; set from the first subscribe if not given.
+pusher.subject = process.env.PUSH_SUBJECT ?? store.getSetting<string>('push_subject') ?? pusher.subject;
+
+/** Ping everyone subscribed to the ticket's project (but `except`) if the trigger warrants it. */
+function notify(ticketId: number, trigger: PushTrigger, except: string | null = null) {
+  const ticket = store.getTicket(ticketId);
+  if (ticket) pusher.notify(ticket, trigger, except).catch((err) => console.error(`Push for ticket ${ticketId} failed:`, err));
+}
+
+runner.onTurnError = (ticketId, text) => notify(ticketId, { kind: 'error', text });
 
 // ---------- artifacts ----------
 
@@ -621,6 +636,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     throw new HttpError(403, 'Not available to the coordinator');
   }
 
+  if (pathname.startsWith('/api/push/')) return pushApi(req, res, pathname, method, session);
+
   if (pathname === '/api/stream') {
     if (clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
@@ -816,6 +833,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         if ('model' in fields) runner.emit(id, 'note', { text: `${who} set this thread to ${fields.model ? modelName(fields.model) : 'the default model'} ${next}.` });
         if ('effort' in fields) runner.emit(id, 'note', { text: `${who} set this thread to ${fields.effort ? `${fields.effort} effort` : 'the default effort'} ${next}.` });
         runner.broadcastTicket(id);
+        // A result or a blocker is worth a ping; whoever set it by hand already knows.
+        if (fields.state && NOTIFY_STATES[fields.state]) {
+          const after = store.getTicket(id)!;
+          notify(id, { kind: 'state', state: after.state, note: after.note }, session.agent === undefined ? session.name : null);
+        }
       }
       return json(res, 200, ticketView(id));
     }
@@ -857,6 +879,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const questions = cleanQuestions((await readJson(req)).questions);
       const questionId = randomBytes(6).toString('hex');
       runner.emit(id, 'question', { id: questionId, questions });
+      notify(id, { kind: 'question', questions });
       return json(res, 201, { id: questionId });
     }
     if (action === '/answer' && method === 'POST') {
@@ -905,6 +928,52 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   }
 
   throw new HttpError(404, 'Not found');
+}
+
+// ---------- push subscriptions ----------
+
+/** This browser's subscription as the account panel needs it. */
+const pushView = (endpoint: string) => {
+  const row = store.getPushSubscription(endpoint);
+  return { subscribed: !!row, muted: row ? JSON.parse(row.muted) as number[] : [] };
+};
+
+/** Each signed-in person turns notifications on per browser, and can mute projects there. */
+async function pushApi(req: IncomingMessage, res: ServerResponse, pathname: string, method: string, session: Session) {
+  if (session.agent !== undefined) throw new HttpError(403, 'Only people get notifications');
+  if (pathname === '/api/push/key' && method === 'GET') return json(res, 200, { publicKey: pusher.publicKey });
+  if (pathname !== '/api/push/subscription') throw new HttpError(404, 'Not found');
+  const body = await readJson(req, 10_000);
+  if (method === 'PUT') {
+    if (!validSubscription(body.subscription)) throw new HttpError(400, 'Not a usable push subscription');
+    const { endpoint, keys } = body.subscription;
+    store.savePushSubscription(session.name, endpoint, keys.p256dh, keys.auth);
+    if (!process.env.PUSH_SUBJECT && !store.getSetting('push_subject')) {
+      const host = req.headers['x-forwarded-host'] ?? req.headers.host;
+      pusher.subject = `https://${host}`;
+      store.setSetting('push_subject', pusher.subject);
+    }
+    return json(res, 200, pushView(endpoint));
+  }
+  const endpoint = typeof body.endpoint === 'string' ? body.endpoint : '';
+  const row = store.getPushSubscription(endpoint);
+  // Only the person a browser is subscribed for may change or see it.
+  if (row && row.name !== session.name) return json(res, 200, { subscribed: false, muted: [] });
+  if (method === 'POST') return json(res, 200, pushView(endpoint));
+  if (method === 'PATCH') {
+    if (!row) throw new HttpError(404, 'This browser is not subscribed');
+    const projectId = Number(body.projectId);
+    const muted = new Set<number>(JSON.parse(row.muted));
+    if (body.muted) muted.add(projectId);
+    else muted.delete(projectId);
+    store.setPushMuted(endpoint, [...muted].filter((id) => store.getProject(id)));
+    return json(res, 200, pushView(endpoint));
+  }
+  if (method === 'DELETE') {
+    if (row) store.deletePushSubscription(endpoint);
+    return json(res, 200, pushView(endpoint));
+  }
+  throw new HttpError(405, 'Method not allowed');
 }
 
 // ---------- machines ----------

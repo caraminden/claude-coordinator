@@ -1,5 +1,6 @@
-// Lets browsers offer "Install app". It caches nothing: every request goes to the network as usual,
-// so chat data is never stale and a deploy's new app.js loads like it would without a worker.
+// Lets browsers offer "Install app" and shows push notifications. It caches nothing: every request
+// goes to the network as usual, so chat data is never stale and a deploy's new app.js loads like it
+// would without a worker.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
@@ -11,4 +12,48 @@ self.addEventListener('fetch', (event) => {
     '<a href="">Try again</a></body>',
     { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
   )));
+});
+
+// A question card, a failed turn, or a thread that is ready or blocked (src/push.ts). One
+// notification per thread: a newer one replaces the last, and still alerts.
+self.addEventListener('push', (event) => {
+  let msg = {};
+  try {
+    msg = event.data?.json() ?? {};
+  } catch {}
+  event.waitUntil(self.registration.showNotification(msg.title || 'Claude Coordinator', {
+    body: msg.body || '',
+    tag: msg.tag,
+    renotify: !!msg.tag,
+    icon: '/icon-192.png',
+    data: { url: msg.url || '/' },
+  }));
+});
+
+// Open the thread: in a window the app already has (focused, and told where to go), else a new one.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || '/', self.location.origin).href;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const win = windows.find((w) => w.focused) ?? windows[0];
+    if (!win) return self.clients.openWindow(url);
+    win.postMessage({ type: 'open', url });
+    // Browsers only let a notification click bring a window forward; elsewhere this throws.
+    await win.focus().catch(() => {});
+  })());
+});
+
+// The browser replaced this device's subscription (keys expire); register the new one.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil((async () => {
+    const key = event.oldSubscription?.options?.applicationServerKey;
+    const sub = event.newSubscription ?? (key && await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }));
+    if (!sub) return;
+    await fetch('/api/push/subscription', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: sub.toJSON() }),
+    });
+  })());
 });

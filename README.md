@@ -52,6 +52,14 @@ runners on other people's own Claude logins.
   (`mcp__<name>__…`): a small stdio proxy (`src/machine-mcp.ts`) relays through the app
   (`src/machines.ts`), and the agent runs a separate copy of the MCP server per session.
   Tokens are stored hashed; a new token or removing the machine disconnects it.
+- **Push notifications**: "Notify me on this device" in the overview panel subscribes that
+  browser (desktop, or the installed Android app) with Web Push, and once on, a project can be
+  muted there. Claude only pings for decisions, blockers and results: a question card (from a
+  thread or the coordinator), a failed turn, or a thread set to ready, try or blocked; never for
+  plain replies, and never the person who caused it. One notification per thread, replaced by the
+  next; clicking it opens the thread. `src/push.ts` signs with VAPID and encrypts payloads
+  (RFC 8291) using only `node:crypto`; the key pair is made on first start as `vapid.json` in
+  `DATA_DIR` (mode 600). Replacing that file orphans every subscription.
 - Projects with a repo URL are cloned once; each ticket gets
   `git worktree add -b ticket/<id>-<slug>` from the default branch.
 
@@ -65,6 +73,7 @@ uses the built-in `node:sqlite`.
 | `server.ts` | HTTP server, JSON API, SSE stream, static files |
 | `src/runner.ts` | Spawns `claude` turns, parses stream-json, queues messages |
 | `src/mcp.ts` | MCP server giving the coordinator its ticket-management tools |
+| `src/push.ts` | Web Push: VAPID keys and signing, payload encryption, when to notify |
 | `src/machines.ts` | Relays MCP traffic between thread turns and connected machines |
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server |
 | `public/machine-agent.mjs` | Agent people run on their own computers to connect them |
@@ -87,6 +96,7 @@ Configuration comes from the environment:
 | `HOST` / `PORT` | `127.0.0.1` / `8573` | Listen address |
 | `DATA_DIR` | `~/.local/share/claude-coordinator` | Database, clones, worktrees |
 | `CLAUDE_BIN` | `claude` | Claude Code executable |
+| `PUSH_SUBJECT` | the app's address, from the first subscribe | VAPID contact (`https://…` or `mailto:…`) push services see |
 
 On perigee the secrets live in `~/.config/claude-coordinator/env` (mode 600,
 never committed) and the app runs as a user service:

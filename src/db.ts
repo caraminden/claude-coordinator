@@ -93,6 +93,18 @@ export interface Machine {
   last_seen_at: number | null;
 }
 
+/** One browser of one signed-in person that wants Web Push notifications (src/push.ts). */
+export interface PushSubscriptionRow {
+  id: number;
+  name: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  /** JSON list of project ids this device doesn't want notifications from. */
+  muted: string;
+  created_at: number;
+}
+
 export interface EventRow {
   id: number;
   ticket_id: number;
@@ -172,6 +184,15 @@ CREATE TABLE IF NOT EXISTS machines (
   created_by TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   last_seen_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  muted TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL
 );
 `;
 
@@ -550,5 +571,33 @@ export class Store {
 
   deleteMachine(id: number) {
     this.db.prepare('DELETE FROM machines WHERE id = ?').run(id);
+  }
+
+  listPushSubscriptions(): PushSubscriptionRow[] {
+    return this.db.prepare('SELECT * FROM push_subscriptions ORDER BY id').all() as unknown as PushSubscriptionRow[];
+  }
+
+  getPushSubscription(endpoint: string): PushSubscriptionRow | undefined {
+    return this.db.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').get(endpoint) as unknown as PushSubscriptionRow | undefined;
+  }
+
+  /** Save a browser's subscription for `name`; a browser someone else signed in on before becomes theirs. */
+  savePushSubscription(name: string, endpoint: string, p256dh: string, auth: string): PushSubscriptionRow {
+    this.db
+      .prepare(
+        `INSERT INTO push_subscriptions (name, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth,
+           muted = CASE WHEN name = excluded.name THEN muted ELSE '[]' END, name = excluded.name`,
+      )
+      .run(name, endpoint, p256dh, auth, Date.now());
+    return this.getPushSubscription(endpoint)!;
+  }
+
+  setPushMuted(endpoint: string, muted: number[]) {
+    this.db.prepare('UPDATE push_subscriptions SET muted = ? WHERE endpoint = ?').run(JSON.stringify(muted), endpoint);
+  }
+
+  deletePushSubscription(endpoint: string) {
+    this.db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
   }
 }

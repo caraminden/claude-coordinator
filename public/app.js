@@ -366,7 +366,8 @@ function renderUsage(next = usage) {
   if (!week) return;
   const pct = Math.round(Math.min(1, Math.max(0, week.utilization)) * 100);
   el.querySelector('.label').textContent = `Week ${pct}%`;
-  el.querySelector('.fill').style.width = `${pct}%`;
+  // CSS turns this into a width (top bar) or a height (side rail).
+  el.style.setProperty('--pct', `${pct}%`);
   el.dataset.level = week.status && week.status !== 'allowed' ? 'error' : pct >= 90 ? 'error' : pct >= 75 ? 'warn' : '';
   const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   el.title = [
@@ -1415,10 +1416,14 @@ function renderTyping() {
 // ---------- boot ----------
 
 // Sticky elements sit just below the top bar, whose height changes with wrapping and safe areas.
+// On wider screens it is a rail down the left edge instead, and nothing needs to clear it.
 const topbar = document.querySelector('.topbar');
 // Use the exact height: at fractional display scaling (e.g. 175%) a rounded one leaves a sliver
 // where scrolled chat text shows through.
-new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${topbar.getBoundingClientRect().height}px`)).observe(topbar);
+new ResizeObserver(() => {
+  const r = topbar.getBoundingClientRect();
+  document.documentElement.style.setProperty('--topbar-h', `${r.width > r.height ? r.height : 0}px`);
+}).observe(topbar);
 // Keep relative times in the usage readout honest.
 setInterval(() => {
   if (usage) renderUsage();

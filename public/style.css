@@ -78,6 +78,7 @@ code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0
 #me { color: var(--muted); font-size: 0.9em; }
 #me button { margin-left: 0.5rem; padding: 0.2rem 0.6rem; font-size: 0.85em; }
 
+
 main { max-width: 1200px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
 main:has(> .split) { max-width: 1560px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; }
@@ -127,7 +128,7 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 .ticket-head {
   position: sticky;
   /* Tuck 1px under the top bar so pixel rounding can never open a gap between them. */
-  top: calc(var(--topbar-h, 3rem) - 1px);
+  top: max(0px, calc(var(--topbar-h, 3rem) - 1px));
   z-index: 4;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
@@ -361,7 +362,7 @@ button.pin.on { color: var(--accent); }
 /* Weekly usage of the Claude account, in the top bar */
 .usage { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8em; color: var(--muted); white-space: nowrap; cursor: default; }
 .usage .track { width: 5rem; height: 0.4rem; border-radius: 999px; background: var(--line); overflow: hidden; }
-.usage .fill { display: block; height: 100%; background: var(--running); }
+.usage .fill { display: block; width: var(--pct, 0%); height: 100%; background: var(--running); }
 .usage[data-level="warn"] .fill { background: var(--waiting); }
 .usage[data-level="error"] .fill { background: var(--error); }
 .usage[data-level="error"] .label { color: var(--error); }
@@ -377,3 +378,27 @@ button.pin.on { color: var(--accent); }
 .typing .dots i:nth-child(3) { animation-delay: 0.3s; }
 @keyframes typing-dot { 0%, 60%, 100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
 @media (prefers-reduced-motion: reduce) { .typing .dots i { animation: none; opacity: 0.7; } }
+
+/* Wider screens: the top bar becomes a slim rail down the left edge, so the page keeps its full height. */
+@media (min-width: 801px) {
+  body { padding-left: 2.75rem; }
+  .topbar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 2.75rem;
+    flex-direction: column;
+    gap: 1.1rem;
+    padding: 0.9rem 0;
+    border-bottom: 0;
+    border-right: 1px solid var(--line);
+  }
+  .topbar .brand, .topbar #crumbs, .topbar #me, .topbar .usage { writing-mode: vertical-rl; }
+  #crumbs { flex: 1; min-height: 0; }
+  #me { display: flex; align-items: center; gap: 0.6rem; }
+  #me button { margin: 0; padding: 0.6rem 0.2rem; }
+  .usage { gap: 0.5rem; }
+  .usage .track { writing-mode: horizontal-tb; width: 0.4rem; height: 5rem; display: flex; flex-direction: column; justify-content: flex-end; }
+  .usage .fill { width: 100%; height: var(--pct, 0%); }
+}

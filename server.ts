@@ -305,16 +305,16 @@ const MIN_GZIP_BYTES = 1400;
 function send(res: ServerResponse, status: number, headers: Record<string, string>, body: string | Buffer) {
   const buf = typeof body === 'string' ? Buffer.from(body) : body;
   if (buf.length < MIN_GZIP_BYTES || !acceptsGzip.has(res)) {
-    res.writeHead(status, { ...headers, Vary: 'Accept-Encoding' });
+    res.writeHead(status, { Vary: 'Accept-Encoding', ...headers });
     return res.end(buf);
   }
   gzip(buf, { level: 6 }, (err, zipped) => {
     if (res.destroyed) return;
     if (err) {
-      res.writeHead(status, { ...headers, Vary: 'Accept-Encoding' });
+      res.writeHead(status, { Vary: 'Accept-Encoding', ...headers });
       return res.end(buf);
     }
-    res.writeHead(status, { ...headers, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+    res.writeHead(status, { Vary: 'Accept-Encoding', ...headers, 'Content-Encoding': 'gzip' });
     res.end(zipped);
   });
 }
@@ -546,11 +546,26 @@ const MIME: Record<string, string> = {
   '.webmanifest': 'application/manifest+json',
 };
 
-async function serveStatic(res: ServerResponse, path: string) {
+// Android colours an installed app's status and navigation bars from the manifest, which can't vary
+// by light or dark mode yet (color_scheme_dark is still a proposal). Ask the browser for its colour
+// scheme and hand dark-mode devices a manifest with the dark colours, so the app doesn't get a white bar.
+const COLOR_SCHEME_HINT = 'Sec-CH-Prefers-Color-Scheme';
+const DARK_MANIFEST = (() => {
+  const manifest = JSON.parse(ASSETS.get('manifest.webmanifest')!.toString());
+  return Buffer.from(JSON.stringify({ ...manifest, ...manifest.color_scheme_dark }, null, 2));
+})();
+
+async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string) {
   const name = path === '/' ? 'index.html' : path.replace(/^\//, '');
-  const body = ASSETS.get(name);
+  let body = ASSETS.get(name);
   if (!body) throw new HttpError(404, 'Not found');
-  send(res, 200, { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(name)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' }, body);
+  const headers: Record<string, string> = { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(name)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' };
+  if (name === 'index.html') headers['Accept-CH'] = COLOR_SCHEME_HINT;
+  if (name === 'manifest.webmanifest') {
+    if (/dark/.test(String(req.headers[COLOR_SCHEME_HINT.toLowerCase()] ?? ''))) body = DARK_MANIFEST;
+    headers.Vary = `Accept-Encoding, ${COLOR_SCHEME_HINT}`;
+  }
+  send(res, 200, headers, body);
 }
 
 async function api(req: IncomingMessage, res: ServerResponse, url: URL, session: Session | null) {
@@ -877,7 +892,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/')) {
       await api(req, res, url, auth.session(req));
     } else {
-      await serveStatic(res, url.pathname);
+      await serveStatic(req, res, url.pathname);
     }
   } catch (err: any) {
     const status = err instanceof HttpError ? err.status : 500;

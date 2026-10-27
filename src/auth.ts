@@ -1,0 +1,85 @@
+// Shared-password login with HMAC-signed session cookies.
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
+
+const COOKIE = 'cc_session';
+const SESSION_DAYS = 30;
+const MAX_FAILURES = 10;
+const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+
+export interface Session {
+  name: string;
+  exp: number;
+}
+
+function sha256(s: string): Buffer {
+  return createHash('sha256').update(s).digest();
+}
+
+export class Auth {
+  private failures = new Map<string, { count: number; since: number }>();
+  private password: string;
+  private secret: string;
+
+  constructor(password: string, secret: string) {
+    if (password.length < 12) throw new Error('COORDINATOR_PASSWORD must be at least 12 characters');
+    if (secret.length < 32) throw new Error('SESSION_SECRET must be at least 32 characters');
+    this.password = password;
+    this.secret = secret;
+  }
+
+  /** Too many recent failures from this client? */
+  limited(client: string): boolean {
+    const f = this.failures.get(client);
+    if (!f) return false;
+    if (Date.now() - f.since > FAILURE_WINDOW_MS) {
+      this.failures.delete(client);
+      return false;
+    }
+    return f.count >= MAX_FAILURES;
+  }
+
+  checkPassword(client: string, attempt: string): boolean {
+    const ok = timingSafeEqual(sha256(attempt), sha256(this.password));
+    if (ok) {
+      this.failures.delete(client);
+    } else {
+      const f = this.failures.get(client) ?? { count: 0, since: Date.now() };
+      f.count++;
+      this.failures.set(client, f);
+    }
+    return ok;
+  }
+
+  private sign(payload: string): string {
+    return createHmac('sha256', this.secret).update(payload).digest('base64url');
+  }
+
+  issueCookie(name: string, secure: boolean): string {
+    const session: Session = { name, exp: Date.now() + SESSION_DAYS * 86400_000 };
+    const payload = Buffer.from(JSON.stringify(session)).toString('base64url');
+    const value = `${payload}.${this.sign(payload)}`;
+    return `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure ? '; Secure' : ''}`;
+  }
+
+  clearCookie(): string {
+    return `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  }
+
+  session(req: IncomingMessage): Session | null {
+    const header = req.headers.cookie ?? '';
+    const match = header.split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`));
+    if (!match) return null;
+    const [payload, sig] = match.slice(COOKIE.length + 1).split('.');
+    if (!payload || !sig) return null;
+    const expected = Buffer.from(this.sign(payload));
+    const given = Buffer.from(sig);
+    if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+    try {
+      const s = JSON.parse(Buffer.from(payload, 'base64url').toString()) as Session;
+      return s.exp > Date.now() && typeof s.name === 'string' ? s : null;
+    } catch {
+      return null;
+    }
+  }
+}

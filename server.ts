@@ -1,0 +1,245 @@
+// Claude Coordinator: a shared web UI over headless Claude Code sessions.
+import { readFile, mkdir } from 'node:fs/promises';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { extname, join, normalize } from 'node:path';
+import { homedir } from 'node:os';
+import { Auth, type Session } from './src/auth.ts';
+import { Store } from './src/db.ts';
+import { Runner } from './src/runner.ts';
+import { cloneProject, createTicketDir } from './src/workspace.ts';
+
+const HOST = process.env.HOST ?? '127.0.0.1';
+const PORT = Number(process.env.PORT ?? 8573);
+const DATA_DIR = process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator');
+const PUBLIC_DIR = join(import.meta.dirname, 'public');
+const PERMISSION_MODES = ['acceptEdits', 'bypassPermissions', 'plan', 'default'];
+
+await mkdir(DATA_DIR, { recursive: true });
+const store = new Store(join(DATA_DIR, 'coordinator.db'));
+const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '');
+
+const clients = new Set<ServerResponse>();
+function broadcast(msg: object) {
+  const data = `data: ${JSON.stringify(msg)}\n\n`;
+  for (const res of clients) res.write(data);
+}
+
+const runner = new Runner(store, broadcast, process.env.CLAUDE_BIN ?? 'claude');
+runner.recover();
+
+class HttpError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers });
+  res.end(JSON.stringify(body));
+}
+
+async function readJson(req: IncomingMessage): Promise<any> {
+  if (!(req.headers['content-type'] ?? '').startsWith('application/json')) {
+    throw new HttpError(415, 'Expected application/json');
+  }
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 1_000_000) throw new HttpError(413, 'Request too large');
+    chunks.push(chunk);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString() || '{}');
+  } catch {
+    throw new HttpError(400, 'Invalid JSON');
+  }
+}
+
+function clientIp(req: IncomingMessage): string {
+  const fwd = req.headers['x-forwarded-for'];
+  return (typeof fwd === 'string' ? fwd.split(',')[0].trim() : '') || req.socket.remoteAddress || '?';
+}
+
+function isSecure(req: IncomingMessage): boolean {
+  return req.headers['x-forwarded-proto'] === 'https';
+}
+
+function str(v: unknown, field: string, max = 200): string {
+  if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `${field} is required`);
+  if (v.length > max) throw new HttpError(400, `${field} is too long`);
+  return v.trim();
+}
+
+function ticketView(id: number) {
+  const t = store.getTicket(id);
+  if (!t) throw new HttpError(404, 'No such ticket');
+  return { ...t, queued: runner.queued(id) };
+}
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+};
+
+async function serveStatic(res: ServerResponse, path: string) {
+  const rel = normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
+  const file = join(PUBLIC_DIR, rel);
+  if (!file.startsWith(PUBLIC_DIR)) throw new HttpError(404, 'Not found');
+  try {
+    const body = await readFile(file);
+    res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    res.end(body);
+  } catch {
+    throw new HttpError(404, 'Not found');
+  }
+}
+
+async function api(req: IncomingMessage, res: ServerResponse, url: URL, session: Session | null) {
+  const { pathname } = url;
+  const method = req.method ?? 'GET';
+
+  if (pathname === '/api/login' && method === 'POST') {
+    const ip = clientIp(req);
+    if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
+    const body = await readJson(req);
+    const name = str(body.name, 'Name', 40);
+    if (!auth.checkPassword(ip, String(body.password ?? ''))) throw new HttpError(401, 'Wrong password');
+    return json(res, 200, { name }, { 'Set-Cookie': auth.issueCookie(name, isSecure(req)) });
+  }
+  if (pathname === '/api/logout' && method === 'POST') {
+    return json(res, 200, {}, { 'Set-Cookie': auth.clearCookie() });
+  }
+  if (!session) throw new HttpError(401, 'Not logged in');
+
+  // Reject cross-site writes (SameSite=Lax and the JSON content type cover most of this already).
+  if (method !== 'GET') {
+    const origin = req.headers.origin;
+    const host = req.headers['x-forwarded-host'] ?? req.headers.host;
+    if (origin && new URL(origin).host !== host) throw new HttpError(403, 'Cross-origin request');
+  }
+
+  if (pathname === '/api/me') return json(res, 200, { name: session.name });
+
+  if (pathname === '/api/stream') {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+    res.write(': connected\n\n');
+    clients.add(res);
+    const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
+    req.on('close', () => {
+      clearInterval(ping);
+      clients.delete(res);
+    });
+    return;
+  }
+
+  if (pathname === '/api/projects') {
+    if (method === 'GET') {
+      return json(res, 200, store.listProjects().map((p) => ({ ...p, tickets: store.listTickets(p.id).length })));
+    }
+    if (method === 'POST') {
+      const body = await readJson(req);
+      const name = str(body.name, 'Name', 80);
+      const repoUrl = typeof body.repoUrl === 'string' && body.repoUrl.trim() ? body.repoUrl.trim() : null;
+      if (repoUrl && !/^(https:\/\/|git@)/.test(repoUrl)) throw new HttpError(400, 'Repo URL must be https:// or git@');
+      let project;
+      try {
+        project = store.createProject(name, repoUrl);
+      } catch {
+        throw new HttpError(409, 'A project with that name already exists');
+      }
+      if (repoUrl) {
+        try {
+          store.setProjectRepoDir(project.id, await cloneProject(DATA_DIR, project.id, repoUrl));
+        } catch (err: any) {
+          store.deleteProject(project.id);
+          throw new HttpError(400, `Could not clone repo: ${err.stderr?.trim() || err.message}`);
+        }
+      }
+      return json(res, 201, store.getProject(project.id));
+    }
+  }
+
+  let m = pathname.match(/^\/api\/projects\/(\d+)$/);
+  if (m && method === 'GET') {
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such project');
+    const tickets = store.listTickets(project.id).map((t) => ({ ...t, queued: runner.queued(t.id) }));
+    return json(res, 200, { project, tickets });
+  }
+
+  m = pathname.match(/^\/api\/projects\/(\d+)\/tickets$/);
+  if (m && method === 'POST') {
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such project');
+    const body = await readJson(req);
+    const title = str(body.title, 'Title', 120);
+    const message = str(body.message, 'First message', 100_000);
+    const mode = PERMISSION_MODES.includes(body.permissionMode) ? body.permissionMode : 'acceptEdits';
+    const id = store.nextTicketId();
+    let dir;
+    try {
+      dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, title);
+    } catch (err: any) {
+      throw new HttpError(500, `Could not create working directory: ${err.stderr?.trim() || err.message}`);
+    }
+    store.createTicket({ id, project_id: project.id, title, cwd: dir.cwd, branch: dir.branch, permission_mode: mode, created_by: session.name });
+    runner.send(id, session.name, message);
+    return json(res, 201, ticketView(id));
+  }
+
+  m = pathname.match(/^\/api\/tickets\/(\d+)(\/[a-z]+)?$/);
+  if (m) {
+    const id = Number(m[1]);
+    const action = m[2] ?? '';
+    const ticket = ticketView(id);
+    if (action === '' && method === 'GET') {
+      return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
+    }
+    if (action === '/events' && method === 'GET') {
+      return json(res, 200, store.listEvents(id, Number(url.searchParams.get('after') ?? 0)));
+    }
+    if (action === '/messages' && method === 'POST') {
+      const body = await readJson(req);
+      runner.send(id, session.name, str(body.text, 'Message', 100_000));
+      return json(res, 202, ticketView(id));
+    }
+    if (action === '/stop' && method === 'POST') {
+      return json(res, 200, { stopped: runner.stop(id) });
+    }
+    if (action === '/status' && method === 'POST') {
+      const body = await readJson(req);
+      if (body.status !== 'closed' && body.status !== 'idle') throw new HttpError(400, 'Status must be closed or idle');
+      if (runner.isRunning(id)) throw new HttpError(409, 'Stop the ticket before closing it');
+      store.updateTicket(id, { status: body.status });
+      runner.emit(id, 'note', { text: `${session.name} ${body.status === 'closed' ? 'closed' : 'reopened'} this ticket.` });
+      runner.broadcastTicket(id);
+      return json(res, 200, ticketView(id));
+    }
+  }
+
+  throw new HttpError(404, 'Not found');
+}
+
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  try {
+    if (url.pathname.startsWith('/api/')) {
+      await api(req, res, url, auth.session(req));
+    } else {
+      await serveStatic(res, url.pathname);
+    }
+  } catch (err: any) {
+    const status = err instanceof HttpError ? err.status : 500;
+    if (status === 500) console.error(err);
+    if (!res.headersSent) json(res, status, { error: status === 500 ? 'Internal error' : err.message });
+    else res.end();
+  }
+});
+
+server.listen(PORT, HOST, () => console.log(`Claude Coordinator listening on http://${HOST}:${PORT}`));

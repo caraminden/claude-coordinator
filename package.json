@@ -1,0 +1,13 @@
+{
+  "name": "claude-coordinator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared web UI that runs headless Claude Code sessions as tickets",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server.ts"
+  }
+}

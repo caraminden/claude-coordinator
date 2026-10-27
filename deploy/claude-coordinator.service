@@ -1,0 +1,16 @@
+[Unit]
+Description=Claude Coordinator web app
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/claude-coordinator
+ExecStart=/usr/bin/node %h/claude-coordinator/server.ts
+EnvironmentFile=%h/.config/claude-coordinator/env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOST=127.0.0.1 PORT=8573
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

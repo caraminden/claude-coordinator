@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, readdir, mkdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { basename, extname, join, normalize, sep } from 'node:path';
+import { basename, extname, join, normalize, posix, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { homedir } from 'node:os';
 import { artifactType, findArtifacts } from './src/artifacts.ts';
@@ -133,15 +133,16 @@ function artifactCsp(kind: string): string {
   return "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'self'";
 }
 
-async function serveArtifact(req: IncomingMessage, res: ServerResponse, a: Artifact, ticket: Ticket, download: boolean) {
-  const type = artifactType(a.path);
+/** Serve a file from a ticket's folder; `path` is relative to it and must be an artifact type. */
+async function serveArtifact(req: IncomingMessage, res: ServerResponse, ticket: Ticket, path: string, download: boolean) {
+  const type = artifactType(path);
   if (!type) throw new HttpError(404, 'Not found');
   let file: string;
   let size: number;
   try {
     // Resolve symlinks so the file must really be inside the ticket's folder.
     const root = await realpath(ticket.cwd);
-    file = await realpath(join(ticket.cwd, a.path));
+    file = await realpath(join(ticket.cwd, path));
     if (!file.startsWith(root + sep)) throw new Error('outside');
     const st = await stat(file);
     if (!st.isFile()) throw new Error('not a file');
@@ -157,7 +158,7 @@ async function serveArtifact(req: IncomingMessage, res: ServerResponse, a: Artif
     'Cache-Control': 'private, no-cache',
     'Accept-Ranges': 'bytes',
   };
-  if (download) headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(basename(a.path))}`;
+  if (download) headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(basename(path))}`;
   // Byte ranges, so videos can seek (Safari won't play them without).
   let start = 0;
   let end = size - 1;
@@ -466,7 +467,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       return json(res, 200, { artifact: artifactView(a), project: store.getProject(a.project_id) });
     }
     if (action === '/raw' && (method === 'GET' || method === 'HEAD')) {
-      return serveArtifact(req, res, a, store.getTicket(a.ticket_id)!, url.searchParams.has('download'));
+      return serveArtifact(req, res, store.getTicket(a.ticket_id)!, a.path, url.searchParams.has('download'));
+    }
+    if (action === '/rel' && (method === 'GET' || method === 'HEAD')) {
+      // A file a document links to (e.g. its images), relative to the document. serveArtifact
+      // still keeps it inside the ticket's folder and to artifact file types.
+      const rel = posix.normalize(posix.join(posix.dirname(a.path), url.searchParams.get('path') ?? ''));
+      if (rel.startsWith('../') || rel === '..' || posix.isAbsolute(rel)) throw new HttpError(404, 'Not found');
+      return serveArtifact(req, res, store.getTicket(a.ticket_id)!, rel, false);
     }
     if (action === '/pin' && method === 'POST') {
       const body = await readJson(req);

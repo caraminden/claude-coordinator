@@ -93,6 +93,111 @@ function markdown(src) {
   return div;
 }
 
+/**
+ * Fuller Markdown for documents threads write: headings, nested lists, tables, quotes, rules,
+ * italics, and images, which `imageUrl` maps to a URL (or null to show the alt text instead).
+ */
+function markdownDoc(src, imageUrl) {
+  const inline = (t) => {
+    // Pull code spans out first so nothing inside them is treated as Markdown.
+    const codes = [];
+    let html = escapeHtml(t).replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
+    html = html
+      .replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (_, alt, href) => {
+        const url = imageUrl(href.replace(/&amp;/g, '&'));
+        return url
+          ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img src="${escapeHtml(url)}" alt="${alt}" title="${alt}" loading="lazy"></a>`
+          : `<span class="muted">[image: ${alt}]</span>`;
+      })
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, text, href) => /^https?:\/\//.test(href)
+        ? `<a href="${href}" target="_blank" rel="noopener">${text}</a>`
+        : `<span class="link" title="${href}">${text}</span>`)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>');
+    return html.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+  };
+  const isItem = (l) => /^\s*([-*+]|\d+\.)\s+/.test(l);
+  const startsBlock = (l) => /^(#{1,6}\s|```|>|\s*\|)/.test(l) || /^([-*+]|\d+\.)\s+/.test(l);
+
+  const list = (lines) => {
+    const root = { indent: -1, children: [] };
+    const stack = [root];
+    for (const l of lines) {
+      const m = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(l);
+      if (!m) {
+        // A wrapped line carries on the item above it.
+        stack[stack.length - 1].text += ` ${l.trim()}`;
+        continue;
+      }
+      while (stack.length > 1 && m[1].length <= stack[stack.length - 1].indent) stack.pop();
+      const item = { indent: m[1].length, ordered: /\d/.test(m[2]), text: m[3], children: [] };
+      stack[stack.length - 1].children.push(item);
+      stack.push(item);
+    }
+    const render = (items) => {
+      const tag = items[0].ordered ? 'ol' : 'ul';
+      return `<${tag}>${items.map((it) => `<li>${inline(it.text)}${it.children.length ? render(it.children) : ''}</li>`).join('')}</${tag}>`;
+    };
+    return root.children.length ? render(root.children) : '';
+  };
+
+  const table = (rows) => {
+    const cells = (r) => r.trim().replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((c) => inline(c.trim().replace(/\\\|/g, '|')));
+    const hasHead = rows.length > 1 && /^[\s|:-]+$/.test(rows[1]);
+    const head = hasHead ? `<thead><tr>${cells(rows[0]).map((c) => `<th>${c}</th>`).join('')}</tr></thead>` : '';
+    const body = (hasHead ? rows.slice(2) : rows).map((r) => `<tr>${cells(r).map((c) => `<td>${c}</td>`).join('')}</tr>`).join('');
+    return `<div class="table-wrap"><table>${head}<tbody>${body}</tbody></table></div>`;
+  };
+
+  const lines = src.replace(/<!--[\s\S]*?-->/g, '').split('\n');
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    let m;
+    if (!line.trim()) {
+      i++;
+    } else if (/^```/.test(line)) {
+      const code = [];
+      for (i++; i < lines.length && !/^```/.test(lines[i]); i++) code.push(lines[i]);
+      i++;
+      out.push(`<pre><code>${escapeHtml(code.join('\n'))}</code></pre>`);
+    } else if ((m = /^(#{1,6})\s+(.*?)\s*#*$/.exec(line))) {
+      out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`);
+      i++;
+    } else if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      out.push('<hr>');
+      i++;
+    } else if (/^\s*\|/.test(line)) {
+      const rows = [];
+      for (; i < lines.length && /^\s*\|/.test(lines[i]); i++) rows.push(lines[i]);
+      out.push(table(rows));
+    } else if (/^>/.test(line)) {
+      const quoted = [];
+      for (; i < lines.length && /^>/.test(lines[i]); i++) quoted.push(lines[i].replace(/^>\s?/, ''));
+      out.push(`<blockquote>${markdownDoc(quoted.join('\n'), imageUrl).innerHTML}</blockquote>`);
+    } else if (isItem(line)) {
+      const items = [];
+      for (; i < lines.length; i++) {
+        const l = lines[i];
+        if (l.trim() && (isItem(l) || /^\s/.test(l))) items.push(l);
+        // One blank line inside a list is fine if the list carries on after it.
+        else if (!l.trim() && i + 1 < lines.length && (isItem(lines[i + 1]) || /^\s+\S/.test(lines[i + 1]))) continue;
+        else if (l.trim() && !startsBlock(l) && items.length && lines[i - 1].trim()) items.push(l); // lazy wrap
+        else break;
+      }
+      out.push(list(items));
+    } else {
+      const para = [];
+      for (; i < lines.length && lines[i].trim() && (!para.length || !startsBlock(lines[i])); i++) para.push(lines[i].trim());
+      out.push(`<p>${inline(para.join(' '))}</p>`);
+    }
+  }
+  const div = document.createElement('div');
+  div.innerHTML = out.join('');
+  return div;
+}
+
 // ---------- drafts ----------
 
 // Unsent text survives reloads and switching threads: it is saved per thread as you type.
@@ -851,7 +956,13 @@ function artifactViewer(a) {
     fetch(src).then(async (res) => {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       const text = await res.text();
-      body.replaceChildren(a.kind === 'markdown' ? h('div', { class: 'msg doc' }, markdown(text)) : h('pre', { class: 'artifact-text' }, text));
+      // Images a document links to by relative path load from next to it, in the thread's folder.
+      const imageUrl = (href) => (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(href) || href.startsWith('/')
+        ? null
+        : `/api/artifacts/${a.id}/rel?path=${encodeURIComponent(href.split('#')[0])}&v=${a.mtime}`);
+      body.replaceChildren(a.kind === 'markdown'
+        ? h('div', { class: 'msg doc' }, markdownDoc(text, imageUrl))
+        : h('pre', { class: 'artifact-text' }, text));
     }).catch((err) => body.replaceChildren(h('p', { class: 'error' }, `Could not load: ${err.message}`)));
   }
   return section;

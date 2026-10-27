@@ -363,6 +363,10 @@ export class Store {
     if (!by) this.db.prepare('DELETE FROM artifacts WHERE id = ? AND missing = 1').run(id);
   }
 
+  pinnedArtifactPaths(ticketId: number): string[] {
+    return (this.db.prepare('SELECT path FROM artifacts WHERE ticket_id = ? AND pinned_at IS NOT NULL').all(ticketId) as { path: string }[]).map((r) => r.path);
+  }
+
   /** Bring a ticket's artifact rows in line with what is on disk. Returns whether anything changed. */
   syncArtifacts(ticket: Ticket, found: { path: string; size: number; mtime: number }[]): boolean {
     const existing = new Map(
@@ -444,6 +448,20 @@ export class Store {
     return this.db
       .prepare('SELECT * FROM events WHERE ticket_id = ? AND id > ? ORDER BY id')
       .all(ticketId, afterId) as unknown as EventRow[];
+  }
+
+  /** The text of a ticket's replies that may link files (subagents' included). */
+  replyTexts(ticketId: number): string[] {
+    const rows = this.db
+      .prepare("SELECT data FROM events WHERE ticket_id = ? AND kind = 'claude' AND data LIKE '%\"type\":\"assistant\"%' AND data LIKE '%](%'")
+      .all(ticketId) as { data: string }[];
+    const texts: string[] = [];
+    for (const { data } of rows) {
+      const content = JSON.parse(data).message?.content;
+      if (!Array.isArray(content)) continue;
+      for (const b of content) if (b?.type === 'text' && typeof b.text === 'string') texts.push(b.text);
+    }
+    return texts;
   }
 
   /** Pass every stored Claude event through `fn` and save what it returns (null deletes the event). */

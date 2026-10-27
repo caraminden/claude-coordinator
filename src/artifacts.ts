@@ -1,7 +1,7 @@
 // Artifacts: documents and pages that tickets create in their working directories.
 import { execFile } from 'node:child_process';
 import { lstat, readdir } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { extname, isAbsolute, join, normalize } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -115,4 +115,25 @@ export async function findArtifacts(cwd: string, isGit: boolean): Promise<FoundA
     }
   }
   return found;
+}
+
+/**
+ * The files a ticket's replies link, as absolute paths. A ticket links what it means people to
+ * see; files it makes for its own use (test pages, scratch notes) go unlinked, so only linked
+ * files are listed as artifacts.
+ */
+export function linkedPaths(texts: string[], cwd: string): Set<string> {
+  const out = new Set<string>();
+  for (const text of texts) {
+    // [title](path), ![caption](path), with an optional <> around the path and a "title" after it.
+    for (const m of text.matchAll(/\]\(\s*(<[^>\n]+>|[^)\s]+)/g)) {
+      let href = m[1].replace(/^<|>$/g, '').split(/[?#]/)[0];
+      if (!href || /^[a-z][a-z0-9+.-]*:|^\/\//i.test(href)) continue;
+      try {
+        href = decodeURI(href);
+      } catch {}
+      out.add(isAbsolute(href) ? normalize(href) : join(cwd, href));
+    }
+  }
+  return out;
 }

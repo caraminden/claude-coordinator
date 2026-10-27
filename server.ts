@@ -7,7 +7,7 @@ import { basename, extname, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { gzip } from 'node:zlib';
 import { homedir } from 'node:os';
-import { fileType, findArtifacts, isArtifact } from './src/artifacts.ts';
+import { fileType, findArtifacts, isArtifact, linkedPaths } from './src/artifacts.ts';
 import { AGENT_NAME, Auth, threadMayCall, type Session } from './src/auth.ts';
 import { branchStatus, type BranchStatus } from './src/branch.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
@@ -108,7 +108,12 @@ async function scanArtifacts(ticketId: number) {
       // Files in the shared folder are stored by absolute path, since they sit outside the working directory.
       ...(await findArtifacts(shared, false)).map((f) => ({ ...f, path: join(shared, f.path) })),
     ];
-    if (store.syncArtifacts(ticket, found)) broadcast({ type: 'artifacts', projectId: ticket.project_id });
+    // Only files a reply linked are meant for people; the rest are the ticket's own working files.
+    // A pinned file stays listed either way.
+    const linked = linkedPaths(store.replyTexts(ticketId), ticket.cwd);
+    const pinned = new Set(store.pinnedArtifactPaths(ticketId));
+    const shown = found.filter((f) => linked.has(isAbsolute(f.path) ? f.path : join(ticket.cwd, f.path)) || pinned.has(f.path));
+    if (store.syncArtifacts(ticket, shown)) broadcast({ type: 'artifacts', projectId: ticket.project_id });
   })();
   scanning.set(ticketId, job);
   try {

@@ -134,7 +134,7 @@ function showingFiles(ticket: Ticket, filesDir: string | null): string[] {
     filesDir
       ? `Put files you fetch from elsewhere or make only to show people (not part of the work in your branch) in ${filesDir}, so they never end up in a commit. Files elsewhere on disk can't be shown; copy them there first.`
       : '',
-    'Linking a file is the only way people see it; they cannot browse your folders.',
+    'Linking a file is the only way people see it; they cannot browse your folders. Files you link are also listed in the project\'s artifacts, so link only what is meant for people, not files you made for your own use (test pages, scratch notes, fixtures).',
   ].filter(Boolean);
 }
 

@@ -388,7 +388,7 @@ async function showProject(projectId, ticketId = null) {
 function newTicketForm(projectId) {
   const form = h('form', {},
     h('label', {}, 'Title', h('input', { name: 'title', required: true, maxlength: 120 })),
-    h('label', {}, 'First message', h('textarea', { name: 'message', required: true, rows: 5, placeholder: 'What should this thread work on?' })),
+    h('label', {}, 'First message', h('textarea', { name: 'message', required: true, rows: 5, placeholder: 'What should this thread work on? (Enter to send, Shift+Enter for a new line)' })),
     h('label', {}, 'Permissions',
       h('select', { name: 'permissionMode' },
         h('option', { value: 'bypassPermissions' }, 'Full access: edit files and run any command'),
@@ -396,10 +396,18 @@ function newTicketForm(projectId) {
         h('option', { value: 'plan' }, 'Plan only: read and plan, no changes'))),
     h('p', { class: 'error', hidden: true }),
     h('button', { type: 'submit' }, 'Start thread'));
+  form.message.addEventListener('keydown', (e) => {
+    // Same as the chat composer: Enter sends, Shift+Enter adds a line, IME composition is left alone.
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = form.querySelector('button');
     const err = form.querySelector('.error');
+    if (btn.disabled) return;
     btn.disabled = true;
     try {
       const t = await api(`/api/projects/${projectId}/tickets`, {

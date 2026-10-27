@@ -34,6 +34,45 @@ const NOTE = { type: ['string', 'null'], description: 'One terse line on where t
 
 const TICKET_ID = { type: 'integer', description: 'Ticket number in this project, e.g. 12 for #12 (as shown by list_tickets)' };
 
+const ASK_QUESTION = {
+  name: 'ask_question',
+  description:
+    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for real decisions with clear options, instead of listing choices in prose. Put your recommended option first. After calling it, finish your turn with a short reply and wait: the answers arrive as the next message.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 4,
+        items: {
+          type: 'object',
+          properties: {
+            question: { type: 'string', description: 'The full question, ending in "?"' },
+            header: { type: 'string', description: 'A very short label for the card, max 24 chars, e.g. "Layout"' },
+            multiSelect: { type: 'boolean', description: 'true if several options can be picked (default false)' },
+            options: {
+              type: 'array',
+              minItems: 2,
+              maxItems: 6,
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string', description: 'The choice, 1 to 5 words' },
+                  description: { type: 'string', description: 'What picking it means, or its trade-off' },
+                },
+                required: ['label'],
+              },
+            },
+          },
+          required: ['question', 'options'],
+        },
+      },
+    },
+    required: ['questions'],
+  },
+};
+
 const TOOLS = [
   {
     name: 'list_tickets',
@@ -100,6 +139,7 @@ const TOOLS = [
     description: "Interrupt a ticket's running turn and drop its queued messages.",
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
   },
+  ASK_QUESTION,
 ];
 
 async function call(method: string, path: string, body?: object): Promise<any> {
@@ -174,6 +214,7 @@ const THREAD_TOOLS = [
       "Label this thread for the project's threads list: its short title, kind of work, and where things stand. Leave out what should stay. Call it when the work's kind becomes clear, and at the end of a turn whenever the state or note changes.",
     inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE } },
   },
+  ASK_QUESTION,
 ];
 
 async function runTool(name: string, args: any): Promise<string> {
@@ -206,6 +247,9 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Sent. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/messages`, { text: args.text }))}`;
     case 'update_ticket':
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, labelFields(args)))}`;
+    case 'ask_question':
+      await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
+      return 'The question card is in the chat. End your turn now with a short reply; the answers will come as the next message.';
     case 'set_thread_status':
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}`;
     case 'close_ticket':

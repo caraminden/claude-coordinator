@@ -136,6 +136,7 @@ function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null)
     '- Mark each task in_progress with TaskUpdate when you start it. When you finish it, mark it completed and set metadata.outcome to one plain sentence on what it found, decided or changed.',
     '- If the plan changes, add, reword or delete tasks so the list stays true.',
     'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
+    'When you need people to decide between clear options, ask with the `ask_question` tool (mcp__thread) instead of listing choices in prose: it shows a card they answer with a click. Then end your turn; the answers arrive as the next message.',
     'The project\'s threads list groups threads by kind and shows each as one line: number, short title, state, note. Keep yours accurate with the `set_thread_status` tool (mcp__thread):',
     '- title: the short ask, about 30 characters ("Usage bar in the top bar"), no number, tag or emoji. Shorten a long title you were given once you know what the work is.',
     '- tag: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet). Set it once the kind of work is clear, and change it if the work changes kind; leave it unset for one-off questions.',
@@ -156,6 +157,7 @@ function coordinatorPrompt(project: Project): string {
     project.repo_dir
       ? `The project's main checkout is at ${project.repo_dir} and ticket worktrees are under ${join(project.repo_dir, '..', 'tickets')}. You may read them for context, but do not edit, commit or switch branches there.`
       : 'This project has no git repo; each ticket gets a plain folder.',
+    'When you need people to decide between clear options, ask with your `ask_question` tool: it shows a card in this chat they answer with a click. Then end your turn; the answers arrive as the next message.',
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short and end each turn with what you did and what, if anything, you need from them.',
   ].join('\n');
 }
@@ -222,8 +224,9 @@ export class Runner {
   }
 
   /** Record a user message and run it now, or queue it behind the current turn. */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = []) {
-    this.emit(ticketId, 'user_message', images.length ? { author, text, images: images.map((i) => i.name) } : { author, text });
+  /** `extra` is stored with the message for the UI (e.g. which question card it answers), not sent to Claude. */
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: object = {}) {
+    this.emit(ticketId, 'user_message', { author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra });
     const q = this.queues.get(ticketId) ?? [];
     q.push({ author, text, images });
     this.queues.set(ticketId, q);
@@ -285,7 +288,8 @@ export class Runner {
     // inherits), never on the command line.
     const role = ticket.kind === 'coordinator' ? 'coordinator' : 'thread';
     const mcp = { mcpServers: { [role]: { type: 'stdio', command: process.execPath, args: [MCP_SERVER] } } };
-    args.push('--mcp-config', JSON.stringify(mcp), '--allowedTools', `mcp__${role}`);
+    // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
+    args.push('--mcp-config', JSON.stringify(mcp), '--allowedTools', `mcp__${role}`, '--disallowedTools', 'AskUserQuestion');
     env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
     // A state describes where the last turn left things; a new turn makes it stale.
     if (ticket.state) this.store.updateTicket(ticket.id, { state: null });

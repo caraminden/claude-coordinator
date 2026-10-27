@@ -341,6 +341,40 @@ function isSecure(req: IncomingMessage): boolean {
   return req.headers['x-forwarded-proto'] === 'https';
 }
 
+/** A question card from Claude: 1 to 4 questions, each with 2 to 6 options. */
+function cleanQuestions(raw: unknown) {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 4) throw new HttpError(400, 'questions must be a list of 1 to 4 questions');
+  return raw.map((q: any, i: number) => {
+    const n = `Question ${i + 1}`;
+    if (!q || typeof q !== 'object') throw new HttpError(400, `${n} must be an object`);
+    if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 6) throw new HttpError(400, `${n} needs 2 to 6 options`);
+    const options = q.options.map((o: any, j: number) => ({
+      label: str(o?.label, `${n} option ${j + 1} label`, 80),
+      ...(o?.description ? { description: str(o.description, `${n} option ${j + 1} description`, 300) } : {}),
+    }));
+    if (new Set(options.map((o: any) => o.label)).size !== options.length) throw new HttpError(400, `${n} has duplicate option labels`);
+    return {
+      question: str(q.question, n, 500),
+      ...(q.header ? { header: str(q.header, `${n} header`, 24) } : {}),
+      multiSelect: q.multiSelect === true,
+      options,
+    };
+  });
+}
+
+/** A person's picks for each question of a card: chosen option labels, plus optional free text. */
+function cleanAnswers(questions: any[], raw: unknown) {
+  if (!Array.isArray(raw) || raw.length !== questions.length) throw new HttpError(400, 'Answer every question on the card');
+  return questions.map((q, i) => {
+    const a: any = raw[i] ?? {};
+    const selected = Array.isArray(a.selected) ? [...new Set(a.selected.filter((l: unknown) => q.options.some((o: any) => o.label === l)))] as string[] : [];
+    const other = typeof a.other === 'string' ? a.other.trim().slice(0, 2000) : '';
+    if (!q.multiSelect && selected.length > 1) throw new HttpError(400, `Pick one answer for question ${i + 1}`);
+    if (!selected.length && !other) throw new HttpError(400, `Answer question ${i + 1}`);
+    return other ? { selected, other } : { selected };
+  });
+}
+
 /** One of a fixed set of values, or null when empty. */
 /** "Opus 5.5" for "claude-opus-5-5". */
 function modelName(id: string): string {
@@ -394,7 +428,8 @@ function agentProject(session: Session, method: string, pathname: string): numbe
   if (!t) throw new HttpError(403, 'No such ticket');
   // A ticket's own token may only read and update that ticket (its title, tag, state and note).
   if (t.kind !== 'coordinator') {
-    if (pathname !== `/api/tickets/${t.id}` || (method !== 'GET' && method !== 'PATCH')) throw new HttpError(403, 'A thread may only update itself');
+    const own = pathname === `/api/tickets/${t.id}` ? method === 'GET' || method === 'PATCH' : pathname === `/api/tickets/${t.id}/questions` && method === 'POST';
+    if (!own) throw new HttpError(403, 'A thread may only update itself');
     return t.project_id;
   }
   return t.project_id;
@@ -672,7 +707,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const action = m[2] ?? '';
     const ticket = ticketView(id);
     inScope(ticket.project_id);
-    if (scope !== null && method !== 'GET' && ticket.kind === 'coordinator') {
+    // (Asking people a question card in its own chat is the one thing it may do to itself.)
+    if (scope !== null && method !== 'GET' && ticket.kind === 'coordinator' && !(action === '/questions' && session.agent === id)) {
       throw new HttpError(403, 'The coordinator cannot act on itself');
     }
     if (action === '' && method === 'GET') {
@@ -726,6 +762,32 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const hasImages = Array.isArray(body.images) && body.images.length > 0;
       const text = hasImages && (typeof body.text !== 'string' || !body.text.trim()) ? '' : str(body.text, 'Message', 100_000);
       runner.send(id, session.name, text, await saveImages(ticket, body.images));
+      return json(res, 202, ticketView(id));
+    }
+    if (action === '/questions' && method === 'POST') {
+      // Claude asks people multiple-choice questions; the card shows in the chat until someone answers.
+      if (session.agent !== id) throw new HttpError(403, 'Only the thread itself can ask in its chat');
+      const questions = cleanQuestions((await readJson(req)).questions);
+      const questionId = randomBytes(6).toString('hex');
+      runner.emit(id, 'question', { id: questionId, questions });
+      return json(res, 201, { id: questionId });
+    }
+    if (action === '/answer' && method === 'POST') {
+      if (session.agent !== undefined) throw new HttpError(403, 'Only people answer question cards');
+      const body = await readJson(req);
+      const events = store.listEvents(id);
+      const card = events.find((e) => e.kind === 'question' && JSON.parse(e.data).id === body.questionId);
+      if (!card) throw new HttpError(404, 'No such question');
+      if (events.some((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId === body.questionId)) {
+        throw new HttpError(409, 'That question has already been answered');
+      }
+      const { questions } = JSON.parse(card.data);
+      const answers = cleanAnswers(questions, body.answers);
+      const text = questions.map((q: any, i: number) => {
+        const picked = [...answers[i].selected, ...(answers[i].other ? [`Other: ${answers[i].other}`] : [])];
+        return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked.join('; ')}`;
+      }).join('\n\n');
+      runner.send(id, session.name, `My answers to your question card:\n\n${text}`, [], { answer: { questionId: body.questionId, answers } });
       return json(res, 202, ticketView(id));
     }
     if (action === '/stop' && method === 'POST') {

@@ -688,6 +688,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite' }), // below the chat log
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
     pendingMessages: [], // { el, text } shown on send, replaced by the server's copy
+    cards: new Map(), // question card id -> { markAnswered }
     branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
   };
   const projectLink = h('a', { href: `#/p/${project.id}` }, project.name);
@@ -1816,8 +1817,16 @@ function appendEvent(event, scroll = true) {
       const i = Math.max(0, view.pendingMessages.findIndex((m) => m.text === (data.text ?? '')));
       view.pendingMessages.splice(i, 1)[0].el.remove();
     }
-    nodes.push(userBubble(data.author, data.text,
-      (data.images ?? []).map((name) => `/api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`)));
+    if (data.answer) {
+      // An answer to a question card: the card shows the picks, so the message only needs a short line.
+      view.cards.get(data.answer.questionId)?.markAnswered(data.answer.answers, data.author);
+      nodes.push(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), answerSummary(data.answer.answers)));
+    } else {
+      nodes.push(userBubble(data.author, data.text,
+        (data.images ?? []).map((name) => `/api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`)));
+    }
+  } else if (event.kind === 'question') {
+    nodes.push(questionCard(event.ticket_id, data));
   } else if (event.kind === 'note') {
     nodes.push(h('div', { class: 'note' }, data.text));
   } else if (event.kind === 'error') {
@@ -1869,6 +1878,112 @@ function appendEvent(event, scroll = true) {
 /** An object URL for base64 image data (the page's CSP allows blob: images but not data: ones). */
 function base64Url(mediaType, data) {
   return URL.createObjectURL(new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: mediaType }));
+}
+
+// ---------- question cards ----------
+
+/** "Answered: Tabs · Other: keep both" lines for an answer message. */
+function answerSummary(answers) {
+  return h('div', { class: 'answer-lines' }, answers.map((a) =>
+    h('div', {}, '→ ', [...a.selected, ...(a.other ? [`Other: ${a.other}`] : [])].join(' · '))));
+}
+
+/**
+ * A card of multiple-choice questions from Claude. Click options to pick (several when the question
+ * allows), or type an answer under Other; a single one-pick question sends on the first click.
+ */
+function questionCard(ticketId, card) {
+  const picks = card.questions.map(() => ({ selected: new Set(), other: '' }));
+  const single = card.questions.length === 1 && !card.questions[0].multiSelect;
+  const sendBtn = h('button', { type: 'button', class: 'small', disabled: true }, single ? 'Send' : 'Send answers');
+  const status = h('span', { class: 'muted' });
+  const el = h('div', { class: 'qcard' });
+  let answered = false;
+
+  const ready = () => picks.every((p) => p.selected.size || p.other.trim());
+  const refresh = () => {
+    for (const [i, q] of card.questions.entries()) {
+      for (const btn of el.querySelectorAll(`[data-q="${i}"] .opt`)) btn.classList.toggle('picked', picks[i].selected.has(btn.dataset.label));
+    }
+    sendBtn.disabled = answered || !ready();
+  };
+  const send = async () => {
+    if (answered || !ready()) return;
+    el.classList.add('sending');
+    sendBtn.disabled = true;
+    status.textContent = 'Sending…';
+    try {
+      const answers = picks.map((p) => ({ selected: [...p.selected], other: p.other.trim() }));
+      const ticket = await api(`/api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id, answers } });
+      if (view?.id === ticketId) {
+        view.ticket = ticket;
+        renderTicketHead();
+        scrollToBottom();
+        catchUpEvents().catch(() => {});
+      }
+    } catch (ex) {
+      status.textContent = ex.message;
+      el.classList.remove('sending');
+      refresh();
+    }
+  };
+  sendBtn.addEventListener('click', send);
+
+  el.append(
+    h('div', { class: 'who' }, 'Claude asks'),
+    ...card.questions.map((q, i) => {
+      const other = h('input', { type: 'text', class: 'other', placeholder: 'Other: type your own answer', maxlength: 2000 });
+      other.addEventListener('input', () => {
+        picks[i].other = other.value;
+        // A typed answer replaces the pick on a one-answer question.
+        if (!q.multiSelect && other.value.trim()) picks[i].selected.clear();
+        refresh();
+      });
+      other.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); }
+      });
+      return h('div', { class: 'q', 'data-q': i },
+        h('div', { class: 'qtitle' }, q.header ? h('span', { class: 'chip' }, q.header) : '', q.question,
+          q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
+        h('div', { class: 'opts' }, q.options.map((o) => h('button', {
+          type: 'button', class: 'opt', 'data-label': o.label,
+          onclick: () => {
+            if (answered) return;
+            const sel = picks[i].selected;
+            if (q.multiSelect) sel.has(o.label) ? sel.delete(o.label) : sel.add(o.label);
+            else {
+              sel.clear();
+              sel.add(o.label);
+              other.value = '';
+              picks[i].other = '';
+            }
+            refresh();
+            if (single) send();
+          },
+        }, h('span', { class: 'label' }, o.label), o.description ? h('span', { class: 'desc' }, o.description) : ''))),
+        other);
+    }),
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), sendBtn));
+
+  view.cards.set(card.id, {
+    markAnswered(answers, author) {
+      answered = true;
+      el.classList.remove('sending');
+      el.classList.add('answered');
+      answers.forEach((a, i) => {
+        picks[i].selected = new Set(a.selected);
+        const other = el.querySelector(`[data-q="${i}"] .other`);
+        other.value = a.other ?? '';
+        other.hidden = !a.other;
+        other.disabled = true;
+      });
+      for (const btn of el.querySelectorAll('.opt')) btn.disabled = true;
+      sendBtn.hidden = true;
+      status.textContent = `Answered by ${author}`;
+      refresh();
+    },
+  });
+  return el;
 }
 
 function userBubble(author, text, imageSrcs) {

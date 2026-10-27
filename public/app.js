@@ -458,6 +458,8 @@ async function showProject(projectId, main = { kind: 'chat', ticketId: null }) {
     ui: progressUi(chatId),
     actions: new Map(), // tool_use_id -> { block, taskId, result }
     turnActions: [], // actions of the current (or last) turn, in order
+    typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite' }), // below the chat log
+    sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
   };
   const projectLink = h('a', { href: `#/p/${project.id}` }, project.name);
   const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
@@ -558,6 +560,10 @@ function chatSection(chatId, ticket, events) {
     if (!text && !attachments.items.length) return;
     sendBtn.disabled = true;
     sending++;
+    // Acknowledge the message straight away; the server's reply and the stream catch up after.
+    view.sendingTo = chatId;
+    renderTyping();
+    if (followChat) scrollToBottom();
     try {
       const sent = attachments.items.slice();
       const images = sent.map(({ mediaType, data }) => ({ mediaType, data }));
@@ -577,6 +583,10 @@ function chatSection(chatId, ticket, events) {
     } catch (ex) {
       alertNote(ex.message);
     } finally {
+      if (view?.sendingTo === chatId) {
+        view.sendingTo = null;
+        renderTyping();
+      }
       sendBtn.disabled = false;
       sending--;
       reloadWhenIdle();
@@ -588,7 +598,7 @@ function chatSection(chatId, ticket, events) {
     log.append(h('div', { class: 'note' },
       'This is the project coordinator. It keeps track of the threads on the left and can create, message, rename and close them for you.'));
   }
-  return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, form);
+  return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);
 }
 
 function newTicketForm(projectId) {
@@ -997,6 +1007,7 @@ function renderTicketHead() {
     h('div', { class: 'stats', id: 'ticket-stats' }),
     view.progressEl);
   renderStats();
+  renderTyping();
   const hint = document.getElementById('composer-hint');
   if (hint) hint.textContent = t.status === 'running' ? 'Messages sent now run after the current turn.' : '';
   scheduleProgress();
@@ -1220,7 +1231,26 @@ function appendEvent(event, scroll = true) {
   }
 
   log.append(...nodes);
+  renderTyping();
   if (scroll && followChat) scrollToBottom();
+}
+
+/** "Claude is thinking…" under the chat while a turn runs, so a sent message is visibly being worked on. */
+function renderTyping() {
+  const el = view?.typingEl;
+  if (!el || !view.ticket) return;
+  const t = view.ticket;
+  const show = t.status === 'running' || view.sendingTo === t.id;
+  const wasHidden = el.hidden;
+  el.hidden = !show;
+  if (!show) return;
+  const last = view.turnActions.at(-1);
+  const busy = t.status === 'running' && last && !last.result;
+  el.replaceChildren(
+    h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
+    h('span', {}, busy ? `Claude is working · ${actionLabel(last.block)}` : 'Claude is thinking…'),
+    t.queued ? h('span', { class: 'muted' }, ` · ${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn`) : '');
+  if (wasHidden && followChat) scrollToBottom();
 }
 
 // ---------- boot ----------

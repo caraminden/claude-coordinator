@@ -2280,3 +2280,5 @@ setInterval(() => {
 }, 30_000);
 
 api('/api/me').then((r) => start(r.name)).catch(() => {});
+// The service worker only makes the app installable (home screen, full screen); it caches nothing.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

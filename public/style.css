@@ -218,6 +218,15 @@ h2 { font-size: 1.15rem; margin: 0; }
 .note { color: var(--muted); font-size: 0.85em; text-align: center; }
 .note.error { color: var(--error); white-space: pre-wrap; text-align: left; }
 .turn-end { color: var(--muted); font-size: 0.8em; text-align: right; border-top: 1px dashed var(--line); padding-top: 0.2rem; }
+/* One line: the branch on the left gives way, the turn's ✓, time and actions stay whole on the right. */
+.turn-end > summary, div.turn-end { display: flex; align-items: baseline; gap: 0.5rem; }
+.turn-end > summary { list-style: none; }
+.turn-end > summary::-webkit-details-marker { display: none; }
+.turn-end > summary::after { content: '▸'; flex: none; }
+details.turn-end[open] > summary::after { content: '▾'; }
+.turn-end .bits { flex: none; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.turn-end .bits .ok { color: #16a34a; }
+.turn-end .bits .fail { color: var(--error); font-weight: 700; }
 details.turn-end summary { cursor: pointer; }
 details.turn-end .phases, details.turn-end .cmds { text-align: left; margin-left: 0.2rem; font-size: 1.1em; }
 details.turn-end .recap { text-align: left; margin: 0.4rem 0 0.2rem; font-size: 1.1em; }
@@ -397,7 +406,9 @@ button.pin.on { color: var(--accent); }
 @media (max-width: 600px) { .usage .track { width: 3rem; } }
 
 /* "Claude is thinking…" under the chat while a turn runs */
-.typing { display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0 0.75rem; color: var(--muted); font-size: 0.9em; overflow-wrap: anywhere; }
+.typing { display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0 0.75rem; color: var(--muted); font-size: 0.9em; white-space: nowrap; }
+.typing .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.typing .muted { flex: none; }
 .typing[hidden] { display: none; }
 .typing .dots { display: inline-flex; gap: 3px; flex: none; padding: 0.45rem 0.6rem; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }
 .typing .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--running); animation: typing-dot 1.2s infinite ease-in-out; }
@@ -472,7 +483,8 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .thread-row.s-closed .name { color: var(--muted); font-weight: normal; }
 
 /* The thread's PR or branch, on the left of the newest turn-end line */
-.turn-end .branch-status { float: left; display: inline-flex; gap: 0.4rem; align-items: baseline; max-width: 60%; text-align: left; }
+.turn-end .branch-status { display: inline-flex; gap: 0.4rem; align-items: baseline; min-width: 0; text-align: left; }
+.turn-end .branch-status .branch { min-width: 2.5em; }
 .turn-end .branch-status[hidden] { display: none; }
 .turn-end .branch-status a { color: var(--accent); font-weight: 600; text-decoration: none; }
 .turn-end .branch-status .branch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
@@ -500,8 +512,10 @@ mark.find.current { background: var(--waiting); color: #fff; }
   .ticket-head > .row > h2 { flex: 1 0 calc(100% - 1.1rem); min-width: 0; }
   .ticket-head > .row > .muted { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
   .ticket-head > .row > .spacer { display: none; }
+  .ticket-head > .row > h2 { font-size: 1rem; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
   .ticket-head > .row > button, .ticket-head > .row > .find-box { flex: none; white-space: nowrap; }
-  .find-box .chat-find, .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 6.5rem; }
+  .find-box .chat-find { width: 4.8rem; }
+  .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 6.5rem; }
   /* While a search is typed, its count and arrows need room too. */
   .find-box { gap: 0.15rem; }
   .find-box .chat-find:not(:placeholder-shown) { width: 5.5rem; }
@@ -531,7 +545,11 @@ mark.find.current { background: var(--waiting); color: #fff; }
   .composer .row { gap: 0.5rem; }
   .composer #composer-hint { order: 1; flex-basis: 100%; font-size: 0.85em; }
   .composer #composer-hint:empty { display: none; }
+  .composer textarea { min-height: 3rem; }
 }
+/* Words that only fit on wider screens ("BUG:", "Close ticket", "Add image"); phones get the short form. */
+@media (max-width: 800px) { .wide-only { display: none; } }
+.composer .add-image { line-height: 1.4; }
 
 /* Question cards: Claude's multiple-choice questions, answered with a click */
 .qcard { border: 1px solid color-mix(in srgb, var(--running) 45%, var(--line)); border-radius: 10px; background: var(--panel); padding: 0.6rem 0.85rem; display: flex; flex-direction: column; gap: 0.75rem; }

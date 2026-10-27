@@ -703,6 +703,15 @@ function threadFullName(t) {
   return [tag?.emoji, t.number ?? t.id, tag ? `${tag.label.toUpperCase()}: ${t.title}` : t.title, state?.emoji].filter(Boolean).join(' ');
 }
 
+/** threadFullName in parts; phones hide the tag word and state emoji, which the emoji and state label already say. */
+function threadTitleParts(t) {
+  if (isCoordinator(t)) return 'Coordinator';
+  const tag = TAGS[t.tag];
+  const state = t.status !== 'running' && STATES[t.state];
+  return [tag ? `${tag.emoji} ` : '', `${t.number ?? t.id} `, tag ? h('span', { class: 'wide-only' }, `${tag.label.toUpperCase()}: `) : '', t.title,
+    state ? h('span', { class: 'wide-only' }, ` ${state.emoji}`) : ''];
+}
+
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 async function showTicket(ticketId) {
   const { ticket } = await api(`/api/tickets/${ticketId}`);
@@ -899,10 +908,9 @@ async function mountChat(chatId, ticket, events) {
 }
 
 function chatSection(chatId, ticket, events) {
+  const keys = matchMedia('(max-width: 800px)').matches ? '' : ' (Enter to send, Shift+Enter for a new line)';
   const textarea = h('textarea', {
-    placeholder: isCoordinator(ticket)
-      ? 'Ask the coordinator to start, check on, or close tickets… (Enter to send, Shift+Enter for a new line)'
-      : 'Message this ticket… (Enter to send, Shift+Enter for a new line)',
+    placeholder: (isCoordinator(ticket) ? 'Ask the coordinator to start, check on, or close tickets…' : 'Message this ticket…') + keys,
     'data-draft': true,
   });
   const draftKey = `cc-draft:${chatId}`;
@@ -918,7 +926,8 @@ function chatSection(chatId, ticket, events) {
   });
   const form = h('form', { class: 'composer' }, attachments.el, textarea, picker,
     h('div', { class: 'row' },
-      h('button', { type: 'button', class: 'secondary small', onclick: () => picker.click() }, 'Add image'),
+      h('button', { type: 'button', class: 'secondary small add-image', title: 'Add image', 'aria-label': 'Add image', onclick: () => picker.click() },
+        h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Add image')),
       h('span', { class: 'muted', id: 'composer-hint' }), h('span', { class: 'spacer' }),
       modelPicker(chatId), sendBtn));
   textarea.addEventListener('paste', (e) => {
@@ -1172,7 +1181,7 @@ function clearHighlights(el) {
 
 /** Find in the open conversation: highlights every match, Enter / ↓ for the next, Shift+Enter / ↑ for the previous. */
 function chatFindBox() {
-  const input = h('input', { type: 'search', class: 'chat-find', placeholder: 'Find in chat', autocomplete: 'off' });
+  const input = h('input', { type: 'search', class: 'chat-find', placeholder: matchMedia('(max-width: 800px)').matches ? '🔍 Find' : 'Find in chat', 'aria-label': 'Find in chat', autocomplete: 'off' });
   const count = h('span', { class: 'find-count muted' });
   const state = { marks: [], at: -1 };
   const show = (i) => {
@@ -1318,12 +1327,12 @@ function renderBranch(status) {
     parts.push(
       h('a', { href: pr.url, target: '_blank', rel: 'noopener', title: pr.title, onclick: (e) => e.stopPropagation() }, `PR #${pr.number}`),
       h('span', { class: `state ${state}` }, state));
-    if (pr.state === 'OPEN' && status.merged) parts.push(`merged into ${status.base}`);
+    if (pr.state === 'OPEN' && status.merged) parts.push(h('span', { title: `Merged into ${status.base}` }, '✓ in main'));
   } else if (status && !status.empty) {
     parts.push(h('span', { class: 'branch', title: status.branch }, status.branch));
     parts.push(status.merged
-      ? h('span', { class: 'state merged' }, `merged into ${status.base}`)
-      : h('span', { class: 'state open' }, `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}`));
+      ? h('span', { class: 'state merged', title: `Merged into ${status.base}` }, 'merged')
+      : h('span', { class: 'state open', title: `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}` }, `${status.ahead} unmerged`));
   }
   el.replaceChildren(...parts);
   el.hidden = !parts.length;
@@ -1911,7 +1920,7 @@ function renderTicketHead() {
   } else {
     actions.push(h('button', { class: 'secondary', onclick: async () => {
       if (await setStatus(t.id, 'closed')) location.hash = `#/p/${t.project_id}`;
-    } }, 'Close ticket'));
+    }, title: 'Close ticket' }, 'Close', h('span', { class: 'wide-only' }, ' ticket')));
   }
   const state = (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '');
   // Titled too, since phones may cut it short to keep the buttons beside it.
@@ -1919,7 +1928,7 @@ function renderTicketHead() {
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
-      h('h2', {}, threadFullName(t)),
+      h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       stateLabel,
       h('span', { class: 'spacer' }), ...actions, view.findEl ?? '',
       // Leaves the thread as it is and goes back to the project's coordinator.
@@ -2163,7 +2172,8 @@ function appendEvent(event, scroll = true) {
   } else if (event.kind === 'question') {
     nodes.push(questionCard(event.ticket_id, data));
   } else if (event.kind === 'note') {
-    nodes.push(h('div', { class: 'note' }, threadRefs(data.text)));
+    const short = shortNote(data.text);
+    nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
   } else if (event.kind === 'error') {
     nodes.push(h('div', { class: 'note error' }, data.text));
   } else if (event.kind === 'claude') {
@@ -2187,19 +2197,22 @@ function appendEvent(event, scroll = true) {
     } else if (data.type === 'result') {
       // Tool calls stay out of the chat; each turn gets one collapsed line listing them.
       const acts = view.turnActions;
-      const bits = [data.is_error ? 'Turn failed' : 'Turn finished'];
-      if (data.duration_ms) bits.push(`${Math.round(data.duration_ms / 1000)}s`);
+      const bits = [];
+      if (data.duration_ms) bits.push(shortDuration(data.duration_ms));
       if (acts.length) bits.push(`${acts.length} action${acts.length === 1 ? '' : 's'}`);
-      if (data.total_cost_usd) bits.push(`$${data.total_cost_usd.toFixed(2)}`);
+      const title = [data.is_error ? 'Turn failed' : 'Turn finished', ...bits, data.total_cost_usd ? `$${data.total_cost_usd.toFixed(2)}` : ''].filter(Boolean).join(' · ');
+      const summary = [view.branchEl, h('span', { class: 'bits', title },
+        h('span', { class: data.is_error ? 'fail' : 'ok', 'aria-label': data.is_error ? 'Turn failed' : 'Turn finished' }, data.is_error ? '✗' : '✓'),
+        ` ${bits.join(' · ')}`)];
       // The branch status rides on the newest turn's line, so it moves down as turns finish.
       if (acts.length) {
-        const end = h('details', { class: 'turn-end' }, h('summary', {}, view.branchEl, bits.join(' · ')));
+        const end = h('details', { class: 'turn-end' }, h('summary', {}, ...summary));
         end.addEventListener('toggle', () => {
           if (end.open && !end.querySelector('.phases')) end.append(...phaseRows(acts, false));
         });
         nodes.push(end);
       } else {
-        nodes.push(h('div', { class: 'turn-end' }, view.branchEl, bits.join(' · ')));
+        nodes.push(h('div', { class: 'turn-end' }, ...summary));
       }
       if (data.is_error && data.result) nodes.push(h('div', { class: 'note error' }, data.result));
     }
@@ -2210,9 +2223,30 @@ function appendEvent(event, scroll = true) {
   if (scroll && followChat) scrollToBottom();
 }
 
+/** "45s", "1m 47s", "12m", "1h 5m". */
+function shortDuration(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  if (s < 600) return `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ''}`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  return `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
+}
+
 /** An object URL for base64 image data (the page's CSP allows blob: images but not data: ones). */
 function base64Url(mediaType, data) {
   return URL.createObjectURL(new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: mediaType }));
+}
+
+/** Short wording for the notes the server writes often; anything else stays as it is. */
+function shortNote(text) {
+  let m;
+  if (/^Restored this thread's Claude session from the app's database/.test(text)) return '↺ Session restored';
+  if (text === 'The server restarted during this turn, so it was interrupted.') return '⚠ Interrupted by a server restart';
+  if ((m = text.match(/^(.+?) renamed this ticket from ".*" to "(.*)"\.$/s))) return `✎ ${m[1] === 'Claude' ? 'Renamed' : `${m[1]} renamed it`} “${m[2]}”`;
+  if ((m = text.match(/^(.+?) set this thread to (.+?) (from the next turn|from now on)\.$/))) return `⚙ ${m[1]}: ${m[2]}${m[3] === 'from the next turn' ? ' next turn' : ''}`;
+  if ((m = text.match(/^(.+?) (updated|cleared) the project instructions; they apply from each thread's next turn\.$/))) return `📋 ${m[1]} ${m[2]} the project instructions`;
+  if ((m = text.match(/^(.+?) reopened this ticket\.$/))) return `↻ ${m[1]} reopened it`;
+  return text;
 }
 
 // ---------- question cards ----------
@@ -2344,8 +2378,8 @@ function renderTyping() {
   const busy = t.status === 'running' && last && !last.result;
   el.replaceChildren(
     h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
-    h('span', {}, busy ? `Claude is working · ${actionLabel(last.block)}` : 'Claude is thinking…'),
-    t.queued ? h('span', { class: 'muted' }, ` · ${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn`) : '');
+    h('span', { class: 'what' }, busy ? `Claude is working · ${actionLabel(last.block)}` : 'Claude is thinking…'),
+    t.queued ? h('span', { class: 'muted', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, ` · ${t.queued} queued`) : '');
   if (wasHidden && followChat) scrollToBottom();
 }
 

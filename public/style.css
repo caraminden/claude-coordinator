@@ -228,13 +228,32 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .msg .images img { display: block; max-height: 14rem; max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
 
 /* Project view: artifacts shelf and threads sidebar beside the main panel */
-.split { display: grid; grid-template-columns: minmax(180px, 230px) minmax(230px, 300px) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+.split { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+.shelf[open] { width: clamp(180px, 16vw, 230px); }
+.sidebar[open] { width: clamp(230px, 20vw, 300px); }
 /* Sticky can't move past the bottom of .split, which ends main's 3rem bottom padding above the
    page end. Keep the side panels short enough (1rem top gap + 3rem) that the chat reaching the bottom
    never drags them up, and keep wheel/touch scrolls inside them from chaining to the page. */
 .sidebar, .shelf { position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
-.sidebar > summary, .shelf > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; }
-.sidebar > summary { display: none; }
+/* Panel headers double as collapse toggles: a row with ‹ when open, a slim vertical tab with › when closed. */
+.sidebar > summary, .shelf > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; list-style: none; display: flex; align-items: center; gap: 0.4rem; user-select: none; }
+.sidebar > summary::-webkit-details-marker, .shelf > summary::-webkit-details-marker { display: none; }
+.sidebar > summary .label, .shelf > summary .label { flex: 1; }
+.sidebar > summary::after, .shelf > summary::after { content: '‹'; color: var(--muted); font-size: 1.2em; line-height: 1; padding: 0 0.25rem; border-radius: 4px; }
+.sidebar > summary:hover::after, .shelf > summary:hover::after { color: var(--accent); }
+.sidebar:not([open]), .shelf:not([open]) { width: 2rem; padding-right: 0; border-right: 0; }
+.sidebar:not([open]) > summary, .shelf:not([open]) > summary {
+  writing-mode: vertical-rl;
+  flex-direction: row;
+  margin: 0;
+  padding: 0.6rem 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+}
+.sidebar:not([open]) > summary:hover, .shelf:not([open]) > summary:hover { border-color: var(--accent); color: var(--ink); }
+.sidebar:not([open]) > summary::after, .shelf:not([open]) > summary::after { content: '›'; writing-mode: horizontal-tb; order: -1; margin-bottom: 0.3rem; }
 .shelf { border-right: 1px solid var(--line); padding-right: 0.9rem; }
 .shelf .column { margin-top: 1rem; }
 .shelf .small { font-size: 0.82em; margin: 0; }
@@ -300,7 +319,13 @@ button.pin.on { color: var(--accent); }
 .chat { min-width: 0; }
 /* Medium screens: stack the artifacts and threads in one column so the main panel keeps its width. */
 @media (min-width: 801px) and (max-width: 1150px) {
-  .split { grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); }
+  /* The main panel spans both rows; let the lower row take its extra height so the shelf stays snug. */
+  .split { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .shelf[open], .sidebar[open] { width: clamp(220px, 24vw, 280px); }
+  /* Stacked in one column: a closed panel beside an open one is just a header row. */
+  .split:has(> details[open]) > details:not([open]) { width: auto; }
+  .split:has(> details[open]) > details:not([open]) > summary { writing-mode: horizontal-tb; border: 0; background: none; padding: 0; margin-bottom: 0.5rem; }
+  .split:has(> details[open]) > details:not([open]) > summary::after { content: '›'; order: 0; margin: 0; }
   .split > .shelf { grid-column: 1; grid-row: 1; position: static; max-height: none; border-right: 0; padding-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
   .split > .sidebar { grid-column: 1; grid-row: 2; position: static; max-height: none; }
   .split > section { grid-column: 2; grid-row: 1 / span 2; }
@@ -309,7 +334,10 @@ button.pin.on { color: var(--accent); }
   .split { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   .sidebar, .shelf { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
   .shelf { border-right: 0; padding-right: 0; }
-  .sidebar > summary { display: list-item; }
+  .shelf[open], .sidebar[open], .sidebar:not([open]), .shelf:not([open]) { width: auto; }
+  .sidebar:not([open]) > summary, .shelf:not([open]) > summary { writing-mode: horizontal-tb; border: 0; background: none; padding: 0; }
+  .sidebar > summary::after, .shelf > summary::after { content: '▾'; }
+  .sidebar:not([open]) > summary::after, .shelf:not([open]) > summary::after { content: '▸'; order: 0; margin: 0; }
 }
 
 .update-banner {

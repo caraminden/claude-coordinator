@@ -249,6 +249,14 @@ document.addEventListener('load', (e) => {
   if (followChat && e.target.tagName === 'IMG' && e.target.closest('#log')) scrollToBottom();
 }, true);
 
+/** Which side panels (artifacts shelf, threads list) are open on wide screens. */
+function loadPanelState() {
+  try { return JSON.parse(localStorage.getItem('cc-panels')) ?? {}; } catch { return {}; }
+}
+function savePanelState(state) {
+  try { localStorage.setItem('cc-panels', JSON.stringify(state)); } catch {}
+}
+
 /** Where each thread was scrolled to, so coming back lands in the same place. */
 function saveScroll() {
   if (view?.kind !== 'project' || !view.id) return;
@@ -587,22 +595,28 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
         : chatId !== coordinator.id ? [projectLink, ' / ', `#${ticket.number ?? ticket.id}`]
           : [project.name]));
 
-  // On phones the side panels fold away above the main panel; on wider screens the thread list
-  // is always open and its toggle is hidden by CSS.
+  // Both side panels collapse to a slim tab so the main panel can take their room. On wider
+  // screens that choice is remembered; on phones they fold away above the main panel instead.
   const narrowQuery = matchMedia('(max-width: 800px)');
-  const shelf = h('details', { class: 'shelf', open: !narrowQuery.matches },
-    h('summary', {}, 'Artifacts', h('span', { class: 'muted', id: 'artifact-count' })),
+  const panelOpen = (name) => !narrowQuery.matches && loadPanelState()[name] !== false;
+  const shelf = h('details', { class: 'shelf', open: panelOpen('shelf') },
+    h('summary', { title: 'Show or hide artifacts' }, h('span', { class: 'label' }, 'Artifacts', h('span', { class: 'muted', id: 'artifact-count' }))),
     h('div', { id: 'artifact-shelf' }));
-  const sidebar = h('details', { class: 'sidebar', open: !narrowQuery.matches },
-    h('summary', {}, 'Threads'),
+  const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
+    h('summary', { title: 'Show or hide threads' }, h('span', { class: 'label' }, 'Threads')),
     newTicketForm(projectId),
     h('div', { id: 'threads' }));
-  // Don't hide a half-written new thread behind a collapsed sidebar on phones.
+  // Don't hide a half-written new thread behind a collapsed sidebar.
   if (sidebar.querySelector('details.new').open) sidebar.open = true;
+  for (const [name, el] of [['shelf', shelf], ['threads', sidebar]]) {
+    el.addEventListener('toggle', () => {
+      if (!narrowQuery.matches) savePanelState({ ...loadPanelState(), [name]: el.open });
+    });
+  }
   narrowQuery.onchange = () => {
     if (narrowQuery.matches) return;
-    sidebar.open = true;
-    shelf.open = true;
+    shelf.open = panelOpen('shelf');
+    sidebar.open = panelOpen('threads');
   };
   const section = main.kind === 'artifacts' ? artifactBrowser()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)

@@ -280,7 +280,22 @@ button.pin.on { color: var(--accent); }
 .artifact-media { display: block; max-width: 100%; max-height: 75vh; border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); }
 .artifact-frame { width: 100%; height: 75vh; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .artifact-text { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.msg.doc { padding: 1rem 1.25rem; }
+.msg.doc { padding: 1rem 1.5rem 1.5rem; line-height: 1.6; max-width: 60rem; }
+.msg.doc h1 { font-size: 1.6rem; margin: 0.6rem 0 0.8rem; }
+.msg.doc h2 { font-size: 1.3rem; margin: 1.8rem 0 0.6rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--line); }
+.msg.doc h3 { font-size: 1.1rem; margin: 1.4rem 0 0.5rem; }
+.msg.doc h4, .msg.doc h5, .msg.doc h6 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
+.msg.doc p { margin: 0.6rem 0; }
+.msg.doc ul, .msg.doc ol { padding-left: 1.4rem; margin: 0.5rem 0; }
+.msg.doc li { margin: 0.2rem 0; }
+.msg.doc img { display: block; max-width: 100%; margin: 0.75rem 0; border-radius: 6px; border: 1px solid var(--line); background: var(--code-bg); }
+.msg.doc blockquote { margin: 0.6rem 0; padding: 0.1rem 0.9rem; border-left: 3px solid var(--line); color: var(--muted); }
+.msg.doc hr { border: 0; border-top: 1px solid var(--line); margin: 1.2rem 0; }
+.msg.doc .link { text-decoration: underline dotted; }
+.msg.doc .table-wrap { overflow-x: auto; margin: 0.75rem 0; }
+.msg.doc table { border-collapse: collapse; font-size: 0.9em; }
+.msg.doc th, .msg.doc td { border: 1px solid var(--line); padding: 0.3rem 0.55rem; text-align: left; vertical-align: top; overflow-wrap: normal; }
+.msg.doc th { background: var(--code-bg); }
 .sidebar details.new { margin: 0 0 1rem; }
 .sidebar details.new form { margin-top: 0.5rem; }
 .sidebar .column { margin-top: 1rem; }

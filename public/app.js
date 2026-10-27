@@ -357,24 +357,28 @@ setInterval(reloadWhenIdle, 2000);
 
 let usage = null;
 
-/** The weekly-limit bar in the top bar, fed by usage reports from Claude turns. */
+/** A weekly-limit bar; one lives in the top bar and one in a project's side panel. */
+const usageMeter = () => h('div', { class: 'usage', hidden: true },
+  h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })));
+
+/** Fill in every usage bar from the latest usage report from Claude turns. */
 function renderUsage(next = usage) {
   usage = next;
-  const el = document.getElementById('usage');
   const week = usage?.weekly;
-  el.hidden = !week;
-  if (!week) return;
-  const pct = Math.round(Math.min(1, Math.max(0, week.utilization)) * 100);
-  el.querySelector('.label').textContent = `Week ${pct}%`;
-  // CSS turns this into a width (top bar) or a height (side rail).
-  el.style.setProperty('--pct', `${pct}%`);
-  el.dataset.level = week.status && week.status !== 'allowed' ? 'error' : pct >= 90 ? 'error' : pct >= 75 ? 'warn' : '';
-  const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-  el.title = [
-    `Weekly usage of this Claude account: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
-    usage.session ? `5-hour window: ${Math.round(usage.session.utilization * 100)}%${usage.session.resetsAt ? `, resets ${when(usage.session.resetsAt)}` : ''}` : null,
-    `As of the last turn, ${ago(usage.updatedAt)}`,
-  ].filter(Boolean).join('\n');
+  for (const el of document.querySelectorAll('.usage')) {
+    el.hidden = !week;
+    if (!week) continue;
+    const pct = Math.round(Math.min(1, Math.max(0, week.utilization)) * 100);
+    el.querySelector('.label').textContent = `Week ${pct}%`;
+    el.style.setProperty('--pct', `${pct}%`);
+    el.dataset.level = week.status && week.status !== 'allowed' ? 'error' : pct >= 90 ? 'error' : pct >= 75 ? 'warn' : '';
+    const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+    el.title = [
+      `Weekly usage of this Claude account: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
+      usage.session ? `5-hour window: ${Math.round(usage.session.utilization * 100)}%${usage.session.resetsAt ? `, resets ${when(usage.session.resetsAt)}` : ''}` : null,
+      `As of the last turn, ${ago(usage.updatedAt)}`,
+    ].filter(Boolean).join('\n');
+  }
 }
 
 // Phones and sleeping laptops drop connections quietly; recheck when the page comes back.
@@ -562,10 +566,11 @@ async function showArtifact(artifactId) {
  * coordinator (or the chosen ticket), the artifact browser, or one artifact.
  */
 async function showProject(projectId, main = { kind: 'chat', number: null }) {
-  const [{ project, coordinator, tickets }, artifacts] = await Promise.all([
+  const [{ project, coordinator, tickets }, artifacts, projects] = await Promise.all([
     api(`/api/projects/${projectId}`),
     // An empty shelf beats a broken page if the server is older than this front end.
     api(`/api/projects/${projectId}/artifacts`).catch(() => []),
+    api('/api/projects').catch(() => []),
   ]);
   let chatId = null;
   if (main.kind === 'chat') {
@@ -599,8 +604,18 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   // screens that choice is remembered; on phones they fold away above the main panel instead.
   const narrowQuery = matchMedia('(max-width: 800px)');
   const panelOpen = (name) => !narrowQuery.matches && loadPanelState()[name] !== false;
+  // The overview panel: account and usage (standing in for the top bar, which wider screens hide
+  // on project pages), the projects, then this project's pinned and recent artifacts.
   const shelf = h('details', { class: 'shelf', open: panelOpen('shelf') },
-    h('summary', { title: 'Show or hide artifacts' }, h('span', { class: 'label' }, 'Artifacts', h('span', { class: 'muted', id: 'artifact-count' }))),
+    h('summary', { title: 'Show or hide the overview' }, h('span', { class: 'label' }, project.name)),
+    h('section', { class: 'account' },
+      h('div', { class: 'row' }, h('strong', {}, me), h('span', { class: 'spacer' }),
+        h('button', { class: 'secondary small', onclick: logout }, 'Sign out')),
+      usageMeter()),
+    h('section', { class: 'column' },
+      h('h3', {}, 'Projects', h('span', { class: 'spacer' }), h('a', { class: 'more', href: '#/' }, 'All')),
+      projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
+        h('span', { class: 'name' }, p.name)))),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     h('summary', { title: 'Show or hide threads' }, h('span', { class: 'label' }, 'Threads')),
@@ -625,6 +640,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   // .panels only becomes a box of its own when both panels are collapsed, so their tabs can share
   // one slim sticky column; otherwise the panels sit directly in the grid.
   app.replaceChildren(h('div', { class: 'split' }, h('div', { class: 'panels' }, shelf, sidebar), section));
+  renderUsage();
   renderShelf();
   renderSidebar();
   if (main.kind === 'artifacts') renderArtifactResults();
@@ -822,7 +838,7 @@ function ticketCard(t, href = threadHref(t)) {
 
 // ---------- artifacts ----------
 
-const RECENT_ARTIFACTS = 12;
+const RECENT_ARTIFACTS = 5;
 const MAX_TEXT_PREVIEW = 2 * 1024 * 1024;
 const ARTIFACT_FILTERS = [
   { key: 'all', label: 'All', match: () => true },
@@ -898,21 +914,20 @@ function renderShelf() {
   const all = view.artifacts;
   const pinned = all.filter((a) => a.pinned_at).sort((a, b) => b.pinned_at - a.pinned_at);
   const recent = all.filter((a) => !a.pinned_at && !a.missing).slice(0, RECENT_ARTIFACTS);
-  document.getElementById('artifact-count').textContent = all.length ? ` · ${all.length}` : '';
   const item = (a) => h('a', { class: `artifact-item${view.artifactId === a.id ? ' active' : ''}${a.missing ? ' missing' : ''}`, href: `#/a/${a.id}`, title: a.path },
     h('span', { class: `badge k-${a.kind}` }, extOf(a)),
     h('span', { class: 'text' },
       h('span', { class: 'name' }, a.name),
       h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? 'Coordinator' : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
   el.replaceChildren(
-    h('a', { class: `view-all${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts` },
-      'Browse all', all.length ? h('span', { class: 'count' }, all.length) : ''),
     h('section', { class: 'column' },
       h('h3', {}, 'Pinned', pinned.length ? h('span', { class: 'count' }, pinned.length) : ''),
       pinned.length ? pinned.map(item) : h('p', { class: 'muted small' }, 'Pin artifacts with ☆ to keep them here.')),
     h('section', { class: 'column' },
-      h('h3', {}, 'Recent'),
-      recent.length ? recent.map(item) : h('p', { class: 'muted small' }, 'Documents, pages and canvases that threads create show up here.')));
+      h('h3', {}, 'Recent artifacts'),
+      recent.length ? recent.map(item) : h('p', { class: 'muted small' }, 'Documents, pages and canvases that threads create show up here.')),
+    h('a', { class: `view-all${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts` },
+      'Browse all artifacts', all.length ? h('span', { class: 'count' }, all.length) : ''));
 }
 
 /** Main panel: every artifact in the project, searchable, with pin toggles. */

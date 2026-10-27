@@ -2495,8 +2495,14 @@ function questionCard(ticketId, card) {
   return el;
 }
 
+// Messages the app sends a thread about its pull request (see src/github.ts).
+const GITHUB_NAME = 'GitHub';
+
 function userBubble(author, text, imageSrcs) {
-  const msg = h('div', { class: 'msg user' }, h('div', { class: 'who' }, author));
+  const github = author === GITHUB_NAME;
+  const msg = h('div', { class: github ? 'msg user github' : 'msg user' }, h('div', { class: 'who' }, author));
+  // GitHub's messages end lines with bare URLs, which Markdown alone would leave as text.
+  if (github && text) text = text.replace(/(^|\s)(https?:\/\/[^\s<>]*[^\s<>.,;:!?'")\]])/g, '$1[$2]($2)');
   if (text) msg.append(markdown(text));
   if (imageSrcs.length) {
     msg.append(h('div', { class: 'images' }, imageSrcs.map((src) =>

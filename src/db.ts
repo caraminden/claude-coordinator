@@ -173,6 +173,13 @@ CREATE TABLE IF NOT EXISTS machines (
   created_at INTEGER NOT NULL,
   last_seen_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS github_seen (
+  ticket_id INTEGER NOT NULL REFERENCES tickets(id),
+  key TEXT NOT NULL,
+  delivered INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (ticket_id, key)
+);
 `;
 
 /** Columns added after the first release, for databases created before them. */
@@ -314,6 +321,7 @@ export class Store {
     this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM github_seen WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
@@ -514,6 +522,42 @@ export class Store {
         WHERE t.project_id = ? AND e.kind IN ('user_message', 'claude') AND e.data LIKE ? ESCAPE '\\'
         ORDER BY e.id DESC LIMIT ?`)
       .all(projectId, like, limit) as unknown as EventRow[];
+  }
+
+  /** PR events already handled for a ticket (keys starting with `prefix`, which is stripped). */
+  githubSeen(ticketId: number, prefix: string): string[] {
+    const like = `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    return (this.db.prepare("SELECT key FROM github_seen WHERE ticket_id = ? AND key LIKE ? ESCAPE '\\'").all(ticketId, like) as { key: string }[])
+      .map((r) => r.key.slice(prefix.length));
+  }
+
+  /** Record PR events as handled; `delivered` says whether any were sent to the ticket. */
+  addGithubSeen(ticketId: number, keys: string[], delivered: boolean) {
+    const insert = this.db.prepare('INSERT OR IGNORE INTO github_seen (ticket_id, key, delivered, created_at) VALUES (?, ?, ?, ?)');
+    const now = Date.now();
+    this.db.exec('BEGIN');
+    try {
+      for (const k of keys) insert.run(ticketId, k, delivered ? 1 : 0, now);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /**
+   * When a ticket's turns since `since` started and ended: a turn starts with Claude's init event
+   * and ends with its result, an error, or a stop or restart note.
+   */
+  turnMarks(ticketId: number, since: number): { at: number; start: boolean }[] {
+    const rows = this.db
+      .prepare(`SELECT created_at, kind, data FROM events WHERE ticket_id = ? AND created_at >= ? AND (
+          (kind = 'claude' AND (data LIKE '{"type":"system","subtype":"init"%' OR data LIKE '{"type":"result"%'))
+          OR kind = 'error'
+          OR (kind = 'note' AND (data LIKE '{"text":"Stopped by user.%' OR data LIKE '{"text":"The server restarted during this turn%')))
+        ORDER BY id`)
+      .all(ticketId, since) as { created_at: number; kind: string; data: string }[];
+    return rows.map((r) => ({ at: r.created_at, start: r.kind === 'claude' && r.data.startsWith('{"type":"system"') }));
   }
 
   getSetting<T>(key: string): T | null {

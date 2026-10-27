@@ -30,6 +30,10 @@ runners on other people's own Claude logins.
 - Images pasted, dropped or attached in the composer are shrunk in the browser
   if needed, saved under `projects/<id>/uploads/<ticket>/`, and sent to Claude
   as image blocks alongside the message text.
+- `projects/<id>/shared/project/` is a folder every thread and the coordinator can read and
+  write (`--add-dir`, plus a line in the system prompt) for handoffs, specs and notes. Its
+  documents and pages show as a "Shared" group on the artifacts shelf. The coordinator can
+  also read and write the repo's Claude Code memory folder, still with no shell.
 - Opening a project creates its coordinator ticket on first visit. Its turns
   run with an extra MCP server (`src/mcp.ts`) whose tools call this app's API
   with a bearer token that only reaches that project's tickets (never the

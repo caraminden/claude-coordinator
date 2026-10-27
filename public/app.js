@@ -1451,15 +1451,15 @@ function renderShelf() {
     h('span', { class: 'text' },
       h('span', { class: 'name' }, a.name),
       h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? 'Coordinator' : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
-  const sub = (title, count, items, empty) => h('div', { class: 'sub' },
+  const sub = (title, count, items, empty, render = item) => h('div', { class: 'sub' },
     h('h4', {}, title, count ? h('span', { class: 'count' }, count) : ''),
-    items.length ? items.map(item) : h('p', { class: 'muted small' }, empty));
+    items.length ? items.map(render) : h('p', { class: 'muted small' }, empty));
   el.replaceChildren(h('section', { class: 'column' },
     h('h3', {}, 'Artifacts', h('span', { class: 'spacer' }),
       h('a', { class: `browse${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts`, title: `Browse all ${all.length} artifacts` }, 'Browse')),
     sub('Pinned', pinned.length, pinned, 'Pin artifacts with ☆ to keep them here.'),
     sub('Recent', 0, recent, 'Documents, pages and canvases that threads create show up here.'),
-    sub('Shared', view.shared.length, view.shared.slice(0, RECENT_SHARED).map(sharedItem), 'Handoffs and notes in the project\'s shared folder show up here.')));
+    sub('Shared', view.shared.length, view.shared.slice(0, RECENT_SHARED), 'Handoffs and notes in the project\'s shared folder show up here.', sharedItem)));
 }
 
 /** A document or page in the project's shared folder, as a row of the artifacts panel. */

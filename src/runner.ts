@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
-import { applyEvent, createProgress, progressLine } from '../public/progress.js';
+import { actionLabel, applyEvent, createProgress, isWorkTool, progressLine } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
 const MCP_SERVER = join(import.meta.dirname, 'mcp.ts');
@@ -99,7 +99,8 @@ function describeActivity(ev: any): string | null {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
     if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) return b.text.trim().split('\n')[0].replace(/\*\*|`/g, '').slice(0, 160);
-    if (b.type === 'tool_use') return `Using ${b.name}`;
+    // The same plain words as the readout ("Ran the tests", "Edited app.js"), not "Using Bash".
+    if (b.type === 'tool_use' && isWorkTool(b.name)) return actionLabel(b);
   }
   return null;
 }
@@ -169,6 +170,17 @@ export class Runner {
         if (t.status === 'running') {
           this.emit(t.id, 'note', { text: 'The server restarted during this turn, so it was interrupted.' });
           this.setStatus(t.id, 'idle');
+        }
+        if (/^Using \w+$/.test(t.last_activity ?? '')) {
+          // Reword lines saved before activity was described in plain words.
+          const events = this.store.listEvents(t.id);
+          for (let i = events.length - 1; i >= 0; i--) {
+            const activity = events[i].kind === 'claude' ? describeActivity(JSON.parse(events[i].data)) : null;
+            if (activity) {
+              this.store.setLastActivity(t.id, activity);
+              break;
+            }
+          }
         }
       }
     }

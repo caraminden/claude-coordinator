@@ -161,6 +161,11 @@ export class Store {
     this.db.prepare(`UPDATE tickets SET ${sets}, updated_at = ? WHERE id = ?`).run(...values, Date.now(), id);
   }
 
+  /** Change a ticket's activity line without counting it as new activity. */
+  setLastActivity(id: number, text: string) {
+    this.db.prepare('UPDATE tickets SET last_activity = ? WHERE id = ?').run(text, id);
+  }
+
   addEvent(ticketId: number, kind: string, data: unknown): EventRow {
     const now = Date.now();
     const json = JSON.stringify(data);

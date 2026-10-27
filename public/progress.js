@@ -7,6 +7,9 @@ export const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskList', 'Task
 /** Housekeeping tools (loading other tools' schemas) that are not shown as actions either. */
 const HIDDEN_TOOLS = new Set(['ToolSearch']);
 
+/** Whether a tool call is real work to show, rather than plan bookkeeping or housekeeping. */
+export const isWorkTool = (name) => !TASK_TOOLS.has(name) && !HIDDEN_TOOLS.has(name);
+
 export function createProgress() {
   return {
     tasks: [], // { id, subject, activeForm, status: 'pending' | 'in_progress' | 'completed', actions, note }
@@ -236,7 +239,7 @@ export function applyEvent(p, kind, data) {
         p.tasks = input.todos.map((t, n) => ({
           id: `todo-${n}`, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0,
         }));
-      } else if (!TASK_TOOLS.has(block.name) && !HIDDEN_TOOLS.has(block.name)) {
+      } else if (isWorkTool(block.name)) {
         const task = p.tasks.find((t) => t.status === 'in_progress');
         if (task) task.actions++;
         p.turnActions++;

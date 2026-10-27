@@ -572,6 +572,7 @@ async function route() {
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/instructions$/))) await showProject(Number(m[1]), { kind: 'instructions' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
     else if ((m = hash.match(/^#\/f\/(\d+)\/(.+)$/))) await showFile(Number(m[1]), decodeURIComponent(m[2]));
@@ -751,7 +752,7 @@ function chatView(chatId, ticket) {
     typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite' }), // below the chat log
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
     pendingMessages: [], // { el, text } shown on send, replaced by the server's copy
-    cards: new Map(), // question card id -> { markAnswered }
+    cards: new Map(), // question card id -> { markAnswered }; approval card id -> { settle }
     branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
   };
 }
@@ -763,6 +764,7 @@ function renderCrumbs(main) {
   crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', ...(
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
       : main.kind === 'instructions' ? [projectLink, ' / ', 'Instructions']
+      : main.kind === 'approvals' ? [projectLink, ' / ', 'Approvals']
       : main.kind === 'machines' ? [projectLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Coordinator' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
@@ -822,6 +824,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
       projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
         h('span', { class: 'name' }, p.name)))),
     h('div', { id: 'instructions-shelf' }),
+    h('div', { id: 'approvals-shelf' }),
     h('div', { id: 'machines-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
@@ -845,6 +848,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   };
   const section = main.kind === 'artifacts' ? artifactBrowser()
     : main.kind === 'instructions' ? instructionsEditor()
+    : main.kind === 'approvals' ? approvalsEditor()
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'file' ? fileViewer(main.ticket, main.file)
@@ -855,6 +859,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   app.replaceChildren(h('div', { class: 'split' }, h('div', { class: 'panels' }, shelf, sidebar), section));
   renderUsage();
   renderInstructionsShelf();
+  renderApprovalsShelf();
   renderMachinesShelf();
   renderShelf();
   renderSidebar();
@@ -1265,6 +1270,7 @@ function rowState(t) {
     const days = Date.now() - t.updated_at >= 86_400_000;
     return h('b', { class: days ? 'st' : 'm' }, shortAgo(t.updated_at));
   };
+  if (t.approvals) return { rank: 0, cls: 'q', cell: ['✋ ', waited()], label: 'Waiting for your approval' };
   if (t.status === 'running' || t.status === 'new') return { rank: 1, cls: 'w', cell: [`●${steps}`], label: 'Claude is working' };
   if (t.status === 'error') return { rank: 0, cls: 'st', cell: ['⚠️'], label: 'Stuck: the last turn failed' };
   if (t.status === 'closed') return { rank: 5, cls: 'm', cell: ['✓'], label: 'Closed' };
@@ -1602,6 +1608,11 @@ function onProjectUpdate(project) {
   if (view?.kind !== 'project' || view.projectId !== project.id) return;
   view.project = project;
   renderInstructionsShelf();
+  renderApprovalsShelf();
+  for (const [id, key] of [['approval-rules', 'approval_rules'], ['plugin-dirs', 'plugin_dirs']]) {
+    const el = document.getElementById(id);
+    if (el && !el.hasAttribute('data-draft')) el.value = project[key];
+  }
   const text = document.getElementById('instructions-text');
   // Someone else saved: show their text unless this tab has edits of its own.
   if (text && !text.hasAttribute('data-draft')) text.value = project.instructions;
@@ -1623,6 +1634,94 @@ function renderInstructionsShelf() {
         h('span', { class: 'name' }, first ?? ''),
         h('span', { class: 'meta' }, `${count(text.length)} chars${p.instructions_updated_by ? ` · ${p.instructions_updated_by}, ${ago(p.instructions_updated_at)}` : ''}`))
       : h('p', { class: 'muted small' }, 'Standing rules every thread and the coordinator follow. Import them from Claude Code.')));
+}
+
+const splitLines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+
+/** Overview panel: which tool calls need a person's OK, and which plugin folders threads load. */
+function renderApprovalsShelf() {
+  const el = document.getElementById('approvals-shelf');
+  if (!el) return;
+  const p = view.project;
+  const rules = splitLines(p.approval_rules);
+  const dirs = splitLines(p.plugin_dirs);
+  const href = `#/p/${view.projectId}/approvals`;
+  el.replaceChildren(h('section', { class: 'column' },
+    h('h3', {}, 'Needs approval', h('span', { class: 'spacer' }),
+      h('a', { class: `browse${view.main === 'approvals' ? ' active' : ''}`, href }, rules.length || dirs.length ? 'Edit' : 'Add')),
+    rules.length
+      ? h('a', { class: 'rule-chips', href }, rules.map((r) => h('code', { class: 'rule' }, r)))
+      : h('p', { class: 'muted small' }, 'Nothing: threads run every tool without asking.'),
+    dirs.length ? h('p', { class: 'muted small' }, `Plugins: ${dirs.join(', ')}`) : ''));
+}
+
+/** Main panel: the project's approval rules and plugin folders. */
+function approvalsEditor() {
+  const p = view.project;
+  const field = (id, key, placeholder) => {
+    const t = h('textarea', { id, class: 'instructions-text settings-list', spellcheck: 'false', rows: 5, placeholder });
+    t.value = p[key] ?? '';
+    return t;
+  };
+  const rules = field('approval-rules', 'approval_rules', 'Bash(gh pr merge:*)\nmcp__*__merge_pull_request');
+  const dirs = field('plugin-dirs', 'plugin_dirs', 'tools/mods/delve');
+  const status = h('span', { class: 'muted', role: 'status' });
+  const save = h('button', { type: 'button' }, 'Save');
+  const discard = h('button', { type: 'button', class: 'secondary' }, 'Discard');
+  const same = (a, b) => splitLines(a).join('\n') === splitLines(b).join('\n');
+  const sync = () => {
+    let dirty = false;
+    for (const [t, key] of [[rules, 'approval_rules'], [dirs, 'plugin_dirs']]) {
+      // Marked as a draft only while it differs, so someone else's save still shows otherwise.
+      const d = !same(t.value, view.project[key]);
+      t.toggleAttribute('data-draft', d);
+      dirty ||= d;
+    }
+    save.disabled = discard.disabled = !dirty;
+  };
+  for (const t of [rules, dirs]) t.addEventListener('input', () => {
+    status.textContent = '';
+    sync();
+  });
+  save.onclick = async () => {
+    save.disabled = true;
+    status.textContent = 'Saving…';
+    try {
+      view.project = await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { approval_rules: rules.value, plugin_dirs: dirs.value } });
+      rules.value = view.project.approval_rules;
+      dirs.value = view.project.plugin_dirs;
+      status.textContent = 'Saved. Threads pick this up on their next turn.';
+      renderApprovalsShelf();
+    } catch (err) {
+      status.textContent = err.message;
+    }
+    sync();
+  };
+  discard.onclick = () => {
+    rules.value = view.project.approval_rules ?? '';
+    dirs.value = view.project.plugin_dirs ?? '';
+    status.textContent = '';
+    sync();
+  };
+  const section = h('section', { class: 'artifacts-main instructions-main' },
+    h('div', { class: 'ticket-head' },
+      h('div', { class: 'row' }, h('h2', {}, 'Approvals and plugins'), h('span', { class: 'spacer' }),
+        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the coordinator', 'aria-label': 'Close' }, '×')),
+      h('div', { class: 'meta' }, 'Threads in this project use these from their next turn. The coordinator is not affected.')),
+    h('h3', { class: 'settings-label' }, 'Needs approval'),
+    h('p', { class: 'muted small' },
+      'Claude Code permission rules, one per line. A thread\'s tool call that matches one waits in its chat with Approve and Deny buttons until someone signed in clicks; everything else runs without asking. ',
+      'Examples: ', h('code', {}, 'Bash(gh pr merge:*)'), ', ', h('code', {}, 'mcp__*__merge_pull_request'), '. ',
+      'Bash rules match how a command starts, so they catch mistakes rather than a determined workaround.'),
+    rules,
+    h('h3', { class: 'settings-label' }, 'Plugin folders'),
+    h('p', { class: 'muted small' },
+      'Folders relative to the repo root, one per line, like ', h('code', {}, 'tools/mods/delve'),
+      '. Each thread loads the ones that exist in its worktree as Claude Code plugins (', h('code', {}, '--plugin-dir'), ').'),
+    dirs,
+    h('div', { class: 'row instructions-actions' }, save, discard, status));
+  sync();
+  return section;
 }
 
 function renderInstructionsHead() {
@@ -2311,6 +2410,11 @@ function appendEvent(event, scroll = true) {
     }
   } else if (event.kind === 'question') {
     nodes.push(questionCard(event.ticket_id, data));
+  } else if (event.kind === 'approval') {
+    nodes.push(approvalCard(event.ticket_id, data));
+  } else if (event.kind === 'approval_result') {
+    // The card itself records who decided, or why it expired.
+    view.cards.get(data.id)?.settle(data);
   } else if (event.kind === 'note') {
     const short = shortNote(data.text);
     nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
@@ -2385,8 +2489,70 @@ function shortNote(text) {
   if ((m = text.match(/^(.+?) renamed this ticket from ".*" to "(.*)"\.$/s))) return `✎ ${m[1] === 'Claude' ? 'Renamed' : `${m[1]} renamed it`} “${m[2]}”`;
   if ((m = text.match(/^(.+?) set this thread to (.+?) (from the next turn|from now on)\.$/))) return `⚙ ${m[1]}: ${m[2]}${m[3] === 'from the next turn' ? ' next turn' : ''}`;
   if ((m = text.match(/^(.+?) (updated|cleared) the project instructions; they apply from each thread's next turn\.$/))) return `📋 ${m[1]} ${m[2]} the project instructions`;
+  if ((m = text.match(/^(.+?) set the (approval rules|plugin folders) to: (.*)\. They apply from each thread's next turn\.$/s))) return `🔒 ${m[1]} set the ${m[2]}: ${m[3]}`;
   if ((m = text.match(/^(.+?) reopened this ticket\.$/))) return `↻ ${m[1]} reopened it`;
   return text;
+}
+
+// ---------- approval cards ----------
+
+/** "merge_pull_request (github)" for an MCP tool, else the tool's own name. */
+function toolTitle(name) {
+  const m = name.match(/^mcp__(.+?)__(.+)$/);
+  return m ? `${m[2]} (${m[1]})` : name;
+}
+
+/** "✓ Approved by Cara", "✗ Denied by Cara", "⌛ Expired, not run: …". */
+function approvalOutcome(r) {
+  if (r.state === 'allowed') return `✓ Approved by ${r.by}`;
+  if (r.state === 'denied') return `✗ Denied by ${r.by}`;
+  return `⌛ Expired, not run: ${r.reason}`;
+}
+
+/**
+ * A tool call that matches one of the project's approval rules, waiting for a person. The turn is
+ * paused until someone clicks; a card whose turn ended (stopped, failed, server restart) expires.
+ */
+function approvalCard(ticketId, card) {
+  const input = card.input ?? {};
+  // Show what will actually run: the command for Bash, the path for file tools, else the whole input.
+  const lead = typeof input.command === 'string' ? 'command' : typeof input.file_path === 'string' ? 'file_path' : null;
+  const rest = lead ? Object.fromEntries(Object.entries(input).filter(([k]) => k !== lead && k !== 'description')) : {};
+  const status = h('span', { class: 'muted', role: 'status' });
+  const approve = h('button', { type: 'button', class: 'small' }, 'Approve');
+  const deny = h('button', { type: 'button', class: 'small secondary' }, 'Deny');
+  const el = h('div', { class: 'qcard acard' },
+    h('div', { class: 'who' }, 'Claude asks to run'),
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Needs approval'), toolTitle(card.tool)),
+    typeof input.description === 'string' ? h('div', { class: 'desc' }, input.description) : '',
+    h('pre', { class: 'acmd' }, lead ? input[lead] : JSON.stringify(input, null, 2)),
+    Object.keys(rest).length ? h('pre', { class: 'acmd extra' }, JSON.stringify(rest, null, 2)) : '',
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), deny, approve));
+  let settled = false;
+  const decide = async (allow) => {
+    if (settled) return;
+    approve.disabled = deny.disabled = true;
+    status.textContent = allow ? 'Approving…' : 'Denying…';
+    try {
+      await api(`/api/tickets/${ticketId}/approve`, { method: 'POST', body: { approvalId: card.id, allow } });
+      if (view?.id === ticketId) catchUpEvents().catch(() => {});
+    } catch (ex) {
+      status.textContent = ex.message;
+      // An expired or already-settled card stays shut; anything else can be tried again.
+      if (!/expired|already/.test(ex.message)) approve.disabled = deny.disabled = false;
+    }
+  };
+  approve.addEventListener('click', () => decide(true));
+  deny.addEventListener('click', () => decide(false));
+  view.cards.set(card.id, {
+    settle(r) {
+      settled = true;
+      el.classList.add('answered', `a-${r.state}`);
+      approve.hidden = deny.hidden = true;
+      status.textContent = approvalOutcome(r);
+    },
+  });
+  return el;
 }
 
 // ---------- question cards ----------
@@ -2518,7 +2684,7 @@ function renderTyping() {
   const busy = t.status === 'running' && last && !last.result;
   el.replaceChildren(
     h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
-    h('span', { class: 'what' }, busy ? `Claude is working · ${actionLabel(last.block)}` : 'Claude is thinking…'),
+    h('span', { class: 'what' }, t.approvals ? 'Waiting for someone to approve or deny' : busy ? `Claude is working · ${actionLabel(last.block)}` : 'Claude is thinking…'),
     t.queued ? h('span', { class: 'muted', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, ` · ${t.queued} queued`) : '');
   if (wasHidden && followChat) scrollToBottom();
 }

@@ -181,9 +181,19 @@ function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null,
     'When the thread\'s work is done and should be closed (for example when project instructions say to close after shipping), call the `close_self` tool (mcp__thread) near the end of your turn: the thread closes once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not close a thread whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can close, even if its brief says to close.',
     ...showingFiles(ticket, filesDir),
     ...machineTools(machines),
+    ...approvalNote(project),
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
     ...projectInstructions(project),
   ].join('\n');
+}
+
+/** Which tool calls wait for a person's OK in this project. */
+function approvalNote(project: Project): string[] {
+  const rules = lines(project.approval_rules);
+  if (!rules.length) return [];
+  return [
+    `In this project, tool calls matching these rules wait for a person to approve them in the chat before they run: ${rules.join(', ')}. Make such a call when the work is ready for it; the turn pauses until someone clicks Approve or Deny. If it is denied or expires, do not retry it or reach the same result another way; say what you needed it for.`,
+  ];
 }
 
 /** Which people's computers lend this turn their MCP tools. */

@@ -8,8 +8,7 @@ closed), and any ticket can also be opened and chatted with directly. Each
 ticket is one Claude Code session working in its own git worktree.
 
 This is the proof-of-concept stage: tickets, chat, live output and a board.
-Planned next: approve/deny buttons for permission requests, artifacts, and
-runners on other people's own Claude logins.
+Planned next: runners on other people's own Claude logins.
 
 ## How it works
 
@@ -65,6 +64,7 @@ uses the built-in `node:sqlite`.
 | `server.ts` | HTTP server, JSON API, SSE stream, static files |
 | `src/runner.ts` | Spawns `claude` turns, parses stream-json, queues messages |
 | `src/mcp.ts` | MCP server giving the coordinator its ticket-management tools |
+| `src/approvals.ts` | Approval rules, plugin folders, and the Approve / Deny cards |
 | `src/machines.ts` | Relays MCP traffic between thread turns and connected machines |
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server |
 | `public/machine-agent.mjs` | Agent people run on their own computers to connect them |
@@ -104,7 +104,40 @@ ticket currently uses Cara's account.
 ## Permissions
 
 Headless turns can't show a permission prompt, so every ticket runs in
-`bypassPermissions`: full access as the service user.
+`bypassPermissions`: full access as the service user. Anything that would still
+prompt is denied (`--permission-prompts none`).
+
+**Needs approval.** A project can list Claude Code permission rules, such as
+`Bash(gh pr merge:*)` or `mcp__*__merge_pull_request`, in the overview panel's
+"Needs approval" section (or the coordinator's `set_project_settings` tool). Its
+threads then run with:
+
+```
+--permission-mode bypassPermissions
+--permission-prompts host
+--permission-prompt-tool mcp__thread__approve
+--settings '{"permissions":{"ask":[<the rules>]}}'
+```
+
+`ask` rules are still checked in `bypassPermissions`, so only matching calls
+prompt; everything else runs as before. (`--permission-prompts none` would deny
+them outright, even with a prompt tool.) The prompt goes to the thread MCP
+server's `approve` tool, which posts an Approve / Deny card in the chat and waits
+until someone signed in clicks; the chat records who. Only a person's Approve
+allows the call. Cards live in memory with the turn that asked: Stop, a failed
+turn or a server restart expires them, and an expired card denies. The turn runs
+with `MCP_TOOL_TIMEOUT` raised to a week so a card can wait overnight; a timeout
+also denies. With rules set, anything else that would prompt in
+`bypassPermissions` gets a card too, instead of being denied.
+
+Rules are guardrails against mistakes, not a sandbox: a Bash rule matches how a
+command starts, and a thread with full shell access could reach the same result
+another way. Projects with no rules (the default) run exactly as before. The
+coordinator is never affected.
+
+**Plugin folders.** A project can also list folders relative to the repo root
+(e.g. `tools/mods/delve`); each thread turn gets `--plugin-dir <worktree>/<folder>`
+for every one that exists in its worktree.
 
 The coordinator itself runs in `acceptEdits` with only its MCP tools
 pre-approved, so it can read the code and manage tickets but can't run shell

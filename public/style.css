@@ -602,8 +602,7 @@ a.thread-ref:hover { text-decoration: underline; }
     left: auto; right: 0; border-right: 0; border-left: 1px solid var(--line);
     padding-left: 0.9rem; padding-right: calc(0.9rem + env(safe-area-inset-right, 0px));
   }
-  /* The panels only come out as drawers here: swiped in, or opened with the edge handles below. */
-  .panels > details:not(.as-drawer) { display: none; }
+  /* No gap for the placeholder a pulled-out panel leaves in the grid. */
   .split { gap: 0; }
   .panels > details.as-drawer:focus { outline: none; }
   /* In a drawer the panel's bar closes it. */

@@ -1,6 +1,8 @@
 // Phones: swipe in from the left edge for the overview panel, from the right edge for the threads.
 // The panels are the same .shelf and .sidebar that sit beside the chat on wider screens; on phones
 // they are hidden until one is pulled out as a drawer over the page, and go back when closed.
+// Slim handles on the edges open them with a tap too, since in a Safari tab the edges belong to the
+// browser's back and forward swipes.
 
 export const NARROW = '(max-width: 800px)'; // the mobile layout's breakpoint in style.css
 export const EDGE = 24; // px from the screen edge a swipe has to start in

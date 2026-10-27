@@ -2102,8 +2102,9 @@ function instructionsEditor() {
 
 // ---------- machines ----------
 
-// What the add form suggests running: the Godot MCP server most people use.
-const DEFAULT_MACHINE_COMMAND = 'npx -y @coding-solo/godot-mcp';
+// What the add form suggests running: Delve's Godot MCP, as its dock's Configure button set it up
+// for Claude Code on that computer.
+const DEFAULT_CLAUDE_MCP = 'godot-ai';
 
 function onMachinesUpdate(machines) {
   if (view?.kind !== 'project') return;
@@ -2133,11 +2134,29 @@ function renderMachinesShelf() {
       : h('p', { class: 'muted small' }, 'Lend threads MCP tools from your own computers, like a Godot editor that runs builds.')));
 }
 
-/** The lines to run on a machine to connect it, for its token and MCP server command. */
-function machineSetup(token, command) {
+/** The lines to run on a machine to connect it, for its token and what it should run. */
+function machineSetup(token, kind, what) {
+  const run = kind === 'command' ? `-- ${what}` : `--claude-mcp ${what || DEFAULT_CLAUDE_MCP}`;
   return [
     `curl -fsSLO ${location.origin}/machine-agent.mjs`,
-    `node machine-agent.mjs ${location.origin} ${token} -- ${command || DEFAULT_MACHINE_COMMAND}`,
+    `node machine-agent.mjs ${location.origin} ${token} ${run}`,
+  ].join('\n');
+}
+
+/**
+ * The same for Windows PowerShell, as a task that starts now and at every logon (in that person's
+ * own session, so it can reach an open Godot editor), restarting if it ever stops. No reboot needed.
+ */
+function machineSetupWindows(name, token, kind, what) {
+  const run = kind === 'command' ? `-- ${what}` : `--claude-mcp ${what || DEFAULT_CLAUDE_MCP}`;
+  const task = `Coordinator agent (${name})`;
+  return [
+    '$dir = "$env:USERPROFILE\\coordinator-agent"; New-Item -ItemType Directory -Force $dir | Out-Null',
+    `curl.exe -fsSLo "$dir\\machine-agent.mjs" ${location.origin}/machine-agent.mjs`,
+    `$action = New-ScheduledTaskAction -Execute (Get-Command node).Source -WorkingDirectory $dir -Argument "\`"$dir\\machine-agent.mjs\`" ${location.origin} ${token} ${run.replace(/"/g, '`"')}"`,
+    '$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries',
+    `Register-ScheduledTask -Force -TaskName "${task}" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) -Settings $settings | Out-Null`,
+    `Start-ScheduledTask -TaskName "${task}"`,
   ].join('\n');
 }
 
@@ -2145,12 +2164,20 @@ function machineSetup(token, command) {
 function machinesPage() {
   view.machineToken = null; // { id, name, token } just made, shown until you leave the page
   const name = h('input', { name: 'name', placeholder: 'godot-laptop', required: true, maxlength: 30, autocomplete: 'off', pattern: '[a-z0-9][a-z0-9\\-]*' });
-  const command = h('input', { name: 'command', value: DEFAULT_MACHINE_COMMAND, autocomplete: 'off', spellcheck: 'false' });
+  const kind = h('select', { name: 'kind' },
+    h('option', { value: 'claude' }, 'Claude Code MCP server named'),
+    h('option', { value: 'command' }, 'Command'));
+  const command = h('input', { name: 'command', value: DEFAULT_CLAUDE_MCP, autocomplete: 'off', spellcheck: 'false' });
+  kind.onchange = () => {
+    command.value = kind.value === 'claude' ? DEFAULT_CLAUDE_MCP : '';
+    command.placeholder = kind.value === 'claude' ? DEFAULT_CLAUDE_MCP : 'npx -y some-mcp-server';
+    renderMachineSetup();
+  };
   command.addEventListener('input', renderMachineSetup);
   const status = h('span', { class: 'muted', role: 'status' });
   const form = h('form', { class: 'machine-add' },
     h('label', {}, 'Name', name),
-    h('label', { class: 'wide' }, 'MCP server to run there', command),
+    h('label', { class: 'wide' }, 'MCP server to run there', h('span', { class: 'row' }, kind, command)),
     h('button', { type: 'submit' }, 'Add machine'),
     status);
   form.onsubmit = async (e) => {
@@ -2176,8 +2203,9 @@ function machinesPage() {
     h('div', { id: 'machine-list', class: 'machine-list' }),
     h('p', { class: 'muted small' },
       'Each machine runs one MCP server; add another machine for a second one. It needs Node 18 or newer. ',
-      'A thread gets the tools of machines online when its turn starts, named mcp__<name>__…, and the tools act on that computer, ',
-      'so only add servers you trust threads to run. On Windows, use curl.exe in PowerShell.'));
+      '"Claude Code MCP server" runs one already set up for Claude Code on that computer, like godot-ai after its dock\'s Configure. ',
+      'A thread gets the tools of machines online when its turn starts, named mcp__<name>__…, plus the machine\'s notes, and the tools act on that computer, ',
+      'so only add servers you trust threads to run.'));
   setTimeout(() => {
     renderMachineSetup();
     renderMachineList();
@@ -2191,17 +2219,21 @@ function renderMachineSetup() {
   if (!el) return;
   const t = view.machineToken;
   if (!t) return el.replaceChildren();
+  const kind = document.querySelector('.machine-add select[name=kind]')?.value;
   const command = document.querySelector('.machine-add input[name=command]')?.value.trim();
-  const text = machineSetup(t.token, command);
-  const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
-  copy.onclick = async () => {
-    await navigator.clipboard.writeText(text);
-    copy.textContent = 'Copied';
+  const block = (label, text) => {
+    const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
+    copy.onclick = async () => {
+      await navigator.clipboard.writeText(text);
+      copy.textContent = 'Copied';
+    };
+    return [h('div', { class: 'row' }, h('span', { class: 'small' }, label), h('span', { class: 'spacer' }), copy), h('pre', {}, text)];
   };
   el.replaceChildren(h('div', { class: 'machine-setup' },
-    h('div', { class: 'row' }, h('strong', {}, `Connect ${t.name}`), h('span', { class: 'spacer' }), copy),
-    h('p', { class: 'small' }, 'Run this on that computer and leave it running. The token is shown only now; if you lose it, make a new one.'),
-    h('pre', {}, text)));
+    h('strong', {}, `Connect ${t.name}`),
+    h('p', { class: 'small' }, 'The token is shown only now; if you lose it, make a new one. Run one of these on that computer:'),
+    ...block('Windows PowerShell: starts now and at every logon, no reboot', machineSetupWindows(t.name, t.token, kind, command)),
+    ...block('Any computer, in a terminal you leave open', machineSetup(t.token, kind, command))));
 }
 
 function renderMachineList() {
@@ -2223,12 +2255,33 @@ function renderMachineList() {
       if (view.machineToken?.id === m.id) view.machineToken = null;
       renderMachineSetup();
     };
+    const notes = h('textarea', { rows: 4, maxlength: 2000, placeholder: 'What threads should know: never restart it, where the repo is cloned, what to check first…' });
+    notes.value = m.notes ?? '';
+    const saved = h('span', { class: 'muted small', role: 'status' });
+    const save = h('button', { type: 'button', class: 'small' }, 'Save notes');
+    save.onclick = async () => {
+      saved.textContent = 'Saving…';
+      try {
+        await api(`/api/machines/${m.id}`, { method: 'PATCH', body: { notes: notes.value } });
+        saved.textContent = 'Saved; threads get them from their next turn.';
+      } catch (err) {
+        saved.textContent = err.message;
+      }
+    };
+    // Keep an open notes editor open (and its draft) when the list re-renders for a status change.
+    const old = document.querySelector(`.machine-notes[data-id="${m.id}"]`);
+    const editing = old?.open;
+    if (editing) notes.value = old.querySelector('textarea').value;
     return h('div', { class: `machine-row${m.online ? ' online' : ''}` },
-      h('span', { class: `dot${m.online ? ' online' : ''}` }),
-      h('span', { class: 'text' },
-        h('span', { class: 'name' }, m.name),
-        h('span', { class: 'meta' }, [machineStatus(m), m.command, `added by ${m.created_by}`].filter(Boolean).join(' · '))),
-      newToken, remove);
+      h('div', { class: 'row' },
+        h('span', { class: `dot${m.online ? ' online' : ''}` }),
+        h('span', { class: 'text' },
+          h('span', { class: 'name' }, m.name),
+          h('span', { class: 'meta' }, [machineStatus(m), m.command, `added by ${m.created_by}`].filter(Boolean).join(' · '))),
+        newToken, remove),
+      h('details', { class: 'machine-notes', 'data-id': m.id, open: editing },
+        h('summary', {}, m.notes ? `Notes: ${m.notes.split('\n')[0]}` : 'Add notes for threads'),
+        notes, h('div', { class: 'row' }, save, saved)));
   }));
 }
 

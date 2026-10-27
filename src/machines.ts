@@ -71,6 +71,7 @@ export class MachineRelay {
       id: machine.id,
       name: machine.name,
       created_by: machine.created_by,
+      notes: machine.notes,
       created_at: machine.created_at,
       last_seen_at: machine.last_seen_at,
       online: !!agent,

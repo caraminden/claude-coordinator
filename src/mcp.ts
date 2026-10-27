@@ -222,7 +222,7 @@ const THREAD_TOOLS = [
   {
     name: 'close_self',
     description:
-      "Close this thread when the current turn ends, e.g. once a small fix is merged and shipped. It closes only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled.",
+      "Close this thread when the current turn ends, e.g. once a small fix is merged and shipped. It closes only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled. Not for threads whose result is a report or doc for people to read: those stay open until someone has read it.",
     inputSchema: {
       type: 'object',
       properties: { reason: { type: 'string', description: 'Optional one-line summary shown in the thread with the close, e.g. "Merged abc1234; live after the restart"' } },

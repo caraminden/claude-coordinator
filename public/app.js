@@ -2750,7 +2750,7 @@ function appendEvent(event, scroll = true) {
     view.cards.get(data.id)?.settle(data);
   } else if (event.kind === 'note') {
     const short = shortNote(data.text);
-    nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
+    if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
   } else if (event.kind === 'error') {
     nodes.push(h('div', { class: 'note error' }, data.text));
   } else if (event.kind === 'claude') {
@@ -2842,10 +2842,11 @@ function base64Url(mediaType, data) {
   return URL.createObjectURL(new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: mediaType }));
 }
 
-/** Short wording for the notes the server writes often; anything else stays as it is. */
+/** Short wording for the notes the server writes often (null hides one); anything else stays as it is. */
 function shortNote(text) {
   let m;
-  if (/^Restored this thread's Claude session from the app's database/.test(text)) return '↺ Session restored';
+  // Older threads stored a note on every session restore; restores are silent now.
+  if (/^Restored this thread's Claude session from the app's database/.test(text)) return null;
   if (text === 'The server restarted during this turn, so it was interrupted.') return '⚠ Interrupted by a server restart';
   if ((m = text.match(/^(.+?) renamed this ticket from ".*" to "(.*)"\.$/s))) return `✎ ${m[1] === 'Claude' ? 'Renamed' : `${m[1]} renamed it`} “${m[2]}”`;
   if ((m = text.match(/^(.+?) set this thread to (.+?) (from the next turn|from now on)\.$/))) return `⚙ ${m[1]}: ${m[2]}${m[3] === 'from the next turn' ? ' next turn' : ''}`;

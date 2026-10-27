@@ -489,7 +489,7 @@ export class Runner {
     const configDir = claudeConfigDir(env);
     try {
       const restored = restoreSession(this.store, ticket, project, configDir);
-      if (restored) this.emit(ticket.id, 'note', { text: `Restored this thread's Claude session from the app's database (${restored} file${restored === 1 ? '' : 's'}).` });
+      if (restored) console.log(`Ticket ${ticket.id}: restored the Claude session from the database (${restored} file${restored === 1 ? '' : 's'}).`);
     } catch (err: any) {
       this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${err.message}` });
     }

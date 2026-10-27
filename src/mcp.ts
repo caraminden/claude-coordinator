@@ -275,7 +275,15 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'set_thread_status':
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}`;
     case 'close_self':
-      await call('POST', `/api/tickets/${TICKET}/close`, { reason: args.reason ?? null });
+      try {
+        await call('POST', `/api/tickets/${TICKET}/close`, { reason: args.reason ?? null });
+      } catch (err: any) {
+        // A server from before close_self refuses the route with its generic "only itself" error.
+        if (/only update itself|Not found/.test(err.message)) {
+          throw new Error('The coordinator server running now predates close_self, so it cannot close threads yet; it will after its next restart. End your reply with "Done, ready to close" instead.');
+        }
+        throw err;
+      }
       return 'This thread will close when your turn ends (unless the turn fails or a new message arrives). Finish your reply now.';
     case 'close_ticket':
       return `Closed. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed' }))}`;

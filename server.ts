@@ -8,7 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { gzip } from 'node:zlib';
 import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact } from './src/artifacts.ts';
-import { AGENT_NAME, Auth, type Session } from './src/auth.ts';
+import { AGENT_NAME, Auth, threadMayCall, type Session } from './src/auth.ts';
 import { branchStatus, type BranchStatus } from './src/branch.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
@@ -455,14 +455,7 @@ function agentProject(session: Session, method: string, pathname: string): numbe
   if (!t) throw new HttpError(403, 'No such ticket');
   // A ticket's own token may only read and update that ticket (its title, tag, state and note),
   // ask a question card in its chat, and close itself.
-  if (t.kind !== 'coordinator') {
-    const own =
-      pathname === `/api/tickets/${t.id}`
-        ? method === 'GET' || method === 'PATCH'
-        : (pathname === `/api/tickets/${t.id}/questions` || pathname === `/api/tickets/${t.id}/close`) && method === 'POST';
-    if (!own) throw new HttpError(403, 'A thread may only update itself');
-    return t.project_id;
-  }
+  if (t.kind !== 'coordinator' && !threadMayCall(t.id, method, pathname)) throw new HttpError(403, 'A thread may only update itself');
   return t.project_id;
 }
 

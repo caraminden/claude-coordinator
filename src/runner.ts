@@ -1,6 +1,7 @@
 // Runs ticket turns as headless `claude -p` processes, one turn per process.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
@@ -8,7 +9,13 @@ import { claudeConfigDir, lastEffort, restoreSession, saveSession } from './sess
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
-const MCP_SERVER = join(import.meta.dirname, 'mcp.ts');
+// Turns run a copy of the MCP server taken when this server started, not the file on disk: a deploy
+// pulls new code before the restart, and a newer MCP server would offer tools this process rejects.
+const MCP_SERVER = (() => {
+  const copy = join(mkdtempSync(join(tmpdir(), 'claude-coordinator-mcp-')), 'mcp.ts');
+  writeFileSync(copy, readFileSync(join(import.meta.dirname, 'mcp.ts')));
+  return copy;
+})();
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);

@@ -3,21 +3,63 @@
 // coordinator's threads. It dials out to the app and keeps that connection open, so the app never
 // needs to reach this computer; each thread session gets its own copy of the MCP server.
 //
+//   node machine-agent.mjs <app url> <token> --claude-mcp <name>
 //   node machine-agent.mjs <app url> <token> -- <mcp server command> [args...]
 //
+// --claude-mcp runs a server already set up for Claude Code on this computer (in ~/.claude.json),
+// such as godot-ai, whose entry holds a path only this computer knows. It is read afresh for each
+// session, so an updated entry applies without restarting the agent.
 // The token can come from CC_MACHINE_TOKEN instead. Needs Node 18 or newer; no other installs.
 import { spawn } from 'node:child_process';
-import { hostname } from 'node:os';
+import { readFileSync } from 'node:fs';
+import { homedir, hostname } from 'node:os';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 const argv = process.argv.slice(2);
 const dash = argv.indexOf('--');
-const [appUrl, argToken] = dash < 0 ? argv : argv.slice(0, dash);
 const command = dash < 0 ? [] : argv.slice(dash + 1);
+const opts = dash < 0 ? argv : argv.slice(0, dash);
+const flag = opts.indexOf('--claude-mcp');
+const claudeMcp = flag < 0 ? null : opts.splice(flag, 2)[1];
+const [appUrl, argToken] = opts;
 const token = argToken ?? process.env.CC_MACHINE_TOKEN;
-if (!appUrl || !token || !command.length) {
-  console.error('Usage: node machine-agent.mjs <app url> <token> -- <mcp server command> [args...]');
-  console.error('Example: node machine-agent.mjs https://example.net ccm_1_… -- npx -y @coding-solo/godot-mcp');
+if (!appUrl || !token || (!command.length && !claudeMcp)) {
+  console.error('Usage: node machine-agent.mjs <app url> <token> --claude-mcp <name>');
+  console.error('   or: node machine-agent.mjs <app url> <token> -- <mcp server command> [args...]');
+  console.error('Example: node machine-agent.mjs https://example.net ccm_1_… --claude-mcp godot-ai');
+  process.exit(2);
+}
+
+/** A stdio server from Claude Code's config: user scope first, then any project's. */
+function claudeServer(name) {
+  const file = join(process.env.CLAUDE_CONFIG_DIR ?? homedir(), '.claude.json');
+  let config;
+  try {
+    config = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new Error(`could not read ${file}: ${err.message}`);
+  }
+  const entry = config.mcpServers?.[name] ?? Object.values(config.projects ?? {}).map((p) => p?.mcpServers?.[name]).find(Boolean);
+  if (!entry?.command) throw new Error(`${file} has no stdio MCP server named "${name}"`);
+  return { command: entry.command, args: entry.args ?? [], env: entry.env ?? {} };
+}
+
+/** What a session runs: the program, its arguments, extra environment, and whether it needs a shell. */
+function serverCommand() {
+  if (claudeMcp) {
+    const s = claudeServer(claudeMcp);
+    // An absolute path may hold spaces, which a shell would split; only batch files need one.
+    return { ...s, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(s.command) };
+  }
+  // npx and friends are .cmd files on Windows, which only start through a shell.
+  return { command: command[0], args: command.slice(1), env: {}, shell: process.platform === 'win32' };
+}
+const describe = claudeMcp ? `${claudeMcp} (from Claude Code's config)` : command.join(' ');
+try {
+  serverCommand();
+} catch (err) {
+  console.error(err.message);
   process.exit(2);
 }
 const auth = { Authorization: `Bearer ${token}` };
@@ -28,14 +70,17 @@ const log = (...a) => console.log(new Date().toLocaleTimeString(), ...a);
 const sessions = new Map();
 
 function startServer(id) {
-  const proc = spawn(command[0], command.slice(1), {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    // npx and friends are .cmd files on Windows, which only start through a shell.
-    shell: process.platform === 'win32',
-  });
+  let run;
+  try {
+    run = serverCommand();
+  } catch (err) {
+    log(`Session ${id.slice(0, 6)} could not start: ${err.message}`);
+    run = { command: process.execPath, args: ['-e', 'process.exit(1)'], env: {}, shell: false };
+  }
+  const proc = spawn(run.command, run.args, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...run.env }, shell: run.shell });
   const s = { proc, chain: Promise.resolve() };
   sessions.set(id, s);
-  log(`Session ${id.slice(0, 6)} started ${command[0]}`);
+  log(`Session ${id.slice(0, 6)} started ${describe}`);
   createInterface({ input: proc.stdout }).on('line', (line) => {
     let message;
     try {
@@ -99,7 +144,7 @@ async function* events(body) {
 async function connect() {
   const url = new URL('/api/machines/connect', appUrl);
   url.searchParams.set('host', hostname());
-  url.searchParams.set('command', command.join(' '));
+  url.searchParams.set('command', describe);
   const res = await fetch(url, { headers: { ...auth, Accept: 'text/event-stream' } });
   if (res.status === 401) {
     console.error('The app rejected this token. Make a new one in the Machines panel.');
@@ -108,7 +153,7 @@ async function connect() {
   if (!res.ok) throw new Error(`the app answered ${res.status}`);
   for await (const msg of events(res.body)) {
     if (msg.hello) {
-      log(`Connected to ${new URL(appUrl).host} as "${msg.hello}". Threads can use ${command.join(' ')} while this runs.`);
+      log(`Connected to ${new URL(appUrl).host} as "${msg.hello}". Threads can use ${describe} while this runs.`);
       retry = 0;
     } else if (msg.close) {
       stopServer(msg.session);

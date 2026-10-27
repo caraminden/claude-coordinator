@@ -55,6 +55,11 @@ Planned next: runners on other people's own Claude logins.
   (`mcp__<name>__…`): a small stdio proxy (`src/machine-mcp.ts`) relays through the app
   (`src/machines.ts`), and the agent runs a separate copy of the MCP server per session.
   Tokens are stored hashed; a new token or removing the machine disconnects it.
+  `--claude-mcp <name>` runs a server already set up for Claude Code on that computer
+  (from its `~/.claude.json`, e.g. Delve's `godot-ai`), and each machine's notes ("never
+  restart it", where the clone is) go into thread prompts while it is online. For Windows
+  the page also gives a PowerShell snippet that registers a Task Scheduler task to start the
+  agent now and at every logon, in the person's own session, with no reboot.
 - **GitHub** wakes a thread about its pull request. `src/github.ts` polls each open
   thread's branch for its newest PR with one `gh api graphql` call, one thread at a time
   (every 2 minutes while a PR is open, backing off to 15 while nothing changes; 30 for

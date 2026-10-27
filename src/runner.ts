@@ -208,6 +208,7 @@ function machineTools(machines: Machine[]): string[] {
   const names = machines.map((m) => `${m.name} (mcp__${m.name})`).join(', ');
   return [
     `Connected machines: ${names}. Their MCP tools run on people's own computers, not on this server: files and builds there are separate from your working directory, so sync code there (for example with git) before building, and expect a tool to fail if that computer goes offline mid-turn.`,
+    ...machines.filter((m) => m.notes).map((m) => `Notes on ${m.name} from its owner:\n${m.notes}`),
   ];
 }
 

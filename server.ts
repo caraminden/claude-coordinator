@@ -1113,6 +1113,9 @@ async function machineAgentApi(req: IncomingMessage, res: ServerResponse, url: U
   throw new HttpError(404, 'Not found');
 }
 
+// Notes go into every thread's system prompt while the machine is online, so keep them short.
+const MAX_MACHINE_NOTES = 2000;
+
 function machineName(v: unknown): string {
   const name = typeof v === 'string' ? v.trim().toLowerCase() : '';
   if (!MACHINE_NAME.test(name)) throw new HttpError(400, 'Use 1 to 30 lowercase letters, digits and dashes, like godot-laptop');
@@ -1168,9 +1171,17 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
     return json(res, 200, { machine: machines.view(store.getMachine(machine.id)!), token });
   }
   if (!m[2] && method === 'PATCH') {
-    const name = machineName((await readJson(req)).name);
+    // Any of name and notes.
+    const body = await readJson(req);
+    const fields: { name?: string; notes?: string } = {};
+    if (body.name !== undefined) fields.name = machineName(body.name);
+    if (body.notes !== undefined) {
+      if (typeof body.notes !== 'string') throw new HttpError(400, 'notes must be text');
+      fields.notes = body.notes.replace(/\r\n/g, '\n').trim();
+      if (fields.notes.length > MAX_MACHINE_NOTES) throw new HttpError(400, `Notes are limited to ${MAX_MACHINE_NOTES.toLocaleString('en')} characters`);
+    }
     try {
-      store.updateMachine(machine.id, { name });
+      store.updateMachine(machine.id, fields);
     } catch {
       throw new HttpError(409, 'A machine with that name already exists');
     }

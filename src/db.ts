@@ -95,6 +95,8 @@ export interface Machine {
   created_at: number;
   /** When its agent last connected or disconnected; null if it never has. */
   last_seen_at: number | null;
+  /** What threads should know when using it ("never restart it", where the clone is); '' for none. */
+  notes: string;
 }
 
 /** One browser of one signed-in person that wants Web Push notifications (src/push.ts). */
@@ -187,7 +189,8 @@ CREATE TABLE IF NOT EXISTS machines (
   token_hash TEXT NOT NULL,
   created_by TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  last_seen_at INTEGER
+  last_seen_at INTEGER,
+  notes TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS github_seen (
   ticket_id INTEGER NOT NULL REFERENCES tickets(id),
@@ -223,6 +226,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'instructions_updated_at', 'ALTER TABLE projects ADD COLUMN instructions_updated_at INTEGER'],
   ['projects', 'approval_rules', "ALTER TABLE projects ADD COLUMN approval_rules TEXT NOT NULL DEFAULT ''"],
   ['projects', 'plugin_dirs', "ALTER TABLE projects ADD COLUMN plugin_dirs TEXT NOT NULL DEFAULT ''"],
+  ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
 ];
 
 export class Store {
@@ -619,7 +623,7 @@ export class Store {
     return this.getMachine(Number(lastInsertRowid))!;
   }
 
-  updateMachine(id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'last_seen_at'>>) {
+  updateMachine(id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'last_seen_at' | 'notes'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     this.db.prepare(`UPDATE machines SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);

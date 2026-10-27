@@ -98,8 +98,8 @@ async function until<T>(what: string, fn: () => Promise<T | undefined | false> |
 
 const turns = () => existsSync(join(root, 'turns.jsonl')) ? readFileSync(join(root, 'turns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
 
-function startAgent(token: string) {
-  const agent = spawn(process.execPath, [join(repo, 'public/machine-agent.mjs'), base, token, '--', process.execPath, mcpServer], { stdio: ['ignore', 'pipe', 'pipe'] });
+function startAgent(token: string, run = ['--', process.execPath, mcpServer], env: NodeJS.ProcessEnv = {}) {
+  const agent = spawn(process.execPath, [join(repo, 'public/machine-agent.mjs'), base, token, ...run], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
   procs.push(agent);
   let output = '';
   agent.stdout!.on('data', (d) => (output += d));
@@ -168,4 +168,22 @@ test('threads skip offline machines, and only people manage machines', async () 
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'thread' } }), /400/);
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'Bad Name!' } }), /400/);
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'sleepy' } }), /409/);
+});
+
+test('an agent can run a server from Claude Code\'s config, and threads get the machine\'s notes', async () => {
+  const home = join(root, 'pc-home');
+  const { mkdirSync } = await import('node:fs');
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'godot-ai': { type: 'stdio', command: process.execPath, args: [mcpServer] } } }));
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'desk' } });
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: 'Never restart this PC.' } });
+  startAgent(token, ['--claude-mcp', 'godot-ai'], { CLAUDE_CONFIG_DIR: home });
+  const online = await until('desk to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'desk' && m.online));
+  assert.match(online.command, /godot-ai/);
+  const before = turns().length;
+  const [project] = await call('/api/projects');
+  await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'play' } });
+  const turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
+  assert.deepEqual(turn.results.desk.tools, ['whoami']);
+  assert.match(turn.args[turn.args.indexOf('--append-system-prompt') + 1], /Notes on desk from its owner:\nNever restart this PC\./);
 });

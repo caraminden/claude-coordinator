@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact } from './src/artifacts.ts';
 import { AGENT_NAME, Auth, type Session } from './src/auth.ts';
+import { branchStatus, type BranchStatus } from './src/branch.ts';
 import { Store, type Artifact, type Project, type Ticket } from './src/db.ts';
 import { Runner } from './src/runner.ts';
 import { cloneProject, createTicketDir, projectDir, removeProjectDir } from './src/workspace.ts';
@@ -107,7 +108,10 @@ async function scanArtifacts(ticketId: number) {
   }
 }
 
-runner.onFilesMayChange = scheduleScan;
+runner.onFilesMayChange = (ticketId) => {
+  scheduleScan(ticketId);
+  scheduleBranchCheck(ticketId);
+};
 runner.filesDir = sharedDir;
 // Pick up anything made while the server was down (or before artifacts existed), one ticket at a time.
 // Rows for file types that no longer count as artifacts go first, pinned or not.
@@ -119,6 +123,38 @@ store.pruneArtifacts(isArtifact);
     }
   }
 })();
+
+// ---------- branch and pull request ----------
+
+// gh calls go over the network, so a ticket's PR is looked up at most this often; git is checked every time.
+const PR_TTL_MS = 60_000;
+const branchCache = new Map<number, { status: BranchStatus | null; prAt: number; json: string }>();
+const branchTimers = new Map<number, NodeJS.Timeout>();
+
+/** Where a ticket's branch stands (null for tickets without one); broadcast when it changes. */
+async function ticketBranch(ticketId: number, maxPrAge = PR_TTL_MS): Promise<BranchStatus | null> {
+  const ticket = store.getTicket(ticketId);
+  const project = ticket && store.getProject(ticket.project_id);
+  if (!ticket?.branch || !project?.repo_dir) return null;
+  const cached = branchCache.get(ticketId);
+  const prFresh = cached && Date.now() - cached.prAt < maxPrAge;
+  const status = await branchStatus(project.repo_dir, ticket.branch, ticket.created_at, !prFresh);
+  if (status && prFresh) status.pr = cached.status?.pr ?? null;
+  const json = JSON.stringify(status);
+  branchCache.set(ticketId, { status, prAt: prFresh ? cached.prAt : Date.now(), json });
+  if (cached && cached.json !== json) broadcast({ type: 'branch', ticketId, status });
+  return status;
+}
+
+/** After a turn's tool calls (commits, merges, `gh pr create`), look again shortly. */
+function scheduleBranchCheck(ticketId: number) {
+  if (branchTimers.has(ticketId)) return;
+  branchTimers.set(ticketId, setTimeout(() => {
+    branchTimers.delete(ticketId);
+    ticketBranch(ticketId, runner.isRunning(ticketId) ? PR_TTL_MS : 0)
+      .catch((err) => console.error(`Branch check of ticket ${ticketId} failed:`, err));
+  }, SCAN_DELAY_MS));
+}
 
 function artifactView(a: Artifact & { ticket_title?: string; ticket_kind?: string; ticket_number?: number | null }) {
   const ticket = a.ticket_title === undefined ? store.getTicket(a.ticket_id) : null;
@@ -549,6 +585,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         runner.broadcastTicket(id);
       }
       return json(res, 200, ticketView(id));
+    }
+    if (action === '/branch' && method === 'GET') {
+      return json(res, 200, { status: await ticketBranch(id) });
     }
     if (action === '/file' && (method === 'GET' || method === 'HEAD')) {
       // A file the ticket linked in its reply: ?path= as written there; ?info for its details.

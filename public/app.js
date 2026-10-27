@@ -375,6 +375,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'event') onEvent(msg.event);
     if (msg.type === 'artifacts') onArtifactsChanged(msg.projectId);
+    if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };
   es.onerror = () => {
     // EventSource retries dropped connections itself, but gives up for good on a non-200
@@ -476,6 +477,7 @@ async function resync() {
     if (!chat) return;
     view.ticket = chat.ticket;
     renderTicketHead();
+    if (view.ticket.branch) refreshBranch(view.id);
     await catchUpEvents();
   } catch {}
 }
@@ -678,6 +680,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite' }), // below the chat log
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
     pendingMessages: [], // { el, text } shown on send, replaced by the server's copy
+    branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
   };
   const projectLink = h('a', { href: `#/p/${project.id}` }, project.name);
   const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
@@ -738,6 +741,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   if (!chatId) return window.scrollTo(0, 0);
   renderTicketHead();
   for (const ev of events) appendEvent(ev, false);
+  if (ticket.branch) refreshBranch(chatId);
   restoreScroll(chatId);
   try {
     if (sessionStorage.getItem('cc-refocus')) {
@@ -947,6 +951,36 @@ function shortAgo(ms) {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
+}
+
+// ---------- branch and pull request ----------
+
+async function refreshBranch(ticketId) {
+  try {
+    const { status } = await api(`/api/tickets/${ticketId}/branch`);
+    if (view?.kind === 'project' && view.id === ticketId) renderBranch(status);
+  } catch {}
+}
+
+/** "PR #12 · merged" (linked), or for work merged without a PR, the branch and whether main has it. */
+function renderBranch(status) {
+  const el = view.branchEl;
+  const parts = [];
+  if (status?.pr) {
+    const { pr } = status;
+    const state = pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : pr.draft ? 'draft' : 'open';
+    parts.push(
+      h('a', { href: pr.url, target: '_blank', rel: 'noopener', title: pr.title, onclick: (e) => e.stopPropagation() }, `PR #${pr.number}`),
+      h('span', { class: `state ${state}` }, state));
+    if (pr.state === 'OPEN' && status.merged) parts.push(`merged into ${status.base}`);
+  } else if (status && !status.empty) {
+    parts.push(h('span', { class: 'branch', title: status.branch }, status.branch));
+    parts.push(status.merged
+      ? h('span', { class: 'state merged' }, `merged into ${status.base}`)
+      : h('span', { class: 'state open' }, `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}`));
+  }
+  el.replaceChildren(...parts);
+  el.hidden = !parts.length;
 }
 
 // ---------- artifacts ----------
@@ -1546,14 +1580,15 @@ function appendEvent(event, scroll = true) {
       if (data.duration_ms) bits.push(`${Math.round(data.duration_ms / 1000)}s`);
       if (acts.length) bits.push(`${acts.length} action${acts.length === 1 ? '' : 's'}`);
       if (data.total_cost_usd) bits.push(`$${data.total_cost_usd.toFixed(2)}`);
+      // The branch status rides on the newest turn's line, so it moves down as turns finish.
       if (acts.length) {
-        const end = h('details', { class: 'turn-end' }, h('summary', {}, bits.join(' · ')));
+        const end = h('details', { class: 'turn-end' }, h('summary', {}, view.branchEl, bits.join(' · ')));
         end.addEventListener('toggle', () => {
           if (end.open && !end.querySelector('.phases')) end.append(...phaseRows(acts, false));
         });
         nodes.push(end);
       } else {
-        nodes.push(h('div', { class: 'turn-end' }, bits.join(' · ')));
+        nodes.push(h('div', { class: 'turn-end' }, view.branchEl, bits.join(' · ')));
       }
       if (data.is_error && data.result) nodes.push(h('div', { class: 'note error' }, data.result));
     }

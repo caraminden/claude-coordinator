@@ -426,3 +426,13 @@ button.pin.on { color: var(--accent); }
 .msg .file-preview:hover img, .msg .file-preview:hover video { border-color: var(--accent); }
 .msg .file-preview .caption { display: block; font-size: 0.82em; color: var(--muted); margin-top: 0.2rem; }
 .artifact-media { display: block; max-width: 100%; max-height: 75vh; border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); }
+
+/* The thread's PR or branch, on the left of the newest turn-end line */
+.turn-end .branch-status { float: left; display: inline-flex; gap: 0.4rem; align-items: baseline; max-width: 60%; text-align: left; }
+.turn-end .branch-status[hidden] { display: none; }
+.turn-end .branch-status a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.turn-end .branch-status .branch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.turn-end .branch-status .state { border-radius: 999px; padding: 0 0.45rem; border: 1px solid var(--line); white-space: nowrap; }
+.turn-end .branch-status .state.merged { color: #7c3aed; border-color: color-mix(in srgb, #7c3aed 40%, var(--line)); }
+.turn-end .branch-status .state.open { color: var(--running); border-color: color-mix(in srgb, var(--running) 40%, var(--line)); }
+.turn-end .branch-status .state.draft, .turn-end .branch-status .state.closed { color: var(--muted); }

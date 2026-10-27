@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
-import { actionLabel, applyEvent, createProgress, isWorkTool, progressLine } from '../public/progress.js';
+import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
 const MCP_SERVER = join(import.meta.dirname, 'mcp.ts');
@@ -100,7 +100,7 @@ function describeActivity(ev: any): string | null {
     const b = blocks[i];
     if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) return b.text.trim().split('\n')[0].replace(/\*\*|`/g, '').slice(0, 160);
     // The same plain words as the readout ("Ran the tests", "Edited app.js"), not "Using Bash".
-    if (b.type === 'tool_use' && isWorkTool(b.name)) return actionLabel(b);
+    if (b.type === 'tool_use' && isWorkTool(b.name)) return activityLabel(b);
   }
   return null;
 }
@@ -115,9 +115,13 @@ function systemPrompt(project: Project, ticket: Ticket): string {
     'This ticket is managed by Claude Coordinator, a shared web app where several people chat with you.',
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
     where,
-    'For work with more than a couple of steps, plan it with TaskCreate (one task per step, with a short activeForm like "Running tests") and mark each task in_progress and then completed with TaskUpdate as you go. The web UI shows this plan as a live progress readout ("Running tests… 3/7").',
+    'People follow your work through a progress readout ("Running tests… 3/7") built from your task list, so for anything beyond a quick answer, plan the work with TaskCreate before starting it:',
+    '- Make 3 to 7 tasks that are conceptual chunks someone skimming would follow ("Find where the sidebar text comes from", "Make the readout show phases", "Test it on a copy"), not individual commands.',
+    '- Give each a one-sentence description of what it involves and why, and a short activeForm ("Finding where the sidebar text comes from").',
+    '- Mark each task in_progress with TaskUpdate when you start it. When you finish it, mark it completed and set metadata.outcome to one plain sentence on what it found, decided or changed.',
+    '- If the plan changes, add, reword or delete tasks so the list stays true.',
     'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
-    'The readout lists your tool calls in plain words, so give every Bash call a short plain-English description (like "Run the test suite").',
+    'Give every Bash call a short plain-English description (like "Run the test suite").',
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
   ].join('\n');
 }

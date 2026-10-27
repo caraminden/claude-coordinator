@@ -12,7 +12,7 @@ export const isWorkTool = (name) => !TASK_TOOLS.has(name) && !HIDDEN_TOOLS.has(n
 
 export function createProgress() {
   return {
-    tasks: [], // { id, subject, activeForm, status: 'pending' | 'in_progress' | 'completed', actions, note }
+    tasks: [], // { id, subject, activeForm, description, outcome, note, status: 'pending' | 'in_progress' | 'completed', actions }
     pendingCreates: new Map(), // tool_use_id -> TaskCreate input, until its result tells us the task id
     turnActions: 0,
     lastAction: null,
@@ -106,6 +106,84 @@ function describeCommand(command) {
   if (parts.some((t) => !filler.includes(t))) parts.splice(0, parts.length, ...parts.filter((t) => !filler.includes(t)));
   const shown = parts.slice(0, 2).map((t, n) => (n ? t.charAt(0).toLowerCase() + t.slice(1) : t)).join(', ');
   return parts.length > 2 ? `${shown} and more` : shown;
+}
+
+/**
+ * What kind of work a shell command is, as a phase of the job: looking around, changing things,
+ * checking they work, or saving them to git. Uses the command itself, then Claude's description.
+ */
+function commandPhase(command, description = '') {
+  const c = String(command ?? '');
+  if (/\bgit (commit|merge|push|pull|rebase|cherry-pick)\b|\bgh pr\b/.test(c)) return 'save';
+  if (/\bsed -i|\bperl -i|\.write\(|writeFile|\bgit (add|checkout|restore|stash)\b|\b(mv|cp|rm|mkdir|touch|ln)\s|(^|[^2&])>\s*[\w./~-]+\.\w+|\b(npm|pnpm|yarn|pip3?|uv) (i|install|add)\b/.test(c)) return 'change';
+  if (/(^|\W)(npm|pnpm|yarn|bun) (run )?test|pytest|jest|vitest|go test|cargo test|node --test|--check\b|\btsc\b|eslint|\bcurl\b|\bwget\b|systemctl|journalctl|screenshot|\b(node|python3?|deno|bun) (?!-e)\S+\.(m?js|ts|py)\b/.test(c)) return 'verify';
+  if (/^\s*(cd \S+ && )?(git (status|log|diff|show|branch|blame|grep|ls-files|rev-parse|remote)|ls|cat|head|tail|less|grep|rg|find|tree|wc|sed -n|stat|file)\b/.test(c)) return 'explore';
+  const d = description.toLowerCase();
+  if (/\b(commit|merge|push|deploy)/.test(d)) return 'save';
+  if (/^(run|test|check|verify|start|restart|try|build)/.test(d)) return 'verify';
+  if (/^(create|write|edit|update|add|remove|delete|install|fix|rename|move|copy|apply)/.test(d)) return 'change';
+  if (/^(read|show|list|look|inspect|find|search|view|see|count|compare|print)/.test(d)) return 'explore';
+  return 'other';
+}
+
+const TOOL_PHASE = {
+  Read: 'explore', Grep: 'explore', Glob: 'explore', LS: 'explore',
+  Edit: 'change', MultiEdit: 'change', NotebookEdit: 'change', Write: 'change',
+  WebFetch: 'research', WebSearch: 'research', Task: 'delegate', Agent: 'delegate', Workflow: 'delegate',
+};
+
+/** Which phase of the work a tool call belongs to (see PHASES). */
+export function actionPhase(block) {
+  const i = block.input || {};
+  if (block.name === 'Bash') return commandPhase(i.command, i.description);
+  if (block.name.startsWith('mcp__coordinator__')) return 'coordinate';
+  return TOOL_PHASE[block.name] ?? 'other';
+}
+
+/** How each phase reads once done and while underway; `files` is filled in for changes. */
+const PHASES = {
+  explore: { done: 'Looked through the code', now: 'Looking through the code' },
+  change: { done: (f) => (f ? `Changed ${f}` : 'Made changes'), now: (f) => (f ? `Changing ${f}` : 'Making changes') },
+  verify: { done: 'Tried it out and checked it works', now: 'Trying it out' },
+  save: { done: 'Saved the work in git', now: 'Saving the work in git' },
+  research: { done: 'Looked things up online', now: 'Looking things up online' },
+  delegate: { done: 'Had helper agents work on parts of it', now: 'Working with helper agents' },
+  coordinate: { done: 'Updated other tickets', now: 'Updating other tickets' },
+  other: { done: 'Ran some other commands', now: 'Running commands' },
+};
+
+/** What a tool call says about the work underway, at the level of its phase: "Changing app.js", "Trying it out". */
+export function activityLabel(block) {
+  const phase = actionPhase(block);
+  return phaseText(phase, phase === 'change' ? describeAction(block).object : '', false);
+}
+
+function phaseText(phase, files, done) {
+  const t = PHASES[phase][done ? 'done' : 'now'];
+  return typeof t === 'function' ? t(files) : t;
+}
+
+/**
+ * Group a run of tool calls into the phases of the work, e.g. "Looked through the code" →
+ * "Changed app.js, style.css" → "Tried it out". Back-to-back calls of the same kind merge, so a
+ * long session reads as a few conceptual chunks. The last phase is worded as ongoing when `running`.
+ */
+export function workPhases(actions, running = false) {
+  const phases = [];
+  for (const a of actions) {
+    const phase = actionPhase(a.block);
+    let last = phases[phases.length - 1];
+    if (last?.phase !== phase) phases.push((last = { phase, count: 0, failed: 0, files: [], actions: [] }));
+    last.count++;
+    last.actions.push(a);
+    if (a.result?.is_error) last.failed++;
+    const file = describeAction(a.block).object;
+    if (file && phase === 'change' && !last.files.includes(file)) last.files.push(file);
+  }
+  return phases.map((ph, n) => {
+    const ongoing = running && n === phases.length - 1;
+    return { ...ph, text: phaseText(ph.phase, ph.files.length ? listNames(ph.files) : '', !ongoing), ongoing };
+  });
 }
 
 /**
@@ -215,6 +293,8 @@ export function applyEvent(p, kind, data) {
   if (data.type === 'system' && data.subtype === 'init') {
     p.turnActions = 0;
     p.lastAction = null;
+    // A plan finished in an earlier turn belongs to that chunk of work, not this one.
+    if (p.tasks.length && allDone(p)) p.tasks = [];
   } else if (data.type === 'assistant') {
     for (const block of data.message?.content ?? []) {
       if (block.type === 'text' && block.text?.trim()) {
@@ -235,6 +315,9 @@ export function applyEvent(p, kind, data) {
         else if (input.status) task.status = input.status;
         if (input.subject) task.subject = input.subject;
         if (input.activeForm) task.activeForm = input.activeForm;
+        if (input.description) task.description = input.description;
+        // Claude records what a finished step found or decided as metadata.outcome.
+        if (typeof input.metadata?.outcome === 'string') task.outcome = input.metadata.outcome;
       } else if (block.name === 'TodoWrite' && Array.isArray(input.todos)) {
         p.tasks = input.todos.map((t, n) => ({
           id: `todo-${n}`, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0,
@@ -243,7 +326,7 @@ export function applyEvent(p, kind, data) {
         const task = p.tasks.find((t) => t.status === 'in_progress');
         if (task) task.actions++;
         p.turnActions++;
-        p.lastAction = actionLabel(block);
+        p.lastAction = activityLabel(block);
         actions.push({ block, taskId: task?.id ?? null });
       }
     }
@@ -256,7 +339,7 @@ export function applyEvent(p, kind, data) {
       if (block.is_error || !id) continue;
       // A new plan starts once the previous one is finished; old finished steps drop off.
       if (p.tasks.length && allDone(p)) p.tasks = [];
-      p.tasks.push({ id, subject: input.subject || `Task ${id}`, activeForm: input.activeForm, status: 'pending', actions: 0 });
+      p.tasks.push({ id, subject: input.subject || `Task ${id}`, activeForm: input.activeForm, description: input.description, status: 'pending', actions: 0 });
     }
   }
   return actions;

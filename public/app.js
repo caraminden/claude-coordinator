@@ -1,5 +1,5 @@
 // Claude Coordinator front end: hash-routed views over the JSON API, live via SSE.
-import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, summarizeActions } from './progress.js';
+import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 
 const app = document.getElementById('app');
 const crumbs = document.getElementById('crumbs');
@@ -1085,6 +1085,62 @@ function progressUi(ticketId) {
   return progressUiState.get(ticketId);
 }
 
+function firstSentence(text, max = 200) {
+  const flat = String(text ?? '').replace(/[*`#>]/g, '').replace(/\s+/g, ' ').trim();
+  const sentence = flat.match(/^.*?[.!?](\s|$)/)?.[0].trim() ?? flat;
+  return sentence.length > max ? `${sentence.slice(0, max - 1).replace(/\s+\S*$/, '')}…` : sentence;
+}
+
+/** The phases of some work as rows ("✓ Looked through the code · 4 actions"), plus its commands behind a toggle. */
+function phaseRows(acts, running) {
+  const phases = workPhases(acts, running);
+  const cmds = h('details', { class: 'cmds' }, h('summary', {}, `Show the ${acts.length} individual action${acts.length === 1 ? '' : 's'}`));
+  cmds.addEventListener('toggle', () => {
+    if (cmds.open && !cmds.querySelector('.actions')) cmds.append(actionList(acts));
+  });
+  return [
+    h('ul', { class: 'phases' }, phases.map((ph) => h('li', { class: ph.ongoing ? 'ongoing' : '' },
+      h('span', { class: 'st' }, ph.ongoing ? '◐' : '✓'), ph.text,
+      h('span', { class: 'muted' }, ` · ${ph.count} action${ph.count === 1 ? '' : 's'}${ph.failed ? `, ${ph.failed} failed along the way` : ''}`)))),
+    cmds,
+  ];
+}
+
+/** One step of Claude's plan: its title, one plain line about it, and on opening, how the work went. */
+function planStep(t, acts, running) {
+  const now = t.status === 'in_progress';
+  const live = now && running;
+  const phases = workPhases(acts, live);
+  // The one line: what it achieved once done, where it's at while underway, what it's for before then.
+  let line;
+  if (t.status === 'completed') line = t.outcome || (t.note && firstSentence(t.note)) || t.description || phases.map((ph) => ph.text).join(', ');
+  else if (now) line = live ? (phases.length ? `Now: ${phases[phases.length - 1].text.toLowerCase()}` : 'Just started') : 'Paused here when the turn ended';
+  else line = t.description || 'Not started yet';
+  const el = h('details', { class: `step ${t.status}${now && !running ? ' paused' : ''}`, open: view.ui.openSteps.has(t.id) || null },
+    h('summary', {},
+      h('span', { class: 'icon' }, STEP_ICON[t.status] ?? '○'),
+      h('span', { class: 'subject' }, t.subject),
+      h('span', { class: 'recap' }, firstSentence(line, 220))),
+    t.description && line !== t.description ? h('p', { class: 'step-desc' }, h('span', { class: 'muted' }, 'Plan: '), t.description) : '',
+    t.note && !t.outcome ? stepNote(t.note) : '',
+    acts.length ? phaseRows(acts, live) : '');
+  el.addEventListener('toggle', () => (el.open ? view.ui.openSteps.add(t.id) : view.ui.openSteps.delete(t.id)));
+  return el;
+}
+
+/** Work done outside any plan step, told as phases. */
+function looseWork(acts, running, onlyWork) {
+  const phases = workPhases(acts, running);
+  const el = h('details', { class: 'step loose', open: (view.ui.looseOpen ?? onlyWork) || null },
+    h('summary', {}, h('span', { class: 'icon' }, '⋯'),
+      h('span', { class: 'subject' }, !onlyWork ? 'Other work this turn' : running ? 'Work so far' : 'Work last turn'),
+      h('span', { class: 'recap' }, phases.map((ph) => ph.text).join(' → '))),
+    view.turnNote ? stepNote(view.turnNote) : '',
+    phaseRows(acts, running));
+  el.addEventListener('toggle', () => (view.ui.looseOpen = el.open));
+  return el;
+}
+
 let progressFrame = 0;
 function scheduleProgress() {
   if (!progressFrame) progressFrame = requestAnimationFrame(() => { progressFrame = 0; renderProgress(); });
@@ -1120,36 +1176,20 @@ function renderProgress() {
   let detail = '';
   if (view.ui.open) {
     const all = [...view.actions.values()];
-    const steps = p.tasks.map((t) => {
-      const acts = all.filter((a) => a.taskId === t.id);
-      const isCurrent = t === current;
-      const recap = summarizeActions(acts) || (t.status === 'pending' ? 'Not started yet' : 'Nothing done yet');
-      const el = h('details', { class: `step ${t.status}${isCurrent && !running ? ' paused' : ''}`, open: view.ui.openSteps.has(t.id) || null },
-        h('summary', {},
-          h('span', { class: 'icon' }, STEP_ICON[t.status] ?? '○'),
-          h('span', { class: 'subject' }, t.subject),
-          isCurrent ? h('span', { class: 'muted' }, running ? (t.activeForm ? ` — ${t.activeForm}…` : '') : ' — paused') : '',
-          acts.length ? h('span', { class: 'muted n' }, `${acts.length} action${acts.length === 1 ? '' : 's'}`) : '',
-          h('span', { class: 'recap' }, recap)),
-        t.note ? stepNote(t.note) : '',
-        acts.length ? actionList(acts) : '');
-      el.addEventListener('toggle', () => (el.open ? view.ui.openSteps.add(t.id) : view.ui.openSteps.delete(t.id)));
-      return el;
-    });
+    const groups = { completed: [], in_progress: [], pending: [] };
+    for (const t of p.tasks) (groups[t.status] ?? groups.pending).push(t);
+    const stepEl = (t) => planStep(t, all.filter((a) => a.taskId === t.id), running);
+    const section = (title, tasks) => (tasks.length ? h('section', { class: 'plan-group' }, h('h4', {}, title), tasks.map(stepEl)) : '');
     const loose = view.turnActions.filter((a) => a.taskId == null || !p.tasks.some((t) => t.id === a.taskId));
-    const looseEl = loose.length
-      ? h('details', { class: 'step loose', open: (view.ui.looseOpen ?? !p.tasks.length) || null },
-          h('summary', {}, h('span', { class: 'icon' }, '⋯'),
-            h('span', { class: 'subject' }, p.tasks.length ? 'Other work this turn' : running ? 'Work this turn' : 'Work last turn'),
-            h('span', { class: 'muted n' }, `${loose.length} action${loose.length === 1 ? '' : 's'}`),
-            h('span', { class: 'recap' }, summarizeActions(loose))),
-          actionList(loose))
-      : '';
-    if (looseEl) looseEl.addEventListener('toggle', () => (view.ui.looseOpen = looseEl.open));
+    const req = view.turnRequest;
     detail = h('div', { class: 'progress-detail' },
-      steps.length ? h('div', { class: 'steps' }, steps) : '',
-      looseEl,
-      !steps.length && !looseEl ? h('p', { class: 'muted empty' }, 'Nothing has run yet.') : '');
+      req?.length ? h('p', { class: 'request' }, h('span', { class: 'muted' }, running ? 'Working on ' : 'Last worked on '),
+        req.flatMap((m, n) => [n ? ' and ' : '', `${m.author}'s request: `, h('q', {}, firstSentence(m.text, 160))])) : '',
+      section('Done', groups.completed),
+      section(running ? 'Now' : 'Stopped at', groups.in_progress),
+      section('Up next', groups.pending),
+      loose.length ? looseWork(loose, running, !p.tasks.length) : '',
+      !p.tasks.length && !loose.length ? h('p', { class: 'muted empty' }, 'Nothing has run yet.') : '');
   }
   progressEl.replaceChildren(bar, meter, detail);
   if (detail) detail.scrollTop = scrollTop;
@@ -1169,7 +1209,17 @@ function appendEvent(event, scroll = true) {
     stats.cost += data.total_cost_usd || 0;
   }
   renderStats();
-  if (event.kind === 'claude' && data.type === 'system' && data.subtype === 'init') view.turnActions = [];
+  if (event.kind === 'user_message') (view.pendingRequest ??= []).push({ author: data.author, text: data.text || '(image)' });
+  if (event.kind === 'claude' && data.type === 'system' && data.subtype === 'init') {
+    view.turnActions = [];
+    view.turnNote = null;
+    // Messages queued since the last turn are what this turn works on.
+    if (view.pendingRequest?.length) view.turnRequest = view.pendingRequest;
+    view.pendingRequest = [];
+  }
+  if (event.kind === 'claude' && data.type === 'assistant') {
+    for (const b of data.message?.content ?? []) if (b.type === 'text' && b.text.trim()) view.turnNote = b.text.trim();
+  }
   for (const { block, taskId } of applyEvent(view.progress, event.kind, data)) {
     const action = { block, taskId, result: null };
     view.actions.set(block.id, action);
@@ -1220,7 +1270,7 @@ function appendEvent(event, scroll = true) {
       if (acts.length) {
         const end = h('details', { class: 'turn-end' }, h('summary', {}, bits.join(' · ')));
         end.addEventListener('toggle', () => {
-          if (end.open && !end.querySelector('.actions')) end.append(h('p', { class: 'recap' }, summarizeActions(acts)), actionList(acts));
+          if (end.open && !end.querySelector('.phases')) end.append(...phaseRows(acts, false));
         });
         nodes.push(end);
       } else {

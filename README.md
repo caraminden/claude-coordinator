@@ -13,13 +13,16 @@ runners on other people's own Claude logins.
 
 ## How it works
 
-- Each chat message spawns one `claude -p --output-format stream-json` process
+- Each chat message spawns one `claude -p --input-format stream-json --output-format stream-json` process
   in the ticket's working directory, with `--resume <session_id>` after the
   first turn. Idle tickets cost nothing, and a restart loses nothing.
 - Every stream event is stored in SQLite and pushed to browsers over
   server-sent events.
 - Messages sent while a turn is running are queued and sent together as the
   next turn. Messages reach Claude as `[Name]: text`.
+- Images pasted, dropped or attached in the composer are shrunk in the browser
+  if needed, saved under `projects/<id>/uploads/<ticket>/`, and sent to Claude
+  as image blocks alongside the message text.
 - Opening a project creates its coordinator ticket on first visit. Its turns
   run with an extra MCP server (`src/mcp.ts`) whose tools call this app's API
   with a bearer token that only reaches that project's tickets (never the

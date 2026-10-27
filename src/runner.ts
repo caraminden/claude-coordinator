@@ -1,5 +1,6 @@
 // Runs ticket turns as headless `claude -p` processes, one turn per process.
 import { spawn, type ChildProcess } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
@@ -13,9 +14,33 @@ const DROPPED_SYSTEM_SUBTYPES = new Set(['commands_changed']);
 
 export type Broadcast = (msg: object) => void;
 
+export interface MessageImage {
+  name: string;
+  path: string;
+  mediaType: string;
+}
+
 interface QueuedMessage {
   author: string;
   text: string;
+  images: MessageImage[];
+}
+
+/** One turn's prompt as a stream-json user message, so pasted images reach Claude as images. */
+function promptMessage(batch: QueuedMessage[]): string {
+  const content: object[] = [];
+  for (const m of batch) {
+    const text = m.text || (m.images.length ? '(sent an image)' : '');
+    content.push({ type: 'text', text: `[${m.author}]: ${text}` });
+    for (const img of m.images) {
+      try {
+        content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: readFileSync(img.path).toString('base64') } });
+      } catch {
+        content.push({ type: 'text', text: `(An image ${m.author} attached could not be loaded.)` });
+      }
+    }
+  }
+  return JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
 }
 
 function truncate(s: string): string {
@@ -123,10 +148,10 @@ export class Runner {
   }
 
   /** Record a user message and run it now, or queue it behind the current turn. */
-  send(ticketId: number, author: string, text: string) {
-    this.emit(ticketId, 'user_message', { author, text });
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = []) {
+    this.emit(ticketId, 'user_message', images.length ? { author, text, images: images.map((i) => i.name) } : { author, text });
     const q = this.queues.get(ticketId) ?? [];
-    q.push({ author, text });
+    q.push({ author, text, images });
     this.queues.set(ticketId, q);
     if (!this.isRunning(ticketId)) this.next(ticketId);
     else this.broadcastTicket(ticketId);
@@ -155,13 +180,13 @@ export class Runner {
     const ticket = this.store.getTicket(ticketId);
     const project = ticket && this.store.getProject(ticket.project_id);
     if (!ticket || !project) return;
-    const prompt = batch.map((m) => `[${m.author}]: ${m.text}`).join('\n\n');
-    this.startTurn(project, ticket, prompt);
+    this.startTurn(project, ticket, promptMessage(batch));
   }
 
   private startTurn(project: Project, ticket: Ticket, prompt: string) {
     const args = [
       '-p',
+      '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', ticket.permission_mode,

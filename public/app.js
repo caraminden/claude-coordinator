@@ -314,8 +314,31 @@ async function showProject(projectId, ticketId = null) {
       : 'Message this ticket… (Enter to send, Shift+Enter for a new line)',
   });
   const sendBtn = h('button', { type: 'submit' }, 'Send');
-  const form = h('form', { class: 'composer' }, textarea,
-    h('div', { class: 'row' }, h('span', { class: 'muted', id: 'composer-hint' }), h('span', { class: 'spacer' }), sendBtn));
+  const attachments = createAttachments();
+  const picker = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
+  picker.addEventListener('change', () => {
+    attachments.add(picker.files);
+    picker.value = '';
+  });
+  const form = h('form', { class: 'composer' }, attachments.el, textarea, picker,
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'secondary small', onclick: () => picker.click() }, 'Add image'),
+      h('span', { class: 'muted', id: 'composer-hint' }), h('span', { class: 'spacer' }), sendBtn));
+  textarea.addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    attachments.add(files);
+  });
+  form.addEventListener('dragover', (e) => {
+    if ([...e.dataTransfer.items].some((i) => i.type.startsWith('image/'))) e.preventDefault();
+  });
+  form.addEventListener('drop', (e) => {
+    const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    attachments.add(files);
+  });
   textarea.addEventListener('keydown', (e) => {
     // Leave Enter alone while an IME is composing text, or it would send half a word.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -326,11 +349,14 @@ async function showProject(projectId, ticketId = null) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const text = textarea.value.trim();
-    if (!text) return;
+    if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.');
+    if (!text && !attachments.items.length) return;
     sendBtn.disabled = true;
     try {
-      const ticket = await api(`/api/tickets/${chatId}/messages`, { method: 'POST', body: { text } });
+      const images = attachments.items.map(({ mediaType, data }) => ({ mediaType, data }));
+      const ticket = await api(`/api/tickets/${chatId}/messages`, { method: 'POST', body: { text, images } });
       textarea.value = '';
+      attachments.clear();
       // Show the message now even if the live stream is down; duplicates are skipped by id.
       if (view?.kind === 'project' && view.id === chatId) {
         view.ticket = ticket;
@@ -426,6 +452,80 @@ function ticketCard(t, href = `#/t/${t.id}`) {
     ].filter(Boolean).join(' · ')));
 }
 
+// ---------- pasted images ----------
+
+const MAX_IMAGES = 6;
+const MAX_IMAGE_EDGE = 2000;
+const MAX_IMAGE_BYTES = 3.5 * 1024 * 1024; // base64 adds a third; the server caps decoded images at 5 MB
+const SENDABLE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
+/** Pending images in the composer: thumbnails with a remove button, read as base64 for sending. */
+function createAttachments() {
+  const el = h('div', { class: 'attachments', hidden: true });
+  const state = { el, items: [], busy: 0 };
+  const render = () => {
+    el.hidden = !state.items.length;
+    el.replaceChildren(...state.items.map((item) => h('div', { class: 'thumb' },
+      h('img', { src: item.url, alt: 'Image to send' }),
+      h('button', { type: 'button', title: 'Remove', onclick: () => {
+        URL.revokeObjectURL(item.url);
+        state.items.splice(state.items.indexOf(item), 1);
+        render();
+      } }, '×'))));
+  };
+  state.add = async (files) => {
+    for (const file of files) {
+      if (state.items.length + state.busy >= MAX_IMAGES) {
+        alertNote(`At most ${MAX_IMAGES} images per message.`);
+        break;
+      }
+      state.busy++;
+      try {
+        const blob = await prepareImage(file);
+        const data = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result).split(',')[1]);
+          r.onerror = () => reject(r.error);
+          r.readAsDataURL(blob);
+        });
+        state.items.push({ url: URL.createObjectURL(blob), mediaType: blob.type, data });
+        render();
+      } catch (err) {
+        alertNote(`Could not add image: ${err.message}`);
+      } finally {
+        state.busy--;
+      }
+    }
+  };
+  state.clear = () => {
+    for (const item of state.items) URL.revokeObjectURL(item.url);
+    state.items = [];
+    render();
+  };
+  return state;
+}
+
+/** Shrink big images (and convert odd formats) so they fit the API's size limits. */
+async function prepareImage(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));
+  if (scale === 1 && file.size <= MAX_IMAGE_BYTES && SENDABLE_TYPES.includes(file.type)) {
+    bitmap.close();
+    return file;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const encode = (type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+  // Screenshots stay sharp as PNG; fall back to JPEG when that is still too big.
+  let blob = await encode('image/png');
+  if (!blob || blob.size > MAX_IMAGE_BYTES) blob = await encode('image/jpeg', 0.85);
+  if (!blob || blob.size > MAX_IMAGE_BYTES) throw new Error('image is too large');
+  return blob;
+}
+
 function alertNote(text) {
   document.getElementById('log')?.append(h('div', { class: 'note error' }, text));
 }
@@ -514,7 +614,13 @@ function appendEvent(event, scroll = true) {
 
   if (event.kind === 'user_message') {
     const msg = h('div', { class: 'msg user' }, h('div', { class: 'who' }, data.author));
-    msg.append(markdown(data.text));
+    if (data.text) msg.append(markdown(data.text));
+    if (data.images?.length) {
+      msg.append(h('div', { class: 'images' }, data.images.map((name) => {
+        const src = `/api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`;
+        return h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' }));
+      })));
+    }
     nodes.push(msg);
   } else if (event.kind === 'note') {
     nodes.push(h('div', { class: 'note' }, data.text));

@@ -1,6 +1,6 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
-import { createHash } from 'node:crypto';
-import { readFile, readdir, mkdir } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
+import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { homedir } from 'node:os';
@@ -49,7 +49,8 @@ function broadcast(msg: object) {
 }
 
 const SECURITY_HEADERS = {
-  'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  // blob: lets the composer preview pasted images before they are sent.
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
 };
@@ -80,7 +81,7 @@ function json(res: ServerResponse, status: number, body: unknown, headers: Recor
   res.end(JSON.stringify(body));
 }
 
-async function readJson(req: IncomingMessage): Promise<any> {
+async function readJson(req: IncomingMessage, maxBytes = 1_000_000): Promise<any> {
   if (!(req.headers['content-type'] ?? '').startsWith('application/json')) {
     throw new HttpError(415, 'Expected application/json');
   }
@@ -88,7 +89,7 @@ async function readJson(req: IncomingMessage): Promise<any> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 1_000_000) throw new HttpError(413, 'Request too large');
+    if (size > maxBytes) throw new HttpError(413, 'Request too large');
     chunks.push(chunk);
   }
   try {
@@ -155,6 +156,45 @@ function agentProject(session: Session): number | null {
   const t = store.getTicket(session.agent);
   if (t?.kind !== 'coordinator') throw new HttpError(403, 'Not a coordinator');
   return t.project_id;
+}
+
+// Images people paste into a chat. 5 MB is the API's per-image limit.
+const MAX_IMAGES = 6;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const IMAGE_TYPES: { type: string; ext: string; magic: (b: Buffer) => boolean }[] = [
+  { type: 'image/png', ext: '.png', magic: (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
+  { type: 'image/jpeg', ext: '.jpg', magic: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  { type: 'image/gif', ext: '.gif', magic: (b) => b.subarray(0, 4).toString('latin1') === 'GIF8' },
+  { type: 'image/webp', ext: '.webp', magic: (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP' },
+];
+const IMAGE_NAME = /^[0-9a-f]{24}\.(png|jpg|gif|webp)$/;
+
+function uploadsDir(ticket: Ticket): string {
+  return join(projectDir(DATA_DIR, ticket.project_id), 'uploads', String(ticket.id));
+}
+
+/** Check pasted images (base64 in the request body) and write them to the ticket's uploads folder. */
+async function saveImages(ticket: Ticket, raw: unknown): Promise<{ name: string; path: string; mediaType: string }[]> {
+  if (raw == null || (Array.isArray(raw) && !raw.length)) return [];
+  if (!Array.isArray(raw)) throw new HttpError(400, 'images must be a list');
+  if (raw.length > MAX_IMAGES) throw new HttpError(400, `At most ${MAX_IMAGES} images per message`);
+  const decoded = raw.map((img) => {
+    const buf = Buffer.from(typeof img?.data === 'string' ? img.data : '', 'base64');
+    if (!buf.length) throw new HttpError(400, 'Empty image');
+    if (buf.length > MAX_IMAGE_BYTES) throw new HttpError(413, 'Images must be under 5 MB each');
+    // Trust the bytes, not the declared type, since these get served back to browsers.
+    const kind = IMAGE_TYPES.find((t) => t.magic(buf));
+    if (!kind) throw new HttpError(415, 'Images must be PNG, JPEG, GIF or WebP');
+    return { buf, kind };
+  });
+  const dir = uploadsDir(ticket);
+  await mkdir(dir, { recursive: true });
+  return Promise.all(decoded.map(async ({ buf, kind }) => {
+    const name = randomBytes(12).toString('hex') + kind.ext;
+    const path = join(dir, name);
+    await writeFile(path, buf);
+    return { name, path, mediaType: kind.type };
+  }));
 }
 
 const MIME: Record<string, string> = {
@@ -296,6 +336,23 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     return json(res, 201, ticketView(id));
   }
 
+  m = pathname.match(/^\/api\/tickets\/(\d+)\/images\/([^/]+)$/);
+  if (m && method === 'GET') {
+    const ticket = ticketView(Number(m[1]));
+    inScope(ticket.project_id);
+    if (!IMAGE_NAME.test(m[2])) throw new HttpError(404, 'Not found');
+    let body: Buffer;
+    try {
+      body = await readFile(join(uploadsDir(ticket), m[2]));
+    } catch {
+      throw new HttpError(404, 'Not found');
+    }
+    const type = IMAGE_TYPES.find((t) => m![2].endsWith(t.ext))!.type;
+    // Names are random and never reused, so the browser can keep them.
+    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': type, 'Cache-Control': 'private, max-age=31536000, immutable' });
+    return res.end(body);
+  }
+
   m = pathname.match(/^\/api\/tickets\/(\d+)(\/[a-z]+)?$/);
   if (m) {
     const id = Number(m[1]);
@@ -322,8 +379,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       return json(res, 200, store.listEvents(id, Number(url.searchParams.get('after') ?? 0)));
     }
     if (action === '/messages' && method === 'POST') {
-      const body = await readJson(req);
-      runner.send(id, session.name, str(body.text, 'Message', 100_000));
+      // Room for MAX_IMAGES images at 5 MB each, base64-encoded.
+      const body = await readJson(req, 45_000_000);
+      const hasImages = Array.isArray(body.images) && body.images.length > 0;
+      const text = hasImages && (typeof body.text !== 'string' || !body.text.trim()) ? '' : str(body.text, 'Message', 100_000);
+      runner.send(id, session.name, text, await saveImages(ticket, body.images));
       return json(res, 202, ticketView(id));
     }
     if (action === '/stop' && method === 'POST') {

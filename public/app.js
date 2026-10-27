@@ -904,11 +904,6 @@ function chatSection(chatId, ticket, events) {
 
 function newTicketForm(projectId) {
   const form = h('form', {},
-    h('label', {}, 'Title', h('input', { name: 'title', required: true, maxlength: 120, placeholder: 'The short ask, about 30 characters', 'data-draft': true })),
-    h('label', {}, 'Kind',
-      h('select', { name: 'tag' },
-        h('option', { value: '' }, 'Other (one-off question, review…)'),
-        Object.entries(TAGS).map(([value, t]) => h('option', { value }, `${t.emoji} ${t.label}`)))),
     h('label', {}, 'First message', h('textarea', { name: 'message', required: true, rows: 5, placeholder: 'What should this thread work on? (Enter to send, Shift+Enter for a new line)', 'data-draft': true })),
     h('label', {}, 'Permissions',
       h('select', { name: 'permissionMode' },
@@ -920,13 +915,12 @@ function newTicketForm(projectId) {
   const draftKey = `cc-new-thread:${projectId}`;
   const draft = loadDraft(draftKey);
   if (draft) {
-    form.title.value = draft.title ?? '';
     form.message.value = draft.message ?? '';
     if (draft.permissionMode) form.permissionMode.value = draft.permissionMode;
-    if (draft.tag) form.tag.value = draft.tag;
   }
-  const fields = () => ({ title: form.title.value, tag: form.tag.value || null, message: form.message.value, permissionMode: form.permissionMode.value });
-  form.addEventListener('input', () => saveDraft(draftKey, form.title.value || form.message.value ? fields() : null));
+  // The thread names and tags itself from what it is asked to do.
+  const fields = () => ({ message: form.message.value, permissionMode: form.permissionMode.value });
+  form.addEventListener('input', () => saveDraft(draftKey, form.message.value ? fields() : null));
   form.message.addEventListener('keydown', (e) => {
     // Same as the chat composer: Enter sends, Shift+Enter adds a line, IME composition is left alone.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -955,7 +949,7 @@ function newTicketForm(projectId) {
     }
   });
   // A half-written thread stays open so it is not forgotten.
-  return h('details', { class: 'new', open: !!(draft?.title || draft?.message) }, h('summary', {}, 'New thread'), form);
+  return h('details', { class: 'new', open: !!draft?.message }, h('summary', {}, 'New thread'), form);
 }
 
 function renderSidebar() {

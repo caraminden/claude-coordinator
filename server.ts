@@ -395,6 +395,15 @@ function str(v: unknown, field: string, max = 200): string {
   return v.trim();
 }
 
+/** A stand-in title from the start of a first message, cut at a word near 40 characters. */
+function provisionalTitle(message: string): string {
+  const line = message.split('\n').find((l) => l.trim())!.replace(/\s+/g, ' ').trim();
+  if (line.length <= 40) return line;
+  const cut = line.slice(0, 40);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > 20 ? cut.slice(0, space) : cut).replace(/[\s,.;:-]+$/, '')}…`;
+}
+
 function ticketView(id: number) {
   const t = store.getTicket(id);
   if (!t) throw new HttpError(404, 'No such ticket');
@@ -666,8 +675,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (!project) throw new HttpError(404, 'No such project');
     inScope(project.id);
     const body = await readJson(req);
-    const title = str(body.title, 'Title', 120);
     const message = str(body.message, 'First message', 100_000);
+    // Without a title (the New thread form sends none) start from the message's opening words;
+    // the thread renames itself once it knows what the work is.
+    const title = body.title === undefined ? provisionalTitle(message) : str(body.title, 'Title', 120);
     const mode = PERMISSION_MODES.includes(body.permissionMode) ? body.permissionMode : DEFAULT_PERMISSION_MODE;
     // Insert first so concurrent creates get distinct ids, then build the working dir.
     const tag = oneOf(body.tag ?? null, TICKET_TAGS, 'Tag') as TicketTag | null;

@@ -128,17 +128,33 @@ const loadDraftImages = (ticketId) => draftStore('readonly', (s) => s.get(ticket
 const saveDraftImages = (ticketId, items) =>
   draftStore('readwrite', (s) => (items.length ? s.put(items, ticketId) : s.delete(ticketId))).catch(() => {});
 
+// The chat follows new output only while you are at the bottom. Tracked on scroll rather than
+// measured when output arrives, so a burst of events can't misjudge it, and kept tight so that
+// scrolling up even a little leaves you where you are.
+const BOTTOM_SLACK = 24;
+const atBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - BOTTOM_SLACK;
+let followChat = true;
+window.addEventListener('scroll', () => { followChat = atBottom(); }, { passive: true });
+function scrollToBottom() {
+  window.scrollTo(0, document.documentElement.scrollHeight);
+  followChat = true;
+}
+// Images finish loading after they are added; stay pinned to the bottom if you were following.
+document.addEventListener('load', (e) => {
+  if (followChat && e.target.tagName === 'IMG' && e.target.closest('#log')) scrollToBottom();
+}, true);
+
 /** Where each thread was scrolled to, so coming back lands in the same place. */
 function saveScroll() {
   if (view?.kind !== 'project') return;
-  const atBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 200;
-  try { sessionStorage.setItem(`cc-scroll:${view.id}`, JSON.stringify(atBottom ? 'bottom' : window.scrollY)); } catch {}
+  try { sessionStorage.setItem(`cc-scroll:${view.id}`, JSON.stringify(followChat ? 'bottom' : window.scrollY)); } catch {}
 }
 
 function restoreScroll(ticketId) {
   let saved = 'bottom';
   try { saved = JSON.parse(sessionStorage.getItem(`cc-scroll:${ticketId}`)) ?? 'bottom'; } catch {}
-  window.scrollTo(0, saved === 'bottom' ? document.body.scrollHeight : saved);
+  if (saved === 'bottom') scrollToBottom();
+  else window.scrollTo(0, saved);
 }
 
 window.addEventListener('pagehide', saveScroll);
@@ -500,6 +516,8 @@ async function showProject(projectId, ticketId = null) {
       attachments.remove(sent);
       // Show the message now even if the live stream is down; duplicates are skipped by id.
       if (view?.kind === 'project' && view.id === chatId) {
+        // You just sent something, so follow the reply.
+        scrollToBottom();
         view.ticket = ticket;
         renderTicketHead();
         catchUpEvents().catch(() => {});
@@ -883,7 +901,6 @@ function appendEvent(event, scroll = true) {
     view.turnActions.push(action);
   }
   if (event.kind === 'claude') scheduleProgress();
-  const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 200;
   const nodes = [];
 
   if (event.kind === 'user_message') {
@@ -939,7 +956,7 @@ function appendEvent(event, scroll = true) {
   }
 
   log.append(...nodes);
-  if (scroll && nearBottom) window.scrollTo(0, document.body.scrollHeight);
+  if (scroll && followChat) scrollToBottom();
 }
 
 // ---------- boot ----------

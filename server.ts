@@ -1,5 +1,6 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
-import { readFile, mkdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, readdir, mkdir } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { homedir } from 'node:os';
@@ -20,6 +21,11 @@ const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
 const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 
 await mkdir(DATA_DIR, { recursive: true });
+// Fingerprint of the front end, so open tabs can tell they are stale after a deploy.
+const ASSET_VERSION = createHash('sha256')
+  .update((await Promise.all((await readdir(PUBLIC_DIR)).sort().map((f) => readFile(join(PUBLIC_DIR, f))))).join('\0'))
+  .digest('hex')
+  .slice(0, 12);
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '');
 // Keep secrets out of the environment that claude and its tools inherit.
@@ -217,7 +223,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   if (pathname === '/api/stream') {
     if (clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
-    res.write(': connected\n\n');
+    res.write(`data: ${JSON.stringify({ type: 'hello', version: ASSET_VERSION })}\n\n`);
     clients.add(res);
     const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
     req.on('close', () => {

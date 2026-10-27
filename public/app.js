@@ -14,6 +14,7 @@ const COLUMNS = [
 let me = null;
 let view = null; // { kind, id, ... } for the current screen
 let stream = null;
+let assetVersion = null;
 
 // ---------- helpers ----------
 
@@ -97,6 +98,11 @@ function connectStream() {
   stream = new EventSource('/api/stream');
   stream.onmessage = (e) => {
     const msg = JSON.parse(e.data);
+    if (msg.type === 'hello') {
+      // The server restarted with a different front end; load it instead of running stale code.
+      if (assetVersion && msg.version !== assetVersion) location.reload();
+      assetVersion = msg.version;
+    }
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'event') onEvent(msg.event);
   };

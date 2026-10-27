@@ -21,7 +21,7 @@ writeFileSync(fakeClaude, `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), cwd: process.cwd(), token: process.env.COORDINATOR_TOKEN }) + '\\n');
+  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), cwd: process.cwd(), token: process.env.COORDINATOR_TOKEN, shared: process.env.COORDINATOR_SHARED_DIR, files: process.env.COORDINATOR_FILES_DIR }) + '\\n');
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
@@ -87,6 +87,8 @@ before(async () => {
   [turn] = await until('the first turn', () => turns().length >= 1 && turns());
   await idle(ticket.id);
   shared = join(root, 'data', 'projects', String(project.id), 'shared', String(ticket.id));
+  assert.equal(turn.shared, join(root, 'data', 'projects', String(project.id), 'shared', 'project'));
+  assert.equal(turn.files, shared);
   mkdirSync(join(turn.cwd, 'takes'), { recursive: true });
   mkdirSync(shared, { recursive: true });
   for (const f of [join(turn.cwd, 'takes/a.png'), join(turn.cwd, 'takes/b.gif'), join(turn.cwd, 'report.md'), join(shared, 'c.mp4'), join(root, 'secret.png')]) writeFileSync(f, 'x');

@@ -160,7 +160,9 @@ coordinator is never affected.
 
 **Plugin folders.** A project can also list folders relative to the repo root
 (e.g. `tools/mods/delve`); each thread turn gets `--plugin-dir <worktree>/<folder>`
-for every one that exists in its worktree.
+for every one that exists in its worktree. Turns also get `COORDINATOR_SHARED_DIR` (the
+project's shared folder) and `COORDINATOR_FILES_DIR` (the thread's own) in their environment,
+for plugins and hooks that write files people should see.
 
 The coordinator itself runs in `acceptEdits` with only its MCP tools
 pre-approved, so it can read the code and manage tickets but can't run shell

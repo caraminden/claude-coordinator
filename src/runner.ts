@@ -475,6 +475,9 @@ export class Runner {
     // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
     args.push('--mcp-config', JSON.stringify({ mcpServers: servers }), '--allowedTools', ...allowed, '--disallowedTools', 'AskUserQuestion');
     env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
+    // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
+    if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;
+    if (filesDir) env.COORDINATOR_FILES_DIR = filesDir;
     // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
     if (rules.length) env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
     // A state describes where the last turn left things; a new turn makes it stale.

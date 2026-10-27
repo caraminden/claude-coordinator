@@ -1,0 +1,15 @@
+#!/bin/sh
+# Backstop for the push rules in tools/guard.sh: git runs this before every push from a
+# clone whose core.hooksPath is .githooks (tools/guard.sh --install sets that when a
+# Claude Code session starts in the repo). It refuses any push that would create, update
+# or delete main or master, whoever runs it, so main only changes through a pull request.
+# To turn it off in one clone: git config --unset core.hooksPath
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      echo "[guard] push to ${remote_ref#refs/heads/} refused: main only changes through a merged pull request. Push a feature branch and open a PR." >&2
+      exit 1
+      ;;
+  esac
+done
+exit 0

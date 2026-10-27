@@ -497,9 +497,19 @@ mark.find.current { background: var(--waiting); color: #fff; }
 
 /* Model and effort pickers beside Send */
 .composer .pickers { display: inline-flex; gap: 0.35rem; }
-.composer select.picker { width: auto; padding: 0.2rem 0.4rem; font-size: 0.82em; color: var(--muted); background: var(--panel); border-radius: 6px; cursor: pointer; }
+.composer select.picker { width: auto; padding: 0.2rem 0.4rem; font-size: 0.82em; color: var(--ink); background: var(--panel); border-radius: 6px; cursor: pointer; }
+/* No choice made: the default, in grey. */
+.composer select.picker.is-default { color: var(--muted); }
+.composer select.picker option { color: var(--ink); }
+.composer select.picker option[value=""] { color: var(--muted); }
 .composer select.picker:hover, .composer select.picker:focus { color: var(--ink); border-color: var(--accent); }
-@media (max-width: 800px) { .composer select.picker { max-width: 8.5rem; } }
+@media (max-width: 800px) {
+  .composer select.picker { max-width: 8.5rem; }
+  /* Phones: Add image, the pickers and Send share one line; the hint, when there is one, goes under them. */
+  .composer .row { gap: 0.5rem; }
+  .composer #composer-hint { order: 1; flex-basis: 100%; font-size: 0.85em; }
+  .composer #composer-hint:empty { display: none; }
+}
 
 /* Question cards: Claude's multiple-choice questions, answered with a click */
 .qcard { border: 1px solid color-mix(in srgb, var(--running) 45%, var(--line)); border-radius: 10px; background: var(--panel); padding: 0.6rem 0.85rem; display: flex; flex-direction: column; gap: 0.75rem; }

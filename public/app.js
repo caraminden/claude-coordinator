@@ -1754,27 +1754,35 @@ function modelPicker(chatId) {
       sel.disabled = false;
     }
   };
-  const model = h('select', { class: 'picker', id: 'model-picker', title: 'Model for this thread', onchange: save('model') });
-  const effort = h('select', { class: 'picker', id: 'effort-picker', title: 'Effort for this thread', onchange: save('effort') });
+  const model = h('select', { class: 'picker', id: 'model-picker', title: 'Model for this thread', 'aria-label': 'Model for this thread', onchange: save('model') });
+  const effort = h('select', { class: 'picker', id: 'effort-picker', title: 'Effort for this thread', 'aria-label': 'Effort for this thread', onchange: save('effort') });
   return h('span', { class: 'pickers' }, model, effort);
 }
 
-/** Fill the pickers from the thread: its choice, and for "Default", what that came out as on its last turn without one. */
+/**
+ * Fill the pickers from the thread: its choice, or with none, the default (named as what it came out
+ * as on its last turn, else just "Model" / "Effort"). The default shows grey; a choice shows in full ink.
+ */
 function renderModelPicker() {
   const model = document.getElementById('model-picker');
   const effort = document.getElementById('effort-picker');
   if (!model || !effort || !view.ticket) return;
   const t = view.ticket;
-  const defModel = !t.model && t.last_model ? `Default · ${modelName(t.last_model)}` : 'Default model';
+  const defModel = !t.model && t.last_model ? modelName(t.last_model) : 'Model';
   model.replaceChildren(h('option', { value: '' }, defModel), ...MODELS.map(([id, name]) => h('option', { value: id }, name)));
   // A model set outside this list (say, by an older version) still shows as itself.
   if (t.model && !MODELS.some(([id]) => id === t.model)) model.append(h('option', { value: t.model }, t.model));
   model.value = t.model ?? '';
-  const defEffort = !t.effort && t.last_effort ? `Default · ${t.last_effort}` : 'Default effort';
-  effort.replaceChildren(h('option', { value: '' }, defEffort), ...EFFORTS.map((e) => h('option', { value: e }, `${e} effort`)));
+  const defEffort = !t.effort && t.last_effort ? t.last_effort : 'Effort';
+  effort.replaceChildren(h('option', { value: '' }, defEffort), ...EFFORTS.map((e) => h('option', { value: e }, e)));
   effort.value = t.effort ?? '';
-  model.title = `Model for this thread${t.last_model ? ` (default here: ${modelName(t.last_model)})` : ''}${t.status === 'running' ? '; a change applies from the next turn' : ''}`;
-  effort.title = `Effort for this thread${t.last_effort ? ` (default here: ${t.last_effort})` : ''}${t.status === 'running' ? '; a change applies from the next turn' : ''}`;
+  model.classList.toggle('is-default', !t.model);
+  effort.classList.toggle('is-default', !t.effort);
+  const later = t.status === 'running' ? '; a change applies from the next turn' : '';
+  model.title = t.model ? `Model for this thread: ${modelName(t.model)}${later}` : `Model for this thread: the default${t.last_model ? ` (${modelName(t.last_model)} on its last turn)` : ''}${later}`;
+  effort.title = t.effort ? `Effort for this thread: ${t.effort}${later}` : `Effort for this thread: the default${t.last_effort ? ` (${t.last_effort} on its last turn)` : ''}${later}`;
+  model.setAttribute('aria-label', model.title);
+  effort.setAttribute('aria-label', effort.title);
 }
 
 function renderTicketHead() {

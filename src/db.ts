@@ -136,6 +136,12 @@ CREATE TABLE IF NOT EXISTS claude_state (
   data BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS claude_state_owner ON claude_state(project_id, ticket_id);
+CREATE TABLE IF NOT EXISTS ticket_seen (
+  name TEXT NOT NULL,
+  ticket_id INTEGER NOT NULL REFERENCES tickets(id),
+  seen_at INTEGER NOT NULL,
+  PRIMARY KEY (name, ticket_id)
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -271,6 +277,7 @@ export class Store {
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
@@ -399,6 +406,22 @@ export class Store {
 
   deleteClaudeState(path: string) {
     this.db.prepare('DELETE FROM claude_state WHERE path = ?').run(path);
+  }
+
+  /** When `name` last looked at each of a project's threads: ticket id -> time. */
+  seenTimes(name: string, projectId: number): Record<number, number> {
+    const rows = this.db
+      .prepare('SELECT s.ticket_id, s.seen_at FROM ticket_seen s JOIN tickets t ON t.id = s.ticket_id WHERE s.name = ? AND t.project_id = ?')
+      .all(name, projectId) as { ticket_id: number; seen_at: number }[];
+    return Object.fromEntries(rows.map((r) => [r.ticket_id, r.seen_at]));
+  }
+
+  markSeen(name: string, ticketId: number): number {
+    const now = Date.now();
+    this.db
+      .prepare('INSERT INTO ticket_seen (name, ticket_id, seen_at) VALUES (?, ?, ?) ON CONFLICT(name, ticket_id) DO UPDATE SET seen_at = excluded.seen_at')
+      .run(name, ticketId, now);
+    return now;
   }
 
   listEvents(ticketId: number, afterId = 0): EventRow[] {

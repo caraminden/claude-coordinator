@@ -623,7 +623,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       .listTickets(project.id)
       .filter((t) => t.kind === 'ticket')
       .map((t) => runner.view(t));
-    return json(res, 200, { project, coordinator: ticketView(coordinator.id), tickets });
+    // When this person last looked at each thread, so rows they have already seen can be shown quieter.
+    const seen = session.agent === undefined ? store.seenTimes(session.name, project.id) : {};
+    return json(res, 200, { project, coordinator: ticketView(coordinator.id), tickets, seen });
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/tickets$/);
@@ -735,6 +737,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         runner.broadcastTicket(id);
       }
       return json(res, 200, ticketView(id));
+    }
+    if (action === '/seen' && method === 'POST') {
+      if (session.agent !== undefined) throw new HttpError(403, 'Only people mark threads seen');
+      return json(res, 200, { seen_at: store.markSeen(session.name, id) });
     }
     if (action === '/branch' && method === 'GET') {
       return json(res, 200, { status: await ticketBranch(id) });

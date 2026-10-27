@@ -444,6 +444,9 @@ button.pin.on { color: var(--accent); }
 .thread-row.yours.stuck, .thread-group .thread-row.yours.stuck { background: var(--stuck-bg); }
 .thread-row.yours.active, .thread-group .thread-row.yours.active { background: color-mix(in srgb, var(--waiting) 12%, var(--yours-bg)); }
 .thread-row.yours.stuck.active, .thread-group .thread-row.yours.stuck.active { background: color-mix(in srgb, var(--error) 10%, var(--stuck-bg)); }
+/* Already seen in its current state: only a hint of the tint, until the thread changes again. */
+.thread-row.yours.seen, .thread-group .thread-row.yours.seen { background: color-mix(in srgb, var(--yours-bg) 35%, var(--panel)); }
+.thread-row.yours.stuck.seen, .thread-group .thread-row.yours.stuck.seen { background: color-mix(in srgb, var(--stuck-bg) 35%, var(--panel)); }
 .thread-row .name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; }
 .thread-row .num { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
 .thread-row.coordinator { margin-top: 0.1rem; }

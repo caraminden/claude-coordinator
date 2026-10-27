@@ -448,13 +448,15 @@ async function resync() {
   if (view?.kind !== 'project') return route();
   // Refresh in place so a half-typed message in the composer survives.
   try {
-    const [{ coordinator, tickets }, artifacts, chat] = await Promise.all([
+    const [{ coordinator, tickets, seen }, artifacts, chat] = await Promise.all([
       api(`/api/projects/${view.projectId}`),
       api(`/api/projects/${view.projectId}/artifacts`),
       view.id ? api(`/api/tickets/${view.id}`) : null,
     ]);
     view.coordinator = coordinator;
     view.tickets = new Map(tickets.map((t) => [t.id, t]));
+    view.seen = seen ?? view.seen;
+    if (view.id) markSeen(view.id);
     renderSidebar();
     setArtifacts(artifacts);
     if (!chat) return;
@@ -495,8 +497,30 @@ function onTicketUpdate(ticket) {
   if (view.id === ticket.id) {
     view.ticket = ticket;
     renderTicketHead();
+    // You're looking at it, so whatever it changed to is seen too.
+    if (document.visibilityState === 'visible') markSeen(ticket.id);
   }
 }
+
+// ---------- seen ----------
+
+const seenTimers = new Map();
+/** Record that you have looked at a thread as it is now (shortly, so a burst of updates sends one). */
+function markSeen(ticketId) {
+  if (seenTimers.has(ticketId)) return;
+  seenTimers.set(ticketId, setTimeout(async () => {
+    seenTimers.delete(ticketId);
+    try {
+      const { seen_at } = await api(`/api/tickets/${ticketId}/seen`, { method: 'POST', body: {} });
+      if (view?.kind !== 'project') return;
+      view.seen[ticketId] = seen_at;
+      renderSidebar();
+    } catch {}
+  }, 800));
+}
+
+/** A thread you have opened since it last changed. */
+const isSeen = (t) => (view.seen?.[t.id] ?? 0) >= t.updated_at;
 
 function onEvent(event) {
   if (view?.kind !== 'project' || view.id !== event.ticket_id) return;
@@ -660,7 +684,7 @@ async function showArtifact(artifactId) {
  * coordinator (or the chosen ticket), the artifact browser, or one artifact.
  */
 async function showProject(projectId, main = { kind: 'chat', number: null }) {
-  const [{ project, coordinator, tickets }, artifacts, projects] = await Promise.all([
+  const [{ project, coordinator, tickets, seen }, artifacts, projects] = await Promise.all([
     api(`/api/projects/${projectId}`),
     // An empty shelf beats a broken page if the server is older than this front end.
     api(`/api/projects/${projectId}/artifacts`).catch(() => []),
@@ -676,6 +700,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     : [{ ticket: null }, []];
   view = {
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
+    seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
     artifacts, artifactId: main.artifact?.id ?? null,
     file: main.file ?? null, fileTicket: main.ticket ?? null,
     id: chatId, ticket, lastEventId: 0,
@@ -752,6 +777,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   renderTicketHead();
   for (const ev of events) appendEvent(ev, false);
   if (ticket.branch) refreshBranch(chatId);
+  markSeen(chatId);
   restoreScroll(chatId);
   if (pendingFind) {
     view.findEl?.find(pendingFind);
@@ -1146,7 +1172,8 @@ function threadRow(t, href = threadHref(t), hit = null) {
   ].filter(Boolean).join('\n');
   const active = (view.id ?? view.fileTicket?.id) === t.id;
   // Rows waiting on you get a tinted background (red when the thread is stuck), so they stand out.
-  const yours = !coord && st.rank === 0 ? ` yours${st.cls === 'st' ? ' stuck' : ''}` : '';
+  // Faint once you've opened the thread since it last changed; vibrant again when it changes.
+  const yours = !coord && st.rank === 0 ? ` yours${st.cls === 'st' ? ' stuck' : ''}${isSeen(t) ? ' seen' : ''}` : '';
   return h('a', { class: `thread-row s-${t.status}${coord ? ' coordinator' : ''}${yours}${active ? ' active' : ''}`, href, title: details },
     h('span', { class: 'name' }, coord ? 'Coordinator' : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',

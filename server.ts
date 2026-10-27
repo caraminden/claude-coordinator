@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact } from './src/artifacts.ts';
 import { AGENT_NAME, Auth, type Session } from './src/auth.ts';
 import { branchStatus, type BranchStatus } from './src/branch.ts';
+import { claudeConfigDir, saveSession } from './src/sessions.ts';
 import { Store, type Artifact, type Project, type Ticket } from './src/db.ts';
 import { Runner } from './src/runner.ts';
 import { cloneProject, createTicketDir, projectDir, removeProjectDir } from './src/workspace.ts';
@@ -120,6 +121,16 @@ store.pruneArtifacts(isArtifact);
   for (const p of store.listProjects()) {
     for (const t of store.listTickets(p.id)) {
       await scanArtifacts(t.id).catch((err) => console.error(`Artifact scan of ticket ${t.id} failed:`, err));
+    }
+  }
+  // Copy every thread's Claude session into the database (only what changed since last time), so
+  // threads from before this existed are covered too. Nothing is pruned here: this config dir may be
+  // a fresh one that hasn't had the sessions restored into it yet.
+  const configDir = claudeConfigDir(process.env);
+  for (const p of store.listProjects()) {
+    for (const t of store.listTickets(p.id)) {
+      if (!t.session_id || runner.isRunning(t.id)) continue;
+      await saveSession(store, t, p, configDir, false).catch((err) => console.error(`Saving the session of ticket ${t.id} failed:`, err));
     }
   }
 })();

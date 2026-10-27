@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
+import { claudeConfigDir, restoreSession, saveSession } from './sessions.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -272,6 +273,16 @@ export class Runner {
       env = { ...env, ...this.coordinatorEnv(ticket) };
     }
 
+    // The session's transcript, task list and memory live in the database too; put back anything this
+    // config dir lacks (another account, a fresh machine) before resuming.
+    const configDir = claudeConfigDir(env);
+    try {
+      const restored = restoreSession(this.store, ticket, project, configDir);
+      if (restored) this.emit(ticket.id, 'note', { text: `Restored this thread's Claude session from the app's database (${restored} file${restored === 1 ? '' : 's'}).` });
+    } catch (err: any) {
+      this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${err.message}` });
+    }
+
     const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     this.procs.set(ticket.id, proc);
     this.setStatus(ticket.id, 'running');
@@ -316,6 +327,12 @@ export class Runner {
       }
       this.setStatus(ticket.id, status);
       this.onFilesMayChange(ticket.id);
+      // Re-read the ticket: the turn may have given it its first (or a new) session id.
+      const after = this.store.getTicket(ticket.id);
+      if (after) {
+        saveSession(this.store, after, project, configDir, true)
+          .catch((err) => console.error(`Saving the session of ticket ${ticket.id} failed:`, err));
+      }
       this.next(ticket.id);
     });
   }

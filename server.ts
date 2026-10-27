@@ -13,7 +13,7 @@ import { branchStatus, type BranchStatus } from './src/branch.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
 import { instructionSources } from './src/instructions.ts';
-import { Runner } from './src/runner.ts';
+import { Runner, slimEvent } from './src/runner.ts';
 import { cloneProject, createTicketDir, projectDir, removeProjectDir } from './src/workspace.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
@@ -124,6 +124,15 @@ runner.onFilesMayChange = (ticketId) => {
 };
 runner.filesDir = sharedDir;
 runner.ticketsDir = (project) => join(projectDir(DATA_DIR, project.id), 'tickets');
+// Threads stored before events were slimmed carry megabytes of thinking and usage data nobody
+// reads; slim them once so opening a long thread downloads only what the chat shows.
+if (!store.getSetting('events_slimmed')) {
+  const { changed, deleted } = store.rewriteClaudeEvents((data) => slimEvent(data, true));
+  store.db.exec('VACUUM');
+  store.setSetting('events_slimmed', 1);
+  console.log(`Slimmed stored events: ${changed} rewritten, ${deleted} dropped.`);
+}
+
 // Pick up anything made while the server was down (or before artifacts existed), one ticket at a time.
 // Rows for file types that no longer count as artifacts go first, pinned or not.
 store.pruneArtifacts(isArtifact);

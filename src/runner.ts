@@ -12,7 +12,6 @@ const MCP_SERVER = join(import.meta.dirname, 'mcp.ts');
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
-const DROPPED_SYSTEM_SUBTYPES = new Set(['commands_changed']);
 
 export type Broadcast = (msg: object) => void;
 
@@ -71,27 +70,39 @@ function truncate(s: string): string {
   return s.length > MAX_TOOL_OUTPUT ? s.slice(0, MAX_TOOL_OUTPUT) + `\n… [truncated ${s.length - MAX_TOOL_OUTPUT} chars]` : s;
 }
 
-/** Shrink a stream-json event before storing it: drop duplicated raw tool results and cap output size. */
-function slimEvent(ev: any): any {
-  if (ev.type === 'system' && ev.subtype === 'init') {
-    return { type: 'system', subtype: 'init', session_id: ev.session_id, model: ev.model, cwd: ev.cwd };
+/**
+ * Shrink a stream-json event before storing it, keeping only what the chat, the progress readout
+ * and the coordinator's transcript read: thinking, usage, ids and background-task echoes are most
+ * of a long thread's history and none of them are shown. Returns null for events not worth keeping.
+ * `stored` is for events already in the database, whose tool output was capped when it was saved.
+ */
+export function slimEvent(ev: any, stored = false): any {
+  if (ev.type === 'system') {
+    return ev.subtype === 'init'
+      ? { type: 'system', subtype: 'init', session_id: ev.session_id, model: ev.model, cwd: ev.cwd }
+      : null;
   }
-  if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
-    const { tool_use_result: _raw, ...rest } = ev;
-    rest.message = {
-      ...ev.message,
-      content: ev.message.content.map((block: any) => {
-        if (block.type !== 'tool_result') return block;
-        let content = block.content;
-        if (Array.isArray(content)) {
-          content = content.map((c: any) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
-        }
-        return { ...block, content: truncate(String(content ?? '')) };
-      }),
-    };
-    return rest;
+  if ((ev.type === 'assistant' || ev.type === 'user') && Array.isArray(ev.message?.content)) {
+    const content = ev.message.content.flatMap((block: any) => {
+      if (block?.type === 'thinking' || block?.type === 'redacted_thinking') return [];
+      if (block?.type !== 'tool_result' || stored) return [block];
+      let content = block.content;
+      if (Array.isArray(content)) {
+        content = content.map((c: any) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
+      }
+      return [{ ...block, content: truncate(String(content ?? '')) }];
+    });
+    if (!content.length) return null;
+    const slim: any = { type: ev.type, message: { role: ev.message.role, content } };
+    if (ev.parent_tool_use_id) slim.parent_tool_use_id = ev.parent_tool_use_id;
+    return slim;
   }
-  return ev;
+  if (ev.type === 'result') {
+    const { subtype, is_error, duration_ms, num_turns, total_cost_usd } = ev;
+    // A successful turn's result repeats its last message; only a failure's says something new.
+    return { type: 'result', subtype, is_error, duration_ms, num_turns, total_cost_usd, ...(ev.is_error ? { result: ev.result } : {}) };
+  }
+  return null;
 }
 
 function describeActivity(ev: any): string | null {
@@ -437,7 +448,6 @@ export class Runner {
     if (!ev || typeof ev !== 'object') return;
     if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info);
     if (DROPPED_TYPES.has(ev.type)) return;
-    if (ev.type === 'system' && DROPPED_SYSTEM_SUBTYPES.has(ev.subtype)) return;
     if (ev.session_id && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
     }
@@ -449,6 +459,7 @@ export class Runner {
       this.broadcastTicket(ticketId);
     }
     const slim = slimEvent(ev);
+    if (!slim) return;
     const progress = this.progressFor(ticketId);
     applyEvent(progress, 'claude', slim);
     const activity = progress.tasks.length ? progressLine(progress, ev.type !== 'result') : describeActivity(ev);

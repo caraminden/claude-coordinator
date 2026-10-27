@@ -534,6 +534,10 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .qcard.answered .opt:not(.picked) { opacity: 0.5; }
 .msg.user.answer .answer-lines { font-size: 0.95em; }
 
+/* While another view loads, dim the one on screen (after a beat, so quick switches don't flicker). */
+body.navigating { cursor: progress; }
+body.navigating #app .split > :last-child, body.navigating #app > :not(.split) { opacity: 0.55; transition: opacity 0.15s 0.12s; }
+
 /* Project instructions: a peek in the overview panel, and the editor with its import picker */
 .instructions-peek { display: flex; flex-direction: column; min-width: 0; text-decoration: none; padding: 0.3rem 0.4rem; border-radius: 6px; }
 .instructions-peek:hover { background: var(--panel); }

@@ -446,6 +446,28 @@ export class Store {
       .all(ticketId, afterId) as unknown as EventRow[];
   }
 
+  /** Pass every stored Claude event through `fn` and save what it returns (null deletes the event). */
+  rewriteClaudeEvents(fn: (data: any) => any): { changed: number; deleted: number } {
+    const changes: { id: number; data: string | null }[] = [];
+    for (const row of this.db.prepare("SELECT id, data FROM events WHERE kind = 'claude'").iterate() as Iterable<any>) {
+      const next = fn(JSON.parse(row.data));
+      const data = next == null ? null : JSON.stringify(next);
+      if (data !== row.data) changes.push({ id: row.id, data });
+    }
+    const update = this.db.prepare('UPDATE events SET data = ? WHERE id = ?');
+    const remove = this.db.prepare('DELETE FROM events WHERE id = ?');
+    this.db.exec('BEGIN');
+    try {
+      for (const c of changes) c.data == null ? remove.run(c.id) : update.run(c.data, c.id);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    const deleted = changes.filter((c) => c.data == null).length;
+    return { changed: changes.length - deleted, deleted };
+  }
+
   /** Newest-first messages and Claude output in a project whose raw JSON contains the text (case-insensitive for ASCII). */
   findEvents(projectId: number, text: string, limit = 3000): EventRow[] {
     const like = `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;

@@ -554,10 +554,17 @@ function onEvent(event) {
 
 // ---------- routing ----------
 
+// Bumped on every navigation, so a slow load that another click has overtaken is dropped.
+let routeSeq = 0;
+
 async function route() {
   if (!me) return;
   saveScroll();
+  const seq = ++routeSeq;
   const hash = location.hash || '#/';
+  // Answer the click straight away: highlight the thread being opened and dim the old view.
+  for (const a of document.querySelectorAll('#threads .thread-row')) a.classList.toggle('active', a.getAttribute('href') === hash);
+  document.body.classList.add('navigating');
   let m;
   try {
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
@@ -569,7 +576,9 @@ async function route() {
     else if ((m = hash.match(/^#\/t\/(\d+)$/))) await showTicket(Number(m[1]));
     else await showProjects();
   } catch (err) {
-    if (err.message !== 'Not logged in') app.replaceChildren(h('p', { class: 'error' }, err.message));
+    if (err.message !== 'Not logged in' && seq === routeSeq) app.replaceChildren(h('p', { class: 'error' }, err.message));
+  } finally {
+    if (seq === routeSeq) document.body.classList.remove('navigating');
   }
 }
 
@@ -717,11 +726,47 @@ async function showArtifact(artifactId) {
   await showProject(artifact.project_id, { kind: 'artifact', artifact });
 }
 
+/** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
+function chatView(chatId, ticket) {
+  return {
+    id: chatId, ticket, lastEventId: 0,
+    progress: createProgress(),
+    progressEl: h('div', { class: 'progress', hidden: true }), // lives in the thread bar
+    findEl: chatId ? chatFindBox() : null, // lives in the thread bar too, so it survives re-renders
+    ui: progressUi(chatId),
+    actions: new Map(), // tool_use_id -> { block, taskId, result }
+    turnActions: [], // actions of the current (or last) turn, in order
+    typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite' }), // below the chat log
+    sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
+    pendingMessages: [], // { el, text } shown on send, replaced by the server's copy
+    cards: new Map(), // question card id -> { markAnswered }
+    branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
+  };
+}
+
+function renderCrumbs(main) {
+  const { project } = view;
+  const projectLink = h('a', { href: `#/p/${project.id}` }, project.name);
+  const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
+  crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', ...(
+    main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
+      : main.kind === 'instructions' ? [projectLink, ' / ', 'Instructions']
+      : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
+      : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Coordinator' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
+        : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
+          : [project.name]));
+}
+
 /**
  * A project page: artifacts and threads on the side, and in the main panel a chat with the
  * coordinator (or the chosen ticket), the artifact browser, or one artifact.
  */
 async function showProject(projectId, main = { kind: 'chat', number: null }) {
+  const seq = routeSeq;
+  // Moving between chats of the project already on screen only swaps the chat; the side panels stay.
+  if (main.kind === 'chat' && view?.kind === 'project' && view.projectId === projectId && document.getElementById('threads')) {
+    if (await switchChat(main, seq)) return;
+  }
   const [{ project, coordinator, tickets, seen }, artifacts, projects] = await Promise.all([
     api(`/api/projects/${projectId}`),
     // An empty shelf beats a broken page if the server is older than this front end.
@@ -736,33 +781,15 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   const [{ ticket }, events] = chatId
     ? await Promise.all([api(`/api/tickets/${chatId}`), loadEvents(chatId)])
     : [{ ticket: null }, []];
+  if (seq !== routeSeq) return; // overtaken by another click while loading
   view = {
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
     artifacts, artifactId: main.artifact?.id ?? null,
     file: main.file ?? null, fileTicket: main.ticket ?? null,
-    id: chatId, ticket, lastEventId: 0,
-    progress: createProgress(),
-    progressEl: h('div', { class: 'progress', hidden: true }), // lives in the thread bar
-    findEl: chatId ? chatFindBox() : null, // lives in the thread bar too, so it survives re-renders
-    ui: progressUi(chatId),
-    actions: new Map(), // tool_use_id -> { block, taskId, result }
-    turnActions: [], // actions of the current (or last) turn, in order
-    typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite' }), // below the chat log
-    sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
-    pendingMessages: [], // { el, text } shown on send, replaced by the server's copy
-    cards: new Map(), // question card id -> { markAnswered }
-    branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
+    ...chatView(chatId, ticket),
   };
-  const projectLink = h('a', { href: `#/p/${project.id}` }, project.name);
-  const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
-  crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', ...(
-    main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
-      : main.kind === 'instructions' ? [projectLink, ' / ', 'Instructions']
-      : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
-      : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Coordinator' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
-        : chatId !== coordinator.id ? [projectLink, ' / ', `#${ticket.number ?? ticket.id}`]
-          : [project.name]));
+  renderCrumbs(main);
 
   // Both side panels collapse to a slim tab so the main panel can take their room. On wider
   // screens that choice is remembered; on phones they fold away above the main panel instead.
@@ -816,6 +843,39 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   if (main.kind === 'artifact') renderArtifactHead();
   if (main.kind === 'file') renderFileHead();
   if (!chatId) return window.scrollTo(0, 0);
+  await mountChat(chatId, ticket, events);
+}
+
+/**
+ * Show another chat of the project on screen in place of the main panel, fetching only that thread
+ * (and only its events not already cached). False when the thread is not one we know of yet.
+ */
+async function switchChat(main, seq) {
+  const chatId = main.id ?? (main.number == null ? view.coordinator.id : [...view.tickets.values()].find((t) => t.number === main.number)?.id);
+  if (!chatId) return false;
+  const [{ ticket }, events] = await Promise.all([api(`/api/tickets/${chatId}`), loadEvents(chatId)]);
+  if (seq !== routeSeq) return true; // overtaken by another click while loading
+  const { kind, projectId, project, coordinator, tickets, seen, artifacts, showClosed } = view;
+  view = {
+    kind, main: 'chat', projectId, project, coordinator, tickets, seen, artifacts, showClosed,
+    artifactId: null, file: null, fileTicket: null,
+    ...chatView(chatId, ticket),
+  };
+  if (isCoordinator(ticket)) view.coordinator = ticket;
+  else view.tickets.set(ticket.id, ticket);
+  renderCrumbs(main);
+  document.querySelector('#app .split').lastElementChild.replaceWith(chatSection(chatId, ticket, events));
+  // On phones the panels sit above the chat; fold them away as a fresh load would.
+  if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details')) el.open = false;
+  renderInstructionsShelf();
+  renderShelf();
+  renderSidebar();
+  await mountChat(chatId, ticket, events);
+  return true;
+}
+
+/** Fill in a chat section just put on the page: its head, its history, and where you were in it. */
+async function mountChat(chatId, ticket, events) {
   renderTicketHead();
   for (const ev of events) appendEvent(ev, false);
   if (ticket.branch) refreshBranch(chatId);

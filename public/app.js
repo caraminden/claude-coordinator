@@ -905,21 +905,13 @@ function chatSection(chatId, ticket, events) {
 function newTicketForm(projectId) {
   const form = h('form', {},
     h('label', {}, 'First message', h('textarea', { name: 'message', required: true, rows: 5, placeholder: 'What should this thread work on? (Enter to send, Shift+Enter for a new line)', 'data-draft': true })),
-    h('label', {}, 'Permissions',
-      h('select', { name: 'permissionMode' },
-        h('option', { value: 'bypassPermissions' }, 'Full access: edit files and run any command'),
-        h('option', { value: 'acceptEdits' }, 'Edit files only; shell commands are refused'),
-        h('option', { value: 'plan' }, 'Plan only: read and plan, no changes'))),
     h('p', { class: 'error', hidden: true }),
     h('button', { type: 'submit' }, 'Start thread'));
   const draftKey = `cc-new-thread:${projectId}`;
   const draft = loadDraft(draftKey);
-  if (draft) {
-    form.message.value = draft.message ?? '';
-    if (draft.permissionMode) form.permissionMode.value = draft.permissionMode;
-  }
-  // The thread names and tags itself from what it is asked to do.
-  const fields = () => ({ message: form.message.value, permissionMode: form.permissionMode.value });
+  if (draft) form.message.value = draft.message ?? '';
+  // The thread names and tags itself from what it is asked to do, and every thread gets full access.
+  const fields = () => ({ message: form.message.value });
   form.addEventListener('input', () => saveDraft(draftKey, form.message.value ? fields() : null));
   form.message.addEventListener('keydown', (e) => {
     // Same as the chat composer: Enter sends, Shift+Enter adds a line, IME composition is left alone.

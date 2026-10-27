@@ -90,14 +90,8 @@ ticket currently uses Cara's account.
 
 ## Permissions
 
-Headless turns can't show a permission prompt, so each ticket picks a mode when
-it is created:
-
-- **bypassPermissions** (default, for tickets started by hand or by the
-  coordinator): full access as the service user.
-- **acceptEdits**: edits files freely; tools that need approval, such as most
-  shell commands, are refused.
-- **plan**: read and plan only.
+Headless turns can't show a permission prompt, so every ticket runs in
+`bypassPermissions`: full access as the service user.
 
 The coordinator itself runs in `acceptEdits` with only its MCP tools
 pre-approved, so it can read the code and manage tickets but can't run shell

@@ -20,9 +20,9 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
 const DATA_DIR = process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator');
 const PUBLIC_DIR = join(import.meta.dirname, 'public');
-const PERMISSION_MODES = ['acceptEdits', 'bypassPermissions', 'plan', 'default'];
-// Headless turns can't ask for approval, so anything short of full access refuses most shell commands.
-const DEFAULT_PERMISSION_MODE = 'bypassPermissions';
+// Headless turns can't ask for approval, so anything short of full access refuses most shell commands;
+// every thread gets full access.
+const THREAD_PERMISSION_MODE = 'bypassPermissions';
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
 const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
@@ -679,10 +679,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     // Without a title (the New thread form sends none) start from the message's opening words;
     // the thread renames itself once it knows what the work is.
     const title = body.title === undefined ? provisionalTitle(message) : str(body.title, 'Title', 120);
-    const mode = PERMISSION_MODES.includes(body.permissionMode) ? body.permissionMode : DEFAULT_PERMISSION_MODE;
     // Insert first so concurrent creates get distinct ids, then build the working dir.
     const tag = oneOf(body.tag ?? null, TICKET_TAGS, 'Tag') as TicketTag | null;
-    const { id, number } = store.createTicket({ project_id: project.id, title, tag, permission_mode: mode, created_by: session.name });
+    const { id, number } = store.createTicket({ project_id: project.id, title, tag, permission_mode: THREAD_PERMISSION_MODE, created_by: session.name });
     try {
       const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number!, title);
       store.setTicketDir(id, dir.cwd, dir.branch);

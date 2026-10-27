@@ -11,12 +11,6 @@ const ROLE = process.env.COORDINATOR_ROLE === 'thread' ? 'thread' : 'coordinator
 const TICKET = Number(process.env.COORDINATOR_TICKET);
 const MAX_TEXT = 4000;
 
-const PERMISSION_MODE = {
-  type: 'string',
-  enum: ['bypassPermissions', 'acceptEdits', 'plan'],
-  description:
-    'bypassPermissions (default): full access, can run any command. acceptEdits: edit files but shell commands are refused. plan: read and plan only.',
-};
 const TITLE = { type: 'string', description: 'The short ask, about 30 characters, e.g. "Usage bar in the top bar". No number, tag or emoji.' };
 const TAG = {
   type: ['string', 'null'],
@@ -101,7 +95,6 @@ const TOOLS = [
         title: { ...TITLE, description: `${TITLE.description} Also used for the branch name.` },
         tag: TAG,
         message: { type: 'string', description: 'First message to the new ticket' },
-        permission_mode: PERMISSION_MODE,
       },
       required: ['title', 'message'],
     },
@@ -250,7 +243,6 @@ async function runTool(name: string, args: any): Promise<string> {
         title: args.title,
         tag: args.tag ?? null,
         message: args.message,
-        permissionMode: args.permission_mode,
       });
       return `Created ${ticketLine(t)}`;
     }

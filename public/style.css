@@ -401,3 +401,4 @@ button.pin.on { color: var(--accent); }
   .usage .track { writing-mode: horizontal-tb; width: 0.4rem; height: 5rem; display: flex; flex-direction: column; justify-content: flex-end; }
   .usage .fill { width: 100%; height: var(--pct, 0%); }
 }
+.msg.user.pending { opacity: 0.7; }

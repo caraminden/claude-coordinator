@@ -586,6 +586,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     turnActions: [], // actions of the current (or last) turn, in order
     typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite' }), // below the chat log
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
+    pendingMessages: [], // { el, text } shown on send, replaced by the server's copy
   };
   const projectLink = h('a', { href: `#/p/${project.id}` }, project.name);
   const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
@@ -694,18 +695,22 @@ function chatSection(chatId, ticket, events) {
     if (!text && !attachments.items.length) return;
     sendBtn.disabled = true;
     sending++;
-    // Acknowledge the message straight away; the server's reply and the stream catch up after.
+    const sent = attachments.items.slice();
+    const images = sent.map(({ mediaType, data }) => ({ mediaType, data }));
+    // Show the message and "Claude is thinking…" straight away, and clear the composer; the
+    // server's copy of the message replaces this one when it arrives.
+    const pending = userBubble(me, text, images.map(({ mediaType, data }) => base64Url(mediaType, data)));
+    pending.classList.add('pending');
+    view.pendingMessages.push({ el: pending, text });
+    document.getElementById('log').append(pending);
+    textarea.value = '';
+    saveDraft(draftKey, '');
+    attachments.remove(sent);
     view.sendingTo = chatId;
     renderTyping();
-    if (followChat) scrollToBottom();
+    scrollToBottom();
     try {
-      const sent = attachments.items.slice();
-      const images = sent.map(({ mediaType, data }) => ({ mediaType, data }));
       const ticket = await api(`/api/tickets/${chatId}/messages`, { method: 'POST', body: { text, images } });
-      // Keep anything typed or attached while the message was on its way.
-      if (textarea.value.trim() === text) textarea.value = '';
-      saveDraft(draftKey, textarea.value);
-      attachments.remove(sent);
       // Show the message now even if the live stream is down; duplicates are skipped by id.
       if (view?.kind === 'project' && view.id === chatId) {
         // You just sent something, so follow the reply.
@@ -715,6 +720,12 @@ function chatSection(chatId, ticket, events) {
         catchUpEvents().catch(() => {});
       }
     } catch (ex) {
+      // Not sent: take the message back out of the chat and put it back in the composer.
+      pending.remove();
+      if (view?.id === chatId) view.pendingMessages = view.pendingMessages.filter((m) => m.el !== pending);
+      textarea.value = textarea.value.trim() ? `${text}\n${textarea.value}` : text;
+      saveDraft(draftKey, textarea.value);
+      attachments.restore(images);
       alertNote(ex.message);
     } finally {
       if (view?.sendingTo === chatId) {
@@ -1082,7 +1093,7 @@ function createAttachments(onChange) {
   /** Bring back images saved with a draft (they are already prepared and encoded). */
   state.restore = (saved) => {
     if (!saved.length) return;
-    const restored = saved.map(({ mediaType, data }) => ({ url: `data:${mediaType};base64,${data}`, mediaType, data }));
+    const restored = saved.map(({ mediaType, data }) => ({ url: base64Url(mediaType, data), mediaType, data }));
     state.items = [...restored, ...state.items].slice(0, MAX_IMAGES);
     render();
   };
@@ -1339,15 +1350,13 @@ function appendEvent(event, scroll = true) {
   const nodes = [];
 
   if (event.kind === 'user_message') {
-    const msg = h('div', { class: 'msg user' }, h('div', { class: 'who' }, data.author));
-    if (data.text) msg.append(markdown(data.text));
-    if (data.images?.length) {
-      msg.append(h('div', { class: 'images' }, data.images.map((name) => {
-        const src = `/api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`;
-        return h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' }));
-      })));
+    if (data.author === me && view.pendingMessages.length) {
+      // Our own message, already shown when it was sent: swap in the server's copy.
+      const i = Math.max(0, view.pendingMessages.findIndex((m) => m.text === (data.text ?? '')));
+      view.pendingMessages.splice(i, 1)[0].el.remove();
     }
-    nodes.push(msg);
+    nodes.push(userBubble(data.author, data.text,
+      (data.images ?? []).map((name) => `/api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`)));
   } else if (event.kind === 'note') {
     nodes.push(h('div', { class: 'note' }, data.text));
   } else if (event.kind === 'error') {
@@ -1393,6 +1402,21 @@ function appendEvent(event, scroll = true) {
   log.append(...nodes);
   renderTyping();
   if (scroll && followChat) scrollToBottom();
+}
+
+/** An object URL for base64 image data (the page's CSP allows blob: images but not data: ones). */
+function base64Url(mediaType, data) {
+  return URL.createObjectURL(new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: mediaType }));
+}
+
+function userBubble(author, text, imageSrcs) {
+  const msg = h('div', { class: 'msg user' }, h('div', { class: 'who' }, author));
+  if (text) msg.append(markdown(text));
+  if (imageSrcs.length) {
+    msg.append(h('div', { class: 'images' }, imageSrcs.map((src) =>
+      h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
+  }
+  return msg;
 }
 
 /** "Claude is thinking…" under the chat while a turn runs, so a sent message is visibly being worked on. */

@@ -62,6 +62,26 @@ interface QueuedMessage {
   about?: string; // the file a comment is on
 }
 
+/**
+ * What a running turn's restart recovery needs, kept in the settings table under `turn:<ticket id>`
+ * from the turn's start until its process exits: a server restart kills the process before then.
+ */
+interface TurnState {
+  /** Auto-resumes in a row that led to this turn; 0 for a turn people or GitHub started. */
+  resumes: number;
+  stopped?: true;
+  /** Present (a reason or null) once the thread asked to close after this turn. */
+  closing?: string | null;
+  queued?: QueuedMessage[];
+}
+
+const turnKey = (ticketId: number) => `turn:${ticketId}`;
+
+/** Auto-resumes in a row before a thread is left alone, in case its own turn is what kills the server. */
+export const MAX_RESUMES = 2;
+const RESUME_PROMPT =
+  "The coordinator server restarted while you were working, which interrupted your last turn. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.";
+
 /** One turn's prompt as a stream-json user message, so pasted images reach Claude as images. */
 export function promptMessage(batch: QueuedMessage[]): string {
   const content: object[] = [];
@@ -286,6 +306,8 @@ export class Runner {
   private broadcast: Broadcast;
   private claudeBin: string;
   private coordinatorEnv: CoordinatorEnv;
+  /** Gap between auto-resumes after a restart, so they don't all start at once. */
+  resumeGapMs = 3000;
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
   filesDir: (ticket: Ticket) => string | null = () => null;
   /** The folder every thread and the coordinator of a project can read and write, for handoffs and notes. */
@@ -345,12 +367,19 @@ export class Runner {
   closeAfterTurn(ticketId: number, reason: string | null): boolean {
     if (!this.isRunning(ticketId)) return false;
     this.closing.set(ticketId, reason);
+    this.saveTurn(ticketId, { closing: reason });
     this.broadcastTicket(ticketId);
     return true;
   }
 
-  /** Mark turns that were cut off by a server restart. */
+  /**
+   * Mark turns that were cut off by a server restart, and resume them a few seconds apart unless
+   * they were stopped, set to close, or already resumed MAX_RESUMES times in a row. Messages queued
+   * behind a cut-off turn go into its resume (or, for one not resumed, into a turn of their own).
+   * A turn that failed (the usage limit included) ended before the restart, so it isn't 'running'.
+   */
   recover() {
+    const later: (() => void)[] = [];
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
         if (t.status === 'running') {
@@ -358,8 +387,22 @@ export class Runner {
           for (const id of unsettledCards(this.store.listEvents(t.id))) {
             this.emit(t.id, 'approval_result', { id, state: 'expired', reason: 'The server restarted while this waited.' });
           }
-          this.emit(t.id, 'note', { text: 'The server restarted during this turn, so it was interrupted.' });
+          const turn = this.store.getSetting<TurnState>(turnKey(t.id));
+          this.store.deleteSetting(turnKey(t.id));
           this.setStatus(t.id, 'idle');
+          // Stopped on purpose: it already says so, and nothing queued survives a stop.
+          if (turn?.stopped) continue;
+          if (turn?.queued?.length) this.queues.set(t.id, turn.queued);
+          const resumes = turn?.resumes ?? 0;
+          let skipped: string | null = null;
+          if (turn && 'closing' in turn) skipped = 'It was set to close, so it was not resumed.';
+          else if (resumes >= MAX_RESUMES) skipped = `It was not resumed: it had already been resumed ${resumes} times in a row.`;
+          if (skipped) {
+            this.emit(t.id, 'note', { text: `The server restarted during this turn, so it was interrupted. ${skipped}` });
+            if (this.queued(t.id)) later.push(() => !this.isRunning(t.id) && this.next(t.id));
+          } else {
+            later.push(() => this.resume(t.id, resumes + 1));
+          }
         }
         if (/^Using \w+$/.test(t.last_activity ?? '')) {
           // Reword lines saved before activity was described in plain words.
@@ -374,6 +417,25 @@ export class Runner {
         }
       }
     }
+    later.forEach((start, i) => setTimeout(start, this.resumeGapMs * (i + 1)));
+  }
+
+  /** Start an auto-resume turn, with any messages that were queued behind the cut-off one. */
+  private resume(ticketId: number, resumes: number) {
+    // Someone's message got in first; its turn took the queue, and that is resume enough.
+    if (this.isRunning(ticketId)) return;
+    const ticket = this.store.getTicket(ticketId);
+    const project = ticket && this.store.getProject(ticket.project_id);
+    if (!ticket || !project || ticket.status === 'closed') return;
+    this.emit(ticketId, 'note', { text: 'Resumed after a server restart' });
+    const batch = this.queues.get(ticketId)?.splice(0) ?? [];
+    this.startTurn(project, ticket, promptMessage([{ author: 'System', text: RESUME_PROMPT, images: [] }, ...batch]), resumes);
+  }
+
+  /** Merge into the saved state of a ticket's running turn. */
+  private saveTurn(ticketId: number, patch: Partial<TurnState>) {
+    const turn = this.store.getSetting<TurnState>(turnKey(ticketId)) ?? { resumes: 0 };
+    this.store.setSetting(turnKey(ticketId), { ...turn, ...patch });
   }
 
   /** Record a user message and run it now, or queue it behind the current turn. */
@@ -386,8 +448,9 @@ export class Runner {
     const q = this.queues.get(ticketId) ?? [];
     q.push({ author, text, images, about: extra.comment?.about });
     this.queues.set(ticketId, q);
-    if (!this.isRunning(ticketId)) this.next(ticketId);
-    else this.broadcastTicket(ticketId);
+    if (!this.isRunning(ticketId)) return this.next(ticketId);
+    this.saveTurn(ticketId, { queued: q });
+    this.broadcastTicket(ticketId);
   }
 
   stop(ticketId: number): boolean {
@@ -395,6 +458,7 @@ export class Runner {
     if (!proc) return false;
     this.queues.delete(ticketId);
     this.stopping.add(ticketId);
+    this.saveTurn(ticketId, { stopped: true, queued: [] });
     this.emit(ticketId, 'note', { text: 'Stopped by user.' });
     // claude runs in its own process group; signal the whole group so tool subprocesses stop too.
     try {
@@ -416,7 +480,7 @@ export class Runner {
     this.startTurn(project, ticket, promptMessage(batch));
   }
 
-  private startTurn(project: Project, ticket: Ticket, prompt: string) {
+  private startTurn(project: Project, ticket: Ticket, prompt: string, resumes = 0) {
     let filesDir = this.filesDir(ticket);
     try {
       if (filesDir) mkdirSync(filesDir, { recursive: true });
@@ -494,6 +558,7 @@ export class Runner {
       this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${err.message}` });
     }
 
+    this.store.setSetting(turnKey(ticket.id), { resumes } satisfies TurnState);
     const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     this.procs.set(ticket.id, proc);
     this.setStatus(ticket.id, 'running');
@@ -530,6 +595,7 @@ export class Runner {
 
     proc.on('close', (code, signal) => {
       this.procs.delete(ticket.id);
+      this.store.deleteSetting(turnKey(ticket.id));
       const stopped = this.stopping.delete(ticket.id);
       this.approvals.endTurn(ticket.id, stopped ? 'The turn was stopped while this waited.' : 'The turn ended while this waited.');
       let status: 'idle' | 'error' = 'idle';

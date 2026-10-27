@@ -608,6 +608,10 @@ export class Store {
       .run(key, JSON.stringify(value));
   }
 
+  deleteSetting(key: string) {
+    this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+  }
+
   listMachines(): Machine[] {
     return this.db.prepare('SELECT * FROM machines ORDER BY name').all() as unknown as Machine[];
   }

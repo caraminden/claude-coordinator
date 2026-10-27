@@ -309,14 +309,18 @@ async function showProject(projectId, ticketId = null) {
 
   const textarea = h('textarea', {
     placeholder: isCoordinator(ticket)
-      ? 'Ask the coordinator to start, check on, or close tickets… (Ctrl+Enter to send)'
-      : 'Message this ticket… (Ctrl+Enter to send)',
+      ? 'Ask the coordinator to start, check on, or close tickets… (Enter to send, Shift+Enter for a new line)'
+      : 'Message this ticket… (Enter to send, Shift+Enter for a new line)',
   });
   const sendBtn = h('button', { type: 'submit' }, 'Send');
   const form = h('form', { class: 'composer' }, textarea,
     h('div', { class: 'row' }, h('span', { class: 'muted', id: 'composer-hint' }), h('span', { class: 'spacer' }), sendBtn));
   textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) form.requestSubmit();
+    // Leave Enter alone while an IME is composing text, or it would send half a word.
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -396,9 +400,14 @@ function renderSidebar() {
     ...COLUMNS.map((col) => {
       const items = tickets.filter((t) => col.match(t.status));
       if (!items.length) return '';
-      return h('section', { class: 'column' },
-        h('h3', {}, h('span', { class: `dot ${col.key === 'waiting' ? 'idle' : col.key}` }), col.label, h('span', { class: 'count' }, items.length)),
-        items.map((t) => ticketCard(t)));
+      const heading = [h('span', { class: `dot ${col.key === 'waiting' ? 'idle' : col.key}` }), col.label, h('span', { class: 'count' }, items.length)];
+      if (col.key === 'closed') {
+        // Closed threads stay out of the way but can still be opened and reopened.
+        const closed = h('details', { class: 'column closed', open: view.showClosed }, h('summary', {}, heading), items.map((t) => ticketCard(t)));
+        closed.addEventListener('toggle', () => { view.showClosed = closed.open; });
+        return closed;
+      }
+      return h('section', { class: 'column' }, h('h3', {}, heading), items.map((t) => ticketCard(t)));
     }),
     tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or use New thread.'));
 }
@@ -433,7 +442,9 @@ function renderTicketHead() {
   } else if (t.status === 'closed') {
     actions.push(h('button', { class: 'secondary', onclick: () => setStatus(t.id, 'idle') }, 'Reopen'));
   } else {
-    actions.push(h('button', { class: 'secondary', onclick: () => setStatus(t.id, 'closed') }, 'Close ticket'));
+    actions.push(h('button', { class: 'secondary', onclick: async () => {
+      if (await setStatus(t.id, 'closed')) location.hash = `#/p/${t.project_id}`;
+    } }, 'Close ticket'));
   }
   el.replaceChildren(
     h('div', { class: 'row' },
@@ -452,8 +463,10 @@ function renderTicketHead() {
 async function setStatus(id, status) {
   try {
     await api(`/api/tickets/${id}/status`, { method: 'POST', body: { status } });
+    return true;
   } catch (e) {
     alertNote(e.message);
+    return false;
   }
 }
 

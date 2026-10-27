@@ -97,8 +97,13 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 
 /* Board */
 .board { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 1rem; align-items: start; }
-.column h3 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.5rem; display: flex; gap: 0.4rem; align-items: center; }
-.column h3 .count { color: var(--muted); font-weight: normal; }
+/* The closed section is a <details> whose summary looks like the other column headings. */
+.column h3, .column.closed > summary { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.5rem; display: flex; gap: 0.4rem; align-items: center; }
+.column.closed > summary { cursor: pointer; color: var(--muted); list-style: none; }
+.column.closed > summary::-webkit-details-marker { display: none; }
+.column.closed > summary::before { content: '▸'; }
+.column.closed[open] > summary::before { content: '▾'; }
+.column h3 .count, .column.closed > summary .count { color: var(--muted); font-weight: normal; }
 .ticket-card { display: block; text-decoration: none; margin-bottom: 0.6rem; border-left: 3px solid var(--line); }
 .ticket-card:hover { border-color: var(--accent); }
 .ticket-card .title { font-weight: 600; }

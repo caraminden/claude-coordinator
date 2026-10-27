@@ -567,3 +567,30 @@ body.navigating #app .split > :last-child, body.navigating #app > :not(.split) {
 a.thread-ref { color: var(--accent); font-weight: 600; text-decoration: none; white-space: nowrap; }
 a.thread-ref:hover { text-decoration: underline; }
 .phases .thread-refs { color: var(--muted); }
+
+/* Phones: the overview and threads panels pulled out from the screen edge as drawers (drawers.js). */
+@media (max-width: 800px) {
+  /* Leave sideways swipes to the app rather than browser history, where the browser allows it. */
+  html, body { overscroll-behavior-x: none; }
+  .panels > details.as-drawer {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 30;
+    width: min(86vw, 340px); max-height: none; margin: 0;
+    overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
+    background: var(--bg); border: 0; border-right: 1px solid var(--line);
+    padding: calc(0.75rem + env(safe-area-inset-top, 0px)) 0.9rem calc(0.75rem + env(safe-area-inset-bottom, 0px)) calc(0.9rem + env(safe-area-inset-left, 0px));
+    box-shadow: 0 0 24px rgb(0 0 0 / 0.25);
+    will-change: transform;
+  }
+  .panels > details.as-drawer.from-right {
+    left: auto; right: 0; border-right: 0; border-left: 1px solid var(--line);
+    padding-left: 0.9rem; padding-right: calc(0.9rem + env(safe-area-inset-right, 0px));
+  }
+  .panels > details.as-drawer:focus { outline: none; }
+  /* In a drawer the panel's bar closes it. */
+  .panels > details.as-drawer > summary::after { content: '✕'; }
+  .drawer-backdrop { position: fixed; inset: 0; z-index: 29; background: rgb(0 0 0 / 0.4); opacity: 0; touch-action: none; }
+  .as-drawer.settling { transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .drawer-backdrop.settling { transition: opacity 0.25s; }
+}
+.drawer-backdrop[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .as-drawer.settling, .drawer-backdrop.settling { transition: none; } }

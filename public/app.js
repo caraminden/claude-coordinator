@@ -1,6 +1,7 @@
 // Claude Coordinator front end: hash-routed views over the JSON API, live via SSE.
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 import { inAppHash, linkThreadRefs } from './threadrefs.js';
+import { initDrawers } from './drawers.js';
 
 const app = document.getElementById('app');
 const crumbs = document.getElementById('crumbs');
@@ -2352,6 +2353,8 @@ new ResizeObserver(() => {
   const r = topbar.getBoundingClientRect();
   document.documentElement.style.setProperty('--topbar-h', `${r.width > r.height ? r.height : 0}px`);
 }).observe(topbar);
+// Phones: edge swipes pull out the overview (left) and threads (right) panels as drawers.
+initDrawers();
 // Keep relative times in the usage readout honest.
 setInterval(() => {
   if (usage) renderUsage();

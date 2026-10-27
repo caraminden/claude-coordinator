@@ -217,6 +217,22 @@ export function initDrawers() {
 
   // ---- other ways to close ----
 
+  // Edge handles: the same drawers with a tap, where the browser's back/forward swipe wins the edge.
+  for (const side of ['left', 'right']) {
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = `drawer-handle ${side}`;
+    handle.setAttribute('aria-label', `Open ${LABELS[side].toLowerCase()}`);
+    handle.title = LABELS[side];
+    handle.addEventListener('click', () => {
+      if (drawer || !narrow.matches || !mount(side)) return;
+      drawer.returnFocus = handle;
+      // Let the closed position paint first so the drawer slides in.
+      requestAnimationFrame(() => requestAnimationFrame(() => settle(true)));
+    });
+    document.body.append(handle);
+  }
+
   backdrop.addEventListener('click', () => close());
   document.addEventListener('keydown', (e) => {
     if (!drawer) return;

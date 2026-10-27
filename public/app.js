@@ -1009,6 +1009,8 @@ function newTicketForm(projectId) {
   const form = h('form', { class: 'new-thread' }, box, err);
   const fit = () => {
     box.style.height = 'auto';
+    // Not laid out (a folded panel, or a phone's drawer still tucked away): keep the one-line default.
+    if (!box.scrollHeight) { box.style.height = ''; return; }
     box.style.height = `${box.scrollHeight + box.offsetHeight - box.clientHeight}px`;
   };
   const draftKey = `cc-new-thread:${projectId}`;

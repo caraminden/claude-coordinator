@@ -34,6 +34,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Paint the page colour on html too, so overscroll, the area behind the phone's bars and any gap
+   below short pages never show white. */
+html { background: var(--bg); }
 body {
   margin: 0;
   background: var(--bg);

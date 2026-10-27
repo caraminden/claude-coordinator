@@ -493,6 +493,22 @@ async function resync() {
   } catch {}
 }
 
+// Threads' histories already downloaded this session, so reopening one only fetches what is new.
+// Events are append-only, so the cached part never goes stale. Most recently used last.
+const eventCache = new Map();
+const EVENT_CACHE_THREADS = 12;
+
+async function loadEvents(ticketId) {
+  const cached = eventCache.get(ticketId) ?? [];
+  const after = cached.length ? cached[cached.length - 1].id : 0;
+  const fresh = await api(`/api/tickets/${ticketId}/events${after ? `?after=${after}` : ''}`);
+  const events = fresh.length ? cached.concat(fresh) : cached;
+  eventCache.delete(ticketId);
+  eventCache.set(ticketId, events);
+  if (eventCache.size > EVENT_CACHE_THREADS) eventCache.delete(eventCache.keys().next().value);
+  return events;
+}
+
 async function catchUpEvents() {
   if (!view.id) return;
   const events = await api(`/api/tickets/${view.id}/events?after=${view.lastEventId}`);
@@ -570,6 +586,7 @@ function start(name) {
 
 async function logout() {
   await api('/api/logout', { method: 'POST', body: {} });
+  eventCache.clear();
   clearTimeout(streamTimer);
   stream?.close();
   stream = null;
@@ -683,7 +700,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     if (!chatId) throw new Error(`There is no thread #${main.number} in ${project.name}.`);
   }
   const [{ ticket }, events] = chatId
-    ? await Promise.all([api(`/api/tickets/${chatId}`), api(`/api/tickets/${chatId}/events`)])
+    ? await Promise.all([api(`/api/tickets/${chatId}`), loadEvents(chatId)])
     : [{ ticket: null }, []];
   view = {
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
@@ -1071,16 +1088,29 @@ function chatFindBox() {
   const run = () => {
     const log = document.getElementById('log');
     if (!log) return;
-    clearHighlights(log);
+    timer = null;
+    if (state.marks.length) clearHighlights(log);
     const q = input.value.trim();
-    state.marks = q ? [...log.querySelectorAll('.msg, .note')].flatMap((m) => highlight(m, q)) : [];
+    state.marks = q.length >= 2 ? [...log.querySelectorAll('.msg, .note')].flatMap((m) => highlight(m, q)) : [];
     state.at = -1;
-    count.textContent = q ? (state.marks.length ? `0/${state.marks.length}` : 'none') : '';
+    count.textContent = q.length >= 2 ? (state.marks.length ? `0/${state.marks.length}` : 'none') : '';
     // Start from the newest match, nearest where you usually are.
     if (state.marks.length) show(state.marks.length - 1);
   };
-  input.addEventListener('input', run);
+  // Highlighting a long chat on every key is wasted work; wait for a pause, and for 2+ characters.
+  let timer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(run, 150);
+  });
   input.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp') && timer) {
+      // A step right after typing goes to the fresh results.
+      clearTimeout(timer);
+      timer = null;
+      run();
+      if (e.key !== 'ArrowUp' && !(e.key === 'Enter' && e.shiftKey)) return e.preventDefault();
+    }
     if (e.key === 'Enter' || e.key === 'ArrowDown') {
       e.preventDefault();
       show(state.at + (e.key === 'Enter' && e.shiftKey ? -1 : 1));

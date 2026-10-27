@@ -116,6 +116,7 @@ function systemPrompt(project: Project, ticket: Ticket): string {
     where,
     'For work with more than a couple of steps, plan it with TaskCreate (one task per step, with a short activeForm like "Running tests") and mark each task in_progress and then completed with TaskUpdate as you go. The web UI shows this plan as a live progress readout ("Running tests… 3/7").',
     'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
+    'The readout lists your tool calls in plain words, so give every Bash call a short plain-English description (like "Run the test suite").',
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
   ].join('\n');
 }

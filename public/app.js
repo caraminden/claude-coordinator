@@ -1,5 +1,5 @@
 // Claude Coordinator front end: hash-routed views over the JSON API, live via SSE.
-import { actionLabel, applyEvent, createProgress, progressLine, stepInfo } from './progress.js';
+import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, summarizeActions } from './progress.js';
 
 const app = document.getElementById('app');
 const crumbs = document.getElementById('crumbs');
@@ -767,22 +767,38 @@ async function setStatus(id, status) {
 
 const STEP_ICON = { completed: '✓', in_progress: '◐', pending: '○' };
 
-/** A collapsed tool call; its input and output are only built when it is opened. */
+function resultString(result) {
+  return typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
+}
+
+/**
+ * One tool call as a plain sentence ("Edited runner.ts", "Run the tests — failed: …"). The raw
+ * command and output sit one click deeper and are only built when opened.
+ */
 function actionEl(action) {
   const { block, result } = action;
   const state = !result ? 'pending' : result.is_error ? 'err' : 'ok';
-  const el = h('details', { class: `tool ${state}` },
-    h('summary', {}, h('span', { class: 'st' }, state === 'pending' ? '…' : state === 'err' ? '✗' : '·'), ' ', actionLabel(block)));
+  const why = state === 'err' ? resultString(result).replace(/<\/?tool_use_error>/g, '').trim().split('\n')[0].slice(0, 120) : '';
+  const el = h('details', { class: `act ${state}` },
+    h('summary', {},
+      h('span', { class: 'st', title: { pending: 'In progress', err: 'Failed', ok: 'Done' }[state] }, state === 'pending' ? '…' : state === 'err' ? '✗' : '·'),
+      h('span', { class: 'what' }, actionLabel(block)),
+      why ? h('span', { class: 'why' }, ` — failed: ${why}`) : ''));
   el.addEventListener('toggle', () => {
     if (!el.open || el.querySelector('.body')) return;
-    const body = h('div', { class: 'body' }, h('pre', {}, JSON.stringify(block.input, null, 2)));
-    if (action.result) {
-      const out = typeof action.result.content === 'string' ? action.result.content : JSON.stringify(action.result.content);
-      body.append(h('div', { class: 'muted' }, action.result.is_error ? 'Error:' : 'Result:'), h('pre', {}, out));
-    }
+    const input = block.input || {};
+    const body = h('div', { class: 'body' },
+      h('pre', {}, block.name === 'Bash' && input.command ? `$ ${input.command}` : JSON.stringify(input, null, 2)));
+    if (action.result) body.append(h('pre', { class: action.result.is_error ? 'err' : '' }, resultString(action.result) || '(no output)'));
     el.append(body);
   });
   return el;
+}
+
+/** Claude's own words from while a step was underway, shortened to a couple of lines. */
+function stepNote(text) {
+  const short = text.length > 280 ? `${text.slice(0, 279).replace(/\s+\S*$/, '')}…` : text;
+  return h('p', { class: 'step-note' }, short.replace(/[*`#]/g, ''));
 }
 
 function actionList(actions) {
@@ -834,13 +850,16 @@ function renderProgress() {
     const steps = p.tasks.map((t) => {
       const acts = all.filter((a) => a.taskId === t.id);
       const isCurrent = t === current;
+      const recap = summarizeActions(acts) || (t.status === 'pending' ? 'Not started yet' : 'Nothing done yet');
       const el = h('details', { class: `step ${t.status}${isCurrent && !running ? ' paused' : ''}`, open: view.ui.openSteps.has(t.id) || null },
         h('summary', {},
           h('span', { class: 'icon' }, STEP_ICON[t.status] ?? '○'),
           h('span', { class: 'subject' }, t.subject),
           isCurrent ? h('span', { class: 'muted' }, running ? (t.activeForm ? ` — ${t.activeForm}…` : '') : ' — paused') : '',
-          h('span', { class: 'muted n' }, acts.length ? `${acts.length} action${acts.length === 1 ? '' : 's'}` : t.status === 'pending' ? 'not started' : '')),
-        acts.length ? actionList(acts) : h('p', { class: 'muted empty' }, 'No actions yet.'));
+          acts.length ? h('span', { class: 'muted n' }, `${acts.length} action${acts.length === 1 ? '' : 's'}`) : '',
+          h('span', { class: 'recap' }, recap)),
+        t.note ? stepNote(t.note) : '',
+        acts.length ? actionList(acts) : '');
       el.addEventListener('toggle', () => (el.open ? view.ui.openSteps.add(t.id) : view.ui.openSteps.delete(t.id)));
       return el;
     });
@@ -848,8 +867,9 @@ function renderProgress() {
     const looseEl = loose.length
       ? h('details', { class: 'step loose', open: (view.ui.looseOpen ?? !p.tasks.length) || null },
           h('summary', {}, h('span', { class: 'icon' }, '⋯'),
-            h('span', { class: 'subject' }, p.tasks.length ? 'Other actions this turn' : running ? 'Actions this turn' : 'Actions last turn'),
-            h('span', { class: 'muted n' }, String(loose.length))),
+            h('span', { class: 'subject' }, p.tasks.length ? 'Other work this turn' : running ? 'Work this turn' : 'Work last turn'),
+            h('span', { class: 'muted n' }, `${loose.length} action${loose.length === 1 ? '' : 's'}`),
+            h('span', { class: 'recap' }, summarizeActions(loose))),
           actionList(loose))
       : '';
     if (looseEl) looseEl.addEventListener('toggle', () => (view.ui.looseOpen = looseEl.open));
@@ -928,7 +948,7 @@ function appendEvent(event, scroll = true) {
       if (acts.length) {
         const end = h('details', { class: 'turn-end' }, h('summary', {}, bits.join(' · ')));
         end.addEventListener('toggle', () => {
-          if (end.open && !end.querySelector('.actions')) end.append(actionList(acts));
+          if (end.open && !end.querySelector('.actions')) end.append(h('p', { class: 'recap' }, summarizeActions(acts)), actionList(acts));
         });
         nodes.push(end);
       } else {

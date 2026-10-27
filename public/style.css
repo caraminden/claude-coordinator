@@ -164,7 +164,10 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 
 /* Project view: threads sidebar beside the chat */
 .split { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
-.sidebar { position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); max-height: calc(100vh - var(--topbar-h, 3rem) - 2rem); overflow-y: auto; }
+/* Sticky can't move past the bottom of .split, which ends main's 3rem bottom padding above the
+   page end. Keep the sidebar short enough (1rem top gap + 3rem) that the chat reaching the bottom
+   never drags it up, and keep wheel/touch scrolls inside it from chaining to the page. */
+.sidebar { position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
 .sidebar > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; }
 .sidebar details.new { margin: 0 0 1rem; }
 .sidebar details.new form { margin-top: 0.5rem; }

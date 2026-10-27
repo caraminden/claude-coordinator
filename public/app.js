@@ -56,12 +56,75 @@ function ago(ms) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+function unescapeHtml(s) {
+  return s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
+}
+
+// ---------- files threads show ----------
+
+// What the server will serve from a thread's folders, by extension (mirrors src/artifacts.ts).
+const FILE_KINDS = {
+  md: 'markdown', markdown: 'markdown', canvas: 'canvas', html: 'html', htm: 'html', pdf: 'pdf', txt: 'text', csv: 'text',
+  png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', avif: 'image', svg: 'image',
+  mp4: 'video', webm: 'video', mov: 'video', mp3: 'audio', wav: 'audio', ogg: 'audio', m4a: 'audio',
+};
+const fileKind = (path) => FILE_KINDS[(path.split(/[?#]/)[0].split('.').pop() || '').toLowerCase()] ?? null;
+const baseName = (path) => path.split('/').filter(Boolean).pop() ?? path;
+const fileExt = (path) => (baseName(path).includes('.') ? baseName(path).split('.').pop().slice(0, 5).toUpperCase() : 'FILE');
+/** A link target that is a path on disk, not a URL, a fragment or a mail address. */
+const isLocalPath = (href) => !/^[a-z][a-z0-9+.-]*:|^\/\/|^#/i.test(href);
+const fileUrl = (ticketId, path) => `/api/tickets/${ticketId}/file?path=${encodeURIComponent(path)}`;
+const fileHref = (ticketId, path) => `#/f/${ticketId}/${encodeURIComponent(path)}`;
+/** A linked path short enough for a card: a thread's shared folder by name, other absolute paths by their tail. */
+function shortPath(path) {
+  const shared = /\/shared\/\d+\/(.+)$/.exec(path);
+  if (shared) return `shared files/${shared[1]}`;
+  return path.startsWith('/') ? `…/${path.split('/').slice(-2).join('/')}` : path;
+}
+
+/** `[title](path)` in a thread's reply: a card that opens the file in place of the chat. */
+function fileCardHtml(ticketId, path, title) {
+  const kind = isLocalPath(path) && fileKind(path);
+  if (!kind) return null;
+  return `<a class="file-card" href="${escapeHtml(fileHref(ticketId, path))}" title="${escapeHtml(path)}">`
+    + (kind === 'image' ? `<img src="${escapeHtml(fileUrl(ticketId, path))}" alt="" loading="lazy">` : `<span class="badge k-${kind}">${escapeHtml(fileExt(path))}</span>`)
+    + `<span class="text"><span class="name">${title}</span><span class="meta">${escapeHtml(shortPath(path))}</span></span></a>`;
+}
+
+/** `![caption](path)` in a thread's reply: the image or video itself (a card for anything else). */
+function filePreviewHtml(ticketId, path, caption) {
+  const kind = isLocalPath(path) && fileKind(path);
+  if (!kind) return null;
+  const src = escapeHtml(fileUrl(ticketId, path));
+  let media;
+  if (kind === 'image') media = `<img src="${src}" alt="${caption}" loading="lazy">`;
+  // Muted and looping like a GIF; the file view has the controls.
+  else if (kind === 'video') media = `<video src="${src}" muted autoplay loop playsinline preload="metadata"></video>`;
+  else return fileCardHtml(ticketId, path, caption || escapeHtml(baseName(path)));
+  return `<a class="file-preview" href="${escapeHtml(fileHref(ticketId, path))}" title="${escapeHtml(path)}">${media}`
+    + `${caption ? `<span class="caption">${caption}</span>` : ''}</a>`;
+}
+
+/** Resolve `rel` against the folder `dir` (both "/"-separated), as a document's relative links are. */
+function joinPath(dir, rel) {
+  if (rel.startsWith('/')) return rel;
+  const parts = dir ? dir.split('/') : [];
+  for (const seg of rel.split('/')) {
+    if (seg === '..' && parts.length && parts[parts.length - 1] !== '..' && parts[parts.length - 1] !== '') parts.pop();
+    else if (seg === '..') parts.push('..');
+    else if (seg && seg !== '.') parts.push(seg);
+  }
+  return parts.join('/') || '.';
+}
+
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
-/** Small, safe Markdown subset: code fences, inline code, bold, headings, lists, links, paragraphs. */
-function markdown(src) {
+/** Small, safe Markdown subset: code fences, inline code, bold, headings, lists, links, paragraphs.
+ * With `ticketId`, links to paths in that thread's folders become file cards and `![…](path)`
+ * becomes an inline preview; both open the file in place of the chat. */
+function markdown(src, ticketId = null) {
   const out = [];
   const parts = src.split(/^```[^\n]*\n([\s\S]*?)^```\s*$/m);
   parts.forEach((part, i) => {
@@ -71,11 +134,20 @@ function markdown(src) {
     }
     for (const block of part.split(/\n{2,}/)) {
       if (!block.trim()) continue;
-      const inline = (t) =>
-        escapeHtml(t)
-          .replace(/`([^`]+)`/g, '<code>$1</code>')
+      const inline = (t) => {
+        // Code spans first, so nothing inside them is treated as Markdown.
+        const codes = [];
+        let html = escapeHtml(t).replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
+        if (ticketId != null) {
+          html = html
+            .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (all, alt, href) => filePreviewHtml(ticketId, unescapeHtml(href), alt) ?? all)
+            .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (all, text, href) => fileCardHtml(ticketId, unescapeHtml(href), text) ?? all);
+        }
+        html = html
           .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
           .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        return html.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+      };
       const lines = block.replace(/^\n+|\n+$/g, '').split('\n');
       if (lines.every((l) => /^\s*([-*]|\d+\.)\s/.test(l))) {
         const ordered = /^\s*\d+\./.test(lines[0]);
@@ -442,6 +514,7 @@ async function route() {
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
+    else if ((m = hash.match(/^#\/f\/(\d+)\/(.+)$/))) await showFile(Number(m[1]), decodeURIComponent(m[2]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/t\/(\d+)$/))) await showProject(Number(m[1]), { kind: 'chat', number: Number(m[2]) });
     else if ((m = hash.match(/^#\/t\/(\d+)$/))) await showTicket(Number(m[1]));
     else await showProjects();
@@ -556,6 +629,18 @@ async function showTicket(ticketId) {
   await showProject(ticket.project_id, { kind: 'chat', id: ticketId });
 }
 
+/** A file a thread linked in its reply, shown in place of the chat. */
+async function showFile(ticketId, path) {
+  const [{ ticket }, file] = await Promise.all([
+    api(`/api/tickets/${ticketId}`),
+    // A file that has gone (or never could be shown) still opens the view, saying so.
+    api(`/api/tickets/${ticketId}/file?info&path=${encodeURIComponent(path)}`).catch((err) => ({
+      missing: err.message, name: baseName(path), kind: fileKind(path) ?? 'text', display_path: shortPath(path),
+    })),
+  ]);
+  await showProject(ticket.project_id, { kind: 'file', ticket, file: { ...file, path } });
+}
+
 async function showArtifact(artifactId) {
   const { artifact } = await api(`/api/artifacts/${artifactId}`);
   await showProject(artifact.project_id, { kind: 'artifact', artifact });
@@ -583,6 +668,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   view = {
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     artifacts, artifactId: main.artifact?.id ?? null,
+    file: main.file ?? null, fileTicket: main.ticket ?? null,
     id: chatId, ticket, lastEventId: 0,
     progress: createProgress(),
     progressEl: h('div', { class: 'progress', hidden: true }), // lives in the thread bar
@@ -598,6 +684,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', ...(
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
+      : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Coordinator' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
         : chatId !== coordinator.id ? [projectLink, ' / ', `#${ticket.number ?? ticket.id}`]
           : [project.name]));
 
@@ -636,7 +723,8 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   };
   const section = main.kind === 'artifacts' ? artifactBrowser()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
-      : chatSection(chatId, ticket, events);
+      : main.kind === 'file' ? fileViewer(main.ticket, main.file)
+        : chatSection(chatId, ticket, events);
 
   // .panels only becomes a box of its own when both panels are collapsed, so their tabs can share
   // one slim sticky column; otherwise the panels sit directly in the grid.
@@ -646,6 +734,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   renderSidebar();
   if (main.kind === 'artifacts') renderArtifactResults();
   if (main.kind === 'artifact') renderArtifactHead();
+  if (main.kind === 'file') renderFileHead();
   if (!chatId) return window.scrollTo(0, 0);
   renderTicketHead();
   for (const ev of events) appendEvent(ev, false);
@@ -836,7 +925,7 @@ function renderSidebar() {
 
 function ticketCard(t, href = threadHref(t)) {
   const coord = isCoordinator(t);
-  return h('a', { class: `card ticket-card s-${t.status}${coord ? ' coordinator' : ''}${view.id === t.id ? ' active' : ''}`, href },
+  return h('a', { class: `card ticket-card s-${t.status}${coord ? ' coordinator' : ''}${(view.id ?? view.fileTicket?.id) === t.id ? ' active' : ''}`, href },
     h('div', { class: 'title' }, threadLabel(t)),
     t.last_activity ? h('div', { class: 'activity' }, t.last_activity) : '',
     h('div', { class: 'meta' }, [
@@ -892,6 +981,7 @@ function setArtifacts(artifacts) {
   renderShelf();
   if (view.main === 'artifacts') renderArtifactResults();
   if (view.main === 'artifact') renderArtifactHead();
+  if (view.main === 'file') renderFileHead();
 }
 
 async function setPinned(a, pinned) {
@@ -925,7 +1015,7 @@ function renderShelf() {
   const all = view.artifacts;
   const pinned = all.filter((a) => a.pinned_at).sort((a, b) => b.pinned_at - a.pinned_at);
   const recent = all.filter((a) => !a.pinned_at && !a.missing).slice(0, RECENT_ARTIFACTS);
-  const item = (a) => h('a', { class: `artifact-item${view.artifactId === a.id ? ' active' : ''}${a.missing ? ' missing' : ''}`, href: `#/a/${a.id}`, title: a.path },
+  const item = (a) => h('a', { class: `artifact-item${view.artifactId === a.id ? ' active' : ''}${a.missing ? ' missing' : ''}`, href: `#/a/${a.id}`, title: a.display_path ?? a.path },
     h('span', { class: `badge k-${a.kind}` }, extOf(a)),
     h('span', { class: 'text' },
       h('span', { class: 'name' }, a.name),
@@ -971,7 +1061,7 @@ function renderArtifactResults() {
   }));
   const results = view.artifacts.filter((a) => {
     if (!filter.match(a)) return false;
-    const hay = `${a.path} ${threadName(a)} ${a.kind}`.toLowerCase();
+    const hay = `${a.display_path ?? a.path} ${threadName(a)} ${a.kind}`.toLowerCase();
     return terms.every((t) => hay.includes(t));
   });
   document.getElementById('artifact-summary').textContent =
@@ -983,8 +1073,9 @@ function renderArtifactResults() {
     return;
   }
   el.replaceChildren(...results.map((a) => {
-    const dir = a.path.includes('/') ? a.path.slice(0, a.path.lastIndexOf('/') + 1) : '';
-    return h('a', { class: `artifact-card${a.missing ? ' missing' : ''}`, href: `#/a/${a.id}`, title: a.path },
+    const shown = a.display_path ?? a.path;
+    const dir = shown.includes('/') ? shown.slice(0, shown.lastIndexOf('/') + 1) : '';
+    return h('a', { class: `artifact-card${a.missing ? ' missing' : ''}`, href: `#/a/${a.id}`, title: shown },
       h('div', { class: 'preview' }, h('span', { class: `badge big k-${a.kind}` }, extOf(a))),
       pinButton(a),
       h('div', { class: 'name' }, a.name),
@@ -998,36 +1089,76 @@ function renderArtifactResults() {
 function artifactViewer(a) {
   const body = h('div', { class: 'artifact-body' });
   const section = h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'artifact-head' }), body);
-  const src = rawUrl(a);
   if (a.missing) {
     body.append(h('p', { class: 'muted' }, 'This file is no longer in the thread\'s folder. Unpin it to remove it from the list.'));
-  } else if (a.kind === 'html') {
+  } else {
+    renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id });
+  }
+  return section;
+}
+
+/** Main panel: a file a thread linked, with a way back to its chat. */
+function fileViewer(ticket, file) {
+  const body = h('div', { class: 'artifact-body' });
+  if (file.missing) body.append(h('p', { class: 'muted' }, `${file.missing}.`));
+  else renderFileBody(body, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id });
+  return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'file-head' }), body);
+}
+
+function renderFileHead() {
+  const el = document.getElementById('file-head');
+  if (!el) return;
+  const { file, fileTicket: t } = view;
+  // A file that is also an artifact can be pinned; keep its pin state live.
+  const a = file.artifact && (view.artifacts.find((x) => x.id === file.artifact.id) ?? file.artifact);
+  const src = `${fileUrl(t.id, file.path)}&v=${file.mtime}`;
+  el.replaceChildren(
+    h('div', { class: 'row' },
+      h('a', { class: 'button secondary', href: threadHref(t) }, '← Back to chat'),
+      h('span', { class: `badge k-${file.kind}` }, fileExt(file.name)),
+      h('h2', {}, file.name),
+      h('span', { class: 'spacer' }),
+      a ? pinButton(a) : '',
+      file.missing ? '' : h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open'),
+      file.missing ? '' : h('a', { class: 'button secondary', href: `${src}&download` }, 'Download')),
+    h('div', { class: 'meta' },
+      file.display_path, ' · from ',
+      h('a', { href: threadHref(t) }, threadLabel(t)),
+      file.missing ? ' · not found' : ` · ${formatSize(file.size)} · updated ${ago(file.mtime)}`));
+}
+
+/** Show a file in `body` by its kind. Markdown's relative image links load from next to it. */
+function renderFileBody(body, { kind, src, size, name, path, ticketId }) {
+  if (kind === 'image') {
+    body.append(h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { class: 'artifact-media', src, alt: name })));
+  } else if (kind === 'video') {
+    body.append(h('video', { class: 'artifact-media', src, controls: true, autoplay: true, muted: true, loop: true, playsinline: true }));
+  } else if (kind === 'audio') {
+    body.append(h('audio', { src, controls: true, preload: 'metadata' }));
+  } else if (kind === 'html') {
     // Sandboxed (here and by the server's CSP) so a page a thread wrote can't act as the app.
-    body.append(h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals', title: a.name }));
-  } else if (a.kind === 'pdf') {
-    body.append(h('iframe', { class: 'artifact-frame', src, title: a.name }));
-  } else if (a.size > MAX_TEXT_PREVIEW) {
-    body.append(h('p', { class: 'muted' }, `Too large to preview (${formatSize(a.size)}). Open or download it instead.`));
+    body.append(h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals', title: name }));
+  } else if (kind === 'pdf') {
+    body.append(h('iframe', { class: 'artifact-frame', src, title: name }));
+  } else if (size > MAX_TEXT_PREVIEW) {
+    body.append(h('p', { class: 'muted' }, `Too large to preview (${formatSize(size)}). Open or download it instead.`));
   } else {
     body.append(h('p', { class: 'muted' }, 'Loading…'));
     fetch(src).then(async (res) => {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       const text = await res.text();
-      // Images a document links to by relative path load from next to it, in the thread's folder.
-      const imageUrl = (href) => (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(href) || href.startsWith('/')
-        ? null
-        : `/api/artifacts/${a.id}/rel?path=${encodeURIComponent(href.split('#')[0])}&v=${a.mtime}`);
+      const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+      const imageUrl = (href) => (isLocalPath(href) ? fileUrl(ticketId, joinPath(dir, href.split('#')[0])) : null);
       let shown = text;
-      if (a.kind === 'canvas') {
+      if (kind === 'canvas') {
         // JSON Canvas files are JSON; lay them out readably.
         try { shown = JSON.stringify(JSON.parse(text), null, 2); } catch {}
       }
-      body.replaceChildren(a.kind === 'markdown'
+      body.replaceChildren(kind === 'markdown'
         ? h('div', { class: 'msg doc' }, markdownDoc(text, imageUrl))
         : h('pre', { class: 'artifact-text' }, shown));
     }).catch((err) => body.replaceChildren(h('p', { class: 'error' }, `Could not load: ${err.message}`)));
   }
-  return section;
 }
 
 function renderArtifactHead() {
@@ -1048,7 +1179,7 @@ function renderArtifactHead() {
       a.missing ? '' : h('a', { class: 'button secondary', href: rawUrl(a), target: '_blank', rel: 'noopener' }, 'Open'),
       a.missing ? '' : h('a', { class: 'button secondary', href: `${rawUrl(a)}&download` }, 'Download')),
     h('div', { class: 'meta' },
-      a.path, ' · from ',
+      a.display_path ?? a.path, ' · from ',
       h('a', { href: threadHref(artifactThread(a)) }, threadName(a)),
       a.missing ? ' · missing' : ` · ${formatSize(a.size)} · updated ${ago(a.mtime)}`,
       a.pinned_at ? ` · pinned by ${a.pinned_by}` : ''));
@@ -1385,7 +1516,7 @@ function appendEvent(event, scroll = true) {
       for (const block of data.message?.content ?? []) {
         if (block.type === 'text' && block.text.trim()) {
           const msg = h('div', { class: 'msg' }, h('div', { class: 'who' }, 'Claude'));
-          msg.append(markdown(block.text));
+          msg.append(markdown(block.text, event.ticket_id));
           nodes.push(msg);
         }
       }

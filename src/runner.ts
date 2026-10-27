@@ -1,6 +1,6 @@
 // Runs ticket turns as headless `claude -p` processes, one turn per process.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
@@ -105,8 +105,22 @@ function describeActivity(ev: any): string | null {
   return null;
 }
 
-function systemPrompt(project: Project, ticket: Ticket): string {
-  if (ticket.kind === 'coordinator') return coordinatorPrompt(project);
+/** How a session can put files in front of people: links in its reply that the app turns into previews. */
+function showingFiles(ticket: Ticket, filesDir: string | null): string[] {
+  const where = filesDir ? `inside your working directory or in ${filesDir}` : 'inside your working directory';
+  return [
+    `You can show people files (documents, images, GIFs, videos, web pages, PDFs) by linking them in your reply with a path ${where}; the app turns those links into previews that open the file in place of the chat:`,
+    '- `![caption](path)` shows an inline preview: use it for images, GIFs and videos.',
+    '- `[title](path)` shows a card: use it for documents, web pages and PDFs.',
+    filesDir
+      ? `Put files you fetch from elsewhere or make only to show people (not part of the work in your branch) in ${filesDir}, so they never end up in a commit. Files elsewhere on disk can't be shown; copy them there first.`
+      : '',
+    'Linking a file is the only way people see it; they cannot browse your folders.',
+  ].filter(Boolean);
+}
+
+function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null): string {
+  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project), ...showingFiles(ticket, filesDir)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the project repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this ticket.';
@@ -122,6 +136,7 @@ function systemPrompt(project: Project, ticket: Ticket): string {
     '- If the plan changes, add, reword or delete tasks so the list stays true.',
     'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
     'Give every Bash call a short plain-English description (like "Run the test suite").',
+    ...showingFiles(ticket, filesDir),
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
   ].join('\n');
 }
@@ -151,6 +166,8 @@ export class Runner {
   private broadcast: Broadcast;
   private claudeBin: string;
   private coordinatorEnv: CoordinatorEnv;
+  /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
+  filesDir: (ticket: Ticket) => string | null = () => null;
   /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
   onFilesMayChange: (ticketId: number) => void = () => {};
 
@@ -229,14 +246,22 @@ export class Runner {
   }
 
   private startTurn(project: Project, ticket: Ticket, prompt: string) {
+    let filesDir = this.filesDir(ticket);
+    try {
+      if (filesDir) mkdirSync(filesDir, { recursive: true });
+    } catch {
+      filesDir = null;
+    }
     const args = [
       '-p',
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', ticket.permission_mode,
-      '--append-system-prompt', systemPrompt(project, ticket),
+      '--append-system-prompt', systemPrompt(project, ticket, filesDir),
     ];
+    // Lets edit-only sessions write there too, not just in their working directory.
+    if (filesDir) args.push('--add-dir', filesDir);
     if (ticket.session_id) args.push('--resume', ticket.session_id);
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
     let env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };

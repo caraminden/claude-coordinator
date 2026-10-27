@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, readdir, mkdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { basename, extname, join, normalize, posix, sep } from 'node:path';
+import { basename, extname, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact } from './src/artifacts.ts';
@@ -91,7 +91,12 @@ async function scanArtifacts(ticketId: number) {
   const job = (async () => {
     const ticket = store.getTicket(ticketId);
     if (!ticket?.cwd) return;
-    const found = await findArtifacts(ticket.cwd, !!ticket.branch);
+    const shared = sharedDir(ticket);
+    const found = [
+      ...(await findArtifacts(ticket.cwd, !!ticket.branch)),
+      // Files in the shared folder are stored by absolute path, since they sit outside the working directory.
+      ...(await findArtifacts(shared, false)).map((f) => ({ ...f, path: join(shared, f.path) })),
+    ];
     if (store.syncArtifacts(ticket, found)) broadcast({ type: 'artifacts', projectId: ticket.project_id });
   })();
   scanning.set(ticketId, job);
@@ -103,6 +108,7 @@ async function scanArtifacts(ticketId: number) {
 }
 
 runner.onFilesMayChange = scheduleScan;
+runner.filesDir = sharedDir;
 // Pick up anything made while the server was down (or before artifacts existed), one ticket at a time.
 // Rows for file types that no longer count as artifacts go first, pinned or not.
 store.pruneArtifacts(isArtifact);
@@ -119,6 +125,7 @@ function artifactView(a: Artifact & { ticket_title?: string; ticket_kind?: strin
   return {
     ...a,
     name: basename(a.path),
+    display_path: displayPath(ticket ?? store.getTicket(a.ticket_id)!, a.path),
     kind: fileType(a.path)?.kind ?? 'text',
     ticket_title: a.ticket_title ?? ticket?.title ?? '',
     ticket_kind: a.ticket_kind ?? ticket?.kind ?? 'ticket',
@@ -136,23 +143,46 @@ function artifactCsp(kind: string): string {
   return "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'self'";
 }
 
-/** Serve a file from a ticket's folder; `path` is relative to it and must be an artifact type. */
-async function serveArtifact(req: IncomingMessage, res: ServerResponse, ticket: Ticket, path: string, download: boolean) {
+/** Where a ticket keeps files it fetched or made to show people, outside its repo. */
+function sharedDir(ticket: Ticket): string {
+  return join(projectDir(DATA_DIR, ticket.project_id), 'shared', String(ticket.id));
+}
+
+/** A path as people should see it: relative to the working directory, or under "shared files". */
+function displayPath(ticket: Ticket, path: string): string {
+  const shared = sharedDir(ticket) + sep;
+  if (path.startsWith(shared)) return `shared files/${path.slice(shared.length)}`;
+  if (ticket.cwd && path.startsWith(ticket.cwd + sep)) return path.slice(ticket.cwd.length + 1);
+  return path;
+}
+
+/**
+ * Find a file a ticket may show: `path` is absolute or relative to its working directory, and must
+ * resolve (symlinks included) to a servable file type inside the working directory or shared folder.
+ */
+async function resolveTicketFile(ticket: Ticket, path: string) {
   const type = fileType(path);
-  if (!type) throw new HttpError(404, 'Not found');
-  let file: string;
-  let size: number;
+  if (!type || !ticket.cwd || path.includes('\0')) return null;
   try {
-    // Resolve symlinks so the file must really be inside the ticket's folder.
-    const root = await realpath(ticket.cwd);
-    file = await realpath(join(ticket.cwd, path));
-    if (!file.startsWith(root + sep)) throw new Error('outside');
-    const st = await stat(file);
-    if (!st.isFile()) throw new Error('not a file');
-    size = st.size;
-  } catch {
-    throw new HttpError(404, 'That file is no longer there');
-  }
+    const file = await realpath(isAbsolute(path) ? path : join(ticket.cwd, path));
+    for (const root of [ticket.cwd, sharedDir(ticket)]) {
+      const real = await realpath(root).catch(() => null);
+      if (!real || !file.startsWith(real + sep)) continue;
+      const st = await stat(file);
+      if (!st.isFile()) return null;
+      // The path the ticket used, made absolute, so artifact rows and links agree.
+      const abs = isAbsolute(path) ? normalize(path) : join(ticket.cwd, path);
+      return { file, abs, type, size: st.size, mtime: Math.round(st.mtimeMs) };
+    }
+  } catch {}
+  return null;
+}
+
+/** Serve a file a ticket may show (see resolveTicketFile), with byte ranges and a sandboxing CSP. */
+async function serveArtifact(req: IncomingMessage, res: ServerResponse, ticket: Ticket, path: string, download: boolean) {
+  const found = await resolveTicketFile(ticket, path);
+  if (!found) throw new HttpError(404, 'That file is no longer there');
+  const { file, type, size } = found;
   const headers: Record<string, string | number> = {
     'Content-Type': type.mime,
     'Content-Security-Policy': artifactCsp(type.kind),
@@ -472,13 +502,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (action === '/raw' && (method === 'GET' || method === 'HEAD')) {
       return serveArtifact(req, res, store.getTicket(a.ticket_id)!, a.path, url.searchParams.has('download'));
     }
-    if (action === '/rel' && (method === 'GET' || method === 'HEAD')) {
-      // A file a document links to (e.g. its images), relative to the document. serveArtifact
-      // still keeps it inside the ticket's folder and to artifact file types.
-      const rel = posix.normalize(posix.join(posix.dirname(a.path), url.searchParams.get('path') ?? ''));
-      if (rel.startsWith('../') || rel === '..' || posix.isAbsolute(rel)) throw new HttpError(404, 'Not found');
-      return serveArtifact(req, res, store.getTicket(a.ticket_id)!, rel, false);
-    }
     if (action === '/pin' && method === 'POST') {
       const body = await readJson(req);
       store.setArtifactPinned(a.id, body.pinned ? session.name : null);
@@ -526,6 +549,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         runner.broadcastTicket(id);
       }
       return json(res, 200, ticketView(id));
+    }
+    if (action === '/file' && (method === 'GET' || method === 'HEAD')) {
+      // A file the ticket linked in its reply: ?path= as written there; ?info for its details.
+      const path = url.searchParams.get('path') ?? '';
+      if (!url.searchParams.has('info')) return serveArtifact(req, res, ticket, path, url.searchParams.has('download'));
+      const found = await resolveTicketFile(ticket, path);
+      if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
+      const relPath = found.abs.startsWith(ticket.cwd + sep) ? found.abs.slice(ticket.cwd.length + 1) : found.abs;
+      const artifact = store.findArtifact(ticket.id, [relPath, found.abs]);
+      return json(res, 200, {
+        path, name: basename(found.abs), display_path: displayPath(ticket, found.abs),
+        kind: found.type.kind, size: found.size, mtime: found.mtime,
+        artifact: artifact ? artifactView(artifact) : null,
+      });
     }
     if (action === '/events' && method === 'GET') {
       return json(res, 200, store.listEvents(id, Number(url.searchParams.get('after') ?? 0)));

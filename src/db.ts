@@ -265,7 +265,17 @@ export class Store {
     for (const r of rows) if (!keep(r.path)) del.run(r.id);
   }
 
-  getArtifact(id: number): Artifact | undefined {
+  /** A ticket's artifact row for any of the given paths. */
+  findArtifact(ticketId: number, paths: string[]): Artifact | undefined {
+    const q = this.db.prepare('SELECT * FROM artifacts WHERE ticket_id = ? AND path = ?');
+    for (const p of paths) {
+      const a = q.get(ticketId, p) as unknown as Artifact | undefined;
+      if (a) return a;
+    }
+    return undefined;
+  }
+
+    getArtifact(id: number): Artifact | undefined {
     return this.db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id) as unknown as Artifact | undefined;
   }
 

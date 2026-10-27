@@ -42,6 +42,16 @@ runners on other people's own Claude logins.
   and `rules/`, the repo's `CLAUDE.md` files, and auto-memory) to add with a tick.
   A file upload or a paste works too. The coordinator can read and change them
   with its `get_project_instructions` and `set_project_instructions` tools.
+- **Machines** lend threads MCP servers that run on people's own computers, such as a
+  Godot editor that runs builds on a laptop. Add one in the overview panel's Machines
+  section; the app shows a one-time token and a command to run there, which downloads
+  `public/machine-agent.mjs` (Node 18+, no installs) and starts it with the MCP server's
+  command. The agent dials out to the app and holds an event stream open, so the computer
+  needs no open ports and can be anywhere. Every thread turn (not the coordinator) gets each
+  machine that is online when it starts as an MCP server named after the machine
+  (`mcp__<name>__…`): a small stdio proxy (`src/machine-mcp.ts`) relays through the app
+  (`src/machines.ts`), and the agent runs a separate copy of the MCP server per session.
+  Tokens are stored hashed; a new token or removing the machine disconnects it.
 - Projects with a repo URL are cloned once; each ticket gets
   `git worktree add -b ticket/<id>-<slug>` from the default branch.
 
@@ -55,6 +65,9 @@ uses the built-in `node:sqlite`.
 | `server.ts` | HTTP server, JSON API, SSE stream, static files |
 | `src/runner.ts` | Spawns `claude` turns, parses stream-json, queues messages |
 | `src/mcp.ts` | MCP server giving the coordinator its ticket-management tools |
+| `src/machines.ts` | Relays MCP traffic between thread turns and connected machines |
+| `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server |
+| `public/machine-agent.mjs` | Agent people run on their own computers to connect them |
 | `src/workspace.ts` | Clones project repos, creates per-ticket worktrees |
 | `src/instructions.ts` | Finds Claude Code instruction and memory files to import as project instructions |
 | `src/db.ts` | SQLite schema and queries |

@@ -383,6 +383,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'event') onEvent(msg.event);
     if (msg.type === 'artifacts') onArtifactsChanged(msg.projectId);
     if (msg.type === 'project') onProjectUpdate(msg.project);
+    if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };
   es.onerror = () => {
@@ -571,6 +572,7 @@ async function route() {
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/instructions$/))) await showProject(Number(m[1]), { kind: 'instructions' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
     else if ((m = hash.match(/^#\/f\/(\d+)\/(.+)$/))) await showFile(Number(m[1]), decodeURIComponent(m[2]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/t\/(\d+)$/))) await showProject(Number(m[1]), { kind: 'chat', number: Number(m[2]) });
@@ -761,6 +763,7 @@ function renderCrumbs(main) {
   crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', ...(
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
       : main.kind === 'instructions' ? [projectLink, ' / ', 'Instructions']
+      : main.kind === 'machines' ? [projectLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Coordinator' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
@@ -777,11 +780,12 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   if (main.kind === 'chat' && view?.kind === 'project' && view.projectId === projectId && document.getElementById('threads')) {
     if (await switchChat(main, seq)) return;
   }
-  const [{ project, coordinator, tickets, seen }, artifacts, projects] = await Promise.all([
+  const [{ project, coordinator, tickets, seen }, artifacts, projects, machines] = await Promise.all([
     api(`/api/projects/${projectId}`),
     // An empty shelf beats a broken page if the server is older than this front end.
     api(`/api/projects/${projectId}/artifacts`).catch(() => []),
     api('/api/projects').catch(() => []),
+    api('/api/machines').catch(() => []),
   ]);
   let chatId = null;
   if (main.kind === 'chat') {
@@ -795,7 +799,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   view = {
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
-    artifacts, artifactId: main.artifact?.id ?? null,
+    artifacts, artifactId: main.artifact?.id ?? null, machines,
     file: main.file ?? null, fileTicket: main.ticket ?? null,
     ...chatView(chatId, ticket),
   };
@@ -818,6 +822,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
       projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
         h('span', { class: 'name' }, p.name)))),
     h('div', { id: 'instructions-shelf' }),
+    h('div', { id: 'machines-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     h('summary', { title: 'Show or hide threads' }, h('span', { class: 'label' }, 'Threads')),
@@ -840,6 +845,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   };
   const section = main.kind === 'artifacts' ? artifactBrowser()
     : main.kind === 'instructions' ? instructionsEditor()
+    : main.kind === 'machines' ? machinesPage()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'file' ? fileViewer(main.ticket, main.file)
         : chatSection(chatId, ticket, events);
@@ -849,6 +855,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   app.replaceChildren(h('div', { class: 'split' }, h('div', { class: 'panels' }, shelf, sidebar), section));
   renderUsage();
   renderInstructionsShelf();
+  renderMachinesShelf();
   renderShelf();
   renderSidebar();
   if (main.kind === 'artifacts') renderArtifactResults();
@@ -1717,6 +1724,138 @@ function instructionsEditor() {
     textarea.focus();
   });
   return section;
+}
+
+// ---------- machines ----------
+
+// What the add form suggests running: the Godot MCP server most people use.
+const DEFAULT_MACHINE_COMMAND = 'npx -y @coding-solo/godot-mcp';
+
+function onMachinesUpdate(machines) {
+  if (view?.kind !== 'project') return;
+  view.machines = machines;
+  renderMachinesShelf();
+  renderMachineList();
+}
+
+/** "online on cara-laptop · 2 threads using it" or "offline · seen 3h ago". */
+function machineStatus(m) {
+  if (m.online) return [`online${m.host ? ` on ${m.host}` : ''}`, m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ');
+  return m.last_seen_at ? `offline · seen ${ago(m.last_seen_at)}` : 'not connected yet';
+}
+
+/** Overview panel: people's computers lending threads their MCP tools, with live status. */
+function renderMachinesShelf() {
+  const el = document.getElementById('machines-shelf');
+  if (!el) return;
+  const href = `#/p/${view.projectId}/machines`;
+  el.replaceChildren(h('section', { class: 'column' },
+    h('h3', {}, 'Machines', h('span', { class: 'spacer' }),
+      h('a', { class: `browse${view.main === 'machines' ? ' active' : ''}`, href }, view.machines.length ? 'Manage' : 'Add')),
+    view.machines.length
+      ? view.machines.map((m) => h('a', { class: `machine-item${m.online ? ' online' : ''}`, href, title: m.command ? `Runs ${m.command}` : '' },
+        h('span', { class: `dot${m.online ? ' online' : ''}` }),
+        h('span', { class: 'text' }, h('span', { class: 'name' }, m.name), h('span', { class: 'meta' }, machineStatus(m)))))
+      : h('p', { class: 'muted small' }, 'Lend threads MCP tools from your own computers, like a Godot editor that runs builds.')));
+}
+
+/** The lines to run on a machine to connect it, for its token and MCP server command. */
+function machineSetup(token, command) {
+  return [
+    `curl -fsSLO ${location.origin}/machine-agent.mjs`,
+    `node machine-agent.mjs ${location.origin} ${token} -- ${command || DEFAULT_MACHINE_COMMAND}`,
+  ].join('\n');
+}
+
+/** Main panel: add machines, show how to connect them, and remove them or replace their token. */
+function machinesPage() {
+  view.machineToken = null; // { id, name, token } just made, shown until you leave the page
+  const name = h('input', { name: 'name', placeholder: 'godot-laptop', required: true, maxlength: 30, autocomplete: 'off', pattern: '[a-z0-9][a-z0-9\\-]*' });
+  const command = h('input', { name: 'command', value: DEFAULT_MACHINE_COMMAND, autocomplete: 'off', spellcheck: 'false' });
+  command.addEventListener('input', renderMachineSetup);
+  const status = h('span', { class: 'muted', role: 'status' });
+  const form = h('form', { class: 'machine-add' },
+    h('label', {}, 'Name', name),
+    h('label', { class: 'wide' }, 'MCP server to run there', command),
+    h('button', { type: 'submit' }, 'Add machine'),
+    status);
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    status.textContent = 'Adding…';
+    try {
+      const { machine, token } = await api('/api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase() } });
+      view.machineToken = { id: machine.id, name: machine.name, token };
+      name.value = '';
+      status.textContent = '';
+      renderMachineSetup();
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  };
+  const section = h('section', { class: 'artifacts-main machines-main' },
+    h('div', { class: 'ticket-head' },
+      h('div', { class: 'row' }, h('h2', {}, 'Machines'), h('span', { class: 'spacer' }),
+        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the coordinator', 'aria-label': 'Close' }, '×')),
+      h('div', { class: 'meta' }, 'Computers that lend every thread their MCP tools while they are connected. They dial out to this app, so they can be anywhere.')),
+    form,
+    h('div', { id: 'machine-setup' }),
+    h('div', { id: 'machine-list', class: 'machine-list' }),
+    h('p', { class: 'muted small' },
+      'Each machine runs one MCP server; add another machine for a second one. It needs Node 18 or newer. ',
+      'A thread gets the tools of machines online when its turn starts, named mcp__<name>__…, and the tools act on that computer, ',
+      'so only add servers you trust threads to run. On Windows, use curl.exe in PowerShell.'));
+  setTimeout(() => {
+    renderMachineSetup();
+    renderMachineList();
+    name.focus();
+  });
+  return section;
+}
+
+function renderMachineSetup() {
+  const el = document.getElementById('machine-setup');
+  if (!el) return;
+  const t = view.machineToken;
+  if (!t) return el.replaceChildren();
+  const command = document.querySelector('.machine-add input[name=command]')?.value.trim();
+  const text = machineSetup(t.token, command);
+  const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
+  copy.onclick = async () => {
+    await navigator.clipboard.writeText(text);
+    copy.textContent = 'Copied';
+  };
+  el.replaceChildren(h('div', { class: 'machine-setup' },
+    h('div', { class: 'row' }, h('strong', {}, `Connect ${t.name}`), h('span', { class: 'spacer' }), copy),
+    h('p', { class: 'small' }, 'Run this on that computer and leave it running. The token is shown only now; if you lose it, make a new one.'),
+    h('pre', {}, text)));
+}
+
+function renderMachineList() {
+  const el = document.getElementById('machine-list');
+  if (!el) return;
+  el.replaceChildren(...view.machines.map((m) => {
+    const newToken = h('button', { type: 'button', class: 'secondary small', title: 'Make a new token; the old one stops working and the machine disconnects' }, 'New token');
+    newToken.onclick = async () => {
+      if (!confirm(`Make a new token for ${m.name}? Its current connection stops and it has to be set up again.`)) return;
+      const { token } = await api(`/api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
+      if (!token) return;
+      view.machineToken = { id: m.id, name: m.name, token };
+      renderMachineSetup();
+    };
+    const remove = h('button', { type: 'button', class: 'secondary small' }, 'Remove');
+    remove.onclick = async () => {
+      if (!confirm(`Remove ${m.name}? Threads lose its tools and its token stops working.`)) return;
+      await api(`/api/machines/${m.id}`, { method: 'DELETE' }).catch((err) => alert(err.message));
+      if (view.machineToken?.id === m.id) view.machineToken = null;
+      renderMachineSetup();
+    };
+    return h('div', { class: `machine-row${m.online ? ' online' : ''}` },
+      h('span', { class: `dot${m.online ? ' online' : ''}` }),
+      h('span', { class: 'text' },
+        h('span', { class: 'name' }, m.name),
+        h('span', { class: 'meta' }, [machineStatus(m), m.command, `added by ${m.created_by}`].filter(Boolean).join(' · '))),
+      newToken, remove);
+  }));
 }
 
 /** The import picker: this app's Claude Code instruction and memory files, to tick and add. */

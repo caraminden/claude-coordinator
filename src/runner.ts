@@ -4,18 +4,22 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from
 import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
-import type { EventRow, Project, Store, Ticket } from './db.ts';
+import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
 import { claudeConfigDir, lastEffort, restoreSession, saveSession } from './sessions.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
 // Turns run a copy of the MCP server taken when this server started, not the file on disk: a deploy
 // pulls new code before the restart, and a newer MCP server would offer tools this process rejects.
-const MCP_SERVER = (() => {
-  const copy = join(mkdtempSync(join(tmpdir(), 'claude-coordinator-mcp-')), 'mcp.ts');
-  writeFileSync(copy, readFileSync(join(import.meta.dirname, 'mcp.ts')));
+const MCP_DIR = mkdtempSync(join(tmpdir(), 'claude-coordinator-mcp-'));
+function pinnedCopy(file: string): string {
+  const copy = join(MCP_DIR, file);
+  writeFileSync(copy, readFileSync(join(import.meta.dirname, file)));
   return copy;
-})();
+}
+const MCP_SERVER = pinnedCopy('mcp.ts');
+// Stands in for a connected machine's MCP server; see src/machines.ts.
+const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
@@ -151,7 +155,7 @@ function projectInstructions(project: Project): string[] {
   ];
 }
 
-function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, ticketsDir: string): string {
+function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, ticketsDir: string, machines: Machine[] = []): string {
   if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir), ...showingFiles(ticket, filesDir), ...projectInstructions(project)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the project repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
@@ -175,9 +179,19 @@ function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null,
     'Give every Bash call a short plain-English description (like "Run the test suite").',
     'When the thread\'s work is done and should be closed (for example when project instructions say to close after shipping), call the `close_self` tool (mcp__thread) near the end of your turn: the thread closes once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not close a thread whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can close, even if its brief says to close.',
     ...showingFiles(ticket, filesDir),
+    ...machineTools(machines),
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
     ...projectInstructions(project),
   ].join('\n');
+}
+
+/** Which people's computers lend this turn their MCP tools. */
+function machineTools(machines: Machine[]): string[] {
+  if (!machines.length) return [];
+  const names = machines.map((m) => `${m.name} (mcp__${m.name})`).join(', ');
+  return [
+    `Connected machines: ${names}. Their MCP tools run on people's own computers, not on this server: files and builds there are separate from your working directory, so sync code there (for example with git) before building, and expect a tool to fail if that computer goes offline mid-turn.`,
+  ];
 }
 
 // Read-only git subcommands the coordinator may run with `git -C <dir>` in the repo and ticket worktrees.
@@ -250,6 +264,8 @@ export class Runner {
   filesDir: (ticket: Ticket) => string | null = () => null;
   /** The folder that holds a project's ticket folders, which the coordinator may read. */
   ticketsDir: (project: Project) => string = (project) => join(project.repo_dir ?? '.', '..', 'tickets');
+  /** Machines online now; a thread's turn gets each one's MCP tools. */
+  machines: () => Machine[] = () => [];
   /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
   onFilesMayChange: (ticketId: number) => void = () => {};
 
@@ -358,13 +374,15 @@ export class Runner {
     } catch {
       filesDir = null;
     }
+    // Threads (not the coordinator, which hands work off) get the tools of every machine online now.
+    const machines = ticket.kind === 'coordinator' ? [] : this.machines();
     const args = [
       '-p',
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', ticket.permission_mode,
-      '--append-system-prompt', systemPrompt(project, ticket, filesDir, this.ticketsDir(project)),
+      '--append-system-prompt', systemPrompt(project, ticket, filesDir, this.ticketsDir(project), machines),
       // Nobody can answer a permission prompt in a headless turn; deny instead of waiting on one.
       '--permission-prompts', 'none',
     ];
@@ -386,9 +404,11 @@ export class Runner {
     // title, tag, state and note. The token travels in the environment (which the MCP server
     // inherits), never on the command line.
     const role = ticket.kind === 'coordinator' ? 'coordinator' : 'thread';
-    const mcp = { mcpServers: { [role]: { type: 'stdio', command: process.execPath, args: [MCP_SERVER] } } };
+    const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [MCP_SERVER] } };
+    for (const m of machines) servers[m.name] = { type: 'stdio', command: process.execPath, args: [MACHINE_MCP_SERVER, String(m.id), m.name] };
+    const allowed = Object.keys(servers).map((name) => `mcp__${name}`);
     // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
-    args.push('--mcp-config', JSON.stringify(mcp), '--allowedTools', `mcp__${role}`, '--disallowedTools', 'AskUserQuestion');
+    args.push('--mcp-config', JSON.stringify({ mcpServers: servers }), '--allowedTools', ...allowed, '--disallowedTools', 'AskUserQuestion');
     env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
     // A state describes where the last turn left things; a new turn makes it stale.
     if (ticket.state) this.store.updateTicket(ticket.id, { state: null });

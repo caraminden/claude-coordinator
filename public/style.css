@@ -648,3 +648,22 @@ a.thread-ref:hover { text-decoration: underline; }
   body:has(.as-drawer) .drawer-handle { visibility: hidden; }
 }
 @media (prefers-reduced-motion: reduce) { .as-drawer.settling, .drawer-backdrop.settling { transition: none; } }
+
+/* Machines: live status in the overview panel, and the page that adds and connects them */
+.dot.online { background: #16a34a; box-shadow: 0 0 0 2px color-mix(in srgb, #16a34a 25%, transparent); }
+.machine-item, .machine-row { display: flex; gap: 0.5rem; align-items: center; min-width: 0; text-decoration: none; padding: 0.3rem 0.4rem; border-radius: 6px; }
+.machine-item:hover { background: var(--panel); }
+.machine-item .dot, .machine-row .dot { flex: none; }
+.machine-item .text, .machine-row .text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.machine-item .name, .machine-row .name { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-item .meta, .machine-row .meta { color: var(--muted); font-size: 0.78em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-add { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin: 0.9rem 0; }
+.machine-add label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85em; }
+.machine-add label.wide { flex: 1 1 18rem; }
+.machine-setup { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 1rem; }
+.machine-setup pre { margin: 0.4rem 0 0; padding: 0.5rem 0.6rem; background: var(--code-bg); border-radius: 6px; overflow-x: auto; font-size: 0.82em; white-space: pre-wrap; word-break: break-all; user-select: all; }
+.machine-setup .small { margin: 0.3rem 0 0; font-size: 0.85em; }
+.machine-list { display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 1rem; }
+.machine-row { border: 1px solid var(--line); }
+.machine-row button { padding: 0.2rem 0.6rem; font-size: 0.82em; }
+.machines-main > p.small { font-size: 0.85em; }

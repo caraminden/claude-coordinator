@@ -81,6 +81,18 @@ export interface ClaudeStateRow {
   data?: Uint8Array;
 }
 
+/** Someone's own computer, which connects out to the app and lends threads its MCP tools. */
+export interface Machine {
+  id: number;
+  /** Also the MCP server name threads see, so its tools are mcp__<name>__*. */
+  name: string;
+  token_hash: string;
+  created_by: string;
+  created_at: number;
+  /** When its agent last connected or disconnected; null if it never has. */
+  last_seen_at: number | null;
+}
+
 export interface EventRow {
   id: number;
   ticket_id: number;
@@ -152,6 +164,14 @@ CREATE TABLE IF NOT EXISTS ticket_seen (
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS machines (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  token_hash TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER
 );
 `;
 
@@ -505,5 +525,30 @@ export class Store {
     this.db
       .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .run(key, JSON.stringify(value));
+  }
+
+  listMachines(): Machine[] {
+    return this.db.prepare('SELECT * FROM machines ORDER BY name').all() as unknown as Machine[];
+  }
+
+  getMachine(id: number): Machine | undefined {
+    return this.db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as unknown as Machine | undefined;
+  }
+
+  createMachine(name: string, tokenHash: string, by: string): Machine {
+    const { lastInsertRowid } = this.db
+      .prepare('INSERT INTO machines (name, token_hash, created_by, created_at) VALUES (?, ?, ?, ?)')
+      .run(name, tokenHash, by, Date.now());
+    return this.getMachine(Number(lastInsertRowid))!;
+  }
+
+  updateMachine(id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'last_seen_at'>>) {
+    const keys = Object.keys(fields) as (keyof typeof fields)[];
+    if (!keys.length) return;
+    this.db.prepare(`UPDATE machines SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
+  }
+
+  deleteMachine(id: number) {
+    this.db.prepare('DELETE FROM machines WHERE id = ?').run(id);
   }
 }

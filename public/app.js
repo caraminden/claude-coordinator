@@ -132,59 +132,31 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
-/** Small, safe Markdown subset: code fences, inline code, bold, headings, lists, links, paragraphs.
- * With `ticketId`, links to paths in that thread's folders become file cards and `![…](path)`
- * becomes an inline preview; both open the file in place of the chat. */
+/**
+ * Markdown in chat messages: the document renderer below (tables, headings, lists, quotes…), with
+ * single line breaks kept as typed. With `ticketId`, links to paths in that thread's folders become
+ * file cards and `![…](path)` an inline preview; both open the file in place of the chat.
+ */
 function markdown(src, ticketId = null) {
-  const out = [];
-  const parts = src.split(/^```[^\n]*\n([\s\S]*?)^```\s*$/m);
-  parts.forEach((part, i) => {
-    if (i % 2 === 1) {
-      out.push(`<pre><code>${escapeHtml(part)}</code></pre>`);
-      return;
-    }
-    for (const block of part.split(/\n{2,}/)) {
-      if (!block.trim()) continue;
-      const inline = (t) => {
-        // Code spans first, so nothing inside them is treated as Markdown.
-        const codes = [];
-        let html = escapeHtml(t).replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
-        if (ticketId != null) {
-          html = html
-            .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (all, alt, href) => filePreviewHtml(ticketId, unescapeHtml(href), alt) ?? all)
-            .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (all, text, href) => fileCardHtml(ticketId, unescapeHtml(href), text) ?? all);
-        }
-        html = html
-          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-          .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-        return html.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
-      };
-      const lines = block.replace(/^\n+|\n+$/g, '').split('\n');
-      if (lines.every((l) => /^\s*([-*]|\d+\.)\s/.test(l))) {
-        const ordered = /^\s*\d+\./.test(lines[0]);
-        const items = lines.map((l) => `<li>${inline(l.replace(/^\s*([-*]|\d+\.)\s/, ''))}</li>`).join('');
-        out.push(ordered ? `<ol>${items}</ol>` : `<ul>${items}</ul>`);
-      } else if (/^#{1,6}\s/.test(lines[0]) && lines.length === 1) {
-        out.push(`<p><strong>${inline(lines[0].replace(/^#+\s/, ''))}</strong></p>`);
-      } else {
-        out.push(`<p>${lines.map(inline).join('<br>')}</p>`);
-      }
-    }
-  });
-  const div = document.createElement('div');
-  div.innerHTML = out.join('');
-  return div;
+  return markdownDoc(src, { ticketId, breaks: true });
 }
 
 /**
  * Fuller Markdown for documents threads write: headings, nested lists, tables, quotes, rules,
  * italics, and images, which `imageUrl` maps to a URL (or null to show the alt text instead).
  */
-function markdownDoc(src, imageUrl) {
+function markdownDoc(src, opts = {}) {
+  const { imageUrl = () => null, ticketId = null, breaks = false } = typeof opts === 'function' ? { imageUrl: opts } : opts;
   const inline = (t) => {
     // Pull code spans out first so nothing inside them is treated as Markdown.
     const codes = [];
     let html = escapeHtml(t).replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
+    if (ticketId != null) {
+      // In a thread's messages, files in its folders become previews and cards (see filePreviewHtml).
+      html = html
+        .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (all, alt, href) => filePreviewHtml(ticketId, unescapeHtml(href), alt) ?? all)
+        .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (all, text, href) => fileCardHtml(ticketId, unescapeHtml(href), text) ?? all);
+    }
     html = html
       .replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (_, alt, href) => {
         const url = imageUrl(href.replace(/&amp;/g, '&'));
@@ -258,7 +230,7 @@ function markdownDoc(src, imageUrl) {
     } else if (/^>/.test(line)) {
       const quoted = [];
       for (; i < lines.length && /^>/.test(lines[i]); i++) quoted.push(lines[i].replace(/^>\s?/, ''));
-      out.push(`<blockquote>${markdownDoc(quoted.join('\n'), imageUrl).innerHTML}</blockquote>`);
+      out.push(`<blockquote>${markdownDoc(quoted.join('\n'), { imageUrl, ticketId, breaks }).innerHTML}</blockquote>`);
     } else if (isItem(line)) {
       const items = [];
       for (; i < lines.length; i++) {
@@ -273,7 +245,7 @@ function markdownDoc(src, imageUrl) {
     } else {
       const para = [];
       for (; i < lines.length && lines[i].trim() && (!para.length || !startsBlock(lines[i])); i++) para.push(lines[i].trim());
-      out.push(`<p>${inline(para.join(' '))}</p>`);
+      out.push(`<p>${breaks ? para.map(inline).join('<br>') : inline(para.join(' '))}</p>`);
     }
   }
   const div = document.createElement('div');

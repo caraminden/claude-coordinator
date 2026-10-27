@@ -928,7 +928,7 @@ function chatSection(chatId, ticket, events) {
     h('div', { class: 'row' },
       h('button', { type: 'button', class: 'secondary small add-image', title: 'Add image', 'aria-label': 'Add image', onclick: () => picker.click() },
         h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Add image')),
-      h('span', { class: 'muted', id: 'composer-hint' }), h('span', { class: 'spacer' }),
+      h('span', { class: 'spacer' }),
       modelPicker(chatId), sendBtn));
   textarea.addEventListener('paste', (e) => {
     const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
@@ -1935,8 +1935,9 @@ function renderTicketHead() {
       coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the coordinator', 'aria-label': 'Back to the coordinator' }, '×')),
     view.progressEl);
   renderTyping();
-  const hint = document.getElementById('composer-hint');
-  if (hint) hint.textContent = t.status === 'running' ? 'Messages sent now run after the current turn.' : '';
+  // While a turn runs, a sent message waits for it; said on hover rather than in a line of its own.
+  const send = document.querySelector('.composer button[type=submit]');
+  if (send) send.title = t.status === 'running' ? 'Runs after the current turn' : '';
   scheduleProgress();
 }
 

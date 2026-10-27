@@ -541,10 +541,8 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .composer select.picker:hover, .composer select.picker:focus { color: var(--ink); border-color: var(--accent); }
 @media (max-width: 800px) {
   .composer select.picker { max-width: 8.5rem; }
-  /* Phones: Add image, the pickers and Send share one line; the hint, when there is one, goes under them. */
+  /* Phones: Add image, the pickers and Send share one line. */
   .composer .row { gap: 0.5rem; }
-  .composer #composer-hint { order: 1; flex-basis: 100%; font-size: 0.85em; }
-  .composer #composer-hint:empty { display: none; }
   .composer textarea { min-height: 3rem; }
 }
 /* Words that only fit on wider screens ("BUG:", "Close ticket", "Add image"); phones get the short form. */

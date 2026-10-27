@@ -441,7 +441,8 @@ async function showArtifact(artifactId) {
 async function showProject(projectId, main = { kind: 'chat', ticketId: null }) {
   const [{ project, coordinator, tickets }, artifacts] = await Promise.all([
     api(`/api/projects/${projectId}`),
-    api(`/api/projects/${projectId}/artifacts`),
+    // An empty shelf beats a broken page if the server is older than this front end.
+    api(`/api/projects/${projectId}/artifacts`).catch(() => []),
   ]);
   const chatId = main.kind === 'chat' ? main.ticketId ?? coordinator.id : null;
   const [{ ticket }, events] = chatId

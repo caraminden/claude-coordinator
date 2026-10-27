@@ -1,13 +1,13 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readFile, readdir, mkdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { basename, extname, isAbsolute, join, normalize, sep } from 'node:path';
+import { basename, extname, isAbsolute, join, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { gzip } from 'node:zlib';
 import { homedir } from 'node:os';
-import { fileType, findArtifacts, isArtifact, linkedPaths } from './src/artifacts.ts';
+import { commentMessage, fileType, findArtifacts, isArtifact, linkedPaths, optionImageProblem, resolveFile } from './src/artifacts.ts';
 import { AGENT_NAME, Auth, threadMayCall, type Session } from './src/auth.ts';
 import { branchStatus, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
@@ -284,32 +284,12 @@ function displayPath(ticket: Ticket, path: string): string {
   return path;
 }
 
-/**
- * Find a file a ticket may show: `path` is absolute or relative to its working directory, and must
- * resolve (symlinks included) to a servable file type inside the working directory, its shared
- * folder or the project's shared folder.
- */
-function resolveTicketFile(ticket: Ticket, path: string) {
-  return resolveFile(ticket.cwd, [ticket.cwd, sharedDir(ticket), projectSharedDir(DATA_DIR, ticket.project_id)], path);
-}
+/** The folders a ticket may show files from: its working directory, its shared folder and the project's. */
+const ticketRoots = (ticket: Ticket) => [ticket.cwd, sharedDir(ticket), projectSharedDir(DATA_DIR, ticket.project_id)];
 
-/** The file at `path` (absolute or relative to `cwd`) if it is a servable type inside one of `roots`. */
-async function resolveFile(cwd: string, roots: string[], path: string) {
-  const type = fileType(path);
-  if (!type || !cwd || path.includes('\0')) return null;
-  try {
-    const file = await realpath(isAbsolute(path) ? path : join(cwd, path));
-    for (const root of roots) {
-      const real = await realpath(root).catch(() => null);
-      if (!real || !file.startsWith(real + sep)) continue;
-      const st = await stat(file);
-      if (!st.isFile()) return null;
-      // The path the ticket used, made absolute, so artifact rows and links agree.
-      const abs = isAbsolute(path) ? normalize(path) : join(cwd, path);
-      return { file, abs, type, size: st.size, mtime: Math.round(st.mtimeMs) };
-    }
-  } catch {}
-  return null;
+/** A file a ticket may show (see resolveFile), or null. */
+function resolveTicketFile(ticket: Ticket, path: string) {
+  return resolveFile(path, ticket.cwd, ticketRoots(ticket));
 }
 
 /** Serve a file found by resolveFile, with byte ranges and a sandboxing CSP. */
@@ -420,16 +400,20 @@ function isSecure(req: IncomingMessage): boolean {
   return req.headers['x-forwarded-proto'] === 'https';
 }
 
-/** A question card from Claude: 1 to 4 questions, each with 2 to 6 options. */
-function cleanQuestions(raw: unknown) {
+/**
+ * A question card from Claude: 1 to 4 questions, each with 2 to 6 options. An option's image must
+ * be a picture or video the ticket may show, so a card can't reach files outside its folders.
+ */
+async function cleanQuestions(ticket: Ticket, raw: unknown) {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 4) throw new HttpError(400, 'questions must be a list of 1 to 4 questions');
-  return raw.map((q: any, i: number) => {
+  const questions = raw.map((q: any, i: number) => {
     const n = `Question ${i + 1}`;
     if (!q || typeof q !== 'object') throw new HttpError(400, `${n} must be an object`);
     if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 6) throw new HttpError(400, `${n} needs 2 to 6 options`);
     const options = q.options.map((o: any, j: number) => ({
       label: str(o?.label, `${n} option ${j + 1} label`, 80),
       ...(o?.description ? { description: str(o.description, `${n} option ${j + 1} description`, 300) } : {}),
+      ...(o?.image ? { image: str(o.image, `${n} option ${j + 1} image`, 1000) } : {}),
     }));
     if (new Set(options.map((o: any) => o.label)).size !== options.length) throw new HttpError(400, `${n} has duplicate option labels`);
     return {
@@ -439,6 +423,13 @@ function cleanQuestions(raw: unknown) {
       options,
     };
   });
+  for (const [i, q] of questions.entries()) {
+    for (const [j, o] of q.options.entries()) {
+      const problem = o.image && await optionImageProblem(o.image, ticket.cwd, ticketRoots(ticket));
+      if (problem) throw new HttpError(400, `Question ${i + 1} option ${j + 1} image ${problem}`);
+    }
+  }
+  return questions;
 }
 
 /** A person's picks for each question of a card: chosen option labels, plus optional free text. */
@@ -834,7 +825,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     // One file of the folder, by path relative to it (or ?info for its details).
     const dir = projectSharedDir(DATA_DIR, project.id);
     const path = url.searchParams.get('path') ?? '';
-    const found = await resolveFile(dir, [dir], path);
+    const found = await resolveFile(path, dir, [dir]);
     if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
     if (!url.searchParams.has('info')) return serveArtifact(req, res, found, path, url.searchParams.has('download'));
     return json(res, 200, {
@@ -952,10 +943,23 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       runner.send(id, session.name, text, await saveImages(ticket, body.images));
       return json(res, 202, ticketView(id));
     }
+    if (action === '/comments' && method === 'POST') {
+      // A comment from a file's viewer: a chat message to the ticket that made the file, saying which file.
+      if (session.agent !== undefined) throw new HttpError(403, 'Only people comment on files');
+      const body = await readJson(req);
+      const found = typeof body.path === 'string' && await resolveTicketFile(ticket, body.path);
+      if (!found) throw new HttpError(404, 'That file is no longer there');
+      const quote = typeof body.quote === 'string' ? body.quote.slice(0, 2000) : '';
+      // Named as the ticket would write it: relative to its working directory, else in full.
+      const path = found.abs.startsWith(ticket.cwd + sep) ? found.abs.slice(ticket.cwd.length + 1) : found.abs;
+      const { about, text } = commentMessage(path, str(body.text, 'Comment', 10_000), quote);
+      runner.send(id, session.name, text, [], { comment: { path: body.path, about } });
+      return json(res, 202, ticketView(id));
+    }
     if (action === '/questions' && method === 'POST') {
       // Claude asks people multiple-choice questions; the card shows in the chat until someone answers.
       if (session.agent !== id) throw new HttpError(403, 'Only the thread itself can ask in its chat');
-      const questions = cleanQuestions((await readJson(req)).questions);
+      const questions = await cleanQuestions(ticket, (await readJson(req)).questions);
       const questionId = randomBytes(6).toString('hex');
       runner.emit(id, 'question', { id: questionId, questions });
       notify(id, { kind: 'question', questions });

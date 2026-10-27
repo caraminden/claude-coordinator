@@ -1,7 +1,7 @@
 // Artifacts: documents and pages that tickets create in their working directories.
 import { execFile } from 'node:child_process';
-import { lstat, readdir } from 'node:fs/promises';
-import { extname, isAbsolute, join, normalize } from 'node:path';
+import { lstat, readdir, realpath, stat } from 'node:fs/promises';
+import { extname, isAbsolute, join, normalize, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -136,4 +136,47 @@ export function linkedPaths(texts: string[], cwd: string): Set<string> {
     }
   }
   return out;
+}
+
+/**
+ * Find a file a ticket may show: `path` is absolute or relative to its working directory `cwd`, and
+ * must resolve (symlinks included) to a servable file type inside one of `roots` (the working
+ * directory and the ticket's shared folder).
+ */
+export async function resolveFile(path: string, cwd: string, roots: string[]) {
+  const type = fileType(path);
+  if (!type || !cwd || path.includes('\0')) return null;
+  try {
+    const file = await realpath(isAbsolute(path) ? path : join(cwd, path));
+    for (const root of roots) {
+      const real = await realpath(root).catch(() => null);
+      if (!real || !file.startsWith(real + sep)) continue;
+      const st = await stat(file);
+      if (!st.isFile()) return null;
+      // The path the ticket used, made absolute, so artifact rows and links agree.
+      const abs = isAbsolute(path) ? normalize(path) : join(cwd, path);
+      return { file, abs, type, size: st.size, mtime: Math.round(st.mtimeMs) };
+    }
+  } catch {}
+  return null;
+}
+
+/** Why `path` can't be a question option's picture, or null if it can: an image or video the ticket may show. */
+export async function optionImageProblem(path: string, cwd: string, roots: string[]): Promise<string | null> {
+  const kind = fileType(path)?.kind;
+  if (kind !== 'image' && kind !== 'video') return 'must be an image (png, jpg, gif, webp, avif, svg) or a video (mp4, webm, mov)';
+  if (!(await resolveFile(path, cwd, roots))) return 'must be a file in your working directory or shared folder';
+  return null;
+}
+
+/**
+ * A person's comment on a file as a chat message: `about` names the file in the message's
+ * "[Name on about]:" prefix, and a quoted passage leads the text as a Markdown quote.
+ */
+export function commentMessage(path: string, text: string, quote = '') {
+  // Like display names, the file sits inside "[...]:" in the prompt, so keep brackets and newlines out.
+  const plain = path.replace(/[\x00-\x1f\x7f\[\]]/g, '').trim();
+  const about = plain.length > 200 ? `…${plain.slice(-199)}` : plain;
+  const quoted = quote.trim() ? `${quote.trim().split('\n').map((l) => `> ${l}`.trimEnd()).join('\n')}\n\n` : '';
+  return { about, text: `${quoted}${text.trim()}` };
 }

@@ -60,9 +60,6 @@ label input, label textarea, label select { margin-top: 0.25rem; color: var(--in
 code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
 
 .topbar {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
   padding: 0.6rem 1rem;
   padding-top: calc(0.6rem + env(safe-area-inset-top, 0px));
   border-bottom: 1px solid var(--line);
@@ -71,6 +68,7 @@ code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0
   top: 0;
   z-index: 5;
 }
+.topbar .bar { display: flex; align-items: center; gap: 1rem; }
 .brand { font-weight: 650; text-decoration: none; }
 #crumbs { flex: 1; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #crumbs a { text-decoration: none; }
@@ -130,9 +128,44 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 .tool summary b { color: var(--ink); font-weight: 600; }
 .tool .body { padding: 0 0.7rem 0.5rem; }
 .tool.err summary { color: var(--error); }
+.tool .st { display: inline-block; width: 0.8em; text-align: center; }
+.tool.pending .st { color: var(--running); }
+
+/* Work progress readout in the top bar */
+.progress { max-width: 1200px; margin: 0.5rem auto 0; }
+.progress-line {
+  display: flex; align-items: center; gap: 0.6rem; width: 100%;
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+  padding: 0.35rem 0.7rem; text-align: left; font-size: 0.9em;
+}
+.progress-line:hover { border-color: var(--accent); }
+.progress-line .text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-line .count { font-variant-numeric: tabular-nums; font-weight: 600; }
+.progress-line .chev { color: var(--muted); }
+.progress .meter { display: block; appearance: none; width: calc(100% - 0.4rem); height: 3px; border: 0; border-radius: 2px; margin: 0.25rem 0.2rem 0; background: var(--line); overflow: hidden; }
+.progress .meter::-webkit-progress-bar { background: var(--line); }
+.progress .meter::-webkit-progress-value { background: var(--running); }
+.progress .meter::-moz-progress-bar { background: var(--running); }
+.progress-detail { max-height: 60vh; overflow-y: auto; margin-top: 0.5rem; padding-right: 0.2rem; }
+.progress-detail .empty { margin: 0.3rem 0.5rem; font-size: 0.85em; }
+.step { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 0.35rem; background: var(--panel); }
+.step > summary { cursor: pointer; padding: 0.35rem 0.7rem; display: flex; gap: 0.5rem; align-items: baseline; list-style: none; }
+.step > summary::-webkit-details-marker { display: none; }
+.step .subject { flex: 1; min-width: 0; }
+.step .n { font-size: 0.8em; white-space: nowrap; }
+.step .icon { width: 1em; text-align: center; color: var(--muted); }
+.step.completed .icon { color: #16a34a; }
+.step.completed .subject { color: var(--muted); }
+.step.in_progress { border-color: var(--running); }
+.step.in_progress .icon { color: var(--running); animation: pulse 1.4s infinite; }
+.step.in_progress .subject { font-weight: 600; }
+.actions { display: flex; flex-direction: column; gap: 0.25rem; padding: 0 0.5rem 0.5rem; }
+.actions .tool summary { padding: 0.2rem 0.5rem; }
 .note { color: var(--muted); font-size: 0.85em; text-align: center; }
 .note.error { color: var(--error); white-space: pre-wrap; text-align: left; }
 .turn-end { color: var(--muted); font-size: 0.8em; text-align: right; border-top: 1px dashed var(--line); padding-top: 0.2rem; }
+details.turn-end summary { cursor: pointer; }
+details.turn-end .actions { text-align: left; padding: 0.4rem 0 0; font-size: 1.1em; }
 .composer { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 1rem; }
 .composer textarea { min-height: 4.5rem; resize: vertical; }
 .composer .row { margin-top: 0.5rem; }

@@ -1,7 +1,10 @@
 // Claude Coordinator front end: hash-routed views over the JSON API, live via SSE.
+import { actionLabel, applyEvent, createProgress, progressLine, stepInfo } from './progress.js';
+
 const app = document.getElementById('app');
 const crumbs = document.getElementById('crumbs');
 const meEl = document.getElementById('me');
+const progressEl = document.getElementById('progress');
 
 const STATUS_LABEL = { running: 'Running', idle: 'Waiting for you', new: 'Starting', error: 'Error', closed: 'Closed' };
 const COLUMNS = [
@@ -142,6 +145,7 @@ function onEvent(event) {
 
 async function route() {
   if (!me) return;
+  progressEl.hidden = true;
   const hash = location.hash || '#/';
   let m;
   try {
@@ -159,6 +163,7 @@ window.addEventListener('hashchange', route);
 
 function renderLogin() {
   view = null;
+  progressEl.hidden = true;
   crumbs.replaceChildren();
   meEl.replaceChildren();
   app.replaceChildren(document.getElementById('login-tpl').content.cloneNode(true));
@@ -309,7 +314,14 @@ async function showTicket(ticketId) {
     api(`/api/tickets/${ticketId}`),
     api(`/api/tickets/${ticketId}/events`),
   ]);
-  view = { kind: 'ticket', id: ticketId, ticket, project, lastEventId: 0, tools: new Map() };
+  view = {
+    kind: 'ticket', id: ticketId, ticket, project, lastEventId: 0,
+    progress: createProgress(),
+    actions: new Map(), // tool_use_id -> { block, taskId, result }
+    turnActions: [], // actions of the current (or last) turn, in order
+    progressOpen: false,
+    openSteps: new Set(),
+  };
   crumbs.replaceChildren(
     h('a', { href: '#/' }, 'Projects'), ' / ',
     h('a', { href: `#/p/${project.id}` }, project.name), ' / ',
@@ -375,6 +387,7 @@ function renderTicketHead() {
     ].filter(Boolean).join(' · ')));
   const hint = document.getElementById('composer-hint');
   if (hint) hint.textContent = t.status === 'running' ? 'Messages sent now run after the current turn.' : '';
+  scheduleProgress();
 }
 
 async function setStatus(id, status) {
@@ -385,10 +398,96 @@ async function setStatus(id, status) {
   }
 }
 
-function toolSummary(block) {
-  const i = block.input || {};
-  const arg = i.command || i.file_path || i.path || i.pattern || i.url || i.query || i.description || i.prompt || '';
-  return [h('b', {}, block.name), ' ', String(arg).split('\n')[0].slice(0, 140)];
+// ---------- work progress (top-bar readout) ----------
+
+const STEP_ICON = { completed: '✓', in_progress: '◐', pending: '○' };
+
+/** A collapsed tool call; its input and output are only built when it is opened. */
+function actionEl(action) {
+  const { block, result } = action;
+  const state = !result ? 'pending' : result.is_error ? 'err' : 'ok';
+  const el = h('details', { class: `tool ${state}` },
+    h('summary', {}, h('span', { class: 'st' }, state === 'pending' ? '…' : state === 'err' ? '✗' : '·'), ' ', actionLabel(block)));
+  el.addEventListener('toggle', () => {
+    if (!el.open || el.querySelector('.body')) return;
+    const body = h('div', { class: 'body' }, h('pre', {}, JSON.stringify(block.input, null, 2)));
+    if (action.result) {
+      const out = typeof action.result.content === 'string' ? action.result.content : JSON.stringify(action.result.content);
+      body.append(h('div', { class: 'muted' }, action.result.is_error ? 'Error:' : 'Result:'), h('pre', {}, out));
+    }
+    el.append(body);
+  });
+  return el;
+}
+
+function actionList(actions) {
+  return h('div', { class: 'actions' }, actions.map(actionEl));
+}
+
+let progressFrame = 0;
+function scheduleProgress() {
+  if (!progressFrame) progressFrame = requestAnimationFrame(() => { progressFrame = 0; renderProgress(); });
+}
+
+function renderProgress() {
+  if (view?.kind !== 'ticket') return;
+  const p = view.progress;
+  const running = view.ticket.status === 'running';
+  const line = progressLine(p, running);
+  if (!line) {
+    progressEl.hidden = true;
+    return;
+  }
+  const { total, done, current } = stepInfo(p);
+  const m = total && line.match(/^(.*?)\s(\d+\/\d+)$/);
+  const text = m ? m[1] : line;
+  const count = m ? m[2] : running && p.turnActions ? `${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
+
+  const bar = h('button', { class: 'progress-line', 'aria-expanded': String(view.progressOpen), onclick: () => {
+    view.progressOpen = !view.progressOpen;
+    renderProgress();
+  } },
+    h('span', { class: `dot ${running ? 'running' : view.ticket.status}` }),
+    h('span', { class: 'text' }, text),
+    count ? h('span', { class: 'count' }, count) : '',
+    h('span', { class: 'chev' }, view.progressOpen ? '▴' : '▾'));
+  const meter = total ? h('progress', { class: 'meter', max: total, value: done }) : '';
+
+  const prevDetail = progressEl.querySelector('.progress-detail');
+  const scrollTop = prevDetail?.scrollTop ?? 0;
+  let detail = '';
+  if (view.progressOpen) {
+    const all = [...view.actions.values()];
+    const steps = p.tasks.map((t) => {
+      const acts = all.filter((a) => a.taskId === t.id);
+      const isCurrent = t === current;
+      const el = h('details', { class: `step ${t.status}`, open: view.openSteps.has(t.id) || null },
+        h('summary', {},
+          h('span', { class: 'icon' }, STEP_ICON[t.status] ?? '○'),
+          h('span', { class: 'subject' }, t.subject),
+          isCurrent && t.activeForm ? h('span', { class: 'muted' }, ` — ${t.activeForm}…`) : '',
+          h('span', { class: 'muted n' }, acts.length ? `${acts.length} action${acts.length === 1 ? '' : 's'}` : t.status === 'pending' ? 'not started' : '')),
+        acts.length ? actionList(acts) : h('p', { class: 'muted empty' }, 'No actions yet.'));
+      el.addEventListener('toggle', () => (el.open ? view.openSteps.add(t.id) : view.openSteps.delete(t.id)));
+      return el;
+    });
+    const loose = view.turnActions.filter((a) => a.taskId == null || !p.tasks.some((t) => t.id === a.taskId));
+    const looseEl = loose.length
+      ? h('details', { class: 'step loose', open: !p.tasks.length || view.openSteps.has('loose') || null },
+          h('summary', {}, h('span', { class: 'icon' }, '⋯'),
+            h('span', { class: 'subject' }, p.tasks.length ? 'Other actions this turn' : running ? 'Actions this turn' : 'Actions last turn'),
+            h('span', { class: 'muted n' }, String(loose.length))),
+          actionList(loose))
+      : '';
+    if (looseEl) looseEl.addEventListener('toggle', () => (looseEl.open ? view.openSteps.add('loose') : view.openSteps.delete('loose')));
+    detail = h('div', { class: 'progress-detail' },
+      steps.length ? h('div', { class: 'steps' }, steps) : '',
+      looseEl,
+      !steps.length && !looseEl ? h('p', { class: 'muted empty' }, 'Nothing has run yet.') : '');
+  }
+  progressEl.replaceChildren(bar, meter, detail);
+  if (detail) detail.scrollTop = scrollTop;
+  progressEl.hidden = false;
 }
 
 function appendEvent(event, scroll = true) {
@@ -396,6 +495,13 @@ function appendEvent(event, scroll = true) {
   const log = document.getElementById('log');
   if (!log) return;
   const data = JSON.parse(event.data);
+  if (event.kind === 'claude' && data.type === 'system' && data.subtype === 'init') view.turnActions = [];
+  for (const { block, taskId } of applyEvent(view.progress, event.kind, data)) {
+    const action = { block, taskId, result: null };
+    view.actions.set(block.id, action);
+    view.turnActions.push(action);
+  }
+  if (event.kind === 'claude') scheduleProgress();
   const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 200;
   const nodes = [];
 
@@ -418,31 +524,29 @@ function appendEvent(event, scroll = true) {
           const msg = h('div', { class: 'msg' }, h('div', { class: 'who' }, 'Claude'));
           msg.append(markdown(block.text));
           nodes.push(msg);
-        } else if (block.type === 'tool_use') {
-          const body = h('div', { class: 'body' }, h('pre', {}, JSON.stringify(block.input, null, 2)));
-          const tool = h('details', { class: 'tool' }, h('summary', {}, toolSummary(block)), body);
-          view.tools.set(block.id, { tool, body });
-          nodes.push(tool);
         }
       }
     } else if (data.type === 'user') {
       for (const block of data.message?.content ?? []) {
-        if (block.type !== 'tool_result') continue;
-        const entry = view.tools.get(block.tool_use_id);
-        const out = h('pre', {}, typeof block.content === 'string' ? block.content : JSON.stringify(block.content));
-        if (entry) {
-          entry.body.append(h('div', { class: 'muted' }, block.is_error ? 'Error:' : 'Result:'), out);
-          if (block.is_error) entry.tool.classList.add('err');
-        } else {
-          nodes.push(h('details', { class: 'tool' }, h('summary', {}, 'Tool result'), h('div', { class: 'body' }, out)));
-        }
+        const action = block.type === 'tool_result' && view.actions.get(block.tool_use_id);
+        if (action) action.result = { content: block.content, is_error: block.is_error };
       }
     } else if (data.type === 'result') {
+      // Tool calls stay out of the chat; each turn gets one collapsed line listing them.
+      const acts = view.turnActions;
       const bits = [data.is_error ? 'Turn failed' : 'Turn finished'];
       if (data.duration_ms) bits.push(`${Math.round(data.duration_ms / 1000)}s`);
-      if (data.num_turns) bits.push(`${data.num_turns} steps`);
+      if (acts.length) bits.push(`${acts.length} action${acts.length === 1 ? '' : 's'}`);
       if (data.total_cost_usd) bits.push(`$${data.total_cost_usd.toFixed(2)}`);
-      nodes.push(h('div', { class: 'turn-end' }, bits.join(' · ')));
+      if (acts.length) {
+        const end = h('details', { class: 'turn-end' }, h('summary', {}, bits.join(' · ')));
+        end.addEventListener('toggle', () => {
+          if (end.open && !end.querySelector('.actions')) end.append(actionList(acts));
+        });
+        nodes.push(end);
+      } else {
+        nodes.push(h('div', { class: 'turn-end' }, bits.join(' · ')));
+      }
       if (data.is_error && data.result) nodes.push(h('div', { class: 'note error' }, data.result));
     }
   }

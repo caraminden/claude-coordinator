@@ -2,6 +2,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
+import { applyEvent, createProgress, progressLine } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
 
@@ -63,6 +64,8 @@ function systemPrompt(project: Project, ticket: Ticket): string {
     'This ticket is managed by Claude Coordinator, a shared web app where several people chat with you.',
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
     where,
+    'For work with more than a couple of steps, plan it with TaskCreate (one task per step, with a short activeForm like "Running tests") and mark each task in_progress and then completed with TaskUpdate as you go. The web UI shows this plan as a live progress readout ("Running tests… 3/7").',
+    'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
   ].join('\n');
 }
@@ -71,6 +74,7 @@ export class Runner {
   private procs = new Map<number, ChildProcess>();
   private queues = new Map<number, QueuedMessage[]>();
   private stopping = new Set<number>();
+  private progress = new Map<number, ReturnType<typeof createProgress>>();
   private store: Store;
   private broadcast: Broadcast;
   private claudeBin: string;
@@ -148,7 +152,9 @@ export class Runner {
     ];
     if (ticket.session_id) args.push('--resume', ticket.session_id);
 
-    const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+    // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
+    const env = { ...process.env, CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
+    const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     this.procs.set(ticket.id, proc);
     this.setStatus(ticket.id, 'running');
     // If claude exits before reading its prompt, the write fails with EPIPE; the close handler reports it.
@@ -211,9 +217,23 @@ export class Runner {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
     }
     if (ev.type === 'result') onResult(!!ev.is_error);
-    const activity = describeActivity(ev);
+    const slim = slimEvent(ev);
+    const progress = this.progressFor(ticketId);
+    applyEvent(progress, 'claude', slim);
+    const activity = progress.tasks.length ? progressLine(progress, ev.type !== 'result') : describeActivity(ev);
     if (activity) this.store.updateTicket(ticketId, { last_activity: activity });
-    this.emit(ticketId, 'claude', slimEvent(ev));
+    this.emit(ticketId, 'claude', slim);
+  }
+
+  /** Task-list state for a ticket, rebuilt from its stored events the first time it is needed. */
+  private progressFor(ticketId: number) {
+    let p = this.progress.get(ticketId);
+    if (!p) {
+      p = createProgress();
+      for (const row of this.store.listEvents(ticketId)) applyEvent(p, row.kind, JSON.parse(row.data));
+      this.progress.set(ticketId, p);
+    }
+    return p;
   }
 
   private setStatus(ticketId: number, status: Ticket['status']) {

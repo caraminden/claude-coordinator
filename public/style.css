@@ -176,3 +176,15 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
   .split { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   .sidebar { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
 }
+
+.update-banner {
+  position: sticky;
+  top: var(--topbar-h, 3rem);
+  z-index: 4;
+  padding: 0.4rem 1rem;
+  background: var(--code-bg);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9em;
+  text-align: center;
+}
+.update-banner button { padding: 0.15rem 0.6rem; font-size: 0.85em; margin-left: 0.25rem; }

@@ -1024,6 +1024,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       }
       return json(res, 200, ticketView(id));
     }
+    if (action === '/coordinator' && method === 'POST') {
+      // A thread asks its project's coordinator for something only the coordinator can do (message_coordinator).
+      if (session.agent !== id || ticket.kind === 'coordinator') throw new HttpError(403, 'Only a thread can message its coordinator');
+      const text = str((await readJson(req)).text, 'Message', 10_000);
+      const coordinator = await ensureCoordinator(store.getProject(ticket.project_id)!);
+      runner.send(coordinator.id, `#${ticket.number} ${ticket.title}`, text, []);
+      runner.emit(id, 'note', { text: `Sent the coordinator: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
+      return json(res, 202, { sent: true });
+    }
     if (action === '/close' && method === 'POST') {
       // A thread closes itself once its current turn ends (close_self); the token decides which thread.
       if (session.agent !== id) throw new HttpError(403, 'A thread may only close itself');

@@ -184,6 +184,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     'When your branch has an open GitHub pull request, the app watches it and messages you as "[GitHub]: ..." when CI on its head commit passes or fails, someone reviews or comments, or it is merged or closed, so you need not wait on CI in a turn; act on those messages as the project expects (fix a red build, answer a review).',
     'Give every Bash call a short plain-English description (like "Run the test suite").',
     'When the thread\'s work is done and should be closed (for example when project instructions say to close after shipping), call the `close_self` tool (mcp__thread) near the end of your turn: the thread closes once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not close a thread whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can close, even if its brief says to close.',
+    'You cannot message other threads directly. When something needs the project\'s coordinator (passing information to another thread, starting a new thread, a decision for it), use the `message_coordinator` tool (mcp__thread) with a self-contained message.',
     ...showingFiles(ticket, filesDir, sharedDir),
     ...machineTools(machines),
     ...approvalNote(project),
@@ -265,6 +266,7 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
       ? `You can read and write files (Read, Write, Edit) in the project's shared folder, described below, and in ${memoryDir}, the project's Claude Code memory that its threads load too. Keep what is worth remembering across conversations in the memory as short topic files with an index in MEMORY.md. You still cannot run shell commands.`
       : '',
     'When you need people to decide between clear options, ask with your `ask_question` tool: it shows a card in this chat they answer with a click. Then end your turn; the answers arrive as the next message.',
+    'Threads can message you with their `message_coordinator` tool; those arrive named by the thread, like "[#12 Some title]: ...". Do what they ask when it is yours to do (relay to another thread with message_ticket, start a thread from a handoff), and do not reply to a thread just to acknowledge it.',
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short and end each turn with what you did and what, if anything, you need from them.',
   ].join('\n');
 }

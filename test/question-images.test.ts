@@ -128,3 +128,13 @@ test('comments only on files the thread may show, and only from people', async (
   await assert.rejects(call(`/api/tickets/${ticket.id}/comments`, { method: 'POST', body: { path: 'report.md', text: ' ' } }), /400/);
   await assert.rejects(call(`/api/tickets/${ticket.id}/comments`, { method: 'POST', token: turn.token, body: { path: 'report.md', text: 'x' } }), /403/);
 });
+
+test('a thread can message its coordinator, which wakes with the thread named', async () => {
+  const before = turns().length;
+  await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: turn.token, body: { text: 'Send #2 the handoff' } });
+  const next = (await until('the coordinator\'s turn', () => turns().length > before && turns())).at(-1);
+  assert.match(next.prompt.message.content[0].text, /^\[#1 .+\]: Send #2 the handoff$/);
+  assert.notEqual(next.token, turn.token);
+  await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', body: { text: 'x' } }), /403/);
+  await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: next.token, body: { text: 'x' } }), /403/);
+});

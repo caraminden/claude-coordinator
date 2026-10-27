@@ -15,6 +15,8 @@ test('a thread token may read, relabel, ask and close only its own internal id',
   assert.ok(threadMayCall(ID, 'PATCH', `/api/tickets/${ID}`));
   assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/questions`));
   assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/close`));
+  assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/coordinator`));
+  assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${NUMBER}/coordinator`));
   assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${NUMBER}/close`));
   assert.ok(!threadMayCall(ID, 'PATCH', `/api/tickets/${NUMBER}`));
   assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${ID}/status`));
@@ -69,6 +71,13 @@ test('close_self and set_thread_status address the internal id, whatever the mod
   assert.ok(!labelled.isError, labelled.content[0].text);
   assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/close`, `PATCH /api/tickets/${ID}`]);
   for (const c of calls) assert.ok(threadMayCall(ID, c.method, c.path), `${c.method} ${c.path} passes the guard`);
+});
+
+test('message_coordinator posts to its own internal id', async () => {
+  calls.length = 0;
+  const r = await tool('message_coordinator', { text: 'Send #28 the handoff', ticket_id: 7 });
+  assert.ok(!r.isError, r.content[0].text);
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/coordinator`]);
 });
 
 test('close_self on a server older than the tool says to wait for the restart', async () => {

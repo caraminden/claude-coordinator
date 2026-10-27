@@ -255,6 +255,12 @@ const THREAD_TOOLS = [
   },
   ASK_QUESTION,
   {
+    name: 'message_coordinator',
+    description:
+      "Send a message to this project's coordinator, waking it: for what only it can do, such as passing information to another thread (#N), starting a new thread from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly.",
+    inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What you need, self-contained: name threads as #N and give file paths in full' } }, required: ['text'] },
+  },
+  {
     name: 'close_self',
     description:
       "Close this thread when the current turn ends, e.g. once a small fix is merged and shipped. It closes only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled. Not for threads whose result is a report or doc for people to read: those stay open until someone has read it.",
@@ -367,6 +373,9 @@ async function runTool(name: string, args: any): Promise<string> {
       return 'The question card is in the chat. End your turn now with a short reply; the answers will come as the next message.';
     case 'set_thread_status':
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}`;
+    case 'message_coordinator':
+      await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text });
+      return 'Sent. The coordinator runs it now, or after its current turn.';
     case 'close_self':
       try {
         await call('POST', `/api/tickets/${TICKET}/close`, { reason: args.reason ?? null });

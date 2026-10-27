@@ -22,14 +22,14 @@ function sha256(s: string): Buffer {
 
 /**
  * What a thread's own token may do: read and relabel that thread, ask a question card in its chat,
- * post an approval card there and read its outcome, and close itself. `ticketId` is the internal id the token was issued for, which is also what the
+ * post an approval card there and read its outcome, message its project's coordinator, and close itself. `ticketId` is the internal id the token was issued for, which is also what the
  * API paths use; the per-project number people see (#25) can differ and plays no part here.
  */
 export function threadMayCall(ticketId: number, method: string, pathname: string): boolean {
   const base = `/api/tickets/${ticketId}`;
   if (pathname === base) return method === 'GET' || method === 'PATCH';
   if (pathname === `${base}/approvals`) return method === 'GET' || method === 'POST';
-  return method === 'POST' && (pathname === `${base}/questions` || pathname === `${base}/close`);
+  return method === 'POST' && (pathname === `${base}/questions` || pathname === `${base}/close` || pathname === `${base}/coordinator`);
 }
 
 export class Auth {

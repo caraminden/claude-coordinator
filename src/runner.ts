@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
+import { applyEvent, createProgress, progressLine } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
 const MCP_SERVER = join(import.meta.dirname, 'mcp.ts');
@@ -13,6 +14,28 @@ const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
 const DROPPED_SYSTEM_SUBTYPES = new Set(['commands_changed']);
 
 export type Broadcast = (msg: object) => void;
+
+interface UsageWindow {
+  utilization: number; // 0..1 of the plan's limit
+  resetsAt: number | null; // epoch ms
+  status: string | null;
+}
+
+/** The Claude account's plan usage, as last reported by a turn. */
+export interface Usage {
+  weekly: UsageWindow | null;
+  session: UsageWindow | null; // the rolling five-hour window
+  updatedAt: number;
+}
+
+function usageWindow(w: any): UsageWindow | null {
+  if (!w || typeof w.utilization !== 'number') return null;
+  return {
+    utilization: w.utilization,
+    resetsAt: typeof w.resetsAt === 'number' ? w.resetsAt * 1000 : null,
+    status: typeof w.status === 'string' ? w.status : null,
+  };
+}
 
 export interface MessageImage {
   name: string;
@@ -91,6 +114,8 @@ function systemPrompt(project: Project, ticket: Ticket): string {
     'This ticket is managed by Claude Coordinator, a shared web app where several people chat with you.',
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
     where,
+    'For work with more than a couple of steps, plan it with TaskCreate (one task per step, with a short activeForm like "Running tests") and mark each task in_progress and then completed with TaskUpdate as you go. The web UI shows this plan as a live progress readout ("Running tests… 3/7").',
+    'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
   ].join('\n');
 }
@@ -115,6 +140,7 @@ export class Runner {
   private procs = new Map<number, ChildProcess>();
   private queues = new Map<number, QueuedMessage[]>();
   private stopping = new Set<number>();
+  private progress = new Map<number, ReturnType<typeof createProgress>>();
   private store: Store;
   private broadcast: Broadcast;
   private claudeBin: string;
@@ -195,12 +221,13 @@ export class Runner {
       '--append-system-prompt', systemPrompt(project, ticket),
     ];
     if (ticket.session_id) args.push('--resume', ticket.session_id);
-    let env = process.env;
+    // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
+    let env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
     if (ticket.kind === 'coordinator') {
       // The token travels in the environment (which the MCP server inherits), never on the command line.
       const mcp = { mcpServers: { coordinator: { type: 'stdio', command: process.execPath, args: [MCP_SERVER] } } };
       args.push('--mcp-config', JSON.stringify(mcp), '--allowedTools', 'mcp__coordinator');
-      env = { ...process.env, ...this.coordinatorEnv(ticket) };
+      env = { ...env, ...this.coordinatorEnv(ticket) };
     }
 
     const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
@@ -261,22 +288,57 @@ export class Runner {
       return;
     }
     if (!ev || typeof ev !== 'object') return;
+    if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info);
     if (DROPPED_TYPES.has(ev.type)) return;
     if (ev.type === 'system' && DROPPED_SYSTEM_SUBTYPES.has(ev.subtype)) return;
     if (ev.session_id && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
     }
     if (ev.type === 'result') onResult(!!ev.is_error);
-    const activity = describeActivity(ev);
-    if (activity) this.store.updateTicket(ticketId, { last_activity: activity });
-    this.emit(ticketId, 'claude', slimEvent(ev));
+    const slim = slimEvent(ev);
+    const progress = this.progressFor(ticketId);
+    applyEvent(progress, 'claude', slim);
+    const activity = progress.tasks.length ? progressLine(progress, ev.type !== 'result') : describeActivity(ev);
+    if (activity && activity !== this.store.getTicket(ticketId)?.last_activity) {
+      this.store.updateTicket(ticketId, { last_activity: activity });
+      // Keep the board's progress line live, not just on status changes.
+      this.broadcastTicket(ticketId);
+    }
+    this.emit(ticketId, 'claude', slim);
     if (ev.type === 'user' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'tool_result')) {
       this.onFilesMayChange(ticketId);
     }
   }
 
+  /** Task-list state for a ticket, rebuilt from its stored events the first time it is needed. */
+  private progressFor(ticketId: number) {
+    let p = this.progress.get(ticketId);
+    if (!p) {
+      p = createProgress();
+      for (const row of this.store.listEvents(ticketId)) applyEvent(p, row.kind, JSON.parse(row.data));
+      this.progress.set(ticketId, p);
+    }
+    return p;
+  }
+
+  get usage(): Usage | null {
+    return this.store.getSetting<Usage>('usage');
+  }
+
+  private updateUsage(info: any) {
+    const windows = info?.unifiedWindows;
+    if (!windows) return;
+    const usage: Usage = { weekly: usageWindow(windows.seven_day), session: usageWindow(windows.five_hour), updatedAt: Date.now() };
+    if (!usage.weekly && !usage.session) return;
+    this.store.setSetting('usage', usage);
+    this.broadcast({ type: 'usage', usage });
+  }
+
   private setStatus(ticketId: number, status: Ticket['status']) {
-    this.store.updateTicket(ticketId, { status });
+    const progress = this.progressFor(ticketId);
+    // Re-word the plan's line too, so a stopped or interrupted turn stops saying "Running tests… 3/7".
+    const activity = progress.tasks.length ? progressLine(progress, status === 'running') : undefined;
+    this.store.updateTicket(ticketId, activity ? { status, last_activity: activity } : { status });
     this.broadcastTicket(ticketId);
   }
 

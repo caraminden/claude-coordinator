@@ -20,6 +20,13 @@ runners on other people's own Claude logins.
   server-sent events.
 - Messages sent while a turn is running are queued and sent together as the
   next turn. Messages reach Claude as `[Name]: text`.
+- Tool calls stay out of the chat. Turns run with
+  `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` so Claude can plan with
+  TaskCreate/TaskUpdate, and `public/progress.js` (shared by the server and the
+  browser) replays the events into a readout in the thread bar:
+  "Running tests… 3/7", expandable to each step and the tool calls made while
+  it was in progress. Each turn leaves one collapsed "Turn finished · N
+  actions" line in the chat, and board cards show the same summary line.
 - Images pasted, dropped or attached in the composer are shrunk in the browser
   if needed, saved under `projects/<id>/uploads/<ticket>/`, and sent to Claude
   as image blocks alongside the message text.
@@ -45,6 +52,7 @@ uses the built-in `node:sqlite`.
 | `src/db.ts` | SQLite schema and queries |
 | `src/auth.ts` | Shared-password login, signed session cookies |
 | `public/` | Front end (vanilla JS, no build) |
+| `public/progress.js` | Task-list and step tracking, shared with the server |
 | `deploy/claude-coordinator.service` | systemd user unit |
 
 ## Running

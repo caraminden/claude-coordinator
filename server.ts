@@ -377,7 +377,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   if (pathname === '/api/stream') {
     if (clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
-    res.write(`data: ${JSON.stringify({ type: 'hello', version: ASSET_VERSION })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'hello', version: ASSET_VERSION, usage: runner.usage })}\n\n`);
     clients.add(res);
     const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
     req.on('close', () => {

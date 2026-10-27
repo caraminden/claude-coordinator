@@ -126,7 +126,8 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 /* Thread bar: pinned under the top bar while the chat scrolls beneath it. */
 .ticket-head {
   position: sticky;
-  top: var(--topbar-h, 3rem);
+  /* Tuck 1px under the top bar so pixel rounding can never open a gap between them. */
+  top: calc(var(--topbar-h, 3rem) - 1px);
   z-index: 4;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
@@ -149,9 +150,46 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 .tool summary b { color: var(--ink); font-weight: 600; }
 .tool .body { padding: 0 0.7rem 0.5rem; }
 .tool.err summary { color: var(--error); }
+.tool .st { display: inline-block; width: 0.8em; text-align: center; }
+.tool.pending .st { color: var(--running); }
+
+/* Work progress readout in the thread bar */
+.progress { margin-top: 0.5rem; }
+.ticket-head .progress-line {
+  display: flex; align-items: center; gap: 0.6rem; width: 100%;
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+  padding: 0.35rem 0.7rem; text-align: left; font-size: 0.9em;
+}
+.progress-line:hover { border-color: var(--accent); }
+.progress-line .text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-line .count { font-variant-numeric: tabular-nums; font-weight: 600; }
+.progress-line .chev { color: var(--muted); }
+.progress .meter { display: block; appearance: none; width: calc(100% - 0.4rem); height: 3px; border: 0; border-radius: 2px; margin: 0.25rem 0.2rem 0; background: var(--line); overflow: hidden; }
+.progress .meter::-webkit-progress-bar { background: var(--line); }
+.progress .meter::-webkit-progress-value { background: var(--running); }
+.progress .meter::-moz-progress-bar { background: var(--running); }
+.progress-detail { max-height: 55dvh; overscroll-behavior: contain; overflow-y: auto; margin-top: 0.5rem; padding-right: 0.2rem; }
+.progress-detail .empty { margin: 0.3rem 0.5rem; font-size: 0.85em; }
+.step { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 0.35rem; background: var(--panel); }
+.step > summary { cursor: pointer; padding: 0.35rem 0.7rem; display: flex; gap: 0.5rem; align-items: baseline; list-style: none; }
+.step > summary::-webkit-details-marker { display: none; }
+.step .subject { flex: 1; min-width: 0; }
+.step .n { font-size: 0.8em; white-space: nowrap; }
+.step .icon { width: 1em; text-align: center; color: var(--muted); }
+.step.completed .icon { color: #16a34a; }
+.step.completed .subject { color: var(--muted); }
+.step.in_progress { border-color: var(--running); }
+.step.in_progress .icon { color: var(--running); animation: pulse 1.4s infinite; }
+.step.in_progress .subject { font-weight: 600; }
+.step.paused { border-color: var(--waiting); }
+.step.paused .icon { color: var(--waiting); animation: none; }
+.actions { display: flex; flex-direction: column; gap: 0.25rem; padding: 0 0.5rem 0.5rem; }
+.actions .tool summary { padding: 0.2rem 0.5rem; }
 .note { color: var(--muted); font-size: 0.85em; text-align: center; }
 .note.error { color: var(--error); white-space: pre-wrap; text-align: left; }
 .turn-end { color: var(--muted); font-size: 0.8em; text-align: right; border-top: 1px dashed var(--line); padding-top: 0.2rem; }
+details.turn-end summary { cursor: pointer; }
+details.turn-end .actions { text-align: left; padding: 0.4rem 0 0; font-size: 1.1em; }
 .composer { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 1rem; }
 .composer textarea { min-height: 4.5rem; resize: vertical; }
 .composer .row { margin-top: 0.5rem; }
@@ -166,8 +204,12 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 
 /* Project view: artifacts shelf and threads sidebar beside the main panel */
 .split { display: grid; grid-template-columns: minmax(180px, 230px) minmax(230px, 300px) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
-.sidebar, .shelf { position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); max-height: calc(100vh - var(--topbar-h, 3rem) - 2rem); overflow-y: auto; }
+/* Sticky can't move past the bottom of .split, which ends main's 3rem bottom padding above the
+   page end. Keep the side panels short enough (1rem top gap + 3rem) that the chat reaching the bottom
+   never drags them up, and keep wheel/touch scrolls inside them from chaining to the page. */
+.sidebar, .shelf { position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
 .sidebar > summary, .shelf > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; }
+.sidebar > summary { display: none; }
 .shelf { border-right: 1px solid var(--line); padding-right: 0.9rem; }
 .shelf .column { margin-top: 1rem; }
 .shelf .small { font-size: 0.82em; margin: 0; }
@@ -231,4 +273,27 @@ button.pin.on { color: var(--accent); }
   .split { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   .sidebar, .shelf { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
   .shelf { border-right: 0; padding-right: 0; }
+  .sidebar > summary { display: list-item; }
 }
+
+.update-banner {
+  position: sticky;
+  top: var(--topbar-h, 3rem);
+  z-index: 4;
+  padding: 0.4rem 1rem;
+  background: var(--code-bg);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9em;
+  text-align: center;
+}
+.update-banner button { padding: 0.15rem 0.6rem; font-size: 0.85em; margin-left: 0.25rem; }
+
+/* Weekly usage of the Claude account, in the top bar */
+.usage { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8em; color: var(--muted); white-space: nowrap; cursor: default; }
+.usage .track { width: 5rem; height: 0.4rem; border-radius: 999px; background: var(--line); overflow: hidden; }
+.usage .fill { display: block; height: 100%; background: var(--running); }
+.usage[data-level="warn"] .fill { background: var(--waiting); }
+.usage[data-level="error"] .fill { background: var(--error); }
+.usage[data-level="error"] .label { color: var(--error); }
+.usage[hidden] { display: none; }
+@media (max-width: 600px) { .usage .track { width: 3rem; } }

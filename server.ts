@@ -28,9 +28,16 @@ const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
 const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 
 await mkdir(DATA_DIR, { recursive: true });
+// The front end as it was when this server started. Serving this copy, not the files on disk, keeps
+// pages in step with the running server: a deploy changes both at the restart, so a tab never gets
+// a new front end that calls API routes the old server doesn't have yet.
+const ASSETS = new Map<string, Buffer>();
+for (const f of (await readdir(PUBLIC_DIR, { withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name).sort()) {
+  ASSETS.set(f, await readFile(join(PUBLIC_DIR, f)));
+}
 // Fingerprint of the front end, so open tabs can tell they are stale after a deploy.
 const ASSET_VERSION = createHash('sha256')
-  .update((await Promise.all((await readdir(PUBLIC_DIR)).sort().map((f) => readFile(join(PUBLIC_DIR, f))))).join('\0'))
+  .update([...ASSETS.values()].join('\0'))
   .digest('hex')
   .slice(0, 12);
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
@@ -529,15 +536,10 @@ const MIME: Record<string, string> = {
 };
 
 async function serveStatic(res: ServerResponse, path: string) {
-  const rel = normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
-  const file = join(PUBLIC_DIR, rel);
-  if (!file.startsWith(PUBLIC_DIR)) throw new HttpError(404, 'Not found');
-  try {
-    const body = await readFile(file);
-    send(res, 200, { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' }, body);
-  } catch {
-    throw new HttpError(404, 'Not found');
-  }
+  const name = path === '/' ? 'index.html' : path.replace(/^\//, '');
+  const body = ASSETS.get(name);
+  if (!body) throw new HttpError(404, 'Not found');
+  send(res, 200, { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(name)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' }, body);
 }
 
 async function api(req: IncomingMessage, res: ServerResponse, url: URL, session: Session | null) {

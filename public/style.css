@@ -39,7 +39,6 @@ body {
   background: var(--bg);
   color: var(--ink);
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-  min-height: 100dvh;
 }
 a { color: inherit; }
 button, input, textarea, select { font: inherit; color: inherit; }
@@ -71,8 +70,6 @@ code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0
   gap: 1rem;
   padding: 0.6rem 1rem;
   padding-top: calc(0.6rem + env(safe-area-inset-top, 0px));
-  padding-left: calc(1rem + env(safe-area-inset-left, 0px));
-  padding-right: calc(1rem + env(safe-area-inset-right, 0px));
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   position: sticky;
@@ -85,10 +82,13 @@ code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0
 #me button { margin-left: 0.5rem; padding: 0.2rem 0.6rem; font-size: 0.85em; }
 
 
-main {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 1.25rem calc(1rem + env(safe-area-inset-right, 0px)) 3rem calc(1rem + env(safe-area-inset-left, 0px));
+main { max-width: 1200px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+/* Installed as an app (home screen or desktop window): keep clear of side notches in landscape and
+   fill the window. Browser tabs keep the layout above unchanged. */
+@media (display-mode: standalone) {
+  body { min-height: 100dvh; }
+  .topbar { padding-left: calc(1rem + env(safe-area-inset-left, 0px)); padding-right: calc(1rem + env(safe-area-inset-right, 0px)); }
+  main { padding-left: calc(1rem + env(safe-area-inset-left, 0px)); padding-right: calc(1rem + env(safe-area-inset-right, 0px)); }
 }
 main:has(> .split) { max-width: 1560px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; }

@@ -2360,3 +2360,12 @@ setInterval(() => {
 api('/api/me').then((r) => start(r.name)).catch(() => {});
 // The service worker only makes the app installable (home screen, full screen); it caches nothing.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+// Only in the installed app, so browser tabs look and behave as before: colour the title/status bar
+// like the top bar, and on Android shrink the page when the keyboard opens so the composer stays in view.
+if (matchMedia('(display-mode: standalone)').matches) {
+  const viewport = document.querySelector('meta[name=viewport]');
+  viewport.content += ', interactive-widget=resizes-content';
+  for (const [scheme, color] of [['light', '#ffffff'], ['dark', '#201f1d']]) {
+    document.head.append(h('meta', { name: 'theme-color', content: color, media: `(prefers-color-scheme: ${scheme})` }));
+  }
+}

@@ -116,6 +116,7 @@ runner.onFilesMayChange = (ticketId) => {
   scheduleBranchCheck(ticketId);
 };
 runner.filesDir = sharedDir;
+runner.ticketsDir = (project) => join(projectDir(DATA_DIR, project.id), 'tickets');
 // Pick up anything made while the server was down (or before artifacts existed), one ticket at a time.
 // Rows for file types that no longer count as artifacts go first, pinned or not.
 store.pruneArtifacts(isArtifact);

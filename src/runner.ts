@@ -1,6 +1,6 @@
 // Runs ticket turns as headless `claude -p` processes, one turn per process.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
@@ -133,8 +133,8 @@ function projectInstructions(project: Project): string[] {
   ];
 }
 
-function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null): string {
-  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project), ...showingFiles(ticket, filesDir), ...projectInstructions(project)].join('\n');
+function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, ticketsDir: string): string {
+  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir), ...showingFiles(ticket, filesDir), ...projectInstructions(project)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the project repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this ticket.';
@@ -161,7 +161,43 @@ function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null)
   ].join('\n');
 }
 
-function coordinatorPrompt(project: Project): string {
+// Read-only git subcommands the coordinator may run with `git -C <dir>` in the repo and ticket worktrees.
+// Branch listing is matched exactly, since `branch -v -D x` would delete.
+const READ_ONLY_GIT = [
+  ...['log', 'show', 'status', 'diff', 'blame', 'ls-files', 'rev-parse', 'shortlog', 'worktree list'].map((c) => `${c}:*`),
+  ...['branch', 'branch -a', 'branch -r', 'branch -v', 'branch -vv', 'branch -av', 'branch --list'],
+];
+
+/**
+ * How the coordinator may look at the project's code: its main checkout and every ticket folder,
+ * readable but not writable. Bash runs only read-only commands there: Claude Code already allows
+ * plain reads (grep, cat, ls, find) in added directories, and `git -C <dir> <read-only command>` is
+ * allowed per folder. Each rule pins the exact folder as a prefix, since `*` in a rule would also
+ * match `git -C x commit -m "fix log"`. Anything else that would ask for approval is denied.
+ */
+export function coordinatorAccess(repoDir: string | null, ticketsDir: string): { addDirs: string[]; settings: object } {
+  let ticketDirs: string[] = [];
+  try {
+    ticketDirs = readdirSync(ticketsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(ticketsDir, d.name));
+  } catch {
+    // No tickets yet.
+  }
+  const roots = repoDir ? [repoDir, ticketsDir] : [ticketsDir];
+  const gitDirs = repoDir ? [repoDir, ...ticketDirs] : [];
+  return {
+    // Adding the parent tickets/ folder also covers worktrees made after the turn starts.
+    addDirs: roots,
+    settings: {
+      permissions: {
+        // `//` makes the path absolute. Edit rules also cover Write, NotebookEdit and Bash commands that write there.
+        deny: [...roots.map((d) => `Edit(/${d}/**)`), 'Bash(git * --output*)'],
+        allow: gitDirs.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`)),
+      },
+    },
+  };
+}
+
+function coordinatorPrompt(project: Project, ticketsDir: string): string {
   return [
     `You are the coordinator for project "${project.name}" in Claude Coordinator, a shared web app where several people chat with Claude Code sessions called tickets.`,
     'People open the project and talk to you first. You keep track of the project\'s tickets and manage them with the `coordinator` MCP tools: list_tickets, read_ticket, create_ticket, message_ticket, update_ticket, close_ticket, reopen_ticket and stop_ticket.',
@@ -170,8 +206,8 @@ function coordinatorPrompt(project: Project): string {
     'Ticket titles are the short ask, about 30 characters ("Usage bar in the top bar"), with no number, tag or emoji; the app shows the number and the tickets label themselves as they work. Give each new ticket a tag: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet); none for one-off questions. You can fix a ticket\'s title, tag, state or note with update_ticket.',
     'Tickets run in the background. To see progress, read them; do not wait or poll in a loop. Close tickets when people agree they are done.',
     project.repo_dir
-      ? `The project's main checkout is at ${project.repo_dir} and ticket worktrees are under ${join(project.repo_dir, '..', 'tickets')}. You may read them for context, but do not edit, commit or switch branches there.`
-      : 'This project has no git repo; each ticket gets a plain folder.',
+      ? `The project's main checkout is at ${project.repo_dir} and ticket worktrees are under ${ticketsDir} (one folder per ticket). You may read them for context, but do not edit, commit or switch branches there: edits there are denied. Search and read them with Read and with read-only Bash such as \`grep -rn … | head\`; for git, use \`git -C <folder> log\` (or status, diff, show, blame, branch -a), since \`cd <folder> && git …\` is denied.`
+      : `This project has no git repo; each ticket gets a plain folder under ${ticketsDir}. You may read them for context, but do not edit them: edits there are denied.`,
     'When you need people to decide between clear options, ask with your `ask_question` tool: it shows a card in this chat they answer with a click. Then end your turn; the answers arrive as the next message.',
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short and end each turn with what you did and what, if anything, you need from them.',
   ].join('\n');
@@ -191,6 +227,8 @@ export class Runner {
   private coordinatorEnv: CoordinatorEnv;
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
   filesDir: (ticket: Ticket) => string | null = () => null;
+  /** The folder that holds a project's ticket folders, which the coordinator may read. */
+  ticketsDir: (project: Project) => string = (project) => join(project.repo_dir ?? '.', '..', 'tickets');
   /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
   onFilesMayChange: (ticketId: number) => void = () => {};
 
@@ -288,10 +326,18 @@ export class Runner {
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', ticket.permission_mode,
-      '--append-system-prompt', systemPrompt(project, ticket, filesDir),
+      '--append-system-prompt', systemPrompt(project, ticket, filesDir, this.ticketsDir(project)),
+      // Nobody can answer a permission prompt in a headless turn; deny instead of waiting on one.
+      '--permission-prompts', 'none',
     ];
     // Lets edit-only sessions write there too, not just in their working directory.
-    if (filesDir) args.push('--add-dir', filesDir);
+    const addDirs = filesDir ? [filesDir] : [];
+    if (ticket.kind === 'coordinator') {
+      const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project));
+      addDirs.push(...access.addDirs);
+      args.push('--settings', JSON.stringify(access.settings));
+    }
+    if (addDirs.length) args.push('--add-dir', ...addDirs);
     if (ticket.session_id) args.push('--resume', ticket.session_id);
     // Chosen per thread in the composer; left out, Claude Code uses its defaults.
     if (ticket.model) args.push('--model', ticket.model);

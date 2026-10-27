@@ -578,6 +578,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/instructions$/))) await showProject(Number(m[1]), { kind: 'instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'sharedList' });
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
     else if ((m = hash.match(/^#\/s\/(\d+)\/(.+)$/))) await showSharedFile(Number(m[1]), decodeURIComponent(m[2]));
     else if ((m = hash.match(/^#\/f\/(\d+)\/(.+)$/))) await showFile(Number(m[1]), decodeURIComponent(m[2]));
@@ -883,7 +884,8 @@ function renderCrumbs(main) {
       : main.kind === 'approvals' ? [projectLink, ' / ', 'Approvals']
       : main.kind === 'machines' ? [projectLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
-      : main.kind === 'shared' ? [projectLink, ' / ', 'Shared', ' / ', main.file.name]
+      : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
+      : main.kind === 'shared' ? [projectLink, ' / ', h('a', { href: `#/p/${project.id}/shared` }, 'Shared files'), ' / ', main.file.name]
       : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Coordinator' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
           : [project.name]));
@@ -969,6 +971,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     : main.kind === 'instructions' ? instructionsEditor()
     : main.kind === 'approvals' ? approvalsEditor()
     : main.kind === 'machines' ? machinesPage()
+    : main.kind === 'sharedList' ? sharedList()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'file' ? fileViewer(main.ticket, main.file)
         : main.kind === 'shared' ? sharedViewer(main.file)
@@ -987,6 +990,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   if (main.kind === 'artifact') renderArtifactHead();
   if (main.kind === 'file') renderFileHead();
   if (main.kind === 'shared') renderSharedHead();
+  if (main.kind === 'sharedList') renderSharedList();
   if (!chatId) return window.scrollTo(0, 0);
   await mountChat(chatId, ticket, events);
 }
@@ -1485,7 +1489,6 @@ function renderBranch(status) {
 // ---------- artifacts ----------
 
 const RECENT_ARTIFACTS = 5;
-const RECENT_SHARED = 8;
 const MAX_TEXT_PREVIEW = 2 * 1024 * 1024;
 const ARTIFACT_FILTERS = [
   { key: 'all', label: 'All', match: () => true },
@@ -1533,6 +1536,7 @@ function setArtifacts(artifacts, shared = view.shared) {
   if (view.main === 'artifacts') renderArtifactResults();
   if (view.main === 'artifact') renderArtifactHead();
   if (view.main === 'file') renderFileHead();
+  if (view.main === 'sharedList') renderSharedList();
 }
 
 async function setPinned(a, pinned) {
@@ -1579,10 +1583,25 @@ function renderShelf() {
       h('a', { class: `browse${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts`, title: `Browse all ${all.length} artifacts` }, 'Browse')),
     sub('Pinned', pinned.length, pinned, 'Pin artifacts with ☆ to keep them here.'),
     sub('Recent', 0, recent, 'Documents, pages and canvases that threads create show up here.'),
-    sub('Shared', view.shared.length, view.shared.slice(0, RECENT_SHARED), 'Handoffs and notes in the project\'s shared folder show up here.', sharedItem)));
+    // The shared folder gets one link, not a list: its files are listed on their own page.
+    h('a', { class: `shared-link${view.main === 'sharedList' ? ' active' : ''}`, href: `#/p/${view.projectId}/shared`, title: 'Handoffs and notes in the project\'s shared folder' }, 'Shared files')));
 }
 
-/** A document or page in the project's shared folder, as a row of the artifacts panel. */
+/** Main panel: every document and page in the project's shared folder, newest first. */
+function sharedList() {
+  return h('section', { class: 'artifacts-main' },
+    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, h('h2', {}, 'Shared files'), h('span', { class: 'muted', id: 'shared-summary' }))),
+    h('div', { class: 'shared-list', id: 'shared-results' }));
+}
+
+function renderSharedList() {
+  const el = document.getElementById('shared-results');
+  if (!el) return;
+  document.getElementById('shared-summary').textContent = `${view.shared.length} in the project's shared folder`;
+  el.replaceChildren(...(view.shared.length ? view.shared.map(sharedItem) : [h('p', { class: 'muted' }, 'Handoffs and notes threads put in the project\'s shared folder show up here.')]));
+}
+
+/** A document or page in the project's shared folder, as a row of the Shared files list. */
 function sharedItem(f) {
   return h('a', { class: `artifact-item${view.main === 'shared' && view.file?.path === f.path ? ' active' : ''}`, href: sharedHref(view.projectId, f.path), title: f.display_path },
     h('span', { class: `badge k-${f.kind}` }, extOf(f)),

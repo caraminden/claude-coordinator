@@ -259,8 +259,14 @@ export function initDrawers() {
       close();
     }
   }, true);
-  // A new view may replace the panels; don't leave a drawer of the old one over it.
-  window.addEventListener('hashchange', () => { if (drawer && !drawer.el.isConnected) settle(false, { instant: true }); });
+  // Going anywhere else (a new thread started from the drawer, say) puts the drawer away; a new view
+  // may also replace the panels, so don't leave a drawer of the old one over it.
+  window.addEventListener('hashchange', () => {
+    if (!drawer) return;
+    if (!drawer.el.isConnected) { settle(false, { instant: true }); return; }
+    drawer.wasOpen = false;
+    close();
+  });
   new MutationObserver(() => { if (drawer && !drawer.el.isConnected) settle(false, { instant: true }); })
     .observe(document.getElementById('app'), { childList: true });
   narrow.addEventListener('change', () => { if (!narrow.matches && drawer) settle(false, { instant: true }); });

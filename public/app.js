@@ -869,7 +869,7 @@ async function switchChat(main, seq) {
   renderCrumbs(main);
   document.querySelector('#app .split').lastElementChild.replaceWith(chatSection(chatId, ticket, events));
   // On phones the panels sit above the chat; fold them away as a fresh load would.
-  if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details')) el.open = false;
+  if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details:not(.as-drawer)')) el.open = false;
   renderInstructionsShelf();
   renderShelf();
   renderSidebar();

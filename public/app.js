@@ -93,6 +93,56 @@ function markdown(src) {
   return div;
 }
 
+// ---------- drafts ----------
+
+// Unsent text survives reloads and switching threads: it is saved per thread as you type.
+// Text goes to localStorage; images are too big for it, so they go to IndexedDB.
+function loadDraft(key) {
+  try { return JSON.parse(localStorage.getItem(key)) ?? null; } catch { return null; }
+}
+
+function saveDraft(key, value) {
+  try {
+    if (value) localStorage.setItem(key, JSON.stringify(value));
+    else localStorage.removeItem(key);
+  } catch {}
+}
+
+let draftDb = null;
+function draftStore(mode, fn) {
+  draftDb ??= new Promise((resolve, reject) => {
+    const req = indexedDB.open('cc-drafts', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('images');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return draftDb.then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction('images', mode);
+    const req = fn(tx.objectStore('images'));
+    tx.oncomplete = () => resolve(req.result);
+    tx.onerror = () => reject(tx.error);
+  }));
+}
+
+const loadDraftImages = (ticketId) => draftStore('readonly', (s) => s.get(ticketId)).then((v) => v ?? [], () => []);
+const saveDraftImages = (ticketId, items) =>
+  draftStore('readwrite', (s) => (items.length ? s.put(items, ticketId) : s.delete(ticketId))).catch(() => {});
+
+/** Where each thread was scrolled to, so coming back lands in the same place. */
+function saveScroll() {
+  if (view?.kind !== 'project') return;
+  const atBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 200;
+  try { sessionStorage.setItem(`cc-scroll:${view.id}`, JSON.stringify(atBottom ? 'bottom' : window.scrollY)); } catch {}
+}
+
+function restoreScroll(ticketId) {
+  let saved = 'bottom';
+  try { saved = JSON.parse(sessionStorage.getItem(`cc-scroll:${ticketId}`)) ?? 'bottom'; } catch {}
+  window.scrollTo(0, saved === 'bottom' ? document.body.scrollHeight : saved);
+}
+
+window.addEventListener('pagehide', saveScroll);
+
 // ---------- live updates ----------
 
 let streamRetry = 0;
@@ -113,9 +163,14 @@ function connectStream(catchUp = false) {
     const msg = JSON.parse(e.data);
     if (msg.type === 'hello') {
       // The server restarted with a different front end; load it instead of running stale code.
-      if (assetVersion && msg.version !== assetVersion) location.reload();
-      assetVersion = msg.version;
+      if (assetVersion && msg.version !== assetVersion) {
+        reloadPending = true;
+        reloadWhenIdle();
+      }
+      assetVersion ??= msg.version;
+      renderUsage(msg.usage);
     }
+    if (msg.type === 'usage') renderUsage(msg.usage);
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'event') onEvent(msg.event);
   };
@@ -127,6 +182,68 @@ function connectStream(catchUp = false) {
     if (stream === es) stream = null;
     streamTimer = setTimeout(() => connectStream(true), Math.min(30_000, 1000 * 2 ** streamRetry++));
   };
+}
+
+// ---------- front-end updates ----------
+
+// A new front end only loads between messages: never while something is half-written or
+// being typed, so an update can't yank the page out from under you.
+let reloadPending = false;
+let lastInputAt = 0;
+let sending = 0;
+const QUIET_MS = 5000;
+
+document.addEventListener('input', () => { lastInputAt = Date.now(); }, true);
+document.addEventListener('keydown', () => { lastInputAt = Date.now(); }, true);
+
+function hasUnsentWork() {
+  if (sending || Date.now() - lastInputAt < QUIET_MS) return true;
+  if (document.querySelector('.attachments:not([hidden])')) return true;
+  return [...app.querySelectorAll('[data-draft]')].some((el) => el.value.trim());
+}
+
+function reloadNow() {
+  // Put the cursor back in the composer if that is where it was.
+  if (document.activeElement?.matches('.composer textarea')) {
+    try { sessionStorage.setItem('cc-refocus', '1'); } catch {}
+  }
+  location.reload();
+}
+
+function reloadWhenIdle() {
+  if (!reloadPending) return;
+  if (!hasUnsentWork()) return reloadNow();
+  if (!document.getElementById('update-banner')) {
+    document.querySelector('.topbar').after(h('div', { class: 'update-banner', id: 'update-banner' },
+      'A new version is ready and will load once you have sent or cleared what you are writing. ',
+      h('button', { class: 'secondary small', onclick: reloadNow }, 'Refresh now'),
+      h('span', { class: 'muted' }, ' (drafts are kept)')));
+  }
+}
+
+setInterval(reloadWhenIdle, 2000);
+
+// ---------- account usage ----------
+
+let usage = null;
+
+/** The weekly-limit bar in the top bar, fed by usage reports from Claude turns. */
+function renderUsage(next = usage) {
+  usage = next;
+  const el = document.getElementById('usage');
+  const week = usage?.weekly;
+  el.hidden = !week;
+  if (!week) return;
+  const pct = Math.round(Math.min(1, Math.max(0, week.utilization)) * 100);
+  el.querySelector('.label').textContent = `Week ${pct}%`;
+  el.querySelector('.fill').style.width = `${pct}%`;
+  el.dataset.level = week.status && week.status !== 'allowed' ? 'error' : pct >= 90 ? 'error' : pct >= 75 ? 'warn' : '';
+  const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  el.title = [
+    `Weekly usage of this Claude account: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
+    usage.session ? `5-hour window: ${Math.round(usage.session.utilization * 100)}%${usage.session.resetsAt ? `, resets ${when(usage.session.resetsAt)}` : ''}` : null,
+    `As of the last turn, ${ago(usage.updatedAt)}`,
+  ].filter(Boolean).join('\n');
 }
 
 // Phones and sleeping laptops drop connections quietly; recheck when the page comes back.
@@ -179,6 +296,7 @@ function onEvent(event) {
 
 async function route() {
   if (!me) return;
+  saveScroll();
   const hash = location.hash || '#/';
   let m;
   try {
@@ -238,9 +356,9 @@ async function showProjects() {
   view = { kind: 'projects' };
   crumbs.replaceChildren('Projects');
   const form = h('form', {},
-    h('label', {}, 'Name', h('input', { name: 'name', required: true, maxlength: 80 })),
+    h('label', {}, 'Name', h('input', { name: 'name', required: true, maxlength: 80, 'data-draft': true })),
     h('label', {}, 'Git repo URL (optional; each ticket gets its own worktree)',
-      h('input', { name: 'repoUrl', placeholder: 'https://github.com/caraminden/gamedevtest.git' })),
+      h('input', { name: 'repoUrl', 'data-draft': true, placeholder: 'https://github.com/caraminden/gamedevtest.git' })),
     h('p', { class: 'error', hidden: true }),
     h('button', { type: 'submit' }, 'Create project'));
   form.addEventListener('submit', async (e) => {
@@ -309,19 +427,31 @@ async function showProject(projectId, ticketId = null) {
   crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ',
     ...(ticketId ? [h('a', { href: `#/p/${project.id}` }, project.name), ' / ', `#${ticket.id}`] : [project.name]));
 
-  const narrow = matchMedia('(max-width: 800px)').matches;
-  const sidebar = h('details', { class: 'sidebar', open: !narrow },
-    h('summary', {}, project.name, h('span', { class: 'muted', id: 'thread-count' })),
+  // On phones the thread list folds away above the chat; on wider screens it is always open
+  // and its toggle is hidden by CSS.
+  const narrowQuery = matchMedia('(max-width: 800px)');
+  const sidebar = h('details', { class: 'sidebar', open: !narrowQuery.matches },
+    h('summary', {}, 'Threads'),
     newTicketForm(projectId),
     h('div', { id: 'threads' }));
+  // Don't hide a half-written new thread behind a collapsed sidebar on phones.
+  if (sidebar.querySelector('details.new').open) sidebar.open = true;
+  narrowQuery.onchange = () => {
+    if (!narrowQuery.matches) sidebar.open = true;
+  };
 
   const textarea = h('textarea', {
     placeholder: isCoordinator(ticket)
       ? 'Ask the coordinator to start, check on, or close tickets… (Enter to send, Shift+Enter for a new line)'
       : 'Message this ticket… (Enter to send, Shift+Enter for a new line)',
+    'data-draft': true,
   });
+  const draftKey = `cc-draft:${chatId}`;
+  textarea.value = loadDraft(draftKey) ?? '';
+  textarea.addEventListener('input', () => saveDraft(draftKey, textarea.value));
   const sendBtn = h('button', { type: 'submit' }, 'Send');
-  const attachments = createAttachments();
+  const attachments = createAttachments((items) => saveDraftImages(chatId, items));
+  loadDraftImages(chatId).then((items) => attachments.restore(items));
   const picker = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
   picker.addEventListener('change', () => {
     attachments.add(picker.files);
@@ -359,11 +489,15 @@ async function showProject(projectId, ticketId = null) {
     if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.');
     if (!text && !attachments.items.length) return;
     sendBtn.disabled = true;
+    sending++;
     try {
-      const images = attachments.items.map(({ mediaType, data }) => ({ mediaType, data }));
+      const sent = attachments.items.slice();
+      const images = sent.map(({ mediaType, data }) => ({ mediaType, data }));
       const ticket = await api(`/api/tickets/${chatId}/messages`, { method: 'POST', body: { text, images } });
-      textarea.value = '';
-      attachments.clear();
+      // Keep anything typed or attached while the message was on its way.
+      if (textarea.value.trim() === text) textarea.value = '';
+      saveDraft(draftKey, textarea.value);
+      attachments.remove(sent);
       // Show the message now even if the live stream is down; duplicates are skipped by id.
       if (view?.kind === 'project' && view.id === chatId) {
         view.ticket = ticket;
@@ -374,6 +508,8 @@ async function showProject(projectId, ticketId = null) {
       alertNote(ex.message);
     } finally {
       sendBtn.disabled = false;
+      sending--;
+      reloadWhenIdle();
     }
   });
 
@@ -387,15 +523,21 @@ async function showProject(projectId, ticketId = null) {
   renderSidebar();
   renderTicketHead();
   for (const ev of events) appendEvent(ev, false);
-  window.scrollTo(0, document.body.scrollHeight);
+  restoreScroll(chatId);
+  try {
+    if (sessionStorage.getItem('cc-refocus')) {
+      sessionStorage.removeItem('cc-refocus');
+      textarea.focus();
+    }
+  } catch {}
   // Events broadcast while the snapshot was loading arrived before `view` existed.
   await catchUpEvents();
 }
 
 function newTicketForm(projectId) {
   const form = h('form', {},
-    h('label', {}, 'Title', h('input', { name: 'title', required: true, maxlength: 120 })),
-    h('label', {}, 'First message', h('textarea', { name: 'message', required: true, rows: 5, placeholder: 'What should this thread work on? (Enter to send, Shift+Enter for a new line)' })),
+    h('label', {}, 'Title', h('input', { name: 'title', required: true, maxlength: 120, 'data-draft': true })),
+    h('label', {}, 'First message', h('textarea', { name: 'message', required: true, rows: 5, placeholder: 'What should this thread work on? (Enter to send, Shift+Enter for a new line)', 'data-draft': true })),
     h('label', {}, 'Permissions',
       h('select', { name: 'permissionMode' },
         h('option', { value: 'bypassPermissions' }, 'Full access: edit files and run any command'),
@@ -403,6 +545,15 @@ function newTicketForm(projectId) {
         h('option', { value: 'plan' }, 'Plan only: read and plan, no changes'))),
     h('p', { class: 'error', hidden: true }),
     h('button', { type: 'submit' }, 'Start thread'));
+  const draftKey = `cc-new-thread:${projectId}`;
+  const draft = loadDraft(draftKey);
+  if (draft) {
+    form.title.value = draft.title ?? '';
+    form.message.value = draft.message ?? '';
+    if (draft.permissionMode) form.permissionMode.value = draft.permissionMode;
+  }
+  const fields = () => ({ title: form.title.value, message: form.message.value, permissionMode: form.permissionMode.value });
+  form.addEventListener('input', () => saveDraft(draftKey, form.title.value || form.message.value ? fields() : null));
   form.message.addEventListener('keydown', (e) => {
     // Same as the chat composer: Enter sends, Shift+Enter adds a line, IME composition is left alone.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -416,27 +567,28 @@ function newTicketForm(projectId) {
     const err = form.querySelector('.error');
     if (btn.disabled) return;
     btn.disabled = true;
+    sending++;
     try {
-      const t = await api(`/api/projects/${projectId}/tickets`, {
-        method: 'POST',
-        body: { title: form.title.value, message: form.message.value, permissionMode: form.permissionMode.value },
-      });
+      const t = await api(`/api/projects/${projectId}/tickets`, { method: 'POST', body: fields() });
+      saveDraft(draftKey, null);
+      form.reset();
       location.hash = `#/t/${t.id}`;
     } catch (ex) {
       err.textContent = ex.message;
       err.hidden = false;
       btn.disabled = false;
+    } finally {
+      sending--;
     }
   });
-  return h('details', { class: 'new' }, h('summary', {}, 'New thread'), form);
+  // A half-written thread stays open so it is not forgotten.
+  return h('details', { class: 'new', open: !!(draft?.title || draft?.message) }, h('summary', {}, 'New thread'), form);
 }
 
 function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el) return;
   const tickets = [...view.tickets.values()].sort((a, b) => b.updated_at - a.updated_at);
-  const open = tickets.filter((t) => t.status !== 'closed').length;
-  document.getElementById('thread-count').textContent = ` · ${open} open`;
   el.replaceChildren(
     ticketCard(view.coordinator, `#/p/${view.projectId}`),
     ...COLUMNS.map((col) => {
@@ -475,10 +627,11 @@ const MAX_IMAGE_BYTES = 3.5 * 1024 * 1024; // base64 adds a third; the server ca
 const SENDABLE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 
 /** Pending images in the composer: thumbnails with a remove button, read as base64 for sending. */
-function createAttachments() {
+function createAttachments(onChange) {
   const el = h('div', { class: 'attachments', hidden: true });
   const state = { el, items: [], busy: 0 };
   const render = () => {
+    onChange(state.items.map(({ mediaType, data }) => ({ mediaType, data })));
     el.hidden = !state.items.length;
     el.replaceChildren(...state.items.map((item) => h('div', { class: 'thumb' },
       h('img', { src: item.url, alt: 'Image to send' }),
@@ -512,9 +665,16 @@ function createAttachments() {
       }
     }
   };
-  state.clear = () => {
-    for (const item of state.items) URL.revokeObjectURL(item.url);
-    state.items = [];
+  state.remove = (items) => {
+    for (const item of items) URL.revokeObjectURL(item.url);
+    state.items = state.items.filter((item) => !items.includes(item));
+    render();
+  };
+  /** Bring back images saved with a draft (they are already prepared and encoded). */
+  state.restore = (saved) => {
+    if (!saved.length) return;
+    const restored = saved.map(({ mediaType, data }) => ({ url: `data:${mediaType};base64,${data}`, mediaType, data }));
+    state.items = [...restored, ...state.items].slice(0, MAX_IMAGES);
     render();
   };
   return state;
@@ -790,6 +950,9 @@ const topbar = document.querySelector('.topbar');
 // where scrolled chat text shows through.
 new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${topbar.getBoundingClientRect().height}px`)).observe(topbar);
 // Keep "last activity 3m ago" honest.
-setInterval(() => view?.kind === 'project' && renderStats(), 30_000);
+setInterval(() => {
+  if (view?.kind === 'project') renderStats();
+  if (usage) renderUsage();
+}, 30_000);
 
 api('/api/me').then((r) => start(r.name)).catch(() => {});

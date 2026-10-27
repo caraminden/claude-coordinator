@@ -206,7 +206,7 @@ details.turn-end .actions { text-align: left; padding: 0.4rem 0 0; font-size: 1.
    page end. Keep the sidebar short enough (1rem top gap + 3rem) that the chat reaching the bottom
    never drags it up, and keep wheel/touch scrolls inside it from chaining to the page. */
 .sidebar { position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
-.sidebar > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; }
+.sidebar > summary { display: none; cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; }
 .sidebar details.new { margin: 0 0 1rem; }
 .sidebar details.new form { margin-top: 0.5rem; }
 .sidebar .column { margin-top: 1rem; }
@@ -216,4 +216,27 @@ details.turn-end .actions { text-align: left; padding: 0.4rem 0 0; font-size: 1.
 @media (max-width: 800px) {
   .split { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   .sidebar { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+  .sidebar > summary { display: list-item; }
 }
+
+.update-banner {
+  position: sticky;
+  top: var(--topbar-h, 3rem);
+  z-index: 4;
+  padding: 0.4rem 1rem;
+  background: var(--code-bg);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9em;
+  text-align: center;
+}
+.update-banner button { padding: 0.15rem 0.6rem; font-size: 0.85em; margin-left: 0.25rem; }
+
+/* Weekly usage of the Claude account, in the top bar */
+.usage { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8em; color: var(--muted); white-space: nowrap; cursor: default; }
+.usage .track { width: 5rem; height: 0.4rem; border-radius: 999px; background: var(--line); overflow: hidden; }
+.usage .fill { display: block; height: 100%; background: var(--running); }
+.usage[data-level="warn"] .fill { background: var(--waiting); }
+.usage[data-level="error"] .fill { background: var(--error); }
+.usage[data-level="error"] .label { color: var(--error); }
+.usage[hidden] { display: none; }
+@media (max-width: 600px) { .usage .track { width: 3rem; } }

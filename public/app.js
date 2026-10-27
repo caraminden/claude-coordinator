@@ -578,7 +578,6 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     artifacts, artifactId: main.artifact?.id ?? null,
     id: chatId, ticket, lastEventId: 0,
-    stats: { messages: 0, turns: 0, cost: 0, lastAt: 0 },
     progress: createProgress(),
     progressEl: h('div', { class: 'progress', hidden: true }), // lives in the thread bar
     ui: progressUi(chatId),
@@ -1137,30 +1136,11 @@ function renderTicketHead() {
       h('h2', {}, threadLabel(t)),
       h('span', { class: 'muted' }, statusLabel(t) + (t.queued ? ` · ${t.queued} queued` : '')),
       h('span', { class: 'spacer' }), ...actions),
-    h('div', { class: 'meta', title: coord ? '' : t.cwd }, (coord
-      ? ["Manages this project's threads"]
-      : [t.branch ? `branch ${t.branch}` : null, `permissions: ${t.permission_mode}`, `started by ${t.created_by}`]
-    ).filter(Boolean).join(' · ')),
-    h('div', { class: 'stats', id: 'ticket-stats' }),
     view.progressEl);
-  renderStats();
   renderTyping();
   const hint = document.getElementById('composer-hint');
   if (hint) hint.textContent = t.status === 'running' ? 'Messages sent now run after the current turn.' : '';
   scheduleProgress();
-}
-
-/** The summary line in the thread bar, tallied from the events shown in the log. */
-function renderStats() {
-  const el = document.getElementById('ticket-stats');
-  if (!el) return;
-  const s = view.stats;
-  el.replaceChildren(...[
-    `${s.messages} message${s.messages === 1 ? '' : 's'}`,
-    `${s.turns} turn${s.turns === 1 ? '' : 's'}`,
-    s.cost ? `$${s.cost.toFixed(2)} spent` : null,
-    s.lastAt ? `last activity ${ago(s.lastAt)}` : null,
-  ].filter(Boolean).map((text) => h('span', {}, text)));
 }
 
 async function setStatus(id, status) {
@@ -1338,14 +1318,6 @@ function appendEvent(event, scroll = true) {
   const log = document.getElementById('log');
   if (!log) return;
   const data = JSON.parse(event.data);
-  const stats = view.stats;
-  stats.lastAt = Math.max(stats.lastAt, event.created_at);
-  if (event.kind === 'user_message') stats.messages++;
-  if (event.kind === 'claude' && data.type === 'result') {
-    stats.turns++;
-    stats.cost += data.total_cost_usd || 0;
-  }
-  renderStats();
   if (event.kind === 'user_message') (view.pendingRequest ??= []).push({ author: data.author, text: data.text || '(image)' });
   if (event.kind === 'claude' && data.type === 'system' && data.subtype === 'init') {
     view.turnActions = [];
@@ -1447,9 +1419,8 @@ const topbar = document.querySelector('.topbar');
 // Use the exact height: at fractional display scaling (e.g. 175%) a rounded one leaves a sliver
 // where scrolled chat text shows through.
 new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${topbar.getBoundingClientRect().height}px`)).observe(topbar);
-// Keep "last activity 3m ago" honest.
+// Keep relative times in the usage readout honest.
 setInterval(() => {
-  if (view?.kind === 'project') renderStats();
   if (usage) renderUsage();
 }, 30_000);
 

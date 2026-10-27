@@ -136,8 +136,6 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 }
 .ticket-head .meta { color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ticket-head button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
-.ticket-head .stats { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
-.ticket-head .stats span { font-size: 0.78em; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 0.05rem 0.55rem; }
 .log { display: flex; flex-direction: column; gap: 0.6rem; }
 .msg { border-radius: 10px; padding: 0.6rem 0.85rem; background: var(--panel); border: 1px solid var(--line); overflow-wrap: anywhere; }
 .msg.user { background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }

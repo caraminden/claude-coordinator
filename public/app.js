@@ -420,13 +420,18 @@ async function showProject(projectId, ticketId = null) {
   crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ',
     ...(ticketId ? [h('a', { href: `#/p/${project.id}` }, project.name), ' / ', `#${ticket.id}`] : [project.name]));
 
-  const narrow = matchMedia('(max-width: 800px)').matches;
-  const sidebar = h('details', { class: 'sidebar', open: !narrow },
-    h('summary', {}, project.name, h('span', { class: 'muted', id: 'thread-count' })),
+  // On phones the thread list folds away above the chat; on wider screens it is always open
+  // and its toggle is hidden by CSS.
+  const narrowQuery = matchMedia('(max-width: 800px)');
+  const sidebar = h('details', { class: 'sidebar', open: !narrowQuery.matches },
+    h('summary', {}, 'Threads'),
     newTicketForm(projectId),
     h('div', { id: 'threads' }));
   // Don't hide a half-written new thread behind a collapsed sidebar on phones.
   if (sidebar.querySelector('details.new').open) sidebar.open = true;
+  narrowQuery.onchange = () => {
+    if (!narrowQuery.matches) sidebar.open = true;
+  };
 
   const textarea = h('textarea', {
     placeholder: isCoordinator(ticket)
@@ -577,8 +582,6 @@ function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el) return;
   const tickets = [...view.tickets.values()].sort((a, b) => b.updated_at - a.updated_at);
-  const open = tickets.filter((t) => t.status !== 'closed').length;
-  document.getElementById('thread-count').textContent = ` · ${open} open`;
   el.replaceChildren(
     ticketCard(view.coordinator, `#/p/${view.projectId}`),
     ...COLUMNS.map((col) => {

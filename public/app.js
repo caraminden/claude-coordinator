@@ -682,7 +682,9 @@ function appendEvent(event, scroll = true) {
 
 // Sticky elements sit just below the top bar, whose height changes with wrapping and safe areas.
 const topbar = document.querySelector('.topbar');
-new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`)).observe(topbar);
+// Use the exact height: at fractional display scaling (e.g. 175%) a rounded one leaves a sliver
+// where scrolled chat text shows through.
+new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${topbar.getBoundingClientRect().height}px`)).observe(topbar);
 // Keep "last activity 3m ago" honest.
 setInterval(() => view?.kind === 'project' && renderStats(), 30_000);
 

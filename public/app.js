@@ -752,7 +752,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     threadSearchBox(projectId),
     h('div', { id: 'threads' }));
   // Don't hide a half-written new thread behind a collapsed sidebar.
-  if (sidebar.querySelector('details.new').open) sidebar.open = true;
+  if (sidebar.querySelector('.new-thread textarea').value) sidebar.open = true;
   for (const [name, el] of [['shelf', shelf], ['threads', sidebar]]) {
     el.addEventListener('toggle', () => {
       if (!narrowQuery.matches) savePanelState({ ...loadPanelState(), [name]: el.open });
@@ -903,17 +903,25 @@ function chatSection(chatId, ticket, events) {
 }
 
 function newTicketForm(projectId) {
-  const form = h('form', {},
-    h('label', {}, 'First message', h('textarea', { name: 'message', required: true, rows: 5, placeholder: 'What should this thread work on? (Enter to send, Shift+Enter for a new line)', 'data-draft': true })),
-    h('p', { class: 'error', hidden: true }),
-    h('button', { type: 'submit' }, 'Start thread'));
+  // A one-line chat box: what you type becomes the new thread's first message. The thread names
+  // and tags itself from it, and every thread gets full access.
+  const box = h('textarea', { name: 'message', required: true, rows: 1, placeholder: 'New thread: what should it work on?', 'aria-label': 'Start a new thread', 'data-draft': true });
+  const err = h('p', { class: 'error', hidden: true });
+  const form = h('form', { class: 'new-thread' }, box, err);
+  const fit = () => {
+    box.style.height = 'auto';
+    box.style.height = `${box.scrollHeight + box.offsetHeight - box.clientHeight}px`;
+  };
   const draftKey = `cc-new-thread:${projectId}`;
   const draft = loadDraft(draftKey);
-  if (draft) form.message.value = draft.message ?? '';
-  // The thread names and tags itself from what it is asked to do, and every thread gets full access.
-  const fields = () => ({ message: form.message.value });
-  form.addEventListener('input', () => saveDraft(draftKey, form.message.value ? fields() : null));
-  form.message.addEventListener('keydown', (e) => {
+  if (draft) box.value = draft.message ?? '';
+  requestAnimationFrame(fit);
+  let busy = false;
+  box.addEventListener('input', () => {
+    fit();
+    saveDraft(draftKey, box.value ? { message: box.value } : null);
+  });
+  box.addEventListener('keydown', (e) => {
     // Same as the chat composer: Enter sends, Shift+Enter adds a line, IME composition is left alone.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
@@ -922,26 +930,27 @@ function newTicketForm(projectId) {
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const btn = form.querySelector('button');
-    const err = form.querySelector('.error');
-    if (btn.disabled) return;
-    btn.disabled = true;
+    if (busy || !box.value.trim()) return;
+    busy = true;
+    box.readOnly = true;
+    err.hidden = true;
     sending++;
     try {
-      const t = await api(`/api/projects/${projectId}/tickets`, { method: 'POST', body: fields() });
+      const t = await api(`/api/projects/${projectId}/tickets`, { method: 'POST', body: { message: box.value } });
       saveDraft(draftKey, null);
-      form.reset();
+      box.value = '';
+      fit();
       location.hash = threadHref(t);
     } catch (ex) {
       err.textContent = ex.message;
       err.hidden = false;
-      btn.disabled = false;
     } finally {
+      busy = false;
+      box.readOnly = false;
       sending--;
     }
   });
-  // A half-written thread stays open so it is not forgotten.
-  return h('details', { class: 'new', open: !!draft?.message }, h('summary', {}, 'New thread'), form);
+  return form;
 }
 
 function renderSidebar() {
@@ -966,7 +975,7 @@ function renderSidebar() {
   el.replaceChildren(
     threadRow(view.coordinator, `#/p/${view.projectId}`),
     ...sections, closedGroup,
-    tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or use New thread.'));
+    tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or type in the box above.'));
 }
 
 // ---------- search ----------

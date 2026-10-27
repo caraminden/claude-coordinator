@@ -97,9 +97,6 @@ h2 { font-size: 1.15rem; margin: 0; }
 .projects { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin-top: 1rem; }
 .projects a.card { text-decoration: none; display: block; }
 .projects a.card:hover { border-color: var(--accent); }
-details.new { margin-top: 1rem; }
-details.new summary { cursor: pointer; color: var(--accent); }
-details.new form { margin-top: 0.75rem; max-width: 560px; }
 
 /* Board */
 .board { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 1rem; align-items: start; }
@@ -334,11 +331,12 @@ button.pin.on { color: var(--accent); }
 .msg table { border-collapse: collapse; font-size: 0.9em; }
 .msg th, .msg td { border: 1px solid var(--line); padding: 0.3rem 0.55rem; text-align: left; vertical-align: top; overflow-wrap: normal; }
 .msg th { background: var(--code-bg); }
-.sidebar details.new { margin: 0 0 0.6rem; }
-.sidebar details.new form { margin-top: 0.5rem; }
+.sidebar .new-thread { margin: 0 0 0.6rem; }
+.new-thread textarea { resize: none; overflow-y: auto; max-height: 12rem; padding: 0.3rem 0.55rem; font-size: 0.9em; line-height: 1.4; border-color: var(--accent); }
+.new-thread .error { margin: 0.3rem 0 0; }
 .sidebar .column { margin-top: 0.75rem; }
 .sidebar .column h3, .sidebar .column.closed > summary { font-size: 0.75rem; margin-bottom: 0.3rem; }
-.sidebar details.new + #threads { margin-top: -0.25rem; }
+.sidebar .new-thread + #threads { margin-top: -0.25rem; }
 .chat { min-width: 0; }
 /* Medium screens: stack the artifacts and threads in one column so the main panel keeps its width. */
 @media (min-width: 801px) and (max-width: 1150px) {

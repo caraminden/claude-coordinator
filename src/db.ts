@@ -373,6 +373,16 @@ export class Store {
       .all(ticketId, afterId) as unknown as EventRow[];
   }
 
+  /** Newest-first messages and Claude output in a project whose raw JSON contains the text (case-insensitive for ASCII). */
+  findEvents(projectId: number, text: string, limit = 3000): EventRow[] {
+    const like = `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    return this.db
+      .prepare(`SELECT e.* FROM events e JOIN tickets t ON t.id = e.ticket_id
+        WHERE t.project_id = ? AND e.kind IN ('user_message', 'claude') AND e.data LIKE ? ESCAPE '\\'
+        ORDER BY e.id DESC LIMIT ?`)
+      .all(projectId, like, limit) as unknown as EventRow[];
+  }
+
   getSetting<T>(key: string): T | null {
     const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
     return row ? JSON.parse(row.value) : null;

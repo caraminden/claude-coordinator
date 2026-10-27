@@ -674,6 +674,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     id: chatId, ticket, lastEventId: 0,
     progress: createProgress(),
     progressEl: h('div', { class: 'progress', hidden: true }), // lives in the thread bar
+    findEl: chatId ? chatFindBox() : null, // lives in the thread bar too, so it survives re-renders
     ui: progressUi(chatId),
     actions: new Map(), // tool_use_id -> { block, taskId, result }
     turnActions: [], // actions of the current (or last) turn, in order
@@ -711,6 +712,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     h('summary', { title: 'Show or hide threads' }, h('span', { class: 'label' }, 'Threads')),
     newTicketForm(projectId),
+    threadSearchBox(projectId),
     h('div', { id: 'threads' }));
   // Don't hide a half-written new thread behind a collapsed sidebar.
   if (sidebar.querySelector('details.new').open) sidebar.open = true;
@@ -743,6 +745,10 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   for (const ev of events) appendEvent(ev, false);
   if (ticket.branch) refreshBranch(chatId);
   restoreScroll(chatId);
+  if (pendingFind) {
+    view.findEl?.find(pendingFind);
+    pendingFind = '';
+  }
   try {
     if (sessionStorage.getItem('cc-refocus')) {
       sessionStorage.removeItem('cc-refocus');
@@ -910,6 +916,7 @@ function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el) return;
   const tickets = [...view.tickets.values()].sort((a, b) => b.updated_at - a.updated_at);
+  if (threadSearch.q) return renderThreadResults(el, tickets);
   el.replaceChildren(
     ticketCard(view.coordinator, `#/p/${view.projectId}`),
     ...COLUMNS.map((col) => {
@@ -927,8 +934,148 @@ function renderSidebar() {
     tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or use New thread.'));
 }
 
+// ---------- search ----------
+
+// The threads search, kept across thread switches within a project.
+const threadSearch = { projectId: null, q: '', hits: new Map(), seq: 0, timer: null };
+// Text to find in the next chat that opens, set when a search result is clicked.
+let pendingFind = '';
+
+function threadSearchBox(projectId) {
+  if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '', hits: new Map() });
+  const input = h('input', { type: 'search', class: 'thread-search', placeholder: 'Search threads and what was said…', value: threadSearch.q, autocomplete: 'off' });
+  input.addEventListener('input', () => {
+    threadSearch.q = input.value.trim();
+    renderSidebar();
+    clearTimeout(threadSearch.timer);
+    threadSearch.timer = setTimeout(() => fetchThreadHits(projectId), 250);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && input.value) {
+      input.value = '';
+      input.dispatchEvent(new Event('input'));
+    }
+  });
+  if (threadSearch.q) fetchThreadHits(projectId);
+  return input;
+}
+
+/** Ask the server which threads mention the text anywhere in their conversation. */
+async function fetchThreadHits(projectId) {
+  const q = threadSearch.q;
+  const seq = ++threadSearch.seq;
+  let hits = [];
+  if (q.length >= 2) {
+    try {
+      hits = await api(`/api/projects/${projectId}/search?q=${encodeURIComponent(q)}`);
+    } catch {
+      hits = [];
+    }
+  }
+  if (seq !== threadSearch.seq || threadSearch.projectId !== projectId) return;
+  threadSearch.hits = new Map(hits.map((hit) => [hit.ticketId, hit]));
+  if (view?.kind === 'project' && view.projectId === projectId) renderSidebar();
+}
+
+/** Search results: threads whose title or details match, or whose conversation mentions the text. */
+function renderThreadResults(el, tickets) {
+  const q = threadSearch.q.toLowerCase();
+  const results = [view.coordinator, ...tickets].filter((t) => {
+    const fields = [threadLabel(t), t.created_by, t.last_activity];
+    return fields.some((f) => f?.toLowerCase().includes(q)) || threadSearch.hits.has(t.id);
+  });
+  el.replaceChildren(
+    h('section', { class: 'column' },
+      h('h3', {}, 'Results', h('span', { class: 'count' }, results.length)),
+      results.length
+        ? results.map((t) => {
+            const hit = threadSearch.hits.get(t.id);
+            const card = ticketCard(t, t === view.coordinator ? `#/p/${view.projectId}` : threadHref(t), hit);
+            // Open the thread with its find box already on the text.
+            card.addEventListener('click', () => { pendingFind = hit ? threadSearch.q : ''; });
+            return card;
+          })
+        : h('p', { class: 'muted small' }, threadSearch.q.length < 2 ? 'Keep typing to search conversations too.' : 'No threads mention that.')));
+}
+
+/** Wrap matches of the text inside el in <mark>, returning the marks in document order. */
+function highlight(el, text) {
+  const marks = [];
+  if (!text) return marks;
+  const needle = text.toLowerCase();
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (let node of nodes) {
+    let i;
+    while ((i = node.data.toLowerCase().indexOf(needle)) >= 0) {
+      const match = node.splitText(i);
+      node = match.splitText(needle.length);
+      const mark = h('mark', { class: 'find' });
+      match.replaceWith(mark);
+      mark.append(match);
+      marks.push(mark);
+    }
+  }
+  return marks;
+}
+
+function clearHighlights(el) {
+  for (const mark of el.querySelectorAll('mark.find')) mark.replaceWith(...mark.childNodes);
+  el.normalize();
+}
+
+/** Find in the open conversation: highlights every match, Enter / ↓ for the next, Shift+Enter / ↑ for the previous. */
+function chatFindBox() {
+  const input = h('input', { type: 'search', class: 'chat-find', placeholder: 'Find in chat', autocomplete: 'off' });
+  const count = h('span', { class: 'find-count muted' });
+  const state = { marks: [], at: -1 };
+  const show = (i) => {
+    if (!state.marks.length) return;
+    state.marks[state.at]?.classList.remove('current');
+    state.at = (i + state.marks.length) % state.marks.length;
+    const mark = state.marks[state.at];
+    mark.classList.add('current');
+    // Open any collapsed block it is in, then bring it to the middle of the screen.
+    for (let d = mark.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true;
+    mark.scrollIntoView({ block: 'center' });
+    count.textContent = `${state.at + 1}/${state.marks.length}`;
+  };
+  const run = () => {
+    const log = document.getElementById('log');
+    if (!log) return;
+    clearHighlights(log);
+    const q = input.value.trim();
+    state.marks = q ? [...log.querySelectorAll('.msg, .note')].flatMap((m) => highlight(m, q)) : [];
+    state.at = -1;
+    count.textContent = q ? (state.marks.length ? `0/${state.marks.length}` : 'none') : '';
+    // Start from the newest match, nearest where you usually are.
+    if (state.marks.length) show(state.marks.length - 1);
+  };
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      show(state.at + (e.key === 'Enter' && e.shiftKey ? -1 : 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      show(state.at - 1);
+    } else if (e.key === 'Escape') {
+      input.value = '';
+      run();
+    }
+  });
+  const step = (d) => h('button', { type: 'button', class: 'secondary find-step', title: d < 0 ? 'Previous match' : 'Next match', onclick: () => show(state.at + d) }, d < 0 ? '↑' : '↓');
+  const box = h('span', { class: 'find-box' }, input, count, step(-1), step(1));
+  box.find = (text) => {
+    input.value = text;
+    run();
+  };
+  return box;
+}
+
 /** A compact thread row (status is its coloured edge): title, who started it, queued messages and age, then the latest activity. */
-function ticketCard(t, href = threadHref(t)) {
+function ticketCard(t, href = threadHref(t), hit = null) {
   const coord = isCoordinator(t);
   const details = [
     threadLabel(t),
@@ -941,7 +1088,14 @@ function ticketCard(t, href = threadHref(t)) {
       t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
       coord ? '' : h('span', { class: 'avatar' }, (t.created_by || '?').slice(0, 1).toUpperCase()),
       h('span', { class: 'when' }, shortAgo(t.updated_at))),
-    t.last_activity ? h('div', { class: 'activity' }, t.last_activity) : '');
+    hit ? snippetLine(hit) : t.last_activity ? h('div', { class: 'activity' }, t.last_activity) : '');
+}
+
+/** A search hit's snippet, with the searched text highlighted. */
+function snippetLine(hit) {
+  const el = h('div', { class: 'activity hit' }, hit.snippet, hit.matches > 1 ? h('span', { class: 'more' }, ` +${hit.matches - 1}`) : '');
+  highlight(el, threadSearch.q);
+  return el;
 }
 
 /** "now", "5m", "3h", "2d": ages for tight spaces. */
@@ -1339,7 +1493,7 @@ function renderTicketHead() {
       h('span', { class: `dot ${t.status}` }),
       h('h2', {}, threadLabel(t)),
       h('span', { class: 'muted' }, statusLabel(t) + (t.queued ? ` · ${t.queued} queued` : '')),
-      h('span', { class: 'spacer' }), ...actions,
+      h('span', { class: 'spacer' }), view.findEl ?? '', ...actions,
       // Leaves the thread as it is and goes back to the project's coordinator.
       coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the coordinator', 'aria-label': 'Back to the coordinator' }, '×')),
     view.progressEl);

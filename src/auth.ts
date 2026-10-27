@@ -10,7 +10,11 @@ const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 export interface Session {
   name: string;
   exp: number;
+  /** Set for a coordinator ticket calling the API through its MCP tools: that ticket's id. */
+  agent?: number;
 }
+
+export const AGENT_NAME = 'Coordinator';
 
 function sha256(s: string): Buffer {
   return createHash('sha256').update(s).digest();
@@ -72,7 +76,22 @@ export class Auth {
     return `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
   }
 
+  /** Bearer token that lets a coordinator ticket's MCP server act on the API as that ticket. */
+  agentToken(ticketId: number): string {
+    return `${ticketId}.${this.sign(`agent:${ticketId}`)}`;
+  }
+
+  private agentSession(req: IncomingMessage): Session | null {
+    const m = (req.headers.authorization ?? '').match(/^Bearer (\d+)\.([\w-]+)$/);
+    if (!m) return null;
+    const expected = Buffer.from(this.sign(`agent:${m[1]}`));
+    const given = Buffer.from(m[2]);
+    if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+    return { name: AGENT_NAME, exp: Infinity, agent: Number(m[1]) };
+  }
+
   session(req: IncomingMessage): Session | null {
+    if (req.headers.authorization) return this.agentSession(req);
     const header = req.headers.cookie ?? '';
     const match = header.split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`));
     if (!match) return null;

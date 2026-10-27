@@ -60,6 +60,9 @@ label input, label textarea, label select { margin-top: 0.25rem; color: var(--in
 code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
 
 .topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
   padding: 0.6rem 1rem;
   padding-top: calc(0.6rem + env(safe-area-inset-top, 0px));
   border-bottom: 1px solid var(--line);
@@ -68,7 +71,6 @@ code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0
   top: 0;
   z-index: 5;
 }
-.topbar .bar { display: flex; align-items: center; gap: 1rem; }
 .brand { font-weight: 650; text-decoration: none; }
 #crumbs { flex: 1; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #crumbs a { text-decoration: none; }
@@ -95,8 +97,13 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 
 /* Board */
 .board { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 1rem; align-items: start; }
-.column h3 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.5rem; display: flex; gap: 0.4rem; align-items: center; }
-.column h3 .count { color: var(--muted); font-weight: normal; }
+/* The closed section is a <details> whose summary looks like the other column headings. */
+.column h3, .column.closed > summary { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.5rem; display: flex; gap: 0.4rem; align-items: center; }
+.column.closed > summary { cursor: pointer; color: var(--muted); list-style: none; }
+.column.closed > summary::-webkit-details-marker { display: none; }
+.column.closed > summary::before { content: '▸'; }
+.column.closed[open] > summary::before { content: '▾'; }
+.column h3 .count, .column.closed > summary .count { color: var(--muted); font-weight: normal; }
 .ticket-card { display: block; text-decoration: none; margin-bottom: 0.6rem; border-left: 3px solid var(--line); }
 .ticket-card:hover { border-color: var(--accent); }
 .ticket-card .title { font-weight: 600; }
@@ -114,8 +121,21 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
 /* Ticket view */
-.ticket-head { margin-bottom: 1rem; }
-.ticket-head .meta { color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; word-break: break-all; }
+/* Thread bar: pinned under the top bar while the chat scrolls beneath it. */
+.ticket-head {
+  position: sticky;
+  /* Tuck 1px under the top bar so pixel rounding can never open a gap between them. */
+  top: calc(var(--topbar-h, 3rem) - 1px);
+  z-index: 4;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 0;
+  margin: -0.6rem 0 1rem;
+}
+.ticket-head .meta { color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ticket-head button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
+.ticket-head .stats { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
+.ticket-head .stats span { font-size: 0.78em; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 0.05rem 0.55rem; }
 .log { display: flex; flex-direction: column; gap: 0.6rem; }
 .msg { border-radius: 10px; padding: 0.6rem 0.85rem; background: var(--panel); border: 1px solid var(--line); overflow-wrap: anywhere; }
 .msg.user { background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
@@ -131,9 +151,9 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 .tool .st { display: inline-block; width: 0.8em; text-align: center; }
 .tool.pending .st { color: var(--running); }
 
-/* Work progress readout in the top bar */
-.progress { max-width: 1200px; margin: 0.5rem auto 0; }
-.progress-line {
+/* Work progress readout in the thread bar */
+.progress { margin-top: 0.5rem; }
+.ticket-head .progress-line {
   display: flex; align-items: center; gap: 0.6rem; width: 100%;
   background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
   padding: 0.35rem 0.7rem; text-align: left; font-size: 0.9em;
@@ -146,7 +166,7 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 .progress .meter::-webkit-progress-bar { background: var(--line); }
 .progress .meter::-webkit-progress-value { background: var(--running); }
 .progress .meter::-moz-progress-bar { background: var(--running); }
-.progress-detail { max-height: 60vh; overflow-y: auto; margin-top: 0.5rem; padding-right: 0.2rem; }
+.progress-detail { max-height: 55dvh; overscroll-behavior: contain; overflow-y: auto; margin-top: 0.5rem; padding-right: 0.2rem; }
 .progress-detail .empty { margin: 0.3rem 0.5rem; font-size: 0.85em; }
 .step { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 0.35rem; background: var(--panel); }
 .step > summary { cursor: pointer; padding: 0.35rem 0.7rem; display: flex; gap: 0.5rem; align-items: baseline; list-style: none; }
@@ -159,6 +179,8 @@ details.new form { margin-top: 0.75rem; max-width: 560px; }
 .step.in_progress { border-color: var(--running); }
 .step.in_progress .icon { color: var(--running); animation: pulse 1.4s infinite; }
 .step.in_progress .subject { font-weight: 600; }
+.step.paused { border-color: var(--waiting); }
+.step.paused .icon { color: var(--waiting); animation: none; }
 .actions { display: flex; flex-direction: column; gap: 0.25rem; padding: 0 0.5rem 0.5rem; }
 .actions .tool summary { padding: 0.2rem 0.5rem; }
 .note { color: var(--muted); font-size: 0.85em; text-align: center; }
@@ -169,3 +191,29 @@ details.turn-end .actions { text-align: left; padding: 0.4rem 0 0; font-size: 1.
 .composer { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 1rem; }
 .composer textarea { min-height: 4.5rem; resize: vertical; }
 .composer .row { margin-top: 0.5rem; }
+.composer button.small { padding: 0.2rem 0.65rem; font-size: 0.85em; }
+.attachments[hidden] { display: none; }
+.attachments { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
+.attachments .thumb { position: relative; }
+.attachments img { display: block; height: 4.5rem; max-width: 9rem; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+.attachments .thumb button { position: absolute; top: -0.4rem; right: -0.4rem; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
+.msg .images { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.4rem 0 0.2rem; }
+.msg .images img { display: block; max-height: 14rem; max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
+
+/* Project view: threads sidebar beside the chat */
+.split { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+/* Sticky can't move past the bottom of .split, which ends main's 3rem bottom padding above the
+   page end. Keep the sidebar short enough (1rem top gap + 3rem) that the chat reaching the bottom
+   never drags it up, and keep wheel/touch scrolls inside it from chaining to the page. */
+.sidebar { position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
+.sidebar > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; }
+.sidebar details.new { margin: 0 0 1rem; }
+.sidebar details.new form { margin-top: 0.5rem; }
+.sidebar .column { margin-top: 1rem; }
+.ticket-card.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.ticket-card.coordinator .title::before { content: "◆ "; color: var(--accent); }
+.chat { min-width: 0; }
+@media (max-width: 800px) {
+  .split { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .sidebar { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+}

@@ -1,6 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 
 export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
+/** Each project has one long-lived coordinator ticket that manages the others. */
+export type TicketKind = 'ticket' | 'coordinator';
 
 export interface Project {
   id: number;
@@ -13,6 +15,7 @@ export interface Project {
 export interface Ticket {
   id: number;
   project_id: number;
+  kind: TicketKind;
   title: string;
   status: TicketStatus;
   session_id: string | null;
@@ -44,6 +47,7 @@ CREATE TABLE IF NOT EXISTS projects (
 CREATE TABLE IF NOT EXISTS tickets (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
+  kind TEXT NOT NULL DEFAULT 'ticket',
   title TEXT NOT NULL,
   status TEXT NOT NULL,
   session_id TEXT,
@@ -65,6 +69,11 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_ticket ON events(ticket_id, id);
 `;
 
+/** Columns added after the first release, for databases created before them. */
+const MIGRATIONS: [table: string, column: string, ddl: string][] = [
+  ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
+];
+
 export class Store {
   db: DatabaseSync;
 
@@ -72,6 +81,11 @@ export class Store {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.db.exec(SCHEMA);
+    for (const [table, column, ddl] of MIGRATIONS) {
+      const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+      if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+    }
+    this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS one_coordinator ON tickets(project_id) WHERE kind = 'coordinator'");
   }
 
   listProjects(): Project[] {
@@ -97,10 +111,17 @@ export class Store {
     this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
   }
 
+  /** All tickets in a project, including the coordinator. */
   listTickets(projectId: number): Ticket[] {
     return this.db
       .prepare('SELECT * FROM tickets WHERE project_id = ? ORDER BY updated_at DESC')
       .all(projectId) as unknown as Ticket[];
+  }
+
+  getCoordinator(projectId: number): Ticket | undefined {
+    return this.db
+      .prepare("SELECT * FROM tickets WHERE project_id = ? AND kind = 'coordinator'")
+      .get(projectId) as unknown as Ticket | undefined;
   }
 
   getTicket(id: number): Ticket | undefined {
@@ -108,14 +129,14 @@ export class Store {
   }
 
   /** Insert a ticket with no working directory yet; call setTicketDir once it exists. */
-  createTicket(t: Pick<Ticket, 'project_id' | 'title' | 'permission_mode' | 'created_by'>): Ticket {
+  createTicket(t: Pick<Ticket, 'project_id' | 'title' | 'permission_mode' | 'created_by'> & { kind?: TicketKind }): Ticket {
     const now = Date.now();
     const r = this.db
       .prepare(
-        `INSERT INTO tickets (project_id, title, status, cwd, permission_mode, created_by, created_at, updated_at)
-         VALUES (?, ?, 'new', '', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (project_id, kind, title, status, cwd, permission_mode, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'new', '', ?, ?, ?, ?)`,
       )
-      .run(t.project_id, t.title, t.permission_mode, t.created_by, now, now);
+      .run(t.project_id, t.kind ?? 'ticket', t.title, t.permission_mode, t.created_by, now, now);
     return this.getTicket(Number(r.lastInsertRowid))!;
   }
 

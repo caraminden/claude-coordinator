@@ -1,10 +1,13 @@
 // Runs ticket turns as headless `claude -p` processes, one turn per process.
 import { spawn, type ChildProcess } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
 import { applyEvent, createProgress, progressLine } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
+const MCP_SERVER = join(import.meta.dirname, 'mcp.ts');
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
@@ -12,9 +15,33 @@ const DROPPED_SYSTEM_SUBTYPES = new Set(['commands_changed']);
 
 export type Broadcast = (msg: object) => void;
 
+export interface MessageImage {
+  name: string;
+  path: string;
+  mediaType: string;
+}
+
 interface QueuedMessage {
   author: string;
   text: string;
+  images: MessageImage[];
+}
+
+/** One turn's prompt as a stream-json user message, so pasted images reach Claude as images. */
+function promptMessage(batch: QueuedMessage[]): string {
+  const content: object[] = [];
+  for (const m of batch) {
+    const text = m.text || (m.images.length ? '(sent an image)' : '');
+    content.push({ type: 'text', text: `[${m.author}]: ${text}` });
+    for (const img of m.images) {
+      try {
+        content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: readFileSync(img.path).toString('base64') } });
+      } catch {
+        content.push({ type: 'text', text: `(An image ${m.author} attached could not be loaded.)` });
+      }
+    }
+  }
+  return JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
 }
 
 function truncate(s: string): string {
@@ -49,13 +76,14 @@ function describeActivity(ev: any): string | null {
   const blocks: any[] = ev.message?.content ?? [];
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
-    if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) return b.text.trim().split('\n')[0].slice(0, 160);
+    if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) return b.text.trim().split('\n')[0].replace(/\*\*|`/g, '').slice(0, 160);
     if (b.type === 'tool_use') return `Using ${b.name}`;
   }
   return null;
 }
 
 function systemPrompt(project: Project, ticket: Ticket): string {
+  if (ticket.kind === 'coordinator') return coordinatorPrompt(project);
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the project repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this ticket.';
@@ -70,6 +98,22 @@ function systemPrompt(project: Project, ticket: Ticket): string {
   ].join('\n');
 }
 
+function coordinatorPrompt(project: Project): string {
+  return [
+    `You are the coordinator for project "${project.name}" in Claude Coordinator, a shared web app where several people chat with Claude Code sessions called tickets.`,
+    'People open the project and talk to you first. You keep track of the project\'s tickets and manage them with the `coordinator` MCP tools: list_tickets, read_ticket, create_ticket, message_ticket, update_ticket, close_ticket, reopen_ticket and stop_ticket.',
+    'Each ticket is a separate Claude Code session with its own git worktree and branch. Hand real work (code changes, investigations) to tickets rather than doing it yourself; give each new ticket a clear title and a self-contained first message, since it cannot see this conversation.',
+    'Tickets run in the background. To see progress, read them; do not wait or poll in a loop. Close tickets when people agree they are done.',
+    project.repo_dir
+      ? `The project's main checkout is at ${project.repo_dir} and ticket worktrees are under ${join(project.repo_dir, '..', 'tickets')}. You may read them for context, but do not edit, commit or switch branches there.`
+      : 'This project has no git repo; each ticket gets a plain folder.',
+    'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short and end each turn with what you did and what, if anything, you need from them.',
+  ].join('\n');
+}
+
+/** Extra process setup for coordinator turns: how its MCP server reaches the API. */
+export type CoordinatorEnv = (ticket: Ticket) => Record<string, string>;
+
 export class Runner {
   private procs = new Map<number, ChildProcess>();
   private queues = new Map<number, QueuedMessage[]>();
@@ -78,10 +122,12 @@ export class Runner {
   private store: Store;
   private broadcast: Broadcast;
   private claudeBin: string;
+  private coordinatorEnv: CoordinatorEnv;
 
-  constructor(store: Store, broadcast: Broadcast, claudeBin = 'claude') {
+  constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
     this.broadcast = broadcast;
+    this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
   }
 
@@ -106,10 +152,10 @@ export class Runner {
   }
 
   /** Record a user message and run it now, or queue it behind the current turn. */
-  send(ticketId: number, author: string, text: string) {
-    this.emit(ticketId, 'user_message', { author, text });
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = []) {
+    this.emit(ticketId, 'user_message', images.length ? { author, text, images: images.map((i) => i.name) } : { author, text });
     const q = this.queues.get(ticketId) ?? [];
-    q.push({ author, text });
+    q.push({ author, text, images });
     this.queues.set(ticketId, q);
     if (!this.isRunning(ticketId)) this.next(ticketId);
     else this.broadcastTicket(ticketId);
@@ -138,22 +184,28 @@ export class Runner {
     const ticket = this.store.getTicket(ticketId);
     const project = ticket && this.store.getProject(ticket.project_id);
     if (!ticket || !project) return;
-    const prompt = batch.map((m) => `[${m.author}]: ${m.text}`).join('\n\n');
-    this.startTurn(project, ticket, prompt);
+    this.startTurn(project, ticket, promptMessage(batch));
   }
 
   private startTurn(project: Project, ticket: Ticket, prompt: string) {
     const args = [
       '-p',
+      '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', ticket.permission_mode,
       '--append-system-prompt', systemPrompt(project, ticket),
     ];
     if (ticket.session_id) args.push('--resume', ticket.session_id);
-
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
-    const env = { ...process.env, CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
+    let env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
+    if (ticket.kind === 'coordinator') {
+      // The token travels in the environment (which the MCP server inherits), never on the command line.
+      const mcp = { mcpServers: { coordinator: { type: 'stdio', command: process.execPath, args: [MCP_SERVER] } } };
+      args.push('--mcp-config', JSON.stringify(mcp), '--allowedTools', 'mcp__coordinator');
+      env = { ...env, ...this.coordinatorEnv(ticket) };
+    }
+
     const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     this.procs.set(ticket.id, proc);
     this.setStatus(ticket.id, 'running');
@@ -221,7 +273,11 @@ export class Runner {
     const progress = this.progressFor(ticketId);
     applyEvent(progress, 'claude', slim);
     const activity = progress.tasks.length ? progressLine(progress, ev.type !== 'result') : describeActivity(ev);
-    if (activity) this.store.updateTicket(ticketId, { last_activity: activity });
+    if (activity && activity !== this.store.getTicket(ticketId)?.last_activity) {
+      this.store.updateTicket(ticketId, { last_activity: activity });
+      // Keep the board's progress line live, not just on status changes.
+      this.broadcastTicket(ticketId);
+    }
     this.emit(ticketId, 'claude', slim);
   }
 
@@ -237,7 +293,10 @@ export class Runner {
   }
 
   private setStatus(ticketId: number, status: Ticket['status']) {
-    this.store.updateTicket(ticketId, { status });
+    const progress = this.progressFor(ticketId);
+    // Re-word the plan's line too, so a stopped or interrupted turn stops saying "Running tests… 3/7".
+    const activity = progress.tasks.length ? progressLine(progress, status === 'running') : undefined;
+    this.store.updateTicket(ticketId, activity ? { status, last_activity: activity } : { status });
     this.broadcastTicket(ticketId);
   }
 

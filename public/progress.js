@@ -19,6 +19,11 @@ export function createProgress() {
 /** One-line description of a tool call, e.g. "Bash: Run the tests". */
 export function actionLabel(block) {
   const i = block.input || {};
+  if (block.name.startsWith('mcp__coordinator__')) {
+    const arg = [i.ticket_id ? `#${i.ticket_id}` : '', i.title || i.text || ''].filter(Boolean).join(' ');
+    const name = block.name.slice('mcp__coordinator__'.length).replace(/_/g, ' ');
+    return arg ? `${name}: ${arg.split('\n')[0].slice(0, 140)}` : name;
+  }
   const arg = (block.name === 'Bash' && i.description) || i.command || i.file_path || i.path || i.pattern || i.url || i.query || i.description || i.prompt || '';
   const first = String(arg).split('\n')[0].slice(0, 140);
   return first ? `${block.name}: ${first}` : block.name;
@@ -99,8 +104,9 @@ export function stepInfo(p) {
 /** Summary line, e.g. "Running the test suite… 3/7". */
 export function progressLine(p, running) {
   const { total, done, current, step } = stepInfo(p);
-  if (total) {
-    if (current) return `${current.activeForm || current.subject}… ${step}/${total}`;
+  // A finished plan from an earlier turn says nothing about a turn that is running now.
+  if (total && !(running && !current && done === total)) {
+    if (current) return running ? `${current.activeForm || current.subject}… ${step}/${total}` : `Paused at: ${current.subject} ${step}/${total}`;
     if (done === total) return `Done · ${total}/${total} steps`;
     return `${!running ? 'Paused' : done ? 'Working' : 'Planning'}… ${done}/${total}`;
   }

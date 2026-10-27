@@ -4,7 +4,6 @@ import { actionLabel, applyEvent, createProgress, progressLine, stepInfo } from 
 const app = document.getElementById('app');
 const crumbs = document.getElementById('crumbs');
 const meEl = document.getElementById('me');
-const progressEl = document.getElementById('progress');
 
 const STATUS_LABEL = { running: 'Running', idle: 'Waiting for you', new: 'Starting', error: 'Error', closed: 'Closed' };
 const COLUMNS = [
@@ -17,6 +16,7 @@ const COLUMNS = [
 let me = null;
 let view = null; // { kind, id, ... } for the current screen
 let stream = null;
+let assetVersion = null;
 
 // ---------- helpers ----------
 
@@ -95,26 +95,59 @@ function markdown(src) {
 
 // ---------- live updates ----------
 
-function connectStream() {
-  if (stream) return;
-  stream = new EventSource('/api/stream');
-  stream.onmessage = (e) => {
+let streamRetry = 0;
+let streamTimer = null;
+
+function connectStream(catchUp = false) {
+  if (stream || !me) return;
+  clearTimeout(streamTimer);
+  const es = new EventSource('/api/stream');
+  stream = es;
+  es.onopen = () => {
+    streamRetry = 0;
+    // Anything broadcast while we were disconnected was missed; fetch it.
+    if (catchUp) resync();
+    catchUp = true;
+  };
+  es.onmessage = (e) => {
     const msg = JSON.parse(e.data);
+    if (msg.type === 'hello') {
+      // The server restarted with a different front end; load it instead of running stale code.
+      if (assetVersion && msg.version !== assetVersion) location.reload();
+      assetVersion = msg.version;
+    }
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'event') onEvent(msg.event);
   };
-  stream.onerror = () => {
-    // EventSource reconnects on its own; catch up on what was missed once it does.
-    stream.onopen = resync;
+  es.onerror = () => {
+    // EventSource retries dropped connections itself, but gives up for good on a non-200
+    // reply (e.g. Caddy's 502 while the server restarts), so reconnect by hand then.
+    if (es.readyState !== EventSource.CLOSED) return;
+    es.close();
+    if (stream === es) stream = null;
+    streamTimer = setTimeout(() => connectStream(true), Math.min(30_000, 1000 * 2 ** streamRetry++));
   };
 }
 
+// Phones and sleeping laptops drop connections quietly; recheck when the page comes back.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !me) return;
+  if (!stream) connectStream(true);
+  else if (view?.kind === 'project') resync();
+});
+
 async function resync() {
-  if (view?.kind !== 'ticket') return route();
+  if (view?.kind !== 'project') return route();
   // Refresh in place so a half-typed message in the composer survives.
   try {
-    const { ticket } = await api(`/api/tickets/${view.id}`);
+    const [{ coordinator, tickets }, { ticket }] = await Promise.all([
+      api(`/api/projects/${view.projectId}`),
+      api(`/api/tickets/${view.id}`),
+    ]);
+    view.coordinator = coordinator;
+    view.tickets = new Map(tickets.map((t) => [t.id, t]));
     view.ticket = ticket;
+    renderSidebar();
     renderTicketHead();
     await catchUpEvents();
   } catch {}
@@ -126,17 +159,18 @@ async function catchUpEvents() {
 }
 
 function onTicketUpdate(ticket) {
-  if (view?.kind === 'board' && view.id === ticket.project_id) {
-    view.tickets.set(ticket.id, ticket);
-    renderBoard();
-  } else if (view?.kind === 'ticket' && view.id === ticket.id) {
+  if (view?.kind !== 'project' || view.projectId !== ticket.project_id) return;
+  if (ticket.kind === 'coordinator') view.coordinator = ticket;
+  else view.tickets.set(ticket.id, ticket);
+  renderSidebar();
+  if (view.id === ticket.id) {
     view.ticket = ticket;
     renderTicketHead();
   }
 }
 
 function onEvent(event) {
-  if (view?.kind !== 'ticket' || view.id !== event.ticket_id) return;
+  if (view?.kind !== 'project' || view.id !== event.ticket_id) return;
   if (event.id <= view.lastEventId) return;
   appendEvent(event);
 }
@@ -145,11 +179,10 @@ function onEvent(event) {
 
 async function route() {
   if (!me) return;
-  progressEl.hidden = true;
   const hash = location.hash || '#/';
   let m;
   try {
-    if ((m = hash.match(/^#\/p\/(\d+)$/))) await showBoard(Number(m[1]));
+    if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/t\/(\d+)$/))) await showTicket(Number(m[1]));
     else await showProjects();
   } catch (err) {
@@ -163,7 +196,6 @@ window.addEventListener('hashchange', route);
 
 function renderLogin() {
   view = null;
-  progressEl.hidden = true;
   crumbs.replaceChildren();
   meEl.replaceChildren();
   app.replaceChildren(document.getElementById('login-tpl').content.cloneNode(true));
@@ -192,6 +224,7 @@ function start(name) {
 
 async function logout() {
   await api('/api/logout', { method: 'POST', body: {} });
+  clearTimeout(streamTimer);
   stream?.close();
   stream = null;
   me = null;
@@ -239,27 +272,149 @@ async function showProjects() {
   );
 }
 
-// ---------- board ----------
+// ---------- project: threads sidebar + chat ----------
 
-async function showBoard(projectId) {
-  const { project, tickets } = await api(`/api/projects/${projectId}`);
-  view = { kind: 'board', id: projectId, project, tickets: new Map(tickets.map((t) => [t.id, t])) };
-  crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', project.name);
+const isCoordinator = (t) => t.kind === 'coordinator';
 
+function statusLabel(t) {
+  if (isCoordinator(t) && t.status === 'new') return 'Ready';
+  return STATUS_LABEL[t.status];
+}
+
+async function showTicket(ticketId) {
+  const { ticket } = await api(`/api/tickets/${ticketId}`);
+  // The coordinator lives at the project's own address.
+  if (isCoordinator(ticket)) return location.replace(`#/p/${ticket.project_id}`);
+  await showProject(ticket.project_id, ticketId);
+}
+
+/** A project page: its threads on the side, and a chat with the coordinator (or the chosen ticket). */
+async function showProject(projectId, ticketId = null) {
+  const { project, coordinator, tickets } = await api(`/api/projects/${projectId}`);
+  const chatId = ticketId ?? coordinator.id;
+  const [{ ticket }, events] = await Promise.all([
+    api(`/api/tickets/${chatId}`),
+    api(`/api/tickets/${chatId}/events`),
+  ]);
+  view = {
+    kind: 'project', projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
+    id: chatId, ticket, lastEventId: 0,
+    stats: { messages: 0, turns: 0, cost: 0, lastAt: 0 },
+    progress: createProgress(),
+    progressEl: h('div', { class: 'progress', hidden: true }), // lives in the thread bar
+    ui: progressUi(chatId),
+    actions: new Map(), // tool_use_id -> { block, taskId, result }
+    turnActions: [], // actions of the current (or last) turn, in order
+  };
+  crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ',
+    ...(ticketId ? [h('a', { href: `#/p/${project.id}` }, project.name), ' / ', `#${ticket.id}`] : [project.name]));
+
+  const narrow = matchMedia('(max-width: 800px)').matches;
+  const sidebar = h('details', { class: 'sidebar', open: !narrow },
+    h('summary', {}, project.name, h('span', { class: 'muted', id: 'thread-count' })),
+    newTicketForm(projectId),
+    h('div', { id: 'threads' }));
+
+  const textarea = h('textarea', {
+    placeholder: isCoordinator(ticket)
+      ? 'Ask the coordinator to start, check on, or close tickets… (Enter to send, Shift+Enter for a new line)'
+      : 'Message this ticket… (Enter to send, Shift+Enter for a new line)',
+  });
+  const sendBtn = h('button', { type: 'submit' }, 'Send');
+  const attachments = createAttachments();
+  const picker = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
+  picker.addEventListener('change', () => {
+    attachments.add(picker.files);
+    picker.value = '';
+  });
+  const form = h('form', { class: 'composer' }, attachments.el, textarea, picker,
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'secondary small', onclick: () => picker.click() }, 'Add image'),
+      h('span', { class: 'muted', id: 'composer-hint' }), h('span', { class: 'spacer' }), sendBtn));
+  textarea.addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    attachments.add(files);
+  });
+  form.addEventListener('dragover', (e) => {
+    if ([...e.dataTransfer.items].some((i) => i.type.startsWith('image/'))) e.preventDefault();
+  });
+  form.addEventListener('drop', (e) => {
+    const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    attachments.add(files);
+  });
+  textarea.addEventListener('keydown', (e) => {
+    // Leave Enter alone while an IME is composing text, or it would send half a word.
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = textarea.value.trim();
+    if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.');
+    if (!text && !attachments.items.length) return;
+    sendBtn.disabled = true;
+    try {
+      const images = attachments.items.map(({ mediaType, data }) => ({ mediaType, data }));
+      const ticket = await api(`/api/tickets/${chatId}/messages`, { method: 'POST', body: { text, images } });
+      textarea.value = '';
+      attachments.clear();
+      // Show the message now even if the live stream is down; duplicates are skipped by id.
+      if (view?.kind === 'project' && view.id === chatId) {
+        view.ticket = ticket;
+        renderTicketHead();
+        catchUpEvents().catch(() => {});
+      }
+    } catch (ex) {
+      alertNote(ex.message);
+    } finally {
+      sendBtn.disabled = false;
+    }
+  });
+
+  const log = h('div', { class: 'log', id: 'log' });
+  if (isCoordinator(ticket) && !events.length) {
+    log.append(h('div', { class: 'note' },
+      'This is the project coordinator. It keeps track of the threads on the left and can create, message, rename and close them for you.'));
+  }
+  app.replaceChildren(h('div', { class: 'split' }, sidebar,
+    h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, form)));
+  renderSidebar();
+  renderTicketHead();
+  for (const ev of events) appendEvent(ev, false);
+  window.scrollTo(0, document.body.scrollHeight);
+  // Events broadcast while the snapshot was loading arrived before `view` existed.
+  await catchUpEvents();
+}
+
+function newTicketForm(projectId) {
   const form = h('form', {},
     h('label', {}, 'Title', h('input', { name: 'title', required: true, maxlength: 120 })),
-    h('label', {}, 'First message', h('textarea', { name: 'message', required: true, rows: 5, placeholder: 'What should this thread work on?' })),
+    h('label', {}, 'First message', h('textarea', { name: 'message', required: true, rows: 5, placeholder: 'What should this thread work on? (Enter to send, Shift+Enter for a new line)' })),
     h('label', {}, 'Permissions',
       h('select', { name: 'permissionMode' },
-        h('option', { value: 'acceptEdits' }, 'Edit files; ask before running commands (commands are refused for now)'),
         h('option', { value: 'bypassPermissions' }, 'Full access: edit files and run any command'),
+        h('option', { value: 'acceptEdits' }, 'Edit files only; shell commands are refused'),
         h('option', { value: 'plan' }, 'Plan only: read and plan, no changes'))),
     h('p', { class: 'error', hidden: true }),
-    h('button', { type: 'submit' }, 'Start ticket'));
+    h('button', { type: 'submit' }, 'Start thread'));
+  form.message.addEventListener('keydown', (e) => {
+    // Same as the chat composer: Enter sends, Shift+Enter adds a line, IME composition is left alone.
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = form.querySelector('button');
     const err = form.querySelector('.error');
+    if (btn.disabled) return;
     btn.disabled = true;
     try {
       const t = await api(`/api/projects/${projectId}/tickets`, {
@@ -273,88 +428,117 @@ async function showBoard(projectId) {
       btn.disabled = false;
     }
   });
-
-  app.replaceChildren(
-    h('div', { class: 'row' }, h('h2', {}, project.name), h('span', { class: 'muted' }, project.repo_url || '')),
-    h('details', { class: 'new', open: !tickets.length }, h('summary', {}, 'New ticket'), h('div', { class: 'card' }, form)),
-    h('div', { class: 'board', id: 'board' }),
-  );
-  renderBoard();
+  return h('details', { class: 'new' }, h('summary', {}, 'New thread'), form);
 }
 
-function renderBoard() {
-  const board = document.getElementById('board');
-  if (!board) return;
+function renderSidebar() {
+  const el = document.getElementById('threads');
+  if (!el) return;
   const tickets = [...view.tickets.values()].sort((a, b) => b.updated_at - a.updated_at);
-  board.replaceChildren(...COLUMNS.map((col) => {
-    const items = tickets.filter((t) => col.match(t.status));
-    if (col.key === 'closed' && !items.length) return '';
-    return h('section', { class: 'column' },
-      h('h3', {}, h('span', { class: `dot ${col.key === 'waiting' ? 'idle' : col.key}` }), col.label, h('span', { class: 'count' }, items.length)),
-      items.length ? items.map(ticketCard) : h('p', { class: 'muted' }, 'None'));
-  }));
+  const open = tickets.filter((t) => t.status !== 'closed').length;
+  document.getElementById('thread-count').textContent = ` · ${open} open`;
+  el.replaceChildren(
+    ticketCard(view.coordinator, `#/p/${view.projectId}`),
+    ...COLUMNS.map((col) => {
+      const items = tickets.filter((t) => col.match(t.status));
+      if (!items.length) return '';
+      const heading = [h('span', { class: `dot ${col.key === 'waiting' ? 'idle' : col.key}` }), col.label, h('span', { class: 'count' }, items.length)];
+      if (col.key === 'closed') {
+        // Closed threads stay out of the way but can still be opened and reopened.
+        const closed = h('details', { class: 'column closed', open: view.showClosed }, h('summary', {}, heading), items.map((t) => ticketCard(t)));
+        closed.addEventListener('toggle', () => { view.showClosed = closed.open; });
+        return closed;
+      }
+      return h('section', { class: 'column' }, h('h3', {}, heading), items.map((t) => ticketCard(t)));
+    }),
+    tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or use New thread.'));
 }
 
-function ticketCard(t) {
-  return h('a', { class: `card ticket-card s-${t.status}`, href: `#/t/${t.id}` },
-    h('div', { class: 'title' }, `#${t.id} ${t.title}`),
+function ticketCard(t, href = `#/t/${t.id}`) {
+  const coord = isCoordinator(t);
+  return h('a', { class: `card ticket-card s-${t.status}${coord ? ' coordinator' : ''}${view.id === t.id ? ' active' : ''}`, href },
+    h('div', { class: 'title' }, coord ? 'Coordinator' : `#${t.id} ${t.title}`),
     t.last_activity ? h('div', { class: 'activity' }, t.last_activity) : '',
     h('div', { class: 'meta' }, [
-      STATUS_LABEL[t.status],
+      statusLabel(t),
       t.queued ? `${t.queued} queued` : '',
-      `by ${t.created_by}`,
+      coord ? '' : `by ${t.created_by}`,
       ago(t.updated_at),
     ].filter(Boolean).join(' · ')));
 }
 
-// ---------- ticket ----------
+// ---------- pasted images ----------
 
-async function showTicket(ticketId) {
-  const [{ ticket, project }, events] = await Promise.all([
-    api(`/api/tickets/${ticketId}`),
-    api(`/api/tickets/${ticketId}/events`),
-  ]);
-  view = {
-    kind: 'ticket', id: ticketId, ticket, project, lastEventId: 0,
-    progress: createProgress(),
-    actions: new Map(), // tool_use_id -> { block, taskId, result }
-    turnActions: [], // actions of the current (or last) turn, in order
-    progressOpen: false,
-    openSteps: new Set(),
+const MAX_IMAGES = 6;
+const MAX_IMAGE_EDGE = 2000;
+const MAX_IMAGE_BYTES = 3.5 * 1024 * 1024; // base64 adds a third; the server caps decoded images at 5 MB
+const SENDABLE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
+/** Pending images in the composer: thumbnails with a remove button, read as base64 for sending. */
+function createAttachments() {
+  const el = h('div', { class: 'attachments', hidden: true });
+  const state = { el, items: [], busy: 0 };
+  const render = () => {
+    el.hidden = !state.items.length;
+    el.replaceChildren(...state.items.map((item) => h('div', { class: 'thumb' },
+      h('img', { src: item.url, alt: 'Image to send' }),
+      h('button', { type: 'button', title: 'Remove', onclick: () => {
+        URL.revokeObjectURL(item.url);
+        state.items.splice(state.items.indexOf(item), 1);
+        render();
+      } }, '×'))));
   };
-  crumbs.replaceChildren(
-    h('a', { href: '#/' }, 'Projects'), ' / ',
-    h('a', { href: `#/p/${project.id}` }, project.name), ' / ',
-    `#${ticket.id}`);
-
-  const textarea = h('textarea', { placeholder: 'Message this ticket… (Ctrl+Enter to send)' });
-  const sendBtn = h('button', { type: 'submit' }, 'Send');
-  const form = h('form', { class: 'composer' }, textarea,
-    h('div', { class: 'row' }, h('span', { class: 'muted', id: 'composer-hint' }), h('span', { class: 'spacer' }), sendBtn));
-  textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) form.requestSubmit();
-  });
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const text = textarea.value.trim();
-    if (!text) return;
-    sendBtn.disabled = true;
-    try {
-      await api(`/api/tickets/${ticketId}/messages`, { method: 'POST', body: { text } });
-      textarea.value = '';
-    } catch (ex) {
-      alertNote(ex.message);
-    } finally {
-      sendBtn.disabled = false;
+  state.add = async (files) => {
+    for (const file of files) {
+      if (state.items.length + state.busy >= MAX_IMAGES) {
+        alertNote(`At most ${MAX_IMAGES} images per message.`);
+        break;
+      }
+      state.busy++;
+      try {
+        const blob = await prepareImage(file);
+        const data = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result).split(',')[1]);
+          r.onerror = () => reject(r.error);
+          r.readAsDataURL(blob);
+        });
+        state.items.push({ url: URL.createObjectURL(blob), mediaType: blob.type, data });
+        render();
+      } catch (err) {
+        alertNote(`Could not add image: ${err.message}`);
+      } finally {
+        state.busy--;
+      }
     }
-  });
+  };
+  state.clear = () => {
+    for (const item of state.items) URL.revokeObjectURL(item.url);
+    state.items = [];
+    render();
+  };
+  return state;
+}
 
-  app.replaceChildren(h('div', { class: 'ticket-head', id: 'ticket-head' }), h('div', { class: 'log', id: 'log' }), form);
-  renderTicketHead();
-  for (const ev of events) appendEvent(ev, false);
-  window.scrollTo(0, document.body.scrollHeight);
-  // Events broadcast while the snapshot was loading arrived before `view` existed.
-  await catchUpEvents();
+/** Shrink big images (and convert odd formats) so they fit the API's size limits. */
+async function prepareImage(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));
+  if (scale === 1 && file.size <= MAX_IMAGE_BYTES && SENDABLE_TYPES.includes(file.type)) {
+    bitmap.close();
+    return file;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const encode = (type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+  // Screenshots stay sharp as PNG; fall back to JPEG when that is still too big.
+  let blob = await encode('image/png');
+  if (!blob || blob.size > MAX_IMAGE_BYTES) blob = await encode('image/jpeg', 0.85);
+  if (!blob || blob.size > MAX_IMAGE_BYTES) throw new Error('image is too large');
+  return blob;
 }
 
 function alertNote(text) {
@@ -365,40 +549,61 @@ function renderTicketHead() {
   const el = document.getElementById('ticket-head');
   if (!el) return;
   const t = view.ticket;
+  const coord = isCoordinator(t);
   const actions = [];
   if (t.status === 'running') {
     actions.push(h('button', { class: 'secondary', onclick: () => api(`/api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));
+  } else if (coord) {
+    // The coordinator stays open for the life of the project.
   } else if (t.status === 'closed') {
     actions.push(h('button', { class: 'secondary', onclick: () => setStatus(t.id, 'idle') }, 'Reopen'));
   } else {
-    actions.push(h('button', { class: 'secondary', onclick: () => setStatus(t.id, 'closed') }, 'Close ticket'));
+    actions.push(h('button', { class: 'secondary', onclick: async () => {
+      if (await setStatus(t.id, 'closed')) location.hash = `#/p/${t.project_id}`;
+    } }, 'Close ticket'));
   }
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
-      h('h2', {}, `#${t.id} ${t.title}`),
-      h('span', { class: 'muted' }, STATUS_LABEL[t.status] + (t.queued ? ` · ${t.queued} queued` : '')),
+      h('h2', {}, coord ? 'Coordinator' : `#${t.id} ${t.title}`),
+      h('span', { class: 'muted' }, statusLabel(t) + (t.queued ? ` · ${t.queued} queued` : '')),
       h('span', { class: 'spacer' }), ...actions),
-    h('div', { class: 'meta' }, [
-      t.branch ? `branch ${t.branch}` : null,
-      `permissions: ${t.permission_mode}`,
-      `started by ${t.created_by}`,
-      t.cwd,
-    ].filter(Boolean).join(' · ')));
+    h('div', { class: 'meta', title: coord ? '' : t.cwd }, (coord
+      ? ["Manages this project's threads"]
+      : [t.branch ? `branch ${t.branch}` : null, `permissions: ${t.permission_mode}`, `started by ${t.created_by}`]
+    ).filter(Boolean).join(' · ')),
+    h('div', { class: 'stats', id: 'ticket-stats' }),
+    view.progressEl);
+  renderStats();
   const hint = document.getElementById('composer-hint');
   if (hint) hint.textContent = t.status === 'running' ? 'Messages sent now run after the current turn.' : '';
   scheduleProgress();
 }
 
+/** The summary line in the thread bar, tallied from the events shown in the log. */
+function renderStats() {
+  const el = document.getElementById('ticket-stats');
+  if (!el) return;
+  const s = view.stats;
+  el.replaceChildren(...[
+    `${s.messages} message${s.messages === 1 ? '' : 's'}`,
+    `${s.turns} turn${s.turns === 1 ? '' : 's'}`,
+    s.cost ? `$${s.cost.toFixed(2)} spent` : null,
+    s.lastAt ? `last activity ${ago(s.lastAt)}` : null,
+  ].filter(Boolean).map((text) => h('span', {}, text)));
+}
+
 async function setStatus(id, status) {
   try {
     await api(`/api/tickets/${id}/status`, { method: 'POST', body: { status } });
+    return true;
   } catch (e) {
     alertNote(e.message);
+    return false;
   }
 }
 
-// ---------- work progress (top-bar readout) ----------
+// ---------- work progress (thread-bar readout) ----------
 
 const STEP_ICON = { completed: '✓', in_progress: '◐', pending: '○' };
 
@@ -424,14 +629,22 @@ function actionList(actions) {
   return h('div', { class: 'actions' }, actions.map(actionEl));
 }
 
+/** Which parts of a ticket's readout are expanded; kept per ticket so re-renders and reconnects don't fold it up. */
+const progressUiState = new Map();
+function progressUi(ticketId) {
+  if (!progressUiState.has(ticketId)) progressUiState.set(ticketId, { open: false, openSteps: new Set() });
+  return progressUiState.get(ticketId);
+}
+
 let progressFrame = 0;
 function scheduleProgress() {
   if (!progressFrame) progressFrame = requestAnimationFrame(() => { progressFrame = 0; renderProgress(); });
 }
 
 function renderProgress() {
-  if (view?.kind !== 'ticket') return;
+  if (view?.kind !== 'project') return;
   const p = view.progress;
+  const progressEl = view.progressEl;
   const running = view.ticket.status === 'running';
   const line = progressLine(p, running);
   if (!line) {
@@ -443,43 +656,43 @@ function renderProgress() {
   const text = m ? m[1] : line;
   const count = m ? m[2] : running && p.turnActions ? `${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
 
-  const bar = h('button', { class: 'progress-line', 'aria-expanded': String(view.progressOpen), onclick: () => {
-    view.progressOpen = !view.progressOpen;
+  const bar = h('button', { class: 'progress-line', 'aria-expanded': String(view.ui.open), onclick: () => {
+    view.ui.open = !view.ui.open;
     renderProgress();
   } },
     h('span', { class: `dot ${running ? 'running' : view.ticket.status}` }),
     h('span', { class: 'text' }, text),
     count ? h('span', { class: 'count' }, count) : '',
-    h('span', { class: 'chev' }, view.progressOpen ? '▴' : '▾'));
+    h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'));
   const meter = total ? h('progress', { class: 'meter', max: total, value: done }) : '';
 
   const prevDetail = progressEl.querySelector('.progress-detail');
   const scrollTop = prevDetail?.scrollTop ?? 0;
   let detail = '';
-  if (view.progressOpen) {
+  if (view.ui.open) {
     const all = [...view.actions.values()];
     const steps = p.tasks.map((t) => {
       const acts = all.filter((a) => a.taskId === t.id);
       const isCurrent = t === current;
-      const el = h('details', { class: `step ${t.status}`, open: view.openSteps.has(t.id) || null },
+      const el = h('details', { class: `step ${t.status}${isCurrent && !running ? ' paused' : ''}`, open: view.ui.openSteps.has(t.id) || null },
         h('summary', {},
           h('span', { class: 'icon' }, STEP_ICON[t.status] ?? '○'),
           h('span', { class: 'subject' }, t.subject),
-          isCurrent && t.activeForm ? h('span', { class: 'muted' }, ` — ${t.activeForm}…`) : '',
+          isCurrent ? h('span', { class: 'muted' }, running ? (t.activeForm ? ` — ${t.activeForm}…` : '') : ' — paused') : '',
           h('span', { class: 'muted n' }, acts.length ? `${acts.length} action${acts.length === 1 ? '' : 's'}` : t.status === 'pending' ? 'not started' : '')),
         acts.length ? actionList(acts) : h('p', { class: 'muted empty' }, 'No actions yet.'));
-      el.addEventListener('toggle', () => (el.open ? view.openSteps.add(t.id) : view.openSteps.delete(t.id)));
+      el.addEventListener('toggle', () => (el.open ? view.ui.openSteps.add(t.id) : view.ui.openSteps.delete(t.id)));
       return el;
     });
     const loose = view.turnActions.filter((a) => a.taskId == null || !p.tasks.some((t) => t.id === a.taskId));
     const looseEl = loose.length
-      ? h('details', { class: 'step loose', open: !p.tasks.length || view.openSteps.has('loose') || null },
+      ? h('details', { class: 'step loose', open: (view.ui.looseOpen ?? !p.tasks.length) || null },
           h('summary', {}, h('span', { class: 'icon' }, '⋯'),
             h('span', { class: 'subject' }, p.tasks.length ? 'Other actions this turn' : running ? 'Actions this turn' : 'Actions last turn'),
             h('span', { class: 'muted n' }, String(loose.length))),
           actionList(loose))
       : '';
-    if (looseEl) looseEl.addEventListener('toggle', () => (looseEl.open ? view.openSteps.add('loose') : view.openSteps.delete('loose')));
+    if (looseEl) looseEl.addEventListener('toggle', () => (view.ui.looseOpen = looseEl.open));
     detail = h('div', { class: 'progress-detail' },
       steps.length ? h('div', { class: 'steps' }, steps) : '',
       looseEl,
@@ -495,6 +708,14 @@ function appendEvent(event, scroll = true) {
   const log = document.getElementById('log');
   if (!log) return;
   const data = JSON.parse(event.data);
+  const stats = view.stats;
+  stats.lastAt = Math.max(stats.lastAt, event.created_at);
+  if (event.kind === 'user_message') stats.messages++;
+  if (event.kind === 'claude' && data.type === 'result') {
+    stats.turns++;
+    stats.cost += data.total_cost_usd || 0;
+  }
+  renderStats();
   if (event.kind === 'claude' && data.type === 'system' && data.subtype === 'init') view.turnActions = [];
   for (const { block, taskId } of applyEvent(view.progress, event.kind, data)) {
     const action = { block, taskId, result: null };
@@ -507,7 +728,13 @@ function appendEvent(event, scroll = true) {
 
   if (event.kind === 'user_message') {
     const msg = h('div', { class: 'msg user' }, h('div', { class: 'who' }, data.author));
-    msg.append(markdown(data.text));
+    if (data.text) msg.append(markdown(data.text));
+    if (data.images?.length) {
+      msg.append(h('div', { class: 'images' }, data.images.map((name) => {
+        const src = `/api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`;
+        return h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' }));
+      })));
+    }
     nodes.push(msg);
   } else if (event.kind === 'note') {
     nodes.push(h('div', { class: 'note' }, data.text));
@@ -556,5 +783,13 @@ function appendEvent(event, scroll = true) {
 }
 
 // ---------- boot ----------
+
+// Sticky elements sit just below the top bar, whose height changes with wrapping and safe areas.
+const topbar = document.querySelector('.topbar');
+// Use the exact height: at fractional display scaling (e.g. 175%) a rounded one leaves a sliver
+// where scrolled chat text shows through.
+new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${topbar.getBoundingClientRect().height}px`)).observe(topbar);
+// Keep "last activity 3m ago" honest.
+setInterval(() => view?.kind === 'project' && renderStats(), 30_000);
 
 api('/api/me').then((r) => start(r.name)).catch(() => {});

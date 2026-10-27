@@ -1,20 +1,31 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
-import { readFile, mkdir } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
+import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { homedir } from 'node:os';
-import { Auth, type Session } from './src/auth.ts';
-import { Store } from './src/db.ts';
+import { AGENT_NAME, Auth, type Session } from './src/auth.ts';
+import { Store, type Project, type Ticket } from './src/db.ts';
 import { Runner } from './src/runner.ts';
-import { cloneProject, createTicketDir, removeProjectDir } from './src/workspace.ts';
+import { cloneProject, createTicketDir, projectDir, removeProjectDir } from './src/workspace.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
 const DATA_DIR = process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator');
 const PUBLIC_DIR = join(import.meta.dirname, 'public');
 const PERMISSION_MODES = ['acceptEdits', 'bypassPermissions', 'plan', 'default'];
+// Headless turns can't ask for approval, so anything short of full access refuses most shell commands.
+const DEFAULT_PERMISSION_MODE = 'bypassPermissions';
+// The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
+const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
+const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 
 await mkdir(DATA_DIR, { recursive: true });
+// Fingerprint of the front end, so open tabs can tell they are stale after a deploy.
+const ASSET_VERSION = createHash('sha256')
+  .update((await Promise.all((await readdir(PUBLIC_DIR)).sort().map((f) => readFile(join(PUBLIC_DIR, f))))).join('\0'))
+  .digest('hex')
+  .slice(0, 12);
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '');
 // Keep secrets out of the environment that claude and its tools inherit.
@@ -38,12 +49,22 @@ function broadcast(msg: object) {
 }
 
 const SECURITY_HEADERS = {
-  'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  // blob: lets the composer preview pasted images before they are sent.
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
 };
 
-const runner = new Runner(store, broadcast, process.env.CLAUDE_BIN ?? 'claude');
+const runner = new Runner(
+  store,
+  broadcast,
+  (ticket) => ({
+    COORDINATOR_API: `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${PORT}`,
+    COORDINATOR_TOKEN: auth.agentToken(ticket.id),
+    COORDINATOR_PROJECT: String(ticket.project_id),
+  }),
+  process.env.CLAUDE_BIN ?? 'claude',
+);
 runner.recover();
 
 class HttpError extends Error {
@@ -60,7 +81,7 @@ function json(res: ServerResponse, status: number, body: unknown, headers: Recor
   res.end(JSON.stringify(body));
 }
 
-async function readJson(req: IncomingMessage): Promise<any> {
+async function readJson(req: IncomingMessage, maxBytes = 1_000_000): Promise<any> {
   if (!(req.headers['content-type'] ?? '').startsWith('application/json')) {
     throw new HttpError(415, 'Expected application/json');
   }
@@ -68,7 +89,7 @@ async function readJson(req: IncomingMessage): Promise<any> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 1_000_000) throw new HttpError(413, 'Request too large');
+    if (size > maxBytes) throw new HttpError(413, 'Request too large');
     chunks.push(chunk);
   }
   try {
@@ -108,6 +129,74 @@ function ticketView(id: number) {
   return { ...t, queued: runner.queued(id) };
 }
 
+/** The project's coordinator ticket, created the first time someone opens the project. */
+async function ensureCoordinator(project: Project): Promise<Ticket> {
+  const existing = store.getCoordinator(project.id);
+  if (existing) return existing;
+  const cwd = join(projectDir(DATA_DIR, project.id), 'coordinator');
+  await mkdir(cwd, { recursive: true });
+  try {
+    const t = store.createTicket({
+      project_id: project.id,
+      kind: 'coordinator',
+      title: 'Coordinator',
+      permission_mode: COORDINATOR_PERMISSION_MODE,
+      created_by: AGENT_NAME,
+    });
+    store.setTicketDir(t.id, cwd, null);
+  } catch {
+    // Lost a race with a concurrent request; the unique index kept a single coordinator.
+  }
+  return store.getCoordinator(project.id)!;
+}
+
+/** The project a coordinator's token may act on, or null for a signed-in person. */
+function agentProject(session: Session): number | null {
+  if (session.agent === undefined) return null;
+  const t = store.getTicket(session.agent);
+  if (t?.kind !== 'coordinator') throw new HttpError(403, 'Not a coordinator');
+  return t.project_id;
+}
+
+// Images people paste into a chat. 5 MB is the API's per-image limit.
+const MAX_IMAGES = 6;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const IMAGE_TYPES: { type: string; ext: string; magic: (b: Buffer) => boolean }[] = [
+  { type: 'image/png', ext: '.png', magic: (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
+  { type: 'image/jpeg', ext: '.jpg', magic: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  { type: 'image/gif', ext: '.gif', magic: (b) => b.subarray(0, 4).toString('latin1') === 'GIF8' },
+  { type: 'image/webp', ext: '.webp', magic: (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP' },
+];
+const IMAGE_NAME = /^[0-9a-f]{24}\.(png|jpg|gif|webp)$/;
+
+function uploadsDir(ticket: Ticket): string {
+  return join(projectDir(DATA_DIR, ticket.project_id), 'uploads', String(ticket.id));
+}
+
+/** Check pasted images (base64 in the request body) and write them to the ticket's uploads folder. */
+async function saveImages(ticket: Ticket, raw: unknown): Promise<{ name: string; path: string; mediaType: string }[]> {
+  if (raw == null || (Array.isArray(raw) && !raw.length)) return [];
+  if (!Array.isArray(raw)) throw new HttpError(400, 'images must be a list');
+  if (raw.length > MAX_IMAGES) throw new HttpError(400, `At most ${MAX_IMAGES} images per message`);
+  const decoded = raw.map((img) => {
+    const buf = Buffer.from(typeof img?.data === 'string' ? img.data : '', 'base64');
+    if (!buf.length) throw new HttpError(400, 'Empty image');
+    if (buf.length > MAX_IMAGE_BYTES) throw new HttpError(413, 'Images must be under 5 MB each');
+    // Trust the bytes, not the declared type, since these get served back to browsers.
+    const kind = IMAGE_TYPES.find((t) => t.magic(buf));
+    if (!kind) throw new HttpError(415, 'Images must be PNG, JPEG, GIF or WebP');
+    return { buf, kind };
+  });
+  const dir = uploadsDir(ticket);
+  await mkdir(dir, { recursive: true });
+  return Promise.all(decoded.map(async ({ buf, kind }) => {
+    const name = randomBytes(12).toString('hex') + kind.ext;
+    const path = join(dir, name);
+    await writeFile(path, buf);
+    return { name, path, mediaType: kind.type };
+  }));
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -136,6 +225,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const ip = clientIp(req);
     const body = await readJson(req);
     const name = cleanName(body.name);
+    if (name.toLowerCase() === AGENT_NAME.toLowerCase()) throw new HttpError(400, 'That name is reserved');
     // Checked right before the password (no await in between) so parallel bursts are counted.
     if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
     if (!auth.checkPassword(ip, String(body.password ?? ''))) throw new HttpError(401, 'Wrong password');
@@ -161,10 +251,19 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
 
   if (pathname === '/api/me') return json(res, 200, { name: session.name });
 
+  // A coordinator may only touch its own project's tickets, and not itself.
+  const scope = agentProject(session);
+  const inScope = (projectId: number) => {
+    if (scope !== null && scope !== projectId) throw new HttpError(403, 'Outside this coordinator\'s project');
+  };
+  if (scope !== null && !/^\/api\/(projects\/\d+(\/tickets)?|tickets\/\d+(\/[a-z]+)?)$/.test(pathname)) {
+    throw new HttpError(403, 'Not available to the coordinator');
+  }
+
   if (pathname === '/api/stream') {
     if (clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
-    res.write(': connected\n\n');
+    res.write(`data: ${JSON.stringify({ type: 'hello', version: ASSET_VERSION })}\n\n`);
     clients.add(res);
     const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
     req.on('close', () => {
@@ -176,7 +275,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
 
   if (pathname === '/api/projects') {
     if (method === 'GET') {
-      return json(res, 200, store.listProjects().map((p) => ({ ...p, tickets: store.listTickets(p.id).length })));
+      return json(res, 200, store.listProjects().map((p) => ({ ...p, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length })));
     }
     if (method === 'POST') {
       const body = await readJson(req);
@@ -206,18 +305,24 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   if (m && method === 'GET') {
     const project = store.getProject(Number(m[1]));
     if (!project) throw new HttpError(404, 'No such project');
-    const tickets = store.listTickets(project.id).map((t) => ({ ...t, queued: runner.queued(t.id) }));
-    return json(res, 200, { project, tickets });
+    inScope(project.id);
+    const coordinator = await ensureCoordinator(project);
+    const tickets = store
+      .listTickets(project.id)
+      .filter((t) => t.kind === 'ticket')
+      .map((t) => ({ ...t, queued: runner.queued(t.id) }));
+    return json(res, 200, { project, coordinator: ticketView(coordinator.id), tickets });
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/tickets$/);
   if (m && method === 'POST') {
     const project = store.getProject(Number(m[1]));
     if (!project) throw new HttpError(404, 'No such project');
+    inScope(project.id);
     const body = await readJson(req);
     const title = str(body.title, 'Title', 120);
     const message = str(body.message, 'First message', 100_000);
-    const mode = PERMISSION_MODES.includes(body.permissionMode) ? body.permissionMode : 'acceptEdits';
+    const mode = PERMISSION_MODES.includes(body.permissionMode) ? body.permissionMode : DEFAULT_PERMISSION_MODE;
     // Insert first so concurrent creates get distinct ids, then build the working dir.
     const { id } = store.createTicket({ project_id: project.id, title, permission_mode: mode, created_by: session.name });
     try {
@@ -231,20 +336,54 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     return json(res, 201, ticketView(id));
   }
 
+  m = pathname.match(/^\/api\/tickets\/(\d+)\/images\/([^/]+)$/);
+  if (m && method === 'GET') {
+    const ticket = ticketView(Number(m[1]));
+    inScope(ticket.project_id);
+    if (!IMAGE_NAME.test(m[2])) throw new HttpError(404, 'Not found');
+    let body: Buffer;
+    try {
+      body = await readFile(join(uploadsDir(ticket), m[2]));
+    } catch {
+      throw new HttpError(404, 'Not found');
+    }
+    const type = IMAGE_TYPES.find((t) => m![2].endsWith(t.ext))!.type;
+    // Names are random and never reused, so the browser can keep them.
+    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': type, 'Cache-Control': 'private, max-age=31536000, immutable' });
+    return res.end(body);
+  }
+
   m = pathname.match(/^\/api\/tickets\/(\d+)(\/[a-z]+)?$/);
   if (m) {
     const id = Number(m[1]);
     const action = m[2] ?? '';
     const ticket = ticketView(id);
+    inScope(ticket.project_id);
+    if (scope !== null && method !== 'GET' && ticket.kind === 'coordinator') {
+      throw new HttpError(403, 'The coordinator cannot act on itself');
+    }
     if (action === '' && method === 'GET') {
       return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
+    }
+    if (action === '' && method === 'PATCH') {
+      const body = await readJson(req);
+      const title = str(body.title, 'Title', 120);
+      if (title !== ticket.title) {
+        store.updateTicket(id, { title });
+        runner.emit(id, 'note', { text: `${session.name} renamed this ticket from "${ticket.title}" to "${title}".` });
+        runner.broadcastTicket(id);
+      }
+      return json(res, 200, ticketView(id));
     }
     if (action === '/events' && method === 'GET') {
       return json(res, 200, store.listEvents(id, Number(url.searchParams.get('after') ?? 0)));
     }
     if (action === '/messages' && method === 'POST') {
-      const body = await readJson(req);
-      runner.send(id, session.name, str(body.text, 'Message', 100_000));
+      // Room for MAX_IMAGES images at 5 MB each, base64-encoded.
+      const body = await readJson(req, 45_000_000);
+      const hasImages = Array.isArray(body.images) && body.images.length > 0;
+      const text = hasImages && (typeof body.text !== 'string' || !body.text.trim()) ? '' : str(body.text, 'Message', 100_000);
+      runner.send(id, session.name, text, await saveImages(ticket, body.images));
       return json(res, 202, ticketView(id));
     }
     if (action === '/stop' && method === 'POST') {
@@ -253,6 +392,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (action === '/status' && method === 'POST') {
       const body = await readJson(req);
       if (body.status !== 'closed' && body.status !== 'idle') throw new HttpError(400, 'Status must be closed or idle');
+      if (ticket.kind === 'coordinator') throw new HttpError(400, 'The coordinator cannot be closed');
       if (runner.isRunning(id)) throw new HttpError(409, 'Stop the ticket before closing it');
       store.updateTicket(id, { status: body.status });
       runner.emit(id, 'note', { text: `${session.name} ${body.status === 'closed' ? 'closed' : 'reopened'} this ticket.` });

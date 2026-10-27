@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Project, Store, Ticket } from './db.ts';
-import { claudeConfigDir, restoreSession, saveSession } from './sessions.ts';
+import { claudeConfigDir, lastEffort, restoreSession, saveSession } from './sessions.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -275,6 +275,9 @@ export class Runner {
     // Lets edit-only sessions write there too, not just in their working directory.
     if (filesDir) args.push('--add-dir', filesDir);
     if (ticket.session_id) args.push('--resume', ticket.session_id);
+    // Chosen per thread in the composer; left out, Claude Code uses its defaults.
+    if (ticket.model) args.push('--model', ticket.model);
+    if (ticket.effort) args.push('--effort', ticket.effort);
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
     let env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
     // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
@@ -343,6 +346,12 @@ export class Runner {
       this.onFilesMayChange(ticket.id);
       // Re-read the ticket: the turn may have given it its first (or a new) session id.
       const after = this.store.getTicket(ticket.id);
+      // Only a turn that ran on Claude Code's default effort says what "Default" means for this thread.
+      const effort = after && !ticket.effort && lastEffort(after, configDir);
+      if (after && effort && effort !== after.last_effort) {
+        this.store.updateTicketQuietly(ticket.id, { last_effort: effort });
+        this.broadcastTicket(ticket.id);
+      }
       if (after) {
         saveSession(this.store, after, project, configDir, true)
           .catch((err) => console.error(`Saving the session of ticket ${ticket.id} failed:`, err));
@@ -368,6 +377,12 @@ export class Runner {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
     }
     if (ev.type === 'result') onResult(!!ev.is_error);
+    // Likewise the model: remembered from turns that ran without one chosen.
+    const t = ev.type === 'system' && ev.subtype === 'init' && typeof ev.model === 'string' ? this.store.getTicket(ticketId) : null;
+    if (t && !t.model && ev.model !== t.last_model) {
+      this.store.updateTicketQuietly(ticketId, { last_model: ev.model });
+      this.broadcastTicket(ticketId);
+    }
     const slim = slimEvent(ev);
     const progress = this.progressFor(ticketId);
     applyEvent(progress, 'claude', slim);

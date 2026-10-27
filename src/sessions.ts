@@ -2,7 +2,7 @@
 // and the project's auto-memory) under its config dir, which belongs to one account on one machine.
 // These copy that state into the app's database after each turn and put it back before the next,
 // so a thread survives a switch of Claude account or config dir.
-import { existsSync, mkdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
@@ -115,4 +115,29 @@ export function restoreSession(store: Store, ticket: Ticket, project: Project, c
     written++;
   }
   return written;
+}
+
+/**
+ * The effort level the session's latest reply ran at, read from the end of its transcript (the
+ * stream Claude Code prints doesn't report it). Null if there is no transcript or no effort in it.
+ */
+export function lastEffort(ticket: Ticket, configDir: string): string | null {
+  if (!ticket.session_id || !ticket.cwd) return null;
+  const path = join(configDir, 'projects', projectSlug(ticket.cwd), `${ticket.session_id}.jsonl`);
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+  } catch {
+    return null;
+  }
+  try {
+    const size = fstatSync(fd).size;
+    const len = Math.min(size, 256 * 1024);
+    const buf = Buffer.alloc(len);
+    readSync(fd, buf, 0, len, size - len);
+    const all = [...buf.toString('utf8').matchAll(/"effort":"([a-z]+)"/g)];
+    return all.length ? all[all.length - 1][1] : null;
+  } finally {
+    closeSync(fd);
+  }
 }

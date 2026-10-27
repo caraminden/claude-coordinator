@@ -12,6 +12,10 @@ export interface Project {
   created_at: number;
 }
 
+/** Models a thread can be set to (null = Claude Code's default), and effort levels for `claude --effort`. */
+export const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'] as const;
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
 export const TICKET_TAGS = ['feature', 'bug', 'design', 'process', 'idea'] as const;
 export type TicketTag = (typeof TICKET_TAGS)[number];
 /** ready: done, ready to merge or pick up · try: ready for people to try · parked: on hold on purpose ·
@@ -33,6 +37,12 @@ export interface Ticket {
   cwd: string;
   branch: string | null;
   permission_mode: string;
+  /** Chosen for this thread; null uses Claude Code's default. */
+  model: string | null;
+  effort: string | null;
+  /** What Claude Code's defaults came out as on this thread's latest turn without a choice. */
+  last_model: string | null;
+  last_effort: string | null;
   last_activity: string | null;
   created_by: string;
   created_at: number;
@@ -139,6 +149,10 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'tag', 'ALTER TABLE tickets ADD COLUMN tag TEXT'],
   ['tickets', 'state', 'ALTER TABLE tickets ADD COLUMN state TEXT'],
   ['tickets', 'note', 'ALTER TABLE tickets ADD COLUMN note TEXT'],
+  ['tickets', 'model', 'ALTER TABLE tickets ADD COLUMN model TEXT'],
+  ['tickets', 'effort', 'ALTER TABLE tickets ADD COLUMN effort TEXT'],
+  ['tickets', 'last_model', 'ALTER TABLE tickets ADD COLUMN last_model TEXT'],
+  ['tickets', 'last_effort', 'ALTER TABLE tickets ADD COLUMN last_effort TEXT'],
 ];
 
 export class Store {
@@ -260,7 +274,14 @@ export class Store {
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
-  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'tag' | 'state' | 'note'>>) {
+  /** Record what a ticket last ran with, without counting as activity (updated_at stays). */
+  updateTicketQuietly(id: number, fields: Partial<Pick<Ticket, 'last_model' | 'last_effort'>>) {
+    const keys = Object.keys(fields) as (keyof typeof fields)[];
+    if (!keys.length) return;
+    this.db.prepare(`UPDATE tickets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
+  }
+
+  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'tag' | 'state' | 'note' | 'model' | 'effort' | 'last_model' | 'last_effort'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');

@@ -798,7 +798,8 @@ function chatSection(chatId, ticket, events) {
   const form = h('form', { class: 'composer' }, attachments.el, textarea, picker,
     h('div', { class: 'row' },
       h('button', { type: 'button', class: 'secondary small', onclick: () => picker.click() }, 'Add image'),
-      h('span', { class: 'muted', id: 'composer-hint' }), h('span', { class: 'spacer' }), sendBtn));
+      h('span', { class: 'muted', id: 'composer-hint' }), h('span', { class: 'spacer' }),
+      modelPicker(chatId), sendBtn));
   textarea.addEventListener('paste', (e) => {
     const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
     if (!files.length) return;
@@ -1528,7 +1529,60 @@ function alertNote(text) {
   document.getElementById('log')?.append(h('div', { class: 'note error' }, text));
 }
 
+// ---------- model and effort ----------
+
+const MODELS = [
+  ['claude-opus-5-5', 'Opus 5.5'],
+  ['claude-sonnet-5-5', 'Sonnet 5.5'],
+  ['claude-haiku-5-5', 'Haiku 5.5'],
+  ['claude-fable-5-1', 'Fable 5.1'],
+];
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const modelName = (id) => MODELS.find(([m]) => m === id)?.[1] ?? id;
+
+/** Model and effort for this thread, beside Send; a change applies from its next turn. */
+function modelPicker(chatId) {
+  const save = (field) => async (e) => {
+    const sel = e.target;
+    sel.disabled = true;
+    try {
+      const ticket = await api(`/api/tickets/${chatId}`, { method: 'PATCH', body: { [field]: sel.value || null } });
+      if (view?.kind === 'project' && view.id === chatId) {
+        view.ticket = ticket;
+        renderModelPicker();
+      }
+    } catch (err) {
+      alertNote(err.message);
+      renderModelPicker();
+    } finally {
+      sel.disabled = false;
+    }
+  };
+  const model = h('select', { class: 'picker', id: 'model-picker', title: 'Model for this thread', onchange: save('model') });
+  const effort = h('select', { class: 'picker', id: 'effort-picker', title: 'Effort for this thread', onchange: save('effort') });
+  return h('span', { class: 'pickers' }, model, effort);
+}
+
+/** Fill the pickers from the thread: its choice, and for "Default", what that came out as on its last turn without one. */
+function renderModelPicker() {
+  const model = document.getElementById('model-picker');
+  const effort = document.getElementById('effort-picker');
+  if (!model || !effort || !view.ticket) return;
+  const t = view.ticket;
+  const defModel = !t.model && t.last_model ? `Default · ${modelName(t.last_model)}` : 'Default model';
+  model.replaceChildren(h('option', { value: '' }, defModel), ...MODELS.map(([id, name]) => h('option', { value: id }, name)));
+  // A model set outside this list (say, by an older version) still shows as itself.
+  if (t.model && !MODELS.some(([id]) => id === t.model)) model.append(h('option', { value: t.model }, t.model));
+  model.value = t.model ?? '';
+  const defEffort = !t.effort && t.last_effort ? `Default · ${t.last_effort}` : 'Default effort';
+  effort.replaceChildren(h('option', { value: '' }, defEffort), ...EFFORTS.map((e) => h('option', { value: e }, `${e} effort`)));
+  effort.value = t.effort ?? '';
+  model.title = `Model for this thread${t.last_model ? ` (default here: ${modelName(t.last_model)})` : ''}${t.status === 'running' ? '; a change applies from the next turn' : ''}`;
+  effort.title = `Effort for this thread${t.last_effort ? ` (default here: ${t.last_effort})` : ''}${t.status === 'running' ? '; a change applies from the next turn' : ''}`;
+}
+
 function renderTicketHead() {
+  renderModelPicker();
   const el = document.getElementById('ticket-head');
   if (!el) return;
   const t = view.ticket;

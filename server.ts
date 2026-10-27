@@ -9,8 +9,8 @@ import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact } from './src/artifacts.ts';
 import { AGENT_NAME, Auth, type Session } from './src/auth.ts';
 import { branchStatus, type BranchStatus } from './src/branch.ts';
-import { claudeConfigDir, saveSession } from './src/sessions.ts';
-import { Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
+import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
+import { EFFORTS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
 import { Runner } from './src/runner.ts';
 import { cloneProject, createTicketDir, projectDir, removeProjectDir } from './src/workspace.ts';
 
@@ -130,6 +130,12 @@ store.pruneArtifacts(isArtifact);
   for (const p of store.listProjects()) {
     for (const t of store.listTickets(p.id)) {
       if (!t.session_id || runner.isRunning(t.id)) continue;
+      // Threads from before the model picker: fill in what they last ran with.
+      if (!t.last_effort || !t.last_model) {
+        const init = store.listEvents(t.id).reverse().find((e) => e.kind === 'claude' && e.data.includes('"subtype":"init"'));
+        const model = t.last_model ?? (init ? JSON.parse(init.data).model ?? null : null);
+        store.updateTicketQuietly(t.id, { last_model: model, last_effort: t.last_effort ?? lastEffort(t, configDir) });
+      }
       await saveSession(store, t, p, configDir, false).catch((err) => console.error(`Saving the session of ticket ${t.id} failed:`, err));
     }
   }
@@ -313,6 +319,12 @@ function isSecure(req: IncomingMessage): boolean {
 }
 
 /** One of a fixed set of values, or null when empty. */
+/** "Opus 5.5" for "claude-opus-5-5". */
+function modelName(id: string): string {
+  const m = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(id);
+  return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id;
+}
+
 function oneOf(v: unknown, allowed: readonly string[], field: string): string | null {
   if (v === null || v === '') return null;
   if (typeof v !== 'string' || !allowed.includes(v)) throw new HttpError(400, `${field} must be one of: ${allowed.join(', ')}`);
@@ -645,9 +657,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
     }
     if (action === '' && method === 'PATCH') {
-      // Any of title, tag, state and note; null (or "") clears tag, state and note.
+      // Any of title, tag, state, note, model and effort; null (or "") clears all but the title.
       const body = await readJson(req);
-      const fields: Partial<Pick<Ticket, 'title' | 'tag' | 'state' | 'note'>> = {};
+      const fields: Partial<Pick<Ticket, 'title' | 'tag' | 'state' | 'note' | 'model' | 'effort'>> = {};
+      if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
+      if (body.effort !== undefined) fields.effort = oneOf(body.effort, EFFORTS, 'Effort');
       if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
       if (body.tag !== undefined) fields.tag = oneOf(body.tag, TICKET_TAGS, 'Tag') as TicketTag | null;
       if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
@@ -657,6 +671,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         store.updateTicket(id, fields);
         const who = session.agent === id ? 'Claude' : session.name;
         if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this ticket from "${ticket.title}" to "${fields.title}".` });
+        const next = runner.isRunning(id) ? 'from the next turn' : 'from now on';
+        if ('model' in fields) runner.emit(id, 'note', { text: `${who} set this thread to ${fields.model ? modelName(fields.model) : 'the default model'} ${next}.` });
+        if ('effort' in fields) runner.emit(id, 'note', { text: `${who} set this thread to ${fields.effort ? `${fields.effort} effort` : 'the default effort'} ${next}.` });
         runner.broadcastTicket(id);
       }
       return json(res, 200, ticketView(id));

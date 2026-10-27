@@ -479,3 +479,9 @@ mark.find.current { background: var(--waiting); color: #fff; }
   .ticket-head > .row > button, .ticket-head > .row > .find-box { flex: none; white-space: nowrap; }
   .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 11rem; }
 }
+
+/* Model and effort pickers beside Send */
+.composer .pickers { display: inline-flex; gap: 0.35rem; }
+.composer select.picker { width: auto; padding: 0.2rem 0.4rem; font-size: 0.82em; color: var(--muted); background: var(--panel); border-radius: 6px; cursor: pointer; }
+.composer select.picker:hover, .composer select.picker:focus { color: var(--ink); border-color: var(--accent); }
+@media (max-width: 800px) { .composer select.picker { max-width: 8.5rem; } }

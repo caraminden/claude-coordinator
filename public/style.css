@@ -573,6 +573,9 @@ a.thread-ref:hover { text-decoration: underline; }
 @media (max-width: 800px) {
   /* Leave sideways swipes to the app rather than browser history, where the browser allows it. */
   html, body { overscroll-behavior-x: none; }
+  /* The drawers stand in for the panels, so their folded bars don't sit above the chat. */
+  .split > .panels:not(:has(> .as-drawer)) { display: none; }
+  .panels > details:not(.as-drawer) { display: none; }
   .panels > details.as-drawer {
     position: fixed; top: 0; bottom: 0; left: 0; z-index: 30;
     width: min(86vw, 340px); max-height: none; margin: 0;

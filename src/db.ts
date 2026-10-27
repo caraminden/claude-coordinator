@@ -28,6 +28,20 @@ export interface Ticket {
   updated_at: number;
 }
 
+export interface Artifact {
+  id: number;
+  project_id: number;
+  ticket_id: number;
+  path: string;
+  size: number;
+  mtime: number;
+  created_at: number;
+  pinned_at: number | null;
+  pinned_by: string | null;
+  /** A pinned file that has since disappeared; kept so the pin isn't silently lost. */
+  missing: number;
+}
+
 export interface EventRow {
   id: number;
   ticket_id: number;
@@ -67,6 +81,20 @@ CREATE TABLE IF NOT EXISTS events (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_ticket ON events(ticket_id, id);
+CREATE TABLE IF NOT EXISTS artifacts (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  ticket_id INTEGER NOT NULL REFERENCES tickets(id),
+  path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  pinned_at INTEGER,
+  pinned_by TEXT,
+  missing INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (ticket_id, path)
+);
+CREATE INDEX IF NOT EXISTS artifacts_project ON artifacts(project_id, mtime);
 `;
 
 /** Columns added after the first release, for databases created before them. */
@@ -146,6 +174,7 @@ export class Store {
 
   deleteTicket(id: number) {
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
@@ -164,6 +193,60 @@ export class Store {
       .prepare('INSERT INTO events (ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?)')
       .run(ticketId, kind, json, now);
     return { id: Number(r.lastInsertRowid), ticket_id: ticketId, kind, data: json, created_at: now };
+  }
+
+  /** A project's artifacts, newest first, with the title of the ticket that made each. */
+  listArtifacts(projectId: number): (Artifact & { ticket_title: string; ticket_kind: TicketKind })[] {
+    return this.db
+      .prepare(
+        `SELECT a.*, t.title AS ticket_title, t.kind AS ticket_kind FROM artifacts a JOIN tickets t ON t.id = a.ticket_id
+         WHERE a.project_id = ? ORDER BY a.mtime DESC`,
+      )
+      .all(projectId) as any;
+  }
+
+  getArtifact(id: number): Artifact | undefined {
+    return this.db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id) as unknown as Artifact | undefined;
+  }
+
+  setArtifactPinned(id: number, by: string | null) {
+    this.db.prepare('UPDATE artifacts SET pinned_at = ?, pinned_by = ? WHERE id = ?').run(by ? Date.now() : null, by, id);
+    // Unpinning a file that is already gone leaves nothing worth showing.
+    if (!by) this.db.prepare('DELETE FROM artifacts WHERE id = ? AND missing = 1').run(id);
+  }
+
+  /** Bring a ticket's artifact rows in line with what is on disk. Returns whether anything changed. */
+  syncArtifacts(ticket: Ticket, found: { path: string; size: number; mtime: number }[]): boolean {
+    const existing = new Map(
+      (this.db.prepare('SELECT * FROM artifacts WHERE ticket_id = ?').all(ticket.id) as unknown as Artifact[]).map((a) => [a.path, a]),
+    );
+    let changed = false;
+    const insert = this.db.prepare(
+      'INSERT INTO artifacts (project_id, ticket_id, path, size, mtime, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    );
+    const update = this.db.prepare('UPDATE artifacts SET size = ?, mtime = ?, missing = 0 WHERE id = ?');
+    this.db.exec('BEGIN');
+    try {
+      for (const f of found) {
+        const a = existing.get(f.path);
+        existing.delete(f.path);
+        if (!a) insert.run(ticket.project_id, ticket.id, f.path, f.size, f.mtime, Date.now());
+        else if (a.size !== f.size || a.mtime !== f.mtime || a.missing) update.run(f.size, f.mtime, a.id);
+        else continue;
+        changed = true;
+      }
+      for (const a of existing.values()) {
+        if (a.pinned_at === null) this.db.prepare('DELETE FROM artifacts WHERE id = ?').run(a.id);
+        else if (!a.missing) this.db.prepare('UPDATE artifacts SET missing = 1 WHERE id = ?').run(a.id);
+        else continue;
+        changed = true;
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    return changed;
   }
 
   listEvents(ticketId: number, afterId = 0): EventRow[] {

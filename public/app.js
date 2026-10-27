@@ -74,7 +74,7 @@ function markdown(src) {
           .replace(/`([^`]+)`/g, '<code>$1</code>')
           .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
           .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-      const lines = block.split('\n');
+      const lines = block.replace(/^\n+|\n+$/g, '').split('\n');
       if (lines.every((l) => /^\s*([-*]|\d+\.)\s/.test(l))) {
         const ordered = /^\s*\d+\./.test(lines[0]);
         const items = lines.map((l) => `<li>${inline(l.replace(/^\s*([-*]|\d+\.)\s/, ''))}</li>`).join('');
@@ -116,6 +116,7 @@ function connectStream(catchUp = false) {
     }
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'event') onEvent(msg.event);
+    if (msg.type === 'artifacts') onArtifactsChanged(msg.projectId);
   };
   es.onerror = () => {
     // EventSource retries dropped connections itself, but gives up for good on a non-200
@@ -138,20 +139,24 @@ async function resync() {
   if (view?.kind !== 'project') return route();
   // Refresh in place so a half-typed message in the composer survives.
   try {
-    const [{ coordinator, tickets }, { ticket }] = await Promise.all([
+    const [{ coordinator, tickets }, artifacts, chat] = await Promise.all([
       api(`/api/projects/${view.projectId}`),
-      api(`/api/tickets/${view.id}`),
+      api(`/api/projects/${view.projectId}/artifacts`),
+      view.id ? api(`/api/tickets/${view.id}`) : null,
     ]);
     view.coordinator = coordinator;
     view.tickets = new Map(tickets.map((t) => [t.id, t]));
-    view.ticket = ticket;
     renderSidebar();
+    setArtifacts(artifacts);
+    if (!chat) return;
+    view.ticket = chat.ticket;
     renderTicketHead();
     await catchUpEvents();
   } catch {}
 }
 
 async function catchUpEvents() {
+  if (!view.id) return;
   const events = await api(`/api/tickets/${view.id}/events?after=${view.lastEventId}`);
   for (const ev of events) if (ev.id > view.lastEventId) appendEvent(ev);
 }
@@ -181,6 +186,8 @@ async function route() {
   let m;
   try {
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
+    else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
+    else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
     else if ((m = hash.match(/^#\/t\/(\d+)$/))) await showTicket(Number(m[1]));
     else await showProjects();
   } catch (err) {
@@ -283,31 +290,67 @@ async function showTicket(ticketId) {
   const { ticket } = await api(`/api/tickets/${ticketId}`);
   // The coordinator lives at the project's own address.
   if (isCoordinator(ticket)) return location.replace(`#/p/${ticket.project_id}`);
-  await showProject(ticket.project_id, ticketId);
+  await showProject(ticket.project_id, { kind: 'chat', ticketId });
 }
 
-/** A project page: its threads on the side, and a chat with the coordinator (or the chosen ticket). */
-async function showProject(projectId, ticketId = null) {
-  const { project, coordinator, tickets } = await api(`/api/projects/${projectId}`);
-  const chatId = ticketId ?? coordinator.id;
-  const [{ ticket }, events] = await Promise.all([
-    api(`/api/tickets/${chatId}`),
-    api(`/api/tickets/${chatId}/events`),
+async function showArtifact(artifactId) {
+  const { artifact } = await api(`/api/artifacts/${artifactId}`);
+  await showProject(artifact.project_id, { kind: 'artifact', artifact });
+}
+
+/**
+ * A project page: artifacts and threads on the side, and in the main panel a chat with the
+ * coordinator (or the chosen ticket), the artifact browser, or one artifact.
+ */
+async function showProject(projectId, main = { kind: 'chat', ticketId: null }) {
+  const [{ project, coordinator, tickets }, artifacts] = await Promise.all([
+    api(`/api/projects/${projectId}`),
+    api(`/api/projects/${projectId}/artifacts`),
   ]);
+  const chatId = main.kind === 'chat' ? main.ticketId ?? coordinator.id : null;
+  const [{ ticket }, events] = chatId
+    ? await Promise.all([api(`/api/tickets/${chatId}`), api(`/api/tickets/${chatId}/events`)])
+    : [{ ticket: null }, []];
   view = {
-    kind: 'project', projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
+    kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
+    artifacts, artifactId: main.artifact?.id ?? null,
     id: chatId, ticket, lastEventId: 0, tools: new Map(),
     stats: { messages: 0, turns: 0, cost: 0, lastAt: 0 },
   };
-  crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ',
-    ...(ticketId ? [h('a', { href: `#/p/${project.id}` }, project.name), ' / ', `#${ticket.id}`] : [project.name]));
+  const projectLink = h('a', { href: `#/p/${project.id}` }, project.name);
+  const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
+  crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', ...(
+    main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
+      : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
+        : main.ticketId ? [projectLink, ' / ', `#${ticket.id}`]
+          : [project.name]));
 
   const narrow = matchMedia('(max-width: 800px)').matches;
+  const shelf = h('details', { class: 'shelf', open: !narrow },
+    h('summary', {}, 'Artifacts', h('span', { class: 'muted', id: 'artifact-count' })),
+    h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: !narrow },
     h('summary', {}, project.name, h('span', { class: 'muted', id: 'thread-count' })),
     newTicketForm(projectId),
     h('div', { id: 'threads' }));
+  const section = main.kind === 'artifacts' ? artifactBrowser()
+    : main.kind === 'artifact' ? artifactViewer(main.artifact)
+      : chatSection(chatId, ticket, events);
 
+  app.replaceChildren(h('div', { class: 'split' }, shelf, sidebar, section));
+  renderShelf();
+  renderSidebar();
+  if (main.kind === 'artifacts') renderArtifactResults();
+  if (main.kind === 'artifact') renderArtifactHead();
+  if (!chatId) return;
+  renderTicketHead();
+  for (const ev of events) appendEvent(ev, false);
+  window.scrollTo(0, document.body.scrollHeight);
+  // Events broadcast while the snapshot was loading arrived before `view` existed.
+  await catchUpEvents();
+}
+
+function chatSection(chatId, ticket, events) {
   const textarea = h('textarea', {
     placeholder: isCoordinator(ticket)
       ? 'Ask the coordinator to start, check on, or close tickets… (Enter to send, Shift+Enter for a new line)'
@@ -375,14 +418,7 @@ async function showProject(projectId, ticketId = null) {
     log.append(h('div', { class: 'note' },
       'This is the project coordinator. It keeps track of the threads on the left and can create, message, rename and close them for you.'));
   }
-  app.replaceChildren(h('div', { class: 'split' }, sidebar,
-    h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, form)));
-  renderSidebar();
-  renderTicketHead();
-  for (const ev of events) appendEvent(ev, false);
-  window.scrollTo(0, document.body.scrollHeight);
-  // Events broadcast while the snapshot was loading arrived before `view` existed.
-  await catchUpEvents();
+  return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, form);
 }
 
 function newTicketForm(projectId) {
@@ -458,6 +494,211 @@ function ticketCard(t, href = `#/t/${t.id}`) {
       coord ? '' : `by ${t.created_by}`,
       ago(t.updated_at),
     ].filter(Boolean).join(' · ')));
+}
+
+// ---------- artifacts ----------
+
+const RECENT_ARTIFACTS = 12;
+const MAX_TEXT_PREVIEW = 2 * 1024 * 1024;
+const ARTIFACT_FILTERS = [
+  { key: 'all', label: 'All', match: () => true },
+  { key: 'pinned', label: 'Pinned', match: (a) => !!a.pinned_at },
+  { key: 'docs', label: 'Documents', match: (a) => ['markdown', 'text', 'pdf'].includes(a.kind) },
+  { key: 'images', label: 'Images', match: (a) => a.kind === 'image' },
+  { key: 'media', label: 'Video & audio', match: (a) => a.kind === 'video' || a.kind === 'audio' },
+  { key: 'web', label: 'Web pages', match: (a) => a.kind === 'html' },
+];
+
+const rawUrl = (a) => `/api/artifacts/${a.id}/raw?v=${a.mtime}`;
+const extOf = (a) => (a.name.includes('.') ? a.name.split('.').pop() : a.kind).slice(0, 5).toUpperCase();
+const threadName = (a) => (a.ticket_kind === 'coordinator' ? 'Coordinator' : `#${a.ticket_id} ${a.ticket_title}`);
+
+function formatSize(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+let artifactRefresh = null;
+function onArtifactsChanged(projectId) {
+  if (view?.kind !== 'project' || view.projectId !== projectId) return;
+  // Scans of several tickets can land together; fetch once for the lot.
+  clearTimeout(artifactRefresh);
+  artifactRefresh = setTimeout(refreshArtifacts, 300);
+}
+
+async function refreshArtifacts() {
+  if (view?.kind !== 'project') return;
+  const projectId = view.projectId;
+  try {
+    const artifacts = await api(`/api/projects/${projectId}/artifacts`);
+    if (view?.kind === 'project' && view.projectId === projectId) setArtifacts(artifacts);
+  } catch {}
+}
+
+function setArtifacts(artifacts) {
+  view.artifacts = artifacts;
+  renderShelf();
+  if (view.main === 'artifacts') renderArtifactResults();
+  if (view.main === 'artifact') renderArtifactHead();
+}
+
+async function setPinned(a, pinned) {
+  try {
+    await api(`/api/artifacts/${a.id}/pin`, { method: 'POST', body: { pinned } });
+    await refreshArtifacts();
+  } catch (e) {
+    alert(`Could not ${pinned ? 'pin' : 'unpin'}: ${e.message}`);
+  }
+}
+
+function pinButton(a) {
+  const pinned = !!a.pinned_at;
+  return h('button', {
+    type: 'button',
+    class: `pin${pinned ? ' on' : ''}`,
+    title: pinned ? `Pinned by ${a.pinned_by}; click to unpin` : 'Pin to the top of the artifacts panel',
+    'aria-pressed': String(pinned),
+    onclick: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setPinned(a, !pinned);
+    },
+  }, pinned ? '★' : '☆');
+}
+
+/** The far-left panel: pinned artifacts, then the most recent ones from any thread. */
+function renderShelf() {
+  const el = document.getElementById('artifact-shelf');
+  if (!el) return;
+  const all = view.artifacts;
+  const pinned = all.filter((a) => a.pinned_at).sort((a, b) => b.pinned_at - a.pinned_at);
+  const recent = all.filter((a) => !a.pinned_at && !a.missing).slice(0, RECENT_ARTIFACTS);
+  document.getElementById('artifact-count').textContent = all.length ? ` · ${all.length}` : '';
+  const item = (a) => h('a', { class: `artifact-item${view.artifactId === a.id ? ' active' : ''}${a.missing ? ' missing' : ''}`, href: `#/a/${a.id}`, title: a.path },
+    h('span', { class: `badge k-${a.kind}` }, extOf(a)),
+    h('span', { class: 'text' },
+      h('span', { class: 'name' }, a.name),
+      h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? 'Coordinator' : `#${a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
+  el.replaceChildren(
+    h('a', { class: `view-all${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts` },
+      'Browse all', all.length ? h('span', { class: 'count' }, all.length) : ''),
+    h('section', { class: 'column' },
+      h('h3', {}, 'Pinned', pinned.length ? h('span', { class: 'count' }, pinned.length) : ''),
+      pinned.length ? pinned.map(item) : h('p', { class: 'muted small' }, 'Pin artifacts with ☆ to keep them here.')),
+    h('section', { class: 'column' },
+      h('h3', {}, 'Recent'),
+      recent.length ? recent.map(item) : h('p', { class: 'muted small' }, 'Files threads create (docs, images, videos, pages…) show up here.')));
+}
+
+/** Main panel: every artifact in the project, searchable, with pin toggles. */
+function artifactBrowser() {
+  view.artifactFilter = 'all';
+  const search = h('input', { type: 'search', id: 'artifact-search', placeholder: 'Search by name, folder or thread…', autocomplete: 'off' });
+  search.addEventListener('input', renderArtifactResults);
+  const chips = h('div', { class: 'chips', id: 'artifact-filters' });
+  const section = h('section', { class: 'artifacts-main' },
+    h('div', { class: 'ticket-head' },
+      h('div', { class: 'row' }, h('h2', {}, 'Artifacts'), h('span', { class: 'muted', id: 'artifact-summary' })),
+      search, chips),
+    h('div', { class: 'artifact-grid', id: 'artifact-results' }));
+  setTimeout(() => search.focus());
+  return section;
+}
+
+function renderArtifactResults() {
+  const el = document.getElementById('artifact-results');
+  if (!el) return;
+  const terms = document.getElementById('artifact-search').value.toLowerCase().split(/\s+/).filter(Boolean);
+  const filter = ARTIFACT_FILTERS.find((f) => f.key === view.artifactFilter) ?? ARTIFACT_FILTERS[0];
+  document.getElementById('artifact-filters').replaceChildren(...ARTIFACT_FILTERS.map((f) => {
+    const n = view.artifacts.filter(f.match).length;
+    if (!n && f.key !== 'all' && f.key !== view.artifactFilter) return '';
+    return h('button', { type: 'button', class: `chip${f === filter ? ' on' : ''}`, onclick: () => {
+      view.artifactFilter = f.key;
+      renderArtifactResults();
+    } }, f.label, h('span', { class: 'count' }, n));
+  }));
+  const results = view.artifacts.filter((a) => {
+    if (!filter.match(a)) return false;
+    const hay = `${a.path} ${threadName(a)} ${a.kind}`.toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  });
+  document.getElementById('artifact-summary').textContent =
+    `${results.length === view.artifacts.length ? '' : `${results.length} of `}${view.artifacts.length} file${view.artifacts.length === 1 ? '' : 's'}`;
+  if (!results.length) {
+    el.replaceChildren(h('p', { class: 'muted' }, view.artifacts.length
+      ? 'Nothing matches.'
+      : 'No artifacts yet. When threads create documents, images, videos or web pages in their folders, they appear here.'));
+    return;
+  }
+  el.replaceChildren(...results.map((a) => {
+    const dir = a.path.includes('/') ? a.path.slice(0, a.path.lastIndexOf('/') + 1) : '';
+    return h('a', { class: `artifact-card${a.missing ? ' missing' : ''}`, href: `#/a/${a.id}`, title: a.path },
+      h('div', { class: 'preview' }, a.kind === 'image' && !a.missing
+        ? h('img', { src: rawUrl(a), alt: '', loading: 'lazy' })
+        : h('span', { class: `badge big k-${a.kind}` }, extOf(a))),
+      pinButton(a),
+      h('div', { class: 'name' }, a.name),
+      dir ? h('div', { class: 'meta path' }, dir) : '',
+      h('div', { class: 'meta' }, threadName(a)),
+      h('div', { class: 'meta' }, a.missing ? 'File no longer exists' : `${formatSize(a.size)} · ${ago(a.mtime)}`));
+  }));
+}
+
+/** Main panel: one artifact, shown inline according to its type. */
+function artifactViewer(a) {
+  const body = h('div', { class: 'artifact-body' });
+  const section = h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'artifact-head' }), body);
+  const src = rawUrl(a);
+  if (a.missing) {
+    body.append(h('p', { class: 'muted' }, 'This file is no longer in the thread\'s folder. Unpin it to remove it from the list.'));
+  } else if (a.kind === 'image') {
+    body.append(h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { class: 'artifact-media', src, alt: a.name })));
+  } else if (a.kind === 'video') {
+    body.append(h('video', { class: 'artifact-media', src, controls: true, preload: 'metadata' }));
+  } else if (a.kind === 'audio') {
+    body.append(h('audio', { src, controls: true, preload: 'metadata' }));
+  } else if (a.kind === 'html') {
+    // Sandboxed (here and by the server's CSP) so a page a thread wrote can't act as the app.
+    body.append(h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals', title: a.name }));
+  } else if (a.kind === 'pdf') {
+    body.append(h('iframe', { class: 'artifact-frame', src, title: a.name }));
+  } else if (a.size > MAX_TEXT_PREVIEW) {
+    body.append(h('p', { class: 'muted' }, `Too large to preview (${formatSize(a.size)}). Open or download it instead.`));
+  } else {
+    body.append(h('p', { class: 'muted' }, 'Loading…'));
+    fetch(src).then(async (res) => {
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+      const text = await res.text();
+      body.replaceChildren(a.kind === 'markdown' ? h('div', { class: 'msg doc' }, markdown(text)) : h('pre', { class: 'artifact-text' }, text));
+    }).catch((err) => body.replaceChildren(h('p', { class: 'error' }, `Could not load: ${err.message}`)));
+  }
+  return section;
+}
+
+function renderArtifactHead() {
+  const el = document.getElementById('artifact-head');
+  if (!el) return;
+  const a = view.artifacts.find((x) => x.id === view.artifactId);
+  if (!a) {
+    el.replaceChildren(h('div', { class: 'row' }, h('h2', {}, 'Artifact removed'),
+      h('span', { class: 'muted' }, 'The file was deleted from its thread\'s folder.')));
+    return;
+  }
+  el.replaceChildren(
+    h('div', { class: 'row' },
+      h('span', { class: `badge k-${a.kind}` }, extOf(a)),
+      h('h2', {}, a.name),
+      h('span', { class: 'spacer' }),
+      pinButton(a),
+      a.missing ? '' : h('a', { class: 'button secondary', href: rawUrl(a), target: '_blank', rel: 'noopener' }, 'Open'),
+      a.missing ? '' : h('a', { class: 'button secondary', href: `${rawUrl(a)}&download` }, 'Download')),
+    h('div', { class: 'meta' },
+      a.path, ' · from ',
+      h('a', { href: a.ticket_kind === 'coordinator' ? `#/p/${a.project_id}` : `#/t/${a.ticket_id}` }, threadName(a)),
+      a.missing ? ' · missing' : ` · ${formatSize(a.size)} · updated ${ago(a.mtime)}`,
+      a.pinned_at ? ` · pinned by ${a.pinned_by}` : ''));
 }
 
 // ---------- pasted images ----------

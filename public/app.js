@@ -101,9 +101,25 @@ function connectStream() {
     if (msg.type === 'event') onEvent(msg.event);
   };
   stream.onerror = () => {
-    // EventSource reconnects on its own; resync the open view once it does.
-    stream.onopen = () => route();
+    // EventSource reconnects on its own; catch up on what was missed once it does.
+    stream.onopen = resync;
   };
+}
+
+async function resync() {
+  if (view?.kind !== 'ticket') return route();
+  // Refresh in place so a half-typed message in the composer survives.
+  try {
+    const { ticket } = await api(`/api/tickets/${view.id}`);
+    view.ticket = ticket;
+    renderTicketHead();
+    await catchUpEvents();
+  } catch {}
+}
+
+async function catchUpEvents() {
+  const events = await api(`/api/tickets/${view.id}/events?after=${view.lastEventId}`);
+  for (const ev of events) if (ev.id > view.lastEventId) appendEvent(ev);
 }
 
 function onTicketUpdate(ticket) {
@@ -325,6 +341,8 @@ async function showTicket(ticketId) {
   renderTicketHead();
   for (const ev of events) appendEvent(ev, false);
   window.scrollTo(0, document.body.scrollHeight);
+  // Events broadcast while the snapshot was loading arrived before `view` existed.
+  await catchUpEvents();
 }
 
 function alertNote(text) {

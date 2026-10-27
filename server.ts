@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { Auth, type Session } from './src/auth.ts';
 import { Store } from './src/db.ts';
 import { Runner } from './src/runner.ts';
-import { cloneProject, createTicketDir } from './src/workspace.ts';
+import { cloneProject, createTicketDir, removeProjectDir } from './src/workspace.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -17,12 +17,31 @@ const PERMISSION_MODES = ['acceptEdits', 'bypassPermissions', 'plan', 'default']
 await mkdir(DATA_DIR, { recursive: true });
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '');
+// Keep secrets out of the environment that claude and its tools inherit.
+delete process.env.COORDINATOR_PASSWORD;
+delete process.env.SESSION_SECRET;
 
+const MAX_CLIENTS = 100;
+const MAX_CLIENT_BACKLOG = 4 * 1024 * 1024;
 const clients = new Set<ServerResponse>();
 function broadcast(msg: object) {
   const data = `data: ${JSON.stringify(msg)}\n\n`;
-  for (const res of clients) res.write(data);
+  for (const res of clients) {
+    // Drop clients that stopped reading rather than buffering for them forever.
+    if (res.writableLength > MAX_CLIENT_BACKLOG) {
+      clients.delete(res);
+      res.destroy();
+    } else {
+      res.write(data);
+    }
+  }
 }
+
+const SECURITY_HEADERS = {
+  'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'same-origin',
+};
 
 const runner = new Runner(store, broadcast, process.env.CLAUDE_BIN ?? 'claude');
 runner.recover();
@@ -37,7 +56,7 @@ class HttpError extends Error {
 }
 
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers });
+  res.writeHead(status, { ...SECURITY_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers });
   res.end(JSON.stringify(body));
 }
 
@@ -60,8 +79,17 @@ async function readJson(req: IncomingMessage): Promise<any> {
 }
 
 function clientIp(req: IncomingMessage): string {
+  // Caddy appends the real client address, so only the right-most entry is trustworthy.
   const fwd = req.headers['x-forwarded-for'];
-  return (typeof fwd === 'string' ? fwd.split(',')[0].trim() : '') || req.socket.remoteAddress || '?';
+  const last = typeof fwd === 'string' ? fwd.split(',').pop()!.trim() : '';
+  return last || req.socket.remoteAddress || '?';
+}
+
+/** Display names end up in prompts as "[Name]: ...", so keep them plain. */
+function cleanName(v: unknown): string {
+  const name = typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f\[\]:]/g, '').replace(/\s+/g, ' ').trim() : '';
+  if (!name) throw new HttpError(400, 'Name is required');
+  return name.slice(0, 40);
 }
 
 function isSecure(req: IncomingMessage): boolean {
@@ -93,7 +121,7 @@ async function serveStatic(res: ServerResponse, path: string) {
   if (!file.startsWith(PUBLIC_DIR)) throw new HttpError(404, 'Not found');
   try {
     const body = await readFile(file);
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
     res.end(body);
   } catch {
     throw new HttpError(404, 'Not found');
@@ -106,9 +134,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
 
   if (pathname === '/api/login' && method === 'POST') {
     const ip = clientIp(req);
-    if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
     const body = await readJson(req);
-    const name = str(body.name, 'Name', 40);
+    const name = cleanName(body.name);
+    // Checked right before the password (no await in between) so parallel bursts are counted.
+    if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
     if (!auth.checkPassword(ip, String(body.password ?? ''))) throw new HttpError(401, 'Wrong password');
     return json(res, 200, { name }, { 'Set-Cookie': auth.issueCookie(name, isSecure(req)) });
   }
@@ -121,12 +150,19 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   if (method !== 'GET') {
     const origin = req.headers.origin;
     const host = req.headers['x-forwarded-host'] ?? req.headers.host;
-    if (origin && new URL(origin).host !== host) throw new HttpError(403, 'Cross-origin request');
+    let originHost: string | null = null;
+    try {
+      originHost = origin ? new URL(origin).host : null;
+    } catch {
+      throw new HttpError(403, 'Cross-origin request');
+    }
+    if (origin && originHost !== host) throw new HttpError(403, 'Cross-origin request');
   }
 
   if (pathname === '/api/me') return json(res, 200, { name: session.name });
 
   if (pathname === '/api/stream') {
+    if (clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
     res.write(': connected\n\n');
     clients.add(res);
@@ -158,6 +194,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
           store.setProjectRepoDir(project.id, await cloneProject(DATA_DIR, project.id, repoUrl));
         } catch (err: any) {
           store.deleteProject(project.id);
+          await removeProjectDir(DATA_DIR, project.id);
           throw new HttpError(400, `Could not clone repo: ${err.stderr?.trim() || err.message}`);
         }
       }
@@ -181,14 +218,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const title = str(body.title, 'Title', 120);
     const message = str(body.message, 'First message', 100_000);
     const mode = PERMISSION_MODES.includes(body.permissionMode) ? body.permissionMode : 'acceptEdits';
-    const id = store.nextTicketId();
-    let dir;
+    // Insert first so concurrent creates get distinct ids, then build the working dir.
+    const { id } = store.createTicket({ project_id: project.id, title, permission_mode: mode, created_by: session.name });
     try {
-      dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, title);
+      const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, title);
+      store.setTicketDir(id, dir.cwd, dir.branch);
     } catch (err: any) {
+      store.deleteTicket(id);
       throw new HttpError(500, `Could not create working directory: ${err.stderr?.trim() || err.message}`);
     }
-    store.createTicket({ id, project_id: project.id, title, cwd: dir.cwd, branch: dir.branch, permission_mode: mode, created_by: session.name });
     runner.send(id, session.name, message);
     return json(res, 201, ticketView(id));
   }

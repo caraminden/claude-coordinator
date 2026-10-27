@@ -48,7 +48,7 @@ function describeActivity(ev: any): string | null {
   const blocks: any[] = ev.message?.content ?? [];
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
-    if (b.type === 'text' && b.text.trim()) return b.text.trim().split('\n')[0].slice(0, 160);
+    if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) return b.text.trim().split('\n')[0].slice(0, 160);
     if (b.type === 'tool_use') return `Using ${b.name}`;
   }
   return null;
@@ -70,6 +70,7 @@ function systemPrompt(project: Project, ticket: Ticket): string {
 export class Runner {
   private procs = new Map<number, ChildProcess>();
   private queues = new Map<number, QueuedMessage[]>();
+  private stopping = new Set<number>();
   private store: Store;
   private broadcast: Broadcast;
   private claudeBin: string;
@@ -114,8 +115,14 @@ export class Runner {
     const proc = this.procs.get(ticketId);
     if (!proc) return false;
     this.queues.delete(ticketId);
+    this.stopping.add(ticketId);
     this.emit(ticketId, 'note', { text: 'Stopped by user.' });
-    proc.kill('SIGTERM');
+    // claude runs in its own process group; signal the whole group so tool subprocesses stop too.
+    try {
+      process.kill(-proc.pid!, 'SIGTERM');
+    } catch {
+      proc.kill('SIGTERM');
+    }
     return true;
   }
 
@@ -141,9 +148,11 @@ export class Runner {
     ];
     if (ticket.session_id) args.push('--resume', ticket.session_id);
 
-    const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     this.procs.set(ticket.id, proc);
     this.setStatus(ticket.id, 'running');
+    // If claude exits before reading its prompt, the write fails with EPIPE; the close handler reports it.
+    proc.stdin!.on('error', () => {});
     proc.stdin!.end(prompt);
 
     let sawResult = false;
@@ -151,26 +160,14 @@ export class Runner {
     const stderr: string[] = [];
 
     createInterface({ input: proc.stdout! }).on('line', (line) => {
-      if (!line.trim()) return;
-      let ev: any;
       try {
-        ev = JSON.parse(line);
-      } catch {
-        this.emit(ticket.id, 'note', { text: line });
-        return;
+        this.handleLine(ticket.id, line, (isError) => {
+          sawResult = true;
+          resultIsError = isError;
+        });
+      } catch (err: any) {
+        this.emit(ticket.id, 'note', { text: `Could not process output line: ${err.message}` });
       }
-      if (DROPPED_TYPES.has(ev.type)) return;
-      if (ev.type === 'system' && DROPPED_SYSTEM_SUBTYPES.has(ev.subtype)) return;
-      if (ev.session_id && ev.session_id !== this.store.getTicket(ticket.id)?.session_id) {
-        this.store.updateTicket(ticket.id, { session_id: ev.session_id });
-      }
-      if (ev.type === 'result') {
-        sawResult = true;
-        resultIsError = !!ev.is_error;
-      }
-      const activity = describeActivity(ev);
-      if (activity) this.store.updateTicket(ticket.id, { last_activity: activity });
-      this.emit(ticket.id, 'claude', slimEvent(ev));
     });
 
     createInterface({ input: proc.stderr! }).on('line', (line) => {
@@ -184,8 +181,9 @@ export class Runner {
 
     proc.on('close', (code, signal) => {
       this.procs.delete(ticket.id);
+      const stopped = this.stopping.delete(ticket.id);
       let status: 'idle' | 'error' = 'idle';
-      if (signal) {
+      if (stopped || signal) {
         // Stopped by the user; leave it waiting for the next message.
       } else if (!sawResult || code !== 0 || resultIsError) {
         status = 'error';
@@ -195,6 +193,27 @@ export class Runner {
       this.setStatus(ticket.id, status);
       this.next(ticket.id);
     });
+  }
+
+  private handleLine(ticketId: number, line: string, onResult: (isError: boolean) => void) {
+    if (!line.trim()) return;
+    let ev: any;
+    try {
+      ev = JSON.parse(line);
+    } catch {
+      this.emit(ticketId, 'note', { text: line });
+      return;
+    }
+    if (!ev || typeof ev !== 'object') return;
+    if (DROPPED_TYPES.has(ev.type)) return;
+    if (ev.type === 'system' && DROPPED_SYSTEM_SUBTYPES.has(ev.subtype)) return;
+    if (ev.session_id && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
+      this.store.updateTicket(ticketId, { session_id: ev.session_id });
+    }
+    if (ev.type === 'result') onResult(!!ev.is_error);
+    const activity = describeActivity(ev);
+    if (activity) this.store.updateTicket(ticketId, { last_activity: activity });
+    this.emit(ticketId, 'claude', slimEvent(ev));
   }
 
   private setStatus(ticketId: number, status: Ticket['status']) {

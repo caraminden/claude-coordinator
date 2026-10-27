@@ -44,11 +44,17 @@ export class Auth {
     if (ok) {
       this.failures.delete(client);
     } else {
+      if (this.failures.size > 10_000) this.prune();
       const f = this.failures.get(client) ?? { count: 0, since: Date.now() };
       f.count++;
       this.failures.set(client, f);
     }
     return ok;
+  }
+
+  private prune() {
+    const cutoff = Date.now() - FAILURE_WINDOW_MS;
+    for (const [client, f] of this.failures) if (f.since < cutoff) this.failures.delete(client);
   }
 
   private sign(payload: string): string {

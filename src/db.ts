@@ -107,20 +107,25 @@ export class Store {
     return this.db.prepare('SELECT * FROM tickets WHERE id = ?').get(id) as unknown as Ticket | undefined;
   }
 
-  nextTicketId(): number {
-    const row = this.db.prepare('SELECT COALESCE(MAX(id), 0) + 1 AS n FROM tickets').get() as { n: number };
-    return row.n;
+  /** Insert a ticket with no working directory yet; call setTicketDir once it exists. */
+  createTicket(t: Pick<Ticket, 'project_id' | 'title' | 'permission_mode' | 'created_by'>): Ticket {
+    const now = Date.now();
+    const r = this.db
+      .prepare(
+        `INSERT INTO tickets (project_id, title, status, cwd, permission_mode, created_by, created_at, updated_at)
+         VALUES (?, ?, 'new', '', ?, ?, ?, ?)`,
+      )
+      .run(t.project_id, t.title, t.permission_mode, t.created_by, now, now);
+    return this.getTicket(Number(r.lastInsertRowid))!;
   }
 
-  createTicket(t: Omit<Ticket, 'session_id' | 'last_activity' | 'created_at' | 'updated_at' | 'status'>): Ticket {
-    const now = Date.now();
-    this.db
-      .prepare(
-        `INSERT INTO tickets (id, project_id, title, status, cwd, branch, permission_mode, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, 'new', ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(t.id, t.project_id, t.title, t.cwd, t.branch, t.permission_mode, t.created_by, now, now);
-    return this.getTicket(t.id)!;
+  setTicketDir(id: number, cwd: string, branch: string | null) {
+    this.db.prepare('UPDATE tickets SET cwd = ?, branch = ? WHERE id = ?').run(cwd, branch, id);
+  }
+
+  deleteTicket(id: number) {
+    this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
   updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title'>>) {

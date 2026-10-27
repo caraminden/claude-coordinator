@@ -1,13 +1,14 @@
 // Project checkouts and per-ticket working directories.
 import { execFile } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
+const GIT_TIMEOUT_MS = 10 * 60 * 1000;
 
 async function git(args: string[], cwd?: string): Promise<string> {
-  const { stdout } = await run('git', args, { cwd, maxBuffer: 16 * 1024 * 1024 });
+  const { stdout } = await run('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, timeout: GIT_TIMEOUT_MS });
   return stdout.trim();
 }
 
@@ -19,11 +20,17 @@ export function projectDir(dataDir: string, projectId: number): string {
   return join(dataDir, 'projects', String(projectId));
 }
 
+export async function removeProjectDir(dataDir: string, projectId: number) {
+  await rm(projectDir(dataDir, projectId), { recursive: true, force: true });
+}
+
 /** Clone the project's repo into the data dir. Returns the checkout path. */
 export async function cloneProject(dataDir: string, projectId: number, repoUrl: string): Promise<string> {
   const dir = join(projectDir(dataDir, projectId), 'repo');
+  // Project ids can be reused after a failed create; clear any leftover partial clone.
+  await rm(dir, { recursive: true, force: true });
   await mkdir(projectDir(dataDir, projectId), { recursive: true });
-  await git(['clone', '--quiet', repoUrl, dir]);
+  await git(['clone', '--quiet', '--', repoUrl, dir]);
   return dir;
 }
 
@@ -43,7 +50,11 @@ export async function createTicketDir(
     await mkdir(cwd, { recursive: true });
     return { cwd, branch: null };
   }
-  await git(['fetch', '--quiet', 'origin'], repoDir);
+  try {
+    await git(['fetch', '--quiet', 'origin'], repoDir);
+  } catch {
+    // Best effort: branch from what we already have if the remote is unreachable.
+  }
   let base = 'HEAD';
   try {
     base = await git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repoDir);

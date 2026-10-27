@@ -12,6 +12,7 @@ import { AGENT_NAME, Auth, threadMayCall, type Session } from './src/auth.ts';
 import { branchStatus, type BranchStatus } from './src/branch.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
+import { cleanPluginDirs, cleanRules, lines } from './src/approvals.ts';
 import { instructionSources } from './src/instructions.ts';
 import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, hashToken, newToken } from './src/machines.ts';
 import { Runner, slimEvent } from './src/runner.ts';
@@ -26,6 +27,8 @@ const PUBLIC_DIR = join(import.meta.dirname, 'public');
 const THREAD_PERMISSION_MODE = 'bypassPermissions';
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
+// How long one wait for an approval card's outcome holds the request open.
+const APPROVAL_POLL_MS = 25_000;
 const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 
 await mkdir(DATA_DIR, { recursive: true });
@@ -681,11 +684,35 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const project = store.getProject(Number(m[1]));
     if (!project) throw new HttpError(404, 'No such project');
     inScope(project.id);
+    // Any of instructions, approval_rules and plugin_dirs; what is left out stays.
     const body = await readJson(req);
-    if (typeof body.instructions !== 'string') throw new HttpError(400, 'instructions must be text');
-    const instructions = body.instructions.replace(/\r\n/g, '\n').trim();
+    if (body.instructions === undefined && body.approval_rules === undefined && body.plugin_dirs === undefined) {
+      throw new HttpError(400, 'Nothing to change');
+    }
+    const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs'>> = {};
+    try {
+      if (body.approval_rules !== undefined) settings.approval_rules = cleanRules(body.approval_rules);
+      if (body.plugin_dirs !== undefined) settings.plugin_dirs = cleanPluginDirs(body.plugin_dirs);
+    } catch (err: any) {
+      throw new HttpError(400, err.message);
+    }
+    if (body.instructions !== undefined && typeof body.instructions !== 'string') throw new HttpError(400, 'instructions must be text');
+    const instructions = body.instructions === undefined ? project.instructions : body.instructions.replace(/\r\n/g, '\n').trim();
     if (instructions.length > MAX_INSTRUCTIONS) {
       throw new HttpError(400, `Instructions are ${instructions.length.toLocaleString('en')} characters; the limit is ${MAX_INSTRUCTIONS.toLocaleString('en')}`);
+    }
+    for (const k of Object.keys(settings) as (keyof typeof settings)[]) if (settings[k] === project[k]) delete settings[k];
+    if (Object.keys(settings).length) {
+      store.setProjectSettings(project.id, settings);
+      // Who changed what gets a permanent line in the coordinator's chat, since rules decide what needs a person's OK.
+      const coordinator = store.getCoordinator(project.id);
+      const shown = (text: string) => (text ? lines(text).join(', ') : 'none');
+      if (coordinator && settings.approval_rules !== undefined) {
+        runner.emit(coordinator.id, 'note', { text: `${session.name} set the approval rules to: ${shown(settings.approval_rules)}. They apply from each thread's next turn.` });
+      }
+      if (coordinator && settings.plugin_dirs !== undefined) {
+        runner.emit(coordinator.id, 'note', { text: `${session.name} set the plugin folders to: ${shown(settings.plugin_dirs)}. They apply from each thread's next turn.` });
+      }
     }
     if (instructions !== project.instructions) {
       store.setProjectInstructions(project.id, instructions, session.name);
@@ -876,6 +903,30 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       }).join('\n\n');
       runner.send(id, session.name, `My answers to your question card:\n\n${text}`, [], { answer: { questionId: body.questionId, answers } });
       return json(res, 202, ticketView(id));
+    }
+    if (action === '/approvals' && method === 'POST') {
+      // Claude Code wants to run a tool that matches an approval rule; show an Approve / Deny card.
+      if (session.agent !== id) throw new HttpError(403, 'Only the thread itself can ask for approval in its chat');
+      if (!runner.isRunning(id)) throw new HttpError(409, 'The thread is not mid-turn');
+      const body = await readJson(req);
+      const tool = str(body.tool_name, 'Tool name', 300);
+      return json(res, 201, { id: runner.approvals.request(id, tool, body.input ?? {}) });
+    }
+    if (action === '/approvals' && method === 'GET') {
+      // The thread's MCP server waits here for the card's outcome, half a minute at a time.
+      if (session.agent !== id) throw new HttpError(403, 'Only the thread itself can wait on its approvals');
+      return json(res, 200, await runner.approvals.wait(id, url.searchParams.get('id') ?? '', APPROVAL_POLL_MS));
+    }
+    if (action === '/approve' && method === 'POST') {
+      // Only a signed-in person's click settles a card; the coordinator and threads cannot.
+      if (session.agent !== undefined) throw new HttpError(403, 'Only people approve tool calls');
+      const body = await readJson(req);
+      if (typeof body.allow !== 'boolean') throw new HttpError(400, 'allow must be true or false');
+      const approvalId = String(body.approvalId ?? '');
+      const before = runner.approvals.get(id, approvalId);
+      if (before.state === 'expired') throw new HttpError(409, 'This request expired; the turn that asked has ended');
+      if (before.state !== 'pending') throw new HttpError(409, `${before.by} already ${before.state === 'allowed' ? 'approved' : 'denied'} this`);
+      return json(res, 200, runner.approvals.decide(id, approvalId, body.allow, session.name));
     }
     if (action === '/stop' && method === 'POST') {
       return json(res, 200, { stopped: runner.stop(id) });

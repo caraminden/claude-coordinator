@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
+import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
 import { claudeConfigDir, lastEffort, restoreSession, saveSession } from './sessions.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
@@ -268,10 +269,17 @@ export class Runner {
   machines: () => Machine[] = () => [];
   /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
   onFilesMayChange: (ticketId: number) => void = () => {};
+  /** Approve / Deny cards waiting on people, for projects with approval rules. */
+  approvals: Approvals;
 
   constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
     this.broadcast = broadcast;
+    this.approvals = new Approvals((ticketId, kind, data) => {
+      this.emit(ticketId, kind, data);
+      // The threads list shows which threads are waiting on an approval.
+      this.broadcastTicket(ticketId);
+    });
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
   }
@@ -287,7 +295,10 @@ export class Runner {
   /** A ticket as the API shows it: plus queued messages and its task-list steps. */
   view(ticket: Ticket) {
     const { total, done } = stepInfo(this.progressFor(ticket.id));
-    return { ...ticket, queued: this.queued(ticket.id), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id) };
+    return {
+      ...ticket, queued: this.queued(ticket.id), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
+      approvals: this.approvals.waiting(ticket.id),
+    };
   }
 
   /** Close a ticket that is not running. Its worktree and branch are kept. */
@@ -312,6 +323,10 @@ export class Runner {
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
         if (t.status === 'running') {
+          // Cards that were waiting died with the turn; nobody's click can count for them now.
+          for (const id of unsettledCards(this.store.listEvents(t.id))) {
+            this.emit(t.id, 'approval_result', { id, state: 'expired', reason: 'The server restarted while this waited.' });
+          }
           this.emit(t.id, 'note', { text: 'The server restarted during this turn, so it was interrupted.' });
           this.setStatus(t.id, 'idle');
         }
@@ -376,6 +391,8 @@ export class Runner {
     }
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now.
     const machines = ticket.kind === 'coordinator' ? [] : this.machines();
+    // Tool calls matching the project's approval rules wait for a person (threads only).
+    const rules = ticket.kind === 'coordinator' ? [] : lines(project.approval_rules);
     const args = [
       '-p',
       '--input-format', 'stream-json',
@@ -384,7 +401,8 @@ export class Runner {
       '--permission-mode', ticket.permission_mode,
       '--append-system-prompt', systemPrompt(project, ticket, filesDir, this.ticketsDir(project), machines),
       // Nobody can answer a permission prompt in a headless turn; deny instead of waiting on one.
-      '--permission-prompts', 'none',
+      // With approval rules, their prompts become Approve / Deny cards instead.
+      ...permissionArgs(rules),
     ];
     // Lets edit-only sessions write there too, not just in their working directory.
     const addDirs = filesDir ? [filesDir] : [];
@@ -394,6 +412,7 @@ export class Runner {
       args.push('--settings', JSON.stringify(access.settings));
     }
     if (addDirs.length) args.push('--add-dir', ...addDirs);
+    if (ticket.kind !== 'coordinator') args.push(...pluginDirArgs(lines(project.plugin_dirs), ticket.cwd));
     if (ticket.session_id) args.push('--resume', ticket.session_id);
     // Chosen per thread in the composer; left out, Claude Code uses its defaults.
     if (ticket.model) args.push('--model', ticket.model);
@@ -410,6 +429,8 @@ export class Runner {
     // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
     args.push('--mcp-config', JSON.stringify({ mcpServers: servers }), '--allowedTools', ...allowed, '--disallowedTools', 'AskUserQuestion');
     env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
+    // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
+    if (rules.length) env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
     // A state describes where the last turn left things; a new turn makes it stale.
     if (ticket.state) this.store.updateTicket(ticket.id, { state: null });
 
@@ -457,6 +478,7 @@ export class Runner {
     proc.on('close', (code, signal) => {
       this.procs.delete(ticket.id);
       const stopped = this.stopping.delete(ticket.id);
+      this.approvals.endTurn(ticket.id, stopped ? 'The turn was stopped while this waited.' : 'The turn ended while this waited.');
       let status: 'idle' | 'error' = 'idle';
       if (stopped || signal) {
         // Stopped by the user; leave it waiting for the next message.

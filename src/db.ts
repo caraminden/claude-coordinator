@@ -13,6 +13,10 @@ export interface Project {
   instructions: string;
   instructions_updated_by: string | null;
   instructions_updated_at: number | null;
+  /** Claude Code permission rules, one per line, that make a thread ask people first; '' for none. */
+  approval_rules: string;
+  /** Folders in the repo, one per line, that each thread loads as Claude Code plugins; '' for none. */
+  plugin_dirs: string;
   created_at: number;
 }
 
@@ -189,6 +193,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'instructions', "ALTER TABLE projects ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"],
   ['projects', 'instructions_updated_by', 'ALTER TABLE projects ADD COLUMN instructions_updated_by TEXT'],
   ['projects', 'instructions_updated_at', 'ALTER TABLE projects ADD COLUMN instructions_updated_at INTEGER'],
+  ['projects', 'approval_rules', "ALTER TABLE projects ADD COLUMN approval_rules TEXT NOT NULL DEFAULT ''"],
+  ['projects', 'plugin_dirs', "ALTER TABLE projects ADD COLUMN plugin_dirs TEXT NOT NULL DEFAULT ''"],
 ];
 
 export class Store {
@@ -269,6 +275,12 @@ export class Store {
     this.db
       .prepare('UPDATE projects SET instructions = ?, instructions_updated_by = ?, instructions_updated_at = ? WHERE id = ?')
       .run(instructions, by, Date.now(), id);
+  }
+
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs'>>) {
+    const keys = Object.keys(fields) as (keyof typeof fields)[];
+    if (!keys.length) return;
+    this.db.prepare(`UPDATE projects SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? ''), id);
   }
 
   deleteProject(id: number) {

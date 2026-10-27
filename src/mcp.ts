@@ -9,6 +9,8 @@ const PROJECT = Number(process.env.COORDINATOR_PROJECT);
 // 'coordinator' manages the project's tickets; 'thread' lets a ticket label itself.
 const ROLE = process.env.COORDINATOR_ROLE === 'thread' ? 'thread' : 'coordinator';
 const TICKET = Number(process.env.COORDINATOR_TICKET);
+// Set for threads in projects with approval rules: Claude Code asks the approve tool before those calls.
+const APPROVALS = process.env.COORDINATOR_APPROVALS === '1';
 const MAX_TEXT = 4000;
 
 const TITLE = { type: 'string', description: 'The short ask, about 30 characters, e.g. "Usage bar in the top bar". No number, tag or emoji.' };
@@ -144,6 +146,32 @@ const TOOLS = [
       'Replace the project instructions with new text (max 16,000 characters; empty clears them). They reach every ticket, and you, from its next turn. Read the current text first and send the whole new version, not just the change.',
     inputSchema: { type: 'object', properties: { instructions: { type: 'string' } }, required: ['instructions'] },
   },
+  {
+    name: 'get_project_settings',
+    description:
+      "Read the project's approval rules (Claude Code permission rules a thread must get a person's OK for, via an Approve / Deny card in its chat) and plugin folders (folders in the repo every thread loads as Claude Code plugins).",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_project_settings',
+    description:
+      'Replace the approval rules and/or plugin folders; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each thread\'s next turn. Only change them when people ask.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        approval_rules: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Claude Code permission rules, e.g. "Bash(gh pr merge:*)" or "mcp__*__merge_pull_request". Matching tool calls wait for a person to approve them.',
+        },
+        plugin_folders: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Folder paths relative to the repo root, e.g. "tools/mods/delve". Each is loaded with --plugin-dir when it exists in a thread\'s worktree.',
+        },
+      },
+    },
+  },
 ];
 
 async function call(method: string, path: string, body?: object): Promise<any> {
@@ -181,6 +209,8 @@ function transcript(events: any[]): string[] {
     if (ev.kind === 'user_message') out.push(`[${data.author}]: ${clip(data.text)}`);
     else if (ev.kind === 'note') out.push(`(note) ${data.text}`);
     else if (ev.kind === 'error') out.push(`(error) ${clip(data.text)}`);
+    else if (ev.kind === 'approval') out.push(`(asked for approval) ${data.tool}: ${clip(JSON.stringify(data.input))}`);
+    else if (ev.kind === 'approval_result') out.push(data.state === 'expired' ? '(approval expired)' : `(${data.state} by ${data.by})`);
     else if (ev.kind === 'claude' && data.type === 'assistant') {
       const text = (data.message?.content ?? [])
         .filter((b: any) => b.type === 'text' && b.text.trim())
@@ -230,9 +260,51 @@ const THREAD_TOOLS = [
   },
 ];
 
+// Claude Code's permission-prompt tool (--permission-prompt-tool): not one for Claude to call itself.
+const APPROVE = {
+  name: 'approve',
+  description: 'Used by Claude Code itself to ask people in the chat to approve a tool call. Do not call it yourself.',
+  inputSchema: {
+    type: 'object',
+    properties: { tool_name: { type: 'string' }, input: { type: 'object' }, tool_use_id: { type: 'string' } },
+    required: ['tool_name', 'input'],
+  },
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Post an Approve / Deny card for a tool call and wait, however long it takes, for a person to
+ * click. Answers in the shape Claude Code expects from a permission-prompt tool. Anything other
+ * than a person's Approve, including errors and expired cards, denies.
+ */
+async function approve(args: any): Promise<string> {
+  let decision: any;
+  try {
+    const { id } = await call('POST', `/api/tickets/${TICKET}/approvals`, { tool_name: args.tool_name, input: args.input ?? {} });
+    // Each request waits up to half a minute on the server; keep asking until the card is settled.
+    for (let failures = 0; !decision || decision.state === 'pending';) {
+      try {
+        decision = await call('GET', `/api/tickets/${TICKET}/approvals?id=${encodeURIComponent(id)}`);
+        failures = 0;
+      } catch (err) {
+        if (++failures >= 5) throw err;
+        await sleep(2000);
+      }
+    }
+  } catch (err: any) {
+    decision = { state: 'expired', reason: `The approval card failed: ${err.message}` };
+  }
+  if (decision.state === 'allowed') return JSON.stringify({ behavior: 'allow', updatedInput: args.input ?? {} });
+  const message = decision.state === 'denied'
+    ? `${decision.by} denied this in the chat. It was not run. Do not retry it or work around it; say what you needed it for, and carry on with anything that does not need it.`
+    : `Nobody approved this, so it was not run (${decision.reason ?? 'the card expired'}).`;
+  return JSON.stringify({ behavior: 'deny', message });
+}
+
 async function runTool(name: string, args: any): Promise<string> {
   // Each role may only call its own tools.
-  if (!(ROLE === 'thread' ? THREAD_TOOLS : TOOLS).some((t) => t.name === name)) throw new Error(`Unknown tool ${name}`);
+  if (!toolList().some((t) => t.name === name)) throw new Error(`Unknown tool ${name}`);
   switch (name) {
     case 'list_tickets': {
       const { tickets } = await call('GET', `/api/projects/${PROJECT}`);
@@ -261,6 +333,22 @@ async function runTool(name: string, args: any): Promise<string> {
       const by = project.instructions_updated_by ? ` (last changed by ${project.instructions_updated_by})` : '';
       return `Project instructions${by}:\n\n${project.instructions}`;
     }
+    case 'get_project_settings': {
+      const { project } = await call('GET', `/api/projects/${PROJECT}`);
+      const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
+      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders:\n${show(project.plugin_dirs)}`;
+    }
+    case 'set_project_settings': {
+      const body: Record<string, unknown> = {};
+      if (args.approval_rules !== undefined) body.approval_rules = args.approval_rules;
+      if (args.plugin_folders !== undefined) body.plugin_dirs = args.plugin_folders;
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders or both');
+      const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
+      const n = (text: string) => (text ? text.split('\n').length : 0);
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s). They apply from each thread's next turn.`;
+    }
+    case 'approve':
+      return approve(args);
     case 'set_project_instructions': {
       const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: String(args.instructions ?? '') });
       return project.instructions ? `Saved (${project.instructions.length} characters).` : 'Cleared the project instructions.';
@@ -298,6 +386,11 @@ async function runTool(name: string, args: any): Promise<string> {
   }
 }
 
+function toolList() {
+  if (ROLE !== 'thread') return TOOLS;
+  return APPROVALS ? [...THREAD_TOOLS, APPROVE] : THREAD_TOOLS;
+}
+
 function reply(msg: object) {
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...msg }) + '\n');
 }
@@ -316,7 +409,7 @@ async function handle(req: any) {
         },
       });
     } else if (method === 'tools/list') {
-      reply({ id: rid, result: { tools: ROLE === 'thread' ? THREAD_TOOLS : TOOLS } });
+      reply({ id: rid, result: { tools: toolList() } });
     } else if (method === 'tools/call') {
       try {
         const text = await runTool(params?.name, params?.arguments ?? {});

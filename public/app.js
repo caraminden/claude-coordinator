@@ -930,15 +930,14 @@ function renderShelf() {
     h('span', { class: 'text' },
       h('span', { class: 'name' }, a.name),
       h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? 'Coordinator' : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
-  el.replaceChildren(
-    h('section', { class: 'column' },
-      h('h3', {}, 'Pinned', pinned.length ? h('span', { class: 'count' }, pinned.length) : ''),
-      pinned.length ? pinned.map(item) : h('p', { class: 'muted small' }, 'Pin artifacts with ☆ to keep them here.')),
-    h('section', { class: 'column' },
-      h('h3', {}, 'Recent artifacts'),
-      recent.length ? recent.map(item) : h('p', { class: 'muted small' }, 'Documents, pages and canvases that threads create show up here.')),
-    h('a', { class: `view-all${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts` },
-      'Browse all artifacts', all.length ? h('span', { class: 'count' }, all.length) : ''));
+  const sub = (title, count, items, empty) => h('div', { class: 'sub' },
+    h('h4', {}, title, count ? h('span', { class: 'count' }, count) : ''),
+    items.length ? items.map(item) : h('p', { class: 'muted small' }, empty));
+  el.replaceChildren(h('section', { class: 'column' },
+    h('h3', {}, 'Artifacts', h('span', { class: 'spacer' }),
+      h('a', { class: `browse${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts`, title: `Browse all ${all.length} artifacts` }, 'Browse')),
+    sub('Pinned', pinned.length, pinned, 'Pin artifacts with ☆ to keep them here.'),
+    sub('Recent', 0, recent, 'Documents, pages and canvases that threads create show up here.')));
 }
 
 /** Main panel: every artifact in the project, searchable, with pin toggles. */

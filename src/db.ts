@@ -214,6 +214,13 @@ export class Store {
       .all(projectId) as any;
   }
 
+  /** Drop artifact rows whose path `keep` rejects. */
+  pruneArtifacts(keep: (path: string) => boolean) {
+    const rows = this.db.prepare('SELECT id, path FROM artifacts').all() as { id: number; path: string }[];
+    const del = this.db.prepare('DELETE FROM artifacts WHERE id = ?');
+    for (const r of rows) if (!keep(r.path)) del.run(r.id);
+  }
+
   getArtifact(id: number): Artifact | undefined {
     return this.db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id) as unknown as Artifact | undefined;
   }

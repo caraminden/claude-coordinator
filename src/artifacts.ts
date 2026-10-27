@@ -1,4 +1,4 @@
-// Artifacts: documents and media that tickets create in their working directories.
+// Artifacts: documents and pages that tickets create in their working directories.
 import { execFile } from 'node:child_process';
 import { lstat, readdir } from 'node:fs/promises';
 import { extname, join } from 'node:path';
@@ -6,18 +6,22 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 
-export type ArtifactKind = 'markdown' | 'text' | 'html' | 'pdf' | 'image' | 'video' | 'audio';
+export type FileKind = 'markdown' | 'text' | 'canvas' | 'html' | 'pdf' | 'image' | 'video' | 'audio';
 
-/** File types that count as artifacts. Source code is left out on purpose; it lives in the branch. */
-export const ARTIFACT_TYPES: Record<string, { kind: ArtifactKind; mime: string }> = {
-  '.md': { kind: 'markdown', mime: 'text/plain; charset=utf-8' },
-  '.markdown': { kind: 'markdown', mime: 'text/plain; charset=utf-8' },
+/**
+ * File types the app will serve from a ticket's folder. Only documents and pages (`artifact`)
+ * are listed as artifacts; images and media are served when a document embeds them.
+ * Source code is left out on purpose; it lives in the branch.
+ */
+export const FILE_TYPES: Record<string, { kind: FileKind; mime: string; artifact?: true }> = {
+  '.md': { kind: 'markdown', mime: 'text/plain; charset=utf-8', artifact: true },
+  '.markdown': { kind: 'markdown', mime: 'text/plain; charset=utf-8', artifact: true },
+  '.canvas': { kind: 'canvas', mime: 'text/plain; charset=utf-8', artifact: true },
+  '.html': { kind: 'html', mime: 'text/html; charset=utf-8', artifact: true },
+  '.htm': { kind: 'html', mime: 'text/html; charset=utf-8', artifact: true },
+  '.pdf': { kind: 'pdf', mime: 'application/pdf', artifact: true },
   '.txt': { kind: 'text', mime: 'text/plain; charset=utf-8' },
   '.csv': { kind: 'text', mime: 'text/plain; charset=utf-8' },
-  '.canvas': { kind: 'text', mime: 'text/plain; charset=utf-8' },
-  '.html': { kind: 'html', mime: 'text/html; charset=utf-8' },
-  '.htm': { kind: 'html', mime: 'text/html; charset=utf-8' },
-  '.pdf': { kind: 'pdf', mime: 'application/pdf' },
   '.png': { kind: 'image', mime: 'image/png' },
   '.jpg': { kind: 'image', mime: 'image/jpeg' },
   '.jpeg': { kind: 'image', mime: 'image/jpeg' },
@@ -34,8 +38,12 @@ export const ARTIFACT_TYPES: Record<string, { kind: ArtifactKind; mime: string }
   '.m4a': { kind: 'audio', mime: 'audio/mp4' },
 };
 
-export function artifactType(path: string) {
-  return ARTIFACT_TYPES[extname(path).toLowerCase()];
+export function fileType(path: string) {
+  return FILE_TYPES[extname(path).toLowerCase()];
+}
+
+export function isArtifact(path: string): boolean {
+  return !!fileType(path)?.artifact;
 }
 
 export interface FoundArtifact {
@@ -94,7 +102,7 @@ async function walk(cwd: string): Promise<string[]> {
 export async function findArtifacts(cwd: string, isGit: boolean): Promise<FoundArtifact[]> {
   if (!cwd) return [];
   const paths = (isGit ? await gitAdded(cwd) : await walk(cwd))
-    .filter((p) => artifactType(p) && !p.split('/').some((part) => part.startsWith('.') || SKIP_DIRS.has(part)))
+    .filter((p) => isArtifact(p) && !p.split('/').some((part) => part.startsWith('.') || SKIP_DIRS.has(part)))
     .slice(0, MAX_FILES);
   const found: FoundArtifact[] = [];
   for (const path of paths) {

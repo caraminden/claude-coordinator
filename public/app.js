@@ -564,7 +564,7 @@ async function route() {
   const seq = ++routeSeq;
   const hash = location.hash || '#/';
   // Answer the click straight away: highlight the thread being opened and dim the old view.
-  for (const a of document.querySelectorAll('#threads .thread-row')) a.classList.toggle('active', a.getAttribute('href') === hash);
+  for (const a of document.querySelectorAll('#coordinator-row .thread-row, #threads .thread-row')) a.classList.toggle('active', a.getAttribute('href') === hash);
   document.body.classList.add('navigating');
   let m;
   try {
@@ -813,6 +813,8 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     h('summary', { title: 'Show or hide threads' }, h('span', { class: 'label' }, 'Threads')),
     newTicketForm(projectId),
+    // The coordinator sits above the search so it stays one click away while searching.
+    h('div', { id: 'coordinator-row' }),
     threadSearchBox(projectId),
     h('div', { id: 'threads' }));
   // Don't hide a half-written new thread behind a collapsed sidebar.
@@ -1054,6 +1056,7 @@ function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el) return;
   const tickets = [...view.tickets.values()];
+  document.getElementById('coordinator-row')?.replaceChildren(threadRow(view.coordinator, `#/p/${view.projectId}`));
   if (threadSearch.q) return renderThreadResults(el, tickets.sort((a, b) => b.updated_at - a.updated_at));
   const open = tickets.filter((t) => t.status !== 'closed');
   const closed = tickets.filter((t) => t.status === 'closed').sort((a, b) => b.updated_at - a.updated_at);
@@ -1070,7 +1073,6 @@ function renderSidebar() {
     closedGroup.addEventListener('toggle', () => { view.showClosed = closedGroup.open; });
   }
   el.replaceChildren(
-    threadRow(view.coordinator, `#/p/${view.projectId}`),
     ...sections, closedGroup,
     tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or type in the box above.'));
 }

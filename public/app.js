@@ -93,10 +93,21 @@ function markdown(src) {
 
 // ---------- live updates ----------
 
-function connectStream() {
-  if (stream) return;
-  stream = new EventSource('/api/stream');
-  stream.onmessage = (e) => {
+let streamRetry = 0;
+let streamTimer = null;
+
+function connectStream(catchUp = false) {
+  if (stream || !me) return;
+  clearTimeout(streamTimer);
+  const es = new EventSource('/api/stream');
+  stream = es;
+  es.onopen = () => {
+    streamRetry = 0;
+    // Anything broadcast while we were disconnected was missed; fetch it.
+    if (catchUp) resync();
+    catchUp = true;
+  };
+  es.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.type === 'hello') {
       // The server restarted with a different front end; load it instead of running stale code.
@@ -106,11 +117,22 @@ function connectStream() {
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'event') onEvent(msg.event);
   };
-  stream.onerror = () => {
-    // EventSource reconnects on its own; catch up on what was missed once it does.
-    stream.onopen = resync;
+  es.onerror = () => {
+    // EventSource retries dropped connections itself, but gives up for good on a non-200
+    // reply (e.g. Caddy's 502 while the server restarts), so reconnect by hand then.
+    if (es.readyState !== EventSource.CLOSED) return;
+    es.close();
+    if (stream === es) stream = null;
+    streamTimer = setTimeout(() => connectStream(true), Math.min(30_000, 1000 * 2 ** streamRetry++));
   };
 }
+
+// Phones and sleeping laptops drop connections quietly; recheck when the page comes back.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !me) return;
+  if (!stream) connectStream(true);
+  else if (view?.kind === 'project') resync();
+});
 
 async function resync() {
   if (view?.kind !== 'project') return route();
@@ -200,6 +222,7 @@ function start(name) {
 
 async function logout() {
   await api('/api/logout', { method: 'POST', body: {} });
+  clearTimeout(streamTimer);
   stream?.close();
   stream = null;
   me = null;
@@ -301,8 +324,14 @@ async function showProject(projectId, ticketId = null) {
     if (!text) return;
     sendBtn.disabled = true;
     try {
-      await api(`/api/tickets/${chatId}/messages`, { method: 'POST', body: { text } });
+      const ticket = await api(`/api/tickets/${chatId}/messages`, { method: 'POST', body: { text } });
       textarea.value = '';
+      // Show the message now even if the live stream is down; duplicates are skipped by id.
+      if (view?.kind === 'project' && view.id === chatId) {
+        view.ticket = ticket;
+        renderTicketHead();
+        catchUpEvents().catch(() => {});
+      }
     } catch (ex) {
       alertNote(ex.message);
     } finally {

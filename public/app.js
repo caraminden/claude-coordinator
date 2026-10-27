@@ -297,6 +297,7 @@ async function showProject(projectId, ticketId = null) {
   view = {
     kind: 'project', projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     id: chatId, ticket, lastEventId: 0, tools: new Map(),
+    stats: { messages: 0, turns: 0, cost: 0, lastAt: 0 },
   };
   crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ',
     ...(ticketId ? [h('a', { href: `#/p/${project.id}` }, project.name), ' / ', `#${ticket.id}`] : [project.name]));
@@ -452,12 +453,27 @@ function renderTicketHead() {
       h('h2', {}, coord ? 'Coordinator' : `#${t.id} ${t.title}`),
       h('span', { class: 'muted' }, statusLabel(t) + (t.queued ? ` · ${t.queued} queued` : '')),
       h('span', { class: 'spacer' }), ...actions),
-    h('div', { class: 'meta' }, (coord
+    h('div', { class: 'meta', title: coord ? '' : t.cwd }, (coord
       ? ["Manages this project's threads"]
-      : [t.branch ? `branch ${t.branch}` : null, `permissions: ${t.permission_mode}`, `started by ${t.created_by}`, t.cwd]
-    ).filter(Boolean).join(' · ')));
+      : [t.branch ? `branch ${t.branch}` : null, `permissions: ${t.permission_mode}`, `started by ${t.created_by}`]
+    ).filter(Boolean).join(' · ')),
+    h('div', { class: 'stats', id: 'ticket-stats' }));
+  renderStats();
   const hint = document.getElementById('composer-hint');
   if (hint) hint.textContent = t.status === 'running' ? 'Messages sent now run after the current turn.' : '';
+}
+
+/** The summary line in the thread bar, tallied from the events shown in the log. */
+function renderStats() {
+  const el = document.getElementById('ticket-stats');
+  if (!el) return;
+  const s = view.stats;
+  el.replaceChildren(...[
+    `${s.messages} message${s.messages === 1 ? '' : 's'}`,
+    `${s.turns} turn${s.turns === 1 ? '' : 's'}`,
+    s.cost ? `$${s.cost.toFixed(2)} spent` : null,
+    s.lastAt ? `last activity ${ago(s.lastAt)}` : null,
+  ].filter(Boolean).map((text) => h('span', {}, text)));
 }
 
 async function setStatus(id, status) {
@@ -485,6 +501,14 @@ function appendEvent(event, scroll = true) {
   const log = document.getElementById('log');
   if (!log) return;
   const data = JSON.parse(event.data);
+  const stats = view.stats;
+  stats.lastAt = Math.max(stats.lastAt, event.created_at);
+  if (event.kind === 'user_message') stats.messages++;
+  if (event.kind === 'claude' && data.type === 'result') {
+    stats.turns++;
+    stats.cost += data.total_cost_usd || 0;
+  }
+  renderStats();
   const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 200;
   const nodes = [];
 
@@ -541,5 +565,11 @@ function appendEvent(event, scroll = true) {
 }
 
 // ---------- boot ----------
+
+// Sticky elements sit just below the top bar, whose height changes with wrapping and safe areas.
+const topbar = document.querySelector('.topbar');
+new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`)).observe(topbar);
+// Keep "last activity 3m ago" honest.
+setInterval(() => view?.kind === 'project' && renderStats(), 30_000);
 
 api('/api/me').then((r) => start(r.name)).catch(() => {});

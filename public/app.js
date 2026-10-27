@@ -749,7 +749,7 @@ function chatView(chatId, ticket) {
     ui: progressUi(chatId),
     actions: new Map(), // tool_use_id -> { block, taskId, result }
     turnActions: [], // actions of the current (or last) turn, in order
-    typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite' }), // below the chat log
+    typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite', role: 'button', tabindex: '0' }), // below the chat log
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
     pendingMessages: [], // { el, text } shown on send, replaced by the server's copy
     cards: new Map(), // question card id -> { markAnswered }; approval card id -> { settle }
@@ -1019,6 +1019,16 @@ function chatSection(chatId, ticket, events) {
     log.append(h('div', { class: 'note' },
       'This is the project coordinator. It keeps track of the threads on the left and can create, message, rename and close them for you.'));
   }
+  // The working line is a shortcut to the readout in the thread bar.
+  const openReadout = () => {
+    view.ui.open = true;
+    renderProgress();
+    view.progressEl.scrollIntoView({ block: 'nearest' });
+  };
+  view.typingEl.onclick = openReadout;
+  view.typingEl.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReadout(); }
+  };
   return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);
 }
 
@@ -2379,6 +2389,9 @@ function appendEvent(event, scroll = true) {
   if (event.kind === 'claude' && data.type === 'system' && data.subtype === 'init') {
     view.turnActions = [];
     view.turnNote = null;
+    view.turnStartedAt = event.created_at;
+    view.turnTexts = [];
+    view.narrationEl = null;
     // Messages queued since the last turn are what this turn works on.
     if (view.pendingRequest?.length) view.turnRequest = view.pendingRequest;
     view.pendingRequest = [];
@@ -2393,6 +2406,7 @@ function appendEvent(event, scroll = true) {
   }
   if (event.kind === 'claude') scheduleProgress();
   const nodes = [];
+  let fold = false;
 
   if (event.kind === 'user_message') {
     if (data.author === me && view.pendingMessages.length) {
@@ -2431,6 +2445,11 @@ function appendEvent(event, scroll = true) {
           const msg = h('div', { class: 'msg' }, h('div', { class: 'who' }, 'Claude'));
           msg.append(markdown(block.text, event.ticket_id));
           nodes.push(msg);
+          (view.turnTexts ??= []).push({ el: msg, text: block.text });
+        } else if (block.type === 'tool_use') {
+          // Words followed by more work were narration; words that lead into a question card stay.
+          if (block.name === 'mcp__thread__ask_question') view.turnTexts = [];
+          else fold = true;
         }
       }
     } else if (data.type === 'user') {
@@ -2463,8 +2482,31 @@ function appendEvent(event, scroll = true) {
   }
 
   log.append(...nodes);
+  if (fold) foldNarration(event.ticket_id);
   renderTyping();
   if (scroll && followChat) scrollToBottom();
+}
+
+/**
+ * Claude's in-between remarks ("Worktree is behind main; merging.") leave the chat for one folded
+ * "updates along the way" row per turn, where the first of them was; the turn's last words stay a
+ * bubble. While the turn runs, the newest remark also shows in the working line.
+ */
+function foldNarration(ticketId) {
+  const texts = view.turnTexts?.splice(0) ?? [];
+  if (!texts.length) return;
+  if (!view.narrationEl?.isConnected) {
+    view.narrationEl = h('details', { class: 'narration' }, h('summary', {}), h('div', { class: 'notes' }));
+    texts[0].el.before(view.narrationEl);
+  }
+  const notes = view.narrationEl.querySelector('.notes');
+  for (const t of texts) {
+    t.el.remove();
+    notes.append(h('div', { class: 'note-text' }, markdown(t.text, ticketId)));
+  }
+  const n = notes.childElementCount;
+  view.narrationEl.querySelector('summary').replaceChildren(
+    h('span', { class: 'st' }, '⋯'), ` ${n} update${n === 1 ? '' : 's'} along the way`);
 }
 
 /** "45s", "1m 47s", "12m", "1h 5m". */
@@ -2671,7 +2713,17 @@ function userBubble(author, text, imageSrcs) {
   return msg;
 }
 
-/** "Claude is thinking…" under the chat while a turn runs, so a sent message is visibly being worked on. */
+/** "1m 05s" style, for how long a turn has run. */
+function elapsedText(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
+}
+
+/**
+ * The working line under the chat while a turn runs: what's running right now, how long the turn
+ * has gone, and Claude's newest remark below. The plan step sits in the thread bar's readout just
+ * above, so it isn't repeated here; clicking the line opens that readout.
+ */
 function renderTyping() {
   const el = view?.typingEl;
   if (!el || !view.ticket) return;
@@ -2680,14 +2732,31 @@ function renderTyping() {
   const wasHidden = el.hidden;
   el.hidden = !show;
   if (!show) return;
+  const running = t.status === 'running';
   const last = view.turnActions.at(-1);
-  const busy = t.status === 'running' && last && !last.result;
+  const busy = running && last && !last.result;
+  const doing = busy ? actionLabel(last.block) : 'thinking…';
+  const sep = () => h('span', { class: 'sep' }, '·');
+  el.title = 'Show the work so far';
+  // Only once folded away, so a remark that is still a bubble isn't said twice.
+  const said = running && view.turnNote && !view.turnTexts?.length ? firstSentence(view.turnNote, 200) : '';
   el.replaceChildren(
     h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
-    h('span', { class: 'what' }, t.approvals ? 'Waiting for someone to approve or deny' : busy ? `Claude is working · ${actionLabel(last.block)}` : 'Claude is thinking…'),
-    t.queued ? h('span', { class: 'muted', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, ` · ${t.queued} queued`) : '');
+    h('span', { class: 'lines' },
+      h('span', { class: 'line' },
+        h('span', { class: 'lead' }, t.approvals ? 'Waiting for someone to approve or deny' : running ? 'Claude is working' : 'Claude is thinking…'),
+        running && !t.approvals ? [sep(), h('span', { class: 'what' }, doing)] : '',
+        running && view.turnStartedAt ? [sep(), h('span', { class: 'time', 'aria-hidden': 'true' }, elapsedText(Date.now() - view.turnStartedAt))] : '',
+        t.queued ? [sep(), h('span', { class: 'queued', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, `${t.queued} queued`)] : ''),
+      said ? h('span', { class: 'said' }, said) : ''));
   if (wasHidden && followChat) scrollToBottom();
 }
+
+/** Ticks the turn timer without rebuilding the line (and without re-announcing it to screen readers). */
+setInterval(() => {
+  const time = view?.typingEl?.querySelector('.time');
+  if (time && view.turnStartedAt && !view.typingEl.hidden) time.textContent = elapsedText(Date.now() - view.turnStartedAt);
+}, 1000);
 
 // ---------- boot ----------
 

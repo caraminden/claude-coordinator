@@ -453,9 +453,13 @@ function agentProject(session: Session, method: string, pathname: string): numbe
   if (session.agent === undefined) return null;
   const t = store.getTicket(session.agent);
   if (!t) throw new HttpError(403, 'No such ticket');
-  // A ticket's own token may only read and update that ticket (its title, tag, state and note).
+  // A ticket's own token may only read and update that ticket (its title, tag, state and note),
+  // ask a question card in its chat, and close itself.
   if (t.kind !== 'coordinator') {
-    const own = pathname === `/api/tickets/${t.id}` ? method === 'GET' || method === 'PATCH' : pathname === `/api/tickets/${t.id}/questions` && method === 'POST';
+    const own =
+      pathname === `/api/tickets/${t.id}`
+        ? method === 'GET' || method === 'PATCH'
+        : (pathname === `/api/tickets/${t.id}/questions` || pathname === `/api/tickets/${t.id}/close`) && method === 'POST';
     if (!own) throw new HttpError(403, 'A thread may only update itself');
     return t.project_id;
   }
@@ -875,10 +879,22 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (body.status !== 'closed' && body.status !== 'idle') throw new HttpError(400, 'Status must be closed or idle');
       if (ticket.kind === 'coordinator') throw new HttpError(400, 'The coordinator cannot be closed');
       if (runner.isRunning(id)) throw new HttpError(409, 'Stop the ticket before closing it');
-      store.updateTicket(id, { status: body.status });
-      runner.emit(id, 'note', { text: `${session.name} ${body.status === 'closed' ? 'closed' : 'reopened'} this ticket.` });
-      runner.broadcastTicket(id);
+      if (body.status === 'closed') {
+        runner.close(id, `${session.name} closed this ticket.`);
+      } else {
+        store.updateTicket(id, { status: body.status });
+        runner.emit(id, 'note', { text: `${session.name} reopened this ticket.` });
+        runner.broadcastTicket(id);
+      }
       return json(res, 200, ticketView(id));
+    }
+    if (action === '/close' && method === 'POST') {
+      // A thread closes itself once its current turn ends (close_self); the token decides which thread.
+      if (session.agent !== id) throw new HttpError(403, 'A thread may only close itself');
+      const body = await readJson(req);
+      const reason = typeof body.reason === 'string' && body.reason.trim() ? str(body.reason.trim(), 'Reason', 500) : null;
+      if (!runner.closeAfterTurn(id, reason)) throw new HttpError(409, 'The thread is not mid-turn');
+      return json(res, 202, ticketView(id));
     }
   }
 

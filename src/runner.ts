@@ -166,6 +166,7 @@ function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null,
     '- tag: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet). Set it once the kind of work is clear, following any project conventions, and change it if the work changes kind; leave it unset for one-off questions.',
     '- At the end of every turn, set state and note: state ready (done, ready to merge or pick up), try (ready for people to try), parked, blocked (on something outside the thread) or outside (work still running elsewhere), or null when you are simply waiting on an answer; note is one terse line, max 60 chars, on where things stand ("needs a pick: tabs or list"). The state clears when the next turn starts.',
     'Give every Bash call a short plain-English description (like "Run the test suite").',
+    'When the thread\'s work is done and should be closed (for example when project instructions say to close after shipping), call the `close_self` tool (mcp__thread) near the end of your turn: the thread closes once the turn ends, keeping its worktree and branch, and any new message reopens it.',
     ...showingFiles(ticket, filesDir),
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
     ...projectInstructions(project),
@@ -231,6 +232,8 @@ export class Runner {
   private procs = new Map<number, ChildProcess>();
   private queues = new Map<number, QueuedMessage[]>();
   private stopping = new Set<number>();
+  /** Tickets that asked to close when their current turn ends, with the reason they gave. */
+  private closing = new Map<number, string | null>();
   private progress = new Map<number, ReturnType<typeof createProgress>>();
   private store: Store;
   private broadcast: Broadcast;
@@ -261,7 +264,24 @@ export class Runner {
   /** A ticket as the API shows it: plus queued messages and its task-list steps. */
   view(ticket: Ticket) {
     const { total, done } = stepInfo(this.progressFor(ticket.id));
-    return { ...ticket, queued: this.queued(ticket.id), steps: total ? { done, total } : null };
+    return { ...ticket, queued: this.queued(ticket.id), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id) };
+  }
+
+  /** Close a ticket that is not running. Its worktree and branch are kept. */
+  close(ticketId: number, text: string) {
+    this.setStatus(ticketId, 'closed');
+    this.emit(ticketId, 'note', { text });
+  }
+
+  /**
+   * Close a running ticket once its current turn finishes cleanly. A turn that fails or is
+   * stopped, or a message that arrives during it, leaves the ticket open instead.
+   */
+  closeAfterTurn(ticketId: number, reason: string | null): boolean {
+    if (!this.isRunning(ticketId)) return false;
+    this.closing.set(ticketId, reason);
+    this.broadcastTicket(ticketId);
+    return true;
   }
 
   /** Mark turns that were cut off by a server restart. */
@@ -418,7 +438,17 @@ export class Runner {
         const detail = stderr.slice(-10).join('\n');
         this.emit(ticket.id, 'error', { text: `claude exited with code ${code}${detail ? `:\n${detail}` : ''}` });
       }
-      this.setStatus(ticket.id, status);
+      const closing = this.closing.has(ticket.id);
+      const reason = this.closing.get(ticket.id);
+      this.closing.delete(ticket.id);
+      if (closing && status === 'idle' && !stopped && !signal && !this.queued(ticket.id)) {
+        this.close(ticket.id, `Claude closed this ticket${reason ? `: ${reason}` : '.'}`);
+      } else {
+        if (closing && status === 'idle' && !stopped && !signal) {
+          this.emit(ticket.id, 'note', { text: 'Claude asked to close this ticket, but a new message arrived, so it stays open.' });
+        }
+        this.setStatus(ticket.id, status);
+      }
       this.onFilesMayChange(ticket.id);
       // Re-read the ticket: the turn may have given it its first (or a new) session id.
       const after = this.store.getTicket(ticket.id);

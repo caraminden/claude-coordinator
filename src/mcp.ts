@@ -165,7 +165,7 @@ function ticketLine(t: any): string {
   return [
     `#${t.number} ${t.title}`,
     t.tag ? `tag: ${t.tag}` : '',
-    `status: ${t.status}${t.state ? `, ${t.state}` : ''}${t.queued ? ` (${t.queued} queued)` : ''}`,
+    `status: ${t.status}${t.state ? `, ${t.state}` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
     t.note ? `note: ${t.note}` : '',
     t.branch ? `branch: ${t.branch}` : '',
     `by ${t.created_by}`,
@@ -219,6 +219,15 @@ const THREAD_TOOLS = [
     inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE } },
   },
   ASK_QUESTION,
+  {
+    name: 'close_self',
+    description:
+      "Close this thread when the current turn ends, e.g. once a small fix is merged and shipped. It closes only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled.",
+    inputSchema: {
+      type: 'object',
+      properties: { reason: { type: 'string', description: 'Optional one-line summary shown in the thread with the close, e.g. "Merged abc1234; live after the restart"' } },
+    },
+  },
 ];
 
 async function runTool(name: string, args: any): Promise<string> {
@@ -265,6 +274,9 @@ async function runTool(name: string, args: any): Promise<string> {
       return 'The question card is in the chat. End your turn now with a short reply; the answers will come as the next message.';
     case 'set_thread_status':
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}`;
+    case 'close_self':
+      await call('POST', `/api/tickets/${TICKET}/close`, { reason: args.reason ?? null });
+      return 'This thread will close when your turn ends (unless the turn fails or a new message arrives). Finish your reply now.';
     case 'close_ticket':
       return `Closed. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed' }))}`;
     case 'reopen_ticket':

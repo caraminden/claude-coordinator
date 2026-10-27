@@ -20,6 +20,11 @@ export function projectDir(dataDir: string, projectId: number): string {
   return join(dataDir, 'projects', String(projectId));
 }
 
+/** Where every thread and the coordinator of a project share handoffs, specs and notes. Ticket ids are numbers, so "project" never clashes with a ticket's shared folder. */
+export function projectSharedDir(dataDir: string, projectId: number): string {
+  return join(projectDir(dataDir, projectId), 'shared', 'project');
+}
+
 export async function removeProjectDir(dataDir: string, projectId: number) {
   await rm(projectDir(dataDir, projectId), { recursive: true, force: true });
 }

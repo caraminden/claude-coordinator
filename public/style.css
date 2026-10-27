@@ -565,6 +565,32 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .qcard.sending { opacity: 0.75; }
 .qcard .opt:disabled { opacity: 1; color: var(--ink); cursor: default; }
 .qcard.answered .opt:not(.picked) { opacity: 0.5; }
+/* Options with pictures: a gallery of tiles, each a thumbnail (opens full size) over its pick button. */
+.qcard .opts.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 0.5rem; }
+.qcard .tile { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.qcard .tile:hover { border-color: var(--running); }
+.qcard .tile:has(.opt.picked) { border-color: var(--running); box-shadow: 0 0 0 1px var(--running); }
+.qcard .tile .thumb { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 4 / 3; background: var(--code-bg); border-bottom: 1px solid var(--line); }
+/* Out of the flow, so a tall picture can't stretch its tile past 4:3. */
+.qcard .tile .thumb img, .qcard .tile .thumb video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; }
+.qcard .tile .thumb.none { color: var(--muted); font-size: 0.85em; }
+.qcard .tile .opt { flex: 1; justify-content: center; border: 0; border-radius: 0; background: transparent; }
+.qcard .tile .opt.picked { background: color-mix(in srgb, var(--running) 12%, var(--panel)); }
+.qcard.answered .tile:not(:has(.opt.picked)) { opacity: 0.5; }
+.qcard.answered .tile .opt:not(.picked) { opacity: 1; }
+@media (max-width: 800px) { .qcard .opts.gallery { grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); } }
+/* A comment on a file, kept in reach under it; it goes to the thread's chat. */
+.file-comment { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 0.75rem; border-top: 1px solid var(--line); }
+.file-comment textarea { display: block; resize: none; overflow-y: auto; min-height: 2.4rem; line-height: 1.4; }
+.file-comment .row { margin-top: 0.5rem; gap: 0.5rem; flex-wrap: nowrap; }
+.file-comment button.small { flex: none; padding: 0.2rem 0.65rem; font-size: 0.85em; }
+.file-comment .status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-comment .status a { color: var(--accent); }
+.file-comment .quote[hidden] { display: none; }
+.file-comment .quote { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; padding: 0.3rem 0.3rem 0.3rem 0.6rem; border-left: 3px solid var(--accent); border-radius: 4px; background: var(--code-bg); font-size: 0.88em; color: var(--muted); }
+.file-comment .quote .text { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: pre-wrap; }
+.file-comment .quote button { flex: none; width: 1.6rem; height: 1.6rem; padding: 0; line-height: 1; }
+.msg .who .about { color: var(--accent); }
 .msg.user.answer .answer-lines { font-size: 0.95em; }
 
 /* While another view loads, dim the one on screen (after a beat, so quick switches don't flicker). */

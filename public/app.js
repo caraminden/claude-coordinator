@@ -1501,6 +1501,7 @@ function artifactViewer(a) {
     body.append(h('p', { class: 'muted' }, 'This file is no longer in the thread\'s folder. Unpin it to remove it from the list.'));
   } else {
     renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id });
+    section.append(commentBox(artifactThread(a), a.path, a.name, body));
   }
   return section;
 }
@@ -1508,9 +1509,93 @@ function artifactViewer(a) {
 /** Main panel: a file a thread linked, with a way back to its chat. */
 function fileViewer(ticket, file) {
   const body = h('div', { class: 'artifact-body' });
+  const section = h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'file-head' }), body);
   if (file.missing) body.append(h('p', { class: 'muted' }, `${file.missing}.`));
-  else renderFileBody(body, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id });
-  return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'file-head' }), body);
+  else {
+    renderFileBody(body, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id });
+    section.append(commentBox(ticket, file.path, file.name, body));
+  }
+  return section;
+}
+
+/**
+ * Under a file's view: a comment that goes to the thread that made the file as a chat message
+ * ("[Cara on report.md]: …"), waking it like any message. Text selected in the file can lead it as a quote.
+ */
+function commentBox(t, path, name, body) {
+  const draftKey = `cc-comment:${t.id}:${path}`;
+  const textarea = h('textarea', { rows: 1, placeholder: `Comment on ${name} to ${isCoordinator(t) ? 'the coordinator' : `#${t.number ?? t.id}`}…`, 'data-draft': true, maxlength: 10000 });
+  textarea.value = loadDraft(draftKey) ?? '';
+  const sendBtn = h('button', { type: 'submit', class: 'small' }, 'Comment');
+  const status = h('span', { class: 'muted small status', 'aria-live': 'polite' });
+  const quoteEl = h('div', { class: 'quote', hidden: true });
+  let quote = '';
+  let selected = '';
+  const setQuote = (text) => {
+    quote = text;
+    quoteEl.hidden = !text;
+    quoteEl.replaceChildren(h('span', { class: 'text' }, text),
+      h('button', { type: 'button', class: 'secondary small', title: 'Remove the quote', 'aria-label': 'Remove the quote', onclick: () => setQuote('') }, '×'));
+  };
+  const quoteBtn = h('button', {
+    type: 'button', class: 'secondary small', hidden: true, title: 'Quote the text selected in the file',
+    // Keep the selection when the button is pressed, so there is still something to quote.
+    onpointerdown: (e) => e.preventDefault(),
+    onclick: () => {
+      setQuote(selected);
+      textarea.focus();
+    },
+  }, '❝ Quote selection');
+  // Only text the file shows on this page can be quoted; pages and PDFs sit in frames of their own.
+  const onSelection = () => {
+    if (!body.isConnected) return document.removeEventListener('selectionchange', onSelection);
+    const sel = getSelection();
+    const inside = sel && !sel.isCollapsed && body.contains(sel.anchorNode) && body.contains(sel.focusNode);
+    selected = inside ? sel.toString().trim().slice(0, 2000) : '';
+    quoteBtn.hidden = !selected;
+  };
+  document.addEventListener('selectionchange', onSelection);
+  const grow = () => {
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight + 2, 200)}px`;
+  };
+  textarea.addEventListener('input', () => {
+    saveDraft(draftKey, textarea.value);
+    status.replaceChildren();
+    grow();
+  });
+  setTimeout(grow);
+  const form = h('form', { class: 'file-comment' }, quoteEl, textarea,
+    h('div', { class: 'row' }, quoteBtn, status, h('span', { class: 'spacer' }), sendBtn));
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(max-width: 800px)').matches) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = textarea.value.trim();
+    if (!text) return textarea.focus();
+    sendBtn.disabled = true;
+    sending++;
+    status.textContent = 'Sending…';
+    try {
+      await api(`/api/tickets/${t.id}/comments`, { method: 'POST', body: { path, text, quote } });
+      textarea.value = '';
+      saveDraft(draftKey, '');
+      setQuote('');
+      grow();
+      status.replaceChildren(`Sent to ${threadLabel(t)} · `, h('a', { href: threadHref(t) }, 'see the chat'));
+    } catch (ex) {
+      status.textContent = ex.message;
+    } finally {
+      sendBtn.disabled = false;
+      sending--;
+      reloadWhenIdle();
+    }
+  });
+  return form;
 }
 
 function renderFileHead() {
@@ -2307,7 +2392,8 @@ function appendEvent(event, scroll = true) {
       nodes.push(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), answerSummary(data.answer.answers)));
     } else {
       nodes.push(userBubble(data.author, data.text,
-        (data.images ?? []).map((name) => `/api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`)));
+        (data.images ?? []).map((name) => `/api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
+        data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null));
     }
   } else if (event.kind === 'question') {
     nodes.push(questionCard(event.ticket_id, data));
@@ -2401,8 +2487,12 @@ function answerSummary(answers) {
  * A card of multiple-choice questions from Claude. Click options to pick (several when the question
  * allows), or type an answer under Other; a single one-pick question sends on the first click.
  */
+// Picks not yet sent, by card id, so a card keeps them while you look at an option's picture.
+const cardPicks = new Map();
+
 function questionCard(ticketId, card) {
-  const picks = card.questions.map(() => ({ selected: new Set(), other: '' }));
+  if (!cardPicks.has(card.id)) cardPicks.set(card.id, card.questions.map(() => ({ selected: new Set(), other: '' })));
+  const picks = cardPicks.get(card.id);
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;
   const sendBtn = h('button', { type: 'button', class: 'small', disabled: true }, single ? 'Send' : 'Send answers');
   const status = h('span', { class: 'muted' });
@@ -2441,7 +2531,7 @@ function questionCard(ticketId, card) {
   el.append(
     h('div', { class: 'who' }, 'Claude asks'),
     ...card.questions.map((q, i) => {
-      const other = h('input', { type: 'text', class: 'other', placeholder: 'Other: type your own answer', maxlength: 2000 });
+      const other = h('input', { type: 'text', class: 'other', placeholder: 'Other: type your own answer', maxlength: 2000, value: picks[i].other });
       other.addEventListener('input', () => {
         picks[i].other = other.value;
         // A typed answer replaces the pick on a one-answer question.
@@ -2451,28 +2541,35 @@ function questionCard(ticketId, card) {
       other.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); }
       });
+      const pickBtn = (o) => h('button', {
+        type: 'button', class: 'opt', 'data-label': o.label,
+        onclick: () => {
+          if (answered) return;
+          const sel = picks[i].selected;
+          if (q.multiSelect) sel.has(o.label) ? sel.delete(o.label) : sel.add(o.label);
+          else {
+            sel.clear();
+            sel.add(o.label);
+            other.value = '';
+            picks[i].other = '';
+          }
+          refresh();
+          if (single) send();
+        },
+      }, h('span', { class: 'label' }, o.label), o.description ? h('span', { class: 'desc' }, o.description) : '');
+      // With pictures, the options are a gallery: each thumbnail opens the full view, its button picks it.
+      const gallery = q.options.some((o) => o.image);
       return h('div', { class: 'q', 'data-q': i },
         h('div', { class: 'qtitle' }, q.header ? h('span', { class: 'chip' }, q.header) : '', q.question,
           q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
-        h('div', { class: 'opts' }, q.options.map((o) => h('button', {
-          type: 'button', class: 'opt', 'data-label': o.label,
-          onclick: () => {
-            if (answered) return;
-            const sel = picks[i].selected;
-            if (q.multiSelect) sel.has(o.label) ? sel.delete(o.label) : sel.add(o.label);
-            else {
-              sel.clear();
-              sel.add(o.label);
-              other.value = '';
-              picks[i].other = '';
-            }
-            refresh();
-            if (single) send();
-          },
-        }, h('span', { class: 'label' }, o.label), o.description ? h('span', { class: 'desc' }, o.description) : ''))),
+        gallery
+          ? h('div', { class: 'opts gallery' }, q.options.map((o) => h('div', { class: 'tile' },
+            o.image ? optionThumb(ticketId, o) : h('div', { class: 'thumb none' }, 'No picture'), pickBtn(o))))
+          : h('div', { class: 'opts' }, q.options.map(pickBtn)),
         other);
     }),
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), sendBtn));
+  refresh();
 
   view.cards.set(card.id, {
     markAnswered(answers, author) {
@@ -2495,8 +2592,21 @@ function questionCard(ticketId, card) {
   return el;
 }
 
-function userBubble(author, text, imageSrcs) {
-  const msg = h('div', { class: 'msg user' }, h('div', { class: 'who' }, author));
+/** A question option's picture: a thumbnail (muted and looping for video) that opens the file's full view. */
+function optionThumb(ticketId, o) {
+  const src = fileUrl(ticketId, o.image);
+  let media = h('img', { src, alt: o.label, loading: 'lazy' });
+  if (fileKind(o.image) === 'video') {
+    media = h('video', { src, muted: true, autoplay: true, loop: true, playsinline: true, preload: 'metadata' });
+    media.muted = true; // the attribute alone doesn't let it autoplay in every browser
+  }
+  return h('a', { class: 'thumb', href: fileHref(ticketId, o.image), title: `Open “${o.label}” full size` }, media);
+}
+
+/** A chat message from a person; `about`, for a comment on a file, links that file. */
+function userBubble(author, text, imageSrcs, about = null) {
+  const msg = h('div', { class: 'msg user' }, h('div', { class: 'who' }, author,
+    about ? [' on ', h('a', { class: 'about', href: fileHref(about.ticketId, about.path), title: about.path }, about.name)] : ''));
   if (text) msg.append(markdown(text));
   if (imageSrcs.length) {
     msg.append(h('div', { class: 'images' }, imageSrcs.map((src) =>

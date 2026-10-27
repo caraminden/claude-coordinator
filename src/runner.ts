@@ -58,14 +58,15 @@ interface QueuedMessage {
   author: string;
   text: string;
   images: MessageImage[];
+  about?: string; // the file a comment is on
 }
 
 /** One turn's prompt as a stream-json user message, so pasted images reach Claude as images. */
-function promptMessage(batch: QueuedMessage[]): string {
+export function promptMessage(batch: QueuedMessage[]): string {
   const content: object[] = [];
   for (const m of batch) {
     const text = m.text || (m.images.length ? '(sent an image)' : '');
-    content.push({ type: 'text', text: `[${m.author}]: ${text}` });
+    content.push({ type: 'text', text: `[${m.author}${m.about ? ` on ${m.about}` : ''}]: ${text}` });
     for (const img of m.images) {
       try {
         content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: readFileSync(img.path).toString('base64') } });
@@ -331,11 +332,14 @@ export class Runner {
   }
 
   /** Record a user message and run it now, or queue it behind the current turn. */
-  /** `extra` is stored with the message for the UI (e.g. which question card it answers), not sent to Claude. */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: object = {}) {
+  /**
+   * `extra` is stored with the message for the UI (e.g. which question card it answers), not sent
+   * to Claude; a comment's file (`extra.comment.about`) is, in its "[Name on file]:" prefix.
+   */
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string } } & object = {}) {
     this.emit(ticketId, 'user_message', { author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra });
     const q = this.queues.get(ticketId) ?? [];
-    q.push({ author, text, images });
+    q.push({ author, text, images, about: extra.comment?.about });
     this.queues.set(ticketId, q);
     if (!this.isRunning(ticketId)) this.next(ticketId);
     else this.broadcastTicket(ticketId);

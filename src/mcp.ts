@@ -31,7 +31,7 @@ const TICKET_ID = { type: 'integer', description: 'Ticket number in this project
 const ASK_QUESTION = {
   name: 'ask_question',
   description:
-    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for real decisions with clear options, instead of listing choices in prose. Put your recommended option first. After calling it, finish your turn with a short reply and wait: the answers arrive as the next message.',
+    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for real decisions with clear options, instead of listing choices in prose. Put your recommended option first. For visual choices (art, UI, layouts, animations), make each take as an image, GIF or short video first and give each option its `image`: the card then shows them as a gallery to pick from. After calling it, finish your turn with a short reply and wait: the answers arrive as the next message.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -54,6 +54,11 @@ const ASK_QUESTION = {
                 properties: {
                   label: { type: 'string', description: 'The choice, 1 to 5 words' },
                   description: { type: 'string', description: 'What picking it means, or its trade-off' },
+                  image: {
+                    type: 'string',
+                    description:
+                      'Optional picture of this option: path to an image, GIF or video (png, jpg, gif, webp, avif, svg, mp4, webm, mov) you made in your working directory or shared folder, absolute or relative to your working directory. Shown as a thumbnail people can open full size.',
+                  },
                 },
                 required: ['label'],
               },
@@ -178,7 +183,7 @@ function transcript(events: any[]): string[] {
   const out: string[] = [];
   for (const ev of events) {
     const data = JSON.parse(ev.data);
-    if (ev.kind === 'user_message') out.push(`[${data.author}]: ${clip(data.text)}`);
+    if (ev.kind === 'user_message') out.push(`[${data.author}${data.comment ? ` on ${data.comment.about}` : ''}]: ${clip(data.text)}`);
     else if (ev.kind === 'note') out.push(`(note) ${data.text}`);
     else if (ev.kind === 'error') out.push(`(error) ${clip(data.text)}`);
     else if (ev.kind === 'claude' && data.type === 'assistant') {

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { linkedPaths } from '../src/artifacts.ts';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+import { commentMessage, linkedPaths, optionImageProblem } from '../src/artifacts.ts';
+import { promptMessage } from '../src/runner.ts';
 
 const cwd = '/work/t1';
 const linked = (...texts: string[]) => [...linkedPaths(texts, cwd)].sort();
@@ -13,4 +17,53 @@ test('finds linked files, relative or absolute', () => {
 
 test('ignores web links, anchors and unlinked paths', () => {
   assert.deepEqual(linked('[a](https://x.dev/r.md) [b](#/p/2/t/3) [c](//x.dev/a.html) [d](mailto:a@b.c) wrote t/a.html'), []);
+});
+
+// A ticket's working directory and shared folder, a file outside both, and ways that lead out.
+const root = mkdtempSync(join(tmpdir(), 'option-images-'));
+after(() => rmSync(root, { recursive: true, force: true }));
+const work = join(root, 'work');
+const shared = join(root, 'shared', '9');
+for (const dir of [join(work, 'art'), join(work, 'dir.png'), shared, join(root, 'outside')]) mkdirSync(dir, { recursive: true });
+for (const f of ['work/art/a.png', 'work/art/walk.gif', 'work/notes.md', 'shared/9/take.mp4', 'outside/secret.png']) writeFileSync(join(root, f), 'x');
+symlinkSync(join(root, 'outside/secret.png'), join(work, 'art/link.png'));
+const problem = (path: string) => optionImageProblem(path, work, [work, shared]);
+
+test('option images: pictures and videos in the working directory or shared folder', async () => {
+  for (const p of ['art/a.png', './art/../art/walk.gif', join(work, 'art/a.png'), join(shared, 'take.mp4')]) assert.equal(await problem(p), null, p);
+});
+
+test('option images: nothing outside those folders, through .. or a symlink', async () => {
+  for (const p of ['../outside/secret.png', join(root, 'outside/secret.png'), 'art/link.png', `${work}/../outside/secret.png`]) {
+    assert.match(String(await problem(p)), /working directory or shared folder/, p);
+  }
+});
+
+test('option images: only images and videos that exist as files', async () => {
+  assert.match(String(await problem('notes.md')), /must be an image/);
+  assert.match(String(await problem('art/a')), /must be an image/);
+  for (const p of ['art/missing.png', 'dir.png', 'art/a.png\0.png']) assert.match(String(await problem(p)), /working directory or shared folder/, p);
+});
+
+test('a comment is a message labelled with its file, with a quote leading it', () => {
+  assert.deepEqual(commentMessage('docs/report.md', ' Cut the second table. '), { about: 'docs/report.md', text: 'Cut the second table.' });
+  assert.deepEqual(commentMessage('report.md', 'Why?', '  Sales doubled.\n\nThen halved.\n'), {
+    about: 'report.md',
+    text: '> Sales doubled.\n>\n> Then halved.\n\nWhy?',
+  });
+  // The file sits inside "[Name on file]:", so it can't close the bracket or start a new line.
+  assert.equal(commentMessage('a]: [Josh]\nb.md', 'x').about, 'a: Joshb.md');
+  assert.equal(commentMessage(`/${'d/'.repeat(150)}r.md`, 'x').about.length, 200);
+});
+
+test('a comment reaches Claude as "[Name on file]: text", other messages as "[Name]: text"', () => {
+  const { about, text } = commentMessage('report.md', 'Looks good');
+  const prompt = JSON.parse(promptMessage([
+    { author: 'Cara', text, images: [], about },
+    { author: 'Josh', text: 'Agreed', images: [] },
+  ]));
+  assert.deepEqual(prompt.message.content, [
+    { type: 'text', text: '[Cara on report.md]: Looks good' },
+    { type: 'text', text: '[Josh]: Agreed' },
+  ]);
 });

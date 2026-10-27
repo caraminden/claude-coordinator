@@ -112,7 +112,7 @@ runner.onFilesMayChange = scheduleScan;
   }
 })();
 
-function artifactView(a: Artifact & { ticket_title?: string; ticket_kind?: string }) {
+function artifactView(a: Artifact & { ticket_title?: string; ticket_kind?: string; ticket_number?: number | null }) {
   const ticket = a.ticket_title === undefined ? store.getTicket(a.ticket_id) : null;
   return {
     ...a,
@@ -120,6 +120,7 @@ function artifactView(a: Artifact & { ticket_title?: string; ticket_kind?: strin
     kind: artifactType(a.path)?.kind ?? 'text',
     ticket_title: a.ticket_title ?? ticket?.title ?? '',
     ticket_kind: a.ticket_kind ?? ticket?.kind ?? 'ticket',
+    ticket_number: a.ticket_number ?? ticket?.number ?? null,
   };
 }
 
@@ -439,9 +440,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const message = str(body.message, 'First message', 100_000);
     const mode = PERMISSION_MODES.includes(body.permissionMode) ? body.permissionMode : DEFAULT_PERMISSION_MODE;
     // Insert first so concurrent creates get distinct ids, then build the working dir.
-    const { id } = store.createTicket({ project_id: project.id, title, permission_mode: mode, created_by: session.name });
+    const { id, number } = store.createTicket({ project_id: project.id, title, permission_mode: mode, created_by: session.name });
     try {
-      const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, title);
+      const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number!, title);
       store.setTicketDir(id, dir.cwd, dir.branch);
     } catch (err: any) {
       store.deleteTicket(id);

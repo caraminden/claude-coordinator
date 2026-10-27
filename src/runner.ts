@@ -111,7 +111,7 @@ function systemPrompt(project: Project, ticket: Ticket): string {
     ? `Your working directory is a dedicated git worktree of the project repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this ticket.';
   return [
-    `You are working on ticket #${ticket.id} "${ticket.title}" in project "${project.name}".`,
+    `You are working on ticket #${ticket.number} "${ticket.title}" in project "${project.name}".`,
     'This ticket is managed by Claude Coordinator, a shared web app where several people chat with you.',
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
     where,

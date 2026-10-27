@@ -43,6 +43,7 @@ export async function createTicketDir(
   projectId: number,
   repoDir: string | null,
   ticketId: number,
+  ticketNumber: number,
   title: string,
 ): Promise<{ cwd: string; branch: string | null }> {
   const cwd = join(projectDir(dataDir, projectId), 'tickets', String(ticketId));
@@ -61,7 +62,13 @@ export async function createTicketDir(
   } catch {
     // No origin/HEAD (e.g. local repo); branch from the checkout's HEAD.
   }
-  const branch = `ticket/${ticketId}-${slugify(title)}`;
+  // Branches are named by the per-project number; a branch left over from before
+  // per-project numbering may already have the name, so add a suffix then.
+  const name = `ticket/${ticketNumber}-${slugify(title)}`;
+  let branch = name;
+  for (let i = 2; await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repoDir).then(() => true, () => false); i++) {
+    branch = `${name}-${i}`;
+  }
   await mkdir(join(projectDir(dataDir, projectId), 'tickets'), { recursive: true });
   await git(['worktree', 'add', '--quiet', '-b', branch, cwd, base], repoDir);
   return { cwd, branch };

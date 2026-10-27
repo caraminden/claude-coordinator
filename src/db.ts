@@ -15,6 +15,7 @@ export interface Project {
 export interface Ticket {
   id: number;
   project_id: number;
+  number: number | null; // shown as #n; counts up per project, null for the coordinator
   kind: TicketKind;
   title: string;
   status: TicketStatus;
@@ -104,6 +105,7 @@ CREATE TABLE IF NOT EXISTS settings (
 /** Columns added after the first release, for databases created before them. */
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
+  ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
 ];
 
 export class Store {
@@ -118,6 +120,47 @@ export class Store {
       if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
     }
     this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS one_coordinator ON tickets(project_id) WHERE kind = 'coordinator'");
+    this.numberTickets();
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS ticket_number ON tickets(project_id, number)');
+  }
+
+  /**
+   * Tickets used to be numbered by their global id. Give each project its own 1, 2, 3… in
+   * creation order, and leave a note in every thread whose number changed.
+   */
+  private numberTickets() {
+    const unnumbered = this.db
+      .prepare("SELECT id, project_id FROM tickets WHERE kind = 'ticket' AND number IS NULL ORDER BY id")
+      .all() as { id: number; project_id: number }[];
+    if (!unnumbered.length) return;
+    const changed = new Map<number, string[]>(); // project_id -> "#old is now #new"
+    this.db.exec('BEGIN');
+    try {
+      for (const { id, project_id } of unnumbered) {
+        const number = this.nextNumber(project_id);
+        this.db.prepare('UPDATE tickets SET number = ? WHERE id = ?').run(number, id);
+        if (number === id) continue;
+        this.addEvent(id, 'note', { text: `Threads are now numbered per project. This thread is now #${number} (it was #${id}).` });
+        changed.set(project_id, [...(changed.get(project_id) ?? []), `#${id} → #${number}`]);
+      }
+      for (const [projectId, moves] of changed) {
+        const coordinator = this.getCoordinator(projectId);
+        if (coordinator) this.addEvent(coordinator.id, 'note', { text: `Threads are now numbered per project: ${moves.join(', ')}.` });
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  private nextNumber(projectId: number): number {
+    const row = this.db.prepare('SELECT MAX(number) AS n FROM tickets WHERE project_id = ?').get(projectId) as { n: number | null };
+    return (row.n ?? 0) + 1;
+  }
+
+  getTicketByNumber(projectId: number, number: number): Ticket | undefined {
+    return this.db.prepare('SELECT * FROM tickets WHERE project_id = ? AND number = ?').get(projectId, number) as unknown as Ticket | undefined;
   }
 
   listProjects(): Project[] {
@@ -163,12 +206,13 @@ export class Store {
   /** Insert a ticket with no working directory yet; call setTicketDir once it exists. */
   createTicket(t: Pick<Ticket, 'project_id' | 'title' | 'permission_mode' | 'created_by'> & { kind?: TicketKind }): Ticket {
     const now = Date.now();
+    const kind = t.kind ?? 'ticket';
     const r = this.db
       .prepare(
-        `INSERT INTO tickets (project_id, kind, title, status, cwd, permission_mode, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, 'new', '', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (project_id, kind, number, title, status, cwd, permission_mode, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'new', '', ?, ?, ?, ?)`,
       )
-      .run(t.project_id, t.kind ?? 'ticket', t.title, t.permission_mode, t.created_by, now, now);
+      .run(t.project_id, kind, kind === 'coordinator' ? null : this.nextNumber(t.project_id), t.title, t.permission_mode, t.created_by, now, now);
     return this.getTicket(Number(r.lastInsertRowid))!;
   }
 
@@ -205,10 +249,10 @@ export class Store {
   }
 
   /** A project's artifacts, newest first, with the title of the ticket that made each. */
-  listArtifacts(projectId: number): (Artifact & { ticket_title: string; ticket_kind: TicketKind })[] {
+  listArtifacts(projectId: number): (Artifact & { ticket_title: string; ticket_kind: TicketKind; ticket_number: number | null })[] {
     return this.db
       .prepare(
-        `SELECT a.*, t.title AS ticket_title, t.kind AS ticket_kind FROM artifacts a JOIN tickets t ON t.id = a.ticket_id
+        `SELECT a.*, t.title AS ticket_title, t.kind AS ticket_kind, t.number AS ticket_number FROM artifacts a JOIN tickets t ON t.id = a.ticket_id
          WHERE a.project_id = ? ORDER BY a.mtime DESC`,
       )
       .all(projectId) as any;

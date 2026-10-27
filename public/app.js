@@ -429,6 +429,7 @@ async function route() {
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
+    else if ((m = hash.match(/^#\/p\/(\d+)\/t\/(\d+)$/))) await showProject(Number(m[1]), { kind: 'chat', number: Number(m[2]) });
     else if ((m = hash.match(/^#\/t\/(\d+)$/))) await showTicket(Number(m[1]));
     else await showProjects();
   } catch (err) {
@@ -527,11 +528,19 @@ function statusLabel(t) {
   return STATUS_LABEL[t.status];
 }
 
+/**
+ * Threads are numbered per project and live at #/p/<project>/t/<number>. A server from before
+ * per-project numbers sends no number, so fall back to the global id there.
+ */
+const threadHref = (t) =>
+  isCoordinator(t) ? `#/p/${t.project_id}` : t.number == null ? `#/t/${t.id}` : `#/p/${t.project_id}/t/${t.number}`;
+const threadLabel = (t) => (isCoordinator(t) ? 'Coordinator' : `#${t.number ?? t.id} ${t.title}`);
+
+/** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 async function showTicket(ticketId) {
   const { ticket } = await api(`/api/tickets/${ticketId}`);
-  // The coordinator lives at the project's own address.
-  if (isCoordinator(ticket)) return location.replace(`#/p/${ticket.project_id}`);
-  await showProject(ticket.project_id, { kind: 'chat', ticketId });
+  if (isCoordinator(ticket) || ticket.number != null) return location.replace(threadHref(ticket));
+  await showProject(ticket.project_id, { kind: 'chat', id: ticketId });
 }
 
 async function showArtifact(artifactId) {
@@ -543,13 +552,17 @@ async function showArtifact(artifactId) {
  * A project page: artifacts and threads on the side, and in the main panel a chat with the
  * coordinator (or the chosen ticket), the artifact browser, or one artifact.
  */
-async function showProject(projectId, main = { kind: 'chat', ticketId: null }) {
+async function showProject(projectId, main = { kind: 'chat', number: null }) {
   const [{ project, coordinator, tickets }, artifacts] = await Promise.all([
     api(`/api/projects/${projectId}`),
     // An empty shelf beats a broken page if the server is older than this front end.
     api(`/api/projects/${projectId}/artifacts`).catch(() => []),
   ]);
-  const chatId = main.kind === 'chat' ? main.ticketId ?? coordinator.id : null;
+  let chatId = null;
+  if (main.kind === 'chat') {
+    chatId = main.id ?? (main.number == null ? coordinator.id : tickets.find((t) => t.number === main.number)?.id);
+    if (!chatId) throw new Error(`There is no thread #${main.number} in ${project.name}.`);
+  }
   const [{ ticket }, events] = chatId
     ? await Promise.all([api(`/api/tickets/${chatId}`), api(`/api/tickets/${chatId}/events`)])
     : [{ ticket: null }, []];
@@ -571,7 +584,7 @@ async function showProject(projectId, main = { kind: 'chat', ticketId: null }) {
   crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', ...(
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
-        : main.ticketId ? [projectLink, ' / ', `#${ticket.id}`]
+        : chatId !== coordinator.id ? [projectLink, ' / ', `#${ticket.number ?? ticket.id}`]
           : [project.name]));
 
   // On phones the side panels fold away above the main panel; on wider screens the thread list
@@ -744,7 +757,7 @@ function newTicketForm(projectId) {
       const t = await api(`/api/projects/${projectId}/tickets`, { method: 'POST', body: fields() });
       saveDraft(draftKey, null);
       form.reset();
-      location.hash = `#/t/${t.id}`;
+      location.hash = threadHref(t);
     } catch (ex) {
       err.textContent = ex.message;
       err.hidden = false;
@@ -778,10 +791,10 @@ function renderSidebar() {
     tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or use New thread.'));
 }
 
-function ticketCard(t, href = `#/t/${t.id}`) {
+function ticketCard(t, href = threadHref(t)) {
   const coord = isCoordinator(t);
   return h('a', { class: `card ticket-card s-${t.status}${coord ? ' coordinator' : ''}${view.id === t.id ? ' active' : ''}`, href },
-    h('div', { class: 'title' }, coord ? 'Coordinator' : `#${t.id} ${t.title}`),
+    h('div', { class: 'title' }, threadLabel(t)),
     t.last_activity ? h('div', { class: 'activity' }, t.last_activity) : '',
     h('div', { class: 'meta' }, [
       statusLabel(t),
@@ -806,7 +819,8 @@ const ARTIFACT_FILTERS = [
 
 const rawUrl = (a) => `/api/artifacts/${a.id}/raw?v=${a.mtime}`;
 const extOf = (a) => (a.name.includes('.') ? a.name.split('.').pop() : a.kind).slice(0, 5).toUpperCase();
-const threadName = (a) => (a.ticket_kind === 'coordinator' ? 'Coordinator' : `#${a.ticket_id} ${a.ticket_title}`);
+const artifactThread = (a) => ({ id: a.ticket_id, kind: a.ticket_kind, project_id: a.project_id, number: a.ticket_number, title: a.ticket_title });
+const threadName = (a) => threadLabel(artifactThread(a));
 
 function formatSize(n) {
   if (n < 1024) return `${n} B`;
@@ -874,7 +888,7 @@ function renderShelf() {
     h('span', { class: `badge k-${a.kind}` }, extOf(a)),
     h('span', { class: 'text' },
       h('span', { class: 'name' }, a.name),
-      h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? 'Coordinator' : `#${a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
+      h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? 'Coordinator' : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
   el.replaceChildren(
     h('a', { class: `view-all${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts` },
       'Browse all', all.length ? h('span', { class: 'count' }, all.length) : ''),
@@ -997,7 +1011,7 @@ function renderArtifactHead() {
       a.missing ? '' : h('a', { class: 'button secondary', href: `${rawUrl(a)}&download` }, 'Download')),
     h('div', { class: 'meta' },
       a.path, ' · from ',
-      h('a', { href: a.ticket_kind === 'coordinator' ? `#/p/${a.project_id}` : `#/t/${a.ticket_id}` }, threadName(a)),
+      h('a', { href: threadHref(artifactThread(a)) }, threadName(a)),
       a.missing ? ' · missing' : ` · ${formatSize(a.size)} · updated ${ago(a.mtime)}`,
       a.pinned_at ? ` · pinned by ${a.pinned_by}` : ''));
 }
@@ -1108,7 +1122,7 @@ function renderTicketHead() {
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
-      h('h2', {}, coord ? 'Coordinator' : `#${t.id} ${t.title}`),
+      h('h2', {}, threadLabel(t)),
       h('span', { class: 'muted' }, statusLabel(t) + (t.queued ? ` · ${t.queued} queued` : '')),
       h('span', { class: 'spacer' }), ...actions),
     h('div', { class: 'meta', title: coord ? '' : t.cwd }, (coord

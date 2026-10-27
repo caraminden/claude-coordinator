@@ -14,7 +14,7 @@ const PERMISSION_MODE = {
   description:
     'bypassPermissions (default): full access, can run any command. acceptEdits: edit files but shell commands are refused. plan: read and plan only.',
 };
-const TICKET_ID = { type: 'integer', description: 'Ticket number, e.g. 12 for #12' };
+const TICKET_ID = { type: 'integer', description: 'Ticket number in this project, e.g. 12 for #12 (as shown by list_tickets)' };
 
 const TOOLS = [
   {
@@ -100,7 +100,7 @@ function clip(s: string): string {
 
 function ticketLine(t: any): string {
   return [
-    `#${t.id} ${t.title}`,
+    `#${t.number} ${t.title}`,
     `status: ${t.status}${t.queued ? ` (${t.queued} queued)` : ''}`,
     t.branch ? `branch: ${t.branch}` : '',
     `by ${t.created_by}`,
@@ -129,11 +129,15 @@ function transcript(events: any[]): string[] {
   return out;
 }
 
-const id = (args: any) => {
+/** Tickets are numbered per project; the API addresses them by their global id. */
+async function id(args: any): Promise<number> {
   const n = Number(args.ticket_id);
   if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a ticket number');
-  return n;
-};
+  const { tickets } = await call('GET', `/api/projects/${PROJECT}`);
+  const ticket = tickets.find((t: any) => t.number === n);
+  if (!ticket) throw new Error(`There is no ticket #${n} in this project`);
+  return ticket.id;
+}
 
 async function runTool(name: string, args: any): Promise<string> {
   switch (name) {
@@ -143,7 +147,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return shown.length ? shown.map(ticketLine).join('\n') : 'No tickets.';
     }
     case 'read_ticket': {
-      const n = id(args);
+      const n = await id(args);
       const last = Math.min(Math.max(Number(args.last) || 10, 1), 50);
       const [{ ticket }, events] = await Promise.all([call('GET', `/api/tickets/${n}`), call('GET', `/api/tickets/${n}/events`)]);
       const lines = transcript(events);
@@ -159,15 +163,15 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Created ${ticketLine(t)}`;
     }
     case 'message_ticket':
-      return `Sent. ${ticketLine(await call('POST', `/api/tickets/${id(args)}/messages`, { text: args.text }))}`;
+      return `Sent. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/messages`, { text: args.text }))}`;
     case 'update_ticket':
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${id(args)}`, { title: args.title }))}`;
+      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { title: args.title }))}`;
     case 'close_ticket':
-      return `Closed. ${ticketLine(await call('POST', `/api/tickets/${id(args)}/status`, { status: 'closed' }))}`;
+      return `Closed. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed' }))}`;
     case 'reopen_ticket':
-      return `Reopened. ${ticketLine(await call('POST', `/api/tickets/${id(args)}/status`, { status: 'idle' }))}`;
+      return `Reopened. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'idle' }))}`;
     case 'stop_ticket': {
-      const { stopped } = await call('POST', `/api/tickets/${id(args)}/stop`, {});
+      const { stopped } = await call('POST', `/api/tickets/${await id(args)}/stop`, {});
       return stopped ? 'Stopped.' : 'That ticket was not running.';
     }
     default:

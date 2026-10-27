@@ -67,6 +67,10 @@ CREATE TABLE IF NOT EXISTS events (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_ticket ON events(ticket_id, id);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;
 
 /** Columns added after the first release, for databases created before them. */
@@ -170,5 +174,16 @@ export class Store {
     return this.db
       .prepare('SELECT * FROM events WHERE ticket_id = ? AND id > ? ORDER BY id')
       .all(ticketId, afterId) as unknown as EventRow[];
+  }
+
+  getSetting<T>(key: string): T | null {
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+    return row ? JSON.parse(row.value) : null;
+  }
+
+  setSetting(key: string, value: unknown) {
+    this.db
+      .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(key, JSON.stringify(value));
   }
 }

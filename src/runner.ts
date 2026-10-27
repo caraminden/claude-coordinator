@@ -14,6 +14,28 @@ const DROPPED_SYSTEM_SUBTYPES = new Set(['commands_changed']);
 
 export type Broadcast = (msg: object) => void;
 
+interface UsageWindow {
+  utilization: number; // 0..1 of the plan's limit
+  resetsAt: number | null; // epoch ms
+  status: string | null;
+}
+
+/** The Claude account's plan usage, as last reported by a turn. */
+export interface Usage {
+  weekly: UsageWindow | null;
+  session: UsageWindow | null; // the rolling five-hour window
+  updatedAt: number;
+}
+
+function usageWindow(w: any): UsageWindow | null {
+  if (!w || typeof w.utilization !== 'number') return null;
+  return {
+    utilization: w.utilization,
+    resetsAt: typeof w.resetsAt === 'number' ? w.resetsAt * 1000 : null,
+    status: typeof w.status === 'string' ? w.status : null,
+  };
+}
+
 export interface MessageImage {
   name: string;
   path: string;
@@ -258,6 +280,7 @@ export class Runner {
       return;
     }
     if (!ev || typeof ev !== 'object') return;
+    if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info);
     if (DROPPED_TYPES.has(ev.type)) return;
     if (ev.type === 'system' && DROPPED_SYSTEM_SUBTYPES.has(ev.subtype)) return;
     if (ev.session_id && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
@@ -267,6 +290,19 @@ export class Runner {
     const activity = describeActivity(ev);
     if (activity) this.store.updateTicket(ticketId, { last_activity: activity });
     this.emit(ticketId, 'claude', slimEvent(ev));
+  }
+
+  get usage(): Usage | null {
+    return this.store.getSetting<Usage>('usage');
+  }
+
+  private updateUsage(info: any) {
+    const windows = info?.unifiedWindows;
+    if (!windows) return;
+    const usage: Usage = { weekly: usageWindow(windows.seven_day), session: usageWindow(windows.five_hour), updatedAt: Date.now() };
+    if (!usage.weekly && !usage.session) return;
+    this.store.setSetting('usage', usage);
+    this.broadcast({ type: 'usage', usage });
   }
 
   private setStatus(ticketId: number, status: Ticket['status']) {

@@ -166,7 +166,9 @@ function connectStream(catchUp = false) {
         reloadWhenIdle();
       }
       assetVersion ??= msg.version;
+      renderUsage(msg.usage);
     }
+    if (msg.type === 'usage') renderUsage(msg.usage);
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'event') onEvent(msg.event);
   };
@@ -218,6 +220,29 @@ function reloadWhenIdle() {
 }
 
 setInterval(reloadWhenIdle, 2000);
+
+// ---------- account usage ----------
+
+let usage = null;
+
+/** The weekly-limit bar in the top bar, fed by usage reports from Claude turns. */
+function renderUsage(next = usage) {
+  usage = next;
+  const el = document.getElementById('usage');
+  const week = usage?.weekly;
+  el.hidden = !week;
+  if (!week) return;
+  const pct = Math.round(Math.min(1, Math.max(0, week.utilization)) * 100);
+  el.querySelector('.label').textContent = `Week ${pct}%`;
+  el.querySelector('.fill').style.width = `${pct}%`;
+  el.dataset.level = week.status && week.status !== 'allowed' ? 'error' : pct >= 90 ? 'error' : pct >= 75 ? 'warn' : '';
+  const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  el.title = [
+    `Weekly usage of this Claude account: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
+    usage.session ? `5-hour window: ${Math.round(usage.session.utilization * 100)}%${usage.session.resetsAt ? `, resets ${when(usage.session.resetsAt)}` : ''}` : null,
+    `As of the last turn, ${ago(usage.updatedAt)}`,
+  ].filter(Boolean).join('\n');
+}
 
 // Phones and sleeping laptops drop connections quietly; recheck when the page comes back.
 document.addEventListener('visibilitychange', () => {
@@ -818,6 +843,9 @@ const topbar = document.querySelector('.topbar');
 // where scrolled chat text shows through.
 new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${topbar.getBoundingClientRect().height}px`)).observe(topbar);
 // Keep "last activity 3m ago" honest.
-setInterval(() => view?.kind === 'project' && renderStats(), 30_000);
+setInterval(() => {
+  if (view?.kind === 'project') renderStats();
+  if (usage) renderUsage();
+}, 30_000);
 
 api('/api/me').then((r) => start(r.name)).catch(() => {});

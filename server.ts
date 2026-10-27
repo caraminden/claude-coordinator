@@ -5,6 +5,7 @@ import { readFile, readdir, mkdir, realpath, stat, writeFile } from 'node:fs/pro
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { basename, extname, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { gzip } from 'node:zlib';
 import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact } from './src/artifacts.ts';
 import { AGENT_NAME, Auth, type Session } from './src/auth.ts';
@@ -271,9 +272,31 @@ class HttpError extends Error {
   }
 }
 
+// Responses to browsers that accept gzip. Caddy passes bodies through as they are, and a long
+// thread's history is megabytes of JSON that gzips about 4x.
+const acceptsGzip = new WeakSet<ServerResponse>();
+const MIN_GZIP_BYTES = 1400;
+
+/** Send a whole body, gzipped when the browser accepts it and it is big enough to be worth it. */
+function send(res: ServerResponse, status: number, headers: Record<string, string>, body: string | Buffer) {
+  const buf = typeof body === 'string' ? Buffer.from(body) : body;
+  if (buf.length < MIN_GZIP_BYTES || !acceptsGzip.has(res)) {
+    res.writeHead(status, { ...headers, Vary: 'Accept-Encoding' });
+    return res.end(buf);
+  }
+  gzip(buf, { level: 6 }, (err, zipped) => {
+    if (res.destroyed) return;
+    if (err) {
+      res.writeHead(status, { ...headers, Vary: 'Accept-Encoding' });
+      return res.end(buf);
+    }
+    res.writeHead(status, { ...headers, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+    res.end(zipped);
+  });
+}
+
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
-  res.writeHead(status, { ...SECURITY_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers });
-  res.end(JSON.stringify(body));
+  send(res, status, { ...SECURITY_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers }, JSON.stringify(body));
 }
 
 async function readJson(req: IncomingMessage, maxBytes = 1_000_000): Promise<any> {
@@ -453,8 +476,7 @@ async function serveStatic(res: ServerResponse, path: string) {
   if (!file.startsWith(PUBLIC_DIR)) throw new HttpError(404, 'Not found');
   try {
     const body = await readFile(file);
-    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
-    res.end(body);
+    send(res, 200, { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' }, body);
   } catch {
     throw new HttpError(404, 'Not found');
   }
@@ -709,6 +731,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
+  if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   try {
     if (url.pathname.startsWith('/api/')) {
       await api(req, res, url, auth.session(req));

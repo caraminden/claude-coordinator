@@ -145,7 +145,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
   /* Tuck 1px under the top bar so pixel rounding can never open a gap between them. */
   top: max(0px, calc(var(--topbar-h, 3rem) - 1px));
   z-index: 4;
-  background: var(--chat-bg, var(--bg));
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
   padding: 0.6rem 0;
   margin: -0.6rem 0 1rem;
@@ -250,7 +250,7 @@ details.turn-end summary { cursor: pointer; }
 details.turn-end .phases, details.turn-end .cmds { text-align: left; margin-left: 0.2rem; font-size: 1.1em; }
 details.turn-end .recap { text-align: left; margin: 0.4rem 0 0.2rem; font-size: 1.1em; }
 details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 1.1em; }
-.composer { position: sticky; bottom: 0; background: var(--chat-bg, var(--bg)); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 1rem; }
+.composer { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 1rem; }
 .composer textarea { min-height: 4.5rem; resize: vertical; }
 .composer .row { margin-top: 0.5rem; }
 .composer button.small { padding: 0.2rem 0.65rem; font-size: 0.85em; }
@@ -398,8 +398,8 @@ button.pin.on { color: var(--accent); }
 .sidebar .column h3, .sidebar .column.closed > summary { font-size: 0.75rem; margin-bottom: 0.3rem; }
 .sidebar .new-thread + #threads { margin-top: -0.25rem; }
 .chat { min-width: 0; }
-/* A dismissed minion's chat sits on a grey tint, its sticky bar and composer included. */
-.chat.dismissed { --chat-bg: color-mix(in srgb, var(--closed) 14%, var(--bg)); background: var(--chat-bg); border-radius: 10px; padding: 0.6rem 0.85rem 0; }
+/* A dismissed minion's message box is tinted grey, so it reads as dismissed before you type. */
+.chat.dismissed .composer textarea { background: color-mix(in srgb, var(--closed) 18%, var(--panel)); border-color: color-mix(in srgb, var(--closed) 45%, var(--line)); }
 /* Medium screens: stack the artifacts and threads in one column so the main panel keeps its width. */
 @media (min-width: 801px) and (max-width: 1150px) {
   /* The main panel spans both rows; let the lower row take its extra height so the shelf stays snug. */

@@ -150,7 +150,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
 
   // The thread asks a question: everyone.
   let n = received.length;
-  await call(`agent:${t.id}`, `/api/tickets/${t.id}/questions`, { method: 'POST', body: { questions: [{ question: 'Tabs or list?', options: [{ label: 'Tabs' }, { label: 'List' }] }] } });
+  await call(`agent:${t.id}`, `/api/tickets/${t.id}/questions`, { method: 'POST', body: { questions: [{ question: 'Tabs or list?', options: [{ label: 'Tabs', recommended: true }, { label: 'List' }] }] } });
   let got = await pushes(n, 3);
   assert.deepEqual(got.cara, { title: '#1 Build it', body: 'Tabs or list?', tag: `thread-${t.id}`, url });
   assert.deepEqual(got.josh, got.cara);
@@ -184,7 +184,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   assert.deepEqual(await call('Josh', '/api/push/subscription', { method: 'PATCH', body: { endpoint: browsers.josh.endpoint, projectId: project.id, muted: true } }),
     { subscribed: true, muted: [project.id] });
   n = received.length;
-  await call(`agent:${coordinator.id}`, `/api/tickets/${coordinator.id}/questions`, { method: 'POST', body: { questions: [{ question: 'Which first?', options: [{ label: 'A' }, { label: 'B' }] }] } });
+  await call(`agent:${coordinator.id}`, `/api/tickets/${coordinator.id}/questions`, { method: 'POST', body: { questions: [{ question: 'Which first?', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } });
   got = await pushes(n, 1);
   assert.deepEqual(got.cara, { title: 'P Taskmaster', body: 'Which first?', tag: `thread-${coordinator.id}`, url: `/#/p/${project.id}` });
 });

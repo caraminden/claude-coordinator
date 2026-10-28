@@ -96,7 +96,7 @@ before(async () => {
 
 const ask = (images: (string | undefined)[]) => call(`/api/tickets/${ticket.id}/questions`, {
   method: 'POST', token: turn.token,
-  body: { questions: [{ question: 'Which take?', options: images.map((image, i) => ({ label: `Take ${i + 1}`, ...(image ? { image } : {}) })) }] },
+  body: { questions: [{ question: 'Which take?', options: images.map((image, i) => ({ label: `Take ${i + 1}`, ...(image ? { image } : {}), ...(i ? {} : { recommended: true }) })) }] },
 });
 
 test('a question card keeps option pictures from the thread\'s folders', async () => {
@@ -113,6 +113,20 @@ test('a question card refuses pictures outside those folders, missing or not pic
   await assert.rejects(ask(['takes/none.png', 'takes/a.png']), /400 .*must be a file/);
   await assert.rejects(ask(['report.md', 'takes/a.png']), /400 .*must be an image/);
   await assert.rejects(ask(['/etc/passwd', 'takes/a.png']), /400 .*must be an image/);
+});
+
+const askWith = (options: object[], multiSelect = false) => call(`/api/tickets/${ticket.id}/questions`, {
+  method: 'POST', token: turn.token, body: { questions: [{ question: 'Tabs or list?', multiSelect, options }] },
+});
+
+test('every question on a card recommends an option', async () => {
+  await assert.rejects(askWith([{ label: 'Tabs' }, { label: 'List' }]), /400 Question 1 needs a recommended option/);
+  await assert.rejects(askWith([{ label: 'Tabs', recommended: true }, { label: 'List', recommended: true }]), /400 Question 1 recommends 2 options; mark just one/);
+  await askWith([{ label: 'Tabs', recommended: true }, { label: 'List', recommended: true }, { label: 'Both' }], true);
+  // A label that says "(Recommended)" itself becomes the flag, so the card doesn't show the words twice.
+  const { id } = await askWith([{ label: 'Tabs' }, { label: 'List (Recommended)' }]);
+  const card = (await call(`/api/tickets/${ticket.id}/events`)).find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === id);
+  assert.deepEqual(JSON.parse(card.data).questions[0].options, [{ label: 'Tabs' }, { label: 'List', recommended: true }]);
 });
 
 test('a comment on a file is a chat message from the person that wakes the thread', async () => {

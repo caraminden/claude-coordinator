@@ -471,9 +471,13 @@ function isSecure(req: IncomingMessage): boolean {
   return req.headers['x-forwarded-proto'] === 'https';
 }
 
+// A label Claude ended with "(Recommended)" itself; the card adds those words to the flagged option.
+const SAYS_RECOMMENDED = /\s*\(recommended\)\s*$/i;
+
 /**
- * A question card from Claude: 1 to 4 questions, each with 2 to 6 options. An option's image must
- * be a picture or video the ticket may show, so a card can't reach files outside its folders.
+ * A question card from Claude: 1 to 4 questions, each with 2 to 6 options, one of them recommended
+ * (any number on a pick-any question), so people always see what Claude would pick. An option's
+ * image must be a picture or video the ticket may show, so a card can't reach files outside its folders.
  */
 async function cleanQuestions(ticket: Ticket, raw: unknown) {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 4) throw new HttpError(400, 'questions must be a list of 1 to 4 questions');
@@ -481,12 +485,19 @@ async function cleanQuestions(ticket: Ticket, raw: unknown) {
     const n = `Question ${i + 1}`;
     if (!q || typeof q !== 'object') throw new HttpError(400, `${n} must be an object`);
     if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 6) throw new HttpError(400, `${n} needs 2 to 6 options`);
-    const options = q.options.map((o: any, j: number) => ({
-      label: str(o?.label, `${n} option ${j + 1} label`, 80),
-      ...(o?.description ? { description: str(o.description, `${n} option ${j + 1} description`, 300) } : {}),
-      ...(o?.image ? { image: str(o.image, `${n} option ${j + 1} image`, 1000) } : {}),
-    }));
+    const options = q.options.map((o: any, j: number) => {
+      const says = typeof o?.label === 'string' && SAYS_RECOMMENDED.test(o.label);
+      return {
+        label: str(says ? o.label.replace(SAYS_RECOMMENDED, '') : o?.label, `${n} option ${j + 1} label`, 80),
+        ...(o?.description ? { description: str(o.description, `${n} option ${j + 1} description`, 300) } : {}),
+        ...(o?.image ? { image: str(o.image, `${n} option ${j + 1} image`, 1000) } : {}),
+        ...(o?.recommended === true || says ? { recommended: true } : {}),
+      };
+    });
     if (new Set(options.map((o: any) => o.label)).size !== options.length) throw new HttpError(400, `${n} has duplicate option labels`);
+    const recommended = options.filter((o: any) => o.recommended).length;
+    if (!recommended) throw new HttpError(400, `${n} needs a recommended option: set "recommended": true on the one you would pick`);
+    if (recommended > 1 && q.multiSelect !== true) throw new HttpError(400, `${n} recommends ${recommended} options; mark just one`);
     return {
       question: str(q.question, n, 500),
       ...(q.header ? { header: str(q.header, `${n} header`, 24) } : {}),

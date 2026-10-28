@@ -648,6 +648,7 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .qcard .opt:hover:not(:disabled) { border-color: var(--running); }
 .qcard .opt.picked { border-color: var(--running); background: color-mix(in srgb, var(--running) 12%, var(--panel)); }
 .qcard .opt .label { font-weight: 600; }
+.qcard .opt .rec { font-weight: 500; font-size: 0.85em; color: var(--running); }
 .qcard .opt .desc { font-size: 0.85em; color: var(--muted); }
 .qcard .other { margin-top: 0.35rem; font-size: 0.92em; }
 .qcard .row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85em; }

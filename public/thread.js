@@ -797,7 +797,7 @@ function questionCard(ticketId, card) {
           refresh();
           if (single) send();
         },
-      }, h('span', { class: 'label' }, o.label), o.description ? h('span', { class: 'desc' }, o.description) : '');
+      }, h('span', { class: 'label' }, o.label, o.recommended ? h('span', { class: 'rec' }, ' (Recommended)') : ''), o.description ? h('span', { class: 'desc' }, o.description) : '');
       // With pictures, the options are a gallery: each thumbnail opens the full view, its button picks it.
       const gallery = q.options.some((o) => o.image);
       return h('div', { class: 'q', 'data-q': i },

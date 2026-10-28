@@ -88,7 +88,7 @@ const TICKET_ID = { type: 'integer', description: 'Minion number in this scheme,
 const ASK_QUESTION = {
   name: 'ask_question',
   description:
-    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for real decisions with clear options, instead of listing choices in prose. Put your recommended option first. For visual choices (art, UI, layouts, animations), make each take as an image, GIF or short video first and give each option its `image`: the card then shows them as a gallery to pick from. After calling it, finish your turn with a short reply and wait: the answers arrive as the next message.',
+    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for real decisions with clear options, instead of listing choices in prose. Every question marks the option you would pick with `recommended: true` (exactly one, or any number on a multiSelect question): the card shows it as "(Recommended)", and a question without one is refused. Put it first. For visual choices (art, UI, layouts, animations), make each take as an image, GIF or short video first and give each option its `image`: the card then shows them as a gallery to pick from. After calling it, finish your turn with a short reply and wait: the answers arrive as the next message.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -116,6 +116,7 @@ const ASK_QUESTION = {
                     description:
                       'Optional picture of this option: path to an image, GIF or video (png, jpg, gif, webp, avif, svg, mp4, webm, mov) you made in your working directory or shared folder, absolute or relative to your working directory. Shown as a thumbnail people can open full size.',
                   },
+                  recommended: { type: 'boolean', description: 'true on the option you recommend; the card labels it "(Recommended)". Leave the words out of the label.' },
                 },
                 required: ['label'],
               },

@@ -40,6 +40,7 @@ interface Agent {
 interface Session {
   machineId: number;
   ticketId: number;
+  projectId: number;
   res: ServerResponse;
 }
 
@@ -72,6 +73,8 @@ export class MachineRelay {
       name: machine.name,
       created_by: machine.created_by,
       notes: machine.notes,
+      /** The schemes whose minions get it. */
+      projects: this.store.machineProjects(machine.id),
       created_at: machine.created_at,
       last_seen_at: machine.last_seen_at,
       online: !!agent,
@@ -86,9 +89,18 @@ export class MachineRelay {
     return this.store.listMachines().map((m) => this.view(m));
   }
 
-  /** Machines connected right now, whose tools a starting turn should get. */
-  online(): Machine[] {
-    return this.store.listMachines().filter((m) => this.agents.has(m.id));
+  /** Machines connected right now and granted to the scheme, whose tools its starting turn should get. */
+  online(projectId: number): Machine[] {
+    return this.store.listMachines().filter((m) => this.agents.has(m.id) && this.store.machineGranted(m.id, projectId));
+  }
+
+  /** Let a scheme's minions use a machine, or stop them; revoking ends their open sessions on it. */
+  setGrant(machineId: number, projectId: number, granted: boolean) {
+    this.store.setMachineGrant(machineId, projectId, granted);
+    if (!granted) {
+      for (const [id, s] of this.sessions) if (s.machineId === machineId && s.projectId === projectId) this.endSession(id, true);
+    }
+    this.onChange();
   }
 
   isOnline(machineId: number): boolean {
@@ -138,11 +150,12 @@ export class MachineRelay {
   }
 
   /** A thread's proxy started: give it a session whose stream carries the machine's replies. */
-  openSession(machineId: number, ticketId: number, res: ServerResponse): boolean {
+  openSession(machineId: number, ticket: { id: number; project_id: number }, res: ServerResponse): 'ok' | 'offline' | 'not granted' {
+    if (!this.store.machineGranted(machineId, ticket.project_id)) return 'not granted';
     const agent = this.agents.get(machineId);
-    if (!agent) return false;
+    if (!agent) return 'offline';
     const id = randomBytes(12).toString('hex');
-    this.sessions.set(id, { machineId, ticketId, res });
+    this.sessions.set(id, { machineId, ticketId: ticket.id, projectId: ticket.project_id, res });
     agent.sessions.add(id);
     res.writeHead(200, SSE_HEADERS);
     res.write(`data: ${JSON.stringify({ session: id })}\n\n`);
@@ -152,7 +165,7 @@ export class MachineRelay {
       this.endSession(id, true);
     });
     this.onChange();
-    return true;
+    return 'ok';
   }
 
   /** A message from a thread's proxy to the machine. False if the session or machine is gone. */

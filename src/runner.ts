@@ -400,8 +400,8 @@ export class Runner {
   sharedDir: (project: Project) => string | null = () => null;
   /** The folder that holds a project's ticket folders, which the coordinator may read. */
   ticketsDir: (project: Project) => string = (project) => join(project.repo_dir ?? '.', '..', 'tickets');
-  /** Machines online now; a thread's turn gets each one's MCP tools. */
-  machines: () => Machine[] = () => [];
+  /** Machines online now and granted to the project; a thread's turn gets each one's MCP tools. */
+  machines: (project: Project) => Machine[] = () => [];
   /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
   onFilesMayChange: (ticketId: number) => void = () => {};
   /** Called when a turn's process has exited, however the turn ended. */
@@ -620,8 +620,8 @@ export class Runner {
     } catch {
       memoryDir = null;
     }
-    // Threads (not the coordinator, which hands work off) get the tools of every machine online now.
-    const machines = ticket.kind === 'coordinator' ? [] : this.machines();
+    // Threads (not the coordinator, which hands work off) get the tools of the scheme's machines online now.
+    const machines = ticket.kind === 'coordinator' ? [] : this.machines(project);
     // Tool calls matching the project's approval rules wait for a person (threads only).
     const rules = ticket.kind === 'coordinator' ? [] : lines(project.approval_rules);
     const args = [

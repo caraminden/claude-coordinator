@@ -780,6 +780,9 @@ a.thread-ref:hover { text-decoration: underline; }
 .machine-add label .row { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 0.4rem; }
 .machine-add label .row select { width: auto; flex: none; }
 .machine-add label .row input { flex: 1; min-width: 0; width: auto; }
+.machine-grants { display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; margin: 0.3rem 0 0 1.1rem; font-size: 0.85em; }
+.machine-grants .toggle { display: flex; align-items: center; gap: 0.4rem; margin: 0; padding: 0.15rem 0; cursor: pointer; }
+.machine-grants .toggle input { width: auto; margin: 0; accent-color: var(--accent); flex: none; }
 .machine-notes { margin: 0.3rem 0 0.1rem 1.1rem; font-size: 0.85em; }
 .machine-notes summary { cursor: pointer; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .machine-notes textarea { width: 100%; margin: 0.4rem 0; font-size: 0.95em; }

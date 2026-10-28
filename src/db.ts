@@ -197,6 +197,11 @@ CREATE TABLE IF NOT EXISTS machines (
   last_seen_at INTEGER,
   notes TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS machine_projects (
+  machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  PRIMARY KEY (machine_id, project_id)
+);
 CREATE TABLE IF NOT EXISTS github_seen (
   ticket_id INTEGER NOT NULL REFERENCES tickets(id),
   key TEXT NOT NULL,
@@ -244,7 +249,12 @@ export class Store {
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+    const hadGrants = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'machine_projects'").get();
     this.db.exec(SCHEMA);
+    // Machines used to serve every scheme. Keep that, except Delve's shared Godot editor, which is Delve's alone.
+    if (!hadGrants) {
+      this.db.exec("INSERT INTO machine_projects SELECT m.id, p.id FROM machines m, projects p WHERE m.name != 'perigee-godot' OR p.name = 'Delve'");
+    }
     for (const [table, column, ddl] of MIGRATIONS) {
       const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
       if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
@@ -662,6 +672,20 @@ export class Store {
 
   deleteMachine(id: number) {
     this.db.prepare('DELETE FROM machines WHERE id = ?').run(id);
+  }
+
+  /** The schemes whose minions may use a machine. */
+  machineProjects(machineId: number): number[] {
+    return (this.db.prepare('SELECT project_id FROM machine_projects WHERE machine_id = ? ORDER BY project_id').all(machineId) as { project_id: number }[]).map((r) => r.project_id);
+  }
+
+  machineGranted(machineId: number, projectId: number): boolean {
+    return !!this.db.prepare('SELECT 1 FROM machine_projects WHERE machine_id = ? AND project_id = ?').get(machineId, projectId);
+  }
+
+  setMachineGrant(machineId: number, projectId: number, granted: boolean) {
+    if (granted) this.db.prepare('INSERT OR IGNORE INTO machine_projects (machine_id, project_id) VALUES (?, ?)').run(machineId, projectId);
+    else this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ? AND project_id = ?').run(machineId, projectId);
   }
 
   listPushSubscriptions(): PushSubscriptionRow[] {

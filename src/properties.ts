@@ -295,7 +295,7 @@ export class Registry {
     const active = values.filter((v) => v.status === 'active');
     const near = active.filter((v) => [v.value, ...aliasesOf(v)].some((s) => nearDuplicate(s, raw))).map((v) => code(v.value));
     throw new PropertyError(
-      `${code(raw.trim())} isn't a ${code(k.key)} value${near.length ? `; did you mean ${near.join(' or ')}?` : '.'} Values: ${active.map((v) => code(v.value)).join(', ')}.` +
+      `${code(raw.trim())} isn't one of the ${code(k.key)} values${near.length ? `; did you mean ${near.join(' or ')}?` : '.'} Values: ${active.map((v) => code(v.value)).join(', ')}.` +
         ' If none fits, propose a new value instead of picking a near-duplicate.',
     );
   }

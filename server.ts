@@ -508,15 +508,13 @@ function registry<T>(fn: () => T): T {
   }
 }
 
-const VOCAB_FILE = 'property-vocabulary.md';
-
 /** Rewrite each scheme's property-vocabulary.md from the registry; a hand-written one is kept aside once. */
 async function writeVocabularies(projectIds = store.listProjects().map((p) => p.id)) {
   for (const id of projectIds) {
     const project = store.getProject(id);
     if (!project) continue;
     const dir = projectSharedDir(DATA_DIR, id);
-    const path = join(dir, VOCAB_FILE);
+    const path = join(dir, 'property-vocabulary.md');
     const text = store.props.doc(id, project.name);
     const old = await readFile(path, 'utf8').catch(() => null);
     if (old === text) continue;

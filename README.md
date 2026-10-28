@@ -189,8 +189,10 @@ minion that made it. It never hard-restarts:
    GitHub (`origin`), with the gh CLI's git credentials. GitHub's `main` is
    what's live and the off-box copy. It never force-pushes: if GitHub's `main`
    has diverged, it says so and leaves it. A failed push (no network, auth, a
-   rejection) doesn't fail or roll back the deploy; it shows in the deploy's
-   report and in `journalctl --user -t cc-restart-when-idle`.
+   rejection) doesn't fail or roll back the deploy: its report shows as an
+   error and notifies, with the reason and any fix, but still dismisses the
+   minion, and the next deploy retries. Also in `journalctl --user -t
+   cc-restart-when-idle`.
 
 How a queued restart went is posted in the deploying minion's chat (a failure
 as an error, which pushes) and in the journal: `journalctl --user -u

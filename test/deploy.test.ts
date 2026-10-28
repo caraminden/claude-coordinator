@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { appendFileSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -133,6 +133,19 @@ test('an ok report dismisses a minion in pending-deploy; a failed one leaves it 
   assert.equal(store.getTicket(ticket.id)!.status, 'closed');
 });
 
+test('a warning (live, but not pushed to GitHub) shows as an error and still dismisses', async () => {
+  const t = store.createTicket({ project_id: project.id, title: 'W', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(t.id, { status: 'idle', state: 'pending-deploy' });
+  const text = 'Deployed abc1234. Not pushed to GitHub: rejected. The next deploy will retry.';
+  const res = await fetch(`${base}/api/tickets/${t.id}/deploy`, {
+    method: 'POST', headers: { Authorization: `Bearer ${new Auth('test-password-123', SECRET).agentToken(t.id)}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ok: true, warn: true, text }),
+  });
+  assert.deepEqual(await res.json(), { dismissed: true });
+  assert.equal(store.getTicket(t.id)!.status, 'closed');
+  assert.ok(store.listEvents(t.id).some((e) => e.kind === 'error' && JSON.parse(e.data).text === text));
+});
+
 test('deploy.sh tells front-end-only changes from the rest', () => {
   const git = (...args: string[]) => execFileSync('git', ['-C', join(root, 'g'), ...args], { encoding: 'utf8' }).trim();
   mkdirSync(join(root, 'g', 'public'), { recursive: true });
@@ -173,23 +186,39 @@ test('deploy.sh pushes the live commit to main, never forced, and a failed push 
   };
   // Failed pushes go to the journal; a test tag keeps them out of the real deploy unit's log.
   const env = { ...process.env, DEPLOY_LIVE: live, DEPLOY_UNIT: 'deploy-test-push' };
-  const push = (sha: string, to = remote) => execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'push-github', sha], {
-    encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...env, DEPLOY_REMOTE: to },
-  }).trimEnd();
+  // Status 1 makes the deploy report a warning; the deploy itself carries on.
+  const push = (sha: string, to = remote) => {
+    const r = spawnSync('bash', [join(repo, 'tools', 'deploy.sh'), 'push-github', sha], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...env, DEPLOY_REMOTE: to },
+    });
+    return { status: r.status, out: r.stdout.trimEnd() };
+  };
   const a = commit();
-  assert.equal(push(a), ' Pushed to GitHub.');
+  assert.deepEqual(push(a), { status: 0, out: ' Pushed to GitHub.' });
   assert.equal(git(remote, 'rev-parse', 'main'), a);
   const b = commit();
-  assert.equal(push(b), ' Pushed to GitHub.', 'a fast-forward');
+  assert.deepEqual(push(b), { status: 0, out: ' Pushed to GitHub.' }, 'a fast-forward');
   assert.equal(git(remote, 'rev-parse', 'main'), b);
 
   git(live, 'reset', '-q', '--hard', a);
   const c = commit();
-  assert.match(push(c), /^ Not pushed to GitHub: .*diverged/);
+  assert.deepEqual(push(c), {
+    status: 1,
+    out: " Not pushed to GitHub: its main has commits that aren't live, so nothing was forced. The next deploy will retry. GitHub main has diverged: a person needs to look.",
+  });
   assert.equal(git(remote, 'rev-parse', 'main'), b, 'a diverged main is left alone');
 
-  assert.match(push(c, join(root, 'nowhere.git')), /^ Could not push to GitHub: \S/, 'exits 0 with the reason');
-  assert.equal(execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'push-github', c], {
+  const gone = push(c, join(root, 'nowhere.git'));
+  assert.equal(gone.status, 1);
+  assert.match(gone.out, /^ Not pushed to GitHub: fatal: .*nowhere\.git.* The next deploy will retry\.$/, 'the reason, and no fix to offer');
+
+  // A login GitHub refuses gets the fix line (simulated by a remote hook that denies the push).
+  const denied = join(root, 'denied.git');
+  execFileSync('git', ['init', '-q', '--bare', denied]);
+  writeFileSync(join(denied, 'hooks', 'pre-receive'), '#!/bin/sh\necho "Permission denied to someone." >&2\nexit 1\n', { mode: 0o755 });
+  assert.match(push(c, denied).out, /The next deploy will retry\. GitHub refused the login: run gh auth status/);
+
+  assert.deepEqual(spawnSync('bash', [join(repo, 'tools', 'deploy.sh'), 'push-github', c], {
     encoding: 'utf8', env: { ...env, DEPLOY_REMOTE: '' },
-  }), '', 'an empty DEPLOY_REMOTE skips the push');
+  }).stdout, '', 'an empty DEPLOY_REMOTE skips the push');
 });

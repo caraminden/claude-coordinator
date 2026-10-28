@@ -51,26 +51,27 @@ init_state() {
   mkdir -p -m 700 "$STATE"
 }
 
-# Post a deploy report in one minion's chat. An ok report dismisses a minion in pending-deploy.
+# Post a deploy report in one minion's chat: ok, warn (live, but something needs a look: shows as an
+# error and notifies) or fail. ok and warn dismiss a minion in pending-deploy.
 post_report() {
   local api=$1 token=$2 ticket=$3 ok=$4 text=$5
   curl -fsS --max-time 10 -X POST "$api/api/tickets/$ticket/deploy" \
     -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "$(node -e 'console.log(JSON.stringify({ok:process.argv[1]==="ok",text:process.argv[2]}))' "$ok" "$text")" >/dev/null ||
+    -d "$(node -e 'const k=process.argv[1];console.log(JSON.stringify({ok:k!=="fail",warn:k==="warn",text:process.argv[2]}))' "$ok" "$text")" >/dev/null ||
     say "could not post the report to minion $ticket's chat"
 }
 
 # Live already, so the minion running this deploy hears now (and is dismissed when its turn ends).
 report_me() {
   if [ -n "${COORDINATOR_TICKET:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ]; then
-    post_report "${COORDINATOR_API:-$URL}" "$COORDINATOR_TOKEN" "$COORDINATOR_TICKET" ok "$1"
+    post_report "${COORDINATOR_API:-$URL}" "$COORDINATOR_TOKEN" "$COORDINATOR_TICKET" "${2:-ok}" "$1"
   fi
 }
 
-# Tell the minions that asked for this deploy, and the journal. $1 is ok or fail.
+# Tell the minions that asked for this deploy, and the journal. $1 is ok, warn or fail.
 report() {
   local ok=$1 text=$2 api token ticket
-  if [ "$ok" = ok ]; then say "$text"; else say "FAILED: $text"; fi
+  case "$ok" in ok) say "$text" ;; warn) say "WARNING: $text" ;; *) say "FAILED: $text" ;; esac
   [ -f "$STATE/reporters" ] || return 0
   while read -r api token ticket; do
     post_report "$api" "$token" "$ticket" "$ok" "$text"
@@ -80,24 +81,30 @@ report() {
 
 # Push live commit $1 to $REMOTE's main, so GitHub matches what runs and keeps a copy off the box.
 # Never forced: if GitHub's main has commits that aren't live, git rejects it and we only report that.
-# A failure never fails the deploy; prints a sentence to add to the deploy's report.
+# Prints a sentence to add to the deploy's report; a failed push returns 1 (a warn report), but never
+# fails the deploy.
 push_github() {
   [ -n "$REMOTE" ] || return 0
-  local out msg
+  local out why fix=""
   if out=$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$LIVE" push -q "$REMOTE" "$1:refs/heads/main" 2>&1); then
     say "pushed $(git_live rev-parse --short "$1") to $REMOTE main"
     echo " Pushed to GitHub."
     return 0
   fi
   if grep -qE '\[rejected\]|non-fast-forward|fetch first' <<<"$out"; then
-    msg="Not pushed to GitHub: its main has commits that aren't live (it has diverged), so nothing was forced. Someone needs to reconcile the two."
+    why="its main has commits that aren't live, so nothing was forced"
+    fix="GitHub main has diverged: a person needs to look."
   else
     # git's first fatal/error line names the cause; the last line is often just advice.
-    msg="Could not push to GitHub: $(awk '/^(fatal|error):/ && !e {e=$0} NF {l=$0} END {print e != "" ? e : l != "" ? l : "no answer within 60 s"}' <<<"$out")"
+    why=$(awk '/^(fatal|error):/ && !e {e=$0} NF {l=$0} END {print e != "" ? e : l != "" ? l : "no answer within 60 s"}' <<<"$out")
+    grep -qiE 'could not read Username|Authentication failed|Invalid username|error: 40[13]|Permission denied' <<<"$out" &&
+      fix="GitHub refused the login: run gh auth status as $(id -un) and log in again if it has expired."
   fi
+  local msg="Not pushed to GitHub: $why. The next deploy will retry.${fix:+ $fix}"
   say "$msg"
   logger -t "$UNIT" -- "$msg" 2>/dev/null || true
   echo " $msg"
+  return 1
 }
 
 running_minions() {
@@ -139,7 +146,9 @@ restart_when_idle() {
   say "everyone is idle; restarting $SERVICE on $(short "$target")"
   if restart_healthy "$target"; then
     git_live tag -f last-good "$target" >/dev/null
-    report ok "Deployed $(short "$target"): the server restarted and is healthy.$(push_github "$target")"
+    local pushed kind=ok
+    pushed=$(push_github "$target") || kind=warn
+    report "$kind" "Deployed $(short "$target"): the server restarted and is healthy.$pushed"
     return 0
   fi
   local why="the server did not answer healthy on it within ${HEALTHY_WAIT} s"
@@ -208,7 +217,9 @@ deploy() {
       if [ "$(health version)" = "$version" ]; then
         git_live tag -f last-good "$new" >/dev/null
         say "live now: the server reloaded the front end ($version); open tabs reload when idle. No restart."
-        report_me "Deployed $(short "$new"): the server reloaded the front end, no restart.$(push_github "$new")"
+        local pushed kind=ok
+        pushed=$(push_github "$new") || kind=warn
+        report_me "Deployed $(short "$new"): the server reloaded the front end, no restart.$pushed" "$kind"
         return 0
       fi
     done

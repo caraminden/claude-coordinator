@@ -1232,14 +1232,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     }
     if (action === '/deploy' && method === 'POST') {
       // tools/deploy.sh, run for this minion, reports how its queued restart went. A failure shows as
-      // an error and pushes, so a deploy that rolled back or gave up is never silent.
+      // an error and pushes, so a deploy that rolled back or gave up is never silent. A warning (live,
+      // but the push to GitHub failed) is just as loud, yet still counts as live.
       if (session.agent !== id) throw new HttpError(403, 'Only the deploying minion can report its deploy');
       const body = await readJson(req);
       const text = str(body.text, 'Report', 4000);
       const failed = body.ok === false;
-      (failed ? console.error : console.log)(`Deploy report for minion ${id}: ${text}`);
-      runner.emit(id, failed ? 'error' : 'note', { text });
-      if (failed) notify(id, { kind: 'error', text });
+      const loud = failed || body.warn === true;
+      (loud ? console.error : console.log)(`Deploy report for minion ${id}: ${text}`);
+      runner.emit(id, loud ? 'error' : 'note', { text });
+      if (loud) notify(id, { kind: 'error', text });
       // A failed deploy leaves the minion in pending-deploy, so the error stays in view.
       const dismissed = !failed && runner.deployLive(id);
       return json(res, 201, { dismissed });

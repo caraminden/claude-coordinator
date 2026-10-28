@@ -147,7 +147,8 @@ restart() {
   rm -f "$0" # a private copy (see deploy); bash keeps reading it from the open file
   init_state
   local i=0
-  while [ -z "$NOW" ]; do
+  # $STATE/now: a --now deploy that found this restart already queued and waiting.
+  while [ -z "$NOW" ] && [ ! -e "$STATE/now" ]; do
     if [ "$(interruptible)" = 0 ]; then
       sleep 2
       [ "$(interruptible)" = 0 ] && break
@@ -162,6 +163,7 @@ restart() {
 
   exec 9>"$STATE/lock"
   flock 9
+  rm -f "$STATE/now"
   local target good
   target=$(git_live rev-parse HEAD)
   say "restarting $SERVICE on $(short "$target")"
@@ -271,7 +273,10 @@ deploy() {
     else say "restart queued as $UNIT: running turns carry on through it, and it reports here"; fi
   elif grep -qi 'already' <<<"$out"; then
     rm -f "$copy"
-    say "a restart is already queued as $UNIT; it will deploy this too and report here"
+    if [ -n "$NOW" ]; then
+      touch "$STATE/now"
+      say "a restart is already queued as $UNIT; with --now it goes ahead at once and deploys this too, and reports here"
+    else say "a restart is already queued as $UNIT; it will deploy this too and report here"; fi
     return 0
   else
     rm -f "$copy"

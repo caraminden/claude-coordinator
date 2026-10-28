@@ -23,9 +23,9 @@ const TAG = {
 };
 const STATE = {
   type: ['string', 'null'],
-  enum: ['ready', 'try', 'parked', 'blocked', 'outside', null],
+  enum: ['ready', 'try', 'parked', 'blocked', 'outside', 'pending-deploy', null],
   description:
-    'Where the turn leaves things, for the minions list: ready (done; ready to merge or pick up), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person\'s answer), outside (work still running somewhere this minion cannot wait on, like CI). null when it is simply people\'s turn to answer, which the list shows by itself. Cleared automatically when the next turn starts.',
+    'Where the turn leaves things, for the minions list: ready (done; ready to merge or pick up), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person\'s answer), outside (work still running somewhere this minion cannot wait on, like CI), pending-deploy (deployed with tools/deploy.sh, waiting to go live; a successful deploy dismisses the minion). null when it is simply people\'s turn to answer, which the list shows by itself. Cleared automatically when the next turn starts, except pending-deploy, which stays until you set another state.',
 };
 const NOTE = { type: ['string', 'null'], description: 'One terse line on where things stand, max 60 chars, e.g. "needs a pick: tabs or a list" or "merged, live after restart". No names or prefixes.' };
 
@@ -431,7 +431,7 @@ const THREAD_TOOLS = [
   {
     name: 'close_self',
     description:
-      "Dismiss this minion when the current turn ends, e.g. once a small fix is merged and shipped. It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled. Not for minions whose result is a report or doc for people to read: those stay open until someone has read it.",
+      "Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live. It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled. Not for minions whose result is a report or doc for people to read: those stay open until someone has read it.",
     inputSchema: {
       type: 'object',
       properties: { reason: { type: 'string', description: 'Optional one-line summary shown in the minion with the dismissal, e.g. "Merged abc1234; live after the restart"' } },

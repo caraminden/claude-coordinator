@@ -25,6 +25,7 @@ const STATES = {
   parked: { emoji: '🧊', label: 'Parked' },
   blocked: { emoji: '⛔', label: 'Blocked on something outside the minion' },
   outside: { emoji: '⏳', label: 'Waiting on work running elsewhere' },
+  'pending-deploy': { emoji: '🚀', label: 'Deployed; dismissed once it is live' },
 };
 
 let me = null;
@@ -1509,7 +1510,7 @@ function rowState(t) {
   if (t.status === 'closed') return { rank: 5, cls: 'm', cell: ['✓'], label: 'Dismissed' };
   const state = STATES[t.state];
   if (t.state === 'parked') return { rank: 4, cls: 'm', cell: [state.emoji], label: state.label };
-  if (t.state === 'outside') return { rank: 2, cls: 'w', cell: [`${state.emoji}${steps}`], label: state.label };
+  if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, cls: 'w', cell: [`${state.emoji}${steps}`], label: state.label };
   if (t.state === 'blocked') return { rank: 2, cls: 'st', cell: [state.emoji], label: state.label };
   if (state) return { rank: 0, cls: 'ok', cell: [state.emoji, ' ', waited()], label: state.label };
   return { rank: 0, cls: 'q', cell: ['❓ ', waited()], label: 'Your move' };

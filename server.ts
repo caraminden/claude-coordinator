@@ -1218,7 +1218,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       (failed ? console.error : console.log)(`Deploy report for minion ${id}: ${text}`);
       runner.emit(id, failed ? 'error' : 'note', { text });
       if (failed) notify(id, { kind: 'error', text });
-      return json(res, 201, {});
+      // A failed deploy leaves the minion in pending-deploy, so the error stays in view.
+      const dismissed = !failed && runner.deployLive(id);
+      return json(res, 201, { dismissed });
     }
     if (action === '/close' && method === 'POST') {
       // A thread closes itself once its current turn ends (close_self); the token decides which thread.

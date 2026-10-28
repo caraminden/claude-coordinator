@@ -268,10 +268,11 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     '- tag: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet). Set it once the kind of work is clear, following any scheme conventions, and change it if the work changes kind; leave it unset for one-off questions.',
     '- build: the major build number, only when the work has been assigned to one (the list groups a build\'s minions together).',
     'Your minion also carries properties from the scheme\'s property registry (`list_properties`, mcp__thread): a `type` (feature, bug, art, ideation, design, research, chore or other), a `stage`, and any keys the scheme registers. Set them with `set_properties` once the work is clear, and keep `type` right if the work changes kind (setting the tag sets the type too). Use only registered keys and values; aliases are fine. If nothing fits, set `type: other` and ask people with a card whether it stays `other` or moves to another bucket; for any other key, use `propose_property` instead of a near-duplicate. Show properties as `key: value`.',
-    '- At the end of every turn, set state and note: state ready (done, ready to merge or pick up), try (ready for people to try), parked, blocked (on something outside the minion) or outside (work still running elsewhere), or null when you are simply waiting on an answer; note is one terse line, max 60 chars, on where things stand ("needs a pick: tabs or list"). The state clears when the next turn starts.',
+    '- At the end of every turn, set state and note: state ready (done, ready to merge or pick up), try (ready for people to try), parked, blocked (on something outside the minion), outside (work still running elsewhere) or pending-deploy (deployed with tools/deploy.sh, not live yet), or null when you are simply waiting on an answer; note is one terse line, max 60 chars, on where things stand ("needs a pick: tabs or list"). The state clears when the next turn starts, except pending-deploy, which stays until you set another state: change it if a later turn starts new work.',
     'When your branch has an open GitHub pull request, the app watches it and messages you as "[GitHub]: ..." when CI on its head commit passes or fails, someone reviews or comments, or it is merged or closed, so you need not wait on CI in a turn; act on those messages as the scheme expects (fix a red build, answer a review).',
     'Give every Bash call a short plain-English description (like "Run the test suite").',
-    'When the minion\'s work is done and should be dismissed (for example when scheme instructions say to dismiss after shipping), call the `close_self` tool (mcp__thread) near the end of your turn: the minion is dismissed once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not dismiss a minion whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can be dismissed, even if its brief says to dismiss.',
+    'After you deploy with tools/deploy.sh, set state pending-deploy and do not call close_self: a successful deploy dismisses the minion once it is live (straight after the turn for a front-end-only change, after the idle restart otherwise), and a failed one leaves it open with the error.',
+    'When the minion\'s work is done and should be dismissed with nothing to deploy, call the `close_self` tool (mcp__thread) near the end of your turn: the minion is dismissed once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not dismiss a minion whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can be dismissed, even if its brief says to dismiss.',
     'You cannot message other minions directly. When something needs the scheme\'s Taskmaster (passing information to another minion, starting a new minion, a decision for it), message it with the `message_coordinator` tool (mcp__thread) with a self-contained message.',
     ...showingFiles(ticket, filesDir, sharedDir),
     ...machineTools(machines),
@@ -384,6 +385,8 @@ export class Runner {
   private stopping = new Set<number>();
   /** Tickets that asked to close when their current turn ends, with the reason they gave. */
   private closing = new Map<number, string | null>();
+  /** Minions whose deploy went live mid-turn: dismissed when that turn ends, if still pending-deploy. */
+  private deployedMidTurn = new Set<number>();
   private progress = new Map<number, ReturnType<typeof createProgress>>();
   private store: Store;
   private broadcast: Broadcast;
@@ -443,6 +446,32 @@ export class Runner {
   close(ticketId: number, text: string) {
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
+  }
+
+  /**
+   * A deploy this minion queued is live (tools/deploy.sh reported ok). A minion waiting on it in state
+   * pending-deploy is dismissed, unless something is still open: a question card, or a failed last turn.
+   * Mid-turn or with messages queued (approval cards only exist mid-turn), it waits for the last of
+   * those turns to end. Returns whether it was dismissed.
+   */
+  deployLive(ticketId: number): boolean {
+    if (this.isRunning(ticketId) || this.queued(ticketId)) {
+      this.deployedMidTurn.add(ticketId);
+      return false;
+    }
+    const t = this.store.getTicket(ticketId);
+    // shortcut: also takes the interim "outside" + "pending deploy" note, for minions that deployed before this state existed; drop it once none are left.
+    const pending = t?.state === 'pending-deploy' || (t?.state === 'outside' && /pending deploy/i.test(t.note ?? ''));
+    if (!t || t.status === 'closed' || t.status === 'error' || !pending) return false;
+    const events = this.store.listEvents(ticketId);
+    const answered = new Set(events.map((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId).filter(Boolean));
+    if (events.some((e) => e.kind === 'question' && !answered.has(JSON.parse(e.data).id))) {
+      this.emit(ticketId, 'note', { text: 'The deploy is live, but a question card is still open, so this minion stays open.' });
+      return false;
+    }
+    this.store.updateTicket(ticketId, { state: null });
+    this.close(ticketId, 'The deploy is live, so it dismissed this minion.');
+    return true;
   }
 
   /**
@@ -640,8 +669,9 @@ export class Runner {
     if (filesDir) env.COORDINATOR_FILES_DIR = filesDir;
     // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
     if (rules.length) env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
-    // A state describes where the last turn left things; a new turn makes it stale.
-    if (ticket.state) this.store.updateTicket(ticket.id, { state: null });
+    // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
+    // outlasts a stray turn, so the deploy still dismisses the minion unless the turn sets another state.
+    if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, { state: null });
 
     // The session's transcript, task list and memory live in the database too; put back anything this
     // config dir lacks (another account, a fresh machine) before resuming.
@@ -714,6 +744,8 @@ export class Runner {
         }
         this.setStatus(ticket.id, status);
       }
+      // A failed or stopped turn leaves it open; a queued message makes deployLive wait for that turn too.
+      if (this.deployedMidTurn.delete(ticket.id) && status === 'idle' && !stopped && !signal && !closing) this.deployLive(ticket.id);
       this.onFilesMayChange(ticket.id);
       this.onTurnEnd(ticket.id);
       // Re-read the ticket: the turn may have given it its first (or a new) session id.

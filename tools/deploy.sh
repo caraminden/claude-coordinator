@@ -48,16 +48,29 @@ init_state() {
   mkdir -p -m 700 "$STATE"
 }
 
+# Post a deploy report in one minion's chat. An ok report dismisses a minion in pending-deploy.
+post_report() {
+  local api=$1 token=$2 ticket=$3 ok=$4 text=$5
+  curl -fsS --max-time 10 -X POST "$api/api/tickets/$ticket/deploy" \
+    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    -d "$(node -e 'console.log(JSON.stringify({ok:process.argv[1]==="ok",text:process.argv[2]}))' "$ok" "$text")" >/dev/null ||
+    say "could not post the report to minion $ticket's chat"
+}
+
+# Live already, so the minion running this deploy hears now (and is dismissed when its turn ends).
+report_me() {
+  if [ -n "${COORDINATOR_TICKET:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ]; then
+    post_report "${COORDINATOR_API:-$URL}" "$COORDINATOR_TOKEN" "$COORDINATOR_TICKET" ok "$1"
+  fi
+}
+
 # Tell the minions that asked for this deploy, and the journal. $1 is ok or fail.
 report() {
   local ok=$1 text=$2 api token ticket
   if [ "$ok" = ok ]; then say "$text"; else say "FAILED: $text"; fi
   [ -f "$STATE/reporters" ] || return 0
   while read -r api token ticket; do
-    curl -fsS --max-time 10 -X POST "$api/api/tickets/$ticket/deploy" \
-      -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-      -d "$(node -e 'console.log(JSON.stringify({ok:process.argv[1]==="ok",text:process.argv[2]}))' "$ok" "$text")" >/dev/null ||
-      say "could not post the report to minion $ticket's chat"
+    post_report "$api" "$token" "$ticket" "$ok" "$text"
   done < <(sort -u "$STATE/reporters") # one note per minion, however many deploys it queued
   rm -f "$STATE/reporters"
 }
@@ -143,6 +156,7 @@ deploy() {
   kind=$(change_kind "$LIVE" "$running" "$new")
   if [ "$kind" = none ]; then
     say "nothing to deploy: the server already runs $(short "$new")"
+    report_me "Nothing to deploy: the server already runs $(short "$new")."
     return 0
   fi
   say "deploying $(short "$new") ($kind change)"
@@ -169,6 +183,7 @@ deploy() {
       if [ "$(health version)" = "$version" ]; then
         git_live tag -f last-good "$new" >/dev/null
         say "live now: the server reloaded the front end ($version); open tabs reload when idle. No restart."
+        report_me "Deployed $(short "$new"): the server reloaded the front end, no restart."
         return 0
       fi
     done

@@ -122,6 +122,17 @@ test('a minion reports its deploy: failures show as errors, only for its own cha
   ]);
 });
 
+test('an ok report dismisses a minion in pending-deploy; a failed one leaves it be', async () => {
+  const post = (ok: boolean) => fetch(`${base}/api/tickets/${ticket.id}/deploy`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ok, text: 'x' }),
+  }).then((r) => r.json());
+  store.updateTicket(ticket.id, { status: 'idle', state: 'pending-deploy' });
+  assert.deepEqual(await post(false), { dismissed: false });
+  assert.equal(store.getTicket(ticket.id)!.state, 'pending-deploy');
+  assert.deepEqual(await post(true), { dismissed: true });
+  assert.equal(store.getTicket(ticket.id)!.status, 'closed');
+});
+
 test('deploy.sh tells front-end-only changes from the rest', () => {
   const git = (...args: string[]) => execFileSync('git', ['-C', join(root, 'g'), ...args], { encoding: 'utf8' }).trim();
   mkdirSync(join(root, 'g', 'public'), { recursive: true });

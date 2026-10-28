@@ -436,6 +436,10 @@ export function appendEvent(event, scroll = true) {
     nodes.push(questionCard(event.ticket_id, data));
   } else if (event.kind === 'approval') {
     nodes.push(approvalCard(event.ticket_id, data));
+  } else if (event.kind === 'plan') {
+    nodes.push(planCard(event.ticket_id, data));
+  } else if (event.kind === 'plan_result') {
+    view.cards.get(data.id)?.settle(data);
   } else if (event.kind === 'loop_paused') {
     nodes.push(loopCard(data));
   } else if (event.kind === 'loop_continued') {
@@ -466,7 +470,7 @@ export function appendEvent(event, scroll = true) {
           (view.turnTexts ??= []).push({ el: msg, text: block.text });
         } else if (block.type === 'tool_use') {
           // Words followed by more work were narration; words that lead into a question card stay.
-          if (block.name === 'mcp__thread__ask_question') view.turnTexts = [];
+          if (block.name === 'mcp__thread__ask_question' || block.name === 'mcp__thread__propose_plan') view.turnTexts = [];
           else fold = true;
         }
       }
@@ -616,6 +620,85 @@ function approvalCard(ticketId, card) {
       status.textContent = approvalOutcome(r);
     },
   });
+  return el;
+}
+
+// A plan only moves forward: pending, then sent back, then superseded; approved is final.
+const PLAN_RANK = { pending: 0, revising: 1, approved: 2, superseded: 2 };
+
+/** "✓ Approved by Cara · Tue 14:05", "✎ Cara asked for changes", "Superseded by a newer plan". */
+function planOutcome(r) {
+  const when = r.at ? ` · ${new Date(r.at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : '';
+  if (r.status === 'approved') return `✓ Approved by ${r.by}${when}`;
+  if (r.status === 'revising') return `✎ ${r.by} asked for changes${when}`;
+  return 'Superseded by a newer plan';
+}
+
+/**
+ * A plan from Claude waiting for a go: Approve sends it, Revise opens a box for notes that go back
+ * to Claude, which answers with a new card. Only people can decide; the card keeps its outcome.
+ */
+function planCard(ticketId, card) {
+  const status = h('span', { class: 'muted', role: 'status' });
+  const approve = h('button', { type: 'button', class: 'small' }, 'Approve');
+  const revise = h('button', { type: 'button', class: 'small secondary' }, 'Revise');
+  const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: 'What should change?', hidden: true });
+  const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
+  const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: true }, 'Send notes');
+  const el = h('div', { class: 'qcard pcard' },
+    h('div', { class: 'who' }, 'Claude proposes a plan'),
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Plan'), card.summary),
+    h('div', { class: 'pbody' }, markdown(card.plan, ticketId)),
+    notes,
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), revise, approve, cancel, sendNotes));
+  let rank = 0;
+  const editing = (on) => {
+    notes.hidden = cancel.hidden = sendNotes.hidden = !on;
+    approve.hidden = revise.hidden = on;
+    if (!on) return;
+    notes.focus({ preventScroll: true });
+    // Centre the box so its buttons clear the sticky message box at the bottom.
+    notes.scrollIntoView({ block: 'center' });
+  };
+  const decide = async (verdict) => {
+    if (rank) return;
+    approve.disabled = revise.disabled = sendNotes.disabled = cancel.disabled = true;
+    status.textContent = verdict === 'approve' ? 'Approving…' : 'Sending…';
+    try {
+      const ticket = await api(`/api/tickets/${ticketId}/verdict`, { method: 'POST', body: { planId: card.id, verdict, notes: notes.value.trim() } });
+      if (view?.id === ticketId) {
+        view.ticket = ticket;
+        renderTicketHead();
+        scrollToBottom();
+        catchUpEvents().catch(() => {});
+      }
+    } catch (ex) {
+      status.textContent = ex.message;
+      approve.disabled = revise.disabled = cancel.disabled = false;
+      sendNotes.disabled = !notes.value.trim();
+    }
+  };
+  approve.addEventListener('click', () => decide('approve'));
+  revise.addEventListener('click', () => editing(true));
+  cancel.addEventListener('click', () => editing(false));
+  sendNotes.addEventListener('click', () => decide('revise'));
+  notes.addEventListener('input', () => { sendNotes.disabled = !notes.value.trim(); });
+  notes.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && notes.value.trim()) { e.preventDefault(); decide('revise'); }
+  });
+  const handle = {
+    settle(r) {
+      // The stored card already has its latest outcome, so replayed older results are ignored.
+      if ((PLAN_RANK[r.status] ?? 0) <= rank) return;
+      rank = PLAN_RANK[r.status];
+      editing(false);
+      el.classList.add('answered', `p-${r.status}`);
+      approve.hidden = revise.hidden = true;
+      status.textContent = planOutcome(r);
+    },
+  };
+  view.cards.set(card.id, handle);
+  if (card.status !== 'pending') handle.settle(card);
   return el;
 }
 

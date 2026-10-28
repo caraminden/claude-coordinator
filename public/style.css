@@ -937,7 +937,7 @@ dialog.viewer .composer .picker { display: none; }
 .inbox-row .asks { display: flex; gap: 0.3rem; flex: none; }
 .inbox-row .when { flex: none; font-size: 0.9em; }
 /* The scheme recap at the bottom of the Taskmaster chat (public/recap.js). */
-.recap { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 10px; background: var(--panel); padding: 0.6rem 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; scroll-margin-top: calc(var(--topbar-h, 3rem) + 5rem); }
+.recap { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 10px; background: var(--panel); padding: 0.6rem 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; }
 .recap-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.6rem; row-gap: 0.1rem; }
 .recap-head .muted { font-size: 0.85em; }
 .recap-group { display: flex; flex-direction: column; gap: 0.1rem; }

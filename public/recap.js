@@ -27,6 +27,8 @@ export async function showRecap() {
       h('span', { class: 'muted' }, [`since your last action ${ago(recap.since)}`, turns ? `${plural(turns, 'turn')} across ${plural(minions.length, 'minion')}` : plural(minions.length, 'minion'), fresh ? `${fresh} new` : ''].filter(Boolean).join(' · '))),
     sections.map((s) => h('section', { class: `recap-group g-${s.key}` }, h('h4', {}, s.label), s.rows.map((t) => threadRow(t)))));
   log.append(card);
+  // Its top just under the pinned thread bar, which is stuck there since the chat opened at its end.
+  card.style.scrollMarginTop = `${(document.getElementById('ticket-head')?.getBoundingClientRect().bottom ?? 0) + 8}px`;
   card.scrollIntoView({ block: 'start' });
 }
 

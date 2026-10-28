@@ -158,3 +158,38 @@ test('deploy.sh tells front-end-only changes from the rest', () => {
   assert.equal(kind(c, c), 'none');
   assert.equal(kind('', c), 'server', 'an unknown running commit restarts');
 });
+
+test('deploy.sh pushes the live commit to main, never forced, and a failed push only reports', () => {
+  const live = join(root, 'live');
+  const remote = join(root, 'remote.git');
+  const git = (dir: string, ...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['init', '-q', '--bare', remote]);
+  execFileSync('git', ['init', '-q', '-b', 'main', live]);
+  git(live, 'config', 'user.email', 't@t');
+  git(live, 'config', 'user.name', 't');
+  const commit = () => {
+    git(live, 'commit', '-q', '--allow-empty', '-m', String(Math.random()));
+    return git(live, 'rev-parse', 'HEAD');
+  };
+  // Failed pushes go to the journal; a test tag keeps them out of the real deploy unit's log.
+  const env = { ...process.env, DEPLOY_LIVE: live, DEPLOY_UNIT: 'deploy-test-push' };
+  const push = (sha: string, to = remote) => execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'push-github', sha], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...env, DEPLOY_REMOTE: to },
+  }).trimEnd();
+  const a = commit();
+  assert.equal(push(a), ' Pushed to GitHub.');
+  assert.equal(git(remote, 'rev-parse', 'main'), a);
+  const b = commit();
+  assert.equal(push(b), ' Pushed to GitHub.', 'a fast-forward');
+  assert.equal(git(remote, 'rev-parse', 'main'), b);
+
+  git(live, 'reset', '-q', '--hard', a);
+  const c = commit();
+  assert.match(push(c), /^ Not pushed to GitHub: .*diverged/);
+  assert.equal(git(remote, 'rev-parse', 'main'), b, 'a diverged main is left alone');
+
+  assert.match(push(c, join(root, 'nowhere.git')), /^ Could not push to GitHub: \S/, 'exits 0 with the reason');
+  assert.equal(execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'push-github', c], {
+    encoding: 'utf8', env: { ...env, DEPLOY_REMOTE: '' },
+  }), '', 'an empty DEPLOY_REMOTE skips the push');
+});

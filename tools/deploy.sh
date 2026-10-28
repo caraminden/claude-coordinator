@@ -9,6 +9,8 @@
 #    restarts, waits up to 30 s for a healthy server and tags it last-good. If the new code doesn't
 #    come up, it rolls the checkout back to last-good and restarts again. It reports how it went in
 #    the deploying minion's chat (failures as errors, which push) and in the journal.
+# 4. Once the new code is live (either way), pushes that commit to GitHub's main, never forced. A failed
+#    push is logged and shows in the report, but the deploy stands.
 # Every path and name can be overridden with DEPLOY_* variables, which is how it is tested on a dev copy.
 set -euo pipefail
 
@@ -20,6 +22,7 @@ DB=${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}
 UNIT=${DEPLOY_UNIT:-cc-restart-when-idle}
 IDLE_TRIES=${DEPLOY_IDLE_TRIES:-720} # 10 s apart: 2 h
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-30}
+REMOTE=${DEPLOY_REMOTE-origin} # set it empty to skip the push (dev copies)
 
 say() { echo "deploy: $*" >&2; }
 git_live() { git -C "$LIVE" "$@"; }
@@ -75,6 +78,28 @@ report() {
   rm -f "$STATE/reporters"
 }
 
+# Push live commit $1 to $REMOTE's main, so GitHub matches what runs and keeps a copy off the box.
+# Never forced: if GitHub's main has commits that aren't live, git rejects it and we only report that.
+# A failure never fails the deploy; prints a sentence to add to the deploy's report.
+push_github() {
+  [ -n "$REMOTE" ] || return 0
+  local out msg
+  if out=$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$LIVE" push -q "$REMOTE" "$1:refs/heads/main" 2>&1); then
+    say "pushed $(git_live rev-parse --short "$1") to $REMOTE main"
+    echo " Pushed to GitHub."
+    return 0
+  fi
+  if grep -qE '\[rejected\]|non-fast-forward|fetch first' <<<"$out"; then
+    msg="Not pushed to GitHub: its main has commits that aren't live (it has diverged), so nothing was forced. Someone needs to reconcile the two."
+  else
+    # git's first fatal/error line names the cause; the last line is often just advice.
+    msg="Could not push to GitHub: $(awk '/^(fatal|error):/ && !e {e=$0} NF {l=$0} END {print e != "" ? e : l != "" ? l : "no answer within 60 s"}' <<<"$out")"
+  fi
+  say "$msg"
+  logger -t "$UNIT" -- "$msg" 2>/dev/null || true
+  echo " $msg"
+}
+
 running_minions() {
   (cd /tmp && node -e "const {DatabaseSync}=require('node:sqlite');console.log(new DatabaseSync(process.argv[1],{readOnly:true}).prepare(\"select count(*) c from tickets where status='running'\").get().c)" "$DB") 2>/dev/null || echo '?'
 }
@@ -114,7 +139,7 @@ restart_when_idle() {
   say "everyone is idle; restarting $SERVICE on $(short "$target")"
   if restart_healthy "$target"; then
     git_live tag -f last-good "$target" >/dev/null
-    report ok "Deployed $(short "$target"): the server restarted and is healthy."
+    report ok "Deployed $(short "$target"): the server restarted and is healthy.$(push_github "$target")"
     return 0
   fi
   local why="the server did not answer healthy on it within ${HEALTHY_WAIT} s"
@@ -183,7 +208,7 @@ deploy() {
       if [ "$(health version)" = "$version" ]; then
         git_live tag -f last-good "$new" >/dev/null
         say "live now: the server reloaded the front end ($version); open tabs reload when idle. No restart."
-        report_me "Deployed $(short "$new"): the server reloaded the front end, no restart."
+        report_me "Deployed $(short "$new"): the server reloaded the front end, no restart.$(push_github "$new")"
         return 0
       fi
     done
@@ -201,7 +226,7 @@ deploy() {
   local out
   if out=$(systemd-run --user --collect --unit="$UNIT" --description="Restart $SERVICE when idle (tools/deploy.sh)" \
     --setenv=DEPLOY_LIVE="$LIVE" --setenv=DEPLOY_SERVICE="$SERVICE" --setenv=DEPLOY_URL="$URL" --setenv=DEPLOY_DB="$DB" \
-    --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=PATH="$PATH" \
+    --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" --setenv=PATH="$PATH" \
     bash "$copy" restart-when-idle 2>&1); then
     say "restart queued as $UNIT: it restarts once no minion is running (this one counts until its turn ends) and reports here"
   elif grep -qi 'already' <<<"$out"; then
@@ -218,5 +243,6 @@ case "${1:-}" in
   '') deploy ;;
   restart-when-idle) restart_when_idle ;;
   change-kind) change_kind "$2" "$3" "$4" ;;
-  *) echo "usage: $0 [restart-when-idle | change-kind <dir> <from> <to>]" >&2; exit 2 ;;
+  push-github) push_github "$2" ;;
+  *) echo "usage: $0 [restart-when-idle | change-kind <dir> <from> <to> | push-github <commit>]" >&2; exit 2 ;;
 esac

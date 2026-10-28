@@ -3478,6 +3478,16 @@ new ResizeObserver(() => {
 }).observe(topbar);
 // Phones: edge swipes pull out the overview (left) and threads (right) panels as drawers.
 initDrawers();
+// Phones: a refresh button at the top of the screen, since an installed app has no browser reload.
+// It lives in the top bar and, on pages that hide the top bar, at the right end of the first thread
+// bar's title line. Thread bars are rebuilt often, so it is put back after each change.
+document.querySelector('.topbar .refresh-btn').addEventListener('click', reloadNow);
+new MutationObserver(() => {
+  const row = app.querySelector('.ticket-head > .row');
+  if (!row || row.querySelector(':scope > .refresh-btn')) return;
+  const btn = h('button', { type: 'button', class: 'refresh-btn', title: 'Refresh', 'aria-label': 'Refresh', onclick: reloadNow }, '↻');
+  row.insertBefore(btn, row.querySelector(':scope > h2')?.nextSibling ?? row.firstChild);
+}).observe(app, { childList: true, subtree: true });
 // Keep relative times in the usage readout honest.
 setInterval(() => {
   if (usage) renderUsage();

@@ -604,6 +604,18 @@ mark.find.current { background: var(--waiting); color: #fff; }
 }
 /* Words that only fit on wider screens ("BUG:", "Close ticket", "Add image"); phones get the short form. */
 @media (max-width: 800px) { .wide-only { display: none; } }
+/* Refresh button at the top of the screen, phones only (desktop browsers have their own). */
+.refresh-btn { display: none; }
+@media (max-width: 800px) {
+  .topbar .refresh-btn, .ticket-head > .row > .refresh-btn {
+    display: inline-flex; flex: none; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; padding: 0;
+    border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 1.2rem; line-height: 1; cursor: pointer;
+  }
+  .refresh-btn:hover, .refresh-btn:focus-visible { background: var(--line); color: var(--ink); }
+  /* The title leaves room for it (and the status dot, when there is one) on its line. */
+  .ticket-head > .row > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 2.35rem); }
+  .ticket-head > .row:has(> .dot) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 3.45rem); }
+}
 .composer .add-image { line-height: 1.4; }
 
 /* Question cards: Claude's multiple-choice questions, answered with a click */

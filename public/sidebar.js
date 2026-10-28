@@ -248,7 +248,7 @@ function threadRow(t, href = threadHref(t)) {
     [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, `updated ${ago(t.updated_at)}`].filter(Boolean).join(' · '),
     note,
   ].filter(Boolean).join('\n');
-  const active = (view.id ?? view.fileTicket?.id) === t.id;
+  const active = view.id === t.id;
   // Rows waiting on you get a tinted background (red when the thread is stuck), so they stand out.
   // Faint once you've opened the thread since it last changed; vibrant again when it changes.
   const yours = !coord && st.rank === 0 ? ` yours${st.cls === 'st' ? ' stuck' : ''}${isSeen(t) ? ' seen' : ''}` : '';

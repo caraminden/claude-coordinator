@@ -1,10 +1,11 @@
 // Artifacts and files: the shelf, the browser, and viewers for artifacts and linked or shared files.
-import { ago, api, baseName, fileExt, fileKind, fileUrl, h, isCoordinator, isLocalPath, joinPath, markdownDoc, reloadWhenIdle, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
+import { ago, api, baseName, fileExt, fileKind, fileUrl, followChat, h, isCoordinator, isLocalPath, joinPath, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { showProject } from './project.js';
 
-/** A file a thread linked in its reply, shown in place of the chat. */
+/** A file a thread linked in its reply, shown full screen over its chat, which stays beside it. */
 export async function showFile(ticketId, path) {
+  const seq = routeSeq;
   const [{ ticket }, file] = await Promise.all([
     api(`/api/tickets/${ticketId}`),
     // A file that has gone (or never could be shown) still opens the view, saying so.
@@ -12,7 +13,15 @@ export async function showFile(ticketId, path) {
       missing: err.message, name: baseName(path), kind: fileKind(path) ?? 'text', display_path: shortPath(path),
     })),
   ]);
-  await showProject(ticket.project_id, { kind: 'file', ticket, file: { ...file, path } });
+  if (seq !== routeSeq) return;
+  // Opened from its own chat, the chat stays as it is and closing comes straight back to it.
+  const inPlace = view?.kind === 'project' && view.main === 'chat' && view.id === ticketId && !!document.getElementById('log');
+  if (!inPlace) {
+    closeViewer();
+    await showProject(ticket.project_id, { kind: 'chat', id: ticketId });
+    if (seq !== routeSeq) return;
+  }
+  openViewer(ticket, { ...file, path }, inPlace);
 }
 
 /** A file in the project's shared folder, opened from the Shared group of the artifacts panel. */
@@ -77,7 +86,7 @@ export function setArtifacts(artifacts, shared = view.shared) {
   renderShelf();
   if (view.main === 'artifacts') renderArtifactResults();
   if (view.main === 'artifact') renderArtifactHead();
-  if (view.main === 'file') renderFileHead();
+  renderViewerBar();
   if (view.main === 'sharedList') renderSharedList();
 }
 
@@ -219,16 +228,87 @@ export function artifactViewer(a) {
   return section;
 }
 
-/** Main panel: a file a thread linked, with a way back to its chat. */
-export function fileViewer(ticket, file) {
-  const body = h('div', { class: 'artifact-body' });
-  const section = h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'file-head' }), body);
-  if (file.missing) body.append(h('p', { class: 'muted' }, `${file.missing}.`));
-  else {
-    renderFileBody(body, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id });
-    section.append(commentBox(ticket, file.path, file.name, body));
+// The open full-screen viewer: the chat section lives inside it until it closes.
+let viewer = null; // { dialog, stage, bar, chat, placeholder, ticket, file, inPlace, scrollY }
+
+/**
+ * Show a file a chat linked full screen: the file as big as it fits, and the chat itself (moved,
+ * so it stays live and keeps its draft) in a compact column beside it, with nothing else.
+ */
+function openViewer(ticket, file, inPlace) {
+  if (!viewer) {
+    const chat = document.querySelector('#app .chat');
+    if (!chat) return;
+    const placeholder = document.createComment('chat');
+    const scrollY = window.scrollY;
+    const stage = h('div', { class: 'viewer-stage' });
+    const bar = h('div', { class: 'viewer-bar' });
+    chat.replaceWith(placeholder);
+    const dialog = h('dialog', { class: 'viewer', 'aria-label': file.name }, h('div', { class: 'viewer-file' }, bar, stage), chat);
+    dialog.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      leaveViewer();
+    });
+    // Browsers may close a dialog past a refused cancel (Esc pressed twice); still go back properly.
+    dialog.addEventListener('close', () => { if (viewer?.dialog === dialog) leaveViewer(); });
+    // Another file from the chat swaps in place, so closing still goes straight back to the chat.
+    dialog.addEventListener('click', (e) => {
+      const a = e.target.closest?.('a[href^="#/f/"]');
+      if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      location.replace(a.getAttribute('href'));
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+    viewer = { dialog, stage, bar, chat, placeholder, inPlace, scrollY };
+    // Keep the clicked embed in sight in the narrower chat, unless you were following the end.
+    const link = [...chat.querySelectorAll('#log a[href]')].reverse().find((a) => a.getAttribute('href') === location.hash);
+    if (followChat || !link) scrollToBottom();
+    else link.scrollIntoView({ block: 'center' });
   }
-  return section;
+  Object.assign(viewer, { ticket, file });
+  viewer.dialog.setAttribute('aria-label', file.name);
+  viewer.stage.className = `viewer-stage k-${file.kind}`;
+  viewer.stage.replaceChildren();
+  if (file.missing) viewer.stage.append(h('p', { class: 'muted' }, `${file.missing}.`));
+  else renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id });
+  renderViewerBar();
+}
+
+/** Put the chat back where it was and drop the viewer. The chat's address it was over, or null. */
+export function closeViewer() {
+  if (!viewer) return null;
+  const { dialog, chat, placeholder, ticket, scrollY } = viewer;
+  const follow = followChat;
+  viewer = null;
+  placeholder.replaceWith(chat);
+  dialog.close();
+  dialog.remove();
+  if (follow) scrollToBottom();
+  else window.scrollTo(0, scrollY);
+  return threadHref(ticket);
+}
+
+/** × or Esc: back to the chat, as the browser's back button would when it was opened from there. */
+function leaveViewer() {
+  if (viewer.inPlace) history.back();
+  else location.replace(threadHref(viewer.ticket));
+}
+
+function renderViewerBar() {
+  if (!viewer) return;
+  const { file, ticket: t } = viewer;
+  // A file that is also an artifact can be pinned; keep its pin state live.
+  const a = file.artifact && (view.artifacts.find((x) => x.id === file.artifact.id) ?? file.artifact);
+  const src = `${fileUrl(t.id, file.path)}&v=${file.mtime}`;
+  viewer.bar.replaceChildren(
+    h('span', { class: `badge k-${file.kind}` }, fileExt(file.name)),
+    h('div', { class: 'name' }, h('h2', { title: file.display_path }, file.name),
+      h('span', { class: 'meta' }, file.missing ? 'not found' : `${formatSize(file.size)} · updated ${ago(file.mtime)}`)),
+    a ? pinButton(a) : '',
+    file.missing ? '' : h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open'),
+    file.missing ? '' : h('a', { class: 'button secondary wide-only', href: `${src}&download` }, 'Download'),
+    h('button', { type: 'button', class: 'close-view', title: 'Back to the chat', 'aria-label': 'Back to the chat', onclick: leaveViewer }, '×'));
 }
 
 /**
@@ -333,28 +413,6 @@ export function renderSharedHead() {
       file.missing ? '' : h('a', { class: 'button secondary', href: `${src}&download` }, 'Download')),
     h('div', { class: 'meta' },
       file.display_path, ' · in the folder every minion and the Taskmaster share',
-      file.missing ? ' · not found' : ` · ${formatSize(file.size)} · updated ${ago(file.mtime)}`));
-}
-
-export function renderFileHead() {
-  const el = document.getElementById('file-head');
-  if (!el) return;
-  const { file, fileTicket: t } = view;
-  // A file that is also an artifact can be pinned; keep its pin state live.
-  const a = file.artifact && (view.artifacts.find((x) => x.id === file.artifact.id) ?? file.artifact);
-  const src = `${fileUrl(t.id, file.path)}&v=${file.mtime}`;
-  el.replaceChildren(
-    h('div', { class: 'row' },
-      h('a', { class: 'button secondary', href: threadHref(t) }, '← Back to chat'),
-      h('span', { class: `badge k-${file.kind}` }, fileExt(file.name)),
-      h('h2', {}, file.name),
-      h('span', { class: 'spacer' }),
-      a ? pinButton(a) : '',
-      file.missing ? '' : h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open'),
-      file.missing ? '' : h('a', { class: 'button secondary', href: `${src}&download` }, 'Download')),
-    h('div', { class: 'meta' },
-      file.display_path, ' · from ',
-      h('a', { href: threadHref(t) }, threadLabel(t)),
       file.missing ? ' · not found' : ` · ${formatSize(file.size)} · updated ${ago(file.mtime)}`));
 }
 

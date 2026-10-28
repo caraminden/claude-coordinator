@@ -857,3 +857,47 @@ a.thread-ref:hover { text-decoration: underline; }
 .pv-add input[type=checkbox] { width: auto; margin: 0; }
 /* On a phone the chip sits mid-bar, so the popover spans the screen instead of hanging off its left edge. */
 @media (max-width: 800px) { .prop-pop { position: fixed; top: 6.5rem; left: 1rem; right: 1rem; width: auto; } }
+
+/* Full-screen file viewer (#79): a file a chat linked, as big as it fits, with that chat in a
+   compact column beside it (below it on phones) and nothing else on screen. */
+dialog.viewer {
+  position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0;
+  background: var(--bg); color: var(--ink); display: grid; grid-template-columns: minmax(0, 1fr) clamp(20rem, 30vw, 28rem);
+  padding-top: env(safe-area-inset-top, 0px); box-sizing: border-box; overflow: hidden;
+}
+dialog.viewer:not([open]) { display: none; }
+body:has(dialog.viewer[open]) { overflow: hidden; }
+.viewer-file { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.viewer-bar { flex: none; display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--line); }
+.viewer-bar .name { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 0.6rem; }
+.viewer-bar h2 { margin: 0; font-size: 1rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.viewer-bar .meta { flex: none; color: var(--muted); font-size: 0.8em; white-space: nowrap; }
+.viewer-bar .close-view { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; padding: 0; border: 0; border-radius: 6px; background: none; font-size: 1.4rem; line-height: 1; color: var(--muted); }
+.viewer-bar .close-view:hover, .viewer-bar .close-view:focus-visible { background: var(--line); color: var(--ink); }
+/* The stage gives the file every pixel left; images and videos scale to fit it, up or down. */
+.viewer-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0.75rem; overflow: auto; overscroll-behavior: contain; }
+.viewer-stage > a { display: contents; }
+.viewer-stage .artifact-media { width: 100%; height: 100%; max-height: none; object-fit: contain; border: 0; border-radius: 0; background: none; }
+.viewer-stage .artifact-frame { width: 100%; height: 100%; }
+.viewer-stage.k-markdown, .viewer-stage.k-text, .viewer-stage.k-canvas { display: block; }
+.viewer-stage > .msg.doc, .viewer-stage > .artifact-text { max-width: 52rem; margin: 0 auto; }
+/* The chat, compact: smaller type, and no properties, find, dismiss or × in its bar. */
+dialog.viewer > .chat { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid var(--line); padding: 0 0.75rem; font-size: 0.88rem; }
+dialog.viewer .ticket-head { top: 0; margin: 0 0 0.75rem; }
+dialog.viewer .ticket-head > .row > h2 { font-size: 0.95rem; }
+dialog.viewer .ticket-head :is(.prop-chip, .find-box, .close-view, button[title='Dismiss minion']) { display: none; }
+dialog.viewer .msg .file-preview img, dialog.viewer .msg .file-preview video { max-height: 10rem; }
+dialog.viewer .composer textarea { min-height: 2.6rem; height: 2.6rem; }
+dialog.viewer .composer .picker { display: none; }
+@media (max-width: 800px) {
+  /* Phones: the file on top with most of the height, the chat below it. */
+  dialog.viewer { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); }
+  dialog.viewer > .chat { border-left: 0; border-top: 1px solid var(--line); }
+  .viewer-bar .meta, .viewer-bar a.wide-only { display: none; }
+  .viewer-stage { padding: 0.4rem; }
+  /* The chat gets little height here: title, state and Stop share one line, and the readout waits for the full chat. */
+  dialog.viewer .ticket-head > .row > h2 { flex: 1 1 0; -webkit-line-clamp: 1; line-clamp: 1; }
+  dialog.viewer .ticket-head > .row > .muted { flex: 0 1 auto; max-width: 30%; }
+  dialog.viewer .ticket-head .progress { display: none; }
+  dialog.viewer .ticket-head { margin-bottom: 0.5rem; }
+}

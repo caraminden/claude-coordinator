@@ -2,7 +2,7 @@
 import { onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
 import { showProject, showTicket } from './project.js';
-import { onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
+import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
 import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './thread.js';
 import { onPropertiesChanged } from './properties.js';
 import { inAppHash, linkThreadRefs } from './threadrefs.js';
@@ -107,7 +107,7 @@ export function shortPath(path) {
   return path.startsWith('/') ? `…/${path.split('/').slice(-2).join('/')}` : path;
 }
 
-/** `[title](path)` in a thread's reply: a card that opens the file in place of the chat. */
+/** `[title](path)` in a thread's reply: a card that opens the file full screen beside the chat. */
 function fileCardHtml(ticketId, path, title) {
   const kind = isLocalPath(path) && fileKind(path);
   if (!kind) return null;
@@ -165,7 +165,7 @@ export function threadRefs(text) {
 /**
  * Markdown in chat messages: the document renderer below (tables, headings, lists, quotes…), with
  * single line breaks kept as typed. With `ticketId`, links to paths in that thread's folders become
- * file cards and `![…](path)` an inline preview; both open the file in place of the chat.
+ * file cards and `![…](path)` an inline preview; both open the file full screen beside the chat.
  */
 export function markdown(src, ticketId = null) {
   return markdownDoc(src, { ticketId, breaks: true });
@@ -293,11 +293,22 @@ export function markdownDoc(src, opts = {}) {
 // measured when output arrives, so a burst of events can't misjudge it, and kept tight so that
 // scrolling up even a little leaves you where you are.
 const BOTTOM_SLACK = 24;
-const atBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - BOTTOM_SLACK;
+// In the full-screen file viewer the chat scrolls in its own column instead of the page.
+const chatScroller = () => document.querySelector('dialog.viewer[open] > .chat');
+const atBottom = () => {
+  const el = chatScroller();
+  return el ? el.scrollTop + el.clientHeight >= el.scrollHeight - BOTTOM_SLACK
+    : window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - BOTTOM_SLACK;
+};
 export let followChat = true;
-window.addEventListener('scroll', () => { followChat = atBottom(); }, { passive: true });
+// Captured, so the viewer's chat column (whose scroll events don't bubble) counts too.
+document.addEventListener('scroll', (e) => {
+  if (e.target === document || e.target === chatScroller()) followChat = atBottom();
+}, { passive: true, capture: true });
 export function scrollToBottom() {
-  window.scrollTo(0, document.documentElement.scrollHeight);
+  const el = chatScroller();
+  if (el) el.scrollTop = el.scrollHeight;
+  else window.scrollTo(0, document.documentElement.scrollHeight);
   followChat = true;
 }
 // Images finish loading after they are added; stay pinned to the bottom if you were following.
@@ -588,6 +599,8 @@ async function route() {
   document.body.classList.add('navigating');
   let m;
   try {
+    // Leaving the file viewer for the chat under it just closes it; anywhere else goes on from there.
+    if (!hash.startsWith('#/f/') && closeViewer() === hash) return;
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/(?:settings|instructions)$/))) await showProject(Number(m[1]), { kind: 'instructions' });

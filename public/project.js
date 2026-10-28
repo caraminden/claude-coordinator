@@ -1,8 +1,8 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
-import { api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, setView, taskmasterLabel, threadHref, usageMeter, view } from './core.js';
+import { api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, setView, threadHref, usageMeter, view } from './core.js';
 import { approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderMachinesShelf } from './settings.js';
 import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, threadSearchBox } from './sidebar.js';
-import { artifactBrowser, artifactViewer, fileViewer, renderArtifactHead, renderArtifactResults, renderFileHead, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
+import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
 import { chatSection, chatView, mountChat } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
 
@@ -27,7 +27,6 @@ function renderCrumbs(main) {
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
       : main.kind === 'shared' ? [projectLink, ' / ', h('a', { href: `#/p/${project.id}/shared` }, 'Shared files'), ' / ', main.file.name]
-      : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? taskmasterLabel(main.ticket.project_id) : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
           : [h('span', { 'data-project-name': project.id }, project.name)]));
 }
@@ -63,7 +62,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
     artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects,
-    file: main.file ?? null, fileTicket: main.ticket ?? null,
+    file: main.file ?? null,
     ...chatView(chatId, ticket),
   });
   renderCrumbs(main);
@@ -118,8 +117,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'sharedList' ? sharedList()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
-      : main.kind === 'file' ? fileViewer(main.ticket, main.file)
-        : main.kind === 'shared' ? sharedViewer(main.file)
+      : main.kind === 'shared' ? sharedViewer(main.file)
         : chatSection(chatId, ticket, events);
 
   // .panels only becomes a box of its own when both panels are collapsed, so their tabs can share
@@ -133,7 +131,6 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   prefetchTopRows();
   if (main.kind === 'artifacts') renderArtifactResults();
   if (main.kind === 'artifact') renderArtifactHead();
-  if (main.kind === 'file') renderFileHead();
   if (main.kind === 'shared') renderSharedHead();
   if (main.kind === 'sharedList') renderSharedList();
   if (!chatId) return window.scrollTo(0, 0);
@@ -152,7 +149,7 @@ async function switchChat(main, seq) {
   const { kind, projectId, project, coordinator, tickets, seen, artifacts, shared, showClosed } = view;
   setView({
     kind, main: 'chat', projectId, project, coordinator, tickets, seen, artifacts, shared, showClosed,
-    artifactId: null, file: null, fileTicket: null,
+    artifactId: null, file: null,
     ...chatView(chatId, ticket),
   });
   if (isCoordinator(ticket)) view.coordinator = ticket;

@@ -22,6 +22,10 @@ import { cloneProject, createTicketDir, projectDir, projectSharedDir, removeProj
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
+// Where machines' agents connect, if not the app's own address: a URL on a private network (the
+// tailnet), served by a second listener that takes nothing but agents. The main listener then
+// refuses agents, so a leaked token is no use from the public internet.
+const MACHINES_URL = process.env.MACHINES_URL ? new URL(process.env.MACHINES_URL) : null;
 const DATA_DIR = process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator');
 const PUBLIC_DIR = join(import.meta.dirname, 'public');
 // Headless turns can't ask for approval, so anything short of full access refuses most shell commands;
@@ -636,7 +640,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     return json(res, 200, {}, { 'Set-Cookie': auth.clearCookie() });
   }
   // A machine's agent signs in with its own token, which reaches nothing else.
-  if (pathname === '/api/machines/connect' || pathname === '/api/machines/send') return machineAgentApi(req, res, url);
+  if (pathname === '/api/machines/connect' || pathname === '/api/machines/send') {
+    if (MACHINES_URL) throw new HttpError(403, `Machines connect at ${MACHINES_URL.origin}, not here`);
+    return machineAgentApi(req, res, url);
+  }
   if (!session) throw new HttpError(401, 'Not logged in');
 
   // Reject cross-site writes (SameSite=Lax and the JSON content type cover most of this already).
@@ -1157,7 +1164,7 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
     store.updateMachine(machine.id, { token_hash: hashToken(token) });
     broadcast({ type: 'machines', machines: machines.list() });
     // The only time the token is shown; the app keeps just its hash.
-    return json(res, 201, { machine: machines.view(store.getMachine(machine.id)!), token });
+    return json(res, 201, { machine: machines.view(store.getMachine(machine.id)!), token, agent_url: MACHINES_URL?.origin ?? null });
   }
 
   m = pathname.match(/^\/api\/machines\/(\d+)(\/token)?$/);
@@ -1168,7 +1175,7 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
     const token = newToken(machine.id);
     store.updateMachine(machine.id, { token_hash: hashToken(token) });
     machines.disconnect(machine.id);
-    return json(res, 200, { machine: machines.view(store.getMachine(machine.id)!), token });
+    return json(res, 200, { machine: machines.view(store.getMachine(machine.id)!), token, agent_url: MACHINES_URL?.origin ?? null });
   }
   if (!m[2] && method === 'PATCH') {
     // Any of name and notes.
@@ -1215,3 +1222,29 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => console.log(`Claude Coordinator listening on http://${HOST}:${PORT}`));
+
+// The machines-only listener: the agent's two endpoints and the agent script, nothing else.
+if (MACHINES_URL) {
+  const agents = createServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    try {
+      if (url.pathname === '/api/machines/connect' || url.pathname === '/api/machines/send') await machineAgentApi(req, res, url);
+      else if (url.pathname === '/machine-agent.mjs' && req.method === 'GET') await serveStatic(req, res, url.pathname);
+      else throw new HttpError(404, 'Not found');
+    } catch (err: any) {
+      const status = err instanceof HttpError ? err.status : 500;
+      if (status === 500) console.error(err);
+      if (!res.headersSent) json(res, status, { error: status === 500 ? 'Internal error' : err.message });
+      else res.end();
+    }
+  });
+  const port = Number(MACHINES_URL.port || 80);
+  // The tailnet address may not be up yet at boot; keep trying rather than keep the app from starting.
+  const listen = () => agents.listen(port, MACHINES_URL.hostname);
+  agents.on('listening', () => console.log(`Machines connect at ${MACHINES_URL.origin}`));
+  agents.on('error', (err) => {
+    console.error(`Machines listener on ${MACHINES_URL.host}: ${err.message}; retrying in 30s`);
+    setTimeout(listen, 30_000).unref();
+  });
+  listen();
+}

@@ -150,6 +150,11 @@ async function connect() {
     console.error('The app rejected this token. Make a new one in the Machines panel.');
     process.exit(1);
   }
+  if (res.status === 403) {
+    // This address takes no machines; the app says where they connect instead.
+    console.error((await res.json().catch(() => ({}))).error ?? 'The app refused this connection.');
+    process.exit(1);
+  }
   if (!res.ok) throw new Error(`the app answered ${res.status}`);
   for await (const msg of events(res.body)) {
     if (msg.hello) {

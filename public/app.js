@@ -2135,11 +2135,11 @@ function renderMachinesShelf() {
 }
 
 /** The lines to run on a machine to connect it, for its token and what it should run. */
-function machineSetup(token, kind, what) {
+function machineSetup(url, token, kind, what) {
   const run = kind === 'command' ? `-- ${what}` : `--claude-mcp ${what || DEFAULT_CLAUDE_MCP}`;
   return [
-    `curl -fsSLO ${location.origin}/machine-agent.mjs`,
-    `node machine-agent.mjs ${location.origin} ${token} ${run}`,
+    `curl -fsSLO ${url}/machine-agent.mjs`,
+    `node machine-agent.mjs ${url} ${token} ${run}`,
   ].join('\n');
 }
 
@@ -2147,13 +2147,13 @@ function machineSetup(token, kind, what) {
  * The same for Windows PowerShell, as a task that starts now and at every logon (in that person's
  * own session, so it can reach an open Godot editor), restarting if it ever stops. No reboot needed.
  */
-function machineSetupWindows(name, token, kind, what) {
+function machineSetupWindows(url, name, token, kind, what) {
   const run = kind === 'command' ? `-- ${what}` : `--claude-mcp ${what || DEFAULT_CLAUDE_MCP}`;
   const task = `Coordinator agent (${name})`;
   return [
     '$dir = "$env:USERPROFILE\\coordinator-agent"; New-Item -ItemType Directory -Force $dir | Out-Null',
-    `curl.exe -fsSLo "$dir\\machine-agent.mjs" ${location.origin}/machine-agent.mjs`,
-    `$action = New-ScheduledTaskAction -Execute (Get-Command node).Source -WorkingDirectory $dir -Argument "\`"$dir\\machine-agent.mjs\`" ${location.origin} ${token} ${run.replace(/"/g, '`"')}"`,
+    `curl.exe -fsSLo "$dir\\machine-agent.mjs" ${url}/machine-agent.mjs`,
+    `$action = New-ScheduledTaskAction -Execute (Get-Command node).Source -WorkingDirectory $dir -Argument "\`"$dir\\machine-agent.mjs\`" ${url} ${token} ${run.replace(/"/g, '`"')}"`,
     '$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries',
     `Register-ScheduledTask -Force -TaskName "${task}" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) -Settings $settings | Out-Null`,
     `Start-ScheduledTask -TaskName "${task}"`,
@@ -2184,8 +2184,8 @@ function machinesPage() {
     e.preventDefault();
     status.textContent = 'Adding…';
     try {
-      const { machine, token } = await api('/api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase() } });
-      view.machineToken = { id: machine.id, name: machine.name, token };
+      const { machine, token, agent_url } = await api('/api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase() } });
+      view.machineToken = { id: machine.id, name: machine.name, token, url: agent_url ?? location.origin };
       name.value = '';
       status.textContent = '';
       renderMachineSetup();
@@ -2197,7 +2197,7 @@ function machinesPage() {
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Machines'), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the coordinator', 'aria-label': 'Close' }, '×')),
-      h('div', { class: 'meta' }, 'Computers that lend every thread their MCP tools while they are connected. They dial out to this app, so they can be anywhere.')),
+      h('div', { class: 'meta' }, 'Computers that lend every thread their MCP tools while they are connected. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.')),
     form,
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
@@ -2232,8 +2232,8 @@ function renderMachineSetup() {
   el.replaceChildren(h('div', { class: 'machine-setup' },
     h('strong', {}, `Connect ${t.name}`),
     h('p', { class: 'small' }, 'The token is shown only now; if you lose it, make a new one. Run one of these on that computer:'),
-    ...block('Windows PowerShell: starts now and at every logon, no reboot', machineSetupWindows(t.name, t.token, kind, command)),
-    ...block('Any computer, in a terminal you leave open', machineSetup(t.token, kind, command))));
+    ...block('Windows PowerShell: starts now and at every logon, no reboot', machineSetupWindows(t.url, t.name, t.token, kind, command)),
+    ...block('Any computer, in a terminal you leave open', machineSetup(t.url, t.token, kind, command))));
 }
 
 function renderMachineList() {
@@ -2243,9 +2243,9 @@ function renderMachineList() {
     const newToken = h('button', { type: 'button', class: 'secondary small', title: 'Make a new token; the old one stops working and the machine disconnects' }, 'New token');
     newToken.onclick = async () => {
       if (!confirm(`Make a new token for ${m.name}? Its current connection stops and it has to be set up again.`)) return;
-      const { token } = await api(`/api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
+      const { token, agent_url } = await api(`/api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
       if (!token) return;
-      view.machineToken = { id: m.id, name: m.name, token };
+      view.machineToken = { id: m.id, name: m.name, token, url: agent_url ?? location.origin };
       renderMachineSetup();
     };
     const remove = h('button', { type: 'button', class: 'secondary small' }, 'Remove');

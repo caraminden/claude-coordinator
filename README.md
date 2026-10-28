@@ -54,7 +54,9 @@ Planned next: runners on other people's own Claude logins.
   machine that is online when it starts as an MCP server named after the machine
   (`mcp__<name>__…`): a small stdio proxy (`src/machine-mcp.ts`) relays through the app
   (`src/machines.ts`), and the agent runs a separate copy of the MCP server per session.
-  Tokens are stored hashed; a new token or removing the machine disconnects it.
+  Tokens are stored hashed; a new token or removing the machine disconnects it. With
+  `MACHINES_URL` set (perigee uses its tailnet name), agents connect only there, on a second
+  listener that serves nothing else, and the public address refuses them.
   `--claude-mcp <name>` runs a server already set up for Claude Code on that computer
   (from its `~/.claude.json`, e.g. Delve's `godot-ai`), and each machine's notes ("never
   restart it", where the clone is) go into thread prompts while it is online. For Windows
@@ -114,6 +116,7 @@ Configuration comes from the environment:
 | `HOST` / `PORT` | `127.0.0.1` / `8573` | Listen address |
 | `DATA_DIR` | `~/.local/share/claude-coordinator` | Database, clones, worktrees |
 | `CLAUDE_BIN` | `claude` | Claude Code executable |
+| `MACHINES_URL` | (unset: agents use the app's address) | Private address machines' agents connect to, e.g. `http://perigee.tail59477f.ts.net:8574`; the app listens there for agents only |
 | `PUSH_SUBJECT` | the app's address, from the first subscribe | VAPID contact (`https://…` or `mailto:…`) push services see |
 
 On perigee the secrets live in `~/.config/claude-coordinator/env` (mode 600,

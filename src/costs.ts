@@ -39,3 +39,39 @@ export function costDays(store: Store, now = Date.now()): CostDay[] {
   }
   return days;
 }
+
+/** A day's use of the plan's weekly limit, followed from the weekly meter's readings (runner.updateUsage). */
+export interface UsageDay {
+  day: string;
+  /** The meter (0..1) when the day started, in the current weekly window. */
+  start: number;
+  /** What the day used in weekly windows that reset during it. */
+  carried: number;
+  /** The latest reading and its window's reset time. */
+  last: number;
+  resetsAt: number | null;
+  /** The share of a week's limit the day has used so far: carried + last - start. */
+  share: number;
+}
+
+/**
+ * Fold a new weekly reading into the day's tally. A day starts from the last reading before it;
+ * when the window resets (its reset time moves), what the day used before goes into `carried`.
+ */
+export function trackDay(prev: UsageDay | null, weekly: { utilization: number; resetsAt: number | null }, day: string): UsageDay {
+  const now = weekly.utilization;
+  // The reset time is a fixed moment per window; allow for rounding between readings.
+  const reset = !!prev && prev.resetsAt !== null && weekly.resetsAt !== null && Math.abs(weekly.resetsAt - prev.resetsAt) > 3600_000;
+  let start: number;
+  let carried = 0;
+  if (!prev) start = now;
+  else if (prev.day !== day) start = reset ? 0 : prev.last;
+  else if (reset) {
+    carried = prev.carried + Math.max(0, prev.last - prev.start);
+    start = 0;
+  } else {
+    carried = prev.carried;
+    start = prev.start;
+  }
+  return { day, start, carried, last: now, resetsAt: weekly.resetsAt, share: Math.max(0, carried + now - start) };
+}

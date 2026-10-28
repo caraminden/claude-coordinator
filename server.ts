@@ -1264,7 +1264,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (action === '' && method === 'GET') {
       return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
     }
-    if (action === '/turns' && method === 'GET') return json(res, 200, store.listTurns(id));
     if (action === '' && method === 'PATCH') {
       // Any of title, tag, state, note, build, model and effort; null (or "") clears all but the title.
       const body = await readJson(req);

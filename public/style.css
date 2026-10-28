@@ -947,3 +947,13 @@ dialog.viewer .composer .picker { display: none; }
 .recap-group { display: flex; flex-direction: column; gap: 0.1rem; }
 .recap-group h4 { margin: 0 0 0.1rem; font-size: 0.72em; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .recap-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }
+
+/* Settings, Cost: a week of daily totals at API prices. */
+.cost-table { border-collapse: collapse; margin: 1rem 0 0.5rem; font-variant-numeric: tabular-nums; }
+.cost-table th, .cost-table td { padding: 0.35rem 0.75rem; border-bottom: 1px solid var(--line); text-align: left; font-weight: normal; white-space: nowrap; }
+.cost-table thead th { color: var(--muted); font-size: 0.85em; }
+.cost-table tfoot th, .cost-table tfoot td { font-weight: 600; border-bottom: none; }
+.cost-table .num { text-align: right; }
+.cost-main .warn { color: var(--waiting); font-weight: 600; }
+.settings-link[data-cost-warn]::after { content: ''; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--waiting); margin-left: 0.35rem; display: inline-block; vertical-align: middle; }
+@media (max-width: 600px) { .settings-tabs { flex-wrap: wrap; } }

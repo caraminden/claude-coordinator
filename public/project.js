@@ -1,6 +1,6 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, setView, threadHref, usageMeter, view } from './core.js';
-import { approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderMachinesShelf } from './settings.js';
+import { approvalsEditor, costPage, instructionsEditor, machinesPage, projectTitle, pushControls, renderMachinesShelf } from './settings.js';
 import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
 import { chatSection, chatView, mountChat } from './thread.js';
@@ -24,6 +24,7 @@ function renderCrumbs(main) {
       : main.kind === 'instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Instructions']
       : main.kind === 'approvals' ? [projectLink, ' / ', settingsLink, ' / ', 'Needs approval']
       : main.kind === 'properties' ? [projectLink, ' / ', settingsLink, ' / ', 'Properties']
+      : main.kind === 'cost' ? [projectLink, ' / ', settingsLink, ' / ', 'Cost']
       : main.kind === 'machines' ? [projectLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
@@ -79,7 +80,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('summary', { title: 'Show or hide the overview' }, projectTitle(project)),
     h('section', { class: 'account' },
       h('div', { class: 'row' }, h('strong', {}, me), h('span', { class: 'spacer' }),
-        h('a', { class: 'button secondary settings-link', href: `#/p/${projectId}/settings`, title: 'Instructions, approvals and properties for this scheme' },
+        h('a', { class: 'button secondary settings-link', href: `#/p/${projectId}/settings`, title: 'Instructions, approvals, properties and cost for this scheme' },
           'Settings', h('span', { id: 'settings-count', class: 'count', hidden: true })),
         h('button', { class: 'secondary small', onclick: logout }, 'Sign out')),
       usageMeter(),
@@ -116,6 +117,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'instructions' ? instructionsEditor()
     : main.kind === 'approvals' ? approvalsEditor()
     : main.kind === 'properties' ? propertiesPage()
+    : main.kind === 'cost' ? costPage()
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'sharedList' ? sharedList()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)

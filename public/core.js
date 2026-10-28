@@ -1,5 +1,5 @@
 // Shared by every view: state, API and DOM helpers, live updates, routing and sign-in.
-import { onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
+import { onCostChanged, onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
 import { showProject, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
@@ -377,6 +377,7 @@ function connectStream(catchUp = false) {
       // Rows of minions that hit the usage limit count down to its reset.
       if (view?.kind === 'project') renderSidebar();
     }
+    if (msg.type === 'usage' || msg.type === 'turn') onCostChanged();
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'event') {
       onEvent(msg.event);
@@ -444,6 +445,17 @@ setInterval(reloadWhenIdle, 2000);
 
 export let usage = null;
 
+/** A day using more than this share of the weekly limit, a week's even pace, shows its cost in amber. */
+export const DAY_SHARE_WARN = 1 / 7;
+
+/** How much of the weekly limit today has used so far, by the server's tally (src/costs.ts trackDay). */
+export function todayShare() {
+  const t = usage?.today;
+  const d = new Date();
+  // shortcut: compares with the browser's date, so it is off around midnight if the browser and server zones differ.
+  return t?.day === `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` ? t.share : 0;
+}
+
 /** A weekly-limit bar; one lives in the top bar and one in a project's side panel. */
 export const usageMeter = () => h('div', { class: 'usage', hidden: true },
   h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })));
@@ -465,6 +477,13 @@ export function renderUsage(next = usage) {
       usage.session ? `5-hour window: ${Math.round(usage.session.utilization * 100)}%${usage.session.resetsAt ? `, resets ${when(usage.session.resetsAt)}` : ''}` : null,
       `As of the last turn, ${ago(usage.updatedAt)}`,
     ].filter(Boolean).join('\n');
+  }
+  const share = todayShare();
+  for (const el of document.querySelectorAll('.settings-link')) {
+    el.toggleAttribute('data-cost-warn', share > DAY_SHARE_WARN);
+    el.title = share > DAY_SHARE_WARN
+      ? `Today has used ${Math.round(share * 100)}% of the week's limit, more than a seventh: see Settings, Cost`
+      : 'Instructions, approvals, properties and cost for this scheme';
   }
 }
 
@@ -621,6 +640,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/(?:settings|instructions)$/))) await showProject(Number(m[1]), { kind: 'instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/cost$/))) await showProject(Number(m[1]), { kind: 'cost' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'sharedList' });
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));

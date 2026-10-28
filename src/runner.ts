@@ -12,6 +12,7 @@ import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
 import type { Ship } from './branch.ts';
+import { localDay, trackDay, type UsageDay } from './costs.ts';
 import { claudeConfigDir, lastEffort, projectSlug, restoreSession, saveSession } from './sessions.ts';
 import { restoreTicketDir } from './workspace.ts';
 import { previewKey } from './previews.ts';
@@ -114,6 +115,8 @@ export interface Usage {
   weekly: UsageWindow | null;
   session: UsageWindow | null; // the rolling five-hour window
   updatedAt: number;
+  /** How much of the weekly limit the day (usage.today.day) has used. */
+  today?: UsageDay | null;
 }
 
 function usageWindow(w: any): UsageWindow | null {
@@ -1234,6 +1237,8 @@ export class Runner {
     if (!windows) return;
     const usage: Usage = { weekly: usageWindow(windows.seven_day), session: usageWindow(windows.five_hour), updatedAt: Date.now() };
     if (!usage.weekly && !usage.session) return;
+    const prev = this.usage?.today ?? null;
+    usage.today = usage.weekly ? trackDay(prev, usage.weekly, localDay(usage.updatedAt)) : prev;
     this.store.setSetting('usage', usage);
     this.broadcast({ type: 'usage', usage });
   }

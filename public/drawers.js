@@ -5,9 +5,11 @@
 // browser's back and forward swipes.
 
 export const NARROW = '(max-width: 800px)'; // the mobile layout's breakpoint in style.css
-export const EDGE = 24; // px from the screen edge a swipe has to start in
+export const EDGE = 44; // px from the screen edge a swipe has to start in: a thumb's width, not a sliver
 const SLOP = 10; // px of movement before deciding whether a touch is a swipe
-const FLING = 0.35; // px/ms: a flick this fast settles the drawer whichever way it goes
+const ANGLE = 1.2; // how much more sideways than up or down a swipe has to be (about 40° off level at most)
+const FLING = 0.25; // px/ms: a flick this fast settles the drawer whichever way it goes
+const COMMIT = 1 / 3; // how far along a slow drag has to get to finish the move it started
 
 /**
  * Decide what a touch that has moved (dx, dy) is: 'wait' while it is too short to tell, 'swipe'
@@ -15,17 +17,18 @@ const FLING = 0.35; // px/ms: a flick this fast settles the drawer whichever way
  */
 export function classify(dx, dy, dir) {
   if (Math.hypot(dx, dy) < SLOP) return 'wait';
-  return Math.sign(dx) === dir && Math.abs(dx) > Math.abs(dy) * 1.5 ? 'swipe' : 'ignore';
+  return Math.sign(dx) === dir && Math.abs(dx) > Math.abs(dy) * ANGLE ? 'swipe' : 'ignore';
 }
 
 /**
- * Whether a released drawer should end open: a fast enough flick decides, otherwise whether it is
- * at least half out. `progress` is 0 (closed) to 1 (open); `velocity` is px/ms in the opening direction.
+ * Whether a released drawer should end open: a fast enough flick decides, otherwise whether the drag
+ * got a third of the way from where it started (`from`: 0 pulling it out, 1 pushing it back).
+ * `progress` is 0 (closed) to 1 (open); `velocity` is px/ms in the opening direction.
  */
-export function settleOpen(progress, velocity) {
+export function settleOpen(progress, velocity, from = 0) {
   if (velocity > FLING) return true;
   if (velocity < -FLING) return false;
-  return progress >= 0.5;
+  return from === 0 ? progress >= COMMIT : progress > 1 - COMMIT;
 }
 
 /** Which drawer a touch at `x` on a screen `width` wide would pull out, if any. */
@@ -212,7 +215,7 @@ export function initDrawers() {
     // A finger that stopped before letting go isn't flicking.
     const held = last ? e.timeStamp - last[0] > 100 : true;
     const v = dt > 0 && !held ? ((last[1] - first[1]) / dt) * (drawer.side === 'left' ? 1 : -1) : 0;
-    settle(e.type === 'touchcancel' ? tr.from === 1 : settleOpen(drawer.progress, v));
+    settle(e.type === 'touchcancel' ? tr.from === 1 : settleOpen(drawer.progress, v, tr.from));
   };
   document.addEventListener('touchend', release);
   document.addEventListener('touchcancel', release);

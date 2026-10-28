@@ -347,16 +347,16 @@ function renderProgress() {
     return;
   }
   const { total, done, current } = stepInfo(p);
-  const m = total && line.match(/^(.*?)\s(\d+\/\d+)$/);
-  const text = m ? m[1] : line;
-  const count = m ? m[2] : running && p.turnActions ? `${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
+  // The line carries its own worded step count; the turn's action count shows only when no plan is underway.
+  const planned = total && (current || done < total);
+  const count = !planned && running && p.turnActions ? `${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
 
   const bar = h('button', { class: 'progress-line', 'aria-expanded': String(view.ui.open), onclick: () => {
     view.ui.open = !view.ui.open;
     renderProgress();
   } },
     h('span', { class: `dot ${running ? 'running' : view.ticket.status}` }),
-    h('span', { class: 'text' }, text),
+    h('span', { class: 'text' }, line),
     count ? h('span', { class: 'count' }, count) : '',
     h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'));
   const meter = total ? h('progress', { class: 'meter', max: total, value: done }) : '';

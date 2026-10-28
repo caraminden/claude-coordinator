@@ -2,6 +2,7 @@
 import { ago, api, app, crumbs, h, highlight, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, threadLabel, view } from './core.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { threadSections } from './threadgroups.js';
+import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 
 // ---------- projects ----------
@@ -249,12 +250,12 @@ export function rowState(t) {
     return h('b', { class: days ? 'st' : 'm' }, shortAgo(t.updated_at));
   };
   if (t.approvals) return { rank: 0, cls: 'q', cell: ['✋ ', waited()], label: 'Waiting for your approval' };
-  if (t.status === 'running' || t.status === 'new') return { rank: 1, cls: 'w', cell: [`●${steps}`], label: 'Claude is working' };
+  if (t.status === 'running' || t.status === 'new') return { rank: 1, cls: 'w', cell: [`●${steps}`], counted: !!steps, label: 'Claude is working' };
   if (t.status === 'error') return { rank: 0, cls: 'st', cell: ['⚠️'], label: 'Stuck: the last turn failed' };
   if (t.status === 'closed') return { rank: 5, cls: 'm', cell: ['✓'], label: 'Dismissed' };
   const state = STATES[t.state];
   if (t.state === 'parked') return { rank: 4, cls: 'm', cell: [state.emoji], label: state.label };
-  if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, cls: 'w', cell: [`${state.emoji}${steps}`], label: state.label };
+  if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, cls: 'w', cell: [`${state.emoji}${steps}`], counted: !!steps, label: state.label };
   if (t.state === 'blocked') return { rank: 2, cls: 'st', cell: [state.emoji], label: state.label };
   if (state) return { rank: 0, cls: 'ok', cell: [state.emoji, ' ', waited()], label: state.label };
   return { rank: 0, cls: 'q', cell: ['❓ ', waited()], label: 'Your move' };
@@ -266,7 +267,9 @@ function threadRow(t, href = threadHref(t), hit = null) {
   // The coordinator is always there to talk to; only show when it is busy.
   const st = coord && t.status !== 'running' ? { cls: '', cell: [], label: statusLabel(t) } : rowState(t);
   const working = st.cls === 'w' || st.cls === 'm';
-  const note = (t.status === 'running' ? t.last_activity : t.note || t.last_activity) || '';
+  // The state cell already shows steps done, so the activity line drops its own count.
+  const activity = st.counted && t.last_activity ? withoutCount(t.last_activity) : t.last_activity;
+  const note = (t.status === 'running' ? activity : t.note || activity) || '';
   const details = [
     threadFullName(t),
     [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, `updated ${ago(t.updated_at)}`].filter(Boolean).join(' · '),

@@ -354,15 +354,28 @@ export function stepInfo(p) {
   return { total, done, current, step: current ? currentIdx + 1 : done };
 }
 
-/** Summary line, e.g. "Running the test suite… 3/7". */
+/**
+ * Summary line, e.g. "Step 3 of 7: Running the test suite…". Every count is worded ("step 3 of 7",
+ * "2 of 7 done"), so it can't be read as the steps-done badge some views show beside it.
+ */
 export function progressLine(p, running) {
   const { total, done, current, step } = stepInfo(p);
   // A finished plan from an earlier turn says nothing about a turn that is running now.
   if (total && !(running && !current && done === total)) {
-    if (current) return running ? `${current.activeForm || current.subject}… ${step}/${total}` : `Paused at: ${current.subject} ${step}/${total}`;
+    if (current) return running ? `Step ${step} of ${total}: ${current.activeForm || current.subject}…` : `Paused at step ${step} of ${total}: ${current.subject}`;
     if (done === total) return `Done · ${total}/${total} steps`;
-    return `${!running ? 'Paused' : done ? 'Working' : 'Planning'}… ${done}/${total}`;
+    return `${!running ? 'Paused' : done ? 'Working' : 'Planning'}… ${done} of ${total} done`;
   }
   if (!running) return p.turnActions ? `Finished · ${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
   return p.lastAction ? `Working… ${p.lastAction}` : 'Working…';
+}
+
+/**
+ * A progressLine without its count, for a row whose badge already shows steps done. Also strips the
+ * older "Running tests… 3/7" form, which stored last_activity may still hold.
+ */
+export function withoutCount(line) {
+  return line
+    .replace(/^(?:Step|(Paused at) step) \d+ of \d+: /, (_, paused) => (paused ? 'Paused at: ' : ''))
+    .replace(/(?: · | )\d+(?:\/| of )\d+(?: steps| done)?$/, '');
 }

@@ -2786,8 +2786,8 @@ function modelPicker(chatId) {
 }
 
 /**
- * Fill the pickers from the thread: its choice, or with none, the default (named as what it came out
- * as on its last turn, else just "Model" / "Effort"). The default shows grey; a choice shows in full ink.
+ * Fill the pickers from the thread: its choice, or with none, the default (the effort the scheme or the
+ * Taskmaster pin gives it, the model it came out as on its last turn, else just "Model" / "Effort"). The default shows grey; a choice shows in full ink.
  */
 function renderModelPicker() {
   const model = document.getElementById('model-picker');
@@ -2799,14 +2799,15 @@ function renderModelPicker() {
   // A model set outside this list (say, by an older version) still shows as itself.
   if (t.model && !MODELS.some(([id]) => id === t.model)) model.append(h('option', { value: t.model }, t.model));
   model.value = t.model ?? '';
-  const defEffort = !t.effort && t.last_effort ? t.last_effort : 'Effort';
+  const shownDefault = t.default_effort ?? t.last_effort;
+  const defEffort = !t.effort && shownDefault ? shownDefault : 'Effort';
   effort.replaceChildren(h('option', { value: '' }, defEffort), ...EFFORTS.map((e) => h('option', { value: e }, e)));
   effort.value = t.effort ?? '';
   model.classList.toggle('is-default', !t.model);
   effort.classList.toggle('is-default', !t.effort);
   const later = t.status === 'running' ? '; a change applies from the next turn' : '';
   model.title = t.model ? `Model for this minion: ${modelName(t.model)}${later}` : `Model for this minion: the default${t.last_model ? ` (${modelName(t.last_model)} on its last turn)` : ''}${later}`;
-  effort.title = t.effort ? `Effort for this minion: ${t.effort}${later}` : `Effort for this minion: the default${t.last_effort ? ` (${t.last_effort} on its last turn)` : ''}${later}`;
+  effort.title = t.effort ? `Effort for this minion: ${t.effort}${later}` : `Effort for this minion: the default${t.default_effort ? ` (${t.default_effort})` : t.last_effort ? ` (${t.last_effort} on its last turn)` : ''}${later}`;
   model.setAttribute('aria-label', model.title);
   effort.setAttribute('aria-label', effort.title);
 }

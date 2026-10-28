@@ -18,6 +18,8 @@ export interface Project {
   approval_rules: string;
   /** Folders in the repo, one per line, that each thread loads as Claude Code plugins; '' for none. */
   plugin_dirs: string;
+  /** Effort for turns of minions (and a Taskmaster) with none of their own; '' leaves it to Claude Code. */
+  default_effort: string;
   created_at: number;
 }
 
@@ -229,6 +231,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'instructions_updated_at', 'ALTER TABLE projects ADD COLUMN instructions_updated_at INTEGER'],
   ['projects', 'approval_rules', "ALTER TABLE projects ADD COLUMN approval_rules TEXT NOT NULL DEFAULT ''"],
   ['projects', 'plugin_dirs', "ALTER TABLE projects ADD COLUMN plugin_dirs TEXT NOT NULL DEFAULT ''"],
+  ['projects', 'default_effort', "ALTER TABLE projects ADD COLUMN default_effort TEXT NOT NULL DEFAULT 'high'"],
   ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
 ];
 
@@ -316,7 +319,7 @@ export class Store {
       .run(instructions, by, Date.now(), id);
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     this.db.prepare(`UPDATE projects SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? ''), id);

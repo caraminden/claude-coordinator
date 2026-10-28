@@ -349,6 +349,19 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
 /** Extra process setup for coordinator turns: how its MCP server reaches the API. */
 export type CoordinatorEnv = (ticket: Ticket) => Record<string, string>;
 
+/**
+ * Model and effort for a ticket's turns: its own choice (composer or update_ticket) first, then the
+ * Taskmaster pin (opus at high, so a change in Claude Code's defaults never moves it), then the
+ * scheme's default effort. Null leaves it to Claude Code.
+ */
+export function turnSettings(ticket: Pick<Ticket, 'kind' | 'model' | 'effort'>, project: Pick<Project, 'default_effort'>) {
+  const taskmaster = ticket.kind === 'coordinator';
+  return {
+    model: ticket.model ?? (taskmaster ? 'opus' : null),
+    effort: ticket.effort ?? (taskmaster ? 'high' : project.default_effort || null),
+  };
+}
+
 export class Runner {
   private procs = new Map<number, ChildProcess>();
   private queues = new Map<number, QueuedMessage[]>();
@@ -405,6 +418,8 @@ export class Runner {
     return {
       ...ticket, queued: this.queued(ticket.id), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
       approvals: this.approvals.waiting(ticket.id), properties: this.store.props.forTarget('minion', ticket.id),
+      // What "Default" means in the composer: the effort a turn gets when the ticket has none of its own.
+      default_effort: turnSettings({ ...ticket, effort: null }, this.store.getProject(ticket.project_id) ?? { default_effort: '' }).effort,
     };
   }
 
@@ -579,10 +594,7 @@ export class Runner {
     if (addDirs.length) args.push('--add-dir', ...addDirs);
     if (ticket.kind !== 'coordinator') args.push(...pluginDirArgs(lines(project.plugin_dirs), ticket.cwd));
     if (ticket.session_id) args.push('--resume', ticket.session_id);
-    // Chosen per thread in the composer; left out, Claude Code uses its defaults.
-    // Taskmasters coordinate everything else, so their default is the strongest model at high effort.
-    const model = ticket.model ?? (ticket.kind === 'coordinator' ? 'opus' : null);
-    const effort = ticket.effort ?? (ticket.kind === 'coordinator' ? 'high' : null);
+    const { model, effort } = turnSettings(ticket, project);
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.

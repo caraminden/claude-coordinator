@@ -787,13 +787,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const project = store.getProject(Number(m[1]));
     if (!project) throw new HttpError(404, 'No such scheme');
     inScope(project.id);
-    // Any of name, instructions, approval_rules and plugin_dirs; what is left out stays.
+    // Any of name, instructions, approval_rules, plugin_dirs and default_effort; what is left out stays.
     const body = await readJson(req);
-    if (body.name === undefined && body.instructions === undefined && body.approval_rules === undefined && body.plugin_dirs === undefined) {
+    if (body.name === undefined && body.instructions === undefined && body.approval_rules === undefined && body.plugin_dirs === undefined && body.default_effort === undefined) {
       throw new HttpError(400, 'Nothing to change');
     }
     const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-    const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs'>> = {};
+    const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort'>> = {};
+    // null or "" leaves effort to Claude Code's default.
+    if (body.default_effort !== undefined) settings.default_effort = oneOf(body.default_effort || null, EFFORTS, 'Default effort') ?? '';
     try {
       if (body.approval_rules !== undefined) settings.approval_rules = cleanRules(body.approval_rules);
       if (body.plugin_dirs !== undefined) settings.plugin_dirs = cleanPluginDirs(body.plugin_dirs);
@@ -826,6 +828,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       }
       if (coordinator && settings.plugin_dirs !== undefined) {
         runner.emit(coordinator.id, 'note', { text: `${session.name} set the plugin folders to: ${shown(settings.plugin_dirs)}. They apply from each minion's next turn.` });
+      }
+      if (coordinator && settings.default_effort !== undefined) {
+        runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });
       }
     }
     if (instructions !== project.instructions) {
@@ -861,6 +866,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const title = body.title === undefined ? provisionalTitle(message) : str(body.title, 'Title', 120);
     // Insert first so concurrent creates get distinct ids, then build the working dir.
     const tag = oneOf(body.tag ?? null, TICKET_TAGS, 'Tag') as TicketTag | null;
+    const model = oneOf(body.model ?? null, MODELS, 'Model');
+    const effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
     // Properties are checked before the minion exists, so a bad one doesn't leave half a minion.
     const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
     if (typeof props !== 'object' || Array.isArray(props)) throw new HttpError(400, 'properties must be an object of key: value');
@@ -874,6 +881,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const { id, number } = store.createTicket({ project_id: project.id, title, tag, permission_mode: THREAD_PERMISSION_MODE, created_by: session.name });
     const { notes } = store.props.set('minion', id, project.id, props, session.name);
     store.props.startStage(id);
+    if (model || effort) store.updateTicket(id, { model, effort });
     try {
       const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number!, title);
       store.setTicketDir(id, dir.cwd, dir.branch);

@@ -34,6 +34,18 @@ const BUILD = {
   description: 'The major build this work is assigned to, e.g. 8 for Build 8; the minions list groups the build\'s minions together. null takes it out of a build.',
 };
 
+// The same lists as MODELS and EFFORTS in db.ts; the server checks them again.
+const MODEL = {
+  type: ['string', 'null'],
+  enum: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', null],
+  description: "The model for the minion's turns, as in its composer. Leave it out (or null) for Claude Code's default, which suits most minions.",
+};
+const EFFORT = {
+  type: ['string', 'null'],
+  enum: ['low', 'medium', 'high', 'xhigh', 'max', null],
+  description: "The effort for the minion's turns, as in its composer. Leave it out (or null) for the scheme's default effort.",
+};
+
 const PROPERTIES = {
   type: 'object',
   description:
@@ -138,6 +150,8 @@ const TOOLS = [
         tag: TAG,
         properties: { ...PROPERTIES, description: `${PROPERTIES.description} Must include type; if no type fits, use "other" and ask people where it belongs.` },
         message: { type: 'string', description: 'First message to the new minion' },
+        model: MODEL,
+        effort: EFFORT,
       },
       // properties is asked for but not required, so a client holding an older schema isn't refused before the fallback below.
       required: ['title', 'message'],
@@ -154,10 +168,10 @@ const TOOLS = [
   },
   {
     name: 'update_ticket',
-    description: "Change a minion's title, tag, state, note or build group (the major build it is assigned to); leave out what should stay. (The branch keeps its original name.)",
+    description: "Change a minion's title, tag, state, note, build group (the major build it is assigned to), model or effort; leave out what should stay. A new model or effort applies from its next turn. (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD },
+      properties: { ticket_id: TICKET_ID, title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD, model: MODEL, effort: EFFORT },
       required: ['ticket_id'],
     },
   },
@@ -245,13 +259,13 @@ const TOOLS = [
   {
     name: 'get_project_settings',
     description:
-      "Read the scheme's approval rules (Claude Code permission rules a minion must get a person's OK for, via an Approve / Deny card in its chat) and plugin folders (folders in the repo every minion loads as Claude Code plugins).",
+      "Read the scheme's approval rules (Claude Code permission rules a minion must get a person's OK for, via an Approve / Deny card in its chat), plugin folders (folders in the repo every minion loads as Claude Code plugins) and default effort (what a minion without its own effort runs at).",
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'set_project_settings',
     description:
-      'Replace the approval rules and/or plugin folders; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask.',
+      'Replace the approval rules, plugin folders and/or default effort; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -265,6 +279,7 @@ const TOOLS = [
           items: { type: 'string' },
           description: 'Folder paths relative to the repo root, e.g. "tools/mods/delve". Each is loaded with --plugin-dir when it exists in a minion\'s worktree.',
         },
+        default_effort: { ...EFFORT, description: "Effort for every minion's turns that has none of its own. null leaves it to Claude Code's default." },
       },
     },
   },
@@ -315,6 +330,8 @@ function ticketLine(t: any): string {
     t.tag ? `tag: ${t.tag}` : '',
     t.properties && Object.keys(t.properties).length ? propertyText(t.properties) : '',
     t.build ? `build: ${t.build}` : '',
+    t.model ? `model: ${t.model}` : '',
+    t.effort ? `effort: ${t.effort}` : '',
     `status: ${t.status}${t.state ? `, ${t.state}` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
     t.note ? `note: ${t.note}` : '',
     t.branch ? `branch: ${t.branch}` : '',
@@ -492,6 +509,8 @@ async function runTool(name: string, args: any): Promise<string> {
         tag: args.tag ?? null,
         properties,
         message: args.message,
+        model: args.model ?? null,
+        effort: args.effort ?? null,
       });
       const fallback = untyped ? [`No type was given, so it is type: other for now. Set the right one with set_properties (ticket_id ${t.number}), and pass properties: { type: … } to create_ticket next time.`] : [];
       return [`Created ${ticketLine(t)}`, ...(t.notes ?? []), ...fallback].join('\n');
@@ -531,16 +550,17 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'get_project_settings': {
       const { project } = await call('GET', `/api/projects/${PROJECT}`);
       const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
-      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders:\n${show(project.plugin_dirs)}`;
+      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders:\n${show(project.plugin_dirs)}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}`;
     }
     case 'set_project_settings': {
       const body: Record<string, unknown> = {};
       if (args.approval_rules !== undefined) body.approval_rules = args.approval_rules;
       if (args.plugin_folders !== undefined) body.plugin_dirs = args.plugin_folders;
-      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders or both');
+      if (args.default_effort !== undefined) body.default_effort = args.default_effort;
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, default_effort or a mix');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s). They apply from each minion's next turn.`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), default effort ${project.default_effort || "Claude Code's default"}. They apply from each minion's next turn.`;
     }
     case 'approve':
       return approve(args);
@@ -551,7 +571,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'message_ticket':
       return `Sent. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/messages`, { text: args.text }))}`;
     case 'update_ticket':
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, labelFields(args)))}`;
+      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort }))}`;
     case 'ask_question':
       await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
       return 'The question card is in the chat. End your turn now with a short reply; the answers will come as the next message.';

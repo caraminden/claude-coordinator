@@ -37,11 +37,18 @@ const loadDraftImages = (ticketId) => draftStore('readonly', (s) => s.get(ticket
 const saveDraftImages = (ticketId, items) =>
   draftStore('readwrite', (s) => (items.length ? s.put(items, ticketId) : s.delete(ticketId))).catch(() => {});
 
+/** The message box's hint; a dismissed minion's says a message brings it back. */
+export function composerPlaceholder(ticket) {
+  const keys = matchMedia('(max-width: 800px)').matches ? '' : ' (Enter to send, Shift+Enter for a new line)';
+  const ask = isCoordinator(ticket) ? 'Ask the Taskmaster to start, check on, or dismiss minions…'
+    : ticket.status === 'closed' ? 'Dismissed: send a message to reopen…' : 'Message this minion…';
+  return ask + keys;
+}
+
 /** The message box under a chat: text, pasted images, model and effort, and Send. */
 export function composer(chatId, ticket) {
-  const keys = matchMedia('(max-width: 800px)').matches ? '' : ' (Enter to send, Shift+Enter for a new line)';
   const textarea = h('textarea', {
-    placeholder: (isCoordinator(ticket) ? 'Ask the Taskmaster to start, check on, or dismiss minions…' : 'Message this minion…') + keys,
+    placeholder: composerPlaceholder(ticket),
     'data-draft': true,
   });
   const draftKey = `cc-draft:${chatId}`;

@@ -1,6 +1,6 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, fileUrl, followChat, h, highlight, isCoordinator, markdown, markSeen, me, restoreScroll, scrollToBottom, statusLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, view } from './core.js';
-import { alertNote, composer, renderModelPicker } from './composer.js';
+import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { pendingFind, rowState, setPendingFind } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
@@ -162,8 +162,11 @@ export function renderTicketHead() {
   if (!el) return;
   const t = view.ticket;
   const coord = isCoordinator(t);
-  // Tints the whole chat column so a dismissed minion reads as dismissed at a glance.
-  el.closest('.chat')?.classList.toggle('dismissed', t.status === 'closed');
+  // A dismissed minion's message box is tinted and says so (style.css), following reopen and dismiss live.
+  const chat = el.closest('.chat');
+  chat?.classList.toggle('dismissed', t.status === 'closed');
+  const box = chat?.querySelector('.composer textarea');
+  if (box) box.placeholder = composerPlaceholder(t);
   const actions = [];
   if (t.status === 'running') {
     actions.push(h('button', { class: 'secondary', onclick: () => api(`/api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));

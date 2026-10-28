@@ -2497,17 +2497,25 @@ function machineSetup(url, token, kind, what) {
 /**
  * The same for Windows PowerShell, as a task that starts now and at every logon (in that person's
  * own session, so it can reach an open Godot editor), restarting if it ever stops. No reboot needed.
+ * One script block, so a missing Node or failed download stops it before a broken task is registered.
  */
 function machineSetupWindows(url, name, token, kind, what) {
   const run = kind === 'command' ? `-- ${what}` : `--claude-mcp ${what || DEFAULT_CLAUDE_MCP}`;
   const task = `Coordinator agent (${name})`;
   return [
+    '& {',
+    '$ErrorActionPreference = "Stop"',
+    '$node = (Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source',
+    'if (-not $node -or [version](& $node -v).TrimStart("v") -lt [version]"18.0") { throw "Node 18 or newer is not on this PowerShell\'s PATH. Install it (winget install OpenJS.NodeJS.LTS), open a new PowerShell window and paste this again." }',
     '$dir = "$env:USERPROFILE\\coordinator-agent"; New-Item -ItemType Directory -Force $dir | Out-Null',
     `curl.exe -fsSLo "$dir\\machine-agent.mjs" ${url}/machine-agent.mjs`,
-    `$action = New-ScheduledTaskAction -Execute (Get-Command node).Source -WorkingDirectory $dir -Argument "\`"$dir\\machine-agent.mjs\`" ${url} ${token} ${run.replace(/"/g, '`"')}"`,
+    'if ($LASTEXITCODE) { throw "Could not download machine-agent.mjs (curl exit $LASTEXITCODE)." }',
+    `$action = New-ScheduledTaskAction -Execute $node -WorkingDirectory $dir -Argument "\`"$dir\\machine-agent.mjs\`" ${url} ${token} ${run.replace(/"/g, '`"')}"`,
     '$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries',
     `Register-ScheduledTask -Force -TaskName "${task}" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) -Settings $settings | Out-Null`,
     `Start-ScheduledTask -TaskName "${task}"`,
+    `"Started ${task}; it also starts at every logon. It shows online on the Machines page once it connects."`,
+    '}',
   ].join('\n');
 }
 

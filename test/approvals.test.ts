@@ -109,7 +109,7 @@ async function mcpServer(approvals: boolean) {
       COORDINATOR_PROJECT: '1',
       COORDINATOR_ROLE: 'thread',
       COORDINATOR_TICKET: String(TICKET),
-      ...(approvals ? { COORDINATOR_APPROVALS: '1' } : {}),
+      COORDINATOR_APPROVALS: approvals ? '1' : undefined, // a minion running the tests has it set
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });

@@ -641,6 +641,7 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .acard .desc { font-size: 0.88em; color: var(--muted); margin-top: -0.45rem; }
 .acard .acmd { margin: 0; padding: 0.45rem 0.6rem; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow: auto; }
 .acard .acmd.extra { font-size: 0.78em; color: var(--muted); }
+.acard .anote { font-size: 0.85em; color: var(--muted); }
 .acard.answered { border-color: var(--line); }
 .acard.answered > .who, .acard.answered .chip { color: var(--muted); border-color: var(--line); }
 /* Options with pictures: a gallery of tiles, each a thumbnail (opens full size) over its pick button. */

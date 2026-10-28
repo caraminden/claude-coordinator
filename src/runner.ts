@@ -8,6 +8,7 @@ import { APP_NAME } from './appname.ts';
 import { AGENT_NAME } from './auth.ts';
 import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
+import type { TripwireConfig } from './tripwire.ts';
 import { claudeConfigDir, lastEffort, projectSlug, restoreSession, saveSession } from './sessions.ts';
 import { restoreTicketDir } from './workspace.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
@@ -50,13 +51,18 @@ export const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
 // Pinned too, so a deploy can't change the rules under a running turn.
 export const TRIPWIRE = pinnedCopy('tripwire.ts');
 
+/** The tripwire's view of this server, for a turn in this project; `ask` when the turn can show approval cards. */
+export function tripwireConfig(projectId: number, claudeConfig: string, ask: boolean): TripwireConfig {
+  return { home: homedir(), data: DATA_DIR, checkout: join(import.meta.dirname, '..'), project: projectId, claudeConfig, ask };
+}
+
 /**
  * The PreToolUse hook every turn gets (src/tripwire.ts): it stops known accidents such as writes to
- * this server's data and checkout. Its config travels as one JSON argument; no quoting needed, as
- * these paths and JSON carry no single quotes.
+ * this server's data and checkout, and in a minion's turn sends the ones a person may allow to a card.
+ * Its config travels as one JSON argument; no quoting needed, as these paths and JSON carry no single quotes.
  */
-export function tripwireHooks(projectId: number, claudeConfig: string) {
-  const config = { home: homedir(), data: DATA_DIR, checkout: join(import.meta.dirname, '..'), project: projectId, claudeConfig };
+export function tripwireHooks(projectId: number, claudeConfig: string, ask = false) {
+  const config = tripwireConfig(projectId, claudeConfig, ask);
   const command = [process.execPath, TRIPWIRE, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
   return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob)$', hooks: [{ type: 'command', command, timeout: 10 }] }] };
 }
@@ -300,8 +306,10 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
 /** Which tool calls wait for a person's OK in this project. */
 function approvalNote(project: Project): string[] {
   const rules = lines(project.approval_rules);
-  if (!rules.length) return [];
+  const tripwire = 'Some tripwire blocks (deleting or changing files in the data dir, installing or enabling a user unit) can go to a person as an Approve / Deny card for that one exact Bash call, if its description explains why. Every card interrupts a person, so ask only when the work truly needs that call and nothing else does the job, and ask once. A card left waiting when your turn ends expires. If it is denied, do not retry it or get there another way: stop, and hand the commands to a person in your reply.';
+  if (!rules.length) return [tripwire];
   return [
+    tripwire,
     `In this scheme, tool calls matching these rules wait for a person to approve them in the chat before they run: ${rules.join(', ')}. Make such a call when the work is ready for it; the turn pauses until someone clicks Approve or Deny. If it is denied or expires, do not retry it or reach the same result another way; say what you needed it for.`,
   ];
 }
@@ -696,14 +704,14 @@ export class Runner {
       '--verbose',
       '--permission-mode', ticket.permission_mode,
       '--append-system-prompt', systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines),
-      // Nobody can answer a permission prompt in a headless turn; deny instead of waiting on one.
-      // With approval rules, their prompts become Approve / Deny cards instead.
-      ...permissionArgs(rules),
+      // A minion's tripwire asks and approval rules become Approve / Deny cards; nobody can answer a
+      // Taskmaster's prompts, so those are denied instead of waiting.
+      ...permissionArgs(ticket.kind !== 'coordinator'),
     ];
     // Lets edit-only sessions write there too, not just in their working directory.
     const addDirs = [filesDir, sharedDir].filter((d): d is string => !!d);
     // One --settings per turn: the tripwire hook, plus approval rules or the Taskmaster's access rules.
-    const settings: { permissions?: object; hooks: object } = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env)) };
+    const settings: { permissions?: object; hooks: object } = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator') };
     if (rules.length) settings.permissions = { ask: rules };
     if (ticket.kind === 'coordinator') {
       const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project), sharedDir, memoryDir);
@@ -733,7 +741,7 @@ export class Runner {
     if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;
     if (filesDir) env.COORDINATOR_FILES_DIR = filesDir;
     // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
-    if (rules.length) env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
+    if (ticket.kind !== 'coordinator') env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
     // outlasts a stray turn, so the deploy still dismisses the minion unless the turn sets another state.
     if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, { state: null });

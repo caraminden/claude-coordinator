@@ -3,6 +3,7 @@
 import { randomBytes } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
+import { explanation, tripwire, type TripwireConfig } from './tripwire.ts';
 
 /** The thread MCP server's tool that Claude Code calls instead of showing a permission prompt. */
 export const APPROVAL_TOOL = 'mcp__thread__approve';
@@ -52,13 +53,13 @@ export function cleanPluginDirs(raw: unknown): string {
 }
 
 /**
- * Permission flags for a thread turn. Without rules: deny anything that would prompt, as nobody can
- * answer in a headless turn. With rules: the runner adds them as `ask` rules to the turn's settings
- * (Claude Code still checks those in bypassPermissions), and their prompts go to the approval tool,
- * which shows a card.
+ * Permission flags for a turn. A minion's prompts go to the approval tool: the tripwire's asks, and
+ * the project's approval rules, which the runner adds as `ask` rules to the turn's settings (Claude
+ * Code still checks those in bypassPermissions). The tool shows a card for those and refuses any
+ * other prompt (Approvals.ask). A Taskmaster's turn denies anything that would prompt.
  */
-export function permissionArgs(rules: string[]): string[] {
-  if (!rules.length) return ['--permission-prompts', 'none'];
+export function permissionArgs(cards: boolean): string[] {
+  if (!cards) return ['--permission-prompts', 'none'];
   return [
     '--permission-prompts', 'host',
     '--permission-prompt-tool', APPROVAL_TOOL,
@@ -84,6 +85,8 @@ export type Decision =
 
 interface Request {
   ticketId: number;
+  /** A tripwire card rather than one for the project's approval rules. */
+  tripwire: boolean;
   decision: Decision;
   wake: Set<() => void>;
 }
@@ -103,13 +106,35 @@ export class Approvals {
   }
 
   /** Post a card in the thread's chat for one tool call; returns its id. */
-  request(ticketId: number, tool: string, input: unknown): string {
+  request(ticketId: number, tool: string, input: unknown, tripwire?: { reason: string; explanation: string }): string {
     const id = randomBytes(8).toString('hex');
-    this.requests.set(id, { ticketId, decision: { state: 'pending' }, wake: new Set() });
+    this.requests.set(id, { ticketId, tripwire: !!tripwire, decision: { state: 'pending' }, wake: new Set() });
     let shown = JSON.stringify(input ?? {});
     if (shown.length > MAX_INPUT) shown = JSON.stringify({ truncated: shown.slice(0, MAX_INPUT) });
-    this.emit(ticketId, 'approval', { id, tool, input: JSON.parse(shown) });
+    this.emit(ticketId, 'approval', { id, tool, input: JSON.parse(shown), ...(tripwire ? { tripwire } : {}) });
     return id;
+  }
+
+  /**
+   * Claude Code's permission prompt for a minion's tool call: a card, or a refusal saying why. The
+   * tripwire's verdict is worked out again here, as the hook's reason doesn't reach the prompt; `cwd` is
+   * the minion's, so a call whose shell had moved elsewhere may get a refusal, never a wrong card. A
+   * tripwire card needs an explanation, shows the whole call, and is one at a time; after a deny, the
+   * turn gets no more. Anything else gets a card only in a project with approval rules, as before.
+   */
+  ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean): { id: string } | { refused: string } {
+    const verdict = tripwire({ tool_name: tool, tool_input: input, cwd }, { ...cfg, ask: true });
+    if (verdict && !verdict.ask) return { refused: `The tripwire blocks this. ${verdict.reason}` };
+    if (!verdict) {
+      return rules ? { id: this.request(ticketId, tool, input) } : { refused: 'Nobody can answer a permission prompt in this turn, so this was not run.' };
+    }
+    const why = explanation(input);
+    if (!why) return { refused: `${verdict.reason} An approval card needs a Bash description of why; it had none, so this was not run.` };
+    if (JSON.stringify(input).length > MAX_INPUT) return { refused: 'This call is too long to show in full on an approval card, so it was not run. Hand the commands to a person.' };
+    const mine = [...this.requests.values()].filter((r) => r.ticketId === ticketId && r.tripwire);
+    if (mine.some((r) => r.decision.state === 'pending')) return { refused: 'An approval card for a tripwire block is already waiting in this chat; only one at a time. This was not run.' };
+    if (mine.some((r) => r.decision.state === 'denied')) return { refused: 'A person denied a tripwire card earlier this turn, so no more are shown. This was not run: stop, and hand the commands to a person in your reply.' };
+    return { id: this.request(ticketId, tool, input, { reason: verdict.reason, explanation: why }) };
   }
 
   /** How many of a thread's cards are waiting on a person. */

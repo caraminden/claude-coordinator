@@ -3239,8 +3239,9 @@ function approvalOutcome(r) {
 }
 
 /**
- * A tool call that matches one of the project's approval rules, waiting for a person. The turn is
- * paused until someone clicks; a card whose turn ended (stopped, failed, server restart) expires.
+ * A tool call that matches one of the project's approval rules, or that the tripwire stopped (then the
+ * card also shows its reason), waiting for a person. The turn is paused until someone clicks; a card
+ * whose turn ended (stopped, failed, server restart) expires.
  */
 function approvalCard(ticketId, card) {
   const input = card.input ?? {};
@@ -3252,10 +3253,12 @@ function approvalCard(ticketId, card) {
   const deny = h('button', { type: 'button', class: 'small secondary' }, 'Deny');
   const el = h('div', { class: 'qcard acard' },
     h('div', { class: 'who' }, 'Claude asks to run'),
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Needs approval'), toolTitle(card.tool)),
-    typeof input.description === 'string' ? h('div', { class: 'desc' }, input.description) : '',
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, card.tripwire ? 'Tripwire' : 'Needs approval'), toolTitle(card.tool)),
+    typeof input.description === 'string' ? h('div', { class: 'desc' }, card.tripwire ? `Why: ${input.description}` : input.description) : '',
     h('pre', { class: 'acmd' }, lead ? input[lead] : JSON.stringify(input, null, 2)),
     Object.keys(rest).length ? h('pre', { class: 'acmd extra' }, JSON.stringify(rest, null, 2)) : '',
+    card.tripwire ? h('div', { class: 'anote' }, `Blocked because: ${card.tripwire.reason}`) : '',
+    h('div', { class: 'anote' }, `Approve runs this one call once. If the turn ends first, it expires and doesn't run.`),
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), deny, approve));
   let settled = false;
   const decide = async (allow) => {

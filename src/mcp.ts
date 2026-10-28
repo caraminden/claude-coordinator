@@ -10,7 +10,7 @@ const PROJECT = Number(process.env.COORDINATOR_PROJECT);
 // 'coordinator' manages the project's tickets; 'thread' lets a ticket label itself.
 const ROLE = process.env.COORDINATOR_ROLE === 'thread' ? 'thread' : 'coordinator';
 const TICKET = Number(process.env.COORDINATOR_TICKET);
-// Set for threads in projects with approval rules: Claude Code asks the approve tool before those calls.
+// Set for minions: Claude Code asks the approve tool before tripwire asks and approval-rule calls.
 const APPROVALS = process.env.COORDINATOR_APPROVALS === '1';
 const MAX_TEXT = 4000;
 /** What message_ticket and message_coordinator say when the loop guard holds a message. */
@@ -462,7 +462,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function approve(args: any): Promise<string> {
   let decision: any;
   try {
-    const { id } = await call('POST', `/api/tickets/${TICKET}/approvals`, { tool_name: args.tool_name, input: args.input ?? {} });
+    const { id, refused } = await call('POST', `/api/tickets/${TICKET}/approvals`, { tool_name: args.tool_name, input: args.input ?? {} });
+    if (refused) return JSON.stringify({ behavior: 'deny', message: refused });
     // Each request waits up to half a minute on the server; keep asking until the card is settled.
     for (let failures = 0; !decision || decision.state === 'pending';) {
       try {
@@ -478,7 +479,7 @@ async function approve(args: any): Promise<string> {
   }
   if (decision.state === 'allowed') return JSON.stringify({ behavior: 'allow', updatedInput: args.input ?? {} });
   const message = decision.state === 'denied'
-    ? `${decision.by} denied this in the chat. It was not run. Do not retry it or work around it; say what you needed it for, and carry on with anything that does not need it.`
+    ? `${decision.by} denied this in the chat. It was not run. Do not retry it or work around it; say what you needed it for, carry on with anything that does not need it, and hand the commands it needed to a person in your reply.`
     : `Nobody approved this, so it was not run (${decision.reason ?? 'the card expired'}).`;
   return JSON.stringify({ behavior: 'deny', message });
 }

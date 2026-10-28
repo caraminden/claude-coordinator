@@ -19,7 +19,7 @@ import { cleanPluginDirs, cleanRules, lines } from './src/approvals.ts';
 import { instructionSources } from './src/instructions.ts';
 import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, hashToken, newToken } from './src/machines.ts';
 import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigger } from './src/push.ts';
-import { Runner, slimEvent } from './src/runner.ts';
+import { Runner, slimEvent, tripwireConfig } from './src/runner.ts';
 import { GLOBAL_OWNER, PropertyError, type Actor } from './src/properties.ts';
 import { TAG_TO_TYPE } from './src/property-seed.ts';
 import { cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
@@ -1168,12 +1168,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       return json(res, 202, ticketView(id));
     }
     if (action === '/approvals' && method === 'POST') {
-      // Claude Code wants to run a tool that matches an approval rule; show an Approve / Deny card.
+      // Claude Code asks before a tool call (a tripwire ask or an approval rule): an Approve / Deny card, or a refusal.
       if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can ask for approval in its chat');
       if (!runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
       const body = await readJson(req);
       const tool = str(body.tool_name, 'Tool name', 300);
-      return json(res, 201, { id: runner.approvals.request(id, tool, body.input ?? {}) });
+      const input = body.input && typeof body.input === 'object' ? body.input : {};
+      const project = store.getProject(ticket.project_id)!;
+      const r = runner.approvals.ask(id, tool, input, ticket.cwd, tripwireConfig(project.id, claudeConfigDir(process.env), true), lines(project.approval_rules).length > 0);
+      return json(res, 'id' in r ? 201 : 200, r);
     }
     if (action === '/approvals' && method === 'GET') {
       // The thread's MCP server waits here for the card's outcome, half a minute at a time.

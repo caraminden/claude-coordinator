@@ -30,9 +30,9 @@ test('plugin folders must stay inside the repo', () => {
   for (const bad of ['/etc', '~/x', '../up', 'a/../../b', 'a//b']) assert.throws(() => cleanPluginDirs(bad), /relative to the repo root/, bad);
 });
 
-test('no rules keeps the turn exactly as before; rules ask the approval tool', () => {
-  assert.deepEqual(permissionArgs([]), ['--permission-prompts', 'none']);
-  const args = permissionArgs(['Bash(gh pr merge:*)']);
+test('a Taskmaster denies prompts; a minion asks the approval tool', () => {
+  assert.deepEqual(permissionArgs(false), ['--permission-prompts', 'none']);
+  const args = permissionArgs(true);
   assert.deepEqual(args, ['--permission-prompts', 'host', '--permission-prompt-tool', APPROVAL_TOOL]);
   assert.ok(!args.includes('none'));
 });
@@ -78,6 +78,7 @@ test('the end of a turn expires what still waits', async () => {
 
 // A stand-in for the app's two approval routes, backed by a real Approvals.
 const TICKET = 7;
+const TRIPWIRE_CFG = { home: '/home/u', data: '/home/u/data', checkout: '/home/u/app', project: 1, claudeConfig: '/home/u/.claude', deployScript: true };
 const posted: any[] = [];
 const cards = new Approvals((_t, kind, data) => kind === 'approval' && posted.push(data));
 const api = createServer(async (req, res) => {
@@ -87,8 +88,10 @@ const api = createServer(async (req, res) => {
   const send = (status: number, data: object) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(data));
   if (url.pathname !== `/api/tickets/${TICKET}/approvals`) return send(404, { error: 'Not found' });
   if (req.method === 'POST') {
+    // As server.ts does it, in a project with approval rules.
     const { tool_name, input } = JSON.parse(body);
-    return send(201, { id: cards.request(TICKET, tool_name, input) });
+    const r = cards.ask(TICKET, tool_name, input, '/w', TRIPWIRE_CFG, true);
+    return send('id' in r ? 201 : 200, r);
   }
   send(200, await cards.wait(TICKET, url.searchParams.get('id')!, 200));
 });
@@ -156,6 +159,30 @@ test('Deny answers deny with who denied it', async () => {
   assert.match(result.message, /^Josh denied this/);
 });
 
+test('a tripwire ask: a card with its reason, Approve allows exactly that call, a second at once is refused', async () => {
+  const input = { command: 'rm /home/u/data/coordinator.db.bak-1', description: 'Delete the DB copy Cara approved' };
+  const answer = ask(input);
+  const card = await nextCard();
+  assert.deepEqual(card.input, input);
+  assert.match(card.tripwire.reason, /live data dir/);
+  const second = await ask({ command: 'systemctl --user enable x.timer', description: 'Enable the backup timer from deploy/' });
+  assert.equal(second.behavior, 'deny');
+  assert.match(second.message, /already waiting/);
+  assert.equal(posted.length, 0, 'no second card');
+  cards.decide(TICKET, card.id, true, 'Cara');
+  assert.deepEqual(await answer, { behavior: 'allow', updatedInput: input });
+});
+
+test('a denied tripwire card denies, and the turn gets no more of them', async () => {
+  const answer = ask({ command: 'systemctl --user enable x.timer', description: 'Enable the backup timer from deploy/' });
+  cards.decide(TICKET, (await nextCard()).id, false, 'Cara');
+  const result = await answer;
+  assert.equal(result.behavior, 'deny');
+  assert.match(result.message, /^Cara denied this.*hand the commands/);
+  assert.match((await ask({ command: 'rm /home/u/data/x', description: 'Delete the stale copy from #54' })).message, /stop, and hand the commands to a person/);
+  cards.endTurn(TICKET, 'The turn ended while this waited.');
+});
+
 test('an expired card denies', async () => {
   const answer = ask({ command: 'gh pr merge 14' });
   await nextCard();
@@ -207,16 +234,18 @@ async function finish(id: number) {
   rmSync(join(root, 'release'), { force: true });
 }
 
-test('a project without rules or plugins runs threads exactly as before', async () => {
+test('a project without rules or plugins still sends a minion\'s prompts to cards, for the tripwire', async () => {
   const plain = store.createProject('Plain', null);
   const t = await turn(plain.id, ['tools/mods/delve']);
-  const i = t.args.indexOf('--permission-prompts');
-  assert.deepEqual(t.args.slice(i, i + 2), ['--permission-prompts', 'none']);
-  for (const flag of ['--permission-prompt-tool', '--plugin-dir']) assert.ok(!t.args.includes(flag), flag);
-  // Every turn gets the tripwire hook, and nothing else in its settings.
-  assert.deepEqual(Object.keys(JSON.parse(t.args[t.args.indexOf('--settings') + 1])), ['hooks']);
-  assert.equal(t.timeout, null);
-  assert.equal(t.approvals, null);
+  assert.ok(!t.args.includes('none'));
+  assert.equal(t.args[t.args.indexOf('--permission-prompt-tool') + 1], APPROVAL_TOOL);
+  assert.ok(!t.args.includes('--plugin-dir'));
+  // Every turn gets the tripwire hook, here able to ask, and nothing else in its settings.
+  const settings = JSON.parse(t.args[t.args.indexOf('--settings') + 1]);
+  assert.deepEqual(Object.keys(settings), ['hooks']);
+  assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /"ask":true/);
+  assert.ok(Number(t.timeout) >= 24 * 3600_000);
+  assert.equal(t.approvals, '1');
   await finish(t.id);
 });
 

@@ -203,13 +203,15 @@ commit on `main`, so fix forward. Back up `coordinator.db` with `sqlite3
 ## Permissions
 
 Headless turns can't show a permission prompt, so every minion runs in
-`bypassPermissions`: full access as the service user. Anything that would still
-prompt is denied (`--permission-prompts none`).
+`bypassPermissions`: full access as the service user. What would still prompt
+goes to the `approve` tool (below), which shows a card only for a tripwire ask
+or a scheme's approval rules and denies anything else. The Taskmaster's prompts
+are denied (`--permission-prompts none`).
 
 **Needs approval.** A scheme can list Claude Code permission rules, such as
 `Bash(gh pr merge:*)` or `mcp__*__merge_pull_request`, in the overview panel's
-"Needs approval" section (or the Taskmaster's `set_project_settings` tool). Its
-minions then run with:
+"Needs approval" section (or the Taskmaster's `set_project_settings` tool). Every
+minion runs with (the `ask` rules only when the scheme has some):
 
 ```
 --permission-mode bypassPermissions
@@ -231,8 +233,7 @@ also denies. With rules set, anything else that would prompt in
 
 Rules are guardrails against mistakes, not a sandbox: a Bash rule matches how a
 command starts, and a minion with full shell access could reach the same result
-another way. Schemes with no rules (the default) run exactly as before. The
-Taskmaster is never affected.
+another way. The Taskmaster is never affected.
 
 **Tripwire.** Every turn, Taskmaster or minion in any scheme, gets a `PreToolUse`
 hook (`src/tripwire.ts`) in its `--settings`, alongside the repo's own hooks. It
@@ -245,6 +246,21 @@ reading `~/.ssh` or the Claude login; and running `server.ts` without `DATA_DIR`
 and `PORT`. It reads the command text, so it's a tripwire, not a sandbox: a script,
 an interpreter or a path in a variable gets past it. The table of blocked and
 allowed commands is `test/tripwire.test.ts`.
+
+Some blocks are things a person may reasonably want once, so in a minion's turn
+they *ask* instead (the hook returns `permissionDecision: "ask"`, which Claude Code
+sends to the `approve` tool even in `bypassPermissions`): Bash writes in the data
+dir other than the live database files (SQL on the live database asks when the
+whole of it is in the command), copying units into the user unit folders, and
+`systemctl --user enable`/`link` and the like. The card shows the exact call, the
+minion's Bash description as its reason, and the tripwire's reason; Approve runs
+that one call once. The server works the verdict out again (the hook's reason
+doesn't reach the prompt tool), and refuses the card without a description of at
+least 20 characters, while another tripwire card from that minion is waiting, or
+after one was denied that turn. Everything else stays a hard block: credentials,
+the live checkout, the env file, other schemes, restarts, `server.ts` on live data,
+and clobbering the live database file. A Taskmaster's turn can't show cards, so its
+asks are blocks.
 
 **Plugin folders.** A scheme can also list folders relative to the repo root
 (e.g. `tools/mods/delve`); each minion turn gets `--plugin-dir <worktree>/<folder>`

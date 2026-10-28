@@ -4,14 +4,21 @@
 // the app's services; reading SSH keys or the Claude login; running server.ts against the live data)
 // and says why and what to do instead.
 //
+// Two tiers. Real dangers are hard blocks. Things a person may reasonably want once (deleting or
+// changing files in the data dir other than the live database, installing or enabling a user unit)
+// "ask" instead: in a minion's turn, a Bash call with a description that explains it goes to an
+// Approve / Deny card for that exact call (Approvals.ask in approvals.ts). Nothing a minion does
+// switches a tier off; only a person's click lets one call through.
+//
 // It is a tripwire, NOT a security boundary. It reads the command text, so anything that hides the
 // path from that text gets past it: a script file, an interpreter (`python -c`, `node -e`), a path
 // held in a variable, a symlink, `$(…)` inside double quotes, `xargs`, a glob in the middle of a path.
 // It aims to never block normal work; where it can't tell, it lets the command through.
 //
-// Run as a hook: node tripwire.ts '<config json>' < hook input; exits 2 with the reason on stderr.
+// Run as a hook: node tripwire.ts '<config json>' < hook input; exits 2 with the reason on stderr, or
+// prints a PreToolUse "ask" decision for the approval card.
 import { existsSync, readFileSync } from 'node:fs';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export interface TripwireConfig {
@@ -25,7 +32,16 @@ export interface TripwireConfig {
   claudeConfig: string;
   /** Whether tools/deploy.sh exists in the checkout; read from disk when left out. */
   deployScript?: boolean;
+  /** Whether this turn can show an approval card (minions can; Taskmasters can't), so ask-tier calls ask. */
+  ask?: boolean;
 }
+
+/** Why a call is stopped, and whether a person may approve it once on a card instead. */
+export interface Verdict { reason: string; ask: boolean }
+const hard = (reason: string): Verdict => ({ reason, ask: false });
+
+/** The shortest Bash description that counts as the explanation an approval card needs. */
+export const MIN_EXPLANATION = 20;
 
 const ASK = 'If a person really wants this, they can run it themselves.';
 
@@ -63,6 +79,26 @@ function readReason(p: string, cfg: TripwireConfig): string | null {
   if (under(p, join(cfg.home, '.ssh'))) return `${join(cfg.home, '.ssh')} holds SSH keys; nothing here needs to read them (ssh and git use them on their own).`;
   if (p === join(cfg.claudeConfig, '.credentials.json') || p === join(cfg.home, '.claude/.credentials.json')) return 'That file is the Claude login; nothing here needs to read it.';
   return null;
+}
+
+const LIVE_DB = ['coordinator.db', 'coordinator.db-wal', 'coordinator.db-shm', 'coordinator.db-journal'];
+
+/** Whether a person may approve this write once, rather than it being a hard block. */
+function askable(p: string, cmd: string, cfg: TripwireConfig): boolean {
+  const configDir = join(cfg.home, '.config');
+  // Copying a unit into the folder can ask; deleting the folder itself, or touching the app's own units, can't.
+  if ([join(configDir, 'systemd/user'), join(configDir, 'containers/systemd')].some((u) => under(p, u) && (p !== u || !REMOVERS.has(cmd)))) return !APP_UNITS.test(basename(p));
+  // Other schemes' folders and the projects folder itself stay off limits, as does the whole data dir.
+  if (!under(p, cfg.data) || p === cfg.data || under(p, join(cfg.data, 'projects'))) return false;
+  // SQL on the live database can be read on the card (when it's in the command: see sqlShown); clobbering
+  // the file (rm, mv, cp over it, a glob) can't.
+  if (cmd === 'sqlite3') return true;
+  if (dirname(p) !== cfg.data) return true;
+  // Brace expansion could name anything; a glob is matched against the live files' names.
+  const base = basename(p);
+  if (base.includes('{')) return false;
+  const glob = new RegExp(`^${base.split(/(\*|\?|\[[^\]]*\])/).map((part, k) => (k % 2 ? (part === '*' ? '.*' : '.') : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('')}$`);
+  return !LIVE_DB.some((f) => glob.test(f));
 }
 
 /** For rm and mv: deleting or moving a folder that contains a protected one. */
@@ -349,7 +385,13 @@ function writeTargets(name: string, args: Word[]): Word[] {
   return [];
 }
 
-function gitReason(args: Word[], st: State, cfg: TripwireConfig): string | null {
+/** Whether a sqlite3 call's SQL is all in the command, rather than on stdin or in a file it reads. */
+function sqlShown(args: Word[]): boolean {
+  const plain = args.filter((w) => !w.text.startsWith('-'));
+  return plain.length > 1 && !args.some((w) => /^\s*\.(read|restore|import|load|shell|system)\b/m.test(w.text));
+}
+
+function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null {
   let dir = st.cwd;
   let j = 0;
   for (; j < args.length; j++) {
@@ -379,25 +421,27 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): string | null 
   if (inDir) {
     // Until tools/deploy.sh exists, a fast-forward of the live checkout is how deploys happen.
     if (dir && under(dir, cfg.checkout) && (sub === 'pull' || sub === 'merge') && rest.includes('--ff-only') && !hasDeployScript(cfg)) return null;
-    return `git ${sub} would change ${dir}. ${inDir}`;
+    return hard(`git ${sub} would change ${dir}. ${inDir}`);
   }
   const targets = sub === 'clone' ? args.slice(j + 1).filter((w) => !w.text.startsWith('-')).slice(1) : args.slice(j + 1);
   // Relative paths after -C are relative to that folder.
   for (const w of targets) {
     for (const p of pathsOf(w, { cwd: dir, vars: st.vars }, cfg)) {
       const r = writeReason(p, cfg);
-      if (r) return `git ${sub} would change ${p}. ${r}`;
+      if (r) return hard(`git ${sub} would change ${p}. ${r}`);
     }
   }
   return null;
 }
 
-function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): string | null {
+function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | null {
   for (const r of seg.redirects) {
     if (r.op === '<<<') continue;
     for (const p of pathsOf(r.target, st, cfg)) {
-      const why = readReason(p, cfg) ?? (r.op === '<' ? null : writeReason(p, cfg));
-      if (why) return `The redirect to ${p} is blocked. ${why}`;
+      const read = readReason(p, cfg);
+      if (read) return hard(`The redirect to ${p} is blocked. ${read}`);
+      const why = r.op === '<' ? null : writeReason(p, cfg);
+      if (why) return { reason: `The redirect to ${p} is blocked. ${why}`, ask: askable(p, '', cfg) };
     }
   }
   const words = seg.words;
@@ -460,7 +504,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): string | n
   for (const w of METADATA.has(name) ? [] : args) {
     for (const p of pathsOf(w, st, cfg)) {
       const why = readReason(p, cfg);
-      if (why) return `Reading ${p} is blocked. ${why}`;
+      if (why) return hard(`Reading ${p} is blocked. ${why}`);
     }
   }
 
@@ -473,9 +517,10 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): string | n
     const plain = words.slice(sysctl + 1).filter((w) => !w.text.startsWith('-')).map((w) => w.text);
     const [verb, ...units] = plain;
     if (STOP_VERBS.has(verb) && units.some((u) => APP_UNITS.test(u))) {
-      return `systemctl ${verb} of ${units.join(' ')} is blocked: it cuts off every running turn (or the shared Godot editor). Deploy with ${hasDeployScript(cfg) ? 'tools/deploy.sh, which restarts once no minion is running' : 'the cc-restart-when-idle unit'}, or ask a person.`;
+      return hard(`systemctl ${verb} of ${units.join(' ')} is blocked: it cuts off every running turn (or the shared Godot editor). Deploy with ${hasDeployScript(cfg) ? 'tools/deploy.sh, which restarts once no minion is running' : 'the cc-restart-when-idle unit'}, or ask a person.`);
     }
-    if (UNIT_FILE_VERBS.has(verb)) return `systemctl ${verb} changes the box's unit files. Put units in the repo (deploy/) and ask Cara to install them.`;
+    // `systemctl edit` opens an editor, which would hang a headless turn.
+    if (UNIT_FILE_VERBS.has(verb)) return { reason: `systemctl ${verb} changes the box's unit files. Put units in the repo (deploy/) and ask Cara to install them.`, ask: verb !== 'edit' };
     if (sysctl === i) return null;
   }
 
@@ -485,25 +530,26 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): string | n
     (runner >= 0 && !words.slice(runner + 1).some((w) => w.text === '--check' || w.text === '-c') && words.slice(runner + 1).some((w) => basename(w.text) === 'server.ts' || /\b(import|require)\s*\(\s*['"`][^'"`]*server\.ts['"`]/.test(w.text))) ||
     (npmStart && !!st.cwd && existsSync(join(st.cwd, 'package.json')) && readFileSync(join(st.cwd, 'package.json'), 'utf8').includes('server.ts'));
   if (runsServer && !(vars.has('DATA_DIR') && vars.has('PORT'))) {
-    return 'Running server.ts without both DATA_DIR and PORT set points it at the live database and port (its schema changes would run on live data). Use `DATA_DIR=$(mktemp -d) PORT=<free port> node server.ts` (copy the DB in if you need data), or `node --check server.ts` for a syntax check.';
+    return hard('Running server.ts without both DATA_DIR and PORT set points it at the live database and port (its schema changes would run on live data). Use `DATA_DIR=$(mktemp -d) PORT=<free port> node server.ts` (copy the DB in if you need data), or `node --check server.ts` for a syntax check.');
   }
 
   if (name === 'git') return gitReason(args, st, cfg);
   for (const w of writeTargets(name, args)) {
     for (const p of pathsOf(w, st, cfg)) {
       const why = writeReason(p, cfg);
-      if (why) return `\`${name}\` would change ${p}. ${why}`;
-      if (REMOVERS.has(name) && containsProtected(p, cfg)) return `\`${name}\` on ${p} would take protected folders with it (the live checkout, data, config or keys). Name the exact path you mean.`;
+      if (why) return { reason: `\`${name}\` would change ${p}. ${why}`, ask: askable(p, name === 'sqlite3' && !sqlShown(args) ? '' : name, cfg) };
+      if (REMOVERS.has(name) && containsProtected(p, cfg)) return hard(`\`${name}\` on ${p} would take protected folders with it (the live checkout, data, config or keys). Name the exact path you mean.`);
     }
   }
   return null;
 }
 
-/** Why this Bash command is blocked, or null. */
-export function commandReason(command: string, st: State, cfg: TripwireConfig): string | null {
+/** Why this Bash command is blocked, or null. One hard-blocked part makes the whole command a hard block. */
+export function commandReason(command: string, st: State, cfg: TripwireConfig): Verdict | null {
   const stack: (string | null)[] = [];
   let seg: Segment = { words: [], redirects: [] };
   let redir: string | null = null;
+  let asked: Verdict | null = null;
   const end = () => {
     const why = segmentReason(seg, st, cfg);
     seg = { words: [], redirects: [] };
@@ -518,46 +564,66 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
     else {
       redir = null;
       const why = end();
-      if (why) return why;
+      if (why && !why.ask) return why;
+      asked ??= why;
       // A cd inside ( … ) or $( … ) doesn't outlive it.
       if (tok.text === '(') stack.push(st.cwd);
       if (tok.text === ')' && stack.length) st.cwd = stack.pop()!;
     }
   }
-  return null;
+  return asked;
 }
 
-/** Why this tool call is blocked, or null. `input` is Claude Code's PreToolUse hook input. */
-export function tripwire(input: any, cfg: TripwireConfig): string | null {
+/**
+ * Why this tool call is stopped, or null. `input` is Claude Code's PreToolUse hook input. Only a Bash
+ * call in a turn that can show cards may ask, and only with a description that explains it: the
+ * card shows the description as the minion's reason.
+ */
+export function tripwire(input: any, cfg: TripwireConfig): Verdict | null {
   const tool = String(input?.tool_name ?? '');
   const ti = input?.tool_input ?? {};
   const cwd = typeof input?.cwd === 'string' ? input.cwd : null;
-  if (tool === 'Bash') return typeof ti.command === 'string' ? commandReason(ti.command, { cwd, vars: new Set() }, cfg) : null;
+  if (tool === 'Bash') {
+    const v = typeof ti.command === 'string' ? commandReason(ti.command, { cwd, vars: new Set() }, cfg) : null;
+    if (!v?.ask) return v;
+    if (!cfg.ask) return hard(v.reason);
+    if (explanation(ti)) return v;
+    return hard(`${v.reason} A person can approve this one call on a card, but only with an explanation: if the work really needs it, retry once with a Bash description of at least ${MIN_EXPLANATION} characters that says why (e.g. "Delete the DB copies Cara OK'd in #54").`);
+  }
   const file = ti.file_path ?? ti.notebook_path ?? ti.path;
   if (typeof file !== 'string' || !file) return null;
   const st = { cwd, vars: new Set<string>() };
   const [p] = pathsOf({ text: file, unknown: false }, st, cfg);
   if (!p) return null;
   const read = readReason(p, cfg);
-  if (read) return `${tool} of ${p} is blocked. ${read}`;
+  if (read) return hard(`${tool} of ${p} is blocked. ${read}`);
   if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)) {
     const why = writeReason(p, cfg);
-    if (why) return `${tool} of ${p} is blocked. ${why}`;
+    if (why) return hard(`${tool} of ${p} is blocked. ${why}`);
   }
   return null;
 }
 
+/** The minion's explanation for a Bash call (its description), if it is long enough to count. */
+export function explanation(toolInput: any): string | null {
+  const d = typeof toolInput?.description === 'string' ? toolInput.description.trim() : '';
+  return d.length >= MIN_EXPLANATION ? d : null;
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // Fails open: a broken config or input lets the call through rather than wedging every turn.
-  let reason: string | null = null;
+  let v: Verdict | null = null;
   try {
     const cfg = JSON.parse(process.argv[2]) as TripwireConfig;
-    reason = tripwire(JSON.parse(readFileSync(0, 'utf8')), cfg);
+    v = tripwire(JSON.parse(readFileSync(0, 'utf8')), cfg);
   } catch (err: any) {
     process.stderr.write(`[tripwire] skipped: ${err.message}\n`);
   }
-  if (reason) {
-    process.stderr.write(`[tripwire] ${reason}\n[tripwire] This guard stops known accidents in Citadel (src/tripwire.ts). ${ASK}\n`);
+  if (v?.ask) {
+    // Claude Code sends this call to the turn's permission-prompt tool, which shows the card.
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: `[tripwire] ${v.reason}` } }));
+  } else if (v) {
+    process.stderr.write(`[tripwire] ${v.reason}\n[tripwire] This guard stops known accidents in Citadel (src/tripwire.ts). ${ASK}\n`);
     process.exit(2);
   }
 }

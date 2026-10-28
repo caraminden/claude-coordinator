@@ -479,6 +479,8 @@ export class Runner {
   turnsDir: string;
   /** Tells this server's turn units apart from another server's (a dev copy) on the same user manager. */
   private unitTag: string;
+  /** Set in a preview (server.ts, PREVIEW=1): messages are kept, but no turn ever starts. */
+  noTurns = false;
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
   filesDir: (ticket: Ticket) => string | null = () => null;
   /** The folder every thread and the coordinator of a project can read and write, for handoffs and notes. */
@@ -804,6 +806,11 @@ export class Runner {
   }
 
   private startTurn(project: Project, ticket: Ticket, prompt: string, resumes = 0) {
+    // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
+    if (this.noTurns) {
+      this.emit(ticket.id, 'note', { text: 'This is a preview: it shows the app on a copy of the data, but it never runs turns.' });
+      return this.broadcastTicket(ticket.id);
+    }
     // deploy/prune.sh removes worktrees of long-closed minions; a reopened one gets its back.
     try {
       if (restoreTicketDir(ticket.cwd, project.repo_dir, ticket.branch)) this.emit(ticket.id, 'note', { text: `Recreated this minion's worktree from its branch ${ticket.branch}.` });

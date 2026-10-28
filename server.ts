@@ -56,7 +56,7 @@ async function loadAssets() {
   const assets = new Map<string, Buffer>();
   for (const f of (await readdir(PUBLIC_DIR, { withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name).sort()) {
     const body = await readFile(join(PUBLIC_DIR, f));
-    assets.set(f, /\.(html|js|webmanifest)$/.test(f) ? Buffer.from(body.toString('utf8').replaceAll('%APP_NAME%', APP_NAME)) : body);
+    assets.set(f, /\.(html|js|webmanifest)$/.test(f) ? Buffer.from(body.toString('utf8').replaceAll('%APP_NAME%', SHOWN_NAME)) : body);
   }
   // Built before anything is swapped, so a bad manifest leaves the old front end whole.
   const dark = darkManifest(assets);
@@ -76,7 +76,13 @@ function checkoutHead(): string | null {
 const BOOT_COMMIT = checkoutHead();
 // Set by tools/deploy.sh when it boots new code on a copy of the database: serve and answer, but
 // don't resume interrupted turns or watch GitHub, which would act on the copy's minions for real.
-const BOOT_CHECK = process.env.BOOT_CHECK === '1';
+// A preview (src/previews.ts): a minion's branch served on a copy of the database for people to try.
+// Everything BOOT_CHECK skips, and more: no turns at all, no new minions or schemes (git in the real
+// repos), no pushes, no machines, no startup sweeps.
+const PREVIEW = process.env.PREVIEW === '1';
+const BOOT_CHECK = process.env.BOOT_CHECK === '1' || PREVIEW;
+// The tab title tells a preview from the live app.
+const SHOWN_NAME = PREVIEW ? `${APP_NAME} preview` : APP_NAME;
 await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '');
@@ -120,6 +126,7 @@ const runner = new Runner(
 // Turns run in units of their own when this is the systemd service (systemd sets INVOCATION_ID), so a
 // restart doesn't stop them; TURN_UNITS=0 or 1 overrides that.
 runner.units = process.env.TURN_UNITS ? process.env.TURN_UNITS === '1' : !!process.env.INVOCATION_ID;
+runner.noTurns = PREVIEW;
 if (!BOOT_CHECK) runner.recover();
 if (runner.units && !BOOT_CHECK) {
   execFile('systemctl', ['--user', 'show', '-p', 'MemoryMax', '--value', 'citadel.slice'], (err, out) => {
@@ -141,6 +148,7 @@ pusher.subject = process.env.PUSH_SUBJECT ?? store.getSetting<string>('push_subj
 
 /** Ping everyone subscribed to the ticket's project (but `except`) if the trigger warrants it. */
 function notify(ticketId: number, trigger: PushTrigger, except: string | null = null) {
+  if (PREVIEW) return;
   const ticket = store.getTicket(ticketId);
   if (ticket) pusher.notify(ticket, trigger, except).catch((err) => console.error(`Push for ticket ${ticketId} failed:`, err));
 }
@@ -229,9 +237,10 @@ if (!store.getSetting('events_slimmed')) {
 // Pick up anything made while the server was down (or before artifacts existed), one ticket at a time.
 // Rows for file types that no longer count as artifacts go first, pinned or not.
 store.pruneArtifacts(isArtifact);
+// A preview's copy already holds what these sweeps would find, and they read the live folders.
 // The vocabulary docs follow the registry; the first run replaces the hand-written ones (kept aside).
-writeVocabularies().catch((err) => console.error('Could not write the property vocabularies:', err));
-(async () => {
+if (!PREVIEW) writeVocabularies().catch((err) => console.error('Could not write the property vocabularies:', err));
+if (!PREVIEW) (async () => {
   for (const p of store.listProjects()) {
     for (const t of store.listTickets(p.id)) {
       await scanArtifacts(t.id).catch((err) => console.error(`Artifact scan of ticket ${t.id} failed:`, err));
@@ -741,11 +750,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   // it serves, and that it reloads public/ on SIGHUP (an older server would exit on one).
   if (pathname === '/api/health' && method === 'GET') {
     // interruptible: running turns a restart would stop (they don't run in a unit of their own).
-    return json(res, 200, { ok: true, commit: BOOT_COMMIT, version: ASSET_VERSION, reload: 'sighup', interruptible: runner.interruptible() });
+    return json(res, 200, { ok: true, commit: BOOT_COMMIT, version: ASSET_VERSION, reload: 'sighup', interruptible: runner.interruptible(), preview: PREVIEW });
   }
   // A machine's agent signs in with its own token, which reaches nothing else.
   if (pathname === '/api/machines/connect' || pathname === '/api/machines/send') {
     if (MACHINES_URL) throw new HttpError(403, `Machines connect at ${MACHINES_URL.origin}, not here`);
+    if (PREVIEW) throw new HttpError(403, 'Machines connect to the live app, not a preview');
     return machineAgentApi(req, res, url);
   }
   if (!session) throw new HttpError(401, 'Not logged in');
@@ -796,6 +806,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       return json(res, 200, store.listProjects().map((p) => ({ ...p, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length })));
     }
     if (method === 'POST') {
+      if (PREVIEW) throw new HttpError(403, 'A preview can\'t start schemes');
       const body = await readJson(req);
       const name = str(body.name, 'Name', 80);
       const repoUrl = typeof body.repoUrl === 'string' && body.repoUrl.trim() ? body.repoUrl.trim() : null;
@@ -907,6 +918,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/tickets$/);
   if (m && method === 'POST') {
+    // Every new minion gets a git worktree in the scheme's real repo.
+    if (PREVIEW) throw new HttpError(403, 'A preview can\'t start minions');
     const project = store.getProject(Number(m[1]));
     if (!project) throw new HttpError(404, 'No such scheme');
     inScope(project.id);

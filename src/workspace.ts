@@ -62,17 +62,25 @@ export async function createTicketDir(
   } catch {
     // Best effort: branch from what we already have if the remote is unreachable.
   }
+  const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
   let base = 'HEAD';
   try {
     base = await git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repoDir);
   } catch {
     // No origin/HEAD (e.g. local repo); branch from the checkout's HEAD.
   }
+  // Minions merge into the local default branch, which may never be pushed: branch from it
+  // unless origin's copy is ahead of it (a scheme kept up to date by pushes). Diverged: local wins.
+  const local = base.replace(/^origin\//, '');
+  if (local !== base && await ok(['rev-parse', '--verify', '--quiet', `refs/heads/${local}`])
+    && !await ok(['merge-base', '--is-ancestor', local, base])) {
+    base = local;
+  }
   // Branches are named by the per-project number; a branch left over from before
   // per-project numbering may already have the name, so add a suffix then.
   const name = `ticket/${ticketNumber}-${slugify(title)}`;
   let branch = name;
-  for (let i = 2; await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repoDir).then(() => true, () => false); i++) {
+  for (let i = 2; await ok(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]); i++) {
     branch = `${name}-${i}`;
   }
   await mkdir(join(projectDir(dataDir, projectId), 'tickets'), { recursive: true });

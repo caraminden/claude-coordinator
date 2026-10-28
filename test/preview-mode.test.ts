@@ -117,3 +117,21 @@ test('nothing resumes the copied mid-turn minion, and no claude ever ran', async
   await new Promise((r) => setTimeout(r, 3500));
   assert.equal(existsSync(marker), false);
 });
+
+test('a preview exits once the server that started it is gone', async () => {
+  const srv = createServer();
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const { port } = srv.address() as any;
+  await new Promise((r) => srv.close(r));
+  const dir = mkdtempSync(join(root, 'orphan-'));
+  // A stand-in for the live server: it starts the preview, then dies without cleaning up.
+  const parent = spawn(process.execPath, ['-e', `require('node:child_process').spawn(process.execPath, [${JSON.stringify(join(repo, 'server.ts'))}], { stdio: 'ignore', env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '${port}', DATA_DIR: ${JSON.stringify(dir)}, PREVIEW: '1', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: ${JSON.stringify(join(dir, 'claude'))}, COORDINATOR_PASSWORD: '${PASSWORD}', SESSION_SECRET: '${'x'.repeat(40)}' } }); setInterval(() => {}, 1000);`], { stdio: 'ignore' });
+  procs.push(parent);
+  const up = () => fetch(`http://127.0.0.1:${port}/api/health`).then((r) => r.ok, () => false);
+  for (const end = Date.now() + 10_000; !(await up()); await new Promise((r) => setTimeout(r, 100))) {
+    if (Date.now() > end) throw new Error('The preview never came up');
+  }
+  parent.kill('SIGKILL');
+  await new Promise((r) => setTimeout(r, 3500));
+  assert.equal(await up(), false);
+});

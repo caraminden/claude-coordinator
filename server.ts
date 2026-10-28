@@ -84,6 +84,9 @@ const PREVIEW = process.env.PREVIEW === '1';
 const BOOT_CHECK = process.env.BOOT_CHECK === '1' || PREVIEW;
 // The tab title tells a preview from the live app.
 const SHOWN_NAME = PREVIEW ? `${APP_NAME} preview` : APP_NAME;
+// A preview goes with the server that started it, however that one goes (it is reparented then).
+const PARENT = process.ppid;
+if (PREVIEW) setInterval(() => process.ppid !== PARENT && process.exit(0), 2000).unref();
 await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '');

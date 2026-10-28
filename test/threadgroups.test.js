@@ -24,3 +24,12 @@ test('a build named in the title counts, Delve style; the build field wins', () 
     { n: 5, tag: 'feature', title: 'Rebuild 9 things' }, { n: 6, tag: 'feature', title: 'Workshop · Build #7', build: 9 },
   ]), [['build-7', true, [1, 4]], ['feature', false, [5]], ['build-8', false, [2, 3]], ['build-9', false, [6]]]);
 });
+
+test('search matches title, exact number and property values, not anything else', async () => {
+  const { threadMatches } = await import('../public/threadgroups.js');
+  const t = { number: 78, title: 'Minion search', created_by: 'Cara', last_activity: 'Ran the tests', note: 'needs a pick',
+    properties: { type: 'feature', area: ['ui', 'town'], stage: 'in-progress' } };
+  for (const q of ['search', 'MINION', '78', '#78', 'feature', 'town', 'type: feature', 'area: ui']) assert.ok(threadMatches(t, q), q);
+  for (const q of ['7', '#7', '780', 'cara', 'tests', 'pick', 'type', 'type: bug', 'area: feature']) assert.ok(!threadMatches(t, q), q);
+  assert.ok(threadMatches({ number: 3, title: 'x' }, '3'), 'no properties');
+});

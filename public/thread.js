@@ -1,7 +1,7 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, fileUrl, followChat, h, highlight, isCoordinator, markdown, markSeen, me, restoreScroll, scrollToBottom, statusLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
-import { pendingFind, rowState, setPendingFind } from './sidebar.js';
+import { rowState } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 
@@ -30,10 +30,6 @@ export async function mountChat(chatId, ticket, events) {
   if (ticket.branch) refreshBranch(chatId);
   markSeen(chatId);
   restoreScroll(chatId);
-  if (pendingFind) {
-    view.findEl?.find(pendingFind);
-    setPendingFind('');
-  }
   try {
     if (sessionStorage.getItem('cc-refocus')) {
       sessionStorage.removeItem('cc-refocus');
@@ -118,12 +114,7 @@ function chatFindBox() {
     }
   });
   const step = (d) => h('button', { type: 'button', class: 'secondary find-step', title: d < 0 ? 'Previous match' : 'Next match', onclick: () => show(state.at + d) }, d < 0 ? '↑' : '↓');
-  const box = h('span', { class: 'find-box' }, input, count, step(-1), step(1));
-  box.find = (text) => {
-    input.value = text;
-    run();
-  };
-  return box;
+  return h('span', { class: 'find-box' }, input, count, step(-1), step(1));
 }
 
 // ---------- branch and pull request ----------

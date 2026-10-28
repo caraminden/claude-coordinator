@@ -1,7 +1,7 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
-import { ago, api, app, crumbs, h, highlight, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, threadLabel, view } from './core.js';
+import { ago, api, app, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, threadLabel, view } from './core.js';
 import { loadDraft, saveDraft } from './composer.js';
-import { threadSections } from './threadgroups.js';
+import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 
@@ -168,21 +168,14 @@ export function renderSidebar() {
 // ---------- search ----------
 
 // The threads search, kept across thread switches within a project.
-const threadSearch = { projectId: null, q: '', hits: new Map(), seq: 0, timer: null };
-// Text to find in the next chat that opens, set when a search result is clicked.
-export let pendingFind = '';
-export function setPendingFind(text) {
-  pendingFind = text;
-}
+const threadSearch = { projectId: null, q: '' };
 
 export function threadSearchBox(projectId) {
-  if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '', hits: new Map() });
-  const input = h('input', { type: 'search', class: 'thread-search', placeholder: 'Search minions and what was said…', value: threadSearch.q, autocomplete: 'off' });
+  if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '' });
+  const input = h('input', { type: 'search', class: 'thread-search', placeholder: 'Search titles, numbers and properties…', value: threadSearch.q, autocomplete: 'off' });
   input.addEventListener('input', () => {
     threadSearch.q = input.value.trim();
     renderSidebar();
-    clearTimeout(threadSearch.timer);
-    threadSearch.timer = setTimeout(() => fetchThreadHits(projectId), 250);
   });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && input.value) {
@@ -190,46 +183,19 @@ export function threadSearchBox(projectId) {
       input.dispatchEvent(new Event('input'));
     }
   });
-  if (threadSearch.q) fetchThreadHits(projectId);
   return input;
 }
 
-/** Ask the server which threads mention the text anywhere in their conversation. */
-async function fetchThreadHits(projectId) {
-  const q = threadSearch.q;
-  const seq = ++threadSearch.seq;
-  let hits = [];
-  if (q.length >= 2) {
-    try {
-      hits = await api(`/api/projects/${projectId}/search?q=${encodeURIComponent(q)}`);
-    } catch {
-      hits = [];
-    }
-  }
-  if (seq !== threadSearch.seq || threadSearch.projectId !== projectId) return;
-  threadSearch.hits = new Map(hits.map((hit) => [hit.ticketId, hit]));
-  if (view?.kind === 'project' && view.projectId === projectId) renderSidebar();
-}
-
-/** Search results: threads whose title or details match, or whose conversation mentions the text. */
+/** Search results: threads whose title, number or properties match. */
 function renderThreadResults(el, tickets) {
-  const q = threadSearch.q.toLowerCase();
-  const results = [view.coordinator, ...tickets].filter((t) => {
-    const fields = [threadLabel(t), t.created_by, t.last_activity];
-    return fields.some((f) => f?.toLowerCase().includes(q)) || threadSearch.hits.has(t.id);
-  });
+  // The Taskmaster's row stays above the search, so results are minions only.
+  const results = tickets.filter((t) => threadMatches(t, threadSearch.q));
   el.replaceChildren(
     h('section', { class: 'column' },
       h('h3', {}, 'Results', h('span', { class: 'count' }, results.length)),
       results.length
-        ? results.map((t) => {
-            const hit = threadSearch.hits.get(t.id);
-            const card = threadRow(t, t === view.coordinator ? `#/p/${view.projectId}` : threadHref(t), hit);
-            // Open the thread with its find box already on the text.
-            card.addEventListener('click', () => { pendingFind = hit ? threadSearch.q : ''; });
-            return card;
-          })
-        : h('p', { class: 'muted small' }, threadSearch.q.length < 2 ? 'Keep typing to search conversations too.' : 'No minions mention that.')));
+        ? results.map((t) => threadRow(t))
+        : h('p', { class: 'muted small' }, 'No minion has that in its title, number or properties.')));
 }
 
 /** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked. */
@@ -262,7 +228,7 @@ export function rowState(t) {
 }
 
 /** One compact row: number + short ask and the state on top, the thread's note (or what it is doing) below. */
-function threadRow(t, href = threadHref(t), hit = null) {
+function threadRow(t, href = threadHref(t)) {
   const coord = isCoordinator(t);
   // The coordinator is always there to talk to; only show when it is busy.
   const st = coord && t.status !== 'running' ? { cls: '', cell: [], label: statusLabel(t) } : rowState(t);
@@ -283,14 +249,7 @@ function threadRow(t, href = threadHref(t), hit = null) {
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     h('span', { class: `state ${st.cls}` }, st.cell),
-    hit ? snippetLine(hit) : note ? h('span', { class: `note${working ? ' t' : ''}` }, note) : '');
-}
-
-/** A search hit's snippet, with the searched text highlighted. */
-function snippetLine(hit) {
-  const el = h('span', { class: 'note hit' }, hit.snippet, hit.matches > 1 ? h('span', { class: 'more' }, ` +${hit.matches - 1}`) : '');
-  highlight(el, threadSearch.q);
-  return el;
+    note ? h('span', { class: `note${working ? ' t' : ''}` }, note) : '');
 }
 
 /** "now", "5m", "3h", "2d": ages for tight spaces. */

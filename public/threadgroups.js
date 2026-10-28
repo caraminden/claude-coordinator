@@ -16,3 +16,14 @@ export function threadSections(open, knownTags) {
   return [...builds.slice(0, 1).map(buildSection), ...kinds, ...builds.slice(1).map((b, i) => buildSection(b, i + 1))]
     .filter((s) => s.rows.length);
 }
+
+/**
+ * Whether a thread matches the search: its title, its number ("78" or "#78", exactly) or a property
+ * value; "key: value" matches too, so "type: bug" finds bugs without "type" finding everything.
+ */
+export function threadMatches(t, query) {
+  const q = query.toLowerCase();
+  if (String(t.number ?? t.id) === q.replace(/^#/, '')) return true;
+  const props = Object.entries(t.properties ?? {}).flatMap(([k, v]) => [v].flat().map((x) => (q.includes(':') ? `${k}: ${x}` : String(x))));
+  return [t.title, ...props].some((f) => f?.toLowerCase().includes(q));
+}

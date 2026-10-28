@@ -554,8 +554,6 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 
 /* Search: threads list and find-in-chat */
 .thread-search { margin: 0 0 0.5rem; padding: 0.3rem 0.55rem; font-size: 0.9em; }
-.thread-row .note.hit { white-space: normal; -webkit-line-clamp: 2; line-clamp: 2; display: -webkit-box; }
-.thread-row .note.hit .more { color: var(--muted); font-size: 0.9em; }
 mark.find { background: color-mix(in srgb, var(--waiting) 35%, transparent); color: inherit; border-radius: 2px; }
 mark.find.current { background: var(--waiting); color: #fff; }
 .find-box { display: inline-flex; align-items: center; gap: 0.25rem; }

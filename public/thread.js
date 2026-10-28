@@ -160,6 +160,10 @@ export function renderTicketHead() {
   const box = chat?.querySelector('.composer textarea');
   if (box) box.placeholder = composerPlaceholder(t);
   const actions = [];
+  // The minion's branch, running on a copy of the data (start_preview, src/previews.ts).
+  if (t.preview && t.status !== 'closed') {
+    actions.push(h('button', { class: 'secondary', title: 'Open this minion\'s preview in a new tab', onclick: () => window.open(`preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
+  }
   if (t.status === 'running') {
     actions.push(h('button', { class: 'secondary', onclick: () => api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));
   } else if (coord) {

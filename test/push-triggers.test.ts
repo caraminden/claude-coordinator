@@ -23,9 +23,7 @@ after(() => {
 
 const fakeClaude = join(root, 'claude-fake');
 writeFileSync(fakeClaude, `#!${process.execPath}
-let input = '';
-process.stdin.on('data', (d) => (input += d));
-process.stdin.on('end', () => {
+require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   const fail = input.includes('fail');
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: fail, result: fail ? 'API Error: overloaded' : 'done' }));
   process.exit(0);

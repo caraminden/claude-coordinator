@@ -23,8 +23,7 @@ process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
 const fake = join(root, 'claude-fake');
 writeFileSync(fake, `#!${process.execPath}
-process.stdin.resume();
-process.stdin.on('end', () => {
+require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });

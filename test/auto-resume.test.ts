@@ -16,9 +16,7 @@ writeFileSync(
   fake,
   `#!${process.execPath}
 const { appendFileSync, existsSync } = require('node:fs');
-let input = '';
-process.stdin.on('data', (d) => (input += d));
-process.stdin.on('end', () => appendFileSync(${JSON.stringify(prompts)}, input));
+require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => appendFileSync(${JSON.stringify(prompts)}, input + '\\n'));
 const wait = setInterval(() => {
   if (!existsSync(${JSON.stringify(join(root, 'release'))})) return;
   clearInterval(wait);

@@ -1330,9 +1330,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (session.agent !== undefined && ticket.kind !== 'coordinator') {
         return json(res, 202, { ...ticketView(id), held: runner.relay(id, id, session.name, text) });
       }
-      runner.send(id, session.name, text, await saveImages(ticket, body.images));
+      // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
+      runner.send(id, session.name, text, await saveImages(ticket, body.images), {}, session.agent === undefined && body.after !== true);
       personWrote(ticket, session);
       return json(res, 202, ticketView(id));
+    }
+    if (action === '/unqueue' && method === 'POST') {
+      if (session.agent !== undefined) throw new HttpError(403, 'Only people can take back a queued message');
+      const body = await readJson(req);
+      if (!runner.unqueue(id, Number(body.id), session.name)) throw new HttpError(409, 'That message is no longer queued');
+      return json(res, 200, ticketView(id));
     }
     if (action === '/continue' && method === 'POST') {
       // Continue button on a loop-guard pause: the minion's held messages go through.

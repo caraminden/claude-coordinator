@@ -2,13 +2,15 @@
 // transient systemd user unit, so the turn outlives a restart of the server. Everything it reads and
 // writes is in the turn's folder, given as its one argument:
 //   spec.json     in: the command, args, cwd and env (deleted once read, as the env holds the turn's token)
-//   prompt.jsonl  in: claude's stdin
+//   prompt.jsonl  in: the turn's first message, written to claude's stdin
+//   steer.jsonl   in: messages that steer the running turn, one stream-json line each, appended by the runner
+//   steer.sent    out: bytes of steer.jsonl passed to claude; the runner queues the rest for the next turn
 //   pid.json      out: { wrapper, claude } pids; the runner stops a turn by signalling claude's process group
 //   stream.jsonl  out: claude's stdout, the stream-json the runner tails
 //   stderr.log    out: claude's stderr
 //   exit.json     out: { code, signal, error? } once claude has exited
 import { spawn } from 'node:child_process';
-import { appendFileSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, fstatSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const dir = process.argv[2];
@@ -35,7 +37,7 @@ try {
     env: spec.env,
     // Its own process group, as before units: stopping the turn signals the group, tool subprocesses too.
     detached: true,
-    stdio: [openSync(file('prompt.jsonl'), 'r'), openSync(file('stream.jsonl'), 'a'), openSync(file('stderr.log'), 'a')],
+    stdio: ['pipe', openSync(file('stream.jsonl'), 'a'), openSync(file('stderr.log'), 'a')],
   });
 } catch (err: any) {
   // Some failures (E2BIG: arguments too long) throw here rather than emit 'error'; without exit.json
@@ -45,6 +47,55 @@ try {
 child!.on('error', failed);
 if (child!.pid) writeFileSync(file('pid.json'), JSON.stringify({ wrapper: process.pid, claude: child.pid }));
 child!.on('exit', (code, signal) => done({ code, signal }));
+
+// Claude reads stdin line by line, mid-turn too, and waits for more until it closes. So steers go in
+// until the turn's reply (its result) is out; anything written before the close is still handled.
+child.stdin!.on('error', () => {}); // claude exited without reading it all
+child.stdin!.write(readFileSync(file('prompt.jsonl')));
+let sent = 0;
+let scanned = 0;
+const tick = setInterval(() => {
+  if (replied()) {
+    clearInterval(tick);
+    child.stdin!.end();
+    return;
+  }
+  let steers: Buffer;
+  try {
+    steers = readFileSync(file('steer.jsonl'));
+  } catch {
+    return; // none yet
+  }
+  const end = steers.lastIndexOf(10) + 1; // whole lines only: the runner may be mid-append
+  if (end <= sent) return;
+  child.stdin!.write(steers.subarray(sent, end));
+  sent = end;
+  writeFileSync(file('steer.sent'), String(sent));
+}, 250);
+
+/** Claude's stream has a result line past what was scanned before. */
+function replied(): boolean {
+  const fd = openSync(file('stream.jsonl'), 'r');
+  try {
+    const size = fstatSync(fd).size;
+    if (size <= scanned) return false;
+    const buf = Buffer.alloc(size - scanned);
+    readSync(fd, buf, 0, buf.length, scanned);
+    const end = buf.lastIndexOf(10) + 1;
+    scanned += end;
+    for (const line of buf.subarray(0, end).toString('utf8').split('\n')) {
+      if (!line.includes('"result"')) continue;
+      try {
+        if (JSON.parse(line).type === 'result') return true;
+      } catch {
+        // Not JSON: claude printed something else.
+      }
+    }
+    return false;
+  } finally {
+    closeSync(fd);
+  }
+}
 // `systemctl stop` signals the whole unit at once; outlive claude so its exit is still recorded.
 process.on('SIGTERM', () => {});
 process.on('SIGINT', () => {});

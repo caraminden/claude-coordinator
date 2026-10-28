@@ -3,7 +3,7 @@
 // with its input and output in a turn folder the server tails, so a server restart doesn't stop it.
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { APP_NAME } from './appname.ts';
@@ -139,6 +139,7 @@ interface QueuedMessage {
   text: string;
   images: MessageImage[];
   about?: string; // the file a comment is on
+  id?: number; // its user_message event, for taking it back while queued
 }
 
 /**
@@ -153,6 +154,8 @@ interface TurnState {
   /** Present (a reason or null) once the thread asked to close after this turn. */
   closing?: string | null;
   queued?: QueuedMessage[];
+  /** Messages appended to its steer.jsonl, with where each ends there; those past steer.sent never reached claude. */
+  steered?: { end: number; msg: QueuedMessage }[];
   /** The turn's folder (see src/turn-wrapper.ts); absent for turns from before they had one. */
   dir?: string;
   /** Its transient unit, or null when it runs as a child of the server (and dies with it). */
@@ -195,6 +198,18 @@ function wrapperAlive(dir: string): boolean | null {
   } catch {
     return existsSync('/proc/self') ? false : alive(pid);
   }
+}
+
+/** A turn's steers its wrapper never passed to claude (see src/turn-wrapper.ts). */
+function unsentSteers(turn: TurnState): QueuedMessage[] {
+  if (!turn.steered?.length || !turn.dir) return [];
+  let sent = 0;
+  try {
+    sent = Number(readFileSync(join(turn.dir, 'steer.sent'), 'utf8')) || 0;
+  } catch {
+    // None passed on.
+  }
+  return turn.steered.filter((s) => s.end > sent).map((s) => s.msg);
 }
 
 const turnKey = (ticketId: number) => `turn:${ticketId}`;
@@ -556,7 +571,7 @@ export class Runner {
   view(ticket: Ticket) {
     const { total, done } = stepInfo(this.progressFor(ticket.id));
     return {
-      ...ticket, queued: this.queued(ticket.id), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
+      ...ticket, queued: this.queued(ticket.id), queued_ids: (this.queues.get(ticket.id) ?? []).flatMap((m) => m.id ?? []), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
       approvals: this.approvals.waiting(ticket.id), properties: this.store.props.forTarget('minion', ticket.id),
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
@@ -655,11 +670,12 @@ export class Runner {
             console.error(`Ticket ${t.id}: could not re-attach to its turn, so it counts as interrupted:`, err);
           }
           this.store.deleteSetting(turnKey(t.id));
+          const unsent = turn ? unsentSteers(turn) : [];
           if (turn?.dir) rmSync(turn.dir, { recursive: true, force: true });
           this.setStatus(t.id, 'idle');
           // Stopped on purpose: it already says so, and nothing queued survives a stop.
           if (turn?.stopped) continue;
-          if (turn?.queued?.length) this.queues.set(t.id, turn.queued);
+          if (turn?.queued?.length || unsent.length) this.queues.set(t.id, [...(turn?.queued ?? []), ...unsent]);
           const resumes = turn?.resumes ?? 0;
           let skipped: string | null = null;
           if (turn && 'closing' in turn) skipped = 'It was set to be dismissed, so it was not resumed.';
@@ -735,19 +751,46 @@ export class Runner {
     this.store.setSetting(turnKey(ticketId), { ...turn, ...patch });
   }
 
-  /** Record a user message and run it now, or queue it behind the current turn. */
   /**
+   * Record a user message and run it now, or, mid-turn, with `steer` pass it into the running turn
+   * (Claude reads it between tool calls) or else queue it behind the turn.
    * `extra` is stored with the message for the UI (e.g. which question card it answers), not sent
    * to Claude; a comment's file (`extra.comment.about`) is, in its "[Name on file]:" prefix.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string } } & object = {}) {
-    this.emit(ticketId, 'user_message', { author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra });
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string } } & object = {}, steer = false) {
+    const live = this.turns.get(ticketId);
+    const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
+    // A turn from before steering (no steer.jsonl) can't take one; nor can one whose reply is already out.
+    const steers = !!(steer && live && turn && !turn.result && existsSync(join(live.dir, 'steer.jsonl')));
+    const row = this.emit(ticketId, 'user_message', {
+      author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra, ...(steers ? { steered: true } : {}),
+    });
+    const msg: QueuedMessage = { author, text, images, about: extra.comment?.about, id: row.id };
+    if (steers) {
+      const line = promptMessage([msg]);
+      const file = join(live!.dir, 'steer.jsonl');
+      appendFileSync(file, line);
+      this.saveTurn(ticketId, { steered: [...(turn!.steered ?? []), { end: statSync(file).size, msg }] });
+      return;
+    }
     const q = this.queues.get(ticketId) ?? [];
-    q.push({ author, text, images, about: extra.comment?.about });
+    q.push(msg);
     this.queues.set(ticketId, q);
     if (!this.isRunning(ticketId)) return this.next(ticketId);
     this.saveTurn(ticketId, { queued: q });
     this.broadcastTicket(ticketId);
+  }
+
+  /** Take back a message still queued for the next turn; false once it has gone to Claude. */
+  unqueue(ticketId: number, eventId: number, by: string): boolean {
+    const q = this.queues.get(ticketId);
+    const i = q?.findIndex((m) => m.id === eventId) ?? -1;
+    if (i < 0) return false;
+    q!.splice(i, 1);
+    if (this.isRunning(ticketId)) this.saveTurn(ticketId, { queued: q });
+    this.emit(ticketId, 'unqueued', { id: eventId, by });
+    this.broadcastTicket(ticketId);
+    return true;
   }
 
   /**
@@ -756,7 +799,7 @@ export class Runner {
    * a person to continue, until continueLoop. Returns whether it was held.
    */
   relay(minionId: number, to: number, author: string, text: string): boolean {
-    const { held } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text);
+    const { held } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId);
     if (!held) return false;
     const minion = this.store.getTicket(minionId)!;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
@@ -774,7 +817,7 @@ export class Runner {
    * with a note in both chats, until a person continues in either. `left` is how many more may go now.
    */
   relayTaskmaster(from: number, to: number, author: string, text: string): { held: boolean; left: number } {
-    const { held, left } = this.guard(pairKey(from, to), TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, to, author, text);
+    const { held, left } = this.guard(pairKey(from, to), TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, to, author, text, false);
     if (held) {
       const [a, b] = [from, to].map((id) => this.store.getProject(this.store.getTicket(id)!.project_id)!.name);
       const what = `${a}'s message to ${b} ("${clip(text)}")`;
@@ -787,15 +830,15 @@ export class Runner {
     return { held: held > 0, left };
   }
 
-  /** Count a message against the loop at `key`: send it, or hold it once `limit` went in `windowMs` (or one is held already). `held` is how many wait now (0 if it went), `left` how many more may go. */
-  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string): { held: number; left: number } {
+  /** Count a message against the loop at `key`: send it (steering a running turn with `steer`), or hold it once `limit` went in `windowMs` (or one is held already). `held` is how many wait now (0 if it went), `left` how many more may go. */
+  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean): { held: number; left: number } {
     const loop = this.store.getSetting<LoopState>(key) ?? { sent: [], held: [] };
     const now = this.now();
     loop.sent = loop.sent.filter((t) => now - t < windowMs);
     if (!loop.held.length && loop.sent.length < limit) {
       loop.sent.push(now);
       this.store.setSetting(key, loop);
-      this.send(to, author, text);
+      this.send(to, author, text, [], {}, steer);
       return { held: 0, left: limit - loop.sent.length };
     }
     loop.held.push({ to, author, text });
@@ -825,7 +868,8 @@ export class Runner {
       const text = `${by} continued, so ${n === 1 ? 'the held message' : `the ${n} held messages`} went through.`;
       // A minion's note is keyed by the minion in both chats; a Taskmasters' note by each chat's own Taskmaster.
       for (const id of chats) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' ? id : ticketId, by, text });
-      for (const m of loop.held) this.send(m.to, m.author, m.text);
+      // Only the Taskmaster's messages to its minion steer; Taskmasters' to each other queue.
+      for (const m of loop.held) this.send(m.to, m.author, m.text, [], {}, ticket.kind !== 'coordinator' && m.to === ticketId);
       total += n;
     }
     return total;
@@ -841,7 +885,7 @@ export class Runner {
     const live = this.turns.get(ticketId);
     if (!live) return false;
     this.queues.delete(ticketId);
-    this.saveTurn(ticketId, { stopped: true, queued: [] });
+    this.saveTurn(ticketId, { stopped: true, queued: [], steered: [] });
     this.emit(ticketId, 'note', { text: 'Stopped by user.' });
     this.signal(live, 'SIGTERM');
     // A turn that ignores the stop (or hadn't started claude yet) gets killed.
@@ -990,7 +1034,7 @@ export class Runner {
     }
 
     writeFileSync(join(dir, 'prompt.jsonl'), prompt);
-    for (const f of ['stream.jsonl', 'stderr.log']) writeFileSync(join(dir, f), '');
+    for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: this.claudeBin, args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
@@ -1098,6 +1142,12 @@ export class Runner {
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
     this.store.deleteSetting(turnKey(ticketId));
     const stopped = !!turn?.stopped;
+    // Steers that came in as the turn's reply went out never reached claude: they start the next turn.
+    const unsent = turn && !stopped ? unsentSteers(turn) : [];
+    if (unsent.length) {
+      this.queues.set(ticketId, [...(this.queues.get(ticketId) ?? []), ...unsent]);
+      this.emit(ticketId, 'note', { text: `${unsent.length === 1 ? 'A message' : `${unsent.length} messages`} arrived as the turn ended, so the next turn picks ${unsent.length === 1 ? 'it' : 'them'} up.` });
+    }
     const code = exit?.code ?? null;
     const signal = exit ? exit.signal : 'SIGKILL';
     if (exit?.error) this.emit(ticketId, 'error', { text: `Could not start claude: ${exit.error}` });

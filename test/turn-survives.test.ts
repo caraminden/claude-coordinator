@@ -22,9 +22,7 @@ writeFileSync(
   fake,
   `#!${process.execPath}
 const { appendFileSync, existsSync } = require('node:fs');
-let input = '';
-process.stdin.on('data', (d) => (input += d));
-process.stdin.on('end', () => {
+require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ argv: process.argv.slice(2), env: Object.keys(process.env), input }) + '\\n');
   const say = (text) => console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }));
   say(input.includes('big line') ? 'x'.repeat(1.5e6) : 'working on it');

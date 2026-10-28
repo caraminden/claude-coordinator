@@ -108,8 +108,7 @@ test('resolve accepts hashes the live checkout or the scheme repo knows, and not
 test('wake messages go through the runner without counting toward or being held by the loop guard', async () => {
   const fake = join(root, 'claude-fake');
   writeFileSync(fake, `#!${process.execPath}
-process.stdin.resume();
-process.stdin.on('end', () => {
+require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });

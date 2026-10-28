@@ -1,0 +1,16 @@
+// The minions list's property filter: one dropdown per key, listing the values people can pick.
+
+/**
+ * [{ key, values }] for the scheme's active keys, keys with nothing to pick left out. A list key
+ * offers its registry values, archived and proposed ones left out (nothing can carry a proposed
+ * one); a person, text or number key offers the values its minions carry.
+ */
+export function filterChoices(keys, tickets) {
+  return keys.filter((k) => k.status === 'active').map((k) => ({
+    key: k.key,
+    values: k.value_kind === 'enum'
+      ? k.values.filter((v) => v.status === 'active').map((v) => v.value)
+      : [...new Set(tickets.flatMap((t) => [t.properties?.[k.key] ?? []].flat()))]
+          .sort((a, b) => (typeof a === 'number' ? a - b : String(a).localeCompare(String(b)))),
+  })).filter((c) => c.values.length);
+}

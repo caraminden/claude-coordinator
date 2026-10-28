@@ -35,9 +35,8 @@ function filterLinks(t, key, value) {
   if (!offered) return h('span', { class: 'pv' }, propertyValue(value));
   return [value].flat().map((v) => offered.includes(v)
     ? h('button', { type: 'button', class: 'pv pv-pick', title: `Filter the minions list by ${key}: ${v}`, onclick: (e) => {
-      propFilter.picks.set(key, (propFilter.picks.get(key) ?? new Set()).add(v));
       e.currentTarget.closest('details').open = false;
-      renderSidebar();
+      pick(key, v, true);
     } }, String(v))
     : h('span', { class: 'pv' }, String(v)));
 }
@@ -58,65 +57,68 @@ function closeOnClickAway(chip) {
 
 // ---------- the minions list's property filter ----------
 
-// The scheme's keys and the values ticked per key, kept across minion switches like the search.
-export const propFilter = { projectId: null, keys: null, picks: new Map() };
+// The scheme's keys, the values ticked per key, and which parts of the panel are open, kept across
+// minion switches like the search.
+export const propFilter = { projectId: null, keys: null, picks: new Map(), open: false, openKeys: new Map() };
 
-/** One dropdown per key under the minions search, each a checklist of that key's values. */
+/**
+ * Under the minions search: a Filters button that opens a panel with a collapsible checklist per
+ * key, and the ticked values as chips that untick on a click.
+ */
 export async function renderPropFilter() {
   const el = document.getElementById('prop-filter');
   if (!el) return;
   const projectId = view.projectId;
-  if (propFilter.projectId !== projectId) Object.assign(propFilter, { projectId, keys: null, picks: new Map() });
+  if (propFilter.projectId !== projectId) Object.assign(propFilter, { projectId, keys: null, picks: new Map(), open: false, openKeys: new Map() });
   if (!propFilter.keys) {
     const reg = await loadProperties().catch(() => null);
     if (!reg || propFilter.projectId !== projectId) return;
     propFilter.keys = reg.keys;
   }
-  // Leave an open dropdown alone; it picks up new choices when it next draws.
-  if (!el.isConnected || el.querySelector('details[open]')) return;
-  const clear = h('button', { type: 'button', class: 'secondary small pf-clear', hidden: !propFilter.picks.size, onclick: () => {
-    propFilter.picks.clear();
-    renderSidebar();
-  } }, 'Clear');
-  const changed = () => {
-    clear.hidden = !propFilter.picks.size;
-    renderSidebar();
-  };
+  if (!el.isConnected) return;
+  // Every list change redraws this, so put keyboard focus back where it was.
+  const focused = el.contains(document.activeElement) ? document.activeElement.dataset.pf : null;
+  const { picks } = propFilter;
   const tickets = [...view.tickets.values()];
   const open = tickets.filter((t) => t.status !== 'closed');
-  el.replaceChildren(...filterChoices(propFilter.keys, tickets).map((c) => filterDropdown(c, valueCounts(c.key, open, propFilter.picks), changed)), clear);
+  const choices = filterChoices(propFilter.keys, tickets);
+  if (!choices.length && !picks.size) return el.replaceChildren();
+  const ticked = [...picks.values()].reduce((n, set) => n + set.size, 0);
+  el.replaceChildren(
+    h('button', { type: 'button', class: `tag-chip pf-toggle${ticked ? ' on' : ''}`, 'aria-expanded': String(propFilter.open), 'data-pf': 'toggle', onclick: () => {
+      propFilter.open = !propFilter.open;
+      renderPropFilter();
+    } }, ticked ? `Filters · ${ticked}` : 'Filters'),
+    ...[...picks].flatMap(([key, set]) => [...set].map((v) => h('button', { type: 'button', class: 'tag-chip pf-pick', title: `Stop filtering by ${key}: ${v}`, onclick: () => pick(key, v, false) }, `${key}: ${v} ×`))),
+    picks.size ? h('button', { type: 'button', class: 'secondary small pf-clear', onclick: () => { picks.clear(); renderSidebar(); } }, 'Clear') : '',
+    propFilter.open ? h('div', { class: 'pf-panel' }, choices.map((c) => filterSection(c, valueCounts(c.key, open, picks)))) : '',
+  );
+  if (focused) el.querySelector(`[data-pf="${CSS.escape(focused)}"]`)?.focus();
 }
 
-/** A key's checklist; each value shows how many open minions it would let through, given the other keys' picks. */
-function filterDropdown({ key, values }, counts, changed) {
-  const picked = () => propFilter.picks.get(key) ?? new Set();
-  const summary = h('summary', { class: 'tag-chip' });
-  const dd = h('details', { class: 'prop-chip pf' }, summary,
-    h('div', { class: 'prop-pop' },
-      h('h4', {}, key),
-      values.map((v) => {
-        const box = h('input', { type: 'checkbox', checked: picked().has(v) });
-        box.addEventListener('change', () => {
-          const set = picked();
-          if (box.checked) set.add(v);
-          else set.delete(v);
-          if (set.size) propFilter.picks.set(key, set);
-          else propFilter.picks.delete(key);
-          show();
-          changed();
-        });
-        const n = counts.get(v) ?? 0;
-        return h('label', { class: n ? 'pf-opt' : 'pf-opt none' }, box, String(v), h('span', { class: 'pf-n' }, String(n)));
-      })));
-  const show = () => {
-    const set = picked();
-    summary.textContent = set.size ? `${key}: ${[...set].join(', ')}` : key;
-    dd.classList.toggle('on', !!set.size);
-  };
-  show();
-  // The other dropdowns' counts wait while this one is open (renderPropFilter leaves an open one alone).
-  dd.addEventListener('toggle', () => { if (!dd.open) renderPropFilter(); });
-  return closeOnClickAway(dd);
+/** Tick or untick one value, then redraw the list (which redraws the filter). */
+function pick(key, v, on) {
+  const set = propFilter.picks.get(key) ?? new Set();
+  if (on) set.add(v);
+  else set.delete(v);
+  if (set.size) propFilter.picks.set(key, set);
+  else propFilter.picks.delete(key);
+  renderSidebar();
+}
+
+/** A key's collapsible checklist; each value shows how many open minions it would let through, given the other keys' picks. */
+function filterSection({ key, values }, counts) {
+  const picked = propFilter.picks.get(key) ?? new Set();
+  const sec = h('details', { class: 'pf-key', open: propFilter.openKeys.get(key) ?? picked.size > 0 },
+    h('summary', { 'data-pf': `key:${key}` }, key, picked.size ? h('span', { class: 'pf-n' }, String(picked.size)) : ''),
+    values.map((v) => {
+      const n = counts.get(v) ?? 0;
+      return h('label', { class: n ? 'pf-opt' : 'pf-opt none' },
+        h('input', { type: 'checkbox', checked: picked.has(v), 'data-pf': `value:${key}:${v}`, onchange: (e) => pick(key, v, e.target.checked) }),
+        String(v), h('span', { class: 'pf-n' }, String(n)));
+    }));
+  sec.addEventListener('toggle', () => propFilter.openKeys.set(key, sec.open));
+  return sec;
 }
 
 /** Whether people on this scheme's page change a key: its own keys, and global ones only on Citadel's. */

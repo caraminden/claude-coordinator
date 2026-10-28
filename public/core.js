@@ -5,6 +5,7 @@ import { showProject, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
 import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './thread.js';
 import { onPropertiesChanged } from './properties.js';
+import { inboxEvent, inboxTicket } from './inbox.js';
 import { inAppHash, linkThreadRefs } from './threadrefs.js';
 
 export const app = document.getElementById('app');
@@ -368,7 +369,10 @@ function connectStream(catchUp = false) {
     }
     if (msg.type === 'usage') renderUsage(msg.usage);
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
-    if (msg.type === 'event') onEvent(msg.event);
+    if (msg.type === 'event') {
+      onEvent(msg.event);
+      inboxEvent(msg.event);
+    }
     if (msg.type === 'artifacts') onArtifactsChanged(msg.projectId);
     if (msg.type === 'project') onProjectUpdate(msg.project);
     if (msg.type === 'properties') onPropertiesChanged(msg.projectId);
@@ -547,8 +551,10 @@ export async function catchUpEvents() {
 
 function onTicketUpdate(ticket) {
   if (view?.kind !== 'project' || view.projectId !== ticket.project_id) return;
+  const before = ticket.kind === 'coordinator' ? view.coordinator : view.tickets.get(ticket.id);
   if (ticket.kind === 'coordinator') view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);
+  inboxTicket(before, ticket);
   renderSidebar();
   if (view.id === ticket.id) {
     view.ticket = ticket;
@@ -603,6 +609,7 @@ async function route() {
     if (!hash.startsWith('#/f/') && closeViewer() === hash) return;
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/inbox$/))) await showProject(Number(m[1]), { kind: 'inbox' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/(?:settings|instructions)$/))) await showProject(Number(m[1]), { kind: 'instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });

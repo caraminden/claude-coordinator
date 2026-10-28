@@ -10,14 +10,18 @@ import { inboxItems } from '../src/inbox.ts';
 const root = mkdtempSync(join(tmpdir(), 'inbox-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-test('the inbox lists open cards from every scheme: approvals first, then newest first', () => {
+test('a scheme\'s inbox: open cards and ready/try minions, approvals first, then newest first', () => {
   const store = new Store(join(root, 'db.sqlite'));
   const approvals = new Approvals(() => {});
   const minion = (projectId: number, title: string) =>
     store.createTicket({ project_id: projectId, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
   const p1 = store.createProject('One', null).id;
   const p2 = store.createProject('Two', null).id;
-  const a = minion(p1, 'a'), b = minion(p2, 'b'), gone = minion(p1, 'gone');
+  const a = minion(p1, 'a'), b = minion(p1, 'b'), gone = minion(p1, 'gone'), elsewhere = minion(p2, 'elsewhere');
+  const ready = minion(p1, 'ready'), parked = minion(p1, 'parked');
+  store.updateTicket(ready, { state: 'ready' });
+  store.updateTicket(parked, { state: 'parked' });
+  store.addEvent(elsewhere, 'question', { id: 'q-other-scheme', questions: [] });
 
   store.addEvent(a, 'question', { id: 'q-open', questions: [] });
   store.addEvent(a, 'question', { id: 'q-done', questions: [] });
@@ -31,9 +35,12 @@ test('the inbox lists open cards from every scheme: approvals first, then newest
   const settled = approvals.request(b, 'Bash', { command: 'pwd' });
   approvals.decide(b, settled, true, 'Cara');
 
-  const items = inboxItems(store, approvals);
+  approvals.request(elsewhere, 'Bash', { command: 'id' });
+
+  const items = inboxItems(store, approvals, p1);
   assert.deepEqual([items[0].kind, items[0].ticketId, (items[0].card as any).id], ['approval', a, approvalId]);
-  assert.deepEqual(items.slice(1).map((i) => [i.kind, i.ticketId, (i.card as any).id]).sort(), [['plan', b, 'p-open'], ['question', a, 'q-open']]);
-  assert.ok(items[1].at >= items[2].at);
+  assert.deepEqual(items.slice(1).map((i) => [i.kind, i.ticketId, (i.card as any)?.id ?? null]).sort(),
+    [['plan', b, 'p-open'], ['question', a, 'q-open'], ['state', ready, null]]);
+  for (let i = 2; i < items.length; i++) assert.ok(items[i - 1].at >= items[i].at);
   assert.equal((items[0].card as any).tool, 'Bash');
 });

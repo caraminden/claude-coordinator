@@ -570,7 +570,7 @@ function approvalOutcome(r) {
  * card also shows its reason), waiting for a person. The turn is paused until someone clicks; a card
  * whose turn ended (stopped, failed, server restart) expires.
  */
-function approvalCard(ticketId, card) {
+export function approvalCard(ticketId, card) {
   const input = card.input ?? {};
   // Show what will actually run: the command for Bash, the path for file tools, else the whole input.
   const lead = typeof input.command === 'string' ? 'command' : typeof input.file_path === 'string' ? 'file_path' : null;
@@ -629,7 +629,7 @@ function planOutcome(r) {
  * A plan from Claude waiting for a go: Approve sends it, Revise opens a box for notes that go back
  * to Claude, which answers with a new card. Only people can decide; the card keeps its outcome.
  */
-function planCard(ticketId, card) {
+export function planCard(ticketId, card) {
   const status = h('span', { class: 'muted', role: 'status' });
   const approve = h('button', { type: 'button', class: 'small' }, 'Approve');
   const revise = h('button', { type: 'button', class: 'small secondary' }, 'Revise');
@@ -727,7 +727,7 @@ function answerSummary(answers) {
 // Picks not yet sent, by card id, so a card keeps them while you look at an option's picture.
 const cardPicks = new Map();
 
-function questionCard(ticketId, card) {
+export function questionCard(ticketId, card) {
   if (!cardPicks.has(card.id)) cardPicks.set(card.id, card.questions.map(() => ({ selected: new Set(), other: '' })));
   const picks = cardPicks.get(card.id);
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;

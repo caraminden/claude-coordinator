@@ -16,6 +16,7 @@ import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
 import { cleanPluginDirs, cleanRules, lines } from './src/approvals.ts';
+import { inboxItems } from './src/inbox.ts';
 import { instructionSources } from './src/instructions.ts';
 import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, hashToken, newToken } from './src/machines.ts';
 import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigger } from './src/push.ts';
@@ -985,6 +986,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       return json(res, 200, r);
     }
     throw new HttpError(404, 'Not found');
+  }
+
+  m = pathname.match(/^\/api\/projects\/(\d+)\/inbox$/);
+  if (m && method === 'GET') {
+    // Everything in the scheme waiting on a person: open cards, and minions in state ready or try.
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such scheme');
+    return json(res, 200, { items: inboxItems(store, runner.approvals, project.id) });
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/search$/);

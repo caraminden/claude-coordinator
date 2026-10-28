@@ -901,3 +901,25 @@ dialog.viewer .composer .picker { display: none; }
   dialog.viewer .ticket-head .progress { display: none; }
   dialog.viewer .ticket-head { margin-bottom: 0.5rem; }
 }
+
+/* Needs-you inbox (#74): its row and count in the minions panel, and its page. */
+#inbox-row .inbox-link { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.6rem; margin-bottom: 0.5rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); text-decoration: none; font-weight: 600; }
+#inbox-row .inbox-link .label { flex: 1; }
+#inbox-row .inbox-link .muted { font-weight: normal; font-size: 0.88em; }
+#inbox-row .inbox-link:hover { border-color: var(--accent); }
+#inbox-row .inbox-link.active { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.inbox-link .count, .sidebar > summary .count { background: var(--accent); color: #fff; border-radius: 999px; padding: 0.1rem 0.45rem; font-size: 0.82em; line-height: 1.3; font-weight: 600; }
+.sidebar > summary .count[hidden], .sidebar[open] > summary .count { display: none; }
+.sidebar:not([open]) > summary .count { writing-mode: horizontal-tb; margin-top: 0.4rem; }
+#inbox-list { display: flex; flex-direction: column; gap: 1.1rem; }
+.inbox-item { display: block; }
+.inbox-item > .qcard { margin: 0; }
+.inbox-head { font-size: 0.9em; margin: 0 0 0.35rem; }
+.inbox-head .who-link { color: var(--ink); font-weight: 600; text-decoration: none; }
+.inbox-head .who-link:hover { color: var(--accent); }
+.inbox-head .num { color: var(--muted); }
+.inbox-item.state-item { padding: 0.6rem 0.8rem; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); text-decoration: none; }
+.inbox-item.state-item:hover { border-color: var(--accent); }
+.inbox-item.state-item .state-line { display: flex; align-items: center; gap: 0.5rem; }
+.inbox-item.seen { opacity: 0.55; }
+.inbox-page .pcard .pbody { max-height: 18rem; overflow-y: auto; }

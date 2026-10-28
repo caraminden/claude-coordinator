@@ -5,6 +5,7 @@ import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, threadSearchB
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
 import { chatSection, chatView, mountChat } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
+import { inboxPage, refreshInbox } from './inbox.js';
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 export async function showTicket(ticketId) {
@@ -20,6 +21,7 @@ function renderCrumbs(main) {
   const settingsLink = h('a', { href: `#/p/${project.id}/settings` }, 'Settings');
   crumbs.replaceChildren(...(
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
+      : main.kind === 'inbox' ? [projectLink, ' / ', 'Needs you']
       : main.kind === 'instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Instructions']
       : main.kind === 'approvals' ? [projectLink, ' / ', settingsLink, ' / ', 'Needs approval']
       : main.kind === 'properties' ? [projectLink, ' / ', settingsLink, ' / ', 'Properties']
@@ -91,8 +93,10 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('div', { id: 'machines-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
-    h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label' }, 'Minions')),
+    h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label' }, 'Minions'),
+      h('span', { id: 'inbox-count', class: 'count', title: 'Waiting on you', hidden: true })),
     newTicketForm(projectId),
+    h('div', { id: 'inbox-row' }),
     // The coordinator sits above the search so it stays one click away while searching.
     h('div', { id: 'coordinator-row' }),
     threadSearchBox(projectId),
@@ -111,6 +115,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     sidebar.open = panelOpen('threads');
   };
   const section = main.kind === 'artifacts' ? artifactBrowser()
+    : main.kind === 'inbox' ? inboxPage()
     : main.kind === 'instructions' ? instructionsEditor()
     : main.kind === 'approvals' ? approvalsEditor()
     : main.kind === 'properties' ? propertiesPage()
@@ -128,6 +133,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderMachinesShelf();
   renderShelf();
   renderSidebar();
+  refreshInbox();
   prefetchTopRows();
   if (main.kind === 'artifacts') renderArtifactResults();
   if (main.kind === 'artifact') renderArtifactHead();

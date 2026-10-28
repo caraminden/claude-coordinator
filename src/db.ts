@@ -561,18 +561,18 @@ export class Store {
   }
 
   /**
-   * Stored cards still waiting on a person, in threads that aren't dismissed: questions nobody has
-   * answered, and plans still pending. Approval cards live in memory (Approvals.pending).
+   * A project's stored cards still waiting on a person, in threads that aren't dismissed: questions
+   * nobody has answered, and plans still pending. Approval cards live in memory (Approvals.pending).
    */
-  openCards(): EventRow[] {
+  openCards(projectId: number): EventRow[] {
     return this.db.prepare(`
       SELECT e.* FROM events e JOIN tickets t ON t.id = e.ticket_id
-      WHERE t.status != 'closed' AND (
+      WHERE t.project_id = ? AND t.status != 'closed' AND (
         (e.kind = 'plan' AND json_extract(e.data, '$.status') = 'pending')
         OR (e.kind = 'question' AND NOT EXISTS (
           SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message'
             AND json_extract(a.data, '$.answer.questionId') = json_extract(e.data, '$.id'))))
-      ORDER BY e.id`).all() as unknown as EventRow[];
+      ORDER BY e.id`).all(projectId) as unknown as EventRow[];
   }
 
   /** The text of a ticket's replies that may link files (subagents' included). */

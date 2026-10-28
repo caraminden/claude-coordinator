@@ -6,6 +6,7 @@ import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
+import { renderInbox } from './inbox.js';
 
 // ---------- projects ----------
 
@@ -153,6 +154,8 @@ export function renderSidebar() {
   // The property filter narrows open and dismissed minions alike; the Taskmaster always shows.
   const picks = propFilter.projectId === view.projectId ? propFilter.picks : new Map();
   const tickets = picks.size ? all.filter((t) => matchesPicks(t, picks)) : all;
+  // Its count depends on which minions you've seen, which changes with the rows.
+  renderInbox();
   if (threadSearch.q) return renderThreadResults(el, tickets.sort((a, b) => b.updated_at - a.updated_at));
   const open = tickets.filter((t) => t.status !== 'closed');
   const closed = tickets.filter((t) => t.status === 'closed').sort((a, b) => b.updated_at - a.updated_at);

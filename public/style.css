@@ -907,25 +907,21 @@ dialog.viewer .composer .picker { display: none; }
   dialog.viewer .ticket-head { margin-bottom: 0.5rem; }
 }
 
-/* Needs-you inbox (#74): a strip on top of the chat head, minimized to a count until opened. */
+/* Needs-you inbox (#74): a strip at the top of the minions list, minimized to a count until opened. */
 .inbox-strip { margin: 0 0 0.5rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-.inbox-strip[hidden], dialog.viewer .inbox-strip { display: none; }
+.inbox-strip[hidden] { display: none; }
 .inbox-toggle { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.35rem 0.7rem; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 0.9em; text-align: left; cursor: pointer; }
 .inbox-toggle:hover { color: var(--accent); }
 .inbox-toggle .label { font-weight: 600; }
 .inbox-toggle .count { background: var(--accent); color: #fff; border-radius: 999px; padding: 0.1rem 0.45rem; font-size: 0.85em; line-height: 1.3; font-weight: 600; }
 .inbox-toggle .chev { color: var(--muted); }
 .inbox-rows { display: flex; flex-direction: column; max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); padding: 0.25rem; }
-.inbox-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0.5rem; border-radius: 6px; color: var(--ink); text-decoration: none; font-size: 0.9em; }
+.inbox-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.6rem; padding: 0.35rem 0.5rem; border-radius: 6px; color: var(--ink); text-decoration: none; font-size: 0.9em; }
 .inbox-row:hover { background: var(--bg); }
 .inbox-row.active { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
 .inbox-row.seen { opacity: 0.55; }
-.inbox-row .name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* The panel is narrow: the title takes the first line, what it asks and when go below it. */
+.inbox-row .name { flex-basis: 100%; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .inbox-row .num { color: var(--muted); }
 .inbox-row .asks { display: flex; gap: 0.3rem; flex: none; }
 .inbox-row .when { flex: none; font-size: 0.9em; }
-@media (max-width: 600px) {
-  /* Phones: the title takes the first line, what it asks and when go below it. */
-  .inbox-row { flex-wrap: wrap; row-gap: 0.15rem; }
-  .inbox-row .name { flex-basis: 100%; }
-}

@@ -1,5 +1,5 @@
-// The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the chat,
-// minimized to a count until you open it.
+// The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
+// minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, STATES, taskmasterLabel, threadHref, view } from './core.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
@@ -42,11 +42,10 @@ export function inboxTicket(before, after) {
 const ASKS = { approval: '✋ Approve', question: '❓ Question', plan: '📋 Plan', ready: '✅ Ready', try: '🧪 Try it' };
 const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
 
-// One strip, kept across chats so it stays opened or minimized as you move between them. Made on
-// first use: a module's top-level code must not call into another while they load.
+// One strip, kept across scheme pages so it doesn't flicker as they redraw. Made on first use: a module's top-level code must not call into another while they load.
 let strip = null;
 
-/** The strip for the chat head (renderTicketHead puts it on top). */
+/** The strip for the minions panel (showProject puts it above the Taskmaster's row). */
 export function inboxStrip() {
   strip ??= h('div', { class: 'inbox-strip', hidden: true });
   return strip;

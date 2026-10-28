@@ -3,7 +3,6 @@ import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, file
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState } from './sidebar.js';
 import { propertyChip } from './properties.js';
-import { inboxStrip } from './inbox.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
@@ -179,7 +178,6 @@ export function renderTicketHead() {
   // Titled too, since phones may cut it short to keep the buttons beside it.
   const stateLabel = h('span', { class: 'muted', title: state }, state);
   el.replaceChildren(
-    inboxStrip(),
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),

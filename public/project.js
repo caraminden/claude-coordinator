@@ -5,7 +5,7 @@ import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, threadSearchB
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
 import { chatSection, chatView, mountChat } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
-import { refreshInbox } from './inbox.js';
+import { inboxStrip, refreshInbox } from './inbox.js';
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 export async function showTicket(ticketId) {
@@ -94,6 +94,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label' }, 'Minions')),
     newTicketForm(projectId),
+    inboxStrip(),
     // The coordinator sits above the search so it stays one click away while searching.
     h('div', { id: 'coordinator-row' }),
     threadSearchBox(projectId),

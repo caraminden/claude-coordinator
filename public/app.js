@@ -3049,6 +3049,7 @@ function optionThumb(ticketId, o) {
 
 // Messages the app sends a thread about its pull request (see src/github.ts).
 const GITHUB_NAME = 'GitHub';
+const COORDINATOR_NAME = 'Coordinator';
 
 /** A chat message from a person; `about`, for a comment on a file, links that file. */
 function userBubble(author, text, imageSrcs, about = null) {
@@ -3061,6 +3062,12 @@ function userBubble(author, text, imageSrcs, about = null) {
   if (imageSrcs.length) {
     msg.append(h('div', { class: 'images' }, imageSrcs.map((src) =>
       h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
+  }
+  // The coordinator's hand-offs are rarely worth reading in full, so they start folded to one line.
+  if (author === COORDINATOR_NAME) {
+    const preview = (text ?? '').replace(/[#*_`>\[\]]/g, '').replace(/\s+/g, ' ').trim();
+    msg.querySelector('.who').remove();
+    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, author), h('span', { class: 'preview' }, preview)), msg);
   }
   return msg;
 }

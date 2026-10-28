@@ -15,7 +15,7 @@ const faded = (item) => item.kind === 'state' && isSeen(ticketOf(item.ticketId) 
 export async function refreshInbox() {
   if (view?.kind !== 'project') return;
   const projectId = view.projectId;
-  const { items } = await api(`/api/projects/${projectId}/inbox`).catch(() => ({ items: null }));
+  const { items } = await api(`api/projects/${projectId}/inbox`).catch(() => ({ items: null }));
   if (!items || view?.projectId !== projectId) return;
   Object.assign(inbox, { projectId, items });
   renderInbox();

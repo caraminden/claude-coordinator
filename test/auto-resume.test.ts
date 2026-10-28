@@ -36,6 +36,7 @@ const project = store.createProject('Test', null);
 function server() {
   const r = new Runner(store, () => {}, () => ({}), fake);
   r.resumeGapMs = 10;
+  r.pollMs = 10;
   return r;
 }
 
@@ -45,11 +46,19 @@ function newTicket() {
   return t.id;
 }
 
-/** The server dies mid-turn: its claude process goes with it, and nothing records the turn's end. */
-function crash(r: Runner, id: number) {
-  const proc = (r as any).procs.get(id);
-  proc.removeAllListeners('close');
-  process.kill(-proc.pid, 'SIGKILL');
+/** The server dies mid-turn and its turn goes with it (no unit, or the unit died too): nothing records the turn's end. */
+async function crash(r: Runner, id: number) {
+  const dir: string = (r as any).turns.get(id).dir;
+  await until(() => existsSync(join(dir, 'pid.json')));
+  r.detachAll();
+  const { wrapper, claude } = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8'));
+  for (const pid of [wrapper, -claude]) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
 }
 
 async function until(check: () => boolean) {
@@ -72,7 +81,7 @@ test('an interrupted turn resumes after a restart, with the messages queued behi
   before.send(id, 'Cara', 'build it');
   before.send(id, 'Josh', 'also add a test');
   assert.equal(before.queued(id), 1);
-  crash(before, id);
+  await crash(before, id);
   writeFileSync(prompts, '');
 
   const after = server();
@@ -93,10 +102,8 @@ test('a stopped turn is not resumed, even if the server restarts before it ends'
   const before = server();
   before.send(id, 'Cara', 'build it');
   before.send(id, 'Cara', 'never mind');
-  const proc = (before as any).procs.get(id);
-  proc.removeAllListeners('close');
   before.stop(id);
-  process.kill(-proc.pid, 'SIGKILL');
+  await crash(before, id);
 
   const after = server();
   after.recover();
@@ -111,12 +118,12 @@ test(`a thread is resumed at most ${MAX_RESUMES} times in a row`, async () => {
   let r = server();
   r.send(id, 'Cara', 'build it');
   for (let i = 0; i < MAX_RESUMES; i++) {
-    crash(r, id);
+    await crash(r, id);
     r = server();
     r.recover();
     await until(() => r.isRunning(id));
   }
-  crash(r, id);
+  await crash(r, id);
   r = server();
   r.recover();
   await settle();
@@ -126,7 +133,7 @@ test(`a thread is resumed at most ${MAX_RESUMES} times in a row`, async () => {
 
   // A turn that ends on its own resets the count.
   r.send(id, 'Cara', 'try again');
-  crash(r, id);
+  await crash(r, id);
   r = server();
   r.recover();
   await until(() => r.isRunning(id));

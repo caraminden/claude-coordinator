@@ -1,9 +1,11 @@
-// Runs ticket turns as headless `claude -p` processes, one turn per process.
-import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// Runs ticket turns as headless `claude -p` processes, one turn per process. Each runs through
+// src/turn-wrapper.ts in a transient systemd unit of its own (or, without units, a detached child),
+// with its input and output in a turn folder the server tails, so a server restart doesn't stop it.
+import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { createInterface } from 'node:readline';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { APP_NAME } from './appname.ts';
 import { AGENT_NAME } from './auth.ts';
 import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
@@ -50,6 +52,9 @@ export const MCP_SERVER = pinnedCopy('mcp.ts');
 export const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
 // Pinned too, so a deploy can't change the rules under a running turn.
 export const TRIPWIRE = pinnedCopy('tripwire.ts');
+export const TURN_WRAPPER = pinnedCopy('turn-wrapper.ts');
+/** The slice turn units run in; its name puts it under citadel.slice, which deploy/citadel.slice caps. */
+export const TURN_SLICE = 'citadel-turns.slice';
 
 /** The tripwire's view of this server, for a turn in this project; `ask` when the turn can show approval cards. */
 export function tripwireConfig(projectId: number, claudeConfig: string, ask: boolean): TripwireConfig {
@@ -61,9 +66,9 @@ export function tripwireConfig(projectId: number, claudeConfig: string, ask: boo
  * this server's data and checkout, and in a minion's turn sends the ones a person may allow to a card.
  * Its config travels as one JSON argument; no quoting needed, as these paths and JSON carry no single quotes.
  */
-export function tripwireHooks(projectId: number, claudeConfig: string, ask = false) {
+export function tripwireHooks(projectId: number, claudeConfig: string, ask = false, script = TRIPWIRE) {
   const config = tripwireConfig(projectId, claudeConfig, ask);
-  const command = [process.execPath, TRIPWIRE, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
+  const command = [process.execPath, script, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
   return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob)$', hooks: [{ type: 'command', command, timeout: 10 }] }] };
 }
 
@@ -133,7 +138,8 @@ interface QueuedMessage {
 
 /**
  * What a running turn's restart recovery needs, kept in the settings table under `turn:<ticket id>`
- * from the turn's start until its process exits: a server restart kills the process before then.
+ * from the turn's start until the server has handled its end. A restart re-attaches to the turn from
+ * this, or resumes it if its process died too.
  */
 interface TurnState {
   /** Auto-resumes in a row that led to this turn; 0 for a turn people or GitHub started. */
@@ -142,6 +148,48 @@ interface TurnState {
   /** Present (a reason or null) once the thread asked to close after this turn. */
   closing?: string | null;
   queued?: QueuedMessage[];
+  /** The turn's folder (see src/turn-wrapper.ts); absent for turns from before they had one. */
+  dir?: string;
+  /** Its transient unit, or null when it runs as a child of the server (and dies with it). */
+  unit?: string | null;
+  /** Bytes of its stream.jsonl handled so far. */
+  offset?: number;
+  startedAt?: number;
+  configDir?: string;
+  /** The ticket had an effort of its own when the turn started. */
+  chosenEffort?: boolean;
+  /** Its result event, once seen. */
+  result?: { error: boolean; text: string | null };
+  /** Its minion's deploy went live mid-turn (see deployLive). */
+  deployed?: true;
+}
+
+/** A turn this server follows: its folder, read up to `offset`. */
+interface LiveTurn {
+  dir: string;
+  unit: string | null;
+  offset: number;
+  startedAt: number;
+  configDir: string;
+  chosenEffort: boolean;
+  timer: NodeJS.Timeout;
+  ticks: number;
+  stopTimer?: NodeJS.Timeout;
+}
+
+/** A turn's wrapper still runs: its pid is alive and is that turn's wrapper, not a reused pid. */
+function wrapperAlive(dir: string): boolean | null {
+  let pid: number;
+  try {
+    pid = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8')).wrapper;
+  } catch {
+    return null; // not started yet, or never will be
+  }
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(dir);
+  } catch {
+    return existsSync('/proc/self') ? false : alive(pid);
+  }
 }
 
 const turnKey = (ticketId: number) => `turn:${ticketId}`;
@@ -405,9 +453,8 @@ export function turnSettings(ticket: Pick<Ticket, 'kind' | 'model' | 'effort'>, 
 }
 
 export class Runner {
-  private procs = new Map<number, ChildProcess>();
+  private turns = new Map<number, LiveTurn>();
   private queues = new Map<number, QueuedMessage[]>();
-  private stopping = new Set<number>();
   /** Tickets that asked to close when their current turn ends, with the reason they gave. */
   private closing = new Map<number, string | null>();
   /** Minions whose deploy went live mid-turn: dismissed when that turn ends, if still pending-deploy. */
@@ -421,6 +468,14 @@ export class Runner {
   now = () => Date.now();
   /** Gap between auto-resumes after a restart, so they don't all start at once. */
   resumeGapMs = 3000;
+  /** How often a running turn's stream file is read. */
+  pollMs = 250;
+  /** Run turns in transient systemd user units, which outlive this server, rather than as its children. */
+  units = false;
+  /** Where turn folders go: beside the database, so a test's or dev copy's never mix with the live ones. */
+  turnsDir: string;
+  /** Tells this server's turn units apart from another server's (a dev copy) on the same user manager. */
+  private unitTag: string;
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
   filesDir: (ticket: Ticket) => string | null = () => null;
   /** The folder every thread and the coordinator of a project can read and write, for handoffs and notes. */
@@ -448,10 +503,26 @@ export class Runner {
     });
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
+    this.turnsDir = join(dirname(store.path), 'run', 'turns');
+    this.unitTag = createHash('sha256').update(this.turnsDir).digest('hex').slice(0, 8);
   }
 
   isRunning(ticketId: number): boolean {
-    return this.procs.has(ticketId);
+    return this.turns.has(ticketId);
+  }
+
+  /** Running turns a restart of this server would kill: those not in a unit of their own. */
+  interruptible(): number {
+    return [...this.turns.values()].filter((t) => !t.unit).length;
+  }
+
+  /** Stop following turns, for a server shutting down; they keep running, and the next server re-attaches. */
+  detachAll() {
+    for (const t of this.turns.values()) {
+      clearInterval(t.timer);
+      clearTimeout(t.stopTimer);
+    }
+    this.turns.clear();
   }
 
   queued(ticketId: number): number {
@@ -484,6 +555,7 @@ export class Runner {
   deployLive(ticketId: number): boolean {
     if (this.isRunning(ticketId) || this.queued(ticketId)) {
       this.deployedMidTurn.add(ticketId);
+      if (this.isRunning(ticketId)) this.saveTurn(ticketId, { deployed: true });
       return false;
     }
     const t = this.store.getTicket(ticketId);
@@ -514,22 +586,30 @@ export class Runner {
   }
 
   /**
-   * Mark turns that were cut off by a server restart, and resume them a few seconds apart unless
-   * they were stopped, set to close, or already resumed MAX_RESUMES times in a row. Messages queued
-   * behind a cut-off turn go into its resume (or, for one not resumed, into a turn of their own).
-   * A turn that failed (the usage limit included) ended before the restart, so it isn't 'running'.
+   * After a server restart: re-attach to turns still running in their units (or that ended while the
+   * server was down), and catch up on their output. Turns whose process died too were cut off: mark
+   * them, and resume them a few seconds apart unless they were stopped, set to close, or already
+   * resumed MAX_RESUMES times in a row. Messages queued behind a cut-off turn go into its resume (or,
+   * for one not resumed, into a turn of their own). A turn that failed (the usage limit included)
+   * ended before the restart, so it isn't 'running'.
    */
   recover() {
     const later: (() => void)[] = [];
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
         if (t.status === 'running') {
-          // Cards that were waiting died with the turn; nobody's click can count for them now.
+          // Waiting cards lived in the old server's memory; nobody's click can count for them now.
           for (const id of unsettledCards(this.store.listEvents(t.id))) {
             this.emit(t.id, 'approval_result', { id, state: 'expired', reason: 'The server restarted while this waited.' });
           }
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
+          try {
+            if (turn?.dir && this.reattach(t.id, turn)) continue;
+          } catch (err: any) {
+            console.error(`Ticket ${t.id}: could not re-attach to its turn, so it counts as interrupted:`, err);
+          }
           this.store.deleteSetting(turnKey(t.id));
+          if (turn?.dir) rmSync(turn.dir, { recursive: true, force: true });
           this.setStatus(t.id, 'idle');
           // Stopped on purpose: it already says so, and nothing queued survives a stop.
           if (turn?.stopped) continue;
@@ -559,6 +639,36 @@ export class Runner {
       }
     }
     later.forEach((start, i) => setTimeout(start, this.resumeGapMs * (i + 1)));
+    // Folders of turns nobody follows any more and whose process is gone.
+    try {
+      const followed = new Set([...this.turns.values()].map((t) => t.dir));
+      for (const name of readdirSync(this.turnsDir)) {
+        const dir = join(this.turnsDir, name);
+        if (!followed.has(dir) && !wrapperAlive(dir)) rmSync(dir, { recursive: true, force: true });
+      }
+    } catch {
+      // No turns yet.
+    }
+  }
+
+  /** Follow a turn a previous server started, if it still runs or ended while no server watched it. */
+  private reattach(ticketId: number, turn: TurnState): boolean {
+    const live = this.follow(ticketId, turn);
+    if (!existsSync(join(live.dir, 'exit.json')) && !this.running(live)) {
+      clearInterval(live.timer);
+      this.turns.delete(ticketId);
+      return false;
+    }
+    if (turn.queued?.length) this.queues.set(ticketId, turn.queued);
+    if ('closing' in turn) this.closing.set(ticketId, turn.closing ?? null);
+    if (turn.deployed) this.deployedMidTurn.add(ticketId);
+    console.log(`Ticket ${ticketId}: re-attached to its running turn${live.unit ? ` in ${live.unit}` : ''}.`);
+    return true;
+  }
+
+  /** Whether a followed turn's process may still be running: started, or still starting. */
+  private running(live: LiveTurn): boolean {
+    return wrapperAlive(live.dir) ?? Date.now() - live.startedAt < 60_000;
   }
 
   /** Start an auto-resume turn, with any messages that were queued behind the cut-off one. */
@@ -643,19 +753,40 @@ export class Runner {
   }
 
   stop(ticketId: number): boolean {
-    const proc = this.procs.get(ticketId);
-    if (!proc) return false;
+    const live = this.turns.get(ticketId);
+    if (!live) return false;
     this.queues.delete(ticketId);
-    this.stopping.add(ticketId);
     this.saveTurn(ticketId, { stopped: true, queued: [] });
     this.emit(ticketId, 'note', { text: 'Stopped by user.' });
-    // claude runs in its own process group; signal the whole group so tool subprocesses stop too.
-    try {
-      process.kill(-proc.pid!, 'SIGTERM');
-    } catch {
-      proc.kill('SIGTERM');
-    }
+    this.signal(live, 'SIGTERM');
+    // A turn that ignores the stop (or hadn't started claude yet) gets killed.
+    clearTimeout(live.stopTimer);
+    live.stopTimer = setTimeout(() => this.turns.get(ticketId) === live && this.signal(live, 'SIGKILL'), 15_000);
+    live.stopTimer.unref();
     return true;
+  }
+
+  /** Signal a turn's claude and, as it runs in its own process group, its tool subprocesses too. */
+  private signal(live: LiveTurn, sig: NodeJS.Signals) {
+    let pid = 0;
+    try {
+      pid = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8')).claude;
+    } catch {
+      // Not started yet.
+    }
+    if (pid) {
+      try {
+        process.kill(-pid, sig);
+      } catch {
+        try {
+          process.kill(pid, sig);
+        } catch {
+          // Already gone.
+        }
+      }
+    }
+    // A unit's other processes (claude not started yet, or something it left behind) go with the unit.
+    if (live.unit && (!pid || sig === 'SIGKILL')) execFile('systemctl', ['--user', 'stop', live.unit], () => {});
   }
 
   private next(ticketId: number) {
@@ -699,6 +830,13 @@ export class Runner {
     const machines = ticket.kind === 'coordinator' ? [] : this.machines(project);
     // Tool calls matching the project's approval rules wait for a person (threads only).
     const rules = ticket.kind === 'coordinator' ? [] : lines(project.approval_rules);
+    // The turn's folder, with its own copy of the pinned files: a restart sweeps the server's copy, and
+    // the tripwire hook must still be there for a turn that outlives it.
+    const dir = join(this.turnsDir, `${ticket.id}-${Date.now()}`);
+    const pin = join(dir, 'pin');
+    mkdirSync(dir, { recursive: true });
+    cpSync(MCP_DIR, pin, { recursive: true });
+    const pinned = (file: string) => join(pin, basename(file));
     const args = [
       '-p',
       '--input-format', 'stream-json',
@@ -713,7 +851,7 @@ export class Runner {
     // Lets edit-only sessions write there too, not just in their working directory.
     const addDirs = [filesDir, sharedDir].filter((d): d is string => !!d);
     // One --settings per turn: the tripwire hook, plus approval rules or the Taskmaster's access rules.
-    const settings: { permissions?: object; hooks: object } = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator') };
+    const settings: { permissions?: object; hooks: object } = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)) };
     if (rules.length) settings.permissions = { ask: rules };
     if (ticket.kind === 'coordinator') {
       const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project), sharedDir, memoryDir);
@@ -733,8 +871,8 @@ export class Runner {
     // title, tag, state and note. The token travels in the environment (which the MCP server
     // inherits), never on the command line.
     const role = ticket.kind === 'coordinator' ? 'coordinator' : 'thread';
-    const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [MCP_SERVER] } };
-    for (const m of machines) servers[m.name] = { type: 'stdio', command: process.execPath, args: [MACHINE_MCP_SERVER, String(m.id), m.name] };
+    const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [pinned(MCP_SERVER)] } };
+    for (const m of machines) servers[m.name] = { type: 'stdio', command: process.execPath, args: [pinned(MACHINE_MCP_SERVER), String(m.id), m.name] };
     const allowed = Object.keys(servers).map((name) => `mcp__${name}`);
     // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
     args.push('--mcp-config', JSON.stringify({ mcpServers: servers }), '--allowedTools', ...allowed, '--disallowedTools', 'AskUserQuestion');
@@ -758,85 +896,169 @@ export class Runner {
       this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${err.message}` });
     }
 
-    this.store.setSetting(turnKey(ticket.id), { resumes } satisfies TurnState);
-    const proc = spawn(this.claudeBin, args, { cwd: ticket.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
-    this.procs.set(ticket.id, proc);
+    writeFileSync(join(dir, 'prompt.jsonl'), prompt);
+    for (const f of ['stream.jsonl', 'stderr.log']) writeFileSync(join(dir, f), '');
+    // Holds the turn's token: private, and the wrapper deletes it once read.
+    writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: this.claudeBin, args, cwd: ticket.cwd, env }), { mode: 0o600 });
+    const unit = this.units ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort };
+    this.store.setSetting(turnKey(ticket.id), turn);
+    const live = this.follow(ticket.id, turn);
     this.setStatus(ticket.id, 'running');
-    // If claude exits before reading its prompt, the write fails with EPIPE; the close handler reports it.
-    proc.stdin!.on('error', () => {});
-    proc.stdin!.end(prompt);
+    const wrapper = [process.execPath, pinned(TURN_WRAPPER), dir];
+    if (!unit) return this.spawnWrapper(wrapper, dir);
+    const run = ['--user', '--collect', '--quiet', `--unit=${unit}`, `--slice=${TURN_SLICE}`, '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper];
+    execFile('systemd-run', run, (err, _out, stderr) => {
+      if (!err) return;
+      console.error(`Ticket ${ticket.id}: systemd-run failed (${String(stderr).trim() || err.message}), so this turn runs as a child of the server.`);
+      live.unit = null;
+      this.saveTurn(ticket.id, { unit: null });
+      this.spawnWrapper(wrapper, dir);
+    });
+  }
 
-    let sawResult = false;
-    let resultIsError = false;
-    // A failed turn's own words on what went wrong, which say more than the exit code.
-    let resultError: string | null = null;
-    const stderr: string[] = [];
+  /** Start a turn's wrapper as a detached child: no unit, so it dies when the service restarts. */
+  private spawnWrapper([command, ...args]: string[], dir: string) {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+    child.on('error', (err) => writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: null, signal: null, error: err.message })));
+    child.unref();
+  }
 
-    createInterface({ input: proc.stdout! }).on('line', (line) => {
-      try {
-        this.handleLine(ticket.id, line, (isError, result) => {
-          sawResult = true;
-          resultIsError = isError;
-          if (isError && result) resultError = result;
-        });
-      } catch (err: any) {
-        this.emit(ticket.id, 'note', { text: `Could not process output line: ${err.message}` });
+  /** Start tailing a turn's folder; the turn counts as running from here until finish(). */
+  private follow(ticketId: number, turn: TurnState): LiveTurn {
+    const live: LiveTurn = {
+      dir: turn.dir!, unit: turn.unit ?? null, offset: turn.offset ?? 0, startedAt: turn.startedAt ?? Date.now(),
+      configDir: turn.configDir ?? claudeConfigDir(process.env), chosenEffort: !!turn.chosenEffort, ticks: 0,
+      timer: setInterval(() => this.poll(ticketId), this.pollMs),
+    };
+    this.turns.set(ticketId, live);
+    return live;
+  }
+
+  private poll(ticketId: number) {
+    const live = this.turns.get(ticketId);
+    if (!live) return;
+    try {
+      // Checked before reading: once exit.json is there, everything claude wrote is in the stream.
+      const exited = existsSync(join(live.dir, 'exit.json'));
+      this.readStream(ticketId, live, exited);
+      if (exited) return this.finish(ticketId, live, JSON.parse(readFileSync(join(live.dir, 'exit.json'), 'utf8')));
+      // Gone without a word: killed with its unit (out of memory, say).
+      if (++live.ticks % 20 === 0 && !this.running(live)) {
+        this.readStream(ticketId, live, true);
+        this.finish(ticketId, live, null);
       }
-    });
+    } catch (err: any) {
+      console.error(`Ticket ${ticketId}: following its turn failed:`, err);
+    }
+  }
 
-    createInterface({ input: proc.stderr! }).on('line', (line) => {
-      stderr.push(line);
-      if (stderr.length > 50) stderr.shift();
-    });
-
-    proc.on('error', (err) => {
-      this.emit(ticket.id, 'error', { text: `Could not start claude: ${err.message}` });
-    });
-
-    proc.on('close', (code, signal) => {
-      this.procs.delete(ticket.id);
-      this.store.deleteSetting(turnKey(ticket.id));
-      const stopped = this.stopping.delete(ticket.id);
-      this.approvals.endTurn(ticket.id, stopped ? 'The turn was stopped while this waited.' : 'The turn ended while this waited.');
-      let status: 'idle' | 'error' = 'idle';
-      if (stopped || signal) {
-        // Stopped by the user; leave it waiting for the next message.
-      } else if (!sawResult || code !== 0 || resultIsError) {
-        status = 'error';
-        const detail = stderr.slice(-10).join('\n');
-        const text = `claude exited with code ${code}${detail ? `:\n${detail}` : ''}`;
-        this.emit(ticket.id, 'error', { text });
-        this.onTurnError(ticket.id, resultError ?? text);
-      }
-      const closing = this.closing.has(ticket.id);
-      const reason = this.closing.get(ticket.id);
-      this.closing.delete(ticket.id);
-      if (closing && status === 'idle' && !stopped && !signal && !this.queued(ticket.id)) {
-        this.close(ticket.id, `Claude dismissed this minion${reason ? `: ${reason}` : '.'}`);
-      } else {
-        if (closing && status === 'idle' && !stopped && !signal) {
-          this.emit(ticket.id, 'note', { text: 'Claude asked to dismiss this minion, but a new message arrived, so it stays open.' });
+  /** Handle the stream's new complete lines, and with `toEnd` a last line without its newline. */
+  private readStream(ticketId: number, live: LiveTurn, toEnd: boolean) {
+    let fd: number;
+    try {
+      fd = openSync(join(live.dir, 'stream.jsonl'), 'r');
+    } catch {
+      return;
+    }
+    try {
+      let size = 1 << 20;
+      for (;;) {
+        const buf = Buffer.alloc(size);
+        const n = readSync(fd, buf, 0, size, live.offset);
+        if (!n) return;
+        const atEnd = n < size;
+        const end = buf.lastIndexOf(10, n - 1) + 1;
+        if (!end && !atEnd) {
+          size *= 2; // one line longer than the buffer
+          continue;
         }
-        this.setStatus(ticket.id, status);
+        const take = toEnd && atEnd ? n : end;
+        if (!take) return;
+        const base = live.offset;
+        for (let start = 0; start < take; ) {
+          const nl = buf.indexOf(10, start);
+          const stop = nl < 0 || nl >= take ? take : nl;
+          const line = buf.toString('utf8', start, stop);
+          start = stop + 1;
+          try {
+            this.handleLine(ticketId, line, (error, text) => this.saveTurn(ticketId, { result: { error, text } }));
+          } catch (err: any) {
+            this.emit(ticketId, 'note', { text: `Could not process output line: ${err.message}` });
+          }
+          // Saved per line, so a restart carries on from the next one: nothing shown twice or skipped.
+          live.offset = base + Math.min(start, take);
+          this.saveTurn(ticketId, { offset: live.offset });
+        }
+        if (atEnd) return;
       }
-      // A failed or stopped turn leaves it open; a queued message makes deployLive wait for that turn too.
-      if (this.deployedMidTurn.delete(ticket.id) && status === 'idle' && !stopped && !signal && !closing) this.deployLive(ticket.id);
-      this.onFilesMayChange(ticket.id);
-      this.onTurnEnd(ticket.id);
-      // Re-read the ticket: the turn may have given it its first (or a new) session id.
-      const after = this.store.getTicket(ticket.id);
-      // Only a turn that ran on Claude Code's default effort says what "Default" means for this thread.
-      const effort = after && !ticket.effort && lastEffort(after, configDir);
-      if (after && effort && effort !== after.last_effort) {
-        this.store.updateTicketQuietly(ticket.id, { last_effort: effort });
-        this.broadcastTicket(ticket.id);
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  /** A turn's process has exited (exit is null when it was killed without recording how). */
+  private finish(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string } | null) {
+    clearInterval(live.timer);
+    clearTimeout(live.stopTimer);
+    this.turns.delete(ticketId);
+    const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
+    this.store.deleteSetting(turnKey(ticketId));
+    const stopped = !!turn?.stopped;
+    const code = exit?.code ?? null;
+    const signal = exit ? exit.signal : 'SIGKILL';
+    if (exit?.error) this.emit(ticketId, 'error', { text: `Could not start claude: ${exit.error}` });
+    if (!exit && !stopped) this.emit(ticketId, 'note', { text: 'The turn\'s process was killed before it finished.' });
+    const sawResult = !!turn?.result;
+    const resultIsError = !!turn?.result?.error;
+    const resultError = turn?.result?.error ? turn.result.text : null;
+    let stderr: string[] = [];
+    try {
+      stderr = readFileSync(join(live.dir, 'stderr.log'), 'utf8').split('\n').filter(Boolean);
+    } catch {
+      // No stderr.
+    }
+    this.approvals.endTurn(ticketId, stopped ? 'The turn was stopped while this waited.' : 'The turn ended while this waited.');
+    let status: 'idle' | 'error' = 'idle';
+    if (stopped || signal) {
+      // Stopped by the user; leave it waiting for the next message.
+    } else if (!sawResult || code !== 0 || resultIsError) {
+      status = 'error';
+      const detail = stderr.slice(-10).join('\n');
+      const text = `claude exited with code ${code}${detail ? `:\n${detail}` : ''}`;
+      this.emit(ticketId, 'error', { text });
+      this.onTurnError(ticketId, resultError ?? text);
+    }
+    const closing = this.closing.has(ticketId);
+    const reason = this.closing.get(ticketId);
+    this.closing.delete(ticketId);
+    if (closing && status === 'idle' && !stopped && !signal && !this.queued(ticketId)) {
+      this.close(ticketId, `Claude dismissed this minion${reason ? `: ${reason}` : '.'}`);
+    } else {
+      if (closing && status === 'idle' && !stopped && !signal) {
+        this.emit(ticketId, 'note', { text: 'Claude asked to dismiss this minion, but a new message arrived, so it stays open.' });
       }
-      if (after) {
-        saveSession(this.store, after, project, configDir, true)
-          .catch((err) => console.error(`Saving the session of ticket ${ticket.id} failed:`, err));
-      }
-      this.next(ticket.id);
-    });
+      this.setStatus(ticketId, status);
+    }
+    // A failed or stopped turn leaves it open; a queued message makes deployLive wait for that turn too.
+    if (this.deployedMidTurn.delete(ticketId) && status === 'idle' && !stopped && !signal && !closing) this.deployLive(ticketId);
+    rmSync(live.dir, { recursive: true, force: true });
+    this.onFilesMayChange(ticketId);
+    this.onTurnEnd(ticketId);
+    // Re-read the ticket: the turn may have given it its first (or a new) session id.
+    const after = this.store.getTicket(ticketId);
+    const project = after && this.store.getProject(after.project_id);
+    // Only a turn that ran on Claude Code's default effort says what "Default" means for this thread.
+    const effort = after && !live.chosenEffort && lastEffort(after, live.configDir);
+    if (after && effort && effort !== after.last_effort) {
+      this.store.updateTicketQuietly(ticketId, { last_effort: effort });
+      this.broadcastTicket(ticketId);
+    }
+    if (after && project) {
+      saveSession(this.store, after, project, live.configDir, true)
+        .catch((err) => console.error(`Saving the session of ticket ${ticketId} failed:`, err));
+    }
+    this.next(ticketId);
   }
 
   private handleLine(ticketId: number, line: string, onResult: (isError: boolean, result: string | null) => void) {

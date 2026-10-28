@@ -245,8 +245,11 @@ export class Store {
   db: DatabaseSync;
   /** The property registry and the properties minions and artifacts carry. */
   props: Registry;
+  /** The database file; the runner keeps its turn folders beside it. */
+  readonly path: string;
 
   constructor(path: string) {
+    this.path = path;
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     const hadGrants = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'machine_projects'").get();

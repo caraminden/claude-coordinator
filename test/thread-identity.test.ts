@@ -38,7 +38,7 @@ after(() => api.close());
 
 const mcp = spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
   env: {
-    ...process.env,
+    ...process.env, MACHINES_URL: undefined,
     COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,
     COORDINATOR_TOKEN: `${ID}.sig`,
     COORDINATOR_PROJECT: '2',

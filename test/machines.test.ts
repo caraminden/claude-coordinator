@@ -99,7 +99,7 @@ async function until<T>(what: string, fn: () => Promise<T | undefined | false> |
 const turns = () => existsSync(join(root, 'turns.jsonl')) ? readFileSync(join(root, 'turns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
 
 function startAgent(token: string, run = ['--', process.execPath, mcpServer], env: NodeJS.ProcessEnv = {}) {
-  const agent = spawn(process.execPath, [join(repo, 'public/machine-agent.mjs'), base, token, ...run], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
+  const agent = spawn(process.execPath, [join(repo, 'public/machine-agent.mjs'), base, token, ...run], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MACHINES_URL: undefined, ...env } });
   procs.push(agent);
   let output = '';
   agent.stdout!.on('data', (d) => (output += d));
@@ -110,9 +110,10 @@ function startAgent(token: string, run = ['--', process.execPath, mcpServer], en
 before(async () => {
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
+  // A thread's turn inherits the live service's MACHINES_URL; this server must take agents itself.
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
-      ...process.env, PORT: String(port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: fakeClaude,
+      ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: fakeClaude,
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'inherit', 'inherit'],

@@ -72,7 +72,7 @@ before(async () => {
   base = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
-      ...process.env, PORT: String(port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: fakeClaude,
+      ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: fakeClaude,
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'ignore', 'inherit'],

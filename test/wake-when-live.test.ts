@@ -1,0 +1,131 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+import { APP_NAME } from '../src/appname.ts';
+import { Store } from '../src/db.ts';
+import { Runner } from '../src/runner.ts';
+import { LiveWaiters } from '../src/wake.ts';
+
+// wake_when_live: a waiter is messaged once the server runs a commit containing its commit (or, with
+// none, once the server runs anything new), then dropped. A stand-in live checkout in a temp repo.
+const root = mkdtempSync(join(tmpdir(), 'wake-when-live-'));
+after(() => rmSync(root, { recursive: true, force: true }));
+process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
+const repo = join(root, 'live');
+mkdirSync(join(repo, 'public'), { recursive: true });
+const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+git('init', '-q', '-b', 'main');
+git('config', 'user.email', 't@example.com');
+git('config', 'user.name', 'T');
+let n = 0;
+function commit(file = 'server.ts'): string {
+  writeFileSync(join(repo, file), String(++n));
+  git('add', '-A');
+  git('commit', '-q', '-m', `c${n}`);
+  return git('rev-parse', 'HEAD');
+}
+
+const store = new Store(join(root, 'test.db'));
+const project = store.createProject('P', null);
+function minion() {
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(t.id, { status: 'idle' });
+  return t.id;
+}
+const sent: { id: number; text: string }[] = [];
+const waiters = (head: string) => new LiveWaiters(store, repo, head, (id, text) => sent.push({ id, text }));
+
+test('a waiter on a commit that is not live keeps waiting, and is woken at startup once it is', () => {
+  const running = commit();
+  const pending = commit(); // merged and pulled, but the server hasn't restarted onto it yet
+  const id = minion();
+  sent.length = 0;
+  const before = waiters(running);
+  assert.equal(before.add(id, pending, 'retry the tripwire test'), true);
+  assert.equal(before.check(), 0);
+  assert.equal(before.list().length, 1);
+
+  // The restart: a new server boots on a later commit, which contains `pending`.
+  const after = waiters(commit());
+  assert.equal(after.check(), 1);
+  assert.deepEqual(sent, [{ id, text: `\`${pending.slice(0, 7)}\` is live now (the server runs \`${after.head!.slice(0, 7)}\`): retry the tripwire test` }]);
+  assert.equal(after.list().length, 0);
+  assert.equal(after.check(), 0, 'woken once');
+  assert.equal(sent.length, 1);
+});
+
+test('a commit that is already live is not stored', () => {
+  const live = commit();
+  const w = waiters(commit());
+  assert.equal(w.add(minion(), live, 'x'), false);
+  assert.equal(w.list().length, 0);
+});
+
+test('a commit the live checkout has not fetched yet keeps waiting', () => {
+  const w = waiters(commit());
+  sent.length = 0;
+  w.add(minion(), 'f'.repeat(40), 'x');
+  assert.equal(w.check(), 0);
+  assert.equal(w.list().length, 1);
+  store.setSetting('wake-when-live', []);
+});
+
+test('a waiter with no commit is woken by the next deploy, front-end only included, not by a no-op', () => {
+  const w = waiters(commit());
+  const id = minion();
+  sent.length = 0;
+  assert.equal(w.add(id, null, 'check the new sidebar'), true);
+  assert.equal(w.check(w.head), 0, 'the same commit is no deploy');
+  const fe = commit('public/app.js'); // the SIGHUP reload after a front-end-only deploy
+  assert.equal(w.check(fe), 1);
+  assert.deepEqual(sent, [{ id, text: `A deploy is live now (the server runs \`${fe.slice(0, 7)}\`): check the new sidebar` }]);
+});
+
+test('a dismissed waiter is dropped without a message', () => {
+  const pending = commit();
+  const w = waiters(git('rev-parse', 'HEAD~1'));
+  const id = minion();
+  sent.length = 0;
+  w.add(id, pending, 'x');
+  store.updateTicket(id, { status: 'closed' });
+  assert.equal(w.check(commit()), 0);
+  assert.deepEqual(sent, []);
+  assert.equal(w.list().length, 0);
+});
+
+test('resolve accepts hashes the live checkout or the scheme repo knows, and nothing else', () => {
+  const c = commit();
+  const w = waiters(c);
+  assert.equal(w.resolve(c.slice(0, 7), null), c);
+  assert.equal(w.resolve('--all', null), null);
+  assert.equal(w.resolve('HEAD', null), null);
+  assert.equal(w.resolve('0000000', null), null);
+});
+
+test('wake messages go through the runner without counting toward or being held by the loop guard', async () => {
+  const fake = join(root, 'claude-fake');
+  writeFileSync(fake, `#!${process.execPath}
+process.stdin.resume();
+process.stdin.on('end', () => {
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
+  process.exit(0);
+});
+`);
+  chmodSync(fake, 0o755);
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const id = minion();
+  store.setTicketDir(id, root, null);
+  const w = new LiveWaiters(store, repo, git('rev-parse', 'HEAD'), (t, text) => runner.send(t, APP_NAME, text));
+  for (let i = 0; i < 10; i++) {
+    w.add(id, null, `wake ${i}`);
+    w.check(commit());
+    while (runner.isRunning(id)) await new Promise((r) => setTimeout(r, 10));
+  }
+  const said = store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data));
+  assert.equal(said.length, 10);
+  assert.ok(said.every((m) => m.author === APP_NAME));
+  assert.equal(store.getSetting(`loop:${id}`), null);
+});

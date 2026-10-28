@@ -80,6 +80,17 @@ test('message_coordinator posts to its own internal id', async () => {
   assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/coordinator`]);
 });
 
+test('wake_when_live posts to its own internal id, which its token may do', async () => {
+  calls.length = 0;
+  respond = () => [201, { waiting: true, commit: 'a'.repeat(40), head: 'b'.repeat(40) }];
+  const r = await tool('wake_when_live', { commit: 'aaaaaaa', reason: 'retry', ticket_id: 7 });
+  assert.ok(!r.isError, r.content[0].text);
+  assert.match(r.content[0].text, /Waiting for `aaaaaaa`/);
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/wake`]);
+  assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/wake`));
+  assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${NUMBER}/wake`));
+});
+
 test('close_self on a server older than the tool says to wait for the restart', async () => {
   respond = () => [403, { error: 'A thread may only update itself' }];
   const r = await tool('close_self', {});

@@ -22,6 +22,7 @@ import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigg
 import { Runner, slimEvent, tripwireConfig } from './src/runner.ts';
 import { GLOBAL_OWNER, PropertyError, type Actor } from './src/properties.ts';
 import { TAG_TO_TYPE } from './src/property-seed.ts';
+import { LiveWaiters } from './src/wake.ts';
 import { cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
@@ -64,13 +65,14 @@ async function loadAssets() {
 }
 // The commit this server's code came from, so a deploy can tell whether the change it ships is
 // front end only. null outside a git checkout.
-const BOOT_COMMIT = (() => {
+function checkoutHead(): string | null {
   try {
     return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: import.meta.dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return null;
   }
-})();
+}
+const BOOT_COMMIT = checkoutHead();
 // Set by tools/deploy.sh when it boots new code on a copy of the database: serve and answer, but
 // don't resume interrupted turns or watch GitHub, which would act on the copy's minions for real.
 const BOOT_CHECK = process.env.BOOT_CHECK === '1';
@@ -115,6 +117,10 @@ const runner = new Runner(
   process.env.CLAUDE_BIN ?? 'claude',
 );
 if (!BOOT_CHECK) runner.recover();
+// Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
+// with runner.send, not relay, so the loop guard neither counts nor holds them.
+const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text) => runner.send(ticketId, APP_NAME, text));
+if (!BOOT_CHECK) waiters.check();
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 runner.machines = (project) => machines.online(project.id);
 
@@ -713,7 +719,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const ip = clientIp(req);
     const body = await readJson(req);
     const name = cleanName(body.name);
-    if ([AGENT_NAME, 'Coordinator', GITHUB_NAME].some((n) => n.toLowerCase() === name.toLowerCase())) throw new HttpError(400, 'That name is reserved');
+    if ([AGENT_NAME, 'Coordinator', GITHUB_NAME, APP_NAME].some((n) => n.toLowerCase() === name.toLowerCase())) throw new HttpError(400, 'That name is reserved');
     // Checked right before the password (no await in between) so parallel bursts are counted.
     if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
     if (!auth.checkPassword(ip, String(body.password ?? ''))) throw new HttpError(401, 'Wrong password');
@@ -1249,6 +1255,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const dismissed = !failed && runner.deployLive(id);
       return json(res, 201, { dismissed });
     }
+    if (action === '/wake' && method === 'POST') {
+      // wake_when_live: the minion itself, or its Taskmaster for it, waits for a commit (or the next
+      // deploy) to be live.
+      if (ticket.kind === 'coordinator') throw new HttpError(403, 'Only minions wait on deploys');
+      const body = await readJson(req);
+      const reason = str(body.reason, 'Reason', 1000);
+      let commit: string | null = null;
+      if (body.commit != null && body.commit !== '') {
+        commit = waiters.resolve(String(body.commit), store.getProject(ticket.project_id)?.repo_dir ?? null);
+        if (!commit) throw new HttpError(400, `No commit ${String(body.commit).slice(0, 40)} in the live checkout or the scheme's repo`);
+      }
+      const waiting = waiters.add(id, commit, reason);
+      return json(res, 201, { waiting, commit, head: waiters.head });
+    }
     if (action === '/close' && method === 'POST') {
       // A thread closes itself once its current turn ends (close_self); the token decides which thread.
       if (session.agent !== id) throw new HttpError(403, 'A minion may only be dismissed by itself');
@@ -1451,6 +1471,8 @@ process.on('SIGHUP', () => {
     () => {
       console.log(`Reloaded public/ on SIGHUP: front end ${before} → ${ASSET_VERSION}`);
       if (ASSET_VERSION !== before) broadcast({ type: 'hello', version: ASSET_VERSION, usage: runner.usage });
+      // tools/deploy.sh sends SIGHUP only for a change to public/ alone, so the checkout's HEAD is now live.
+      if (!BOOT_CHECK) waiters.check(checkoutHead());
     },
     (err) => console.error('Reloading public/ on SIGHUP failed; still serving the old front end:', err),
   );

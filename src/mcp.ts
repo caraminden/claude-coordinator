@@ -16,6 +16,12 @@ const MAX_TEXT = 4000;
 /** What message_ticket and message_coordinator say when the loop guard holds a message. */
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in an hour, so it waits for a person to continue. Do not resend it; finish your turn.';
 
+const WAKE_DESCRIPTION =
+  `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as merged: a rebase gives it a new hash), or after the next deploy if no commit is given. Woken once, then forgotten; a dismissed minion is skipped.`;
+const WAKE_PROPS = {
+  commit: { type: 'string', description: 'Optional: the commit to wait for (a hash, short or full)' },
+  reason: { type: 'string', description: 'What to do once it is live; it comes back in the wake message, e.g. "#63\'s approve cards are live: retry the tripwire test"' },
+};
 const TITLE = { type: 'string', description: 'The short ask, about 30 characters, e.g. "Usage bar in the top bar". No number, tag or emoji.' };
 const TAG = {
   type: ['string', 'null'],
@@ -176,6 +182,11 @@ const TOOLS = [
       properties: { ticket_id: TICKET_ID, title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD, model: MODEL, effort: EFFORT },
       required: ['ticket_id'],
     },
+  },
+  {
+    name: 'wake_when_live',
+    description: `${WAKE_DESCRIPTION} Use it when you park a minion that waits on another minion's deploy. The wake message doesn't count toward the loop guard.`,
+    inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID, ...WAKE_PROPS }, required: ['ticket_id', 'reason'] },
   },
   {
     name: 'close_ticket',
@@ -431,6 +442,11 @@ const THREAD_TOOLS = [
     inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What you need, self-contained: name minions as #N and give file paths in full' } }, required: ['text'] },
   },
   {
+    name: 'wake_when_live',
+    description: `${WAKE_DESCRIPTION.replace('the minion', 'this minion')} Use it instead of asking the Taskmaster to remember, then set state parked and end your turn.`,
+    inputSchema: { type: 'object', properties: WAKE_PROPS, required: ['reason'] },
+  },
+  {
     name: 'close_self',
     description:
       "Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live. It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled. Not for minions whose result is a report or doc for people to read: those stay open until someone has read it.",
@@ -596,6 +612,13 @@ async function runTool(name: string, args: any): Promise<string> {
         throw err;
       }
       return 'This minion will be dismissed when your turn ends (unless the turn fails or a new message arrives). Finish your reply now.';
+    case 'wake_when_live': {
+      const target = ROLE === 'thread' ? TICKET : await id(args);
+      const r = await call('POST', `/api/tickets/${target}/wake`, { commit: args.commit ?? null, reason: args.reason });
+      const what = r.commit ? `\`${r.commit.slice(0, 7)}\`` : 'the next deploy';
+      if (!r.waiting) return `${what} is live already (the server runs \`${String(r.head).slice(0, 7)}\`), so there is nothing to wait for.`;
+      return `Waiting for ${what}: ${APP_NAME} sends ${ROLE === 'thread' ? 'you' : 'the minion'} a message once it is live.${ROLE === 'thread' ? ' Set state parked and end your turn.' : ''}`;
+    }
     case 'close_ticket':
       return `Closed. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed' }))}`;
     case 'reopen_ticket':

@@ -38,7 +38,7 @@ export function threadMayCall(ticketId: number, method: string, pathname: string
   if (pathname === `/api/projects/${projectId}/properties/proposals`) return method === 'POST';
   if (pathname === `${base}/properties`) return method === 'PUT';
   if (pathname === `${base}/approvals`) return method === 'GET' || method === 'POST';
-  return method === 'POST' && (pathname === `${base}/questions` || pathname === `${base}/close` || pathname === `${base}/deploy` || pathname === `${base}/coordinator`);
+  return method === 'POST' && (pathname === `${base}/questions` || pathname === `${base}/close` || pathname === `${base}/deploy` || pathname === `${base}/coordinator` || pathname === `${base}/wake`);
 }
 
 export class Auth {

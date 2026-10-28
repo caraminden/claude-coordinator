@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { APP_NAME } from './appname.ts';
+import { AGENT_NAME } from './auth.ts';
 import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
 import { claudeConfigDir, lastEffort, projectSlug, restoreSession, saveSession } from './sessions.ts';
@@ -138,6 +139,20 @@ interface TurnState {
 }
 
 const turnKey = (ticketId: number) => `turn:${ticketId}`;
+
+/** Taskmaster↔minion messages (both ways) one minion may exchange per LOOP_WINDOW_MS before the next waits for a person. */
+export const LOOP_LIMIT = 6;
+export const LOOP_WINDOW_MS = 60 * 60 * 1000;
+
+/** A minion's loop-guard count and held messages, in the settings table under `loop:<minion id>` so they outlive a restart. */
+interface LoopState {
+  /** When each recent Taskmaster↔minion message went through. */
+  sent: number[];
+  /** Messages waiting for a person to continue, oldest first. */
+  held: { to: number; author: string; text: string }[];
+}
+
+const loopKey = (minionId: number) => `loop:${minionId}`;
 
 /** Auto-resumes in a row before a thread is left alone, in case its own turn is what kills the server. */
 export const MAX_RESUMES = 2;
@@ -392,6 +407,8 @@ export class Runner {
   private broadcast: Broadcast;
   private claudeBin: string;
   private coordinatorEnv: CoordinatorEnv;
+  /** The clock the loop guard's window runs on; tests move it. */
+  now = () => Date.now();
   /** Gap between auto-resumes after a restart, so they don't all start at once. */
   resumeGapMs = 3000;
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
@@ -565,6 +582,54 @@ export class Runner {
     if (!this.isRunning(ticketId)) return this.next(ticketId);
     this.saveTurn(ticketId, { queued: q });
     this.broadcastTicket(ticketId);
+  }
+
+  /**
+   * A message between a minion and its Taskmaster, either way (`to` is the receiving ticket). Up to
+   * LOOP_LIMIT per LOOP_WINDOW_MS go through; after that each is held, with a note in both chats asking
+   * a person to continue, until continueLoop. Returns whether it was held.
+   */
+  relay(minionId: number, to: number, author: string, text: string): boolean {
+    const loop = this.store.getSetting<LoopState>(loopKey(minionId)) ?? { sent: [], held: [] };
+    const now = this.now();
+    loop.sent = loop.sent.filter((t) => now - t < LOOP_WINDOW_MS);
+    if (!loop.held.length && loop.sent.length < LOOP_LIMIT) {
+      loop.sent.push(now);
+      this.store.setSetting(loopKey(minionId), loop);
+      this.send(to, author, text);
+      return false;
+    }
+    loop.held.push({ to, author, text });
+    this.store.setSetting(loopKey(minionId), loop);
+    const minion = this.store.getTicket(minionId)!;
+    const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${text.length > 140 ? text.slice(0, 140) + '…' : text}")`;
+    const note = loop.held.length === 1
+      ? `Paused: #${minion.number} and the ${AGENT_NAME} have exchanged ${LOOP_LIMIT} messages in the last hour, so ${what} is held until a person continues.`
+      : `Also held: ${what}.`;
+    for (const id of this.loopChats(minion)) this.emit(id, 'loop_paused', { minion: minionId, text: note });
+    return true;
+  }
+
+  /**
+   * A person continued a minion paused by the loop guard, or wrote into its chat or its Taskmaster's:
+   * the held messages go through in order and its count starts again. Returns how many were held.
+   */
+  continueLoop(minionId: number, by: string): number {
+    const loop = this.store.getSetting<LoopState>(loopKey(minionId));
+    if (!loop) return 0;
+    this.store.deleteSetting(loopKey(minionId));
+    if (!loop.held.length) return 0;
+    const n = loop.held.length;
+    const text = `${by} continued, so ${n === 1 ? 'the held message' : `the ${n} held messages`} went through.`;
+    for (const id of this.loopChats(this.store.getTicket(minionId)!)) this.emit(id, 'loop_continued', { minion: minionId, by, text });
+    for (const m of loop.held) this.send(m.to, m.author, m.text);
+    return n;
+  }
+
+  /** The chats a loop-guard note shows in: the minion's and its Taskmaster's. */
+  private loopChats(minion: Ticket): number[] {
+    const coordinator = this.store.getCoordinator(minion.project_id);
+    return coordinator ? [minion.id, coordinator.id] : [minion.id];
   }
 
   stop(ticketId: number): boolean {

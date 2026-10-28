@@ -3104,6 +3104,14 @@ function appendEvent(event, scroll = true) {
     nodes.push(questionCard(event.ticket_id, data));
   } else if (event.kind === 'approval') {
     nodes.push(approvalCard(event.ticket_id, data));
+  } else if (event.kind === 'loop_paused') {
+    nodes.push(loopCard(data));
+  } else if (event.kind === 'loop_continued') {
+    for (const card of log.querySelectorAll(`.lcard[data-minion="${data.minion}"]:not(.answered)`)) {
+      card.classList.add('answered');
+      card.querySelector('button').remove();
+      card.querySelector('[role=status]').textContent = `Continued by ${data.by}`;
+    }
   } else if (event.kind === 'approval_result') {
     // The card itself records who decided, or why it expired.
     view.cards.get(data.id)?.settle(data);
@@ -3274,6 +3282,25 @@ function approvalCard(ticketId, card) {
     },
   });
   return el;
+}
+
+/** The loop guard held a Taskmaster↔minion message: what it held, and Continue to let it through. */
+function loopCard(data) {
+  const status = h('span', { class: 'muted', role: 'status' });
+  const go = h('button', { type: 'button', class: 'small' }, 'Continue');
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    status.textContent = 'Continuing…';
+    try {
+      await api(`/api/tickets/${data.minion}/continue`, { method: 'POST' });
+    } catch (ex) {
+      status.textContent = ex.message;
+      go.disabled = false;
+    }
+  });
+  return h('div', { class: 'qcard lcard', 'data-minion': data.minion },
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Paused'), threadRefs(data.text)),
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), go));
 }
 
 // ---------- question cards ----------

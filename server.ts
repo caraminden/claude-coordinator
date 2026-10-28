@@ -557,6 +557,16 @@ function ticketView(id: number) {
   return runner.view(t);
 }
 
+/**
+ * A person wrote into a chat, which counts as continuing the loop guard there: for a minion's chat,
+ * that minion; for the Taskmaster's, every minion of its scheme.
+ */
+function personWrote(ticket: Ticket, session: Session) {
+  if (session.agent !== undefined) return;
+  const minions = ticket.kind === 'coordinator' ? store.listTickets(ticket.project_id).filter((t) => t.kind !== 'coordinator') : [ticket];
+  for (const t of minions) runner.continueLoop(t.id, session.name);
+}
+
 /** The project's coordinator ticket, created the first time someone opens the project. */
 async function ensureCoordinator(project: Project): Promise<Ticket> {
   const existing = store.getCoordinator(project.id);
@@ -1102,8 +1112,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const body = await readJson(req, 45_000_000);
       const hasImages = Array.isArray(body.images) && body.images.length > 0;
       const text = hasImages && (typeof body.text !== 'string' || !body.text.trim()) ? '' : str(body.text, 'Message', 100_000);
+      // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
+      if (session.agent !== undefined && ticket.kind !== 'coordinator') {
+        return json(res, 202, { ...ticketView(id), held: runner.relay(id, id, session.name, text) });
+      }
       runner.send(id, session.name, text, await saveImages(ticket, body.images));
+      personWrote(ticket, session);
       return json(res, 202, ticketView(id));
+    }
+    if (action === '/continue' && method === 'POST') {
+      // Continue button on a loop-guard pause: the minion's held messages go through.
+      if (session.agent !== undefined) throw new HttpError(403, 'Only people continue a paused minion');
+      return json(res, 200, { released: runner.continueLoop(id, session.name) });
     }
     if (action === '/comments' && method === 'POST') {
       // A comment from a file's viewer: a chat message to the ticket that made the file, saying which file.
@@ -1116,6 +1136,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const path = found.abs.startsWith(ticket.cwd + sep) ? found.abs.slice(ticket.cwd.length + 1) : found.abs;
       const { about, text } = commentMessage(path, str(body.text, 'Comment', 10_000), quote);
       runner.send(id, session.name, text, [], { comment: { path: body.path, about } });
+      personWrote(ticket, session);
       return json(res, 202, ticketView(id));
     }
     if (action === '/questions' && method === 'POST') {
@@ -1143,6 +1164,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked.join('; ')}`;
       }).join('\n\n');
       runner.send(id, session.name, `My answers to your question card:\n\n${text}`, [], { answer: { questionId: body.questionId, answers } });
+      personWrote(ticket, session);
       return json(res, 202, ticketView(id));
     }
     if (action === '/approvals' && method === 'POST') {
@@ -1204,7 +1226,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (session.agent !== id || ticket.kind === 'coordinator') throw new HttpError(403, 'Only a minion can message its Taskmaster');
       const text = str((await readJson(req)).text, 'Message', 10_000);
       const coordinator = await ensureCoordinator(store.getProject(ticket.project_id)!);
-      runner.send(coordinator.id, `#${ticket.number} ${ticket.title}`, text, []);
+      if (runner.relay(id, coordinator.id, `#${ticket.number} ${ticket.title}`, text)) return json(res, 202, { sent: false, held: true });
       runner.emit(id, 'note', { text: `Sent the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
       return json(res, 202, { sent: true });
     }

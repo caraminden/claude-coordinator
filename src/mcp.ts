@@ -13,6 +13,8 @@ const TICKET = Number(process.env.COORDINATOR_TICKET);
 // Set for threads in projects with approval rules: Claude Code asks the approve tool before those calls.
 const APPROVALS = process.env.COORDINATOR_APPROVALS === '1';
 const MAX_TEXT = 4000;
+/** What message_ticket and message_coordinator say when the loop guard holds a message. */
+const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in an hour, so it waits for a person to continue. Do not resend it; finish your turn.';
 
 const TITLE = { type: 'string', description: 'The short ask, about 30 characters, e.g. "Usage bar in the top bar". No number, tag or emoji.' };
 const TAG = {
@@ -159,7 +161,7 @@ const TOOLS = [
   },
   {
     name: 'message_ticket',
-    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed.',
+    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. After 6 messages either way with one minion in an hour, the next is held until a person continues.',
     inputSchema: {
       type: 'object',
       properties: { ticket_id: TICKET_ID, text: { type: 'string' } },
@@ -425,7 +427,7 @@ const THREAD_TOOLS = [
   {
     name: 'message_coordinator',
     description:
-      "Send a message to this scheme's Taskmaster, waking it: for what only it can do, such as passing information to another minion (#N), starting a new minion from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly.",
+      "Send a message to this scheme's Taskmaster, waking it: for what only it can do, such as passing information to another minion (#N), starting a new minion from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly. After 6 messages either way in an hour, the next is held until a person continues.",
     inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What you need, self-contained: name minions as #N and give file paths in full' } }, required: ['text'] },
   },
   {
@@ -568,8 +570,10 @@ async function runTool(name: string, args: any): Promise<string> {
       const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: String(args.instructions ?? '') });
       return project.instructions ? `Saved (${project.instructions.length} characters).` : 'Cleared the scheme instructions.';
     }
-    case 'message_ticket':
-      return `Sent. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/messages`, { text: args.text }))}`;
+    case 'message_ticket': {
+      const t = await call('POST', `/api/tickets/${await id(args)}/messages`, { text: args.text });
+      return t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
+    }
     case 'update_ticket':
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort }))}`;
     case 'ask_question':
@@ -578,7 +582,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'set_thread_status':
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}`;
     case 'message_coordinator':
-      await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text });
+      if ((await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text })).held) return `Held, not delivered: ${HELD}`;
       return 'Sent. The Taskmaster runs it now, or after its current turn.';
     case 'close_self':
       try {

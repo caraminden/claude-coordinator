@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { Registry } from './properties.ts';
 
 export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
 /** Each project has one long-lived coordinator ticket that manages the others. */
@@ -233,6 +234,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
 
 export class Store {
   db: DatabaseSync;
+  /** The property registry and the properties minions and artifacts carry. */
+  props: Registry;
 
   constructor(path: string) {
     this.db = new DatabaseSync(path);
@@ -245,6 +248,8 @@ export class Store {
     this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS one_coordinator ON tickets(project_id) WHERE kind = 'coordinator'");
     this.numberTickets();
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS ticket_number ON tickets(project_id, number)');
+    this.props = new Registry(this.db);
+    this.props.seed();
   }
 
   /**
@@ -389,7 +394,10 @@ export class Store {
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');
     const values = keys.map((k) => fields[k] ?? null);
+    const before = fields.status ? this.getTicket(id)?.status : undefined;
     this.db.prepare(`UPDATE tickets SET ${sets}, updated_at = ? WHERE id = ?`).run(...values, Date.now(), id);
+    // Dismissing moves the stage to done, reopening back to in-progress.
+    if (before && fields.status) this.props.statusChanged(id, before, fields.status);
   }
 
   /** Change a ticket's activity line without counting it as new activity. */

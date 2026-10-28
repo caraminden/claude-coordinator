@@ -19,6 +19,8 @@ import { instructionSources } from './src/instructions.ts';
 import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, hashToken, newToken } from './src/machines.ts';
 import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
+import { PropertyError, type Actor } from './src/properties.ts';
+import { TAG_TO_TYPE } from './src/property-seed.ts';
 import { cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
@@ -191,6 +193,8 @@ if (!store.getSetting('events_slimmed')) {
 // Pick up anything made while the server was down (or before artifacts existed), one ticket at a time.
 // Rows for file types that no longer count as artifacts go first, pinned or not.
 store.pruneArtifacts(isArtifact);
+// The vocabulary docs follow the registry; the first run replaces the hand-written ones (kept aside).
+writeVocabularies().catch((err) => console.error('Could not write the property vocabularies:', err));
 (async () => {
   for (const p of store.listProjects()) {
     for (const t of store.listTickets(p.id)) {
@@ -486,6 +490,48 @@ function provisionalTitle(message: string): string {
   return `${(space > 20 ? cut.slice(0, space) : cut).replace(/[\s,.;:-]+$/, '')}…`;
 }
 
+/** Who is changing properties: a person, a scheme's Taskmaster, or a minion. */
+function actorFor(session: Session): Actor {
+  if (session.agent === undefined) return { kind: 'person', name: session.name };
+  const t = store.getTicket(session.agent)!;
+  const kind = t.kind === 'coordinator' ? 'coordinator' : 'thread';
+  return { kind, name: kind === 'coordinator' ? AGENT_NAME : `#${t.number} ${t.title}`, projectId: t.project_id, ticketId: t.id };
+}
+
+/** Run a registry call, turning its refusals into HTTP errors. */
+function registry<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof PropertyError) throw new HttpError(err.status, err.message);
+    throw err;
+  }
+}
+
+const VOCAB_FILE = 'property-vocabulary.md';
+
+/** Rewrite each scheme's property-vocabulary.md from the registry; a hand-written one is kept aside once. */
+async function writeVocabularies(projectIds = store.listProjects().map((p) => p.id)) {
+  for (const id of projectIds) {
+    const project = store.getProject(id);
+    if (!project) continue;
+    const dir = projectSharedDir(DATA_DIR, id);
+    const path = join(dir, VOCAB_FILE);
+    const text = store.props.doc(id, project.name);
+    const old = await readFile(path, 'utf8').catch(() => null);
+    if (old === text) continue;
+    await mkdir(dir, { recursive: true });
+    if (old && !/^generated: true$/m.test(old)) await writeFile(join(dir, 'property-vocabulary.before-registry.md'), old, { flag: 'wx' }).catch(() => {});
+    await writeFile(path, text);
+  }
+}
+
+/** After a registry change: regenerate the docs it touches (every scheme's for a global key). */
+function registryChanged(projectId: number, global: boolean) {
+  writeVocabularies(global ? undefined : [projectId]).catch((err) => console.error('Could not write the property vocabulary:', err));
+  broadcast({ type: 'properties', projectId: global ? null : projectId });
+}
+
 function ticketView(id: number) {
   const t = store.getTicket(id);
   if (!t) throw new HttpError(404, 'No such minion');
@@ -520,7 +566,7 @@ function agentProject(session: Session, method: string, pathname: string): numbe
   if (!t) throw new HttpError(403, 'No such minion');
   // A ticket's own token may only read and update that ticket (its title, tag, state and note),
   // ask a question card in its chat, and close itself.
-  if (t.kind !== 'coordinator' && !threadMayCall(t.id, method, pathname)) throw new HttpError(403, 'A minion may only update itself');
+  if (t.kind !== 'coordinator' && !threadMayCall(t.id, method, pathname, t.project_id)) throw new HttpError(403, 'A minion may only update itself');
   return t.project_id;
 }
 
@@ -677,7 +723,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   const inScope = (projectId: number) => {
     if (scope !== null && scope !== projectId) throw new HttpError(403, 'Outside this Taskmaster\'s scheme');
   };
-  if (scope !== null && !/^\/api\/(projects\/\d+(\/tickets)?|tickets\/\d+(\/[a-z]+)?)$/.test(pathname)) {
+  if (scope !== null && !/^\/api\/(projects\/\d+(\/tickets|\/properties(\/[a-z]+)?)?|tickets\/\d+(\/[a-z]+)?)$/.test(pathname)) {
     throw new HttpError(403, 'Not available to the Taskmaster');
   }
 
@@ -817,7 +863,19 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const title = body.title === undefined ? provisionalTitle(message) : str(body.title, 'Title', 120);
     // Insert first so concurrent creates get distinct ids, then build the working dir.
     const tag = oneOf(body.tag ?? null, TICKET_TAGS, 'Tag') as TicketTag | null;
+    // Properties are checked before the minion exists, so a bad one doesn't leave half a minion.
+    const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
+    if (typeof props !== 'object' || Array.isArray(props)) throw new HttpError(400, 'properties must be an object of key: value');
+    const given = (key: string) => Object.keys(props).some((k) => k.toLowerCase() === key.toLowerCase());
+    if (tag && !given('type')) props.type = TAG_TO_TYPE[tag];
+    if (session.agent === undefined && !given('requestedBy')) props.requestedBy = session.name;
+    const planned = registry(() => store.props.check(project.id, props));
+    if (scope !== null && !planned.type?.length) {
+      throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');
+    }
     const { id, number } = store.createTicket({ project_id: project.id, title, tag, permission_mode: THREAD_PERMISSION_MODE, created_by: session.name });
+    const { notes } = store.props.set('minion', id, project.id, props, session.name);
+    store.props.startStage(id);
     try {
       const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number!, title);
       store.setTicketDir(id, dir.cwd, dir.branch);
@@ -826,7 +884,51 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       throw new HttpError(500, `Could not create working directory: ${err.stderr?.trim() || err.message}`);
     }
     runner.send(id, session.name, message);
-    return json(res, 201, ticketView(id));
+    return json(res, 201, { ...ticketView(id), notes });
+  }
+
+  m = pathname.match(/^\/api\/projects\/(\d+)\/properties(\/[a-z]+)?$/);
+  if (m) {
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such scheme');
+    inScope(project.id);
+    const action = m[2] ?? '';
+    if (action === '' && method === 'GET') return json(res, 200, { keys: store.props.list(project.id) });
+    if (method !== 'POST') throw new HttpError(404, 'Not found');
+    const body = await readJson(req);
+    const actor = actorFor(session);
+    if (action === '/keys') {
+      const r = registry(() => store.props.registerKey(project.id, body, actor));
+      if (r.registered) registryChanged(project.id, r.scope === 'global');
+      return json(res, r.registered ? 201 : 200, r);
+    }
+    if (action === '/values') {
+      const r = registry(() => store.props.registerValues(project.id, body.key, body.values, actor, !!body.force));
+      if (r.added.length || r.updated.length) registryChanged(project.id, store.props.isGlobal(project.id, body.key));
+      if (r.unreviewed) {
+        const coordinator = store.getCoordinator(project.id);
+        if (coordinator) runner.emit(coordinator.id, 'note', { text: `${actor.name} added ${r.added.map((v) => `${body.key}: ${v}`).join(', ')} to the registry. It's live now; review it in Settings → Properties.` });
+      }
+      return json(res, 200, r);
+    }
+    if (action === '/review') {
+      const global = store.props.isGlobal(project.id, body.key);
+      const r = registry(() => store.props.review(project.id, body, actor));
+      registryChanged(project.id, global);
+      return json(res, 200, r);
+    }
+    if (action === '/proposals') {
+      if (actor.kind !== 'thread') throw new HttpError(403, 'Taskmasters and people register keys and values directly; proposals are for minions');
+      const r = registry(() => store.props.propose(project.id, body, actor));
+      if (r.proposed) {
+        registryChanged(project.id, false);
+        const what = body.value === undefined ? `a new key \`${body.key}\`` : `\`${body.key}: ${body.value}\``;
+        const coordinator = await ensureCoordinator(project);
+        runner.send(coordinator.id, actor.name, `Property proposal: ${what}. Reason: ${body.reason}\n\nApprove or reject it with review_property (new keys need a person: ask them).`, []);
+      }
+      return json(res, 200, r);
+    }
+    throw new HttpError(404, 'Not found');
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/search$/);
@@ -925,6 +1027,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === ticket[k]) delete fields[k];
       if (Object.keys(fields).length) {
         store.updateTicket(id, fields);
+        if ('tag' in fields) store.props.setTypeFromTag(id, fields.tag ?? null, session.name);
         const who = session.agent === id ? 'Claude' : session.name;
         if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this minion from "${ticket.title}" to "${fields.title}".` });
         const next = runner.isRunning(id) ? 'from the next turn' : 'from now on';
@@ -1034,6 +1137,19 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (before.state === 'expired') throw new HttpError(409, 'This request expired; the turn that asked has ended');
       if (before.state !== 'pending') throw new HttpError(409, `${before.by} already ${before.state === 'allowed' ? 'approved' : 'denied'} this`);
       return json(res, 200, runner.approvals.decide(id, approvalId, body.allow, session.name));
+    }
+    if (action === '/properties' && method === 'PUT') {
+      // On the minion itself, or with `file` on one of the files it showed people (an artifact).
+      const body = await readJson(req);
+      if (body.file != null) {
+        const file = str(body.file, 'file', 4096);
+        const a = store.findArtifact(id, [isAbsolute(file) ? file : join(ticket.cwd, file), join(sharedDir(ticket), file)]);
+        if (!a) throw new HttpError(404, `#${ticket.number} has shown no file ${file}; link it in a reply first`);
+        return json(res, 200, registry(() => store.props.set('artifact', a.id, a.project_id, body.properties, session.name)));
+      }
+      const r = registry(() => store.props.set('minion', id, ticket.project_id, body.properties, session.name));
+      runner.broadcastTicket(id);
+      return json(res, 200, r);
     }
     if (action === '/stop' && method === 'POST') {
       return json(res, 200, { stopped: runner.stop(id) });

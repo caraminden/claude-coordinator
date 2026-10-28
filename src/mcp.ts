@@ -34,6 +34,35 @@ const BUILD = {
   description: 'The major build this work is assigned to, e.g. 8 for Build 8; the minions list groups the build\'s minions together. null takes it out of a build.',
 };
 
+const PROPERTIES = {
+  type: 'object',
+  description:
+    'Properties as { key: value }, e.g. { "type": "feature", "area": ["town", "ui"], "build": 8 }. Keys and values come from list_properties; aliases resolve to their value, and null clears a key. Unknown keys and values are refused with a "did you mean".',
+  additionalProperties: true,
+};
+
+const LIST_PROPERTIES = {
+  name: 'list_properties',
+  description: "The property registry for this scheme: the global keys (type, stage, requestedBy) and this scheme's own, with their values and aliases. Read it before setting or proposing properties.",
+  inputSchema: { type: 'object', properties: {} },
+};
+
+const VALUES = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      value: { type: 'string', description: 'Canonical value: lowercase kebab-case, or a proper name with its capitals' },
+      label: { type: 'string' },
+      description: { type: 'string' },
+      aliases: { type: 'array', items: { type: 'string' }, description: 'Other spellings that resolve to this value' },
+    },
+    required: ['value'],
+  },
+};
+
+const FORCE = { type: 'boolean', description: 'Register even though it looks like a near-duplicate of something that exists (only once you have checked it really is different)' };
+
 const TICKET_ID = { type: 'integer', description: 'Minion number in this scheme, e.g. 12 for #12 (as shown by list_tickets)' };
 
 const ASK_QUESTION = {
@@ -107,9 +136,10 @@ const TOOLS = [
       properties: {
         title: { ...TITLE, description: `${TITLE.description} Also used for the branch name.` },
         tag: TAG,
+        properties: { ...PROPERTIES, description: `${PROPERTIES.description} Must include type; if no type fits, use "other" and ask people where it belongs.` },
         message: { type: 'string', description: 'First message to the new minion' },
       },
-      required: ['title', 'message'],
+      required: ['title', 'properties', 'message'],
     },
   },
   {
@@ -146,6 +176,60 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
   },
   ASK_QUESTION,
+  LIST_PROPERTIES,
+  {
+    name: 'set_properties',
+    description: "Set a minion's properties, or (with file) those of a file it showed people. Only the keys you pass change.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ticket_id: TICKET_ID,
+        file: { type: 'string', description: "Optional: a file the minion linked (an artifact), as a path in its working directory or an absolute path" },
+        properties: PROPERTIES,
+      },
+      required: ['ticket_id', 'properties'],
+    },
+  },
+  {
+    name: 'register_property_values',
+    description:
+      "Add values to one of this scheme's enum keys (or, from the Citadel scheme only, a global key), or add aliases to values it has. New values are live at once but marked unreviewed: say in your reply which you added, so people can approve or correct them. Near-duplicates come back as a warning and nothing is added.",
+    inputSchema: { type: 'object', properties: { key: { type: 'string' }, values: VALUES, force: FORCE }, required: ['key', 'values'] },
+  },
+  {
+    name: 'register_property_key',
+    description:
+      "Propose a new key for this scheme (or, from the Citadel scheme only, a global key with global: true). New keys wait for a person to approve them in Settings → Properties, so ask people first. Keys are camelCase.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'camelCase, e.g. playerClass' },
+        label: { type: 'string' },
+        description: { type: 'string', description: 'What it means and when to set it' },
+        multi: { type: 'boolean', description: 'Whether it holds a list of values' },
+        value_kind: { type: 'string', enum: ['enum', 'integer', 'user', 'text'], description: 'enum (a fixed list of values, the default), integer, user (a login name) or text' },
+        values: VALUES,
+        global: { type: 'boolean', description: 'A key for every scheme (Citadel scheme only)' },
+        force: FORCE,
+      },
+      required: ['key', 'description'],
+    },
+  },
+  {
+    name: 'review_property',
+    description:
+      "Settle a value: approve a minion's proposed value, reject it, archive a value no longer used (what has it keeps it), restore one, or merge a value into another (it becomes an alias and everything carrying it moves over). Keys, and approving your own unreviewed values, need a person.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string' },
+        value: { type: 'string' },
+        action: { type: 'string', enum: ['approve', 'reject', 'archive', 'restore', 'merge'] },
+        into: { type: 'string', description: 'For merge: the value it becomes an alias of' },
+      },
+      required: ['key', 'value', 'action'],
+    },
+  },
   {
     name: 'get_project_instructions',
     description: "Read the scheme instructions: the standing rules people set for this scheme, which every minion and you receive in the system prompt.",
@@ -200,10 +284,35 @@ function clip(s: string): string {
   return s.length > MAX_TEXT ? `${s.slice(0, MAX_TEXT)} … [${s.length - MAX_TEXT} more chars]` : s;
 }
 
+/** Properties as people read them: always `key: value`, since one word can be a value of two keys. */
+function propertyText(props: Record<string, unknown> | undefined): string {
+  return Object.entries(props ?? {}).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; ');
+}
+
+function registryText(keys: any[]): string {
+  const kind = (k: any) => (k.value_kind === 'integer' ? 'a whole number' : k.value_kind === 'user' ? "a person's login name" : k.value_kind === 'text' ? 'free text' : k.multi ? 'one or more of' : 'one of');
+  const line = (k: any) => {
+    const shown = k.values.filter((v: any) => v.status !== 'archived');
+    const values = shown.map((v: any) => `${v.value}${v.aliases.length ? ` (${v.aliases.join(', ')})` : ''}${v.status === 'proposed' ? ' [proposed]' : !v.reviewed ? ' [new, unreviewed]' : ''}`);
+    return `- ${k.key}${k.status === 'proposed' ? ' [proposed key, not usable yet]' : ''}: ${kind(k)}${values.length ? ` ${values.join(', ')}` : ''}${k.description ? `\n  ${k.description.replace(/\n+/g, ' ')}` : ''}`;
+  };
+  const live = keys.filter((k) => k.status !== 'archived');
+  const global = live.filter((k) => k.scope === 'global').map(line);
+  const own = live.filter((k) => k.scope === 'scheme').map(line);
+  return `Global keys (every scheme):\n${global.join('\n')}\n\nThis scheme's keys:\n${own.length ? own.join('\n') : '(none yet)'}\n\nAliases (in brackets) resolve to their value. Show properties as key: value.`;
+}
+
+/** A registry call's answer: what happened, plus any warnings or follow-ups for the caller. */
+function registryReply(r: any, done: string): string {
+  if (r.warnings?.length) return `Nothing changed; it looks like a near-duplicate:\n${r.warnings.map((w: string) => `- ${w}`).join('\n')}`;
+  return [done, ...(r.notes ?? [])].join('\n');
+}
+
 function ticketLine(t: any): string {
   return [
     `#${t.number} ${t.title}`,
     t.tag ? `tag: ${t.tag}` : '',
+    t.properties && Object.keys(t.properties).length ? propertyText(t.properties) : '',
     t.build ? `build: ${t.build}` : '',
     `status: ${t.status}${t.state ? `, ${t.state}` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
     t.note ? `note: ${t.note}` : '',
@@ -261,6 +370,40 @@ const THREAD_TOOLS = [
     inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD } },
   },
   ASK_QUESTION,
+  LIST_PROPERTIES,
+  {
+    name: 'set_properties',
+    description: "Set this minion's properties (type, stage, and this scheme's keys), or with file those of a file you showed people. Only the keys you pass change.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'Optional: a file you linked in a reply, as a path in your working directory or an absolute path' },
+        properties: PROPERTIES,
+      },
+      required: ['properties'],
+    },
+  },
+  {
+    name: 'propose_property',
+    description:
+      "Propose a new value for one of this scheme's keys, or (without value) a new key. It waits as proposed until the Taskmaster or a person approves it, and the Taskmaster is told. Only when nothing in list_properties fits: never a near-duplicate of an existing value.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'The key; for a new key, its camelCase name' },
+        value: { type: 'string', description: 'The new value (kebab-case, or a proper name). Leave out to propose a new key.' },
+        aliases: { type: 'array', items: { type: 'string' } },
+        reason: { type: 'string', description: 'Why nothing existing fits' },
+        label: { type: 'string' },
+        description: { type: 'string' },
+        multi: { type: 'boolean', description: 'New key only: holds a list' },
+        value_kind: { type: 'string', enum: ['enum', 'integer', 'user', 'text'], description: 'New key only' },
+        values: { ...VALUES, description: 'New key only: its values' },
+        force: FORCE,
+      },
+      required: ['key', 'reason'],
+    },
+  },
   {
     name: 'message_coordinator',
     description:
@@ -341,9 +484,36 @@ async function runTool(name: string, args: any): Promise<string> {
       const t = await call('POST', `/api/projects/${PROJECT}/tickets`, {
         title: args.title,
         tag: args.tag ?? null,
+        properties: args.properties ?? {},
         message: args.message,
       });
-      return `Created ${ticketLine(t)}`;
+      return [`Created ${ticketLine(t)}`, ...(t.notes ?? [])].join('\n');
+    }
+    case 'list_properties': {
+      const { keys } = await call('GET', `/api/projects/${PROJECT}/properties`);
+      return registryText(keys);
+    }
+    case 'set_properties': {
+      const target = ROLE === 'thread' ? TICKET : await id(args);
+      const r = await call('PUT', `/api/tickets/${target}/properties`, { properties: args.properties, file: args.file ?? null });
+      return registryReply(r, `Set. ${propertyText(r.properties) || '(no properties)'}`);
+    }
+    case 'register_property_values': {
+      const r = await call('POST', `/api/projects/${PROJECT}/properties/values`, { key: args.key, values: args.values, force: !!args.force });
+      const parts = [r.added.length ? `Added ${r.added.map((v: string) => `${args.key}: ${v}`).join(', ')}` : '', r.updated.length ? `updated ${r.updated.join(', ')}` : ''].filter(Boolean).join('; ');
+      return registryReply(r, `${parts || 'No change'}.${r.unreviewed ? ' These are live but unreviewed: tell people in your reply what you added, so they can approve or correct it.' : ''}`);
+    }
+    case 'register_property_key': {
+      const r = await call('POST', `/api/projects/${PROJECT}/properties/keys`, args);
+      return registryReply(r, r.status === 'active' ? `Registered ${args.key}.` : `Proposed ${args.key}; it waits for a person to approve it in Settings → Properties. Tell people in your reply.`);
+    }
+    case 'review_property': {
+      const r = await call('POST', `/api/projects/${PROJECT}/properties/review`, args);
+      return `Done: ${r.action} ${r.key}${r.value ? `: ${r.value}` : ''}.`;
+    }
+    case 'propose_property': {
+      const r = await call('POST', `/api/projects/${PROJECT}/properties/proposals`, args);
+      return registryReply(r, 'Proposed. The Taskmaster has been told; it stays unusable until approved.');
     }
     case 'get_project_instructions': {
       const { project } = await call('GET', `/api/projects/${PROJECT}`);

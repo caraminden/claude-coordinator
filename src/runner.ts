@@ -359,7 +359,7 @@ export class Runner {
     const { total, done } = stepInfo(this.progressFor(ticket.id));
     return {
       ...ticket, queued: this.queued(ticket.id), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
-      approvals: this.approvals.waiting(ticket.id),
+      approvals: this.approvals.waiting(ticket.id), properties: this.store.props.forTarget('minion', ticket.id),
     };
   }
 

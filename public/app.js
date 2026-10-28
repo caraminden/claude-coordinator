@@ -786,7 +786,7 @@ async function showProjects() {
           h('a', { class: 'card', href: `#/p/${p.id}` },
             h('div', { class: 'title' }, h('strong', { 'data-project-name': p.id }, p.name)),
             h('div', { class: 'muted' }, p.repo_url || 'No repo'),
-            h('div', { class: 'muted' }, `${p.tickets} ticket${p.tickets === 1 ? '' : 's'}`))))
+            h('div', { class: 'muted' }, `${p.tickets} minion${p.tickets === 1 ? '' : 's'}`))))
       : h('p', { class: 'muted' }, 'No schemes yet.'),
     h('details', { class: 'new', open: !projects.length }, h('summary', {}, 'New scheme'), h('div', { class: 'card' }, form)),
   );

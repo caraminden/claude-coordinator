@@ -122,7 +122,7 @@ const TOOLS = [
   },
   {
     name: 'update_ticket',
-    description: "Change a ticket's title, tag, state, note or build; leave out what should stay. (The branch keeps its original name.)",
+    description: "Change a ticket's title, tag, state, note or build group (the major build it is assigned to); leave out what should stay. (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
       properties: { ticket_id: TICKET_ID, title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD },

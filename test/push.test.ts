@@ -94,6 +94,7 @@ const ticket = (over: Partial<Ticket> = {}) => ({ id: 7, project_id: 2, number: 
 test('only decisions, blockers and results make a notification', () => {
   const q = notificationFor(ticket(), { kind: 'question', questions: [{ question: 'Tabs or a list?' }, { question: 'Colour?' }] });
   assert.deepEqual(q, { title: '#34 Web Push', body: 'Tabs or a list? (+1 more)', tag: 'thread-7', url: '/#/p/2/t/34' });
+  assert.equal(notificationFor(ticket(), { kind: 'plan', summary: 'Usage bar in the top bar' })?.body, 'Plan to approve: Usage bar in the top bar');
   assert.equal(notificationFor(ticket(), { kind: 'error', text: 'claude exited with code 1:\nboom' })?.body, 'Turn failed: claude exited with code 1:');
   assert.equal(notificationFor(ticket(), { kind: 'state', state: 'ready', note: 'PR #12 open' })?.body, 'PR #12 open');
   assert.equal(notificationFor(ticket(), { kind: 'state', state: 'try', note: null })?.body, 'Ready for you to try');

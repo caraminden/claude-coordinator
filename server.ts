@@ -1173,6 +1173,45 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       personWrote(ticket, session);
       return json(res, 202, ticketView(id));
     }
+    if (action === '/plans' && method === 'POST') {
+      // Claude proposes a plan: an Approve / Revise card that waits, across restarts, for a person.
+      if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can propose a plan in its chat');
+      const body = await readJson(req);
+      const plan = str(body.plan, 'Plan', 20_000);
+      const summary = str(body.summary, 'Summary', 200);
+      // A new plan replaces any earlier one still open (waiting, or sent back for changes).
+      for (const e of store.listEvents(id)) {
+        const old = e.kind === 'plan' ? JSON.parse(e.data) : null;
+        if (old?.status !== 'pending' && old?.status !== 'revising') continue;
+        store.setEventData(e.id, { ...old, status: 'superseded' });
+        runner.emit(id, 'plan_result', { id: old.id, status: 'superseded' });
+      }
+      const planId = randomBytes(6).toString('hex');
+      runner.emit(id, 'plan', { id: planId, summary, plan, status: 'pending' });
+      notify(id, { kind: 'plan', summary });
+      return json(res, 201, { id: planId });
+    }
+    if (action === '/verdict' && method === 'POST') {
+      // A person approves a plan card (the go) or sends it back with notes; never the minion or the Taskmaster.
+      if (session.agent !== undefined) throw new HttpError(403, 'Only people approve plans');
+      const body = await readJson(req);
+      if (body.verdict !== 'approve' && body.verdict !== 'revise') throw new HttpError(400, 'verdict must be approve or revise');
+      const notes = body.verdict === 'revise' ? str(body.notes, 'Notes', 10_000) : null;
+      const event = store.listEvents(id).find((e) => e.kind === 'plan' && JSON.parse(e.data).id === body.planId);
+      if (!event) throw new HttpError(404, 'No such plan');
+      const card = JSON.parse(event.data);
+      if (card.status === 'superseded') throw new HttpError(409, 'A newer plan replaced this one');
+      if (card.status !== 'pending') throw new HttpError(409, `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
+      const result = { status: body.verdict === 'approve' ? 'approved' : 'revising', by: session.name, at: Date.now() };
+      store.setEventData(event.id, { ...card, ...result });
+      runner.emit(id, 'plan_result', { id: card.id, ...result });
+      runner.send(id, session.name, notes === null
+        ? `Plan approved: build it this way. ("${card.summary}")`
+        : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
+        [], { plan: { planId: card.id, verdict: body.verdict } });
+      personWrote(ticket, session);
+      return json(res, 202, ticketView(id));
+    }
     if (action === '/approvals' && method === 'POST') {
       // Claude Code asks before a tool call (a tripwire ask or an approval rule): an Approve / Deny card, or a refusal.
       if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can ask for approval in its chat');

@@ -284,6 +284,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     '- If the plan changes, add, reword or delete tasks so the list stays true.',
     'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
     'When you need people to decide between clear options, ask with the `ask_question` tool (mcp__thread) instead of listing choices in prose: it shows a card they answer with a click. Then end your turn; the answers arrive as the next message.',
+    'When people want to hear your plan before you build, post it with the `propose_plan` tool (mcp__thread): a card with Approve and Revise that only a person can approve. Then end your turn and write no code until the go arrives as the next message.',
     'The scheme\'s minions list groups minions by kind and shows each as one line: number, short title, state, note. Keep yours accurate with the `set_thread_status` tool (mcp__thread):',
     '- title: the short ask, about 30 characters ("Usage bar in the top bar"), no number, tag or emoji. Your starting title may just be the opening words of the first message; replace it early in your first turn with the short ask.',
     '- tag: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet). Set it once the kind of work is clear, following any scheme conventions, and change it if the work changes kind; leave it unset for one-off questions.',

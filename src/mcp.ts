@@ -129,6 +129,20 @@ const ASK_QUESTION = {
   },
 };
 
+const PROPOSE_PLAN = {
+  name: 'propose_plan',
+  description:
+    'Post a plan in this chat as a card people answer with Approve or Revise, for a run-back before code or any plan that needs a go. Only a person can approve it. After calling it, finish your turn with a short reply and write no code: the go (Approve) or the notes to revise it come as the next message. To revise, call propose_plan again with the whole new plan; the old card shows as superseded.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      summary: { type: 'string', description: 'One line on what the plan builds, max 200 chars, e.g. "Usage bar in the top bar, fed by the turn stats"' },
+      plan: { type: 'string', description: 'The whole plan in markdown: what you will change and how, what you will not do, and how you will test it' },
+    },
+    required: ['summary', 'plan'],
+  },
+};
+
 const TOOLS = [
   {
     name: 'list_tickets',
@@ -401,6 +415,7 @@ const THREAD_TOOLS = [
     inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD } },
   },
   ASK_QUESTION,
+  PROPOSE_PLAN,
   LIST_PROPERTIES,
   {
     name: 'set_properties',
@@ -596,6 +611,9 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'ask_question':
       await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
       return 'The question card is in the chat. End your turn now with a short reply; the answers will come as the next message.';
+    case 'propose_plan':
+      await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan });
+      return 'The plan card is in the chat. End your turn now with a short reply and write no code; the go or the notes to revise it will come as the next message.';
     case 'set_thread_status':
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}`;
     case 'message_coordinator':

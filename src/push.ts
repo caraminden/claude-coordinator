@@ -31,6 +31,7 @@ export interface PushMessage {
 
 export type PushTrigger =
   | { kind: 'question'; questions: { question: string }[] }
+  | { kind: 'plan'; summary: string }
   | { kind: 'error'; text: string }
   | { kind: 'state'; state: string | null; note: string | null };
 
@@ -128,6 +129,8 @@ export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectNam
     const [first, ...rest] = trigger.questions;
     if (!first) return null;
     body = clip(first.question) + (rest.length ? ` (+${rest.length} more)` : '');
+  } else if (trigger.kind === 'plan') {
+    body = clip(`Plan to approve: ${trigger.summary}`);
   } else if (trigger.kind === 'error') {
     body = clip(`Turn failed: ${trigger.text.split('\n')[0]}`);
   } else {

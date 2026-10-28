@@ -428,6 +428,11 @@ export class Store {
     return { id: Number(r.lastInsertRowid), ticket_id: ticketId, kind, data: json, created_at: now };
   }
 
+  /** Replace an event's data, for cards whose status lives in the card (plans). */
+  setEventData(id: number, data: unknown) {
+    this.db.prepare('UPDATE events SET data = ? WHERE id = ?').run(JSON.stringify(data), id);
+  }
+
   /** A project's artifacts, newest first, with the title of the ticket that made each. */
   listArtifacts(projectId: number): (Artifact & { ticket_title: string; ticket_kind: TicketKind; ticket_number: number | null })[] {
     return this.db

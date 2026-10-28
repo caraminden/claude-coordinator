@@ -146,7 +146,12 @@ if (runner.units && !BOOT_CHECK) {
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text) => runner.send(ticketId, APP_NAME, text));
-if (!BOOT_CHECK) waiters.check();
+/** The server now runs `head`: wake its waiters, and dismiss pending-deploy minions it ships. */
+function liveOn(head: string | null) {
+  waiters.check(head);
+  for (const id of waiters.pendingLive()) runner.deployLive(id);
+}
+if (!BOOT_CHECK) liveOn(BOOT_COMMIT);
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 runner.machines = (project) => machines.online(project.id);
 
@@ -1606,7 +1611,7 @@ process.on('SIGHUP', () => {
       console.log(`Reloaded public/ on SIGHUP: front end ${before} → ${ASSET_VERSION}`);
       if (ASSET_VERSION !== before) broadcast({ type: 'hello', version: ASSET_VERSION, usage: runner.usage });
       // tools/deploy.sh sends SIGHUP only for a change to public/ alone, so the checkout's HEAD is now live.
-      if (!BOOT_CHECK) waiters.check(checkoutHead());
+      if (!BOOT_CHECK) liveOn(checkoutHead());
     },
     (err) => console.error('Reloading public/ on SIGHUP failed; still serving the old front end:', err),
   );

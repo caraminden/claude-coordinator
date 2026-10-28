@@ -129,3 +129,31 @@ process.stdin.on('end', () => {
   assert.ok(said.every((m) => m.author === APP_NAME));
   assert.equal(store.getSetting(`loop:${id}`), null);
 });
+
+test('pending-deploy minions whose branch the live commit contains are found, whoever deployed it', () => {
+  // #81: a deploy reports only to the minions that ran it, so one waiting on a commit that went live
+  // in someone else's restart stayed pending-deploy.
+  store.setProjectRepoDir(project.id, repo);
+  const withBranch = (state: any, branch: string | null) => {
+    const id = minion();
+    store.setTicketDir(id, root, branch);
+    store.updateTicket(id, { state });
+    return id;
+  };
+  git('branch', 'ticket/live');
+  const shipped = withBranch('pending-deploy', 'ticket/live');
+  const merged = commit(); // merged to main after the branch was cut: still contains it
+  git('checkout', '-q', '-b', 'ticket/unmerged');
+  commit();
+  git('checkout', '-q', 'main');
+  const unmerged = withBranch('pending-deploy', 'ticket/unmerged');
+  withBranch(null, 'ticket/live'); // not waiting on a deploy
+  withBranch('pending-deploy', 'ticket/gone'); // no such branch
+  withBranch('pending-deploy', null);
+  const closed = withBranch('pending-deploy', 'ticket/live');
+  store.updateTicket(closed, { status: 'closed' });
+  assert.deepEqual(waiters(merged).pendingLive(), [shipped]);
+  assert.deepEqual(waiters('f'.repeat(40)).pendingLive(), [], 'a head the repo does not know');
+  git('merge', '-q', '--no-edit', 'ticket/unmerged');
+  assert.deepEqual(waiters(git('rev-parse', 'HEAD')).pendingLive().sort(), [shipped, unmerged].sort());
+});

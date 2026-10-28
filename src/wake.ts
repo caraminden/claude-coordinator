@@ -93,4 +93,22 @@ export class LiveWaiters {
     }
     return woken.length;
   }
+
+  /**
+   * Minions in pending-deploy whose branch the live commit contains. A deploy reports only to the
+   * minions that ran it, so this also catches one whose commit went live in someone else's restart.
+   */
+  pendingLive(): number[] {
+    if (!this.head) return [];
+    const ids: number[] = [];
+    for (const p of this.store.listProjects()) {
+      if (!p.repo_dir) continue;
+      for (const t of this.store.listTickets(p.id)) {
+        if (t.state !== 'pending-deploy' || t.status === 'closed' || !t.branch) continue;
+        // A scheme whose repo doesn't have the live commit (another app's) fails here, as it should.
+        if (git(p.repo_dir, ['merge-base', '--is-ancestor', `refs/heads/${t.branch}`, this.head]) !== null) ids.push(t.id);
+      }
+    }
+    return ids;
+  }
 }

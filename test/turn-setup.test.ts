@@ -19,6 +19,10 @@ process.env.MACHINES_URL = 'http://127.0.0.1:1';
 process.env.COORDINATOR_PASSWORD = 'hunter2';
 process.env.XDG_RUNTIME_DIR = '/run/user/1000';
 process.env.LC_TIME = 'en_GB.UTF-8';
+// The service's own values must never reach a turn; tools/deploy.sh relies on the per-turn ones.
+process.env.COORDINATOR_API = 'http://service.invalid';
+process.env.COORDINATOR_TOKEN = 'service-token';
+process.env.COORDINATOR_TICKET = '999';
 const { MCP_DIR, MCP_SERVER, Runner, turnEnv } = await import('../src/runner.ts');
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -52,7 +56,7 @@ console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false
 chmodSync(fake, 0o755);
 const store = new Store(join(root, 'test.db'));
 const errors: string[] = [];
-const runner = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 't' }), fake);
+const runner = new Runner(store, () => {}, (t) => ({ COORDINATOR_API: 'http://127.0.0.1:8573', COORDINATOR_TOKEN: `token-${t.id}` }), fake);
 runner.onTurnError = (_id, text) => errors.push(text);
 
 async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string } = {}) {
@@ -70,7 +74,7 @@ async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { mo
   const run = JSON.parse(readFileSync(join(root, 'turn'), 'utf8'));
   const flag = (f: string) => (run.args.includes(f) ? run.args[run.args.indexOf(f) + 1] : null);
   const events = store.listEvents(t.id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text);
-  return { ...run, flag, events };
+  return { ...run, id: t.id, flag, events };
 }
 
 test("a minion turn gets the compaction window, no service secrets, Claude Code's model and the scheme's effort", async () => {
@@ -80,7 +84,10 @@ test("a minion turn gets the compaction window, no service secrets, Claude Code'
   assert.equal(t.env.COORDINATOR_PASSWORD, undefined);
   assert.equal(t.env.XDG_RUNTIME_DIR, '/run/user/1000');
   assert.equal(t.env.LC_TIME, 'en_GB.UTF-8');
-  assert.equal(t.env.COORDINATOR_TOKEN, 't');
+  // What tools/deploy.sh needs to post the restart's outcome to this minion's chat.
+  assert.equal(t.env.COORDINATOR_API, 'http://127.0.0.1:8573');
+  assert.equal(t.env.COORDINATOR_TOKEN, `token-${t.id}`);
+  assert.equal(t.env.COORDINATOR_TICKET, String(t.id));
   assert.equal(t.env.COORDINATOR_ROLE, 'thread');
   assert.equal(t.flag('--model'), null);
   assert.equal(t.flag('--effort'), 'high', "the scheme's default effort");

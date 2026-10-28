@@ -97,7 +97,7 @@ uses the built-in `node:sqlite`.
 | `src/runner.ts` | Spawns `claude` turns, parses stream-json, queues messages |
 | `src/mcp.ts` | MCP server giving the Taskmaster its minion-management tools |
 | `src/approvals.ts` | Approval rules, plugin folders, and the Approve / Deny cards |
-| `src/inbox.ts`, `public/inbox.js` | The Needs-you inbox: a scheme's open cards and ready/try minions, its page and count |
+| `src/inbox.ts`, `public/inbox.js` | The Needs-you inbox: a scheme's open cards and ready/try minions, as a strip on top of the chat |
 | `src/tripwire.ts` | PreToolUse hook every turn gets: blocks known accidents (live data, checkout, units, keys) |
 | `src/push.ts` | Web Push: VAPID keys and signing, payload encryption, when to notify |
 | `src/machines.ts` | Relays MCP traffic between minion turns and connected machines |

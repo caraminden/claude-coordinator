@@ -1,6 +1,6 @@
-// The Needs-you inbox: everything in the scheme waiting on a person, with its badge in the minions panel.
+// The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the chat,
+// minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, STATES, taskmasterLabel, threadHref, view } from './core.js';
-import { approvalCard, planCard, questionCard } from './thread.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
 const inbox = { projectId: null, items: [], timer: 0 };
@@ -11,7 +11,7 @@ const ticketOf = (id) => (view?.coordinator?.id === id ? view.coordinator : view
 // A ready/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
 const faded = (item) => item.kind === 'state' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 });
 
-/** Fetch the scheme's items again, then redraw the badge and (if open) the page. */
+/** Fetch the scheme's items again, then redraw the strip. */
 export async function refreshInbox() {
   if (view?.kind !== 'project') return;
   const projectId = view.projectId;
@@ -38,69 +38,61 @@ export function inboxTicket(before, after) {
   if (!before || before.state !== after.state || (before.status === 'closed') !== (after.status === 'closed')) refreshSoon();
 }
 
-/** Redraw what shows the inbox: the badge row and count in the minions panel, and the page if open. */
+// What each kind of item asks of you, as a chip on its minion's row.
+const ASKS = { approval: '✋ Approve', question: '❓ Question', plan: '📋 Plan', ready: '✅ Ready', try: '🧪 Try it' };
+const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
+
+// One strip, kept across chats so it stays opened or minimized as you move between them. Made on
+// first use: a module's top-level code must not call into another while they load.
+let strip = null;
+
+/** The strip for the chat head (renderTicketHead puts it on top). */
+export function inboxStrip() {
+  strip ??= h('div', { class: 'inbox-strip', hidden: true });
+  return strip;
+}
+
+/** Redraw the strip: the count while minimized; opened, one row per waiting minion, linking to its chat. */
 export function renderInbox() {
   if (view?.kind !== 'project' || inbox.projectId !== view.projectId) return;
   const items = inbox.items.filter((i) => ticketOf(i.ticketId));
+  const strip = inboxStrip();
+  strip.hidden = !items.length;
+  if (!items.length) return strip.replaceChildren();
   const count = items.filter((i) => !faded(i)).length;
-  const tab = document.getElementById('inbox-count');
-  if (tab) {
-    tab.textContent = count || '';
-    tab.hidden = !count;
+  let open = false;
+  try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch {}
+  // A minion's items share its row, in the order of its most urgent one.
+  const rows = new Map();
+  for (const i of items) {
+    if (!rows.has(i.ticketId)) rows.set(i.ticketId, []);
+    rows.get(i.ticketId).push(i);
   }
-  document.getElementById('inbox-row')?.replaceChildren(
-    h('a', { class: `inbox-link${view.main === 'inbox' ? ' active' : ''}`, href: `#/p/${view.projectId}/inbox`, title: 'Everything in this scheme waiting on you' },
-      h('span', { class: 'label' }, 'Needs you'),
-      count ? h('span', { class: 'count' }, count) : h('span', { class: 'muted' }, items.length ? 'all seen' : 'nothing')));
-  const list = document.getElementById('inbox-list');
-  if (list) renderList(list, items);
+  const toggle = h('button', { type: 'button', class: 'inbox-toggle', 'aria-expanded': String(open), title: open ? 'Minimize' : 'Show what waits on you' },
+    h('span', { class: 'label' }, 'Needs you'),
+    count ? h('span', { class: 'count' }, count) : h('span', { class: 'muted' }, 'all seen'),
+    h('span', { class: 'muted' }, `${rows.size} minion${rows.size === 1 ? '' : 's'}`),
+    h('span', { class: 'spacer' }),
+    h('span', { class: 'chev', 'aria-hidden': 'true' }, open ? '▾' : '▸'));
+  toggle.addEventListener('click', () => {
+    try { localStorage.setItem(OPEN_KEY, open ? '0' : '1'); } catch {}
+    renderInbox();
+  });
+  strip.classList.toggle('open', open);
+  strip.replaceChildren(toggle, open ? h('div', { class: 'inbox-rows' }, [...rows.values()].map(inboxRow)) : '');
 }
 
-/** The Needs-you page; renderInbox fills it. */
-export function inboxPage() {
-  return h('section', { class: 'artifacts-main inbox-page' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Needs you'), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
-      h('div', { class: 'meta' }, 'Cards waiting on a person and minions ready for you, newest first. Approvals come first: they hold up a turn.')),
-    h('div', { id: 'inbox-list' }, h('p', { class: 'muted' }, 'Loading…')));
-}
-
-// Cards already on the page, by key, so a refresh keeps half-typed answers and notes.
-const shown = new Map();
-
-function renderList(list, items) {
-  if (!items.length) {
-    shown.clear();
-    return list.replaceChildren(h('p', { class: 'muted empty' }, 'Nothing is waiting on you in this scheme.'));
+/** A waiting minion: its number and title, what it asks of you, and how long the newest ask has waited. */
+function inboxRow(items) {
+  const t = ticketOf(items[0].ticketId);
+  const asks = new Map();
+  for (const i of items) {
+    const ask = ASKS[i.kind === 'state' ? t.state : i.kind] ?? i.kind;
+    asks.set(ask, (asks.get(ask) ?? 0) + 1);
   }
-  const keep = new Map();
-  list.replaceChildren(...items.map((item) => {
-    const key = item.card ? `${item.kind}:${item.card.id}` : `state:${item.ticketId}:${ticketOf(item.ticketId).updated_at}`;
-    const el = shown.get(key) ?? inboxItem(item);
-    el.classList.toggle('seen', faded(item));
-    keep.set(key, el);
-    return el;
-  }));
-  shown.clear();
-  for (const [k, el] of keep) shown.set(k, el);
-}
-
-/** One item: which minion and how long it has waited, then the card itself or the minion's note. */
-function inboxItem(item) {
-  const t = ticketOf(item.ticketId);
-  const state = item.kind === 'state' ? STATES[t.state] : null;
-  const head = h('div', { class: 'inbox-head' },
-    h('a', { class: 'who-link', href: threadHref(t) }, isCoordinator(t) ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
-    h('span', { class: 'muted' }, ` · ${ago(item.at)}`));
-  if (state) {
-    return h('a', { class: 'inbox-item state-item', href: threadHref(t) }, head,
-      h('div', { class: 'state-line' }, h('span', { class: 'chip' }, `${state.emoji} ${t.state === 'try' ? 'Try it' : 'Ready'}`), ' ', t.note || state.label));
-  }
-  const card = item.kind === 'approval' ? approvalCard(t.id, item.card)
-    : item.kind === 'plan' ? planCard(t.id, item.card)
-      : item.kind === 'question' ? questionCard(t.id, item.card)
-        // A card kind this front end doesn't know yet still links to its chat.
-        : h('div', { class: 'qcard' }, h('a', { href: threadHref(t) }, 'Open the chat to answer it'));
-  return h('div', { class: 'inbox-item' }, head, card);
+  const seen = items.every(faded);
+  return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: threadHref(t) },
+    h('span', { class: 'name' }, isCoordinator(t) ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
+    h('span', { class: 'asks' }, [...asks].map(([ask, n]) => h('span', { class: 'chip' }, n > 1 ? `${ask} ×${n}` : ask))),
+    h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))));
 }

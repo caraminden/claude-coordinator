@@ -613,7 +613,6 @@ async function route() {
     if (!hash.startsWith('#/f/') && closeViewer() === hash) return;
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/inbox$/))) await showProject(Number(m[1]), { kind: 'inbox' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/(?:settings|instructions)$/))) await showProject(Number(m[1]), { kind: 'instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });

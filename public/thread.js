@@ -3,6 +3,7 @@ import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, file
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState } from './sidebar.js';
 import { propertyChip } from './properties.js';
+import { inboxStrip } from './inbox.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
@@ -174,6 +175,7 @@ export function renderTicketHead() {
   // Titled too, since phones may cut it short to keep the buttons beside it.
   const stateLabel = h('span', { class: 'muted', title: state }, state);
   el.replaceChildren(
+    inboxStrip(),
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
@@ -570,7 +572,7 @@ function approvalOutcome(r) {
  * card also shows its reason), waiting for a person. The turn is paused until someone clicks; a card
  * whose turn ended (stopped, failed, server restart) expires.
  */
-export function approvalCard(ticketId, card) {
+function approvalCard(ticketId, card) {
   const input = card.input ?? {};
   // Show what will actually run: the command for Bash, the path for file tools, else the whole input.
   const lead = typeof input.command === 'string' ? 'command' : typeof input.file_path === 'string' ? 'file_path' : null;
@@ -629,7 +631,7 @@ function planOutcome(r) {
  * A plan from Claude waiting for a go: Approve sends it, Revise opens a box for notes that go back
  * to Claude, which answers with a new card. Only people can decide; the card keeps its outcome.
  */
-export function planCard(ticketId, card) {
+function planCard(ticketId, card) {
   const status = h('span', { class: 'muted', role: 'status' });
   const approve = h('button', { type: 'button', class: 'small' }, 'Approve');
   const revise = h('button', { type: 'button', class: 'small secondary' }, 'Revise');
@@ -727,7 +729,7 @@ function answerSummary(answers) {
 // Picks not yet sent, by card id, so a card keeps them while you look at an option's picture.
 const cardPicks = new Map();
 
-export function questionCard(ticketId, card) {
+function questionCard(ticketId, card) {
   if (!cardPicks.has(card.id)) cardPicks.set(card.id, card.questions.map(() => ({ selected: new Set(), other: '' })));
   const picks = cardPicks.get(card.id);
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;

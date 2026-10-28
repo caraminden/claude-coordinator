@@ -325,7 +325,7 @@ async function ticketBranch(ticketId: number, maxPrAge = PR_TTL_MS): Promise<Bra
   if (!ticket?.branch || !project?.repo_dir) return null;
   const cached = branchCache.get(ticketId);
   const prFresh = cached && Date.now() - cached.prAt < maxPrAge;
-  const status = await branchStatus(project.repo_dir, ticket.branch, ticket.created_at, !prFresh);
+  const status = await branchStatus(project.repo_dir, ticket.branch, ticket.created_at, !prFresh, { head: waiters.head, checkoutDir: import.meta.dirname });
   if (status && prFresh) status.pr = cached.status?.pr ?? null;
   const json = JSON.stringify(status);
   branchCache.set(ticketId, { status, prAt: prFresh ? cached.prAt : Date.now(), json });

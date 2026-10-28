@@ -15,6 +15,17 @@ export interface BranchStatus {
   /** Nothing committed on the branch since the ticket started. */
   empty: boolean;
   pr: { number: number; title: string; state: 'OPEN' | 'CLOSED' | 'MERGED'; url: string; draft: boolean } | null;
+  /**
+   * For merged work in the repo the server itself runs from: whether the live checkout has pulled it
+   * (a deploy is under way) and whether the running server contains it. Null otherwise.
+   */
+  deploy: { pulled: boolean; live: boolean } | null;
+}
+
+/** The commit the server runs and its live checkout, to place merged work in a deploy. */
+export interface Live {
+  head: string | null;
+  checkoutDir: string;
 }
 
 async function git(args: string[], cwd: string): Promise<string> {
@@ -47,7 +58,7 @@ async function findPr(repoDir: string, branch: string): Promise<BranchStatus['pr
  * Status of a ticket's branch in the project's checkout. Merged means its commits are all in the
  * local default branch or origin's (tickets here are often merged locally rather than through a PR).
  */
-export async function branchStatus(repoDir: string, branch: string, startedAt: number, withPr: boolean): Promise<BranchStatus | null> {
+export async function branchStatus(repoDir: string, branch: string, startedAt: number, withPr: boolean, live: Live | null = null): Promise<BranchStatus | null> {
   if (!(await tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repoDir))) return null;
   const originHead = await tryGit(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repoDir);
   const localDefault = originHead?.replace(/^origin\//, '') ?? 'main';
@@ -72,5 +83,26 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
     merged,
     empty,
     pr: withPr ? await findPr(repoDir, branch) : null,
+    deploy: merged && live ? await deployed(repoDir, branch, live) : null,
   };
+}
+
+/** Is `ancestor` contained in `commit`? Null when the repo doesn't know one of them. */
+async function contains(repoDir: string, commit: string, ancestor: string): Promise<boolean | null> {
+  try {
+    await run('git', ['merge-base', '--is-ancestor', ancestor, commit], { cwd: repoDir, timeout: 15_000 });
+    return true;
+  } catch (err) {
+    return (err as { code?: number }).code === 1 ? false : null;
+  }
+}
+
+/** Whether the live checkout and the running server contain the branch. */
+async function deployed(repoDir: string, branch: string, live: Live): Promise<BranchStatus['deploy']> {
+  // Another scheme's repo doesn't know the server's commit: its work never deploys here.
+  const isLive = live.head ? await contains(repoDir, live.head, `refs/heads/${branch}`) : null;
+  if (isLive === null) return null;
+  const checkout = isLive ? null : await tryGit(['rev-parse', 'HEAD'], live.checkoutDir);
+  const pulled = isLive || (!!checkout && (await contains(repoDir, checkout, `refs/heads/${branch}`)) === true);
+  return { pulled, live: isLive };
 }

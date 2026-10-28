@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -137,7 +138,7 @@ test('the turn keeps its own tripwire and MCP copies, the env allowlist, and no 
   const r = await started(id);
   const dir = turnDir(r, id);
   const run = JSON.parse(readFileSync(seen, 'utf8').trim().split('\n').at(-1)!);
-  const settings = JSON.parse(run.argv[run.argv.indexOf('--settings') + 1]);
+  const settings = JSON.parse(readFileSync(run.argv[run.argv.indexOf('--settings') + 1], 'utf8'));
   const hook = settings.hooks.PreToolUse[0].hooks[0].command.split(' ')[1].slice(1, -1);
   assert.equal(hook, join(dir, 'pin', 'tripwire.ts'));
   assert.ok(existsSync(hook));
@@ -157,4 +158,16 @@ test('a stream line longer than the read buffer arrives whole', async () => {
   await until(() => !r.isRunning(id));
   assert.equal(texts(id)[0].length, 1.5e6);
   assert.equal(texts(id)[1], 'all done');
+});
+
+test('a command too long to start is reported at once, not as a turn killed a minute later', () => {
+  // spawn throws E2BIG rather than emitting 'error'; the wrapper must still write exit.json.
+  const dir = mkdtempSync(join(tmpdir(), 'wrapper-e2big-'));
+  for (const f of ['prompt.jsonl', 'stream.jsonl', 'stderr.log']) writeFileSync(join(dir, f), '');
+  writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: 'true', args: ['x'.repeat(200 * 1024)], cwd: dir, env: { PATH: process.env.PATH } }));
+  spawnSync(process.execPath, [join(import.meta.dirname, '..', 'src', 'turn-wrapper.ts'), dir]);
+  const exit = JSON.parse(readFileSync(join(dir, 'exit.json'), 'utf8'));
+  assert.match(exit.error, /E2BIG/);
+  assert.match(readFileSync(join(dir, 'stderr.log'), 'utf8'), /Could not start true: .*E2BIG/);
+  rmSync(dir, { recursive: true, force: true });
 });

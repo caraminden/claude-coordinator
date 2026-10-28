@@ -948,7 +948,9 @@ export class Runner {
       addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
       settings.permissions = access.settings.permissions;
     }
-    args.push('--settings', JSON.stringify(settings));
+    // As a file: the Taskmaster's git rules (one per worktree) outgrew Linux's 128 KiB cap on one argument (E2BIG).
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings));
+    args.push('--settings', join(dir, 'settings.json'));
     if (addDirs.length) args.push('--add-dir', ...addDirs);
     if (ticket.kind !== 'coordinator') args.push(...pluginDirArgs(lines(project.plugin_dirs), ticket.cwd));
     if (ticket.session_id) args.push('--resume', ticket.session_id);

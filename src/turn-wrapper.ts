@@ -22,20 +22,29 @@ function done(exit: { code: number | null; signal: string | null; error?: string
   process.exit(0);
 }
 
-// The env is exactly the runner's allowlist (turnEnv), not this unit's: the user manager adds its own.
-const child = spawn(spec.command, spec.args, {
-  cwd: spec.cwd,
-  env: spec.env,
-  // Its own process group, as before units: stopping the turn signals the group, tool subprocesses too.
-  detached: true,
-  stdio: [openSync(file('prompt.jsonl'), 'r'), openSync(file('stream.jsonl'), 'a'), openSync(file('stderr.log'), 'a')],
-});
-child.on('error', (err) => {
+function failed(err: Error) {
   appendFileSync(file('stderr.log'), `Could not start ${spec.command}: ${err.message}\n`);
   done({ code: null, signal: null, error: err.message });
-});
-if (child.pid) writeFileSync(file('pid.json'), JSON.stringify({ wrapper: process.pid, claude: child.pid }));
-child.on('exit', (code, signal) => done({ code, signal }));
+}
+
+// The env is exactly the runner's allowlist (turnEnv), not this unit's: the user manager adds its own.
+let child: ReturnType<typeof spawn>;
+try {
+  child = spawn(spec.command, spec.args, {
+    cwd: spec.cwd,
+    env: spec.env,
+    // Its own process group, as before units: stopping the turn signals the group, tool subprocesses too.
+    detached: true,
+    stdio: [openSync(file('prompt.jsonl'), 'r'), openSync(file('stream.jsonl'), 'a'), openSync(file('stderr.log'), 'a')],
+  });
+} catch (err: any) {
+  // Some failures (E2BIG: arguments too long) throw here rather than emit 'error'; without exit.json
+  // the runner would wait out its start-up grace and report the turn as killed.
+  failed(err);
+}
+child!.on('error', failed);
+if (child!.pid) writeFileSync(file('pid.json'), JSON.stringify({ wrapper: process.pid, claude: child.pid }));
+child!.on('exit', (code, signal) => done({ code, signal }));
 // `systemctl stop` signals the whole unit at once; outlive claude so its exit is still recorded.
 process.on('SIGTERM', () => {});
 process.on('SIGINT', () => {});

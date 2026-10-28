@@ -46,7 +46,9 @@ writeFileSync(
   fake,
   `#!${process.execPath}
 const { readFileSync, writeFileSync } = require('node:fs');
-writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args: process.argv.slice(2), env: process.env }));
+const args = process.argv.slice(2);
+const settings = args.includes('--settings') ? JSON.parse(readFileSync(args[args.indexOf('--settings') + 1], 'utf8')) : null;
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
 console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', cwd: process.cwd(), mcp_servers: status ? [{ name: role, status }] : [] }));
@@ -59,10 +61,11 @@ const errors: string[] = [];
 const runner = new Runner(store, () => {}, (t) => ({ COORDINATOR_API: 'http://127.0.0.1:8573', COORDINATOR_TOKEN: `token-${t.id}` }), fake);
 runner.onTurnError = (_id, text) => errors.push(text);
 
-async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string } = {}) {
+async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string } = {}, repoDir?: string) {
   writeFileSync(join(root, 'mcp-status'), mcpStatus);
   // A scheme has one Taskmaster, so each turn gets a scheme of its own.
   const project = store.createProject(`P${Math.random()}`, null);
+  if (repoDir) store.setProjectRepoDir(project.id, repoDir);
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara', kind });
   const cwd = join(root, `ticket-${t.id}`);
   mkdirSync(cwd, { recursive: true });
@@ -103,6 +106,17 @@ test('a Taskmaster turn defaults to opus at high effort, and keeps a choice peop
   const chosen = await turn('coordinator', 'connected', { model: 'sonnet', effort: 'medium' });
   assert.equal(chosen.flag('--model'), 'sonnet');
   assert.equal(chosen.flag('--effort'), 'medium');
+});
+
+test("a Taskmaster's settings travel as a file, so hundreds of worktrees stay under Linux's 128 KiB argument cap", async () => {
+  // Citadel's Taskmaster stopped starting (spawn E2BIG) once ~90 worktrees put its inline --settings over 128 KiB.
+  const scheme = join(root, 'big-scheme');
+  for (let i = 1; i <= 300; i++) mkdirSync(join(scheme, 'tickets', String(i)), { recursive: true });
+  const t = await turn('coordinator', 'connected', {}, join(scheme, 'repo'));
+  assert.deepEqual(t.events, []);
+  for (const arg of t.args) assert.ok(Buffer.byteLength(arg) < 32 * 1024, `argument of ${Buffer.byteLength(arg)} bytes`);
+  assert.ok(t.settings.permissions.allow.includes(`Bash(git -C ${join(scheme, 'tickets', '300')} log:*)`));
+  assert.ok(t.settings.hooks.PreToolUse);
 });
 
 test('a turn whose own MCP server failed or is missing says so as an error', async () => {

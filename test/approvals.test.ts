@@ -249,7 +249,7 @@ test('a project without rules or plugins still sends a minion\'s prompts to card
   assert.equal(t.args[t.args.indexOf('--permission-prompt-tool') + 1], APPROVAL_TOOL);
   assert.ok(!t.args.includes('--plugin-dir'));
   // Every turn gets the tripwire hook, here able to ask, and nothing else in its settings.
-  const settings = JSON.parse(t.args[t.args.indexOf('--settings') + 1]);
+  const settings = JSON.parse(readFileSync(t.args[t.args.indexOf('--settings') + 1], 'utf8'));
   assert.deepEqual(Object.keys(settings), ['hooks']);
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /"ask":true/);
   assert.ok(Number(t.timeout) >= 24 * 3600_000);
@@ -264,7 +264,7 @@ test('rules and plugin folders reach the turn, and Stop expires a waiting card',
   assert.ok(!t.args.includes('none'));
   assert.equal(t.args[t.args.indexOf('--permission-prompt-tool') + 1], APPROVAL_TOOL);
   assert.equal(t.args.filter((a: string) => a === '--settings').length, 1);
-  const settings = JSON.parse(t.args[t.args.indexOf('--settings') + 1]);
+  const settings = JSON.parse(readFileSync(t.args[t.args.indexOf('--settings') + 1], 'utf8'));
   assert.deepEqual(settings.permissions, { ask: ['Bash(gh pr merge:*)'] });
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /tripwire\.ts/);
   assert.deepEqual(t.args.filter((_: string, i: number) => t.args[i - 1] === '--plugin-dir'), [join(t.cwd, 'tools/mods/delve')]);

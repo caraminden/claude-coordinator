@@ -158,6 +158,8 @@ export function renderTicketHead() {
   // A dismissed minion's message box is tinted and says so (style.css), following reopen and dismiss live.
   const chat = el.closest('.chat');
   chat?.classList.toggle('dismissed', t.status === 'closed');
+  chat?.classList.toggle('turn-running', t.status === 'running');
+  for (const bubble of chat?.querySelectorAll('.log [data-event]') ?? []) markQueued(bubble, t);
   const box = chat?.querySelector('.composer textarea');
   if (box) box.placeholder = composerPlaceholder(t);
   const actions = [];
@@ -401,7 +403,8 @@ export function appendEvent(event, scroll = true) {
   if (!log) return;
   const data = JSON.parse(event.data);
   recapEvent(event, data);
-  if (event.kind === 'user_message') (view.pendingRequest ??= []).push({ author: data.author, text: data.text || '(image)' });
+  // A steer was read by the turn already running, so it isn't part of what the next turn works on.
+  if (event.kind === 'user_message' && !data.steered) (view.pendingRequest ??= []).push({ author: data.author, text: data.text || '(image)' });
   if (event.kind === 'claude' && data.type === 'system' && data.subtype === 'init') {
     view.turnActions = [];
     view.turnNote = null;
@@ -435,9 +438,20 @@ export function appendEvent(event, scroll = true) {
       view.cards.get(data.answer.questionId)?.markAnswered(data.answer.answers, data.author);
       nodes.push(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), answerSummary(data.answer.answers)));
     } else {
-      nodes.push(userBubble(data.author, data.text,
+      const bubble = userBubble(data.author, data.text,
         (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
-        data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null));
+        data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null);
+      bubble.dataset.event = event.id;
+      if (data.steered) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'Sent into the turn that was running: Claude read it between steps' }, 'into the running turn'));
+      markQueued(bubble, view.ticket);
+      nodes.push(bubble);
+    }
+  } else if (event.kind === 'unqueued') {
+    const bubble = log.querySelector(`[data-event="${data.id}"]`);
+    if (bubble) {
+      bubble.querySelector('.queued-tag')?.remove();
+      bubble.classList.add('withdrawn');
+      bubble.querySelector('.who').append(h('span', { class: 'msg-tag' }, `taken back by ${data.by}`));
     }
   } else if (event.kind === 'question') {
     nodes.push(questionCard(event.ticket_id, data));
@@ -889,6 +903,26 @@ function machineAuthor(author) {
 }
 
 /** A chat message from a person; `about`, for a comment on a file, links that file. */
+/** A message still queued for the next turn says so, with a ✕ to take it back; it loses both once sent. */
+function markQueued(bubble, ticket) {
+  const id = Number(bubble.dataset.event);
+  const queued = !!ticket?.queued_ids?.includes(id);
+  const tag = bubble.querySelector('.queued-tag');
+  if (!queued) return tag?.remove();
+  if (tag) return;
+  bubble.querySelector('.who').append(h('span', { class: 'msg-tag queued-tag' }, 'queued for the next turn',
+    h('button', { type: 'button', class: 'take-back', title: 'Take back this message', 'aria-label': 'Take back this message',
+      onclick: (e) => {
+        e.preventDefault(); // a Taskmaster message's ✕ sits in its <summary>
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        api(`api/tickets/${ticket.id}/unqueue`, { method: 'POST', body: { id } }).catch((err) => {
+          btn.disabled = false;
+          alertNote(err.message);
+        });
+      } }, '✕')));
+}
+
 export function userBubble(author, text, imageSrcs, about = null) {
   const github = author === GITHUB_NAME;
   const preview = (text ?? '').replace(/[#*_`>\[\]]/g, '').replace(/\s+/g, ' ').trim();

@@ -55,6 +55,33 @@ export function composer(chatId, ticket) {
   textarea.value = loadDraft(draftKey) ?? '';
   textarea.addEventListener('input', () => saveDraft(draftKey, textarea.value));
   const sendBtn = h('button', { type: 'submit' }, 'Send');
+  // Mid-turn, Send steers the running turn; the ▾ (shown only then, style.css) offers queueing instead.
+  let after = false;
+  const menu = h('div', { class: 'send-menu', role: 'menu', hidden: true },
+    h('button', { type: 'button', class: 'secondary', role: 'menuitem', onclick: () => {
+      closeMenu();
+      after = true;
+      form.requestSubmit();
+    } }, 'Send after this turn'));
+  const moreBtn = h('button', { type: 'button', class: 'more', title: 'More ways to send', 'aria-label': 'More ways to send', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
+    onclick: () => (menu.hidden ? openMenu() : closeMenu()) }, '▾');
+  const openMenu = () => {
+    menu.hidden = false;
+    moreBtn.setAttribute('aria-expanded', 'true');
+    menu.querySelector('button').focus();
+  };
+  const closeMenu = () => {
+    menu.hidden = true;
+    moreBtn.setAttribute('aria-expanded', 'false');
+  };
+  const sendGroup = h('span', { class: 'send-group' }, sendBtn, moreBtn, menu);
+  sendGroup.addEventListener('focusout', (e) => !sendGroup.contains(e.relatedTarget) && closeMenu());
+  sendGroup.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !menu.hidden) {
+      closeMenu();
+      moreBtn.focus();
+    }
+  });
   const attachments = createAttachments((items) => saveDraftImages(chatId, items));
   loadDraftImages(chatId).then((items) => attachments.restore(items));
   const picker = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
@@ -67,7 +94,7 @@ export function composer(chatId, ticket) {
       h('button', { type: 'button', class: 'secondary small add-image', title: 'Add image', 'aria-label': 'Add image', onclick: () => picker.click() },
         h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Add image')),
       h('span', { class: 'spacer' }),
-      modelPicker(chatId), sendBtn));
+      modelPicker(chatId), sendGroup));
   textarea.addEventListener('paste', (e) => {
     const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
     if (!files.length) return;
@@ -93,10 +120,12 @@ export function composer(chatId, ticket) {
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const queue = after;
+    after = false;
     const text = textarea.value.trim();
     if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.');
     if (!text && !attachments.items.length) return;
-    sendBtn.disabled = true;
+    sendBtn.disabled = moreBtn.disabled = true;
     setSending(sending + 1);
     const sent = attachments.items.slice();
     const images = sent.map(({ mediaType, data }) => ({ mediaType, data }));
@@ -113,7 +142,7 @@ export function composer(chatId, ticket) {
     renderTyping();
     scrollToBottom();
     try {
-      const ticket = await api(`api/tickets/${chatId}/messages`, { method: 'POST', body: { text, images } });
+      const ticket = await api(`api/tickets/${chatId}/messages`, { method: 'POST', body: { text, images, ...(queue ? { after: true } : {}) } });
       // Show the message now even if the live stream is down; duplicates are skipped by id.
       if (view?.kind === 'project' && view.id === chatId) {
         // You just sent something, so follow the reply.
@@ -135,7 +164,7 @@ export function composer(chatId, ticket) {
         view.sendingTo = null;
         renderTyping();
       }
-      sendBtn.disabled = false;
+      sendBtn.disabled = moreBtn.disabled = false;
       setSending(sending - 1);
       reloadWhenIdle();
     }

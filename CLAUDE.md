@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Overlord: a shared web UI that runs headless Claude Code sessions as minions.
+Citadel: a shared web UI that runs headless Claude Code sessions as minions.
 What it does, its layout and how to run it: `README.md`. Node 24+ runs the TypeScript
 directly; there are no dependencies and no build step.
 

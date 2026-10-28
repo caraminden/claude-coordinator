@@ -1,5 +1,5 @@
 [Unit]
-Description=Overlord web app
+Description=Citadel web app
 After=network-online.target
 
 [Service]

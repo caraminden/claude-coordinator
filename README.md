@@ -1,4 +1,4 @@
-# Overlord
+# Citadel
 
 A shared web UI for running headless Claude Code sessions as **minions**. Several
 people sign in, open a project, and talk to its **Taskmaster**: a long-lived

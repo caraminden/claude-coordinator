@@ -1,11 +1,11 @@
-// The scheme recap: opening the Taskmaster chat after an hour or more since you last did anything
+// The scheme recap: opening the Taskmaster chat 6+ hours after you last did anything
 // in the scheme puts a card at the bottom listing what changed since, built from the minions'
 // own states and notes. It is yours alone, never stored in the chat, and goes once you act.
 import { ago, api, h, me, view } from './core.js';
 import { rowState, threadRow } from './sidebar.js';
 import { recapSections } from './threadgroups.js';
 
-const AWAY_MS = 60 * 60 * 1000;
+const AWAY_MS = 6 * 60 * 60 * 1000; // Cara, 2026-10-28: "only ... if you havent taken an action for 6+ hours"
 
 /** Fetch the recap for the open Taskmaster chat and show it, if you have been away long enough. */
 export async function showRecap() {

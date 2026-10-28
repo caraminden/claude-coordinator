@@ -503,6 +503,8 @@ const eventCache = new Map();
 const EVENT_CACHE_THREADS = 12;
 
 async function loadEvents(ticketId) {
+  // A prefetch already on its way is the head start: wait for it, then fetch only what came after.
+  await prefetching.get(ticketId);
   const cached = eventCache.get(ticketId) ?? [];
   const after = cached.length ? cached[cached.length - 1].id : 0;
   const fresh = await api(`/api/tickets/${ticketId}/events${after ? `?after=${after}` : ''}`);
@@ -511,6 +513,42 @@ async function loadEvents(ticketId) {
   eventCache.set(ticketId, events);
   if (eventCache.size > EVENT_CACHE_THREADS) eventCache.delete(eventCache.keys().next().value);
   return events;
+}
+
+// Prefetching: a thread's history starts downloading when you point at (or touch) its row, and the
+// top few rows load quietly once a project page settles, so a first click opens from the cache.
+// A prefetch only fills a free cache slot, never evicting a thread you actually opened.
+const prefetching = new Map(); // ticket id -> its download in flight
+const PREFETCH_ROWS = 6;
+
+function prefetchEvents(ticketId) {
+  if (eventCache.has(ticketId) || prefetching.has(ticketId) || eventCache.size >= EVENT_CACHE_THREADS) return prefetching.get(ticketId);
+  const p = api(`/api/tickets/${ticketId}/events`)
+    .then((events) => { if (!eventCache.has(ticketId) && eventCache.size < EVENT_CACHE_THREADS) eventCache.set(ticketId, events); })
+    .catch(() => {})
+    .finally(() => prefetching.delete(ticketId));
+  prefetching.set(ticketId, p);
+  return p;
+}
+
+const rowTicketId = (el) => Number(el?.closest?.('a.thread-row[data-id]')?.dataset.id) || null;
+for (const type of ['pointerover', 'touchstart']) {
+  document.addEventListener(type, (e) => {
+    const id = rowTicketId(e.target);
+    if (id && id !== view?.id) prefetchEvents(id);
+  }, { passive: true });
+}
+
+/** Once the page is idle, load the first few minions in the list, two at a time. Not on data saver. */
+function prefetchTopRows() {
+  if (navigator.connection?.saveData) return;
+  const whenIdle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 1500));
+  whenIdle(async () => {
+    const ids = [...document.querySelectorAll('#threads > section a.thread-row[data-id]')]
+      .map(rowTicketId).filter((id) => id && id !== view?.id).slice(0, PREFETCH_ROWS);
+    const next = () => (ids.length ? prefetchEvents(ids.shift()).then(next) : null);
+    await Promise.all([next(), next()]);
+  });
 }
 
 async function catchUpEvents() {
@@ -987,6 +1025,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   renderMachinesShelf();
   renderShelf();
   renderSidebar();
+  prefetchTopRows();
   if (main.kind === 'artifacts') renderArtifactResults();
   if (main.kind === 'artifact') renderArtifactHead();
   if (main.kind === 'file') renderFileHead();
@@ -1433,7 +1472,7 @@ function threadRow(t, href = threadHref(t), hit = null) {
   // Rows waiting on you get a tinted background (red when the thread is stuck), so they stand out.
   // Faint once you've opened the thread since it last changed; vibrant again when it changes.
   const yours = !coord && st.rank === 0 ? ` yours${st.cls === 'st' ? ' stuck' : ''}${isSeen(t) ? ' seen' : ''}` : '';
-  return h('a', { class: `thread-row s-${t.status}${coord ? ' coordinator' : ''}${yours}${active ? ' active' : ''}`, href, title: details },
+  return h('a', { class: `thread-row s-${t.status}${coord ? ' coordinator' : ''}${yours}${active ? ' active' : ''}`, href, title: details, 'data-id': t.id },
     h('span', { class: 'name' }, coord ? 'Taskmaster' : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     h('span', { class: `state ${st.cls}` }, st.cell),

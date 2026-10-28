@@ -366,9 +366,12 @@ function connectStream(catchUp = false) {
         reloadWhenIdle();
       }
       assetVersion ??= msg.version;
-      renderUsage(msg.usage);
     }
-    if (msg.type === 'usage') renderUsage(msg.usage);
+    if (msg.type === 'hello' || msg.type === 'usage') {
+      renderUsage(msg.usage);
+      // Rows of minions that hit the usage limit count down to its reset.
+      if (view?.kind === 'project') renderSidebar();
+    }
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'event') {
       onEvent(msg.event);

@@ -539,7 +539,7 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .thread-row.coordinator .name::before { content: "◆ "; color: var(--accent); }
 .thread-row .queued { font-size: 0.8em; color: var(--running); }
 .thread-row .state { align-self: center; font-weight: 650; white-space: nowrap; font-size: 0.78em; line-height: 1.35; padding: 0.1rem 0.45rem; border-radius: 999px; font-variant-numeric: tabular-nums;
-  color: var(--c); background: color-mix(in srgb, var(--c) 15%, var(--panel)); }
+  color: var(--c); background: color-mix(in srgb, var(--t, var(--c)) 15%, var(--panel)); }
 .thread-row .state .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .thread-row .state .pulse { animation: none; } }
 .thread-row .note { text-align: left; color: var(--ink); grid-column: 1 / -1; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-left: 12px; }

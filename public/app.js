@@ -3299,7 +3299,7 @@ function loopCard(data) {
     }
   });
   return h('div', { class: 'qcard lcard', 'data-minion': data.minion },
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Paused'), threadRefs(data.text)),
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Needs a person'), threadRefs(data.text)),
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), go));
 }
 

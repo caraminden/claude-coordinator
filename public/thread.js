@@ -3,6 +3,7 @@ import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, file
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
+import { recapEvent, showRecap } from './recap.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
@@ -38,6 +39,7 @@ export async function mountChat(chatId, ticket, events) {
   } catch {}
   // Events broadcast while the snapshot was loading arrived before `view` existed.
   await catchUpEvents();
+  if (isCoordinator(ticket)) await showRecap();
 }
 
 export function chatSection(chatId, ticket, events) {
@@ -398,6 +400,7 @@ export function appendEvent(event, scroll = true) {
   const log = document.getElementById('log');
   if (!log) return;
   const data = JSON.parse(event.data);
+  recapEvent(event, data);
   if (event.kind === 'user_message') (view.pendingRequest ??= []).push({ author: data.author, text: data.text || '(image)' });
   if (event.kind === 'claude' && data.type === 'system' && data.subtype === 'init') {
     view.turnActions = [];

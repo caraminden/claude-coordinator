@@ -551,6 +551,25 @@ export class Store {
     return now;
   }
 
+  /**
+   * For the scheme recap: when `name` last acted anywhere in the scheme (a message, a card answer or
+   * plan verdict, which are messages too, or an approval click), and how many turns each thread
+   * has finished since. `since` is null if they never have.
+   */
+  recap(name: string, projectId: number): { since: number | null; turns: Record<number, number> } {
+    const { since } = this.db.prepare(`
+      SELECT MAX(e.created_at) AS since FROM events e JOIN tickets t ON t.id = e.ticket_id
+      WHERE t.project_id = ? AND (
+        (e.kind = 'user_message' AND json_extract(e.data, '$.author') = ?)
+        OR (e.kind = 'approval_result' AND json_extract(e.data, '$.by') = ?))`).get(projectId, name, name) as { since: number | null };
+    if (since == null) return { since: null, turns: {} };
+    const rows = this.db.prepare(`
+      SELECT e.ticket_id, COUNT(*) AS n FROM events e JOIN tickets t ON t.id = e.ticket_id
+      WHERE t.project_id = ? AND e.created_at > ? AND e.kind = 'claude' AND json_extract(e.data, '$.type') = 'result'
+      GROUP BY e.ticket_id`).all(projectId, since) as { ticket_id: number; n: number }[];
+    return { since, turns: Object.fromEntries(rows.map((r) => [r.ticket_id, r.n])) };
+  }
+
   listEvents(ticketId: number, afterId = 0): EventRow[] {
     return this.db
       .prepare('SELECT * FROM events WHERE ticket_id = ? AND id > ? ORDER BY id')

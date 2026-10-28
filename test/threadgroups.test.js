@@ -33,3 +33,20 @@ test('search matches title, exact number and property values, not anything else'
   for (const q of ['7', '#7', '780', 'cara', 'tests', 'pick', 'type', 'type: bug', 'area: feature']) assert.ok(!threadMatches(t, q), q);
   assert.ok(threadMatches({ number: 3, title: 'x' }, '3'), 'no properties');
 });
+
+test('recap sections: changed minions only, newest first, by what they need', async () => {
+  const { recapSections } = await import('../public/threadgroups.js');
+  const stateOf = (t) => ({ rank: t.rank, fam: t.fam });
+  const t = (id, updated_at, rest) => ({ id, updated_at, status: 'idle', rank: 2, fam: 'wait', ...rest });
+  const tickets = [
+    t(1, 50), // unchanged since 100
+    t(2, 120, { rank: 0, fam: 'you' }),
+    t(3, 150, { rank: 0, fam: 'you' }),
+    t(4, 90, { status: 'running', rank: 1, fam: 'work' }), // a turn finished, still running
+    t(5, 130, { status: 'closed', rank: 5, fam: 'idle' }),
+    t(6, 110, { state: 'parked', rank: 4, fam: 'idle' }),
+  ];
+  assert.deepEqual(recapSections(tickets, 100, { 4: 1 }, stateOf).map((s) => [s.key, s.rows.map((r) => r.id)]),
+    [['you', [3, 2]], ['work', [4]], ['wait', [6]], ['closed', [5]]]);
+  assert.deepEqual(recapSections(tickets, 200, {}, stateOf), []);
+});

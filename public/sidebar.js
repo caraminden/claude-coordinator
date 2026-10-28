@@ -258,7 +258,7 @@ export const SHIP = {
 };
 
 /** One compact row: number + short ask and the state on top, the thread's note (or what it is doing) below. */
-function threadRow(t, href = threadHref(t)) {
+export function threadRow(t, href = threadHref(t)) {
   const coord = isCoordinator(t);
   // The coordinator is always there to talk to; only show when it is busy.
   const st = coord && t.status !== 'running' ? { fam: '', cell: '', label: statusLabel(t) } : rowState(t);

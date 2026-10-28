@@ -27,3 +27,23 @@ export function threadMatches(t, query) {
   const props = Object.entries(t.properties ?? {}).flatMap(([k, v]) => [v].flat().map((x) => (q.includes(':') ? `${k}: ${x}` : String(x))));
   return [t.title, ...props].some((f) => f?.toLowerCase().includes(q));
 }
+
+/**
+ * The scheme recap's sections: minions that finished a turn or changed since `since`, newest first,
+ * as needs you / still working / parked or waiting / dismissed. `stateOf` is the list rows' rowState.
+ */
+export function recapSections(tickets, since, turns, stateOf) {
+  const sections = [
+    { key: 'you', label: 'Needs you', rows: [] },
+    { key: 'work', label: 'Still working', rows: [] },
+    { key: 'wait', label: 'Parked or waiting', rows: [] },
+    { key: 'closed', label: 'Dismissed', rows: [] },
+  ];
+  const changed = tickets.filter((t) => turns[t.id] || t.updated_at > since).sort((a, b) => b.updated_at - a.updated_at);
+  for (const t of changed) {
+    const st = stateOf(t);
+    const key = t.status === 'closed' ? 'closed' : st.rank === 0 ? 'you' : st.fam === 'work' ? 'work' : 'wait';
+    sections.find((s) => s.key === key).rows.push(t);
+  }
+  return sections.filter((s) => s.rows.length);
+}

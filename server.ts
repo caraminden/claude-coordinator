@@ -1164,6 +1164,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     return json(res, 200, { items: inboxItems(store, runner.approvals, project.id) });
   }
 
+  m = pathname.match(/^\/api\/projects\/(\d+)\/recap$/);
+  if (m && method === 'GET') {
+    // What happened in the scheme since this person last did something there, for the Taskmaster chat.
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such scheme');
+    inScope(project.id);
+    return json(res, 200, session.agent === undefined ? store.recap(session.name, project.id) : { since: null, turns: {} });
+  }
+
   m = pathname.match(/^\/api\/projects\/(\d+)\/search$/);
   if (m && method === 'GET') {
     const project = store.getProject(Number(m[1]));

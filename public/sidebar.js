@@ -1,5 +1,5 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
-import { ago, api, app, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, usage, view } from './core.js';
+import { ago, api, app, costText, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, usage, view } from './core.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -268,7 +268,7 @@ export function threadRow(t, href = threadHref(t)) {
   const note = (t.status === 'running' ? activity : t.note || activity) || '';
   const details = [
     threadFullName(t),
-    [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, `updated ${ago(t.updated_at)}`].filter(Boolean).join(' · '),
+    [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, `updated ${ago(t.updated_at)}`, t.cost ? `${costText(t.cost)} at API prices` : ''].filter(Boolean).join(' · '),
     note,
     !coord && t.ship ? `${t.ship.text} · ${t.ship.commit}` : '',
   ].filter(Boolean).join('\n');
@@ -283,7 +283,8 @@ export function threadRow(t, href = threadHref(t)) {
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     st.cell ? h('span', { class: 'state' }, st.cell) : '',
-    note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '');
+    note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
+    t.cost ? h('span', { class: 'cost' }, costText(t.cost)) : '');
 }
 
 /** "40m", "1h40", "14h", "2d": time left, for tight spaces. */

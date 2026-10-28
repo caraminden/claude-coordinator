@@ -71,6 +71,11 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
+/** A cost at API prices, marked as an estimate: "≈ $0.42", "≈ $12". Not a bill on a subscription. */
+export function costText(usd) {
+  return `≈ $${usd >= 10 ? Math.round(usd) : usd.toFixed(2)}`;
+}
+
 export function ago(ms) {
   const s = Math.round((Date.now() - ms) / 1000);
   if (s < 60) return 'just now';

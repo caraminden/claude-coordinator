@@ -32,6 +32,10 @@ let me = null;
 let view = null; // { kind, id, ... } for the current screen
 let stream = null;
 let assetVersion = null;
+// Other modules read `view` live but can't assign it, so they replace it through this.
+function setView(next) {
+  view = next;
+}
 
 // ---------- helpers ----------
 
@@ -410,6 +414,9 @@ function connectStream(catchUp = false) {
 let reloadPending = false;
 let lastInputAt = 0;
 let sending = 0;
+function setSending(n) {
+  sending = n;
+}
 const QUIET_MS = 5000;
 
 document.addEventListener('input', () => { lastInputAt = Date.now(); }, true);
@@ -804,7 +811,7 @@ async function openStartScheme() {
   try { last = Number(localStorage.getItem(LAST_SCHEME)); } catch {}
   const id = startScheme(projects, last);
   if (id != null) return location.replace(`#/p/${id}`); // replace: Back shouldn't bounce through here
-  view = { kind: 'projects' };
+  setView({ kind: 'projects' });
   crumbs.replaceChildren('New scheme');
   app.replaceChildren(h('div', { class: 'card new-scheme' }, h('h2', {}, 'New scheme'), newSchemeForm()));
 }
@@ -1012,13 +1019,13 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     ? await Promise.all([api(`/api/tickets/${chatId}`), loadEvents(chatId)])
     : [{ ticket: null }, []];
   if (seq !== routeSeq) return; // overtaken by another click while loading
-  view = {
+  setView({
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
     artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects,
     file: main.file ?? null, fileTicket: main.ticket ?? null,
     ...chatView(chatId, ticket),
-  };
+  });
   renderCrumbs(main);
   try { localStorage.setItem(LAST_SCHEME, String(projectId)); } catch {}
 
@@ -1105,11 +1112,11 @@ async function switchChat(main, seq) {
   const [{ ticket }, events] = await Promise.all([api(`/api/tickets/${chatId}`), loadEvents(chatId)]);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
   const { kind, projectId, project, coordinator, tickets, seen, artifacts, shared, showClosed } = view;
-  view = {
+  setView({
     kind, main: 'chat', projectId, project, coordinator, tickets, seen, artifacts, shared, showClosed,
     artifactId: null, file: null, fileTicket: null,
     ...chatView(chatId, ticket),
-  };
+  });
   if (isCoordinator(ticket)) view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);
   renderCrumbs(main);
@@ -1132,7 +1139,7 @@ async function mountChat(chatId, ticket, events) {
   restoreScroll(chatId);
   if (pendingFind) {
     view.findEl?.find(pendingFind);
-    pendingFind = '';
+    setPendingFind('');
   }
   try {
     if (sessionStorage.getItem('cc-refocus')) {
@@ -1144,7 +1151,8 @@ async function mountChat(chatId, ticket, events) {
   await catchUpEvents();
 }
 
-function chatSection(chatId, ticket, events) {
+/** The message box under a chat: text, pasted images, model and effort, and Send. */
+function composer(chatId, ticket) {
   const keys = matchMedia('(max-width: 800px)').matches ? '' : ' (Enter to send, Shift+Enter for a new line)';
   const textarea = h('textarea', {
     placeholder: (isCoordinator(ticket) ? 'Ask the Taskmaster to start, check on, or dismiss minions…' : 'Message this minion…') + keys,
@@ -1196,7 +1204,7 @@ function chatSection(chatId, ticket, events) {
     if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.');
     if (!text && !attachments.items.length) return;
     sendBtn.disabled = true;
-    sending++;
+    setSending(sending + 1);
     const sent = attachments.items.slice();
     const images = sent.map(({ mediaType, data }) => ({ mediaType, data }));
     // Show the message and "Claude is thinking…" straight away, and clear the composer; the
@@ -1235,11 +1243,15 @@ function chatSection(chatId, ticket, events) {
         renderTyping();
       }
       sendBtn.disabled = false;
-      sending--;
+      setSending(sending - 1);
       reloadWhenIdle();
     }
   });
+  return form;
+}
 
+function chatSection(chatId, ticket, events) {
+  const form = composer(chatId, ticket);
   const log = h('div', { class: 'log', id: 'log' });
   if (isCoordinator(ticket) && !events.length) {
     log.append(h('div', { class: 'note' },
@@ -1292,7 +1304,7 @@ function newTicketForm(projectId) {
     busy = true;
     box.readOnly = true;
     err.hidden = true;
-    sending++;
+    setSending(sending + 1);
     try {
       const t = await api(`/api/projects/${projectId}/tickets`, { method: 'POST', body: { message: box.value } });
       saveDraft(draftKey, null);
@@ -1305,7 +1317,7 @@ function newTicketForm(projectId) {
     } finally {
       busy = false;
       box.readOnly = false;
-      sending--;
+      setSending(sending - 1);
     }
   });
   return form;
@@ -1340,6 +1352,9 @@ function renderSidebar() {
 const threadSearch = { projectId: null, q: '', hits: new Map(), seq: 0, timer: null };
 // Text to find in the next chat that opens, set when a search result is clicked.
 let pendingFind = '';
+function setPendingFind(text) {
+  pendingFind = text;
+}
 
 function threadSearchBox(projectId) {
   if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '', hits: new Map() });
@@ -1848,7 +1863,7 @@ function commentBox(t, path, name, body) {
     const text = textarea.value.trim();
     if (!text) return textarea.focus();
     sendBtn.disabled = true;
-    sending++;
+    setSending(sending + 1);
     status.textContent = 'Sending…';
     try {
       await api(`/api/tickets/${t.id}/comments`, { method: 'POST', body: { path, text, quote } });
@@ -1861,7 +1876,7 @@ function commentBox(t, path, name, body) {
       status.textContent = ex.message;
     } finally {
       sendBtn.disabled = false;
-      sending--;
+      setSending(sending - 1);
       reloadWhenIdle();
     }
   });

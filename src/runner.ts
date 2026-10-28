@@ -8,6 +8,7 @@ import { APP_NAME } from './appname.ts';
 import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
 import { claudeConfigDir, lastEffort, projectSlug, restoreSession, saveSession } from './sessions.ts';
+import { restoreTicketDir } from './workspace.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -550,6 +551,12 @@ export class Runner {
   }
 
   private startTurn(project: Project, ticket: Ticket, prompt: string, resumes = 0) {
+    // deploy/prune.sh removes worktrees of long-closed minions; a reopened one gets its back.
+    try {
+      if (restoreTicketDir(ticket.cwd, project.repo_dir, ticket.branch)) this.emit(ticket.id, 'note', { text: `Recreated this minion's worktree from its branch ${ticket.branch}.` });
+    } catch (err: any) {
+      this.emit(ticket.id, 'note', { text: `Could not recreate the worktree: ${err.message}` });
+    }
     let filesDir = this.filesDir(ticket);
     try {
       if (filesDir) mkdirSync(filesDir, { recursive: true });

@@ -1,5 +1,6 @@
 // Project checkouts and per-ticket working directories.
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -77,4 +78,16 @@ export async function createTicketDir(
   await mkdir(join(projectDir(dataDir, projectId), 'tickets'), { recursive: true });
   await git(['worktree', 'add', '--quiet', '-b', branch, cwd, base], repoDir);
   return { cwd, branch };
+}
+
+/**
+ * Put back a ticket's worktree from its branch if the folder is gone (deploy/prune.sh removes
+ * worktrees of long-closed tickets but keeps their branches). Synchronous: it runs just before a
+ * turn starts. Returns true if it recreated the folder.
+ */
+export function restoreTicketDir(cwd: string, repoDir: string | null, branch: string | null): boolean {
+  if (!cwd || existsSync(cwd) || !repoDir || !branch) return false;
+  execFileSync('git', ['worktree', 'prune'], { cwd: repoDir, timeout: GIT_TIMEOUT_MS });
+  execFileSync('git', ['worktree', 'add', '--quiet', cwd, branch], { cwd: repoDir, timeout: GIT_TIMEOUT_MS });
+  return true;
 }

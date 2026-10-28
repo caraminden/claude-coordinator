@@ -1,0 +1,9 @@
+[Unit]
+Description=Citadel nightly prune at 04:30, after the backup
+
+[Timer]
+OnCalendar=*-*-* 04:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

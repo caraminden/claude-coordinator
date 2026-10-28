@@ -1,9 +1,12 @@
 [Unit]
 Description=Citadel web app
 After=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+# The database, its backups and session state are private to this account.
+UMask=0077
 WorkingDirectory=%h/claude-coordinator
 ExecStart=/usr/bin/node %h/claude-coordinator/server.ts
 EnvironmentFile=%h/.config/claude-coordinator/env

@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Nightly backup of Citadel's database (run by claude-coordinator-backup.timer).
+#
+# Takes an online `sqlite3 .backup` (safe while the server is writing), proves it restores, then
+# keeps the newest 7 dailies and 4 weeklies under $DATA_DIR/backups, all mode 600.
+# A weekly is a hard link to that Sunday's daily (or the first daily of a week with no weekly yet),
+# so it costs no extra space until the daily ages out.
+set -euo pipefail
+umask 077
+
+DATA_DIR=${DATA_DIR:-$HOME/.local/share/claude-coordinator}
+DB=$DATA_DIR/coordinator.db
+DIR=$DATA_DIR/backups
+DAILIES=${DAILIES:-7}
+WEEKLIES=${WEEKLIES:-4}
+
+[[ -f $DB ]] || { echo "No database at $DB" >&2; exit 1; }
+mkdir -p "$DIR"
+chmod 700 "$DIR"
+
+day=$(date +%F)
+week=$(date +%G-W%V)
+out=$DIR/coordinator-$day.db
+tmp=$DIR/.coordinator-$day.db.tmp
+rm -f "$tmp"
+trap 'rm -f "$tmp"' EXIT
+
+sqlite3 "$DB" ".timeout 30000" ".backup '$tmp'"
+
+# The restore check: load the copy into a scratch in-memory database the way a restore would,
+# and require a clean integrity check and the tables the app can't start without.
+check=$(sqlite3 :memory: ".restore '$tmp'" "PRAGMA integrity_check;" "SELECT count(*) FROM projects;" "SELECT count(*) FROM tickets;")
+mapfile -t lines <<<"$check"
+if [[ ${lines[0]} != ok || ${lines[1]:-0} -lt 1 || ${lines[2]:-0} -lt 1 ]]; then
+  echo "Backup failed its restore check: $check" >&2
+  exit 1
+fi
+
+chmod 600 "$tmp"
+mv -f "$tmp" "$out"
+trap - EXIT
+
+weekly=$DIR/coordinator-weekly-$week.db
+if [[ ! -e $weekly ]]; then
+  ln -f "$out" "$weekly"
+elif [[ $(date +%u) == 7 ]]; then
+  ln -f "$out" "$weekly" # Sunday's copy wins for the week.
+fi
+
+# Retention: names sort by date, so drop all but the newest N of each kind.
+prune() { ls -1 "$DIR"/$1 2>/dev/null | sort -r | tail -n +$(($2 + 1)) | xargs -r rm -f --; }
+prune 'coordinator-[0-9]*.db' "$DAILIES"
+prune 'coordinator-weekly-*.db' "$WEEKLIES"
+
+echo "Backed up to $out ($(du -h "$out" | cut -f1); projects ${lines[1]}, minions ${lines[2]}), weekly $(basename "$weekly")"

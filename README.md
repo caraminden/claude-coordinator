@@ -103,7 +103,8 @@ uses the built-in `node:sqlite`.
 | `src/auth.ts` | Shared-password login, signed session cookies |
 | `public/` | Front end (vanilla JS, no build) |
 | `public/progress.js` | Task-list and step tracking, shared with the server |
-| `deploy/claude-coordinator.service` | systemd user unit |
+| `deploy/claude-coordinator.service` | systemd user unit, with a resource-cap drop-in in `.service.d/` |
+| `deploy/backup.sh`, `deploy/prune.sh` | Nightly database backup; pruning of long-closed minions (each with a `.service` and `.timer`) |
 
 ## Running
 
@@ -127,6 +128,37 @@ ln -s ~/claude-coordinator/deploy/claude-coordinator.service ~/.config/systemd/u
 systemctl --user daemon-reload
 systemctl --user enable --now claude-coordinator
 journalctl --user -u claude-coordinator -f
+```
+
+The service runs with `UMask=0077`, so the database and everything it writes are
+private (mode 600). `resources.conf` caps it, and every turn it runs, at
+`MemoryMax=8G` and `CPUQuota=800%`, half of perigee, which is shared:
+
+```sh
+mkdir -p ~/.config/systemd/user/claude-coordinator.service.d
+ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/resources.conf ~/.config/systemd/user/claude-coordinator.service.d/
+```
+
+**Backups.** `deploy/backup.sh` takes an online `sqlite3 .backup` at 04:00 into
+`$DATA_DIR/backups/`, checks the copy restores (integrity check plus the core
+tables), and keeps 7 dailies and 4 weeklies (hard links), mode 600. They live on
+the same disk, so they cover mistakes, not a dead disk. To restore, stop the
+service and copy a backup over `coordinator.db` (removing its `-wal`/`-shm`).
+
+**Pruning.** `deploy/prune.sh` lists, and with `--apply` deletes, the session
+state (`claude_state`) of minions closed over 14 days ago and the worktrees of
+minions closed over 30 days ago. Branches are kept, worktrees with uncommitted
+changes are skipped, and a reopened minion gets its worktree back from its
+branch. `--stale-backups` also removes the ad-hoc `coordinator.db.backup-*` and
+`.bak-*` copies, once a nightly backup passes its check. Always read a dry run
+before the first `--apply`.
+
+```sh
+for u in backup prune; do
+  ln -s ~/claude-coordinator/deploy/claude-coordinator-$u.{service,timer} ~/.config/systemd/user/
+done
+systemctl --user daemon-reload
+systemctl --user enable --now claude-coordinator-backup.timer claude-coordinator-prune.timer
 ```
 
 Turns run as the service's user with that user's Claude Code login, so every

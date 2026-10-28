@@ -1,0 +1,9 @@
+[Unit]
+Description=Citadel nightly database backup
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=%h/claude-coordinator/deploy/backup.sh
+Nice=10
+IOSchedulingClass=idle

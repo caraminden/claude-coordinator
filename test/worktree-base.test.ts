@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { createTicketDir } from '../src/workspace.ts';
+import { catchUpTicketDir, createTicketDir } from '../src/workspace.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'wtbase-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -43,4 +43,18 @@ test('local main wins when the two have diverged', async () => {
   commit(seed, 'remote only');
   git(['push', '--quiet', remote, 'main'], seed);
   assert.equal(head(await newMinion()), git(['rev-parse', 'main'], repo));
+});
+
+test('a chained minion catches up to main when it starts, but never past commits of its own', async () => {
+  const waiting = await newMinion();
+  commit(repo, 'the change it waited for');
+  assert.equal(await catchUpTicketDir(waiting, repo), true);
+  assert.equal(head(waiting), git(['rev-parse', 'main'], repo));
+  assert.equal(await catchUpTicketDir(waiting, repo), false, 'already there');
+
+  commit(waiting, 'its own work');
+  const own = head(waiting);
+  commit(repo, 'more on main');
+  assert.equal(await catchUpTicketDir(waiting, repo), false);
+  assert.equal(head(waiting), own);
 });

@@ -40,23 +40,8 @@ export async function cloneProject(dataDir: string, projectId: number, repoUrl: 
   return dir;
 }
 
-/**
- * Create the working directory for a ticket: a fresh git worktree on its own
- * branch when the project has a repo, otherwise a plain folder.
- */
-export async function createTicketDir(
-  dataDir: string,
-  projectId: number,
-  repoDir: string | null,
-  ticketId: number,
-  ticketNumber: number,
-  title: string,
-): Promise<{ cwd: string; branch: string | null }> {
-  const cwd = join(projectDir(dataDir, projectId), 'tickets', String(ticketId));
-  if (!repoDir) {
-    await mkdir(cwd, { recursive: true });
-    return { cwd, branch: null };
-  }
+/** What a new minion branches from: local main, or origin's if a push put it ahead. Fetches first. */
+export async function ticketBase(repoDir: string): Promise<string> {
   try {
     await git(['fetch', '--quiet', 'origin'], repoDir);
   } catch {
@@ -76,6 +61,46 @@ export async function createTicketDir(
     && !await ok(['merge-base', '--is-ancestor', local, base])) {
     base = local;
   }
+  return base;
+}
+
+/**
+ * A chained minion starts later than it was created: fast-forward its branch to what a new minion
+ * would branch from now, so it builds on the work it waited for. Only a fast-forward: a branch with
+ * commits of its own, or a dirty worktree, is left as it is. Returns whether it moved.
+ */
+export async function catchUpTicketDir(cwd: string, repoDir: string | null): Promise<boolean> {
+  if (!repoDir) return false;
+  // Resolved in the scheme's repo: "HEAD" in the worktree would be the minion's own branch.
+  const base = await git(['rev-parse', `${await ticketBase(repoDir)}^{commit}`], repoDir);
+  const before = await git(['rev-parse', 'HEAD'], cwd);
+  try {
+    await git(['merge', '--ff-only', '--quiet', base], cwd);
+  } catch {
+    return false;
+  }
+  return (await git(['rev-parse', 'HEAD'], cwd)) !== before;
+}
+
+/**
+ * Create the working directory for a ticket: a fresh git worktree on its own
+ * branch when the project has a repo, otherwise a plain folder.
+ */
+export async function createTicketDir(
+  dataDir: string,
+  projectId: number,
+  repoDir: string | null,
+  ticketId: number,
+  ticketNumber: number,
+  title: string,
+): Promise<{ cwd: string; branch: string | null }> {
+  const cwd = join(projectDir(dataDir, projectId), 'tickets', String(ticketId));
+  if (!repoDir) {
+    await mkdir(cwd, { recursive: true });
+    return { cwd, branch: null };
+  }
+  const base = await ticketBase(repoDir);
+  const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
   // Branches are named by the per-project number; a branch left over from before
   // per-project numbering may already have the name, so add a suffix then.
   const name = `ticket/${ticketNumber}-${slugify(title)}`;

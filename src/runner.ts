@@ -557,6 +557,8 @@ export class Runner {
       approvals: this.approvals.waiting(ticket.id), properties: this.store.props.forTarget('minion', ticket.id),
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
+      // What its turns have cost so far, at API prices.
+      cost: this.store.ticketCost(ticket.id),
       // What "Default" means in the composer: the effort a turn gets when the ticket has none of its own.
       default_effort: turnSettings({ ...ticket, effort: null }, this.store.getProject(ticket.project_id) ?? { default_effort: '' }).effort,
     };
@@ -1184,7 +1186,14 @@ export class Runner {
       // Keep the board's progress line live, not just on status changes.
       this.broadcastTicket(ticketId);
     }
-    this.emit(ticketId, 'claude', slim);
+    const row = this.emit(ticketId, 'claude', slim);
+    if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
+      const turn = this.store.recordTurn(ticketId, {
+        event_id: row.id, session_id: typeof ev.session_id === 'string' ? ev.session_id : null, ended_at: row.created_at,
+        session_cost_usd: ev.total_cost_usd, duration_ms: ev.duration_ms, usage: ev.usage,
+      });
+      this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
+    }
     if (ev.type === 'user' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'tool_result')) {
       this.onFilesMayChange(ticketId);
     }

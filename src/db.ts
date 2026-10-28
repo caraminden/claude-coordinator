@@ -117,6 +117,38 @@ export interface PushSubscriptionRow {
   created_at: number;
 }
 
+/**
+ * One finished Claude turn's cost at API prices (what Claude Code reports, not a bill on a subscription).
+ * Claude Code's `total_cost_usd` is the session's running total, carried over on --resume, so a turn's
+ * own cost is the rise since the session's previous turn. Tokens are the turn's own (`usage`), and
+ * null for turns from before they were kept.
+ */
+export interface Turn {
+  id: number;
+  ticket_id: number;
+  /** The turn's stored result event, if any. */
+  event_id: number | null;
+  session_id: string | null;
+  ended_at: number;
+  cost_usd: number;
+  session_cost_usd: number;
+  duration_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+}
+
+/** What a turn's result event says, for Store.recordTurn. */
+export interface TurnResult {
+  event_id?: number | null;
+  session_id?: string | null;
+  ended_at: number;
+  session_cost_usd: number;
+  duration_ms?: number | null;
+  usage?: any;
+}
+
 export interface EventRow {
   id: number;
   ticket_id: number;
@@ -211,6 +243,22 @@ CREATE TABLE IF NOT EXISTS github_seen (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (ticket_id, key)
 );
+CREATE TABLE IF NOT EXISTS turns (
+  id INTEGER PRIMARY KEY,
+  ticket_id INTEGER NOT NULL REFERENCES tickets(id),
+  event_id INTEGER,
+  session_id TEXT,
+  ended_at INTEGER NOT NULL,
+  cost_usd REAL NOT NULL,
+  session_cost_usd REAL NOT NULL,
+  duration_ms INTEGER,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  cache_read_tokens INTEGER,
+  cache_write_tokens INTEGER
+);
+CREATE INDEX IF NOT EXISTS turns_ticket ON turns(ticket_id, id);
+CREATE INDEX IF NOT EXISTS turns_ended ON turns(ended_at);
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -393,6 +441,7 @@ export class Store {
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM github_seen WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM turns WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
@@ -671,6 +720,80 @@ export class Store {
         ORDER BY id`)
       .all(ticketId, since) as { created_at: number; kind: string; data: string }[];
     return rows.map((r) => ({ at: r.created_at, start: r.kind === 'claude' && r.data.startsWith('{"type":"system"') }));
+  }
+
+  /**
+   * Store a finished turn. Its cost is the session's running total minus the total at the session's
+   * previous turn; a total that went down means Claude Code started counting afresh (it restores the
+   * running total on --resume only when the session was the last one run in that folder), so the
+   * whole total is this turn's.
+   */
+  recordTurn(ticketId: number, r: TurnResult): Turn {
+    const prev = this.db
+      .prepare('SELECT session_id, session_cost_usd FROM turns WHERE ticket_id = ? ORDER BY id DESC LIMIT 1')
+      .get(ticketId) as { session_id: string | null; session_cost_usd: number } | undefined;
+    const sameSession = prev && (prev.session_id ?? null) === (r.session_id ?? null);
+    const base = sameSession && prev.session_cost_usd <= r.session_cost_usd ? prev.session_cost_usd : 0;
+    const u = r.usage ?? null;
+    const n = (v: unknown) => (typeof v === 'number' ? v : null);
+    const row = this.db
+      .prepare(`INSERT INTO turns (ticket_id, event_id, session_id, ended_at, cost_usd, session_cost_usd, duration_ms,
+          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
+      .get(ticketId, r.event_id ?? null, r.session_id ?? null, r.ended_at, r.session_cost_usd - base, r.session_cost_usd,
+        n(r.duration_ms), n(u?.input_tokens), n(u?.output_tokens), n(u?.cache_read_input_tokens), n(u?.cache_creation_input_tokens));
+    return row as unknown as Turn;
+  }
+
+  /**
+   * Fill the turns table from stored result events, for turns from before it existed. Session ids
+   * come from each turn's init event. Only runs on an empty table; returns how many turns it added.
+   */
+  backfillTurns(): number {
+    if ((this.db.prepare('SELECT 1 FROM turns LIMIT 1').get())) return 0;
+    const rows = this.db
+      .prepare(`SELECT id, ticket_id, data, created_at FROM events WHERE kind = 'claude'
+          AND (data LIKE '{"type":"system","subtype":"init"%' OR data LIKE '{"type":"result"%') ORDER BY id`)
+      .iterate() as Iterable<{ id: number; ticket_id: number; data: string; created_at: number }>;
+    const session = new Map<number, string | null>();
+    let added = 0;
+    this.db.exec('BEGIN');
+    try {
+      for (const row of rows) {
+        const ev = JSON.parse(row.data);
+        if (ev.type === 'system') {
+          session.set(row.ticket_id, ev.session_id ?? null);
+        } else if (typeof ev.total_cost_usd === 'number') {
+          this.recordTurn(row.ticket_id, {
+            event_id: row.id, session_id: session.get(row.ticket_id) ?? null, ended_at: row.created_at,
+            session_cost_usd: ev.total_cost_usd, duration_ms: ev.duration_ms,
+          });
+          added++;
+        }
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    return added;
+  }
+
+  /** A ticket's turns, oldest first. */
+  listTurns(ticketId: number): Turn[] {
+    return this.db.prepare('SELECT * FROM turns WHERE ticket_id = ? ORDER BY id').all(ticketId) as unknown as Turn[];
+  }
+
+  /** What a ticket's turns have cost so far. */
+  ticketCost(ticketId: number): number {
+    return (this.db.prepare('SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE ticket_id = ?').get(ticketId) as { c: number }).c;
+  }
+
+  /** Cost per local day ('2026-10-28') and project, for turns ended at or after `since`. */
+  dailyCosts(since: number): { day: string; project_id: number; cost: number; turns: number }[] {
+    return this.db
+      .prepare(`SELECT date(u.ended_at / 1000, 'unixepoch', 'localtime') AS day, t.project_id, SUM(u.cost_usd) AS cost, COUNT(*) AS turns
+          FROM turns u JOIN tickets t ON t.id = u.ticket_id WHERE u.ended_at >= ? GROUP BY day, t.project_id ORDER BY day`)
+      .all(since) as unknown as { day: string; project_id: number; cost: number; turns: number }[];
   }
 
   getSetting<T>(key: string): T | null {

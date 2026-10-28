@@ -26,6 +26,7 @@ import { TAG_TO_TYPE } from './src/property-seed.ts';
 import { PreviewError, Previews, previewPath } from './src/previews.ts';
 import { type Chain, LiveWaiters } from './src/wake.ts';
 import { catchUpTicketDir, cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
+import { costDays } from './src/costs.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -279,6 +280,12 @@ if (!store.getSetting('events_slimmed')) {
   store.db.exec('VACUUM');
   store.setSetting('events_slimmed', 1);
   console.log(`Slimmed stored events: ${changed} rewritten, ${deleted} dropped.`);
+}
+
+// Turns from before each turn's cost was kept: work it out from their stored result events, once.
+{
+  const added = store.backfillTurns();
+  if (added) console.log(`Backfilled the cost of ${added} past turns.`);
 }
 
 // Pick up anything made while the server was down (or before artifacts existed), one ticket at a time.
@@ -937,6 +944,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     return;
   }
 
+  if (pathname === '/api/costs' && method === 'GET') return json(res, 200, { days: costDays(store) });
+
   if (pathname === '/api/projects') {
     if (method === 'GET') {
       return json(res, 200, store.listProjects().map((p) => ({ ...p, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length })));
@@ -1255,6 +1264,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (action === '' && method === 'GET') {
       return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
     }
+    if (action === '/turns' && method === 'GET') return json(res, 200, store.listTurns(id));
     if (action === '' && method === 'PATCH') {
       // Any of title, tag, state, note, build, model and effort; null (or "") clears all but the title.
       const body = await readJson(req);

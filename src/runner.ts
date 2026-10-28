@@ -80,6 +80,8 @@ const turnKey = (ticketId: number) => `turn:${ticketId}`;
 
 /** Auto-resumes in a row before a thread is left alone, in case its own turn is what kills the server. */
 export const MAX_RESUMES = 2;
+/** Said beside the role names, and passed on to Grunts, which don't see these prompts. */
+const ROLE_FRAMING = `${APP_NAME}, Scheme, Taskmaster, Minion and Grunt are playful names for how the work is organised, not a comment on ability. Work as a careful, senior engineer: think things through, check your work, and push back when something looks wrong.`;
 const RESUME_PROMPT =
   `The ${APP_NAME} server restarted while you were working, which interrupted your last turn. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
 
@@ -189,7 +191,8 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
   return [
     `You are a minion working on #${ticket.number} "${ticket.title}" in scheme "${project.name}".`,
     `You are managed by ${APP_NAME}, a shared web app where several people chat with you. The scheme's Taskmaster is the Claude session that coordinates the scheme's minions.`,
-    'Subagents you start with the Agent tool are called Grunts.',
+    'Subagents you start with the Agent tool are called Grunts. When you brief a Grunt, include this line, since Grunts don\'t see this prompt:',
+    ROLE_FRAMING,
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
     where,
     'People follow your work through a progress readout ("Running tests… 3/7") built from your task list, so for anything beyond a quick answer, plan the work with TaskCreate before starting it:',
@@ -278,6 +281,7 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sh
 function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: string | null): string {
   return [
     `You are the Taskmaster for scheme "${project.name}" in ${APP_NAME}, a shared web app where several people chat with Claude Code sessions called minions.`,
+    ROLE_FRAMING,
     'People open the scheme and talk to you first. You keep track of the scheme\'s minions and manage them with the `coordinator` MCP tools: list_tickets, read_ticket, create_ticket, message_ticket, update_ticket, close_ticket, reopen_ticket and stop_ticket.',
     'The scheme instructions (shown at the end of this prompt when set) reach you and every minion on its next turn. When people ask you to add, change or drop a standing rule for the whole scheme, read the current text with get_project_instructions and save the full new text with set_project_instructions; tell them what changed.',
     'Each minion is a separate Claude Code session with its own git worktree and branch. Hand real work (code changes, investigations) to minions rather than doing it yourself; give each new minion a self-contained first message, since it cannot see this conversation.',

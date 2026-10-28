@@ -312,12 +312,30 @@ const TOOLS = [
   },
 ];
 
+/** How long a call keeps trying while the app restarts: the turn outlives the server, its calls wait for the next one. */
+const RETRY_MS = 120_000;
+
 async function call(method: string, path: string, body?: object): Promise<any> {
-  const res = await fetch(API + path, {
-    method,
-    headers: { Authorization: `Bearer ${TOKEN}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const started = Date.now();
+  let res: Response;
+  for (let wait = 500; ; wait = Math.min(wait * 2, 5000)) {
+    // A refused connection never reached the app, so any call is safe to send again; one cut off
+    // mid-way, or answered by the proxy, may have run, so only reads are.
+    let retry = false;
+    try {
+      res = await fetch(API + path, {
+        method,
+        headers: { Authorization: `Bearer ${TOKEN}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      retry = method === 'GET' && (res.status === 502 || res.status === 503);
+    } catch (err: any) {
+      if (!(err?.cause?.code === 'ECONNREFUSED' || method === 'GET') || Date.now() - started > RETRY_MS) throw err;
+      retry = true;
+    }
+    if (!retry || Date.now() - started > RETRY_MS) break;
+    await sleep(wait);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;

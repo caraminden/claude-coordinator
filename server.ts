@@ -1,5 +1,5 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
@@ -116,7 +116,15 @@ const runner = new Runner(
   }),
   process.env.CLAUDE_BIN ?? 'claude',
 );
+// Turns run in units of their own when this is the systemd service (systemd sets INVOCATION_ID), so a
+// restart doesn't stop them; TURN_UNITS=0 or 1 overrides that.
+runner.units = process.env.TURN_UNITS ? process.env.TURN_UNITS === '1' : !!process.env.INVOCATION_ID;
 if (!BOOT_CHECK) runner.recover();
+if (runner.units && !BOOT_CHECK) {
+  execFile('systemctl', ['--user', 'show', '-p', 'MemoryMax', '--value', 'citadel.slice'], (err, out) => {
+    if (err || out.trim() === 'infinity') console.warn('citadel.slice has no MemoryMax, so turns run uncapped: install deploy/citadel.slice (see README).');
+  });
+}
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text) => runner.send(ticketId, APP_NAME, text));
@@ -731,7 +739,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   // For tools/deploy.sh, so no login: is this server up, which code it booted from, which front end
   // it serves, and that it reloads public/ on SIGHUP (an older server would exit on one).
   if (pathname === '/api/health' && method === 'GET') {
-    return json(res, 200, { ok: true, commit: BOOT_COMMIT, version: ASSET_VERSION, reload: 'sighup' });
+    // interruptible: running turns a restart would stop (they don't run in a unit of their own).
+    return json(res, 200, { ok: true, commit: BOOT_COMMIT, version: ASSET_VERSION, reload: 'sighup', interruptible: runner.interruptible() });
   }
   // A machine's agent signs in with its own token, which reaches nothing else.
   if (pathname === '/api/machines/connect' || pathname === '/api/machines/send') {
@@ -1501,7 +1510,27 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => console.log(`${APP_NAME} listening on http://${HOST}:${PORT}`));
+// Under socket activation (deploy/claude-coordinator.socket) systemd holds the listening socket, fd 3,
+// across restarts: requests made while the server restarts wait for the next one instead of failing.
+if (process.env.LISTEN_FDS === '1' && process.env.LISTEN_PID === String(process.pid)) {
+  server.listen({ fd: 3 }, () => console.log(`${APP_NAME} listening on the socket systemd holds (${HOST}:${PORT})`));
+} else {
+  server.listen(PORT, HOST, () => console.log(`${APP_NAME} listening on http://${HOST}:${PORT}`));
+}
+
+// A restart: running turns carry on in their units, and the next server re-attaches. Stop taking
+// requests, end the ones that never finish (event streams, approval long-polls; their callers come
+// back), and give the rest a few seconds.
+const SHUTDOWN_GRACE_MS = 5000;
+process.on('SIGTERM', () => {
+  console.log('SIGTERM: finishing requests, then exiting; running turns carry on.');
+  runner.detachAll();
+  server.close(() => process.exit(0));
+  for (const c of clients) c.end();
+  runner.approvals.wakeAll();
+  server.closeIdleConnections();
+  setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
+});
 
 // A front-end-only deploy: re-read public/ and tell open tabs, which reload once nobody is typing.
 process.on('SIGHUP', () => {

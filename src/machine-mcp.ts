@@ -16,13 +16,28 @@ function fail(text: string): never {
   process.exit(1);
 }
 
-const res = await fetch(`${API}/api/machines/${MACHINE}/session`, { headers: { ...headers, Accept: 'text/event-stream' } })
-  .catch((err) => fail(`Could not reach the app: ${err.message}`));
-if (!res.ok || !res.body) fail(`${NAME} is not available (${res.status}): ${await res.text().catch(() => '')}`);
+/** Open the machine's session stream. The first try fails fast; after the app restarts, it keeps trying. */
+async function connect(first: boolean): Promise<Response> {
+  const started = Date.now();
+  for (;;) {
+    try {
+      const res = await fetch(`${API}/api/machines/${MACHINE}/session`, { headers: { ...headers, Accept: 'text/event-stream' } });
+      // The app answered: a machine that is offline stays offline, so don't keep claude waiting.
+      if (!res.ok || !res.body) fail(`${NAME} is not available (${res.status}): ${await res.text().catch(() => '')}`);
+      return res;
+    } catch (err: any) {
+      if (first || Date.now() - started > 120_000) fail(`Could not reach the app: ${err.message}`);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+}
 
 let session = '';
 let markReady: () => void;
-const ready = new Promise<void>((r) => (markReady = r));
+let ready = new Promise<void>((r) => (markReady = r));
+// Claude's MCP handshake, replayed to the new session after a reconnect; the machine's reply to it is dropped.
+const handshake: any[] = [];
+const REPLAY_ID = 'citadel-replayed-initialize';
 
 /** Reply to a request that can't reach the machine, so claude gets an error instead of waiting. */
 function unreachable(message: any, why: string) {
@@ -30,8 +45,16 @@ function unreachable(message: any, why: string) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: `${NAME}: ${why}` } })}\n`);
 }
 
+async function post(message: any): Promise<Response> {
+  return fetch(`${API}/api/machines/${MACHINE}/session/${session}`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  });
+}
+
 // Claude's messages, sent one at a time so the machine sees them in order.
-let chain = ready;
+let chain = Promise.resolve();
 createInterface({ input: process.stdin }).on('line', (line) => {
   if (!line.trim()) return;
   let message: any;
@@ -40,13 +63,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   } catch {
     return;
   }
+  if (message?.method === 'initialize' || message?.method === 'notifications/initialized') handshake.push(message);
   chain = chain.then(async () => {
+    await ready;
     try {
-      const r = await fetch(`${API}/api/machines/${MACHINE}/session/${session}`, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
-      });
+      const r = await post(message);
       if (!r.ok) unreachable(message, r.status === 503 || r.status === 404 ? 'the machine went offline' : `the app answered ${r.status}`);
     } catch (err: any) {
       unreachable(message, `could not reach the app (${err.message})`);
@@ -55,23 +76,32 @@ createInterface({ input: process.stdin }).on('line', (line) => {
 }).on('close', () => process.exit(0));
 
 // The machine's messages, as server-sent events: first our session id, then one MCP message each.
-const decoder = new TextDecoder();
-let buf = '';
-for await (const chunk of res.body) {
-  buf += decoder.decode(chunk, { stream: true });
-  let end;
-  while ((end = buf.indexOf('\n\n')) >= 0) {
-    const block = buf.slice(0, end);
-    buf = buf.slice(end + 2);
-    const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
-    if (!data) continue;
-    const msg = JSON.parse(data);
-    if (msg.session) {
-      session = msg.session;
-      markReady!();
-    } else if (msg.message !== undefined) {
-      process.stdout.write(`${JSON.stringify(msg.message)}\n`);
+// The stream ends when the app restarts; reconnect, and replay the handshake to the new session.
+for (let first = true; ; first = false) {
+  const res = await connect(first);
+  const decoder = new TextDecoder();
+  let buf = '';
+  try {
+    for await (const chunk of res.body!) {
+      buf += decoder.decode(chunk, { stream: true });
+      let end;
+      while ((end = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, end);
+        buf = buf.slice(end + 2);
+        const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
+        if (!data) continue;
+        const msg = JSON.parse(data);
+        if (msg.session) {
+          session = msg.session;
+          if (!first) for (const m of handshake) await post(m.id === undefined ? m : { ...m, id: REPLAY_ID }).catch(() => {});
+          markReady!();
+        } else if (msg.message !== undefined && msg.message?.id !== REPLAY_ID) {
+          process.stdout.write(`${JSON.stringify(msg.message)}\n`);
+        }
+      }
     }
+  } catch {
+    // Cut off mid-stream: the app went away.
   }
+  ready = new Promise<void>((r) => (markReady = r));
 }
-fail(`${NAME} disconnected.`);

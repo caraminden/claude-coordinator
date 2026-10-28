@@ -173,6 +173,11 @@ export class Approvals {
     });
   }
 
+  /** Answer every waiting long-poll now with its card's state so far, for a server shutting down. */
+  wakeAll() {
+    for (const r of this.requests.values()) for (const done of [...r.wake]) done();
+  }
+
   /** The thread's turn ended: expire its undecided cards and forget them all. */
   endTurn(ticketId: number, reason: string) {
     for (const [id, r] of this.requests) {

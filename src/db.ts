@@ -34,8 +34,9 @@ export const TICKET_TAGS = ['feature', 'bug', 'design', 'process', 'idea'] as co
 export type TicketTag = (typeof TICKET_TAGS)[number];
 /** ready: done, ready to merge or pick up · try: ready for people to try · parked: on hold on purpose ·
  * blocked: stuck on something outside the thread · outside: work still running elsewhere (CI, someone's machine) ·
- * pending-deploy: deployed, not live yet; outlasts a new turn, and a successful deploy dismisses the thread. */
-export const TICKET_STATES = ['ready', 'try', 'parked', 'blocked', 'outside', 'pending-deploy'] as const;
+ * pending-deploy: deployed, not live yet; outlasts a new turn, and a successful deploy dismisses the thread ·
+ * limited: the last turn hit the account's usage limit (set by the server, not the thread). */
+export const TICKET_STATES = ['ready', 'try', 'parked', 'blocked', 'outside', 'pending-deploy', 'limited'] as const;
 export type TicketState = (typeof TICKET_STATES)[number];
 
 export interface Ticket {

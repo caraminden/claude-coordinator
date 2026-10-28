@@ -208,6 +208,9 @@ interface LoopState {
 
 const loopKey = (minionId: number) => `loop:${minionId}`;
 
+/** Claude Code's words when a turn hits the plan's usage limit: "You've hit your 5-hour limit · resets 3:30pm (…)". */
+export const USAGE_LIMIT = /hit your [\w -]*limit/i;
+
 /** Auto-resumes in a row before a thread is left alone, in case its own turn is what kills the server. */
 export const MAX_RESUMES = 2;
 /** Said beside the role names, and passed on to Grunts, which don't see these prompts. */
@@ -1028,6 +1031,10 @@ export class Runner {
       const text = `claude exited with code ${code}${detail ? `:\n${detail}` : ''}`;
       this.emit(ticketId, 'error', { text });
       this.onTurnError(ticketId, resultError ?? text);
+      // Waiting on the usage window, not stuck; the note keeps Claude's words on when it resets.
+      if (resultError && USAGE_LIMIT.test(resultError) && this.store.getTicket(ticketId)?.state !== 'pending-deploy') {
+        this.store.updateTicket(ticketId, { state: 'limited', note: resultError });
+      }
     }
     const closing = this.closing.has(ticketId);
     const reason = this.closing.get(ticketId);

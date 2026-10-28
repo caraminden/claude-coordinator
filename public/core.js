@@ -50,7 +50,7 @@ export async function api(path, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && path !== '/api/login') {
+  if (res.status === 401 && path !== 'api/login') {
     me = null;
     renderLogin();
     throw new Error('Not logged in');
@@ -96,9 +96,9 @@ export const baseName = (path) => path.split('/').filter(Boolean).pop() ?? path;
 export const fileExt = (path) => (baseName(path).includes('.') ? baseName(path).split('.').pop().slice(0, 5).toUpperCase() : 'FILE');
 /** A link target that is a path on disk, not a URL, a fragment or a mail address. */
 export const isLocalPath = (href) => !/^[a-z][a-z0-9+.-]*:|^\/\/|^#/i.test(href);
-export const fileUrl = (ticketId, path) => `/api/tickets/${ticketId}/file?path=${encodeURIComponent(path)}`;
+export const fileUrl = (ticketId, path) => `api/tickets/${ticketId}/file?path=${encodeURIComponent(path)}`;
 export const fileHref = (ticketId, path) => `#/f/${ticketId}/${encodeURIComponent(path)}`;
-export const sharedUrl = (projectId, path) => `/api/projects/${projectId}/shared/file?path=${encodeURIComponent(path)}`;
+export const sharedUrl = (projectId, path) => `api/projects/${projectId}/shared/file?path=${encodeURIComponent(path)}`;
 export const sharedHref = (projectId, path) => `#/s/${projectId}/${encodeURIComponent(path)}`;
 /** A linked path short enough for a card: a thread's shared folder by name, other absolute paths by their tail. */
 export function shortPath(path) {
@@ -349,7 +349,7 @@ let streamTimer = null;
 function connectStream(catchUp = false) {
   if (stream || !me) return;
   clearTimeout(streamTimer);
-  const es = new EventSource('/api/stream');
+  const es = new EventSource('api/stream');
   stream = es;
   es.onopen = () => {
     streamRetry = 0;
@@ -475,9 +475,9 @@ async function resync() {
   // Refresh in place so a half-typed message in the composer survives.
   try {
     const [{ coordinator, tickets, seen }, artifacts, chat] = await Promise.all([
-      api(`/api/projects/${view.projectId}`),
-      api(`/api/projects/${view.projectId}/artifacts`),
-      view.id ? api(`/api/tickets/${view.id}`) : null,
+      api(`api/projects/${view.projectId}`),
+      api(`api/projects/${view.projectId}/artifacts`),
+      view.id ? api(`api/tickets/${view.id}`) : null,
     ]);
     view.coordinator = coordinator;
     view.tickets = new Map(tickets.map((t) => [t.id, t]));
@@ -503,7 +503,7 @@ export async function loadEvents(ticketId) {
   await prefetching.get(ticketId);
   const cached = eventCache.get(ticketId) ?? [];
   const after = cached.length ? cached[cached.length - 1].id : 0;
-  const fresh = await api(`/api/tickets/${ticketId}/events${after ? `?after=${after}` : ''}`);
+  const fresh = await api(`api/tickets/${ticketId}/events${after ? `?after=${after}` : ''}`);
   const events = fresh.length ? cached.concat(fresh) : cached;
   eventCache.delete(ticketId);
   eventCache.set(ticketId, events);
@@ -519,7 +519,7 @@ const PREFETCH_ROWS = 6;
 
 function prefetchEvents(ticketId) {
   if (eventCache.has(ticketId) || prefetching.has(ticketId) || eventCache.size >= EVENT_CACHE_THREADS) return prefetching.get(ticketId);
-  const p = api(`/api/tickets/${ticketId}/events`)
+  const p = api(`api/tickets/${ticketId}/events`)
     .then((events) => { if (!eventCache.has(ticketId) && eventCache.size < EVENT_CACHE_THREADS) eventCache.set(ticketId, events); })
     .catch(() => {})
     .finally(() => prefetching.delete(ticketId));
@@ -549,7 +549,7 @@ export function prefetchTopRows() {
 
 export async function catchUpEvents() {
   if (!view.id) return;
-  const events = await api(`/api/tickets/${view.id}/events?after=${view.lastEventId}`);
+  const events = await api(`api/tickets/${view.id}/events?after=${view.lastEventId}`);
   for (const ev of events) if (ev.id > view.lastEventId) appendEvent(ev);
 }
 
@@ -577,7 +577,7 @@ export function markSeen(ticketId) {
   seenTimers.set(ticketId, setTimeout(async () => {
     seenTimers.delete(ticketId);
     try {
-      const { seen_at } = await api(`/api/tickets/${ticketId}/seen`, { method: 'POST', body: {} });
+      const { seen_at } = await api(`api/tickets/${ticketId}/seen`, { method: 'POST', body: {} });
       if (view?.kind !== 'project') return;
       view.seen[ticketId] = seen_at;
       renderSidebar();
@@ -660,7 +660,7 @@ function renderLogin() {
     e.preventDefault();
     const err = document.getElementById('login-error');
     try {
-      const res = await api('/api/login', { method: 'POST', body: { name: form.name.value, password: form.password.value } });
+      const res = await api('api/login', { method: 'POST', body: { name: form.name.value, password: form.password.value } });
       try { localStorage.setItem('cc-name', res.name); } catch {}
       start(res.name);
     } catch (ex) {
@@ -680,7 +680,7 @@ export function start(name) {
 export async function logout() {
   // Notifications on this device were for the person signing out.
   await pushOff().catch(() => {});
-  await api('/api/logout', { method: 'POST', body: {} });
+  await api('api/logout', { method: 'POST', body: {} });
   eventCache.clear();
   clearTimeout(streamTimer);
   stream?.close();

@@ -7,9 +7,9 @@ import { showProject } from './project.js';
 export async function showFile(ticketId, path) {
   const seq = routeSeq;
   const [{ ticket }, file] = await Promise.all([
-    api(`/api/tickets/${ticketId}`),
+    api(`api/tickets/${ticketId}`),
     // A file that has gone (or never could be shown) still opens the view, saying so.
-    api(`/api/tickets/${ticketId}/file?info&path=${encodeURIComponent(path)}`).catch((err) => ({
+    api(`api/tickets/${ticketId}/file?info&path=${encodeURIComponent(path)}`).catch((err) => ({
       missing: err.message, name: baseName(path), kind: fileKind(path) ?? 'text', display_path: shortPath(path),
     })),
   ]);
@@ -26,14 +26,14 @@ export async function showFile(ticketId, path) {
 
 /** A file in the project's shared folder, opened from the Shared group of the artifacts panel. */
 export async function showSharedFile(projectId, path) {
-  const file = await api(`/api/projects/${projectId}/shared/file?info&path=${encodeURIComponent(path)}`).catch((err) => ({
+  const file = await api(`api/projects/${projectId}/shared/file?info&path=${encodeURIComponent(path)}`).catch((err) => ({
     missing: err.message, name: baseName(path), kind: fileKind(path) ?? 'text', display_path: `scheme shared/${path}`,
   }));
   await showProject(projectId, { kind: 'shared', file: { ...file, path } });
 }
 
 export async function showArtifact(artifactId) {
-  const { artifact } = await api(`/api/artifacts/${artifactId}`);
+  const { artifact } = await api(`api/artifacts/${artifactId}`);
   await showProject(artifact.project_id, { kind: 'artifact', artifact });
 }
 
@@ -49,7 +49,7 @@ const ARTIFACT_FILTERS = [
   { key: 'canvas', label: 'Canvases', match: (a) => a.kind === 'canvas' },
 ];
 
-const rawUrl = (a) => `/api/artifacts/${a.id}/raw?v=${a.mtime}`;
+const rawUrl = (a) => `api/artifacts/${a.id}/raw?v=${a.mtime}`;
 const extOf = (a) => (a.name.includes('.') ? a.name.split('.').pop() : a.kind).slice(0, 5).toUpperCase();
 const artifactThread = (a) => ({ id: a.ticket_id, kind: a.ticket_kind, project_id: a.project_id, number: a.ticket_number, title: a.ticket_title });
 const threadName = (a) => threadLabel(artifactThread(a));
@@ -73,8 +73,8 @@ async function refreshArtifacts() {
   const projectId = view.projectId;
   try {
     const [artifacts, shared] = await Promise.all([
-      api(`/api/projects/${projectId}/artifacts`),
-      api(`/api/projects/${projectId}/shared`).catch(() => []),
+      api(`api/projects/${projectId}/artifacts`),
+      api(`api/projects/${projectId}/shared`).catch(() => []),
     ]);
     if (view?.kind === 'project' && view.projectId === projectId) setArtifacts(artifacts, shared);
   } catch {}
@@ -92,7 +92,7 @@ export function setArtifacts(artifacts, shared = view.shared) {
 
 async function setPinned(a, pinned) {
   try {
-    await api(`/api/artifacts/${a.id}/pin`, { method: 'POST', body: { pinned } });
+    await api(`api/artifacts/${a.id}/pin`, { method: 'POST', body: { pinned } });
     await refreshArtifacts();
   } catch (e) {
     alert(`Could not ${pinned ? 'pin' : 'unpin'}: ${e.message}`);
@@ -374,7 +374,7 @@ function commentBox(t, path, name, body) {
     setSending(sending + 1);
     status.textContent = 'Sending…';
     try {
-      await api(`/api/tickets/${t.id}/comments`, { method: 'POST', body: { path, text, quote } });
+      await api(`api/tickets/${t.id}/comments`, { method: 'POST', body: { path, text, quote } });
       textarea.value = '';
       saveDraft(draftKey, '');
       setQuote('');

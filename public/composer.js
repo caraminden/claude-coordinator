@@ -113,7 +113,7 @@ export function composer(chatId, ticket) {
     renderTyping();
     scrollToBottom();
     try {
-      const ticket = await api(`/api/tickets/${chatId}/messages`, { method: 'POST', body: { text, images } });
+      const ticket = await api(`api/tickets/${chatId}/messages`, { method: 'POST', body: { text, images } });
       // Show the message now even if the live stream is down; duplicates are skipped by id.
       if (view?.kind === 'project' && view.id === chatId) {
         // You just sent something, so follow the reply.
@@ -246,7 +246,7 @@ function modelPicker(chatId) {
     const sel = e.target;
     sel.disabled = true;
     try {
-      const ticket = await api(`/api/tickets/${chatId}`, { method: 'PATCH', body: { [field]: sel.value || null } });
+      const ticket = await api(`api/tickets/${chatId}`, { method: 'PATCH', body: { [field]: sel.value || null } });
       if (view?.kind === 'project' && view.id === chatId) {
         view.ticket = ticket;
         renderModelPicker();

@@ -108,7 +108,7 @@ function toReview(reg) {
 
 async function loadProperties() {
   const projectId = view.projectId;
-  const reg = await api(`/api/projects/${projectId}/properties`);
+  const reg = await api(`api/projects/${projectId}/properties`);
   return view?.projectId === projectId ? reg : null;
 }
 
@@ -161,7 +161,7 @@ async function renderPropertiesPage() {
   const run = async (path, payload, done) => {
     status.textContent = '';
     try {
-      const r = await api(`/api/projects/${view.projectId}/properties/${path}`, { method: 'POST', body: payload });
+      const r = await api(`api/projects/${view.projectId}/properties/${path}`, { method: 'POST', body: payload });
       if (r.warnings?.length) return r.warnings;
       done?.();
       renderPropertiesPage();

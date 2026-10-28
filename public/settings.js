@@ -22,7 +22,7 @@ function keyBytes(b64) {
 /** Ask for permission (only ever from a click), subscribe this browser and register it for you. */
 async function pushOn() {
   if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications are blocked for this site in the browser settings');
-  const { publicKey } = await api('/api/push/key');
+  const { publicKey } = await api('api/push/key');
   const reg = await navigator.serviceWorker.ready;
   let sub = await reg.pushManager.getSubscription();
   // A subscription made with another key (an older data dir) can't be used; start over.
@@ -32,14 +32,14 @@ async function pushOn() {
     sub = null;
   }
   sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
-  return api('/api/push/subscription', { method: 'PUT', body: { subscription: sub.toJSON() } });
+  return api('api/push/subscription', { method: 'PUT', body: { subscription: sub.toJSON() } });
 }
 
 export async function pushOff() {
   if (!pushSupported) return;
   const sub = await pushSubscription();
   if (!sub) return;
-  await api('/api/push/subscription', { method: 'DELETE', body: { endpoint: sub.endpoint } });
+  await api('api/push/subscription', { method: 'DELETE', body: { endpoint: sub.endpoint } });
   await sub.unsubscribe();
 }
 
@@ -76,7 +76,7 @@ export function pushControls(project) {
   /** Show where this browser stands (and `err`, if a change just failed). */
   async function refresh(err) {
     const sub = await pushSubscription().catch(() => null);
-    const state = sub && await api('/api/push/subscription', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => null);
+    const state = sub && await api('api/push/subscription', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => null);
     show(state ?? { subscribed: false, muted: [] }, err);
   }
   on.addEventListener('change', () => busy(async () => {
@@ -88,7 +88,7 @@ export function pushControls(project) {
   }));
   mute.addEventListener('change', () => busy(async () => {
     const sub = await pushSubscription();
-    return api('/api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, projectId: project.id, muted: mute.checked } });
+    return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, projectId: project.id, muted: mute.checked } });
   }));
   refresh();
   return el;
@@ -151,7 +151,7 @@ export function projectTitle(project) {
       if (input.value.trim() === view.project.name) return show();
       saving = true;
       try {
-        onProjectUpdate(await api(`/api/projects/${project.id}`, { method: 'PATCH', body: { name: input.value } }));
+        onProjectUpdate(await api(`api/projects/${project.id}`, { method: 'PATCH', body: { name: input.value } }));
         show();
       } catch (ex) {
         err.textContent = ex.message;
@@ -223,7 +223,7 @@ export function approvalsEditor() {
     save.disabled = true;
     status.textContent = 'Saving…';
     try {
-      view.project = await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { approval_rules: rules.value, plugin_dirs: dirs.value } });
+      view.project = await api(`api/projects/${p.id}`, { method: 'PATCH', body: { approval_rules: rules.value, plugin_dirs: dirs.value } });
       rules.value = view.project.approval_rules;
       dirs.value = view.project.plugin_dirs;
       status.textContent = 'Saved. Minions pick this up on their next turn.';
@@ -303,7 +303,7 @@ export function instructionsEditor() {
     save.disabled = true;
     status.textContent = 'Saving…';
     try {
-      view.project = await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { instructions: textarea.value } });
+      view.project = await api(`api/projects/${p.id}`, { method: 'PATCH', body: { instructions: textarea.value } });
       textarea.value = view.project.instructions;
       status.textContent = 'Saved. Minions pick this up on their next turn.';
       renderInstructionsHead();
@@ -454,7 +454,7 @@ export function machinesPage() {
     e.preventDefault();
     status.textContent = 'Adding…';
     try {
-      const { machine, token, agent_url } = await api('/api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), project_id: view.projectId } });
+      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), project_id: view.projectId } });
       view.machineToken = { id: machine.id, name: machine.name, token, url: agent_url ?? location.origin };
       name.value = '';
       status.textContent = '';
@@ -513,7 +513,7 @@ function renderMachineList() {
     const newToken = h('button', { type: 'button', class: 'secondary small', title: 'Make a new token; the old one stops working and the machine disconnects' }, 'New token');
     newToken.onclick = async () => {
       if (!confirm(`Make a new token for ${m.name}? Its current connection stops and it has to be set up again.`)) return;
-      const { token, agent_url } = await api(`/api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
+      const { token, agent_url } = await api(`api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
       if (!token) return;
       view.machineToken = { id: m.id, name: m.name, token, url: agent_url ?? location.origin };
       renderMachineSetup();
@@ -521,7 +521,7 @@ function renderMachineList() {
     const remove = h('button', { type: 'button', class: 'secondary small' }, 'Remove');
     remove.onclick = async () => {
       if (!confirm(`Remove ${m.name}? Minions lose its tools and its token stops working.`)) return;
-      await api(`/api/machines/${m.id}`, { method: 'DELETE' }).catch((err) => alert(err.message));
+      await api(`api/machines/${m.id}`, { method: 'DELETE' }).catch((err) => alert(err.message));
       if (view.machineToken?.id === m.id) view.machineToken = null;
       renderMachineSetup();
     };
@@ -532,7 +532,7 @@ function renderMachineList() {
     save.onclick = async () => {
       saved.textContent = 'Saving…';
       try {
-        await api(`/api/machines/${m.id}`, { method: 'PATCH', body: { notes: notes.value } });
+        await api(`api/machines/${m.id}`, { method: 'PATCH', body: { notes: notes.value } });
         saved.textContent = 'Saved; minions get them from their next turn.';
       } catch (err) {
         saved.textContent = err.message;
@@ -540,7 +540,7 @@ function renderMachineList() {
     };
     const grants = h('div', { class: 'machine-grants' }, ...view.projects.map((p) => {
       const box = h('input', { type: 'checkbox', checked: !!m.projects?.includes(p.id) });
-      box.onchange = () => api(`/api/machines/${m.id}/projects/${p.id}`, { method: box.checked ? 'PUT' : 'DELETE' })
+      box.onchange = () => api(`api/machines/${m.id}/projects/${p.id}`, { method: box.checked ? 'PUT' : 'DELETE' })
         .catch((err) => { box.checked = !box.checked; alert(err.message); });
       return h('label', { class: 'toggle', title: `Let ${p.name}'s minions use ${m.name}` }, box, p.name);
     }));
@@ -567,7 +567,7 @@ async function loadInstructionSources(el, insert) {
   el.replaceChildren(h('p', { class: 'muted small' }, 'Looking for Claude Code instructions and memory…'));
   let sources;
   try {
-    ({ sources } = await api(`/api/projects/${view.projectId}/instructions/sources`));
+    ({ sources } = await api(`api/projects/${view.projectId}/instructions/sources`));
   } catch (err) {
     el.replaceChildren(h('p', { class: 'error' }, `Could not list Claude Code files: ${err.message}`));
     return;

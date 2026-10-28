@@ -33,8 +33,9 @@ setInterval(() => {
   if (view?.kind === 'project') renderSidebar();
 }, 30_000);
 
-api('/api/me').then((r) => start(r.name)).catch(() => {});
+api('api/me').then((r) => start(r.name)).catch(() => {});
 // The service worker makes the app installable (home screen, full screen) and shows push notifications; it caches nothing.
+// Absolute on purpose: a preview (/preview/N/) shares the live app's one worker instead of registering its own.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 // Only in the installed app, so browser tabs look and behave as before: colour the title/status bar
 // like the top bar, and on Android shrink the page when the keyboard opens so the composer stays in view.

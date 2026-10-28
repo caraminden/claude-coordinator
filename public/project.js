@@ -9,7 +9,7 @@ import { refreshInbox } from './inbox.js';
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 export async function showTicket(ticketId) {
-  const { ticket } = await api(`/api/tickets/${ticketId}`);
+  const { ticket } = await api(`api/tickets/${ticketId}`);
   if (isCoordinator(ticket) || ticket.number != null) return location.replace(threadHref(ticket));
   await showProject(ticket.project_id, { kind: 'chat', id: ticketId });
 }
@@ -43,12 +43,12 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     if (await switchChat(main, seq)) return;
   }
   const [{ project, coordinator, tickets, seen }, artifacts, shared, projects, machines] = await Promise.all([
-    api(`/api/projects/${projectId}`),
+    api(`api/projects/${projectId}`),
     // An empty shelf beats a broken page if the server is older than this front end.
-    api(`/api/projects/${projectId}/artifacts`).catch(() => []),
-    api(`/api/projects/${projectId}/shared`).catch(() => []),
-    api('/api/projects').catch(() => []),
-    api('/api/machines').catch(() => []),
+    api(`api/projects/${projectId}/artifacts`).catch(() => []),
+    api(`api/projects/${projectId}/shared`).catch(() => []),
+    api('api/projects').catch(() => []),
+    api('api/machines').catch(() => []),
   ]);
   let chatId = null;
   if (main.kind === 'chat') {
@@ -56,7 +56,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     if (!chatId) throw new Error(`There is no minion #${main.number} in ${project.name}.`);
   }
   const [{ ticket }, events] = chatId
-    ? await Promise.all([api(`/api/tickets/${chatId}`), loadEvents(chatId)])
+    ? await Promise.all([api(`api/tickets/${chatId}`), loadEvents(chatId)])
     : [{ ticket: null }, []];
   if (seq !== routeSeq) return; // overtaken by another click while loading
   setView({
@@ -146,7 +146,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
 async function switchChat(main, seq) {
   const chatId = main.id ?? (main.number == null ? view.coordinator.id : [...view.tickets.values()].find((t) => t.number === main.number)?.id);
   if (!chatId) return false;
-  const [{ ticket }, events] = await Promise.all([api(`/api/tickets/${chatId}`), loadEvents(chatId)]);
+  const [{ ticket }, events] = await Promise.all([api(`api/tickets/${chatId}`), loadEvents(chatId)]);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
   const { kind, projectId, project, coordinator, tickets, seen, artifacts, shared, showClosed } = view;
   setView({

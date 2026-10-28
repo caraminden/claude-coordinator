@@ -14,7 +14,7 @@ export const LAST_SCHEME = 'cc-scheme'; // the scheme this browser last had open
 
 /** The app's front door: open the last scheme (or Citadel, or the first); with none, offer to make one. */
 export async function openStartScheme() {
-  const projects = await api('/api/projects');
+  const projects = await api('api/projects');
   let last = NaN;
   try { last = Number(localStorage.getItem(LAST_SCHEME)); } catch {}
   const id = startScheme(projects, last);
@@ -39,7 +39,7 @@ function newSchemeForm() {
     btn.disabled = true;
     btn.textContent = form.repoUrl.value ? 'Cloning…' : 'Creating…';
     try {
-      const p = await api('/api/projects', { method: 'POST', body: { name: form.name.value, repoUrl: form.repoUrl.value } });
+      const p = await api('api/projects', { method: 'POST', body: { name: form.name.value, repoUrl: form.repoUrl.value } });
       form.closest('dialog')?.close();
       location.hash = `#/p/${p.id}`;
     } catch (ex) {
@@ -128,7 +128,7 @@ export function newTicketForm(projectId) {
     err.hidden = true;
     setSending(sending + 1);
     try {
-      const t = await api(`/api/projects/${projectId}/tickets`, { method: 'POST', body: { message: box.value } });
+      const t = await api(`api/projects/${projectId}/tickets`, { method: 'POST', body: { message: box.value } });
       saveDraft(draftKey, null);
       box.value = '';
       fit();

@@ -122,7 +122,7 @@ function chatFindBox() {
 
 export async function refreshBranch(ticketId) {
   try {
-    const { status } = await api(`/api/tickets/${ticketId}/branch`);
+    const { status } = await api(`api/tickets/${ticketId}/branch`);
     if (view?.kind === 'project' && view.id === ticketId) renderBranch(status);
   } catch {}
 }
@@ -161,7 +161,7 @@ export function renderTicketHead() {
   if (box) box.placeholder = composerPlaceholder(t);
   const actions = [];
   if (t.status === 'running') {
-    actions.push(h('button', { class: 'secondary', onclick: () => api(`/api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));
+    actions.push(h('button', { class: 'secondary', onclick: () => api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));
   } else if (coord) {
     // The coordinator stays open for the life of the project.
   } else if (t.status === 'closed') {
@@ -193,7 +193,7 @@ export function renderTicketHead() {
 
 async function setStatus(id, status) {
   try {
-    await api(`/api/tickets/${id}/status`, { method: 'POST', body: { status } });
+    await api(`api/tickets/${id}/status`, { method: 'POST', body: { status } });
     return true;
   } catch (e) {
     alertNote(e.message);
@@ -422,7 +422,7 @@ export function appendEvent(event, scroll = true) {
       nodes.push(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), answerSummary(data.answer.answers)));
     } else {
       nodes.push(userBubble(data.author, data.text,
-        (data.images ?? []).map((name) => `/api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
+        (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
         data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null));
     }
   } else if (event.kind === 'question') {
@@ -595,7 +595,7 @@ function approvalCard(ticketId, card) {
     approve.disabled = deny.disabled = true;
     status.textContent = allow ? 'Approving…' : 'Denying…';
     try {
-      await api(`/api/tickets/${ticketId}/approve`, { method: 'POST', body: { approvalId: card.id, allow } });
+      await api(`api/tickets/${ticketId}/approve`, { method: 'POST', body: { approvalId: card.id, allow } });
       if (view?.id === ticketId) catchUpEvents().catch(() => {});
     } catch (ex) {
       status.textContent = ex.message;
@@ -703,7 +703,7 @@ function loopCard(data) {
     go.disabled = true;
     status.textContent = 'Continuing…';
     try {
-      await api(`/api/tickets/${data.minion}/continue`, { method: 'POST' });
+      await api(`api/tickets/${data.minion}/continue`, { method: 'POST' });
     } catch (ex) {
       status.textContent = ex.message;
       go.disabled = false;
@@ -752,7 +752,7 @@ function questionCard(ticketId, card) {
     status.textContent = 'Sending…';
     try {
       const answers = picks.map((p) => ({ selected: [...p.selected], other: p.other.trim() }));
-      const ticket = await api(`/api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id, answers } });
+      const ticket = await api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id, answers } });
       if (view?.id === ticketId) {
         view.ticket = ticket;
         renderTicketHead();

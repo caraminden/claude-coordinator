@@ -741,11 +741,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const project = store.getProject(Number(m[1]));
     if (!project) throw new HttpError(404, 'No such project');
     inScope(project.id);
-    // Any of instructions, approval_rules and plugin_dirs; what is left out stays.
+    // Any of name, instructions, approval_rules and plugin_dirs; what is left out stays.
     const body = await readJson(req);
-    if (body.instructions === undefined && body.approval_rules === undefined && body.plugin_dirs === undefined) {
+    if (body.name === undefined && body.instructions === undefined && body.approval_rules === undefined && body.plugin_dirs === undefined) {
       throw new HttpError(400, 'Nothing to change');
     }
+    const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
     const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs'>> = {};
     try {
       if (body.approval_rules !== undefined) settings.approval_rules = cleanRules(body.approval_rules);
@@ -757,6 +758,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const instructions = body.instructions === undefined ? project.instructions : body.instructions.replace(/\r\n/g, '\n').trim();
     if (instructions.length > MAX_INSTRUCTIONS) {
       throw new HttpError(400, `Instructions are ${instructions.length.toLocaleString('en')} characters; the limit is ${MAX_INSTRUCTIONS.toLocaleString('en')}`);
+    }
+    // Renamed first: it is the only change that can still be refused (a taken name).
+    if (name !== project.name) {
+      try {
+        store.renameProject(project.id, name);
+      } catch (err: any) {
+        throw new HttpError(409, err.message);
+      }
+      const coordinator = store.getCoordinator(project.id);
+      if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} renamed the project from "${project.name}" to "${name}".` });
     }
     for (const k of Object.keys(settings) as (keyof typeof settings)[]) if (settings[k] === project[k]) delete settings[k];
     if (Object.keys(settings).length) {

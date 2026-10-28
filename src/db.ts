@@ -317,6 +317,19 @@ export class Store {
     this.db.prepare(`UPDATE projects SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? ''), id);
   }
 
+  /** Change a project's display name; its repo, folders and links go by id and stay put. */
+  renameProject(id: number, name: string): Project {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('The project name cannot be empty');
+    try {
+      this.db.prepare('UPDATE projects SET name = ? WHERE id = ?').run(trimmed, id);
+    } catch (err: any) {
+      if (/UNIQUE/.test(err.message)) throw new Error(`There is already a project called "${trimmed}"`);
+      throw err;
+    }
+    return this.getProject(id)!;
+  }
+
   deleteProject(id: number) {
     this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
   }

@@ -784,7 +784,7 @@ async function showProjects() {
     projects.length
       ? h('div', { class: 'projects' }, projects.map((p) =>
           h('a', { class: 'card', href: `#/p/${p.id}` },
-            h('div', { class: 'title' }, h('strong', {}, p.name)),
+            h('div', { class: 'title' }, h('strong', { 'data-project-name': p.id }, p.name)),
             h('div', { class: 'muted' }, p.repo_url || 'No repo'),
             h('div', { class: 'muted' }, `${p.tickets} ticket${p.tickets === 1 ? '' : 's'}`))))
       : h('p', { class: 'muted' }, 'No projects yet.'),
@@ -877,7 +877,7 @@ function chatView(chatId, ticket) {
 
 function renderCrumbs(main) {
   const { project } = view;
-  const projectLink = h('a', { href: `#/p/${project.id}` }, project.name);
+  const projectLink = h('a', { href: `#/p/${project.id}`, 'data-project-name': project.id }, project.name);
   const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
   crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', ...(
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
@@ -889,7 +889,7 @@ function renderCrumbs(main) {
       : main.kind === 'shared' ? [projectLink, ' / ', h('a', { href: `#/p/${project.id}/shared` }, 'Shared files'), ' / ', main.file.name]
       : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Coordinator' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
-          : [project.name]));
+          : [h('span', { 'data-project-name': project.id }, project.name)]));
 }
 
 /**
@@ -935,7 +935,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   // The overview panel: account and usage (standing in for the top bar, which wider screens hide
   // on project pages), the projects, then this project's pinned and recent artifacts.
   const shelf = h('details', { class: 'shelf', open: panelOpen('shelf') },
-    h('summary', { title: 'Show or hide the overview' }, h('span', { class: 'label' }, project.name)),
+    h('summary', { title: 'Show or hide the overview' }, h('span', { class: 'label', 'data-project-name': project.id }, project.name)),
     h('section', { class: 'account' },
       h('div', { class: 'row' }, h('strong', {}, me), h('span', { class: 'spacer' }),
         h('button', { class: 'secondary small', onclick: logout }, 'Sign out')),
@@ -943,8 +943,8 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
       pushControls(project)),
     h('section', { class: 'column' },
       h('h3', {}, 'Projects', h('span', { class: 'spacer' }), h('a', { class: 'more', href: '#/' }, 'All')),
-      projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
-        h('span', { class: 'name' }, p.name)))),
+      projects.map((p) => p.id === projectId ? renameableProject(p)
+        : h('a', { class: 'nav-item', href: `#/p/${p.id}` }, h('span', { class: 'name', 'data-project-name': p.id }, p.name)))),
     h('div', { id: 'instructions-shelf' }),
     h('div', { id: 'approvals-shelf' }),
     h('div', { id: 'machines-shelf' }),
@@ -1880,6 +1880,7 @@ const MAX_INSTRUCTIONS = 16000;
 const count = (n) => n.toLocaleString('en');
 
 function onProjectUpdate(project) {
+  for (const el of document.querySelectorAll(`[data-project-name="${project.id}"]`)) el.textContent = project.name;
   if (view?.kind !== 'project' || view.projectId !== project.id) return;
   view.project = project;
   renderInstructionsShelf();
@@ -1892,6 +1893,39 @@ function onProjectUpdate(project) {
   // Someone else saved: show their text unless this tab has edits of its own.
   if (text && !text.hasAttribute('data-draft')) text.value = project.instructions;
   renderInstructionsHead();
+}
+
+/** The current project's row in the overview's project list, with a Rename button that swaps in a form. */
+function renameableProject(p) {
+  const row = h('div', { class: 'nav-row' });
+  const show = () => row.replaceChildren(
+    h('a', { class: 'nav-item active', href: `#/p/${p.id}` }, h('span', { class: 'name', 'data-project-name': p.id }, view.project.name)),
+    h('button', { type: 'button', class: 'link small', title: 'Rename this project (its repo stays as it is)', onclick: edit }, 'Rename'));
+  const edit = () => {
+    const input = h('input', { name: 'name', value: view.project.name, maxlength: '80', required: true, 'aria-label': 'Project name' });
+    const err = h('p', { class: 'error small', hidden: true });
+    const form = h('form', { class: 'rename-project' }, input,
+      h('div', { class: 'row' },
+        h('button', { class: 'small' }, 'Save'),
+        h('button', { type: 'button', class: 'secondary small', onclick: show }, 'Cancel')),
+      err);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Escape') show(); });
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (input.value.trim() === view.project.name) return show();
+      try {
+        onProjectUpdate(await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { name: input.value } }));
+        show();
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.hidden = false;
+      }
+    });
+    row.replaceChildren(form);
+    input.select();
+  };
+  show();
+  return row;
 }
 
 /** Overview panel: whether the project has instructions, and a way to edit them. */

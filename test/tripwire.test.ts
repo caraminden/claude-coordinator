@@ -118,6 +118,8 @@ const ALLOWED = [
   'cd ~/claude-coordinator && git pull --ff-only ~/.local/share/claude-coordinator/projects/2/repo main',
   'systemd-run --user --collect --unit=cc-restart-when-idle --description="Restart when idle" /tmp/cc-restart-when-idle.sh',
   '~/claude-coordinator/tools/deploy.sh',
+  'tools/deploy.sh',
+  'git fetch -q && git rebase main && tools/deploy.sh 2>&1 | tail -20',
   'cd ~/claude-coordinator && ./tools/deploy.sh',
   'systemd-run --user --unit=cc-restart-when-idle bash /home/u/claude-coordinator/tools/deploy.sh',
   // the scheme's own main checkout
@@ -187,7 +189,9 @@ test('file tools: writes, edits and reads', () => {
 });
 
 test('reasons say why and what to do instead', () => {
-  assert.match(bash('systemctl --user restart claude-coordinator')!, /idle restart/);
+  assert.match(bash('systemctl --user restart claude-coordinator')!, /cc-restart-when-idle/);
+  assert.match(bash('systemctl --user restart claude-coordinator', worktree, { ...cfg, deployScript: true })!, /tools\/deploy\.sh/);
+  assert.match(bash('git -C ~/claude-coordinator pull --ff-only', worktree, { ...cfg, deployScript: true })!, /run it from your worktree/);
   assert.match(bash('node server.ts')!, /DATA_DIR=\$\(mktemp -d\)/);
   assert.match(bash('rm ~/.local/share/claude-coordinator/coordinator.db')!, /sqlite3 -readonly/);
 });

@@ -33,7 +33,7 @@ const under = (p: string, root: string) => p === root || p.startsWith(root + '/'
 
 function deployNote(cfg: TripwireConfig): string {
   return hasDeployScript(cfg)
-    ? `Deploys go through ${join(cfg.checkout, 'tools/deploy.sh')}.`
+    ? 'Deploys go through tools/deploy.sh: run it from your worktree once your change is on main.'
     : `Deploy with \`git pull --ff-only\` there (the one change allowed until tools/deploy.sh lands) and the cc-restart-when-idle unit.`;
 }
 function hasDeployScript(cfg: TripwireConfig): boolean {
@@ -473,7 +473,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): string | n
     const plain = words.slice(sysctl + 1).filter((w) => !w.text.startsWith('-')).map((w) => w.text);
     const [verb, ...units] = plain;
     if (STOP_VERBS.has(verb) && units.some((u) => APP_UNITS.test(u))) {
-      return `systemctl ${verb} of ${units.join(' ')} is blocked: it cuts off every running turn (or the shared Godot editor). Queue the idle restart instead (${hasDeployScript(cfg) ? 'tools/deploy.sh' : 'the cc-restart-when-idle unit'}), or ask a person.`;
+      return `systemctl ${verb} of ${units.join(' ')} is blocked: it cuts off every running turn (or the shared Godot editor). Deploy with ${hasDeployScript(cfg) ? 'tools/deploy.sh, which restarts once no minion is running' : 'the cc-restart-when-idle unit'}, or ask a person.`;
     }
     if (UNIT_FILE_VERBS.has(verb)) return `systemctl ${verb} changes the box's unit files. Put units in the repo (deploy/) and ask Cara to install them.`;
     if (sysctl === i) return null;

@@ -1,8 +1,8 @@
 # Citadel
 
 A shared web UI for running headless Claude Code sessions as **minions**. Several
-people sign in, open a project, and talk to its **Taskmaster**: a long-lived
-Claude session that creates, messages, renames and dismisses the project's other
+people sign in, open a scheme, and talk to its **Taskmaster**: a long-lived
+Claude session that creates, messages, renames and dismisses the scheme's other
 minions. A sidebar lists the minions (running, waiting for input, errored,
 dismissed), and any minion can also be opened and chatted with directly. Each
 minion is one Claude Code session working in its own git worktree.
@@ -33,12 +33,12 @@ Planned next: runners on other people's own Claude logins.
   write (`--add-dir`, plus a line in the system prompt) for handoffs, specs and notes. Its
   documents and pages are listed on a "Shared files" page, linked from the artifacts panel. The Taskmaster can
   also read and write the repo's Claude Code memory folder, still with no shell.
-- Opening a project creates its Taskmaster minion on first visit. Its turns
+- Opening a scheme creates its Taskmaster minion on first visit. Its turns
   run with an extra MCP server (`src/mcp.ts`) whose tools call this app's API
-  with a bearer token that only reaches that project's minions (never the
+  with a bearer token that only reaches that scheme's minions (never the
   Taskmaster itself). The token is passed in the environment, not on the
   command line, so other users on the box can't read it from `ps`.
-- Each project can have **instructions** (up to 16,000 characters), edited from the
+- Each scheme can have **instructions** (up to 16,000 characters), edited from the
   overview panel. They're appended to the system prompt of the Taskmaster and every
   minion, so they apply from each one's next turn. "Import from Claude Code" lists
   the instruction and memory files of the login the app runs as (`~/.claude/CLAUDE.md`
@@ -71,14 +71,14 @@ Planned next: runners on other people's own Claude logins.
   minion's turns are skipped, as are bots. Handled events are kept in `github_seen`, so
   nothing is sent twice, and a PR's first look sends nothing.
 - **Push notifications**: "Notify me on this device" in the overview panel subscribes that
-  browser (desktop, or the installed Android app) with Web Push, and once on, a project can be
+  browser (desktop, or the installed Android app) with Web Push, and once on, a scheme can be
   muted there. Claude only pings for decisions, blockers and results: a question card (from a
   minion or the Taskmaster), a failed turn, or a minion set to ready, try or blocked; never for
   plain replies, and never the person who caused it. One notification per minion, replaced by the
   next; clicking it opens the minion. `src/push.ts` signs with VAPID and encrypts payloads
   (RFC 8291) using only `node:crypto`; the key pair is made on first start as `vapid.json` in
   `DATA_DIR` (mode 600). Replacing that file orphans every subscription.
-- Projects with a repo URL are cloned once; each minion gets
+- Schemes with a repo URL are cloned once; each minion gets
   `git worktree add -b ticket/<id>-<slug>` from the default branch.
 
 No dependencies: Node 24+ runs the TypeScript directly (type stripping) and
@@ -97,8 +97,8 @@ uses the built-in `node:sqlite`.
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server |
 | `public/machine-agent.mjs` | Agent people run on their own computers to connect them |
 | `src/github.ts` | Watches minions' pull requests and messages them about CI, reviews and merges |
-| `src/workspace.ts` | Clones project repos, creates per-ticket worktrees |
-| `src/instructions.ts` | Finds Claude Code instruction and memory files to import as project instructions |
+| `src/workspace.ts` | Clones scheme repos, creates per-ticket worktrees |
+| `src/instructions.ts` | Finds Claude Code instruction and memory files to import as scheme instructions |
 | `src/db.ts` | SQLite schema and queries |
 | `src/auth.ts` | Shared-password login, signed session cookies |
 | `public/` | Front end (vanilla JS, no build) |
@@ -138,7 +138,7 @@ Headless turns can't show a permission prompt, so every minion runs in
 `bypassPermissions`: full access as the service user. Anything that would still
 prompt is denied (`--permission-prompts none`).
 
-**Needs approval.** A project can list Claude Code permission rules, such as
+**Needs approval.** A scheme can list Claude Code permission rules, such as
 `Bash(gh pr merge:*)` or `mcp__*__merge_pull_request`, in the overview panel's
 "Needs approval" section (or the Taskmaster's `set_project_settings` tool). Its
 minions then run with:
@@ -163,13 +163,13 @@ also denies. With rules set, anything else that would prompt in
 
 Rules are guardrails against mistakes, not a sandbox: a Bash rule matches how a
 command starts, and a minion with full shell access could reach the same result
-another way. Projects with no rules (the default) run exactly as before. The
+another way. Schemes with no rules (the default) run exactly as before. The
 Taskmaster is never affected.
 
-**Plugin folders.** A project can also list folders relative to the repo root
+**Plugin folders.** A scheme can also list folders relative to the repo root
 (e.g. `tools/mods/delve`); each minion turn gets `--plugin-dir <worktree>/<folder>`
 for every one that exists in its worktree. Turns also get `COORDINATOR_SHARED_DIR` (the
-project's shared folder) and `COORDINATOR_FILES_DIR` (the minion's own) in their environment,
+scheme's shared folder) and `COORDINATOR_FILES_DIR` (the minion's own) in their environment,
 for plugins and hooks that write files people should see.
 
 The Taskmaster itself runs in `acceptEdits` with only its MCP tools

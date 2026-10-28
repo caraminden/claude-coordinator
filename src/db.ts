@@ -263,12 +263,12 @@ export class Store {
         const number = this.nextNumber(project_id);
         this.db.prepare('UPDATE tickets SET number = ? WHERE id = ?').run(number, id);
         if (number === id) continue;
-        this.addEvent(id, 'note', { text: `Minions are now numbered per project. This minion is now #${number} (it was #${id}).` });
+        this.addEvent(id, 'note', { text: `Minions are now numbered per scheme. This minion is now #${number} (it was #${id}).` });
         changed.set(project_id, [...(changed.get(project_id) ?? []), `#${id} → #${number}`]);
       }
       for (const [projectId, moves] of changed) {
         const coordinator = this.getCoordinator(projectId);
-        if (coordinator) this.addEvent(coordinator.id, 'note', { text: `Threads are now numbered per project: ${moves.join(', ')}.` });
+        if (coordinator) this.addEvent(coordinator.id, 'note', { text: `Threads are now numbered per scheme: ${moves.join(', ')}.` });
       }
       this.db.exec('COMMIT');
     } catch (err) {
@@ -320,11 +320,11 @@ export class Store {
   /** Change a project's display name; its repo, folders and links go by id and stay put. */
   renameProject(id: number, name: string): Project {
     const trimmed = name.trim();
-    if (!trimmed) throw new Error('The project name cannot be empty');
+    if (!trimmed) throw new Error('The scheme name cannot be empty');
     try {
       this.db.prepare('UPDATE projects SET name = ? WHERE id = ?').run(trimmed, id);
     } catch (err: any) {
-      if (/UNIQUE/.test(err.message)) throw new Error(`There is already a project called "${trimmed}"`);
+      if (/UNIQUE/.test(err.message)) throw new Error(`There is already a scheme called "${trimmed}"`);
       throw err;
     }
     return this.getProject(id)!;

@@ -26,7 +26,7 @@ test('renameProject trims, refuses empty and taken names, and leaves the repo al
   assert.equal(renamed.repo_url, 'https://example.com/a.git');
   assert.equal(renamed.repo_dir, '/data/projects/1/repo');
   assert.throws(() => store.renameProject(a.id, '   '), /cannot be empty/);
-  assert.throws(() => store.renameProject(a.id, 'Beta'), /already a project called "Beta"/);
+  assert.throws(() => store.renameProject(a.id, 'Beta'), /already a scheme called "Beta"/);
   assert.equal(store.renameProject(a.id, 'Gamma').name, 'Gamma', 'keeping its own name is fine');
   assert.equal(store.getProject(a.id)!.name, 'Gamma');
 });
@@ -83,12 +83,12 @@ test('PATCH /api/projects/:id renames, with friendly errors', async () => {
   assert.equal(empty.status, 400);
   const taken = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { name: 'Taken', instructions: 'not saved' } });
   assert.equal(taken.status, 409);
-  assert.match(taken.data.error, /already a project called "Taken"/);
+  assert.match(taken.data.error, /already a scheme called "Taken"/);
 
   const { data: page } = await call(`/api/projects/${p.id}`);
   assert.equal(page.project.name, 'New name');
   assert.equal(page.project.instructions, '', 'a refused rename saves none of the other fields');
   const notes = await call(`/api/tickets/${page.coordinator.id}/events`);
   const texts = notes.data.map((e: any) => JSON.parse(e.data).text);
-  assert.ok(texts.includes('Cara renamed the project from "Old name" to "New name".'), 'the coordinator hears about it');
+  assert.ok(texts.includes('Cara renamed the scheme from "Old name" to "New name".'), 'the coordinator hears about it');
 });

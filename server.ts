@@ -129,7 +129,7 @@ async function sharedFiles(projectId: number) {
   const dir = projectSharedDir(DATA_DIR, projectId);
   const files = await findArtifacts(dir, false);
   return files.sort((a, b) => b.mtime - a.mtime).map((f) => ({
-    ...f, name: basename(f.path), kind: fileType(f.path)?.kind ?? 'text', display_path: `project shared/${f.path}`,
+    ...f, name: basename(f.path), kind: fileType(f.path)?.kind ?? 'text', display_path: `scheme shared/${f.path}`,
   }));
 }
 
@@ -283,7 +283,7 @@ function sharedDir(ticket: Ticket): string {
 /** A path as people should see it: relative to the working directory, or under "shared files". */
 function displayPath(ticket: Ticket, path: string): string {
   const projectShared = projectSharedDir(DATA_DIR, ticket.project_id) + sep;
-  if (path.startsWith(projectShared)) return `project shared/${path.slice(projectShared.length)}`;
+  if (path.startsWith(projectShared)) return `scheme shared/${path.slice(projectShared.length)}`;
   const shared = sharedDir(ticket) + sep;
   if (path.startsWith(shared)) return `shared files/${path.slice(shared.length)}`;
   if (ticket.cwd && path.startsWith(ticket.cwd + sep)) return path.slice(ticket.cwd.length + 1);
@@ -675,7 +675,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   // A coordinator may only touch its own project's tickets, and not itself.
   const scope = agentProject(session, method, pathname);
   const inScope = (projectId: number) => {
-    if (scope !== null && scope !== projectId) throw new HttpError(403, 'Outside this Taskmaster\'s project');
+    if (scope !== null && scope !== projectId) throw new HttpError(403, 'Outside this Taskmaster\'s scheme');
   };
   if (scope !== null && !/^\/api\/(projects\/\d+(\/tickets)?|tickets\/\d+(\/[a-z]+)?)$/.test(pathname)) {
     throw new HttpError(403, 'Not available to the Taskmaster');
@@ -709,7 +709,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       try {
         project = store.createProject(name, repoUrl);
       } catch {
-        throw new HttpError(409, 'A project with that name already exists');
+        throw new HttpError(409, 'A scheme with that name already exists');
       }
       if (repoUrl) {
         try {
@@ -727,7 +727,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   let m = pathname.match(/^\/api\/projects\/(\d+)$/);
   if (m && method === 'GET') {
     const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such project');
+    if (!project) throw new HttpError(404, 'No such scheme');
     inScope(project.id);
     const coordinator = await ensureCoordinator(project);
     const tickets = store
@@ -741,7 +741,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
 
   if (m && method === 'PATCH') {
     const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such project');
+    if (!project) throw new HttpError(404, 'No such scheme');
     inScope(project.id);
     // Any of name, instructions, approval_rules and plugin_dirs; what is left out stays.
     const body = await readJson(req);
@@ -769,7 +769,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         throw new HttpError(409, err.message);
       }
       const coordinator = store.getCoordinator(project.id);
-      if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} renamed the project from "${project.name}" to "${name}".` });
+      if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} renamed the scheme from "${project.name}" to "${name}".` });
     }
     for (const k of Object.keys(settings) as (keyof typeof settings)[]) if (settings[k] === project[k]) delete settings[k];
     if (Object.keys(settings).length) {
@@ -789,7 +789,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const coordinator = store.getCoordinator(project.id);
       if (coordinator) {
         runner.emit(coordinator.id, 'note', {
-          text: `${session.name} ${instructions ? 'updated' : 'cleared'} the project instructions; they apply from each minion's next turn.`,
+          text: `${session.name} ${instructions ? 'updated' : 'cleared'} the scheme instructions; they apply from each minion's next turn.`,
         });
       }
     }
@@ -801,14 +801,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   m = pathname.match(/^\/api\/projects\/(\d+)\/instructions\/sources$/);
   if (m && method === 'GET') {
     const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such project');
+    if (!project) throw new HttpError(404, 'No such scheme');
     return json(res, 200, { sources: await instructionSources(project, claudeConfigDir(process.env), DATA_DIR), max: MAX_INSTRUCTIONS });
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/tickets$/);
   if (m && method === 'POST') {
     const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such project');
+    if (!project) throw new HttpError(404, 'No such scheme');
     inScope(project.id);
     const body = await readJson(req);
     const message = str(body.message, 'First message', 100_000);
@@ -832,7 +832,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   m = pathname.match(/^\/api\/projects\/(\d+)\/search$/);
   if (m && method === 'GET') {
     const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such project');
+    if (!project) throw new HttpError(404, 'No such scheme');
     const q = (url.searchParams.get('q') ?? '').trim().slice(0, 200);
     return json(res, 200, q.length < 2 ? [] : searchProject(project.id, q));
   }
@@ -840,14 +840,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   m = pathname.match(/^\/api\/projects\/(\d+)\/artifacts$/);
   if (m && method === 'GET') {
     const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such project');
+    if (!project) throw new HttpError(404, 'No such scheme');
     return json(res, 200, store.listArtifacts(project.id).map(artifactView));
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/shared(\/file)?$/);
   if (m && (method === 'GET' || (method === 'HEAD' && m[2]))) {
     const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such project');
+    if (!project) throw new HttpError(404, 'No such scheme');
     if (!m[2]) return json(res, 200, await sharedFiles(project.id));
     // One file of the folder, by path relative to it (or ?info for its details).
     const dir = projectSharedDir(DATA_DIR, project.id);
@@ -856,7 +856,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
     if (!url.searchParams.has('info')) return serveArtifact(req, res, found, path, url.searchParams.has('download'));
     return json(res, 200, {
-      path, name: basename(found.abs), display_path: `project shared/${path}`,
+      path, name: basename(found.abs), display_path: `scheme shared/${path}`,
       kind: found.type.kind, size: found.size, mtime: found.mtime,
     });
   }

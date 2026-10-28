@@ -12,7 +12,7 @@ const MAX_SOURCE_CHARS = 64_000;
 export interface InstructionSource {
   /** Stable within one listing, for the browser to keep track of picks. */
   id: string;
-  group: 'Your Claude Code' | 'This project' | 'Other Claude Code projects';
+  group: 'Your Claude Code' | 'This scheme' | 'Other Claude Code projects';
   label: string;
   /** Where it lives, with the home directory shortened to ~. */
   path: string;
@@ -71,11 +71,11 @@ export async function instructionSources(project: Project, configDir: string, da
   const memorySlug = project.repo_dir ? projectSlug(project.repo_dir) : null;
   if (project.repo_dir) {
     for (const name of ['CLAUDE.md', join('.claude', 'CLAUDE.md'), 'CLAUDE.local.md']) {
-      await add('This project', `Repo ${name}`, join(project.repo_dir, name), 'Every minion already reads this from its own worktree; the Taskmaster does not.');
+      await add('This scheme', `Repo ${name}`, join(project.repo_dir, name), 'Every minion already reads this from its own worktree; the Taskmaster does not.');
     }
     const dir = join(configDir, 'projects', memorySlug!, 'memory');
     for (const name of await markdownFiles(dir)) {
-      await add('This project', `Memory: ${name}`, join(dir, name), 'Minions already load this auto-memory; the Taskmaster does not.');
+      await add('This scheme', `Memory: ${name}`, join(dir, name), 'Minions already load this auto-memory; the Taskmaster does not.');
     }
   }
 

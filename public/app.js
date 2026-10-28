@@ -93,7 +93,7 @@ const sharedHref = (projectId, path) => `#/s/${projectId}/${encodeURIComponent(p
 /** A linked path short enough for a card: a thread's shared folder by name, other absolute paths by their tail. */
 function shortPath(path) {
   const projectShared = /\/shared\/project\/(.+)$/.exec(path);
-  if (projectShared) return `project shared/${projectShared[1]}`;
+  if (projectShared) return `scheme shared/${projectShared[1]}`;
   const shared = /\/shared\/\d+\/(.+)$/.exec(path);
   if (shared) return `shared files/${shared[1]}`;
   return path.startsWith('/') ? `…/${path.split('/').slice(-2).join('/')}` : path;
@@ -697,7 +697,7 @@ function pushControls(project) {
   const on = h('input', { type: 'checkbox' });
   const mute = h('input', { type: 'checkbox' });
   const hint = h('span', { class: 'hint', hidden: true });
-  const muteRow = h('label', { class: 'toggle', hidden: true, title: 'Stop notifications from this project on this device' }, mute, `Mute ${project.name} here`);
+  const muteRow = h('label', { class: 'toggle', hidden: true, title: 'Stop notifications from this scheme on this device' }, mute, `Mute ${project.name} here`);
   const el = h('div', { class: 'push' },
     h('label', { class: 'toggle', title: 'Questions for you, failed turns, and minions that are ready or blocked' }, on, 'Notify me on this device'),
     muteRow, hint);
@@ -756,13 +756,13 @@ if (pushSupported) {
 async function showProjects() {
   const projects = await api('/api/projects');
   view = { kind: 'projects' };
-  crumbs.replaceChildren('Projects');
+  crumbs.replaceChildren('Schemes');
   const form = h('form', {},
     h('label', {}, 'Name', h('input', { name: 'name', required: true, maxlength: 80, 'data-draft': true })),
     h('label', {}, 'Git repo URL (optional; each minion gets its own worktree)',
       h('input', { name: 'repoUrl', 'data-draft': true, placeholder: 'https://github.com/caraminden/gamedevtest.git' })),
     h('p', { class: 'error', hidden: true }),
-    h('button', { type: 'submit' }, 'Create project'));
+    h('button', { type: 'submit' }, 'Create scheme'));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = form.querySelector('button');
@@ -776,19 +776,19 @@ async function showProjects() {
       err.textContent = ex.message;
       err.hidden = false;
       btn.disabled = false;
-      btn.textContent = 'Create project';
+      btn.textContent = 'Create scheme';
     }
   });
   app.replaceChildren(
-    h('h2', {}, 'Projects'),
+    h('h2', {}, 'Schemes'),
     projects.length
       ? h('div', { class: 'projects' }, projects.map((p) =>
           h('a', { class: 'card', href: `#/p/${p.id}` },
             h('div', { class: 'title' }, h('strong', { 'data-project-name': p.id }, p.name)),
             h('div', { class: 'muted' }, p.repo_url || 'No repo'),
             h('div', { class: 'muted' }, `${p.tickets} ticket${p.tickets === 1 ? '' : 's'}`))))
-      : h('p', { class: 'muted' }, 'No projects yet.'),
-    h('details', { class: 'new', open: !projects.length }, h('summary', {}, 'New project'), h('div', { class: 'card' }, form)),
+      : h('p', { class: 'muted' }, 'No schemes yet.'),
+    h('details', { class: 'new', open: !projects.length }, h('summary', {}, 'New scheme'), h('div', { class: 'card' }, form)),
   );
 }
 
@@ -847,7 +847,7 @@ async function showFile(ticketId, path) {
 /** A file in the project's shared folder, opened from the Shared group of the artifacts panel. */
 async function showSharedFile(projectId, path) {
   const file = await api(`/api/projects/${projectId}/shared/file?info&path=${encodeURIComponent(path)}`).catch((err) => ({
-    missing: err.message, name: baseName(path), kind: fileKind(path) ?? 'text', display_path: `project shared/${path}`,
+    missing: err.message, name: baseName(path), kind: fileKind(path) ?? 'text', display_path: `scheme shared/${path}`,
   }));
   await showProject(projectId, { kind: 'shared', file: { ...file, path } });
 }
@@ -879,7 +879,7 @@ function renderCrumbs(main) {
   const { project } = view;
   const projectLink = h('a', { href: `#/p/${project.id}`, 'data-project-name': project.id }, project.name);
   const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
-  crumbs.replaceChildren(h('a', { href: '#/' }, 'Projects'), ' / ', ...(
+  crumbs.replaceChildren(h('a', { href: '#/' }, 'Schemes'), ' / ', ...(
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
       : main.kind === 'instructions' ? [projectLink, ' / ', 'Instructions']
       : main.kind === 'approvals' ? [projectLink, ' / ', 'Approvals']
@@ -942,7 +942,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
       usageMeter(),
       pushControls(project)),
     h('section', { class: 'column' },
-      h('h3', {}, 'Projects', h('span', { class: 'spacer' }), h('a', { class: 'more', href: '#/' }, 'All')),
+      h('h3', {}, 'Schemes', h('span', { class: 'spacer' }), h('a', { class: 'more', href: '#/' }, 'All')),
       projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
         h('span', { class: 'name', 'data-project-name': p.id }, p.name)))),
     h('div', { id: 'instructions-shelf' }),
@@ -1144,7 +1144,7 @@ function chatSection(chatId, ticket, events) {
   const log = h('div', { class: 'log', id: 'log' });
   if (isCoordinator(ticket) && !events.length) {
     log.append(h('div', { class: 'note' },
-      'This is the Taskmaster for this project. It keeps track of the minions on the left and can create, message, rename and dismiss them for you.'));
+      'This is the Taskmaster for this scheme. It keeps track of the minions on the left and can create, message, rename and dismiss them for you.'));
   }
   // The working line is a shortcut to the readout in the thread bar.
   const openReadout = () => {
@@ -1584,7 +1584,7 @@ function renderShelf() {
     sub('Pinned', pinned.length, pinned, 'Pin artifacts with ☆ to keep them here.'),
     sub('Recent', 0, recent, 'Documents, pages and canvases that minions create show up here.'),
     // The shared folder gets one link, not a list: its files are listed on their own page.
-    h('a', { class: `shared-link${view.main === 'sharedList' ? ' active' : ''}`, href: `#/p/${view.projectId}/shared`, title: 'Handoffs and notes in the project\'s shared folder' }, 'Shared files')));
+    h('a', { class: `shared-link${view.main === 'sharedList' ? ' active' : ''}`, href: `#/p/${view.projectId}/shared`, title: 'Handoffs and notes in the scheme\'s shared folder' }, 'Shared files')));
 }
 
 /** Main panel: every document and page in the project's shared folder, newest first. */
@@ -1597,8 +1597,8 @@ function sharedList() {
 function renderSharedList() {
   const el = document.getElementById('shared-results');
   if (!el) return;
-  document.getElementById('shared-summary').textContent = `${view.shared.length} in the project's shared folder`;
-  el.replaceChildren(...(view.shared.length ? view.shared.map(sharedItem) : [h('p', { class: 'muted' }, 'Handoffs and notes minions put in the project\'s shared folder show up here.')]));
+  document.getElementById('shared-summary').textContent = `${view.shared.length} in the scheme's shared folder`;
+  el.replaceChildren(...(view.shared.length ? view.shared.map(sharedItem) : [h('p', { class: 'muted' }, 'Handoffs and notes minions put in the scheme\'s shared folder show up here.')]));
 }
 
 /** A document or page in the project's shared folder, as a row of the Shared files list. */
@@ -1908,11 +1908,11 @@ function projectTitle(project) {
     err.remove();
     wrap.replaceChildren(
       h('span', { class: 'label', 'data-project-name': project.id }, view.project.name),
-      h('button', { type: 'button', class: 'rename', 'aria-label': 'Rename project', title: 'Rename project (its repo stays as it is)', onclick: edit }, '✎'));
+      h('button', { type: 'button', class: 'rename', 'aria-label': 'Rename scheme', title: 'Rename scheme (its repo stays as it is)', onclick: edit }, '✎'));
   };
   const edit = () => {
     let saving = false;
-    const input = h('input', { class: 'rename-input', value: view.project.name, maxlength: '80', 'aria-label': 'Project name' });
+    const input = h('input', { class: 'rename-input', value: view.project.name, maxlength: '80', 'aria-label': 'Scheme name' });
     const save = async () => {
       if (saving) return;
       if (input.value.trim() === view.project.name) return show();
@@ -2037,7 +2037,7 @@ function approvalsEditor() {
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Approvals and plugins'), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
-      h('div', { class: 'meta' }, 'Minions in this project use these from their next turn. The Taskmaster is not affected.')),
+      h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster is not affected.')),
     h('h3', { class: 'settings-label' }, 'Needs approval'),
     h('p', { class: 'muted small' },
       'Claude Code permission rules, one per line. A minion\'s tool call that matches one waits in its chat with Approve and Deny buttons until someone signed in clicks; everything else runs without asking. ',
@@ -2059,7 +2059,7 @@ function renderInstructionsHead() {
   if (!el) return;
   const p = view.project;
   el.replaceChildren(
-    h('div', { class: 'row' }, h('h2', {}, 'Project instructions'), h('span', { class: 'spacer' }),
+    h('div', { class: 'row' }, h('h2', {}, 'Scheme instructions'), h('span', { class: 'spacer' }),
       h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
     h('div', { class: 'meta' },
       'The Taskmaster and every minion get these in their system prompt, from their next turn.',
@@ -2071,7 +2071,7 @@ function instructionsEditor() {
   const p = view.project;
   const textarea = h('textarea', {
     id: 'instructions-text', class: 'instructions-text', spellcheck: 'false',
-    placeholder: 'What the project is for, where the work happens (branches, PR names), how a minion checks its work, what needs a go-ahead first…',
+    placeholder: 'What the scheme is for, where the work happens (branches, PR names), how a minion checks its work, what needs a go-ahead first…',
   });
   textarea.value = p.instructions ?? '';
   const counter = h('span', { class: 'muted counter' });
@@ -2905,7 +2905,7 @@ function shortNote(text) {
   if (text === 'The server restarted during this turn, so it was interrupted.') return '⚠ Interrupted by a server restart';
   if ((m = text.match(/^(.+?) renamed this (?:ticket|minion) from ".*" to "(.*)"\.$/s))) return `✎ ${m[1] === 'Claude' ? 'Renamed' : `${m[1]} renamed it`} “${m[2]}”`;
   if ((m = text.match(/^(.+?) set this (?:thread|minion) to (.+?) (from the next turn|from now on)\.$/))) return `⚙ ${m[1]}: ${m[2]}${m[3] === 'from the next turn' ? ' next turn' : ''}`;
-  if ((m = text.match(/^(.+?) (updated|cleared) the project instructions; they apply from each (?:thread|minion)'s next turn\.$/))) return `📋 ${m[1]} ${m[2]} the project instructions`;
+  if ((m = text.match(/^(.+?) (updated|cleared) the (?:project|scheme) instructions; they apply from each (?:thread|minion)'s next turn\.$/))) return `📋 ${m[1]} ${m[2]} the scheme instructions`;
   if ((m = text.match(/^(.+?) set the (approval rules|plugin folders) to: (.*)\. They apply from each (?:thread|minion)'s next turn\.$/s))) return `🔒 ${m[1]} set the ${m[2]}: ${m[3]}`;
   if ((m = text.match(/^(.+?) reopened this (?:ticket|minion)\.$/))) return `↻ ${m[1]} reopened it`;
   return text;

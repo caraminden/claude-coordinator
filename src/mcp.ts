@@ -34,7 +34,7 @@ const BUILD = {
   description: 'The major build this work is assigned to, e.g. 8 for Build 8; the minions list groups the build\'s minions together. null takes it out of a build.',
 };
 
-const TICKET_ID = { type: 'integer', description: 'Minion number in this project, e.g. 12 for #12 (as shown by list_tickets)' };
+const TICKET_ID = { type: 'integer', description: 'Minion number in this scheme, e.g. 12 for #12 (as shown by list_tickets)' };
 
 const ASK_QUESTION = {
   name: 'ask_question',
@@ -83,7 +83,7 @@ const ASK_QUESTION = {
 const TOOLS = [
   {
     name: 'list_tickets',
-    description: 'List the minions in this project with their status and latest activity.',
+    description: 'List the minions in this scheme with their status and latest activity.',
     inputSchema: {
       type: 'object',
       properties: { include_closed: { type: 'boolean', description: 'Include dismissed minions (default false)' } },
@@ -148,19 +148,19 @@ const TOOLS = [
   ASK_QUESTION,
   {
     name: 'get_project_instructions',
-    description: "Read the project instructions: the standing rules people set for this project, which every minion and you receive in the system prompt.",
+    description: "Read the scheme instructions: the standing rules people set for this scheme, which every minion and you receive in the system prompt.",
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'set_project_instructions',
     description:
-      'Replace the project instructions with new text (max 16,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change.',
+      'Replace the scheme instructions with new text (max 16,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change.',
     inputSchema: { type: 'object', properties: { instructions: { type: 'string' } }, required: ['instructions'] },
   },
   {
     name: 'get_project_settings',
     description:
-      "Read the project's approval rules (Claude Code permission rules a minion must get a person's OK for, via an Approve / Deny card in its chat) and plugin folders (folders in the repo every minion loads as Claude Code plugins).",
+      "Read the scheme's approval rules (Claude Code permission rules a minion must get a person's OK for, via an Approve / Deny card in its chat) and plugin folders (folders in the repo every minion loads as Claude Code plugins).",
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -242,7 +242,7 @@ async function id(args: any): Promise<number> {
   if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
   const { tickets } = await call('GET', `/api/projects/${PROJECT}`);
   const ticket = tickets.find((t: any) => t.number === n);
-  if (!ticket) throw new Error(`There is no minion #${n} in this project`);
+  if (!ticket) throw new Error(`There is no minion #${n} in this scheme`);
   return ticket.id;
 }
 
@@ -257,14 +257,14 @@ const THREAD_TOOLS = [
   {
     name: 'set_thread_status',
     description:
-      "Label this minion for the project's minions list: its short title, kind of work, and where things stand. Leave out what should stay. Call it when the work's kind becomes clear, and at the end of a turn whenever the state or note changes.",
+      "Label this minion for the scheme's minions list: its short title, kind of work, and where things stand. Leave out what should stay. Call it when the work's kind becomes clear, and at the end of a turn whenever the state or note changes.",
     inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD } },
   },
   ASK_QUESTION,
   {
     name: 'message_coordinator',
     description:
-      "Send a message to this project's Taskmaster, waking it: for what only it can do, such as passing information to another minion (#N), starting a new minion from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly.",
+      "Send a message to this scheme's Taskmaster, waking it: for what only it can do, such as passing information to another minion (#N), starting a new minion from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly.",
     inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What you need, self-contained: name minions as #N and give file paths in full' } }, required: ['text'] },
   },
   {
@@ -347,9 +347,9 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'get_project_instructions': {
       const { project } = await call('GET', `/api/projects/${PROJECT}`);
-      if (!project.instructions) return 'This project has no instructions yet.';
+      if (!project.instructions) return 'This scheme has no instructions yet.';
       const by = project.instructions_updated_by ? ` (last changed by ${project.instructions_updated_by})` : '';
-      return `Project instructions${by}:\n\n${project.instructions}`;
+      return `Scheme instructions${by}:\n\n${project.instructions}`;
     }
     case 'get_project_settings': {
       const { project } = await call('GET', `/api/projects/${PROJECT}`);
@@ -369,7 +369,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return approve(args);
     case 'set_project_instructions': {
       const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: String(args.instructions ?? '') });
-      return project.instructions ? `Saved (${project.instructions.length} characters).` : 'Cleared the project instructions.';
+      return project.instructions ? `Saved (${project.instructions.length} characters).` : 'Cleared the scheme instructions.';
     }
     case 'message_ticket':
       return `Sent. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/messages`, { text: args.text }))}`;

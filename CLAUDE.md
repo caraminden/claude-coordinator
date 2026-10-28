@@ -10,7 +10,7 @@ directly; there are no dependencies and no build step.
   spec): `docs/working-with-cara.md`. Read it before your first reply to her in a session.
 - Never skip, loosen or delete a test to get green. Fix the code, or say why the test is wrong.
 - Never push to main on GitHub. Work on your minion branch; when and how it lands in the local
-  `main` and deploys follows the project instructions ("Shipping fixes"). No plain force pushes:
+  `main` and deploys follows the scheme instructions ("Shipping fixes"). No plain force pushes:
   `--force-with-lease`, and only on your own branch. `tools/guard.sh` and `.githooks/pre-push`
   enforce the push rules.
 - Commit each green step before a worker starts in the same tree, and never `git checkout`,
@@ -39,7 +39,7 @@ file contents and finished subagent reports, keeping one line for what each conc
 ## Skills, subagents (Grunts) and rules
 
 Skills (`.claude/skills/<name>/SKILL.md`) and subagents, or Grunts (`.claude/agents/<name>.md`) load by
-their descriptions. Several came from the Delve project, and some are copies of open-source
+their descriptions. Several came from the Delve scheme, and some are copies of open-source
 packs, listed with their sources in `.claude/skills/THIRD_PARTY.md`. `.claude/rules/ponytail.md`
 loads whenever a session reads a code file.
 

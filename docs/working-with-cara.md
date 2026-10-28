@@ -1,8 +1,8 @@
 # Working with Cara
 
-How Cara (she/her) likes to work with Claude, carried over from the Delve project, where these
+How Cara (she/her) likes to work with Claude, carried over from the Delve scheme, where these
 were her standing rules and the patterns behind her calls (2026-10-14 to 10-27). They hold for
-any project of hers. Other people chatting on a minion may want something different; follow
+any scheme of hers. Other people chatting on a minion may want something different; follow
 theirs for their asks.
 
 ## Tone and replies

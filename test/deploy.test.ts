@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { appendFileSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
+import { Runner } from '../src/runner.ts';
 
 // Safe deploys (tools/deploy.sh): the server reloads public/ on SIGHUP, answers /api/health, and takes
 // deploy reports; the script tells front-end-only changes from the rest.
@@ -170,6 +173,30 @@ test('deploy.sh tells front-end-only changes from the rest', () => {
   assert.equal(kind(c, d), 'server');
   assert.equal(kind(c, c), 'none');
   assert.equal(kind('', c), 'server', 'an unknown running commit restarts');
+});
+
+test('deploy.sh waits only for turns a restart would cut off; a server from before units counts every running turn', async () => {
+  // Async, so the stand-in server below (in this process) can answer.
+  const count = async (url: string) =>
+    (await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'interruptible'], { encoding: 'utf8', env: { ...process.env, DEPLOY_URL: url, DEPLOY_DB: join(data, 'coordinator.db') } })).stdout.trim();
+  assert.equal(await count(base), '0');
+  assert.equal(await count('http://127.0.0.1:9'), '0', 'a server that is down has no turns to cut off');
+  const old = createHttpServer((_req, res) => res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"ok":true,"reload":"sighup"}'));
+  await new Promise<void>((r) => old.listen(0, '127.0.0.1', r));
+  const running = store.createTicket({ project_id: project.id, title: 'Busy', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(running.id, { status: 'running' });
+  try {
+    assert.equal(await count(`http://127.0.0.1:${(old.address() as any).port}`), '1');
+  } finally {
+    store.updateTicket(running.id, { status: 'idle' });
+    old.close();
+  }
+});
+
+test("deploy.sh names the same turn units as the runner, so a rollback stops only this server's", () => {
+  const units = execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'turn-units'], { encoding: 'utf8', env: { ...process.env, DEPLOY_DB: join(data, 'coordinator.db') } }).trim();
+  const tag = (new Runner(store, () => {}, () => ({})) as any).unitTag;
+  assert.equal(units, `citadel-turn-${tag}-*.service`);
 });
 
 test('deploy.sh pushes the live commit to main, never forced, and a failed push only reports', () => {

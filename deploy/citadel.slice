@@ -1,0 +1,8 @@
+# perigee is shared: cap Citadel, the web app and every turn it runs (citadel-turns.slice, a child of
+# this one by its name), at half the box together.
+[Unit]
+Description=Citadel and its turns
+
+[Slice]
+MemoryMax=8G
+CPUQuota=800%

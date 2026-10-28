@@ -508,6 +508,11 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     }
   }
 
+  // --now restarts even when that cuts off running turns (ones not in a unit of their own): a person's call.
+  const deployCall = words.findIndex((w, k) => k >= i && /(^|\/)tools\/deploy\.sh$/.test(w.text));
+  if (deployCall >= 0 && words.slice(deployCall + 1).some((w) => w.text === '--now')) {
+    return { reason: '`tools/deploy.sh --now` restarts the server even if that cuts off running turns. Run plain tools/deploy.sh unless a person has said to force it.', ask: true };
+  }
   // The deploy script is the sanctioned way to touch the live checkout and restart the service.
   const deploy = join(cfg.checkout, 'tools/deploy.sh');
   if (words.slice(i).some((w) => pathsOf(w, st, cfg).includes(deploy))) return null;
@@ -517,7 +522,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     const plain = words.slice(sysctl + 1).filter((w) => !w.text.startsWith('-')).map((w) => w.text);
     const [verb, ...units] = plain;
     if (STOP_VERBS.has(verb) && units.some((u) => APP_UNITS.test(u))) {
-      return hard(`systemctl ${verb} of ${units.join(' ')} is blocked: it cuts off every running turn (or the shared Godot editor). Deploy with ${hasDeployScript(cfg) ? 'tools/deploy.sh, which restarts once no minion is running' : 'the cc-restart-when-idle unit'}, or ask a person.`);
+      return hard(`systemctl ${verb} of ${units.join(' ')} is blocked: it cuts off every running turn (or the shared Godot editor). Deploy with ${hasDeployScript(cfg) ? 'tools/deploy.sh, which restarts without stopping running turns' : 'the cc-restart-when-idle unit'}, or ask a person.`);
     }
     // `systemctl edit` opens an editor, which would hang a headless turn.
     if (UNIT_FILE_VERBS.has(verb)) return { reason: `systemctl ${verb} changes the box's unit files. Put units in the repo (deploy/) and ask Cara to install them.`, ask: verb !== 'edit' };

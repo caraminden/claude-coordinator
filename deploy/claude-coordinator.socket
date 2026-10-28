@@ -1,0 +1,9 @@
+# systemd holds Citadel's port across restarts, so requests made while the server restarts (browsers
+# through Caddy, the turns' MCP calls) wait for the next server instead of being refused. server.ts
+# takes the socket as fd 3; deploy/claude-coordinator.service.d/socket.conf starts this first.
+[Unit]
+Description=Citadel web app socket
+
+[Socket]
+ListenStream=127.0.0.1:8573
+Backlog=512

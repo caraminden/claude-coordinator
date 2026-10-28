@@ -160,6 +160,9 @@ const ALLOWED = [
 
 // Things a person may reasonably allow once: a card for that exact call.
 const ASKS = [
+  // a deploy that cuts off running turns
+  'tools/deploy.sh --now',
+  'git rebase main && ./tools/deploy.sh --now 2>&1 | tail -20',
   // data-dir files other than the live database
   'rm ~/.local/share/claude-coordinator/coordinator.db.bak-machines ~/.local/share/claude-coordinator/coordinator.db.bak-x',
   'cd ~/.local/share/claude-coordinator && rm coordinator.db.bak-*',

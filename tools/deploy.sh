@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Safe deploys for Citadel. Run it from a minion once its work is on main:
-#   tools/deploy.sh
+#   tools/deploy.sh          (--now: restart even if that cuts off running turns; only with a person's OK)
 # 1. Fast-forwards the live checkout to main, runs the tests, and boots the new code on a spare port
 #    against a copy of the database (tools/boot-check.ts). Any failure puts the checkout back; nothing
 #    restarts.
 # 2. A change to public/ only: SIGHUP, and the server reloads its front end. No restart, no killed turns.
-# 3. Anything else: queues the fixed-name restart unit, which waits until no minion is running,
-#    restarts, waits up to 30 s for a healthy server and tags it last-good. If the new code doesn't
-#    come up, it rolls the checkout back to last-good and restarts again. It reports how it went in
-#    the deploying minion's chat (failures as errors, which push) and in the journal.
+# 3. Anything else: queues the fixed-name restart unit, which restarts straight away (running turns
+#    carry on in their own units and the new server re-attaches; it only waits while turns a restart
+#    would cut off are running, see interruptible), waits up to 30 s for a healthy server and tags it
+#    last-good. If the new code doesn't come up, it rolls the checkout back to last-good and restarts
+#    again. It reports how it went in the deploying minion's chat (failures as errors, which push) and
+#    in the journal.
 # 4. Once the new code is live (either way), pushes that commit to GitHub's main, never forced. A failed
 #    push is logged and shows in the report, but the deploy stands.
 # Every path and name can be overridden with DEPLOY_* variables, which is how it is tested on a dev copy.
@@ -21,6 +23,7 @@ URL=${DEPLOY_URL:-http://127.0.0.1:8573}
 DB=${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}
 UNIT=${DEPLOY_UNIT:-cc-restart-when-idle}
 IDLE_TRIES=${DEPLOY_IDLE_TRIES:-720} # 10 s apart: 2 h
+NOW=${DEPLOY_NOW:-} # set: restart without waiting for interruptible turns (--now)
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-30}
 REMOTE=${DEPLOY_REMOTE-origin} # set it empty to skip the push (dev copies)
 
@@ -111,6 +114,23 @@ running_minions() {
   (cd /tmp && node -e "const {DatabaseSync}=require('node:sqlite');console.log(new DatabaseSync(process.argv[1],{readOnly:true}).prepare(\"select count(*) c from tickets where status='running'\").get().c)" "$DB") 2>/dev/null || echo '?'
 }
 
+# Running turns a restart would cut off: those not in a unit of their own. A server from before turn
+# units doesn't say, and every one of its turns would be cut off; a server that is down has none left.
+interruptible() {
+  local n
+  n=$(health interruptible)
+  if [ -n "$n" ]; then echo "$n"
+  elif [ -z "$(health ok)" ]; then echo 0
+  else running_minions; fi
+}
+
+# The units of the turns this server runs (src/runner.ts names them after its data dir).
+turn_units() {
+  local tag
+  tag=$(printf %s "$(dirname "$DB")/run/turns" | sha256sum | cut -c1-8)
+  echo "citadel-turn-$tag-*.service"
+}
+
 # Restart the service and wait for it to answer healthy from commit $1.
 restart_healthy() {
   systemctl --user restart "$SERVICE" || return 1
@@ -121,19 +141,20 @@ restart_healthy() {
   return 1
 }
 
-# Queued as the restart unit: wait for idle, restart, roll back if the new code doesn't come up.
-restart_when_idle() {
+# Queued as the restart unit: restart once no turn would be cut off (at once with --now), roll back if
+# the new code doesn't come up.
+restart() {
   rm -f "$0" # a private copy (see deploy); bash keeps reading it from the open file
   init_state
   local i=0
-  while :; do
-    if [ "$(running_minions)" = 0 ]; then
-      sleep 5
-      [ "$(running_minions)" = 0 ] && break
+  while [ -z "$NOW" ]; do
+    if [ "$(interruptible)" = 0 ]; then
+      sleep 2
+      [ "$(interruptible)" = 0 ] && break
     fi
     i=$((i + 1))
     if [ "$i" -ge "$IDLE_TRIES" ]; then
-      report fail "Gave up after $((IDLE_TRIES * 10 / 60)) min waiting for every minion to go idle, so nothing restarted. The checkout is at $(short HEAD), but the server still runs $(health commit | cut -c1-7). Run tools/deploy.sh again to queue another restart."
+      report fail "Gave up after $((IDLE_TRIES * 10 / 60)) min waiting for the turns a restart would cut off (ones not in a unit of their own) to finish, so nothing restarted. The checkout is at $(short HEAD), but the server still runs $(health commit | cut -c1-7). Run tools/deploy.sh again to queue another restart, or with a person's OK, tools/deploy.sh --now."
       exit 1
     fi
     sleep 10
@@ -143,7 +164,7 @@ restart_when_idle() {
   flock 9
   local target good
   target=$(git_live rev-parse HEAD)
-  say "everyone is idle; restarting $SERVICE on $(short "$target")"
+  say "restarting $SERVICE on $(short "$target")"
   if restart_healthy "$target"; then
     git_live tag -f last-good "$target" >/dev/null
     local pushed kind=ok
@@ -159,6 +180,12 @@ restart_when_idle() {
   fi
   say "rolling back to last-good $(short "$good")"
   git_live reset -q --hard "$good"
+  # Code from before turn units can't re-attach: it would resume turns that still run. Stop them, so
+  # it resumes them alone.
+  if ! git_live cat-file -e "$good:src/turn-wrapper.ts" 2>/dev/null; then
+    say "last-good predates turn units; stopping the running turns so it resumes them"
+    systemctl --user stop "$(turn_units)" || true
+  fi
   if restart_healthy "$good"; then
     report fail "Deploy of $(short "$target") failed: $why. Rolled back to last-good $(short "$good"), which is up and healthy. main still has the bad commit: fix forward and deploy again. Details: journalctl --user -u $SERVICE."
   else
@@ -235,25 +262,40 @@ deploy() {
   local copy="$STATE/restart-$new-$$.sh"
   cp "$LIVE/tools/deploy.sh" "$copy"
   local out
-  if out=$(systemd-run --user --collect --unit="$UNIT" --description="Restart $SERVICE when idle (tools/deploy.sh)" \
+  if out=$(systemd-run --user --collect --unit="$UNIT" --description="Restart $SERVICE (tools/deploy.sh)" \
     --setenv=DEPLOY_LIVE="$LIVE" --setenv=DEPLOY_SERVICE="$SERVICE" --setenv=DEPLOY_URL="$URL" --setenv=DEPLOY_DB="$DB" \
-    --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" --setenv=PATH="$PATH" \
-    bash "$copy" restart-when-idle 2>&1); then
-    say "restart queued as $UNIT: it restarts once no minion is running (this one counts until its turn ends) and reports here"
+    --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
+    --setenv=DEPLOY_NOW="$NOW" --setenv=PATH="$PATH" \
+    bash "$copy" restart 2>&1); then
+    if [ -n "$NOW" ]; then say "restart queued as $UNIT with --now: it restarts at once, cutting off turns not in a unit of their own (this one too, if so)"
+    else say "restart queued as $UNIT: running turns carry on through it, and it reports here"; fi
   elif grep -qi 'already' <<<"$out"; then
     rm -f "$copy"
     say "a restart is already queued as $UNIT; it will deploy this too and report here"
+    return 0
   else
     rm -f "$copy"
     say "could not queue the restart: $out"
     exit 1
   fi
+  # Usually it is live within seconds; say so here, as this turn carries on through the restart.
+  for _ in $(seq 60); do
+    sleep 1
+    if [ "$(health commit)" = "$new" ]; then
+      say "live now: the server restarted on $(short "$new")"
+      return 0
+    fi
+  done
+  say "not live yet after 60 s; the restart reports here when it is (see journalctl --user -u $UNIT)"
 }
 
 case "${1:-}" in
   '') deploy ;;
-  restart-when-idle) restart_when_idle ;;
+  --now) NOW=1 deploy ;;
+  restart) restart ;;
+  interruptible) interruptible ;;
+  turn-units) turn_units ;;
   change-kind) change_kind "$2" "$3" "$4" ;;
   push-github) push_github "$2" ;;
-  *) echo "usage: $0 [restart-when-idle | change-kind <dir> <from> <to> | push-github <commit>]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--now | restart | interruptible | turn-units | change-kind <dir> <from> <to> | push-github <commit>]" >&2; exit 2 ;;
 esac

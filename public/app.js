@@ -388,6 +388,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'event') onEvent(msg.event);
     if (msg.type === 'artifacts') onArtifactsChanged(msg.projectId);
     if (msg.type === 'project') onProjectUpdate(msg.project);
+    if (msg.type === 'properties') onPropertiesChanged(msg.projectId);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };
@@ -616,6 +617,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/instructions$/))) await showProject(Number(m[1]), { kind: 'instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'sharedList' });
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
@@ -965,6 +967,7 @@ function renderCrumbs(main) {
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
       : main.kind === 'instructions' ? [projectLink, ' / ', 'Instructions']
       : main.kind === 'approvals' ? [projectLink, ' / ', 'Approvals']
+      : main.kind === 'properties' ? [projectLink, ' / ', 'Properties']
       : main.kind === 'machines' ? [projectLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
@@ -1031,6 +1034,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
       h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme')),
     h('div', { id: 'instructions-shelf' }),
     h('div', { id: 'approvals-shelf' }),
+    h('div', { id: 'properties-shelf' }),
     h('div', { id: 'machines-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
@@ -1055,6 +1059,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   const section = main.kind === 'artifacts' ? artifactBrowser()
     : main.kind === 'instructions' ? instructionsEditor()
     : main.kind === 'approvals' ? approvalsEditor()
+    : main.kind === 'properties' ? propertiesPage()
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'sharedList' ? sharedList()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
@@ -1068,6 +1073,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   renderUsage();
   renderInstructionsShelf();
   renderApprovalsShelf();
+  renderPropertiesShelf();
   renderMachinesShelf();
   renderShelf();
   renderSidebar();
@@ -2144,6 +2150,196 @@ function approvalsEditor() {
   return section;
 }
 
+// ---------- properties (the scheme's property registry) ----------
+
+/** A property as people read it: always with its key, since one word can be a value of two keys. */
+const propertyValue = (v) => (Array.isArray(v) ? v.join(', ') : String(v));
+
+/** The "🏷 N" chip in a minion's header; it opens to the minion's properties. */
+function propertyChip(t) {
+  const entries = Object.entries(t.properties ?? {});
+  const chip = h('details', { class: 'prop-chip' },
+    h('summary', { class: 'tag-chip', title: 'Properties', 'aria-label': `${entries.length} properties` }, h('span', { class: 'ic', 'aria-hidden': 'true' }, '🏷️'), String(entries.length)),
+    h('div', { class: 'prop-pop' },
+      h('h4', {}, 'Properties'),
+      entries.length
+        ? h('dl', {}, entries.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, h('span', { class: 'pv' }, propertyValue(v)))]))
+        : h('p', { class: 'muted small' }, 'None yet. The minion sets its own as the work becomes clear.'),
+      h('div', { class: 'foot' }, h('span', {}, 'Minions and the Taskmaster set these'), h('span', { class: 'spacer' }),
+        h('a', { href: `#/p/${t.project_id}/properties` }, 'All keys'))));
+  // Close it on a click elsewhere.
+  chip.addEventListener('toggle', () => {
+    if (!chip.open) return;
+    const away = (e) => {
+      if (chip.contains(e.target)) return;
+      chip.open = false;
+      document.removeEventListener('click', away);
+    };
+    setTimeout(() => document.addEventListener('click', away));
+  });
+  return chip;
+}
+
+/** Whether people on this scheme's page change a key: its own keys, and global ones only on Citadel's. */
+const keyEditable = (reg, k) => k.scope === 'scheme' || reg.globalOwner === view.projectId;
+
+/** What waits on a person: proposed keys and values, and values a Taskmaster added. */
+function toReview(reg) {
+  return reg.keys.filter((k) => keyEditable(reg, k)).flatMap((k) => [
+    ...(k.status === 'proposed' ? [k.key] : []),
+    ...k.values.filter((v) => v.status === 'proposed' || (v.status === 'active' && !v.reviewed)).map((v) => `${k.key}: ${v.value}`),
+  ]);
+}
+
+async function loadProperties() {
+  const projectId = view.projectId;
+  const reg = await api(`/api/projects/${projectId}/properties`);
+  return view?.projectId === projectId ? reg : null;
+}
+
+async function renderPropertiesShelf() {
+  const el = document.getElementById('properties-shelf');
+  if (!el) return;
+  const reg = await loadProperties().catch(() => null);
+  if (!reg || !el.isConnected) return;
+  const own = reg.keys.filter((k) => k.scope === 'scheme' && k.status === 'active').length;
+  const waiting = toReview(reg).length;
+  el.replaceChildren(h('section', { class: 'column' },
+    h('h3', {}, 'Properties', h('span', { class: 'spacer' }),
+      h('a', { class: `browse${view.main === 'properties' ? ' active' : ''}`, href: `#/p/${view.projectId}/properties` }, 'Edit')),
+    h('p', { class: 'muted small' }, own ? `Global keys and ${own} of this scheme's own` : 'Global keys only',
+      waiting ? [' · ', h('a', { href: `#/p/${view.projectId}/properties` }, `${waiting} to review`)] : '')));
+}
+
+function onPropertiesChanged(projectId) {
+  if (view?.kind !== 'project' || (projectId !== null && projectId !== view.projectId)) return;
+  renderPropertiesShelf();
+  if (view.main === 'properties') renderPropertiesPage();
+}
+
+/** Main panel: the registry as this scheme sees it, with proposals to settle and forms to add to it. */
+function propertiesPage() {
+  const p = view.project;
+  const section = h('section', { class: 'artifacts-main props-main' },
+    h('div', { class: 'ticket-head' },
+      h('div', { class: 'row' }, h('h2', {}, 'Properties'), h('span', { class: 'spacer' }),
+        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
+      h('div', { class: 'meta' }, 'The keys and values minions and their files carry. Aliases resolve to their value; nothing else can be set.')),
+    h('div', { id: 'props-body', class: 'props-body' }, h('p', { class: 'muted' }, 'Loading…')));
+  setTimeout(renderPropertiesPage);
+  return section;
+}
+
+async function renderPropertiesPage() {
+  const body = document.getElementById('props-body');
+  if (!body) return;
+  let reg;
+  try {
+    reg = await loadProperties();
+  } catch (err) {
+    body.replaceChildren(h('p', { class: 'muted' }, err.message));
+    return;
+  }
+  if (!reg || !body.isConnected) return;
+  const status = h('p', { class: 'muted small', role: 'status' });
+  const run = async (path, payload, done) => {
+    status.textContent = '';
+    try {
+      const r = await api(`/api/projects/${view.projectId}/properties/${path}`, { method: 'POST', body: payload });
+      if (r.warnings?.length) return r.warnings;
+      done?.();
+      renderPropertiesPage();
+      renderPropertiesShelf();
+    } catch (err) {
+      status.textContent = err.message;
+    }
+    return null;
+  };
+  const review = (k, v, action, extra = {}) => run('review', { key: k.key, value: v?.value, action, ...extra });
+  const btn = (label, title, onclick) => h('button', { type: 'button', class: 'secondary small', title, onclick }, label);
+
+  const keyBlock = (k) => {
+    const edit = keyEditable(reg, k);
+    const kind = k.value_kind === 'integer' ? 'a whole number' : k.value_kind === 'user' ? "a person's login name" : k.value_kind === 'text' ? 'free text' : k.multi ? 'one or more values' : 'one value';
+    const values = k.values.filter((v) => v.status !== 'archived');
+    const archived = k.values.filter((v) => v.status === 'archived');
+    const valueChip = (v) => {
+      const flag = v.status === 'proposed' ? 'proposed' : !v.reviewed ? 'new' : '';
+      const actions = !edit ? [] : v.status === 'proposed'
+        ? [btn('Approve', `Make ${k.key}: ${v.value} usable`, () => review(k, v, 'approve')), btn('Reject', 'Drop the proposal', () => review(k, v, 'reject'))]
+        : [
+          flag ? btn('Approve', `Mark ${k.key}: ${v.value} as reviewed`, () => review(k, v, 'approve')) : '',
+          btn('Merge…', `Fold ${v.value} into another value: it becomes an alias, and what carries it moves over`, () => {
+            const into = prompt(`Merge ${k.key}: ${v.value} into which value?\n${values.filter((o) => o !== v && o.status === 'active').map((o) => o.value).join(', ')}`);
+            if (into) review(k, v, 'merge', { into: into.trim() });
+          }),
+          btn('Archive', 'Stop offering it; what has it keeps it', () => review(k, v, 'archive')),
+        ];
+      return h('div', { class: `pv-row${flag ? ` ${flag}` : ''}` },
+        h('span', { class: 'pv' }, v.value),
+        v.aliases.length ? h('span', { class: 'muted small' }, `also ${v.aliases.join(', ')}`) : '',
+        flag ? h('span', { class: 'pv-flag' }, flag === 'new' ? `new · ${v.created_by}` : `proposed · ${v.created_by}`) : '',
+        v.description ? h('span', { class: 'muted small pv-desc' }, v.description) : '',
+        h('span', { class: 'spacer' }), ...actions);
+    };
+    const addForm = () => {
+      const value = h('input', { type: 'text', placeholder: 'new value', 'aria-label': `New ${k.key} value`, autocomplete: 'off' });
+      const aliases = h('input', { type: 'text', placeholder: 'aliases, comma-separated', 'aria-label': 'Aliases', autocomplete: 'off' });
+      const warn = h('div', { class: 'pv-warn' });
+      const add = async (force) => {
+        const payload = { key: k.key, force, values: [{ value: value.value.trim(), aliases: aliases.value.split(',').map((a) => a.trim()).filter(Boolean) }] };
+        const warnings = await run('values', payload);
+        warn.replaceChildren(...(warnings ? [h('span', {}, warnings.join(' ')), btn('Add anyway', 'It really is different', () => add(true))] : []));
+      };
+      return h('form', { class: 'row pv-add', onsubmit: (e) => { e.preventDefault(); if (value.value.trim()) add(false); } },
+        value, aliases, h('button', { type: 'submit', class: 'small' }, 'Add'), warn);
+    };
+    return h('div', { class: `prop-key${k.status === 'proposed' ? ' proposed' : ''}` },
+      h('div', { class: 'row' },
+        h('code', { class: 'prop-key-name' }, k.key), h('span', {}, k.label),
+        h('span', { class: 'muted small' }, `${kind}${k.status === 'proposed' ? ` · proposed by ${k.created_by}` : ''}`),
+        h('span', { class: 'spacer' }),
+        edit && k.status === 'proposed' ? [btn('Approve key', 'Make it usable', () => review(k, null, 'approve')), btn('Reject', 'Drop the proposal', () => review(k, null, 'reject'))] : ''),
+      k.description ? h('p', { class: 'muted small prop-desc' }, k.description) : '',
+      values.length ? h('div', { class: 'pv-list' }, values.map(valueChip)) : '',
+      archived.length ? h('p', { class: 'muted small' }, 'Archived: ', archived.map((v) => [v.value, ' ', edit ? btn('Restore', `Offer ${v.value} again`, () => review(k, v, 'restore')) : '', ' '])) : '',
+      edit && k.value_kind === 'enum' && k.status !== 'archived' ? addForm() : '');
+  };
+
+  const newKeyForm = () => {
+    const key = h('input', { type: 'text', placeholder: 'camelCase key', 'aria-label': 'Key', autocomplete: 'off' });
+    const label = h('input', { type: 'text', placeholder: 'Label', 'aria-label': 'Label', autocomplete: 'off' });
+    const description = h('input', { type: 'text', placeholder: 'What it means and when to set it', 'aria-label': 'Description', autocomplete: 'off' });
+    const kind = h('select', { 'aria-label': 'Kind of value' }, ['enum', 'integer', 'user', 'text'].map((v) => h('option', { value: v }, { enum: 'a list of values', integer: 'a whole number', user: 'a login name', text: 'free text' }[v])));
+    const multi = h('input', { type: 'checkbox' });
+    const global = h('input', { type: 'checkbox' });
+    const warn = h('div', { class: 'pv-warn' });
+    const add = async (force) => {
+      const warnings = await run('keys', { key: key.value.trim(), label: label.value, description: description.value, value_kind: kind.value, multi: multi.checked, global: global.checked, force });
+      warn.replaceChildren(...(warnings ? [h('span', {}, warnings.join(' ')), btn('Add anyway', 'It really is different', () => add(true))] : []));
+    };
+    return h('form', { class: 'prop-new-key', onsubmit: (e) => { e.preventDefault(); if (key.value.trim()) add(false); } },
+      h('h3', { class: 'settings-label' }, 'New key'),
+      h('div', { class: 'row pv-add' }, key, label, kind, h('label', { class: 'small' }, multi, ' several'),
+        reg.globalOwner === view.projectId ? h('label', { class: 'small' }, global, ' every scheme') : ''),
+      h('div', { class: 'row pv-add' }, description, h('button', { type: 'submit', class: 'small' }, 'Add key')),
+      warn);
+  };
+
+  const live = (k) => k.status !== 'archived';
+  const global = reg.keys.filter((k) => k.scope === 'global' && live(k));
+  const own = reg.keys.filter((k) => k.scope === 'scheme' && live(k));
+  body.replaceChildren(...[
+    status,
+    h('h3', { class: 'settings-label' }, 'All schemes'),
+    reg.globalOwner === view.projectId ? '' : h('p', { class: 'muted small' }, 'These belong to the whole app; change them from the Citadel scheme.'),
+    ...global.map(keyBlock),
+    h('h3', { class: 'settings-label' }, view.project.name),
+    ...(own.length ? own.map(keyBlock) : [h('p', { class: 'muted small' }, 'No keys of its own yet.')]),
+    newKeyForm(),
+  ].filter(Boolean));
+}
+
 function renderInstructionsHead() {
   const el = document.getElementById('instructions-head');
   if (!el) return;
@@ -2641,7 +2837,7 @@ function renderTicketHead() {
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       stateLabel,
-      h('span', { class: 'spacer' }), ...actions, view.findEl ?? '',
+      h('span', { class: 'spacer' }), coord ? '' : propertyChip(t), ...actions, view.findEl ?? '',
       // Leaves the thread as it is and goes back to the project's coordinator.
       coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, '×')),
     view.progressEl);

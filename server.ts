@@ -19,7 +19,7 @@ import { instructionSources } from './src/instructions.ts';
 import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, hashToken, newToken } from './src/machines.ts';
 import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
-import { PropertyError, type Actor } from './src/properties.ts';
+import { GLOBAL_OWNER, PropertyError, type Actor } from './src/properties.ts';
 import { TAG_TO_TYPE } from './src/property-seed.ts';
 import { cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
 
@@ -891,7 +891,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (!project) throw new HttpError(404, 'No such scheme');
     inScope(project.id);
     const action = m[2] ?? '';
-    if (action === '' && method === 'GET') return json(res, 200, { keys: store.props.list(project.id) });
+    if (action === '' && method === 'GET') return json(res, 200, { keys: store.props.list(project.id), globalOwner: GLOBAL_OWNER });
     if (method !== 'POST') throw new HttpError(404, 'Not found');
     const body = await readJson(req);
     const actor = actorFor(session);

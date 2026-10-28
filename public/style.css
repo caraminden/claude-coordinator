@@ -772,3 +772,45 @@ a.thread-ref:hover { text-decoration: underline; }
 .machine-notes summary { cursor: pointer; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .machine-notes textarea { width: 100%; margin: 0.4rem 0; font-size: 0.95em; }
 .machine-notes .row { display: flex; gap: 0.5rem; align-items: center; }
+
+/* Properties: the "🏷 N" chip in a minion's header, its popover, and the scheme's Properties page. */
+.prop-chip { position: relative; flex: none; }
+.prop-chip > summary { list-style: none; cursor: pointer; }
+.prop-chip > summary::-webkit-details-marker { display: none; }
+.tag-chip { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.25rem 0.55rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 0.78em; line-height: 1.3; }
+.prop-chip[open] > .tag-chip { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.prop-pop { position: absolute; z-index: 10; top: calc(100% + 6px); right: 0; width: min(270px, 80vw); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 0.45); padding: 0.6rem 0.7rem; font-size: 0.9em; }
+.prop-pop h4 { margin: 0 0 0.4rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.prop-pop dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.6rem; margin: 0; align-items: center; }
+.prop-pop dt { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85em; }
+.prop-pop dd { margin: 0; }
+.prop-pop .foot { margin-top: 0.5rem; padding-top: 0.45rem; border-top: 1px solid var(--line); display: flex; gap: 0.5rem; align-items: center; font-size: 0.85em; color: var(--muted); }
+.prop-pop .foot a { color: var(--accent); text-decoration: none; white-space: nowrap; }
+.prop-pop .foot .spacer { flex: 1; }
+.pv { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 999px; background: var(--code-bg); border: 1px solid var(--line); font-size: 0.92em; line-height: 1.3; }
+.props-body { overflow-y: auto; padding-bottom: 2rem; }
+.prop-key { border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.75rem; margin: 0.5rem 0; }
+.prop-key.proposed { border-style: dashed; }
+.prop-key > .row { gap: 0.5rem; flex-wrap: wrap; }
+.prop-key-name { font-weight: 600; }
+.prop-desc { margin: 0.35rem 0; white-space: pre-line; }
+.pv-list { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.4rem; }
+.pv-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 0.15rem 0; }
+.pv-row .pv-desc { flex: 1 1 12rem; }
+.pv-row button { padding: 0.15rem 0.5rem; font-size: 0.8em; }
+.pv-flag { font-size: 0.75em; padding: 0.15rem 0.45rem; border-radius: 999px; background: color-mix(in srgb, var(--accent) 15%, var(--panel)); color: var(--ink); line-height: 1.3; }
+.pv-row.proposed .pv { border-style: dashed; }
+.pv-add { gap: 0.4rem; flex-wrap: wrap; margin-top: 0.45rem; }
+.pv-add input[type=text] { flex: 1 1 9rem; min-width: 0; width: auto; }
+.pv-warn { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; color: var(--muted); font-size: 0.85em; }
+.pv-warn:empty { display: none; }
+.prop-new-key { margin-top: 1rem; }
+.props-main .ticket-head > .row > h2 { flex: 1 1 auto; }
+.props-main .ticket-head .meta { white-space: normal; overflow: visible; text-overflow: clip; }
+.props-main .small { font-size: 0.85em; }
+.props-main button.small { padding: 0.2rem 0.6rem; font-size: 0.85em; }
+.pv-add select { flex: none; width: auto; }
+.pv-add label { display: inline-flex; align-items: center; gap: 0.3rem; width: auto; margin: 0; color: var(--muted); }
+.pv-add input[type=checkbox] { width: auto; margin: 0; }
+/* On a phone the chip sits mid-bar, so the popover spans the screen instead of hanging off its left edge. */
+@media (max-width: 800px) { .prop-pop { position: fixed; top: 6.5rem; left: 1rem; right: 1rem; width: auto; } }

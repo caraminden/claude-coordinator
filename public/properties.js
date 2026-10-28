@@ -106,7 +106,7 @@ function filterDropdown({ key, values }, counts, changed) {
           changed();
         });
         const n = counts.get(v) ?? 0;
-        return h('label', { class: n ? 'pf-opt' : 'pf-opt none' }, box, `${key}: ${v}`, h('span', { class: 'pf-n' }, String(n)));
+        return h('label', { class: n ? 'pf-opt' : 'pf-opt none' }, box, String(v), h('span', { class: 'pf-n' }, String(n)));
       })));
   const show = () => {
     const set = picked();

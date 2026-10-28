@@ -192,6 +192,14 @@ test('an expired card denies', async () => {
   assert.match(result.message, /Nobody approved this.*stopped/);
 });
 
+test('a card whose turn ended keeps its outcome for an asker that was between two polls', async () => {
+  const id = cards.request(TICKET, 'Bash', { command: 'gh pr merge 15' });
+  posted.pop();
+  cards.endTurn(TICKET, 'The turn was stopped while this waited.');
+  assert.deepEqual(await cards.wait(TICKET, id, 10), { state: 'expired', reason: 'The turn was stopped while this waited.' });
+  assert.equal(cards.get(TICKET + 1, id).reason, 'This request is no longer waiting.', "another minion's id tells it nothing");
+});
+
 // ---------- turns ----------
 
 // A stand-in for `claude -p` that records its arguments and some of its environment, then waits

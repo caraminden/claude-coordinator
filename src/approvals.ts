@@ -102,6 +102,8 @@ type Emit = (ticketId: number, kind: string, data: unknown) => void;
  */
 export class Approvals {
   private requests = new Map<string, Request>();
+  /** Outcomes of cards forgotten when their turn ended, for an asker that was between two polls then. */
+  private ended = new Map<string, { ticketId: number; decision: Decision }>();
   private emit: Emit;
 
   constructor(emit: Emit) {
@@ -155,7 +157,7 @@ export class Approvals {
 
   /** The card's outcome so far; unknown cards (another thread's, or from before a restart) are expired. */
   get(ticketId: number, id: string): Decision {
-    const r = this.requests.get(id);
+    const r = this.requests.get(id) ?? this.ended.get(id);
     return r && r.ticketId === ticketId ? r.decision : { state: 'expired', reason: 'This request is no longer waiting.' };
   }
 
@@ -193,7 +195,9 @@ export class Approvals {
       if (r.ticketId !== ticketId) continue;
       if (r.decision.state === 'pending') this.settle(id, r, { state: 'expired', reason });
       this.requests.delete(id);
+      this.ended.set(id, { ticketId, decision: r.decision });
     }
+    for (const id of [...this.ended.keys()].slice(0, Math.max(0, this.ended.size - 100))) this.ended.delete(id);
   }
 
   private settle(id: string, r: Request, decision: Exclude<Decision, { state: 'pending' }>) {

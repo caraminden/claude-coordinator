@@ -9,10 +9,10 @@ directly; there are no dependencies and no build step.
 - Working with Cara (tone, when to ask versus pick a default, run-backs, her words as the
   spec): `docs/working-with-cara.md`. Read it before your first reply to her in a session.
 - Never skip, loosen or delete a test to get green. Fix the code, or say why the test is wrong.
-- Never push to main on GitHub. Work on your minion branch; when and how it lands in the local
-  `main` and deploys follows the scheme instructions ("Shipping fixes"). No plain force pushes:
-  `--force-with-lease`, and only on your own branch. `tools/guard.sh` and `.githooks/pre-push`
-  enforce the push rules.
+- Never push to main on GitHub yourself: `tools/deploy.sh` does that after each deploy. Work on your
+  minion branch; when and how it lands in the local `main` and deploys follows the scheme
+  instructions ("Shipping fixes"). No plain force pushes: `--force-with-lease`, and only on your own
+  branch. `tools/guard.sh` and `.githooks/pre-push` enforce the push rules.
 - Commit each green step before a worker starts in the same tree, and never `git checkout`,
   `git restore` or `git stash` a path to look at it (`git diff` and `git show HEAD:path` do
   that): on Delve, uncommitted work was lost twice that way.

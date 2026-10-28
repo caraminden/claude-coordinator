@@ -184,6 +184,13 @@ minion that made it. It never hard-restarts:
    restarts, waits up to 30 s for `/api/health` to answer from the new commit,
    and tags it `last-good`. If it doesn't come up, it resets to `last-good`
    and restarts again. After 2 h without an idle moment it gives up.
+4. Once the new code is live (after the reload, or after the healthy restart
+   and `last-good` tag, inside the unit), it pushes that commit to `main` on
+   GitHub (`origin`), with the gh CLI's git credentials. GitHub's `main` is
+   what's live and the off-box copy. It never force-pushes: if GitHub's `main`
+   has diverged, it says so and leaves it. A failed push (no network, auth, a
+   rejection) doesn't fail or roll back the deploy; it shows in the deploy's
+   report and in `journalctl --user -t cc-restart-when-idle`.
 
 How a queued restart went is posted in the deploying minion's chat (a failure
 as an error, which pushes) and in the journal: `journalctl --user -u

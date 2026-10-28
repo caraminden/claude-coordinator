@@ -92,6 +92,7 @@ uses the built-in `node:sqlite`.
 | `src/runner.ts` | Spawns `claude` turns, parses stream-json, queues messages |
 | `src/mcp.ts` | MCP server giving the Taskmaster its minion-management tools |
 | `src/approvals.ts` | Approval rules, plugin folders, and the Approve / Deny cards |
+| `src/tripwire.ts` | PreToolUse hook every turn gets: blocks known accidents (live data, checkout, units, keys) |
 | `src/push.ts` | Web Push: VAPID keys and signing, payload encryption, when to notify |
 | `src/machines.ts` | Relays MCP traffic between minion turns and connected machines |
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server |
@@ -205,7 +206,7 @@ minions then run with:
 --permission-mode bypassPermissions
 --permission-prompts host
 --permission-prompt-tool mcp__thread__approve
---settings '{"permissions":{"ask":[<the rules>]}}'
+--settings '{"permissions":{"ask":[<the rules>]},"hooks":{…}}'
 ```
 
 `ask` rules are still checked in `bypassPermissions`, so only matching calls
@@ -223,6 +224,18 @@ Rules are guardrails against mistakes, not a sandbox: a Bash rule matches how a
 command starts, and a minion with full shell access could reach the same result
 another way. Schemes with no rules (the default) run exactly as before. The
 Taskmaster is never affected.
+
+**Tripwire.** Every turn, Taskmaster or minion in any scheme, gets a `PreToolUse`
+hook (`src/tripwire.ts`) in its `--settings`, alongside the repo's own hooks. It
+blocks known accidents and says why and what to do instead: writes to the live data
+dir (the database, its backups, other schemes' folders under `projects/`), the live
+checkout (except a fast-forward `git pull` there until `tools/deploy.sh` exists, and
+that script itself), `~/.config/claude-coordinator/` and the systemd and Quadlet
+unit folders; `systemctl --user restart|stop|kill` of the app's or Godot's units;
+reading `~/.ssh` or the Claude login; and running `server.ts` without `DATA_DIR`
+and `PORT`. It reads the command text, so it's a tripwire, not a sandbox: a script,
+an interpreter or a path in a variable gets past it. The table of blocked and
+allowed commands is `test/tripwire.test.ts`.
 
 **Plugin folders.** A scheme can also list folders relative to the repo root
 (e.g. `tools/mods/delve`); each minion turn gets `--plugin-dir <worktree>/<folder>`

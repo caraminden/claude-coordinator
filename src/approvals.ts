@@ -53,15 +53,15 @@ export function cleanPluginDirs(raw: unknown): string {
 
 /**
  * Permission flags for a thread turn. Without rules: deny anything that would prompt, as nobody can
- * answer in a headless turn. With rules: the rules become `ask` rules, which Claude Code still
- * checks in bypassPermissions, and their prompts go to the approval tool, which shows a card.
+ * answer in a headless turn. With rules: the runner adds them as `ask` rules to the turn's settings
+ * (Claude Code still checks those in bypassPermissions), and their prompts go to the approval tool,
+ * which shows a card.
  */
 export function permissionArgs(rules: string[]): string[] {
   if (!rules.length) return ['--permission-prompts', 'none'];
   return [
     '--permission-prompts', 'host',
     '--permission-prompt-tool', APPROVAL_TOOL,
-    '--settings', JSON.stringify({ permissions: { ask: rules } }),
   ];
 }
 

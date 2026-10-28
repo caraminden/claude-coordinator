@@ -33,9 +33,7 @@ test('plugin folders must stay inside the repo', () => {
 test('no rules keeps the turn exactly as before; rules ask the approval tool', () => {
   assert.deepEqual(permissionArgs([]), ['--permission-prompts', 'none']);
   const args = permissionArgs(['Bash(gh pr merge:*)']);
-  assert.deepEqual(args.slice(0, 4), ['--permission-prompts', 'host', '--permission-prompt-tool', APPROVAL_TOOL]);
-  assert.equal(args[4], '--settings');
-  assert.deepEqual(JSON.parse(args[5]), { permissions: { ask: ['Bash(gh pr merge:*)'] } });
+  assert.deepEqual(args, ['--permission-prompts', 'host', '--permission-prompt-tool', APPROVAL_TOOL]);
   assert.ok(!args.includes('none'));
 });
 
@@ -214,7 +212,9 @@ test('a project without rules or plugins runs threads exactly as before', async 
   const t = await turn(plain.id, ['tools/mods/delve']);
   const i = t.args.indexOf('--permission-prompts');
   assert.deepEqual(t.args.slice(i, i + 2), ['--permission-prompts', 'none']);
-  for (const flag of ['--permission-prompt-tool', '--settings', '--plugin-dir']) assert.ok(!t.args.includes(flag), flag);
+  for (const flag of ['--permission-prompt-tool', '--plugin-dir']) assert.ok(!t.args.includes(flag), flag);
+  // Every turn gets the tripwire hook, and nothing else in its settings.
+  assert.deepEqual(Object.keys(JSON.parse(t.args[t.args.indexOf('--settings') + 1])), ['hooks']);
   assert.equal(t.timeout, null);
   assert.equal(t.approvals, null);
   await finish(t.id);
@@ -226,7 +226,10 @@ test('rules and plugin folders reach the turn, and Stop expires a waiting card',
   const t = await turn(delve.id, ['tools/mods/delve']);
   assert.ok(!t.args.includes('none'));
   assert.equal(t.args[t.args.indexOf('--permission-prompt-tool') + 1], APPROVAL_TOOL);
-  assert.deepEqual(JSON.parse(t.args[t.args.indexOf('--settings') + 1]), { permissions: { ask: ['Bash(gh pr merge:*)'] } });
+  assert.equal(t.args.filter((a: string) => a === '--settings').length, 1);
+  const settings = JSON.parse(t.args[t.args.indexOf('--settings') + 1]);
+  assert.deepEqual(settings.permissions, { ask: ['Bash(gh pr merge:*)'] });
+  assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /tripwire\.ts/);
   assert.deepEqual(t.args.filter((_: string, i: number) => t.args[i - 1] === '--plugin-dir'), [join(t.cwd, 'tools/mods/delve')]);
   assert.ok(Number(t.timeout) >= 24 * 3600_000);
   assert.equal(t.approvals, '1');

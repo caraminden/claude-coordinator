@@ -15,7 +15,8 @@ const MAX_TOOL_OUTPUT = 20_000;
 // Turns run a copy of the MCP server taken when this server started, not the file on disk: a deploy
 // pulls new code before the restart, and a newer MCP server would offer tools this process rejects.
 // The copies live in the app's data dir, one folder per server process, swept once that process is gone.
-const RUN_DIR = join(process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator'), 'run');
+const DATA_DIR = process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator');
+const RUN_DIR = join(DATA_DIR, 'run');
 export const MCP_DIR = join(RUN_DIR, `mcp-${process.pid}`);
 function alive(pid: number): boolean {
   try {
@@ -45,6 +46,19 @@ function pinnedCopy(file: string): string {
 export const MCP_SERVER = pinnedCopy('mcp.ts');
 // Stands in for a connected machine's MCP server; see src/machines.ts.
 export const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
+// Pinned too, so a deploy can't change the rules under a running turn.
+export const TRIPWIRE = pinnedCopy('tripwire.ts');
+
+/**
+ * The PreToolUse hook every turn gets (src/tripwire.ts): it stops known accidents such as writes to
+ * this server's data and checkout. Its config travels as one JSON argument; no quoting needed, as
+ * these paths and JSON carry no single quotes.
+ */
+export function tripwireHooks(projectId: number, claudeConfig: string) {
+  const config = { home: homedir(), data: DATA_DIR, checkout: join(import.meta.dirname, '..'), project: projectId, claudeConfig };
+  const command = [process.execPath, TRIPWIRE, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
+  return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob)$', hooks: [{ type: 'command', command, timeout: 10 }] }] };
+}
 
 /**
  * The parts of this server's environment a turn inherits. Anything else (MACHINES_URL, PORT, HOST,
@@ -303,7 +317,7 @@ const READ_ONLY_GIT = [
  * files in them (tried with a real run, the memory folder included; other shell commands are still
  * denied): the project's shared folder and the repo's Claude Code memory.
  */
-export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null): { addDirs: string[]; settings: object } {
+export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null): { addDirs: string[]; settings: { permissions: object } } {
   let ticketDirs: string[] = [];
   try {
     ticketDirs = readdirSync(ticketsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(ticketsDir, d.name));
@@ -594,11 +608,15 @@ export class Runner {
     ];
     // Lets edit-only sessions write there too, not just in their working directory.
     const addDirs = [filesDir, sharedDir].filter((d): d is string => !!d);
+    // One --settings per turn: the tripwire hook, plus approval rules or the Taskmaster's access rules.
+    const settings: { permissions?: object; hooks: object } = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env)) };
+    if (rules.length) settings.permissions = { ask: rules };
     if (ticket.kind === 'coordinator') {
       const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project), sharedDir, memoryDir);
       addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
-      args.push('--settings', JSON.stringify(access.settings));
+      settings.permissions = access.settings.permissions;
     }
+    args.push('--settings', JSON.stringify(settings));
     if (addDirs.length) args.push('--add-dir', ...addDirs);
     if (ticket.kind !== 'coordinator') args.push(...pluginDirArgs(lines(project.plugin_dirs), ticket.cwd));
     if (ticket.session_id) args.push('--resume', ticket.session_id);

@@ -3,6 +3,7 @@ import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPh
 import { inAppHash, linkThreadRefs } from './threadrefs.js';
 import { initDrawers } from './drawers.js';
 import { threadSections } from './threadgroups.js';
+import { startScheme } from './schemes.js';
 
 const app = document.getElementById('app');
 const crumbs = document.getElementById('crumbs');
@@ -622,7 +623,7 @@ async function route() {
     else if ((m = hash.match(/^#\/f\/(\d+)\/(.+)$/))) await showFile(Number(m[1]), decodeURIComponent(m[2]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/t\/(\d+)$/))) await showProject(Number(m[1]), { kind: 'chat', number: Number(m[2]) });
     else if ((m = hash.match(/^#\/t\/(\d+)$/))) await showTicket(Number(m[1]));
-    else await showProjects();
+    else await openStartScheme();
   } catch (err) {
     if (err.message !== 'Not logged in' && seq === routeSeq) app.replaceChildren(h('p', { class: 'error' }, err.message));
   } finally {
@@ -791,10 +792,22 @@ if (pushSupported) {
 
 // ---------- projects ----------
 
-async function showProjects() {
+const LAST_SCHEME = 'cc-scheme'; // the scheme this browser last had open
+
+/** The app's front door: open the last scheme (or Citadel, or the first); with none, offer to make one. */
+async function openStartScheme() {
   const projects = await api('/api/projects');
+  let last = NaN;
+  try { last = Number(localStorage.getItem(LAST_SCHEME)); } catch {}
+  const id = startScheme(projects, last);
+  if (id != null) return location.replace(`#/p/${id}`); // replace: Back shouldn't bounce through here
   view = { kind: 'projects' };
-  crumbs.replaceChildren('Schemes');
+  crumbs.replaceChildren('New scheme');
+  app.replaceChildren(h('div', { class: 'card new-scheme' }, h('h2', {}, 'New scheme'), newSchemeForm()));
+}
+
+/** Name and repo for a new scheme; on success it opens the scheme. */
+function newSchemeForm() {
   const form = h('form', {},
     h('label', {}, 'Name', h('input', { name: 'name', required: true, maxlength: 80, 'data-draft': true })),
     h('label', {}, 'Git repo URL (optional; each minion gets its own worktree)',
@@ -803,12 +816,13 @@ async function showProjects() {
     h('button', { type: 'submit' }, 'Create scheme'));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const btn = form.querySelector('button');
+    const btn = form.querySelector('button[type=submit]');
     const err = form.querySelector('.error');
     btn.disabled = true;
     btn.textContent = form.repoUrl.value ? 'Cloning…' : 'Creating…';
     try {
       const p = await api('/api/projects', { method: 'POST', body: { name: form.name.value, repoUrl: form.repoUrl.value } });
+      form.closest('dialog')?.close();
       location.hash = `#/p/${p.id}`;
     } catch (ex) {
       err.textContent = ex.message;
@@ -817,17 +831,47 @@ async function showProjects() {
       btn.textContent = 'Create scheme';
     }
   });
-  app.replaceChildren(
-    h('h2', {}, 'Schemes'),
-    projects.length
-      ? h('div', { class: 'projects' }, projects.map((p) =>
-          h('a', { class: 'card', href: `#/p/${p.id}` },
-            h('div', { class: 'title' }, h('strong', { 'data-project-name': p.id }, p.name)),
-            h('div', { class: 'muted' }, p.repo_url || 'No repo'),
-            h('div', { class: 'muted' }, `${p.tickets} minion${p.tickets === 1 ? '' : 's'}`))))
-      : h('p', { class: 'muted' }, 'No schemes yet.'),
-    h('details', { class: 'new', open: !projects.length }, h('summary', {}, 'New scheme'), h('div', { class: 'card' }, form)),
-  );
+  return form;
+}
+
+/** The new-scheme form in a modal: a centred box on desktop, a sheet along the bottom on phones. */
+function openNewScheme() {
+  const dialog = h('dialog', { class: 'new-scheme' },
+    h('div', { class: 'row' }, h('h2', {}, 'New scheme'), h('span', { class: 'spacer' }),
+      h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
+    newSchemeForm());
+  dialog.addEventListener('close', () => dialog.remove());
+  // A tap on the backdrop (the dialog itself, outside its content box) closes it.
+  dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
+let closeSchemeMenu = () => {};
+
+/** A small menu of the schemes under the switcher button, with the new-scheme entry at the end. */
+function toggleSchemeMenu(button) {
+  if (document.getElementById('scheme-menu')) return closeSchemeMenu();
+  const menu = h('div', { id: 'scheme-menu', class: 'scheme-menu' },
+    view.projects.map((p) => h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, onclick: () => closeSchemeMenu() },
+      h('span', { class: 'name', 'data-project-name': p.id }, p.name))),
+    h('button', { type: 'button', class: 'nav-item add', onclick: () => { closeSchemeMenu(); openNewScheme(); } }, '+ New scheme'));
+  const outside = (e) => { if (!menu.contains(e.target) && !button.contains(e.target)) closeSchemeMenu(); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeSchemeMenu(); button.focus(); } };
+  closeSchemeMenu = () => {
+    menu.remove();
+    button.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', outside, true);
+    document.removeEventListener('keydown', onKey, true);
+    closeSchemeMenu = () => {};
+  };
+  document.addEventListener('pointerdown', outside, true);
+  document.addEventListener('keydown', onKey, true);
+  document.body.append(menu);
+  button.setAttribute('aria-expanded', 'true');
+  const r = button.getBoundingClientRect();
+  menu.style.top = `${r.bottom + 4}px`;
+  menu.style.left = `${Math.max(8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8))}px`;
 }
 
 // ---------- project: threads sidebar + chat ----------
@@ -917,7 +961,7 @@ function renderCrumbs(main) {
   const { project } = view;
   const projectLink = h('a', { href: `#/p/${project.id}`, 'data-project-name': project.id }, project.name);
   const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
-  crumbs.replaceChildren(h('a', { href: '#/' }, 'Schemes'), ' / ', ...(
+  crumbs.replaceChildren(...(
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
       : main.kind === 'instructions' ? [projectLink, ' / ', 'Instructions']
       : main.kind === 'approvals' ? [projectLink, ' / ', 'Approvals']
@@ -960,11 +1004,12 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   view = {
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
-    artifacts, shared, artifactId: main.artifact?.id ?? null, machines,
+    artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects,
     file: main.file ?? null, fileTicket: main.ticket ?? null,
     ...chatView(chatId, ticket),
   };
   renderCrumbs(main);
+  try { localStorage.setItem(LAST_SCHEME, String(projectId)); } catch {}
 
   // Both side panels collapse to a slim tab so the main panel can take their room. On wider
   // screens that choice is remembered; on phones they fold away above the main panel instead.
@@ -980,9 +1025,10 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
       usageMeter(),
       pushControls(project)),
     h('section', { class: 'column' },
-      h('h3', {}, 'Schemes', h('span', { class: 'spacer' }), h('a', { class: 'more', href: '#/' }, 'All')),
+      h('h3', {}, 'Schemes'),
       projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
-        h('span', { class: 'name', 'data-project-name': p.id }, p.name)))),
+        h('span', { class: 'name', 'data-project-name': p.id }, p.name))),
+      h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme')),
     h('div', { id: 'instructions-shelf' }),
     h('div', { id: 'approvals-shelf' }),
     h('div', { id: 'machines-shelf' }),
@@ -1920,7 +1966,9 @@ const count = (n) => n.toLocaleString('en');
 
 function onProjectUpdate(project) {
   for (const el of document.querySelectorAll(`[data-project-name="${project.id}"]`)) el.textContent = project.name;
-  if (view?.kind !== 'project' || view.projectId !== project.id) return;
+  if (view?.kind !== 'project') return;
+  view.projects = view.projects.map((p) => (p.id === project.id ? { ...p, name: project.name } : p));
+  if (view.projectId !== project.id) return;
   view.project = project;
   renderInstructionsShelf();
   renderApprovalsShelf();
@@ -1947,7 +1995,10 @@ function projectTitle(project) {
     err.remove();
     wrap.replaceChildren(
       h('span', { class: 'label', 'data-project-name': project.id }, view.project.name),
-      h('button', { type: 'button', class: 'rename', 'aria-label': 'Rename scheme', title: 'Rename scheme (its repo stays as it is)', onclick: edit }, '✎'));
+      h('button', { type: 'button', class: 'rename', 'aria-label': 'Rename scheme', title: 'Rename scheme (its repo stays as it is)', onclick: edit }, '✎'),
+      h('span', { class: 'spacer' }),
+      h('button', { type: 'button', class: 'rename switch', 'aria-label': 'Switch scheme', title: 'Switch scheme', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: (e) => toggleSchemeMenu(e.currentTarget) }, '⇅'),
+      h('button', { type: 'button', class: 'rename add', 'aria-label': 'New scheme', title: 'New scheme', onclick: openNewScheme }, '+'));
   };
   const edit = () => {
     let saving = false;

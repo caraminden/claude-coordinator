@@ -205,6 +205,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'message_taskmaster',
+    description:
+      "Send a message to another scheme's Taskmaster, waking it: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scheme: { type: 'string', description: 'The other scheme, by name or id; a wrong one lists them' },
+        text: { type: 'string', description: 'Self-contained: it cannot see your scheme, so say which scheme\'s minion #N is, and paste what it needs rather than pointing at your files' },
+      },
+      required: ['scheme', 'text'],
+    },
+  },
+  {
     name: 'update_ticket',
     description: "Change a minion's title, tag, state, note, build group (the major build it is assigned to), model or effort; leave out what should stay. A new model or effort applies from its next turn. (The branch keeps its original name.)",
     inputSchema: {
@@ -649,6 +662,12 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'message_ticket': {
       const t = await call('POST', `/api/tickets/${await id(args)}/messages`, { text: args.text });
       return t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
+    }
+    case 'message_taskmaster': {
+      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, text: args.text });
+      const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
+      if (r.held) return `Held, not delivered: you and the Taskmaster of ${r.scheme} have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it. ${ask}`;
+      return `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort }))}`;

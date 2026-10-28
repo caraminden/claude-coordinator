@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { LOOP_LIMIT, LOOP_WINDOW_MS, Runner } from '../src/runner.ts';
+import { LOOP_LIMIT, LOOP_WINDOW_MS, Runner, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS } from '../src/runner.ts';
 
 // The loop guard: Taskmaster↔minion messages past LOOP_LIMIT an hour wait for a person. A stand-in
 // `claude -p` ends every turn at once.
@@ -92,6 +92,47 @@ test('the window rolls: messages older than an hour stop counting', () => {
   now += LOOP_WINDOW_MS - 10 * 60_000;
   for (let i = 0; i < LOOP_LIMIT - 1; i++) assert.equal(relay(`next ${i}`), false);
   assert.equal(relay('one too many'), true);
+});
+
+test('two Taskmasters share one burst count, both ways, and either one continuing releases it', () => {
+  const store = new Store(join(root, 'taskmasters.db'));
+  const [a, b, c] = ['Citadel', 'Delve', 'Other'].map((name) => {
+    const p = store.createProject(name, null);
+    const t = store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
+    store.setTicketDir(t.id, root, null);
+    return t;
+  });
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  let now = 1_000_000;
+  runner.now = () => now;
+
+  for (let i = 0; i < TASKMASTER_LOOP_LIMIT; i++) {
+    const [from, to] = i % 2 ? [b, a] : [a, b];
+    assert.deepEqual(runner.relayTaskmaster(from.id, to.id, 'x', `m${i}`), { held: false, left: TASKMASTER_LOOP_LIMIT - 1 - i });
+  }
+  assert.deepEqual(runner.relayTaskmaster(b.id, a.id, 'Taskmaster of Delve', 'seventh'), { held: true, left: 0 });
+  assert.ok(!said(store, a.id).includes('seventh'));
+  for (const t of [a, b]) {
+    const [paused] = kinds(store, t.id, 'loop_paused');
+    assert.match(paused.text, /^Paused: the Taskmasters of Delve and Citadel have exchanged 6 messages in 10 minutes, so Delve's message to Citadel \("seventh"\) is held/);
+    assert.equal(paused.minion, t.id);
+  }
+  // Another pair has its own count.
+  assert.equal(runner.relayTaskmaster(a.id, c.id, 'x', 'to other').held, false);
+
+  // Continuing from either side releases it and keys each chat's note by its own Taskmaster.
+  assert.equal(runner.continueLoop(b.id, 'Cara'), 1);
+  assert.ok(said(store, a.id).includes('seventh'));
+  for (const t of [a, b]) assert.equal(kinds(store, t.id, 'loop_continued')[0].minion, t.id);
+  assert.equal(runner.continueLoop(a.id, 'Cara'), 0);
+
+  // The window is ten minutes, not an hour.
+  for (let i = 0; i < TASKMASTER_LOOP_LIMIT; i++) assert.equal(runner.relayTaskmaster(a.id, b.id, 'x', `burst ${i}`).held, false);
+  assert.equal(runner.relayTaskmaster(a.id, b.id, 'x', 'too fast').held, true);
+  runner.continueLoop(a.id, 'Cara');
+  for (let i = 0; i < TASKMASTER_LOOP_LIMIT; i++) assert.equal(runner.relayTaskmaster(a.id, b.id, 'x', `spread ${i}`).held, false);
+  now += TASKMASTER_LOOP_WINDOW_MS;
+  assert.equal(runner.relayTaskmaster(a.id, b.id, 'x', 'later').held, false);
 });
 
 // Through the real server: who counts, who is held, and what continues.
@@ -179,4 +220,33 @@ test('the routes: agents are held, people never are, and a person writing contin
   await call('Cara', `/api/tickets/${coordinator.id}/messages`, { method: 'POST', body: { text: 'go ahead' } });
   await until('the held message', async () => (await texts(coordinator.id)).includes('round 3 held'));
   assert.deepEqual((await events(t.id, 'loop_continued')).map((d: any) => d.by), ['Cara', 'Cara', 'Cara']);
+});
+
+test('message_taskmaster: a Taskmaster reaches another scheme\'s Taskmaster, and nothing else across schemes', async () => {
+  const mine = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Mine' } });
+  const theirs = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Theirs' } });
+  const { coordinator: tmMine } = await call('Cara', `/api/projects/${mine.id}`);
+  const minion = await call('Cara', `/api/projects/${mine.id}/tickets`, { method: 'POST', body: { message: 'go', title: 'Mine minion' } });
+  const theirMinion = await call('Cara', `/api/projects/${theirs.id}/tickets`, { method: 'POST', body: { message: 'go', title: 'Their minion' } });
+  const tm = `agent:${tmMine.id}`;
+  const send = (who: string, scheme: unknown, text = 'please start a minion for the API change') =>
+    call(who, '/api/taskmaster', { method: 'POST', body: { scheme, text } });
+
+  // By name, any case, before the other scheme's Taskmaster has ever been opened.
+  assert.deepEqual(await send(tm, 'theirs'), { scheme: 'Theirs', held: false, left: 5 });
+  const { coordinator: tmTheirs } = await call('Cara', `/api/projects/${theirs.id}`);
+  const got = (await call('Cara', `/api/tickets/${tmTheirs.id}/events`)).filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
+  assert.deepEqual(got.map((d: any) => [d.author, d.text]), [['Taskmaster of Mine', 'please start a minion for the API change']]);
+  // By id too, and it answers back the same way.
+  assert.equal((await send(`agent:${tmTheirs.id}`, String(mine.id), 'on it')).scheme, 'Mine');
+
+  await assert.rejects(send(tm, 'Mine'), /400 Mine is your own scheme/);
+  await assert.rejects(send(tm, 'Nope'), /404 No other scheme called "Nope"\. The other schemes: .*Theirs/);
+  await assert.rejects(send(`agent:${minion.id}`, 'Theirs'), /403/);
+  await assert.rejects(send('Cara', 'Theirs'), /403/);
+  // Still no reach into the other scheme's minions or its listing.
+  await assert.rejects(call(tm, `/api/tickets/${theirMinion.id}/messages`, { method: 'POST', body: { text: 'hi' } }), /403/);
+  await assert.rejects(call(tm, `/api/tickets/${theirMinion.id}`), /403/);
+  await assert.rejects(call(tm, `/api/projects/${theirs.id}`), /403/);
+  await assert.rejects(call(tm, `/api/tickets/${tmTheirs.id}/messages`, { method: 'POST', body: { text: 'hi' } }), /403/);
 });

@@ -41,7 +41,9 @@ Planned next: runners on other people's own Claude logins.
 - Opening a scheme creates its Taskmaster minion on first visit. Its turns
   run with an extra MCP server (`src/mcp.ts`) whose tools call this app's API
   with a bearer token that only reaches that scheme's minions (never the
-  Taskmaster itself). The token is passed in the environment, not on the
+  Taskmaster itself). The one way past that is `message_taskmaster`, which
+  messages another scheme's Taskmaster (never its minions), with a loop guard of
+  6 messages per pair of Taskmasters in 10 minutes. The token is passed in the environment, not on the
   command line, so other users on the box can't read it from `ps`.
 - Each scheme can have **instructions** (up to 16,000 characters), edited on the
   scheme's Settings page (beside Sign out in the overview panel). They're appended

@@ -200,16 +200,22 @@ const talkedKey = (ticketId: number) => `talked-since-deploy:${ticketId}`;
 /** Taskmaster↔minion messages (both ways) one minion may exchange per LOOP_WINDOW_MS before the next waits for a person. */
 export const LOOP_LIMIT = 6;
 export const LOOP_WINDOW_MS = 60 * 60 * 1000;
+/** Messages between two schemes' Taskmasters (both ways) per TASKMASTER_LOOP_WINDOW_MS before the next waits for a person. */
+export const TASKMASTER_LOOP_LIMIT = 6;
+export const TASKMASTER_LOOP_WINDOW_MS = 10 * 60 * 1000;
 
-/** A minion's loop-guard count and held messages, in the settings table under `loop:<minion id>` so they outlive a restart. */
+/** A loop guard's count and held messages (a minion's under `loop:<minion id>`, two Taskmasters' under pairKey), in the settings table so they outlive a restart. */
 interface LoopState {
-  /** When each recent Taskmaster↔minion message went through. */
+  /** When each recent message went through. */
   sent: number[];
   /** Messages waiting for a person to continue, oldest first. */
   held: { to: number; author: string; text: string }[];
 }
 
 const loopKey = (minionId: number) => `loop:${minionId}`;
+/** Two schemes' Taskmasters share one loop, stored the same way whichever wrote first. */
+const pairKey = (a: number, b: number) => `loop:taskmasters:${Math.min(a, b)}:${Math.max(a, b)}`;
+const clip = (text: string) => (text.length > 140 ? text.slice(0, 140) + '…' : text);
 
 /** Claude Code's words when a turn hits the plan's usage limit: "You've hit your 5-hour limit · resets 3:30pm (…)". */
 export const USAGE_LIMIT = /hit your [\w -]*limit/i;
@@ -349,7 +355,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     'Give every Bash call a short plain-English description (like "Run the test suite").',
     'After you deploy with tools/deploy.sh, set state pending-deploy and do not call close_self: a successful deploy dismisses the minion once it is live and your turn has ended (the restart does not interrupt your turn), and a failed one leaves it open with the error. pending-deploy means the deploy is all that is left: in a later turn, when someone still needs you (helping them use the change, an open question, more work), set another state or null, even while the deploy is still waiting.',
     'When the minion\'s work is done and should be dismissed with nothing to deploy, call the `close_self` tool (mcp__thread) near the end of your turn: the minion is dismissed once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not dismiss a minion whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can be dismissed, even if its brief says to dismiss.',
-    'You cannot message other minions directly. When something needs the scheme\'s Taskmaster (passing information to another minion, starting a new minion, a decision for it), message it with the `message_coordinator` tool (mcp__thread) with a self-contained message.',
+    'You cannot message other minions directly. When something needs the scheme\'s Taskmaster (passing information to another minion, starting a new minion, a decision for it), message it with the `message_coordinator` tool (mcp__thread) with a self-contained message. For work in another scheme, ask your Taskmaster the same way: it can pass it to that scheme\'s Taskmaster.',
     `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state parked and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live.`,
     ...showingFiles(ticket, filesDir, sharedDir),
     ...machineTools(machines),
@@ -438,6 +444,7 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
       : '',
     'When you need people to decide between clear options, ask with your `ask_question` tool: it shows a card in this chat they answer with a click. Then end your turn; the answers arrive as the next message.',
     'Minions can message you with their `message_coordinator` tool; those arrive named by the minion, like "[#12 Some title]: ...". Do what they ask when it is yours to do (relay to another minion with message_ticket, start a minion from a handoff), and do not reply to a minion just to acknowledge it.',
+    `When work touches another scheme, message that scheme's ${AGENT_NAME} with message_taskmaster: hand it what its scheme should do and let it run its own minions, since you cannot reach them. Its messages arrive as "[${AGENT_NAME} of <scheme>]: ..."; do what they ask when it is yours to do in this scheme, as with a minion's message, and answer with message_taskmaster when it needs an answer, never just to acknowledge. Each pair of ${AGENT_NAME}s may exchange ${TASKMASTER_LOOP_LIMIT} messages in ${TASKMASTER_LOOP_WINDOW_MS / 60_000} minutes before the next waits for a person; if you have a good reason to go past that, ask people with ask_question and say why.`,
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short and end each turn with what you did and what, if anything, you need from them.',
   ].join('\n');
 }
@@ -740,20 +747,11 @@ export class Runner {
    * a person to continue, until continueLoop. Returns whether it was held.
    */
   relay(minionId: number, to: number, author: string, text: string): boolean {
-    const loop = this.store.getSetting<LoopState>(loopKey(minionId)) ?? { sent: [], held: [] };
-    const now = this.now();
-    loop.sent = loop.sent.filter((t) => now - t < LOOP_WINDOW_MS);
-    if (!loop.held.length && loop.sent.length < LOOP_LIMIT) {
-      loop.sent.push(now);
-      this.store.setSetting(loopKey(minionId), loop);
-      this.send(to, author, text);
-      return false;
-    }
-    loop.held.push({ to, author, text });
-    this.store.setSetting(loopKey(minionId), loop);
+    const { held } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text);
+    if (!held) return false;
     const minion = this.store.getTicket(minionId)!;
-    const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${text.length > 140 ? text.slice(0, 140) + '…' : text}")`;
-    const note = loop.held.length === 1
+    const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
+    const note = held === 1
       ? `Paused: #${minion.number} and the ${AGENT_NAME} have exchanged ${LOOP_LIMIT} messages in the last hour, so ${what} is held until a person continues.`
       : `Also held: ${what}.`;
     for (const id of this.loopChats(minion)) this.emit(id, 'loop_paused', { minion: minionId, text: note });
@@ -761,19 +759,67 @@ export class Runner {
   }
 
   /**
-   * A person continued a minion paused by the loop guard, or wrote into its chat or its Taskmaster's:
-   * the held messages go through in order and its count starts again. Returns how many were held.
+   * A message from one scheme's Taskmaster to another's (message_taskmaster). Each pair shares one
+   * count, both ways: TASKMASTER_LOOP_LIMIT per TASKMASTER_LOOP_WINDOW_MS go through, which stops a
+   * runaway exchange within a few turns but not work spread out over an hour. Past that each is held,
+   * with a note in both chats, until a person continues in either. `left` is how many more may go now.
    */
-  continueLoop(minionId: number, by: string): number {
-    const loop = this.store.getSetting<LoopState>(loopKey(minionId));
-    if (!loop) return 0;
-    this.store.deleteSetting(loopKey(minionId));
-    if (!loop.held.length) return 0;
-    const n = loop.held.length;
-    const text = `${by} continued, so ${n === 1 ? 'the held message' : `the ${n} held messages`} went through.`;
-    for (const id of this.loopChats(this.store.getTicket(minionId)!)) this.emit(id, 'loop_continued', { minion: minionId, by, text });
-    for (const m of loop.held) this.send(m.to, m.author, m.text);
-    return n;
+  relayTaskmaster(from: number, to: number, author: string, text: string): { held: boolean; left: number } {
+    const { held, left } = this.guard(pairKey(from, to), TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, to, author, text);
+    if (held) {
+      const [a, b] = [from, to].map((id) => this.store.getProject(this.store.getTicket(id)!.project_id)!.name);
+      const what = `${a}'s message to ${b} ("${clip(text)}")`;
+      const note = held === 1
+        ? `Paused: the ${AGENT_NAME}s of ${a} and ${b} have exchanged ${TASKMASTER_LOOP_LIMIT} messages in ${TASKMASTER_LOOP_WINDOW_MS / 60_000} minutes, so ${what} is held until a person continues.`
+        : `Also held: ${what}.`;
+      // Each chat's note names its own Taskmaster, whose Continue releases all its held exchanges.
+      for (const id of [from, to]) this.emit(id, 'loop_paused', { minion: id, text: note });
+    }
+    return { held: held > 0, left };
+  }
+
+  /** Count a message against the loop at `key`: send it, or hold it once `limit` went in `windowMs` (or one is held already). `held` is how many wait now (0 if it went), `left` how many more may go. */
+  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string): { held: number; left: number } {
+    const loop = this.store.getSetting<LoopState>(key) ?? { sent: [], held: [] };
+    const now = this.now();
+    loop.sent = loop.sent.filter((t) => now - t < windowMs);
+    if (!loop.held.length && loop.sent.length < limit) {
+      loop.sent.push(now);
+      this.store.setSetting(key, loop);
+      this.send(to, author, text);
+      return { held: 0, left: limit - loop.sent.length };
+    }
+    loop.held.push({ to, author, text });
+    this.store.setSetting(key, loop);
+    return { held: loop.held.length, left: 0 };
+  }
+
+  /**
+   * A person continued a minion paused by the loop guard, or wrote into its chat or its Taskmaster's:
+   * the held messages go through in order and its count starts again. For a Taskmaster, the same for
+   * each of its exchanges with other schemes' Taskmasters. Returns how many were held.
+   */
+  continueLoop(ticketId: number, by: string): number {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket) return 0;
+    const loops = ticket.kind === 'coordinator'
+      ? this.store.listProjects().map((p) => this.store.getCoordinator(p.id)).filter((c) => c && c.id !== ticketId)
+        .map((c) => ({ key: pairKey(ticketId, c!.id), chats: [ticketId, c!.id] }))
+      : [{ key: loopKey(ticketId), chats: this.loopChats(ticket) }];
+    let total = 0;
+    for (const { key, chats } of loops) {
+      const loop = this.store.getSetting<LoopState>(key);
+      if (!loop) continue;
+      this.store.deleteSetting(key);
+      const n = loop.held.length;
+      if (!n) continue;
+      const text = `${by} continued, so ${n === 1 ? 'the held message' : `the ${n} held messages`} went through.`;
+      // A minion's note is keyed by the minion in both chats; a Taskmasters' note by each chat's own Taskmaster.
+      for (const id of chats) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' ? id : ticketId, by, text });
+      for (const m of loop.held) this.send(m.to, m.author, m.text);
+      total += n;
+    }
+    return total;
   }
 
   /** The chats a loop-guard note shows in: the minion's and its Taskmaster's. */

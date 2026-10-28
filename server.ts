@@ -641,12 +641,12 @@ function ticketView(id: number) {
 
 /**
  * A person wrote into a chat, which counts as continuing the loop guard there: for a minion's chat,
- * that minion; for the Taskmaster's, every minion of its scheme.
+ * that minion; for the Taskmaster's, every minion of its scheme and its exchanges with other Taskmasters.
  */
 function personWrote(ticket: Ticket, session: Session) {
   if (session.agent !== undefined) return;
   runner.personWrote(ticket.id);
-  const minions = ticket.kind === 'coordinator' ? store.listTickets(ticket.project_id).filter((t) => t.kind !== 'coordinator') : [ticket];
+  const minions = ticket.kind === 'coordinator' ? store.listTickets(ticket.project_id) : [ticket];
   for (const t of minions) runner.continueLoop(t.id, session.name);
 }
 
@@ -847,11 +847,33 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   const inScope = (projectId: number) => {
     if (scope !== null && scope !== projectId) throw new HttpError(403, 'Outside this Taskmaster\'s scheme');
   };
-  if (scope !== null && !/^\/api\/(projects\/\d+(\/tickets|\/properties(\/[a-z]+)?)?|tickets\/\d+(\/[a-z]+)?)$/.test(pathname)) {
+  if (scope !== null && !/^\/api\/(taskmaster|projects\/\d+(\/tickets|\/properties(\/[a-z]+)?)?|tickets\/\d+(\/[a-z]+)?)$/.test(pathname)) {
     throw new HttpError(403, 'Not available to the Taskmaster');
   }
 
   if (pathname.startsWith('/api/push/')) return pushApi(req, res, pathname, method, session);
+
+  if (pathname === '/api/taskmaster' && method === 'POST') {
+    // message_taskmaster: one scheme's Taskmaster writes to another's, the only way past inScope. It
+    // reaches that Taskmaster alone, never its minions; minions' tokens were refused above.
+    const from = session.agent === undefined ? null : store.getTicket(session.agent);
+    if (from?.kind !== 'coordinator') throw new HttpError(403, `Only a ${AGENT_NAME} can message another scheme's ${AGENT_NAME}`);
+    const body = await readJson(req);
+    const text = str(body.text, 'Message', 10_000);
+    const want = String(body.scheme ?? '').trim().toLowerCase();
+    const others = store.listProjects().filter((p) => p.id !== from.project_id);
+    const project = others.find((p) => p.name.toLowerCase() === want) ?? others.find((p) => String(p.id) === want);
+    if (!project) {
+      const own = store.getProject(from.project_id)!;
+      if (want === own.name.toLowerCase() || want === String(own.id)) throw new HttpError(400, `${own.name} is your own scheme: use message_ticket for its minions`);
+      throw new HttpError(404, `No other scheme called "${String(body.scheme ?? '')}". The other schemes: ${others.map((p) => `${p.name} (${p.id})`).join(', ') || 'none'}`);
+    }
+    const to = await ensureCoordinator(project);
+    const sender = store.getProject(from.project_id)!.name;
+    const { held, left } = runner.relayTaskmaster(from.id, to.id, `${AGENT_NAME} of ${sender}`, text);
+    if (!held) runner.emit(from.id, 'note', { text: `Sent the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
+    return json(res, 202, { scheme: project.name, held, left });
+  }
 
   if (pathname === '/api/stream') {
     if (clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');

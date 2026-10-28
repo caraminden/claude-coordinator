@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { gzip } from 'node:zlib';
 import { homedir } from 'node:os';
 import { commentMessage, fileType, findArtifacts, isArtifact, linkedPaths, optionImageProblem, resolveFile } from './src/artifacts.ts';
+import { APP_NAME } from './src/appname.ts';
 import { AGENT_NAME, Auth, looksLikeUrl, threadMayCall, type Session } from './src/auth.ts';
 import { branchStatus, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
@@ -43,7 +44,8 @@ await mkdir(DATA_DIR, { recursive: true });
 // a new front end that calls API routes the old server doesn't have yet.
 const ASSETS = new Map<string, Buffer>();
 for (const f of (await readdir(PUBLIC_DIR, { withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name).sort()) {
-  ASSETS.set(f, await readFile(join(PUBLIC_DIR, f)));
+  const body = await readFile(join(PUBLIC_DIR, f));
+  ASSETS.set(f, /\.(html|js|webmanifest)$/.test(f) ? Buffer.from(body.toString('utf8').replaceAll('%APP_NAME%', APP_NAME)) : body);
 }
 // Fingerprint of the front end, so open tabs can tell they are stale after a deploy.
 const ASSET_VERSION = createHash('sha256')
@@ -1240,7 +1242,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => console.log(`Overlord listening on http://${HOST}:${PORT}`));
+server.listen(PORT, HOST, () => console.log(`${APP_NAME} listening on http://${HOST}:${PORT}`));
 
 // The machines-only listener: the agent's two endpoints and the agent script, nothing else.
 if (MACHINES_URL) {

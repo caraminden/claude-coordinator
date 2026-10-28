@@ -2,6 +2,7 @@
 // ticket tools to manage the project's other tickets through the coordinator API.
 // Started by claude from the coordinator's --mcp-config; configured by environment.
 import { createInterface } from 'node:readline';
+import { APP_NAME } from './appname.ts';
 
 const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
 const TOKEN = process.env.COORDINATOR_TOKEN ?? '';
@@ -388,7 +389,7 @@ async function runTool(name: string, args: any): Promise<string> {
       } catch (err: any) {
         // A server from before close_self refuses the route with its generic "only itself" error.
         if (/only update itself|Not found/.test(err.message)) {
-          throw new Error('The Overlord server running now predates close_self, so it cannot dismiss minions yet; it will after its next restart. End your reply with "Done, ready to close" instead.');
+          throw new Error(`The ${APP_NAME} server running now predates close_self, so it cannot dismiss minions yet; it will after its next restart. End your reply with "Done, ready to close" instead.`);
         }
         throw err;
       }

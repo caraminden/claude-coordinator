@@ -1,4 +1,4 @@
-// Overlord front end: hash-routed views over the JSON API, live via SSE.
+// Front end: hash-routed views over the JSON API, live via SSE.
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 import { inAppHash, linkThreadRefs } from './threadrefs.js';
 import { initDrawers } from './drawers.js';

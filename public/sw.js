@@ -8,7 +8,7 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode !== 'navigate') return;
   event.respondWith(fetch(event.request).catch(() => new Response(
     '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Offline</title>' +
-    '<body style="font:16px system-ui;padding:2rem;text-align:center">Overlord can\'t be reached right now. ' +
+    '<body style="font:16px system-ui;padding:2rem;text-align:center">%APP_NAME% can\'t be reached right now. ' +
     '<a href="">Try again</a></body>',
     { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
   )));
@@ -21,7 +21,7 @@ self.addEventListener('push', (event) => {
   try {
     msg = event.data?.json() ?? {};
   } catch {}
-  event.waitUntil(self.registration.showNotification(msg.title || 'Overlord', {
+  event.waitUntil(self.registration.showNotification(msg.title || '%APP_NAME%', {
     body: msg.body || '',
     tag: msg.tag,
     renotify: !!msg.tag,

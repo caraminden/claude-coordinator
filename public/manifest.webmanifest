@@ -1,6 +1,6 @@
 {
-  "name": "Overlord",
-  "short_name": "Overlord",
+  "name": "%APP_NAME%",
+  "short_name": "%APP_NAME%",
   "description": "Chat with Claude Code minions together",
   "id": "/",
   "start_url": "/",

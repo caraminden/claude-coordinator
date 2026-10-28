@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Overlord machine agent: lends this computer's MCP server (a Godot editor, say) to the
+// The app's machine agent: lends this computer's MCP server (a Godot editor, say) to the
 // coordinator's threads. It dials out to the app and keeps that connection open, so the app never
 // needs to reach this computer; each thread session gets its own copy of the MCP server.
 //

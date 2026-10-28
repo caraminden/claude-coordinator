@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from
 import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
+import { APP_NAME } from './appname.ts';
 import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
 import { claudeConfigDir, lastEffort, projectSlug, restoreSession, saveSession } from './sessions.ts';
@@ -80,7 +81,7 @@ const turnKey = (ticketId: number) => `turn:${ticketId}`;
 /** Auto-resumes in a row before a thread is left alone, in case its own turn is what kills the server. */
 export const MAX_RESUMES = 2;
 const RESUME_PROMPT =
-  "The Overlord server restarted while you were working, which interrupted your last turn. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.";
+  `The ${APP_NAME} server restarted while you were working, which interrupted your last turn. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
 
 /** One turn's prompt as a stream-json user message, so pasted images reach Claude as images. */
 export function promptMessage(batch: QueuedMessage[]): string {
@@ -187,7 +188,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     : 'Your working directory is a dedicated folder for this minion.';
   return [
     `You are a minion working on #${ticket.number} "${ticket.title}" in project "${project.name}".`,
-    'You are managed by Overlord, a shared web app where several people chat with you. The project\'s Taskmaster is the Claude session that coordinates the project\'s minions.',
+    `You are managed by ${APP_NAME}, a shared web app where several people chat with you. The project's Taskmaster is the Claude session that coordinates the project's minions.`,
     'Subagents you start with the Agent tool are called Grunts.',
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
     where,
@@ -276,7 +277,7 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sh
 
 function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: string | null): string {
   return [
-    `You are the Taskmaster for project "${project.name}" in Overlord, a shared web app where several people chat with Claude Code sessions called minions.`,
+    `You are the Taskmaster for project "${project.name}" in ${APP_NAME}, a shared web app where several people chat with Claude Code sessions called minions.`,
     'People open the project and talk to you first. You keep track of the project\'s minions and manage them with the `coordinator` MCP tools: list_tickets, read_ticket, create_ticket, message_ticket, update_ticket, close_ticket, reopen_ticket and stop_ticket.',
     'The project instructions (shown at the end of this prompt when set) reach you and every minion on its next turn. When people ask you to add, change or drop a standing rule for the whole project, read the current text with get_project_instructions and save the full new text with set_project_instructions; tell them what changed.',
     'Each minion is a separate Claude Code session with its own git worktree and branch. Hand real work (code changes, investigations) to minions rather than doing it yourself; give each new minion a self-contained first message, since it cannot see this conversation.',

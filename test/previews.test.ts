@@ -46,6 +46,8 @@ createServer((req, res) => res.end(JSON.stringify({ ok: true }))).listen(Number(
 `);
 store.setTicketDir(old.id, oldDir, 'ticket/2-old');
 store.savePushSubscription('Josh', 'https://push.example/x', 'k', 'a');
+// A running turn's record, as live has for a turn in its own systemd unit.
+store.setSetting(`turn:${ticket.id}`, { resumes: 0, unit: 'citadel-turn-x.service' });
 store.db.close();
 
 const agent = new Auth(PASSWORD, SECRET);
@@ -114,9 +116,10 @@ test('the proxy serves the preview to a signed-in person, as that person, withou
   const logout = await fetch(`${base}/preview/${ticket.id}/api/logout`, { method: 'POST', headers: { Cookie: cookie } });
   assert.equal(logout.status, 200);
   assert.equal(logout.headers.get('set-cookie'), null);
-  // The copy came without push subscriptions, though the live database has one.
+  // The copy came without push subscriptions or turn records, though the live database has them.
   const copy = new DatabaseSync(join(data, 'previews', String(ticket.id), 'coordinator.db'), { readOnly: true });
   assert.equal(copy.prepare('SELECT count(*) AS n FROM push_subscriptions').get()!.n, 0);
+  assert.equal(copy.prepare("SELECT count(*) AS n FROM settings WHERE key LIKE 'turn:%'").get()!.n, 0);
   copy.close();
 });
 

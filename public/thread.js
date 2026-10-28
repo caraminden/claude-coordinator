@@ -662,7 +662,7 @@ function planCard(ticketId, card) {
     approve.disabled = revise.disabled = sendNotes.disabled = cancel.disabled = true;
     status.textContent = verdict === 'approve' ? 'Approving…' : 'Sending…';
     try {
-      const ticket = await api(`/api/tickets/${ticketId}/verdict`, { method: 'POST', body: { planId: card.id, verdict, notes: notes.value.trim() } });
+      const ticket = await api(`api/tickets/${ticketId}/verdict`, { method: 'POST', body: { planId: card.id, verdict, notes: notes.value.trim() } });
       if (view?.id === ticketId) {
         view.ticket = ticket;
         renderTicketHead();

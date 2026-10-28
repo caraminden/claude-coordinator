@@ -58,7 +58,7 @@ report() {
       -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
       -d "$(node -e 'console.log(JSON.stringify({ok:process.argv[1]==="ok",text:process.argv[2]}))' "$ok" "$text")" >/dev/null ||
       say "could not post the report to minion $ticket's chat"
-  done <"$STATE/reporters"
+  done < <(sort -u "$STATE/reporters") # one note per minion, however many deploys it queued
   rm -f "$STATE/reporters"
 }
 

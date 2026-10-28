@@ -105,6 +105,7 @@ uses the built-in `node:sqlite`.
 | `public/progress.js` | Task-list and step tracking, shared with the server |
 | `deploy/claude-coordinator.service` | systemd user unit, with a resource-cap drop-in in `.service.d/` |
 | `deploy/backup.sh`, `deploy/prune.sh` | Nightly database backup; pruning of long-closed minions (each with a `.service` and `.timer`) |
+| `tools/deploy.sh`, `tools/boot-check.ts` | Safe deploys: checks, front-end reloads, idle restart with rollback |
 
 ## Running
 
@@ -163,6 +164,31 @@ systemctl --user enable --now claude-coordinator-backup.timer claude-coordinator
 
 Turns run as the service's user with that user's Claude Code login, so every
 minion currently uses Cara's account.
+
+### Deploying
+
+Once a change is on `main` in the scheme repo, run `tools/deploy.sh` from the
+minion that made it. It never hard-restarts:
+
+1. It fast-forwards `~/claude-coordinator` to `main`, runs `node --test`, and
+   boots the new code on a spare port against a copy of the database
+   (`tools/boot-check.ts`: the app page, `/api/health`, and the MCP server's
+   initialize and one tool call). If any of that fails it puts the checkout
+   back and exits non-zero; nothing restarts.
+2. If everything changed since the commit the server booted from is under
+   `public/`, it sends `SIGHUP`. The server re-reads `public/` and tells open
+   tabs, which reload once nobody is typing. No restart, no interrupted turns.
+3. Otherwise it queues the fixed-name `cc-restart-when-idle` unit (a second
+   deploy joins the one already queued). Once no minion is running it
+   restarts, waits up to 30 s for `/api/health` to answer from the new commit,
+   and tags it `last-good`. If it doesn't come up, it resets to `last-good`
+   and restarts again. After 2 h without an idle moment it gives up.
+
+How a queued restart went is posted in the deploying minion's chat (a failure
+as an error, which pushes) and in the journal: `journalctl --user -u
+cc-restart-when-idle` and `-u claude-coordinator`. A rollback leaves the bad
+commit on `main`, so fix forward. Back up `coordinator.db` with `sqlite3
+.backup` before deploying a data migration.
 
 ## Permissions
 

@@ -29,6 +29,7 @@ export const STATES = {
   blocked: { emoji: '⛔', label: 'Blocked on something outside the minion' },
   outside: { emoji: '⏳', label: 'Waiting on work running elsewhere' },
   'pending-deploy': { emoji: '🚀', label: 'Deployed; dismissed once it is live' },
+  limited: { emoji: '⌛', label: 'Hit the usage limit; waiting for it to reset' },
 };
 
 export let me = null;

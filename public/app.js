@@ -1,6 +1,7 @@
 // Front end: hash-routed views over the JSON API, live via SSE. This entry starts the app;
 // each view lives in its own module (see core.js for what they share).
-import { api, app, h, reloadNow, renderUsage, start, usage } from './core.js';
+import { api, app, h, reloadNow, renderUsage, start, usage, view } from './core.js';
+import { renderSidebar } from './sidebar.js';
 import { initDrawers } from './drawers.js';
 
 // ---------- boot ----------
@@ -26,9 +27,10 @@ new MutationObserver(() => {
   const btn = h('button', { type: 'button', class: 'refresh-btn', title: 'Refresh', 'aria-label': 'Refresh', onclick: reloadNow }, '↻');
   row.insertBefore(btn, row.querySelector(':scope > h2')?.nextSibling ?? row.firstChild);
 }).observe(app, { childList: true, subtree: true });
-// Keep relative times in the usage readout honest.
+// Keep relative times honest: the usage readout, and the minions list's waits and usage-reset countdowns.
 setInterval(() => {
   if (usage) renderUsage();
+  if (view?.kind === 'project') renderSidebar();
 }, 30_000);
 
 api('/api/me').then((r) => start(r.name)).catch(() => {});

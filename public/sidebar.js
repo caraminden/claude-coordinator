@@ -1,5 +1,5 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
-import { ago, api, app, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, view } from './core.js';
+import { ago, api, app, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, usage, view } from './core.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -216,33 +216,44 @@ function byUrgency(a, b) {
 }
 
 /**
- * A thread's state cell: ❓ / ✅ / 🧪 when it is your move (with how long it has waited), ● x/y while
- * Claude works, ⏳ ⛔ when it waits on something else, 🧊 parked, ⚠️ stuck.
+ * A thread's state pill, coloured by family (one meaning each): you (amber, your move, with how
+ * long it has waited), done (green), broken (red), work (blue, with steps done), wait (violet: the
+ * usage reset, a deploy, CI), idle (grey: parked, dismissed).
  */
 export function rowState(t) {
   const steps = t.steps ? ` ${t.steps.done}/${t.steps.total}` : '';
-  const waited = () => {
-    const days = Date.now() - t.updated_at >= 86_400_000;
-    return h('b', { class: days ? 'st' : 'm' }, shortAgo(t.updated_at));
-  };
-  if (t.approvals) return { rank: 0, cls: 'q', cell: ['✋ ', waited()], label: 'Waiting for your approval' };
-  if (t.status === 'running' || t.status === 'new') return { rank: 1, cls: 'w', cell: [`●${steps}`], counted: !!steps, label: 'Claude is working' };
-  if (t.status === 'error') return { rank: 0, cls: 'st', cell: ['⚠️'], label: 'Stuck: the last turn failed' };
-  if (t.status === 'closed') return { rank: 5, cls: 'm', cell: ['✓'], label: 'Dismissed' };
+  const waited = (word) => `${word} ${shortAgo(t.updated_at)}`;
+  if (t.approvals) return { rank: 0, fam: 'you', cell: waited('approve'), label: 'Waiting for your approval' };
+  if (t.status === 'running' || t.status === 'new') return { rank: 1, fam: 'work', cell: [h('i', { class: 'pulse' }), steps.trim() || 'working'], counted: !!steps, label: 'Claude is working' };
+  if (t.status === 'error' && t.state === 'limited') return limitState(t, waited);
+  if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited('stuck'), label: 'Stuck: the last turn failed' };
+  if (t.status === 'closed') return { rank: 5, fam: 'idle', cell: 'dismissed', label: 'Dismissed' };
   const state = STATES[t.state];
-  if (t.state === 'parked') return { rank: 4, cls: 'm', cell: [state.emoji], label: state.label };
-  if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, cls: 'w', cell: [`${state.emoji}${steps}`], counted: !!steps, label: state.label };
-  if (t.state === 'blocked') return { rank: 2, cls: 'st', cell: [state.emoji], label: state.label };
-  if (state) return { rank: 0, cls: 'ok', cell: [state.emoji, ' ', waited()], label: state.label };
-  return { rank: 0, cls: 'q', cell: ['❓ ', waited()], label: 'Your move' };
+  if (t.state === 'parked') return { rank: 4, fam: 'idle', cell: 'parked', label: state.label };
+  if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, fam: 'wait', cell: `${t.state === 'outside' ? 'waiting' : 'deploying'}${steps}`, counted: !!steps, label: state.label };
+  if (t.state === 'blocked') return { rank: 2, fam: 'broken', cell: 'blocked', label: state.label };
+  if (t.state === 'ready') return { rank: 0, fam: 'done', cell: waited('ready'), label: state.label };
+  if (t.state === 'try') return { rank: 0, fam: 'you', cell: waited('try it'), label: state.label };
+  return { rank: 0, fam: 'you', cell: waited('reply'), label: 'Your move' };
+}
+
+/**
+ * A minion that hit the usage limit: a countdown while the account's limit is still hit, your move
+ * once a later turn shows it has reset, and just "limit hit" when neither is known (the note says when).
+ */
+function limitState(t, waited) {
+  const hit = [usage?.session, usage?.weekly].find((w) => w?.status === 'rejected' && w.resetsAt > Date.now());
+  if (hit) return { rank: 2, fam: 'wait', cell: `resets ${shortIn(hit.resetsAt)}`, label: STATES.limited.label };
+  if (usage?.updatedAt > t.updated_at) return { rank: 0, fam: 'you', cell: waited('resume'), label: 'The usage limit has reset: send a message to carry on' };
+  return { rank: 2, fam: 'wait', cell: 'limit hit', label: STATES.limited.label };
 }
 
 /** One compact row: number + short ask and the state on top, the thread's note (or what it is doing) below. */
 function threadRow(t, href = threadHref(t)) {
   const coord = isCoordinator(t);
   // The coordinator is always there to talk to; only show when it is busy.
-  const st = coord && t.status !== 'running' ? { cls: '', cell: [], label: statusLabel(t) } : rowState(t);
-  const working = st.cls === 'w' || st.cls === 'm';
+  const st = coord && t.status !== 'running' ? { fam: '', cell: '', label: statusLabel(t) } : rowState(t);
+  const quiet = st.fam === 'work' || st.fam === 'idle' || st.fam === 'wait';
   // The state cell already shows steps done, so the activity line drops its own count.
   const activity = st.counted && t.last_activity ? withoutCount(t.last_activity) : t.last_activity;
   const note = (t.status === 'running' ? activity : t.note || activity) || '';
@@ -252,14 +263,24 @@ function threadRow(t, href = threadHref(t)) {
     note,
   ].filter(Boolean).join('\n');
   const active = view.id === t.id;
-  // Rows waiting on you get a tinted background (red when the thread is stuck), so they stand out.
-  // Faint once you've opened the thread since it last changed; vibrant again when it changes.
-  const yours = !coord && st.rank === 0 ? ` yours${st.cls === 'st' ? ' stuck' : ''}${isSeen(t) ? ' seen' : ''}` : '';
-  return h('a', { class: `thread-row s-${t.status}${coord ? ' coordinator' : ''}${yours}${active ? ' active' : ''}`, href, title: details, 'data-id': t.id },
-    h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
+  // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
+  // Unread (a dot and a bold title) marks any settled row that changed since you last opened it.
+  const yours = !coord && st.rank === 0 ? ' yours' : '';
+  const unread = !coord && st.fam !== 'work' && st.fam !== 'idle' && !isSeen(t) ? ' unread' : '';
+  return h('a', { class: `thread-row s-${t.status} f-${st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${active ? ' active' : ''}`, href, title: details, 'data-id': t.id },
+    h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
-    h('span', { class: `state ${st.cls}` }, st.cell),
-    note ? h('span', { class: `note${working ? ' t' : ''}` }, note) : '');
+    st.cell ? h('span', { class: 'state' }, st.cell) : '',
+    note ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, note) : '');
+}
+
+/** "40m", "1h40", "14h", "2d": time left, for tight spaces. */
+function shortIn(ms) {
+  const m = Math.max(1, Math.ceil((ms - Date.now()) / 60_000));
+  if (m < 60) return `${m}m`;
+  if (m < 600) return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`;
+  if (m < 1440) return `${Math.floor(m / 60)}h`;
+  return `${Math.floor(m / 1440)}d`;
 }
 
 /** "now", "5m", "3h", "2d": ages for tight spaces. */

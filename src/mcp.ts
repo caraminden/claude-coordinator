@@ -28,6 +28,11 @@ const STATE = {
 };
 const NOTE = { type: ['string', 'null'], description: 'One terse line on where things stand, max 60 chars, e.g. "needs a pick: tabs or a list" or "merged, live after restart". No names or prefixes.' };
 
+const BUILD = {
+  type: ['integer', 'null'],
+  description: 'The major build this work is assigned to, e.g. 8 for Build 8; the threads list groups the build\'s threads together. null takes it out of a build.',
+};
+
 const TICKET_ID = { type: 'integer', description: 'Ticket number in this project, e.g. 12 for #12 (as shown by list_tickets)' };
 
 const ASK_QUESTION = {
@@ -117,10 +122,10 @@ const TOOLS = [
   },
   {
     name: 'update_ticket',
-    description: "Change a ticket's title, tag, state or note; leave out what should stay. (The branch keeps its original name.)",
+    description: "Change a ticket's title, tag, state, note or build; leave out what should stay. (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, title: TITLE, tag: TAG, state: STATE, note: NOTE },
+      properties: { ticket_id: TICKET_ID, title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD },
       required: ['ticket_id'],
     },
   },
@@ -198,6 +203,7 @@ function ticketLine(t: any): string {
   return [
     `#${t.number} ${t.title}`,
     t.tag ? `tag: ${t.tag}` : '',
+    t.build ? `build: ${t.build}` : '',
     `status: ${t.status}${t.state ? `, ${t.state}` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
     t.note ? `note: ${t.note}` : '',
     t.branch ? `branch: ${t.branch}` : '',
@@ -242,7 +248,7 @@ async function id(args: any): Promise<number> {
 /** The label fields a call sets; ones left out stay as they are. */
 function labelFields(args: any) {
   const out: Record<string, unknown> = {};
-  for (const k of ['title', 'tag', 'state', 'note']) if (args[k] !== undefined) out[k] = args[k];
+  for (const k of ['title', 'tag', 'state', 'note', 'build']) if (args[k] !== undefined) out[k] = args[k];
   return out;
 }
 
@@ -251,7 +257,7 @@ const THREAD_TOOLS = [
     name: 'set_thread_status',
     description:
       "Label this thread for the project's threads list: its short title, kind of work, and where things stand. Leave out what should stay. Call it when the work's kind becomes clear, and at the end of a turn whenever the state or note changes.",
-    inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE } },
+    inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD } },
   },
   ASK_QUESTION,
   {

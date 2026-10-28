@@ -481,6 +481,8 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .thread-group > summary::-webkit-details-marker { display: none; }
 .thread-group > summary::after { content: ' ▸'; }
 .thread-group[open] > summary::after { content: ' ▾'; }
+.g-build > h3 { color: hsl(205 65% 45%); }
+.g-build > h3 .muted { text-transform: none; font-weight: normal; }
 .g-feature > h3 { color: hsl(265 55% 55%); }
 .g-bug > h3 { color: hsl(0 60% 52%); }
 .g-design > h3 { color: hsl(330 55% 55%); }

@@ -41,6 +41,7 @@ export interface Ticket {
   tag: TicketTag | null; // what kind of work, for grouping the threads list
   state: TicketState | null; // set by the thread at the end of a turn; cleared when the next turn starts
   note: string | null; // the thread's own one-line status, ≤ 60 chars
+  build: number | null; // the major build it is assigned to; the threads list groups by it
   kind: TicketKind;
   title: string;
   status: TicketStatus;
@@ -217,6 +218,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'tag', 'ALTER TABLE tickets ADD COLUMN tag TEXT'],
   ['tickets', 'state', 'ALTER TABLE tickets ADD COLUMN state TEXT'],
   ['tickets', 'note', 'ALTER TABLE tickets ADD COLUMN note TEXT'],
+  ['tickets', 'build', 'ALTER TABLE tickets ADD COLUMN build INTEGER'],
   ['tickets', 'model', 'ALTER TABLE tickets ADD COLUMN model TEXT'],
   ['tickets', 'effort', 'ALTER TABLE tickets ADD COLUMN effort TEXT'],
   ['tickets', 'last_model', 'ALTER TABLE tickets ADD COLUMN last_model TEXT'],
@@ -369,7 +371,7 @@ export class Store {
     this.db.prepare(`UPDATE tickets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   }
 
-  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'tag' | 'state' | 'note' | 'model' | 'effort' | 'last_model' | 'last_effort'>>) {
+  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'tag' | 'state' | 'note' | 'build' | 'model' | 'effort' | 'last_model' | 'last_effort'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');

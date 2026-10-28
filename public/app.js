@@ -2,6 +2,7 @@
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 import { inAppHash, linkThreadRefs } from './threadrefs.js';
 import { initDrawers } from './drawers.js';
+import { threadSections } from './threadgroups.js';
 
 const app = document.getElementById('app');
 const crumbs = document.getElementById('crumbs');
@@ -17,7 +18,6 @@ const TAGS = {
   process: { emoji: '⚙️', label: 'Process', section: 'Process' },
   idea: { emoji: '💡', label: 'Idea', section: 'Ideas' },
 };
-const SECTIONS = ['feature', 'bug', 'design', 'process', null, 'idea']; // null: untagged, "Other"
 const STATES = {
   ready: { emoji: '✅', label: 'Ready to merge or pick up' },
   try: { emoji: '🧪', label: 'Ready for you to try' },
@@ -1220,12 +1220,10 @@ function renderSidebar() {
   if (threadSearch.q) return renderThreadResults(el, tickets.sort((a, b) => b.updated_at - a.updated_at));
   const open = tickets.filter((t) => t.status !== 'closed');
   const closed = tickets.filter((t) => t.status === 'closed').sort((a, b) => b.updated_at - a.updated_at);
-  const sections = SECTIONS.map((tag) => {
-    const rows = open.filter((t) => (TAGS[t.tag] ? t.tag : null) === tag).sort(byUrgency);
-    if (!rows.length) return '';
-    return h('section', { class: `thread-group g-${tag ?? 'other'}` },
-      h('h3', {}, tag ? TAGS[tag].section : 'Other'), rows.map((t) => threadRow(t)));
-  });
+  const sections = threadSections(open, Object.keys(TAGS)).map((s) =>
+    h('section', { class: `thread-group g-${s.build ? 'build' : s.key}` },
+      h('h3', {}, s.build ? ['Build ', s.build, s.current ? h('span', { class: 'muted' }, ' current') : ''] : s.tag ? TAGS[s.tag].section : 'Other'),
+      s.rows.sort(byUrgency).map((t) => threadRow(t))));
   let closedGroup = '';
   if (closed.length) {
     // Closed threads stay out of the way but can still be opened and reopened.

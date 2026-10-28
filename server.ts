@@ -463,6 +463,12 @@ function oneOf(v: unknown, allowed: readonly string[], field: string): string | 
   return v;
 }
 
+function buildNumber(v: unknown): number | null {
+  if (v === null || v === '') return null;
+  if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 9999) throw new HttpError(400, 'Build must be a whole number from 1 to 9999');
+  return v as number;
+}
+
 function str(v: unknown, field: string, max = 200): string {
   if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `${field} is required`);
   if (v.length > max) throw new HttpError(400, `${field} is too long`);
@@ -893,15 +899,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
     }
     if (action === '' && method === 'PATCH') {
-      // Any of title, tag, state, note, model and effort; null (or "") clears all but the title.
+      // Any of title, tag, state, note, build, model and effort; null (or "") clears all but the title.
       const body = await readJson(req);
-      const fields: Partial<Pick<Ticket, 'title' | 'tag' | 'state' | 'note' | 'model' | 'effort'>> = {};
+      const fields: Partial<Pick<Ticket, 'title' | 'tag' | 'state' | 'note' | 'build' | 'model' | 'effort'>> = {};
       if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
       if (body.effort !== undefined) fields.effort = oneOf(body.effort, EFFORTS, 'Effort');
       if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
       if (body.tag !== undefined) fields.tag = oneOf(body.tag, TICKET_TAGS, 'Tag') as TicketTag | null;
       if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
       if (body.note !== undefined) fields.note = body.note ? str(body.note, 'Note', 60) : null;
+      if (body.build !== undefined) fields.build = buildNumber(body.build);
       for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === ticket[k]) delete fields[k];
       if (Object.keys(fields).length) {
         store.updateTicket(id, fields);

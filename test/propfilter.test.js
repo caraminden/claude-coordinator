@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filterChoices } from '../public/propfilter.js';
+import { filterChoices, matchesPicks } from '../public/propfilter.js';
 
 const key = (key, value_kind, values = [], status = 'active') => ({ key, value_kind, status, values });
 const val = (value, status = 'active', reviewed = true) => ({ value, status, reviewed });
@@ -22,4 +22,17 @@ test('person and number keys offer what minions carry, sorted; empty and inactiv
     { key: 'requestedBy', values: ['cara', 'josh'] },
     { key: 'build', values: [8, 9, 10] },
   ]);
+});
+
+test('picks: any value within a key, every key across them; multi and number values count', () => {
+  const a = { properties: { type: 'bug', stage: 'in-progress', area: ['town', 'ui'], build: 8 } };
+  const b = { properties: { type: 'feature', stage: 'done', area: ['ui'] } };
+  const c = {};
+  const match = (picks) => [a, b, c].filter((t) => matchesPicks(t, new Map(Object.entries(picks).map(([k, v]) => [k, new Set(v)])))).length;
+  assert.equal(match({}), 3);
+  assert.equal(match({ type: ['bug', 'feature'] }), 2);
+  assert.equal(match({ type: ['bug', 'feature'], stage: ['in-progress'] }), 1);
+  assert.equal(match({ area: ['town'] }), 1);
+  assert.equal(match({ build: [8] }), 1);
+  assert.equal(match({ type: ['art'] }), 0);
 });

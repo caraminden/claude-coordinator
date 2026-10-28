@@ -14,3 +14,8 @@ export function filterChoices(keys, tickets) {
           .sort((a, b) => (typeof a === 'number' ? a - b : String(a).localeCompare(String(b)))),
   })).filter((c) => c.values.length);
 }
+
+/** Whether a minion matches the ticked values: any ticked value of a key, for every key with ticks. */
+export function matchesPicks(t, picks) {
+  return [...picks].every(([key, set]) => [t.properties?.[key] ?? []].flat().some((v) => set.has(v)));
+}

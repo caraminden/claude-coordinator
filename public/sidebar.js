@@ -1,7 +1,8 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
 import { ago, api, app, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, view } from './core.js';
 import { loadDraft, saveDraft } from './composer.js';
-import { renderPropFilter } from './properties.js';
+import { propFilter, renderPropFilter } from './properties.js';
+import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
@@ -146,9 +147,12 @@ export function newTicketForm(projectId) {
 export function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el) return;
-  const tickets = [...view.tickets.values()];
+  const all = [...view.tickets.values()];
   document.getElementById('coordinator-row')?.replaceChildren(threadRow(view.coordinator, `#/p/${view.projectId}`));
   renderPropFilter();
+  // The property filter narrows open and dismissed minions alike; the Taskmaster always shows.
+  const picks = propFilter.projectId === view.projectId ? propFilter.picks : new Map();
+  const tickets = picks.size ? all.filter((t) => matchesPicks(t, picks)) : all;
   if (threadSearch.q) return renderThreadResults(el, tickets.sort((a, b) => b.updated_at - a.updated_at));
   const open = tickets.filter((t) => t.status !== 'closed');
   const closed = tickets.filter((t) => t.status === 'closed').sort((a, b) => b.updated_at - a.updated_at);
@@ -164,7 +168,8 @@ export function renderSidebar() {
   }
   el.replaceChildren(
     ...sections, closedGroup,
-    tickets.length ? '' : h('p', { class: 'muted' }, 'No minions yet. Ask the Taskmaster to start one, or type in the box above.'));
+    !all.length ? h('p', { class: 'muted' }, 'No minions yet. Ask the Taskmaster to start one, or type in the box above.')
+      : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : '');
 }
 
 // ---------- search ----------

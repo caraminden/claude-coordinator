@@ -6,10 +6,10 @@ import { createInterface } from 'node:readline';
 import { test } from 'node:test';
 import { MACHINE_MCP_SERVER, MCP_SERVER } from '../src/runner.ts';
 
-// Turns run copies of the MCP servers from a temp dir; a local import that isn't copied
+// Turns run copies of the MCP servers from the data dir; a local import that isn't copied
 // with them makes every session's MCP server die on start (CONNECTION_CLOSED).
 
-test('the pinned mcp.ts starts from its temp dir and answers initialize', async () => {
+test('the pinned mcp.ts starts from its pinned dir and answers initialize', async () => {
   const child = spawn(process.execPath, [MCP_SERVER], {
     cwd: dirname(MCP_SERVER),
     env: { ...process.env, COORDINATOR_ROLE: 'thread', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1' },

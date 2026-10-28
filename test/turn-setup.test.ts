@@ -1,0 +1,158 @@
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { createInterface } from 'node:readline';
+import { after, test } from 'node:test';
+import { Store } from '../src/db.ts';
+
+// The runner pins its MCP servers under $DATA_DIR/run when it loads, sweeping copies of dead servers.
+const root = mkdtempSync(join(tmpdir(), 'turn-setup-'));
+after(() => rmSync(root, { recursive: true, force: true }));
+process.env.DATA_DIR = join(root, 'data');
+const stale = join(root, 'data', 'run', 'mcp-999999999');
+mkdirSync(stale, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
+process.env.MACHINES_URL = 'http://127.0.0.1:1';
+process.env.COORDINATOR_PASSWORD = 'hunter2';
+process.env.XDG_RUNTIME_DIR = '/run/user/1000';
+process.env.LC_TIME = 'en_GB.UTF-8';
+const { MCP_DIR, MCP_SERVER, Runner, turnEnv } = await import('../src/runner.ts');
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+test('pinned MCP copies live in the data dir, one folder per server, and stale ones are swept', () => {
+  assert.equal(MCP_DIR, join(root, 'data', 'run', `mcp-${process.pid}`));
+  assert.equal(dirname(MCP_SERVER), MCP_DIR);
+  assert.ok(!existsSync(stale));
+  assert.ok(readdirSync(MCP_DIR).includes('appname.ts'));
+});
+
+test('a turn inherits only the allowlisted environment', () => {
+  const env = turnEnv({ HOME: '/h', PATH: '/bin', LC_ALL: 'C', CLAUDE_CONFIG_DIR: '/c', XDG_RUNTIME_DIR: '/r', GODOT: '/g', MACHINES_URL: 'x', COORDINATOR_PASSWORD: 'p', SESSION_SECRET: 's', PORT: '8573', HOST: 'h', DBUS_SESSION_BUS_ADDRESS: 'd' });
+  assert.deepEqual(env, { HOME: '/h', PATH: '/bin', LC_ALL: 'C', CLAUDE_CONFIG_DIR: '/c', XDG_RUNTIME_DIR: '/r', GODOT: '/g' });
+});
+
+// A stand-in for `claude -p` that records its arguments and environment, prints an init event
+// whose thread/coordinator server has the status in FAKE_MCP, and ends the turn.
+const fake = join(root, 'claude-fake');
+writeFileSync(
+  fake,
+  `#!${process.execPath}
+const { readFileSync, writeFileSync } = require('node:fs');
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args: process.argv.slice(2), env: process.env }));
+const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
+const role = process.env.COORDINATOR_ROLE;
+console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', cwd: process.cwd(), mcp_servers: status ? [{ name: role, status }] : [] }));
+console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
+`,
+);
+chmodSync(fake, 0o755);
+const store = new Store(join(root, 'test.db'));
+const errors: string[] = [];
+const runner = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 't' }), fake);
+runner.onTurnError = (_id, text) => errors.push(text);
+
+async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string } = {}) {
+  writeFileSync(join(root, 'mcp-status'), mcpStatus);
+  // A scheme has one Taskmaster, so each turn gets a scheme of its own.
+  const project = store.createProject(`P${Math.random()}`, null);
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara', kind });
+  const cwd = join(root, `ticket-${t.id}`);
+  mkdirSync(cwd, { recursive: true });
+  store.setTicketDir(t.id, cwd, null);
+  if (set.model || set.effort) store.updateTicket(t.id, set as any);
+  errors.length = 0;
+  runner.send(t.id, 'Cara', 'go');
+  while (runner.isRunning(t.id)) await wait(20);
+  const run = JSON.parse(readFileSync(join(root, 'turn'), 'utf8'));
+  const flag = (f: string) => (run.args.includes(f) ? run.args[run.args.indexOf(f) + 1] : null);
+  const events = store.listEvents(t.id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text);
+  return { ...run, flag, events };
+}
+
+test('a minion turn gets the compaction window, no service secrets, and its own model choice', async () => {
+  const t = await turn('ticket', 'connected');
+  assert.equal(t.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '250000');
+  assert.equal(t.env.MACHINES_URL, undefined);
+  assert.equal(t.env.COORDINATOR_PASSWORD, undefined);
+  assert.equal(t.env.XDG_RUNTIME_DIR, '/run/user/1000');
+  assert.equal(t.env.LC_TIME, 'en_GB.UTF-8');
+  assert.equal(t.env.COORDINATOR_TOKEN, 't');
+  assert.equal(t.env.COORDINATOR_ROLE, 'thread');
+  assert.equal(t.flag('--model'), null);
+  assert.equal(t.flag('--effort'), null);
+  assert.deepEqual(t.events, []);
+  assert.deepEqual(errors, []);
+});
+
+test('a Taskmaster turn defaults to opus at high effort, and keeps a choice people made', async () => {
+  const t = await turn('coordinator', 'connected');
+  assert.equal(t.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '250000');
+  assert.equal(t.flag('--model'), 'opus');
+  assert.equal(t.flag('--effort'), 'high');
+  const chosen = await turn('coordinator', 'connected', { model: 'sonnet', effort: 'medium' });
+  assert.equal(chosen.flag('--model'), 'sonnet');
+  assert.equal(chosen.flag('--effort'), 'medium');
+});
+
+test('a turn whose own MCP server failed or is missing says so as an error', async () => {
+  const failed = await turn('ticket', 'failed');
+  assert.equal(failed.events.length, 1);
+  assert.match(failed.events[0], /thread MCP server is failed/);
+  assert.equal(errors.length, 1);
+  const missing = await turn('coordinator', '');
+  assert.match(missing.events[0], /coordinator MCP server is missing/);
+  const pending = await turn('ticket', 'pending');
+  assert.deepEqual(pending.events, []);
+});
+
+// The Taskmaster's MCP server against a stand-in API that records what create_ticket sends.
+test('create_ticket lists properties but still starts a minion when a stale session leaves them out', async () => {
+  const bodies: any[] = [];
+  const api = createServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => (body += d)).on('end', () => {
+      bodies.push(JSON.parse(body || '{}'));
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ id: 40, number: 12, title: 'X', status: 'new', created_by: 'Taskmaster' }));
+    });
+  });
+  await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
+  const mcp = spawn(process.execPath, [MCP_SERVER], {
+    env: { PATH: process.env.PATH, COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`, COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1' },
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
+  const replies = new Map<number, (r: any) => void>();
+  createInterface({ input: mcp.stdout! }).on('line', (l) => {
+    const r = JSON.parse(l);
+    replies.get(r.id)?.(r);
+  });
+  let rid = 0;
+  const rpc = (method: string, params: object): Promise<any> => {
+    const id = ++rid;
+    mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    return new Promise((r) => replies.set(id, r));
+  };
+  try {
+    const schema = (await rpc('tools/list', {})).result.tools.find((t: any) => t.name === 'create_ticket').inputSchema;
+    assert.ok(schema.properties.properties);
+    assert.ok(!schema.required.includes('properties'));
+
+    const bare = (await rpc('tools/call', { name: 'create_ticket', arguments: { title: 'X', message: 'go' } })).result;
+    assert.ok(!bare.isError, bare.content[0].text);
+    assert.deepEqual(bodies.at(-1).properties, { type: 'other' });
+    assert.match(bare.content[0].text, /type: other for now.*ticket_id 12/);
+
+    const tagged = (await rpc('tools/call', { name: 'create_ticket', arguments: { title: 'X', tag: 'bug', message: 'go' } })).result;
+    assert.deepEqual(bodies.at(-1).properties, {}); // the server gives a tagged minion the tag's type
+    assert.doesNotMatch(tagged.content[0].text, /type: other/);
+
+    await rpc('tools/call', { name: 'create_ticket', arguments: { title: 'X', properties: { Type: 'art' }, message: 'go' } });
+    assert.deepEqual(bodies.at(-1).properties, { Type: 'art' });
+  } finally {
+    mcp.kill();
+    api.close();
+  }
+});

@@ -139,7 +139,8 @@ const TOOLS = [
         properties: { ...PROPERTIES, description: `${PROPERTIES.description} Must include type; if no type fits, use "other" and ask people where it belongs.` },
         message: { type: 'string', description: 'First message to the new minion' },
       },
-      required: ['title', 'properties', 'message'],
+      // properties is asked for but not required, so a client holding an older schema isn't refused before the fallback below.
+      required: ['title', 'message'],
     },
   },
   {
@@ -481,13 +482,19 @@ async function runTool(name: string, args: any): Promise<string> {
       return [ticketLine(ticket), skipped ? `(${skipped} earlier entries omitted)` : '', ...lines.slice(-last)].filter(Boolean).join('\n\n');
     }
     case 'create_ticket': {
+      // A session that loaded an older schema may leave out properties (or its type); a missing type
+      // must not stop it starting minions, so it gets `other` (or the tag's type, server-side) and is told.
+      const properties = args.properties && typeof args.properties === 'object' && !Array.isArray(args.properties) ? { ...args.properties } : {};
+      const untyped = !args.tag && !Object.keys(properties).some((k) => k.toLowerCase() === 'type');
+      if (untyped) properties.type = 'other';
       const t = await call('POST', `/api/projects/${PROJECT}/tickets`, {
         title: args.title,
         tag: args.tag ?? null,
-        properties: args.properties ?? {},
+        properties,
         message: args.message,
       });
-      return [`Created ${ticketLine(t)}`, ...(t.notes ?? [])].join('\n');
+      const fallback = untyped ? [`No type was given, so it is type: other for now. Set the right one with set_properties (ticket_id ${t.number}), and pass properties: { type: … } to create_ticket next time.`] : [];
+      return [`Created ${ticketLine(t)}`, ...(t.notes ?? []), ...fallback].join('\n');
     }
     case 'list_properties': {
       const { keys } = await call('GET', `/api/projects/${PROJECT}/properties`);

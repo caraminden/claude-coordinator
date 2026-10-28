@@ -1,7 +1,7 @@
 // Runs ticket turns as headless `claude -p` processes, one turn per process.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { APP_NAME } from './appname.ts';
@@ -13,17 +13,60 @@ import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, st
 const MAX_TOOL_OUTPUT = 20_000;
 // Turns run a copy of the MCP server taken when this server started, not the file on disk: a deploy
 // pulls new code before the restart, and a newer MCP server would offer tools this process rejects.
-const MCP_DIR = mkdtempSync(join(tmpdir(), 'claude-coordinator-mcp-'));
+// The copies live in the app's data dir, one folder per server process, swept once that process is gone.
+const RUN_DIR = join(process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator'), 'run');
+export const MCP_DIR = join(RUN_DIR, `mcp-${process.pid}`);
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: any) {
+    return err.code === 'EPERM';
+  }
+}
+mkdirSync(RUN_DIR, { recursive: true });
+for (const name of readdirSync(RUN_DIR)) {
+  const pid = Number(/^mcp-(\d+)$/.exec(name)?.[1]);
+  if (pid && pid !== process.pid && !alive(pid)) rmSync(join(RUN_DIR, name), { recursive: true, force: true });
+}
+rmSync(MCP_DIR, { recursive: true, force: true });
+mkdirSync(MCP_DIR);
+process.on('exit', () => rmSync(MCP_DIR, { recursive: true, force: true }));
+/** Copy a server file and, first, every local file it imports, so the copy starts on its own. */
 function pinnedCopy(file: string): string {
   const copy = join(MCP_DIR, file);
-  writeFileSync(copy, readFileSync(join(import.meta.dirname, file)));
+  if (existsSync(copy)) return copy;
+  const source = readFileSync(join(import.meta.dirname, file), 'utf8');
+  for (const [, dep] of source.matchAll(/from '\.\/([^']+)'/g)) pinnedCopy(dep);
+  writeFileSync(copy, source);
   return copy;
 }
-// Every local file the pinned servers import must be pinned too, before them (test/pinned-mcp.test.ts).
-pinnedCopy('appname.ts');
 export const MCP_SERVER = pinnedCopy('mcp.ts');
 // Stands in for a connected machine's MCP server; see src/machines.ts.
 export const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
+
+/**
+ * The parts of this server's environment a turn inherits. Anything else (MACHINES_URL, PORT, HOST,
+ * COORDINATOR_PASSWORD, SESSION_SECRET, the D-Bus address) belongs to the live service, not to minions.
+ * XDG_RUNTIME_DIR stays so a minion can queue the idle restart with `systemd-run --user`.
+ */
+const ENV_NAMES = new Set([
+  'HOME', 'PATH', 'LANG', 'TERM', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TZ', 'SSH_AUTH_SOCK', 'XDG_RUNTIME_DIR',
+  'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS',
+  'DOTNET_ROOT', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'GODOT',
+]);
+// LC_* is the locale; CLAUDE_* and ANTHROPIC_* configure Claude Code itself (its config dir, its login).
+const ENV_PREFIXES = ['LC_', 'CLAUDE_', 'ANTHROPIC_'];
+export function turnEnv(from: NodeJS.ProcessEnv): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(from)) {
+    if (v !== undefined && (ENV_NAMES.has(k) || ENV_PREFIXES.some((p) => k.startsWith(p)))) env[k] = v;
+  }
+  return env;
+}
+/** Where a turn compacts, in tokens; the Taskmasters' folders have no .claude/settings.json to set it. */
+const AUTO_COMPACT_WINDOW = '250000';
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
@@ -537,10 +580,13 @@ export class Runner {
     if (ticket.kind !== 'coordinator') args.push(...pluginDirArgs(lines(project.plugin_dirs), ticket.cwd));
     if (ticket.session_id) args.push('--resume', ticket.session_id);
     // Chosen per thread in the composer; left out, Claude Code uses its defaults.
-    if (ticket.model) args.push('--model', ticket.model);
-    if (ticket.effort) args.push('--effort', ticket.effort);
+    // Taskmasters coordinate everything else, so their default is the strongest model at high effort.
+    const model = ticket.model ?? (ticket.kind === 'coordinator' ? 'opus' : null);
+    const effort = ticket.effort ?? (ticket.kind === 'coordinator' ? 'high' : null);
+    if (model) args.push('--model', model);
+    if (effort) args.push('--effort', effort);
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
-    let env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
+    let env: Record<string, string> = { ...turnEnv(process.env), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', CLAUDE_CODE_AUTO_COMPACT_WINDOW: AUTO_COMPACT_WINDOW };
     // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
     // title, tag, state and note. The token travels in the environment (which the MCP server
     // inherits), never on the command line.
@@ -670,6 +716,7 @@ export class Runner {
       this.store.updateTicketQuietly(ticketId, { last_model: ev.model });
       this.broadcastTicket(ticketId);
     }
+    if (ev.type === 'system' && ev.subtype === 'init' && Array.isArray(ev.mcp_servers)) this.checkMcp(ticketId, ev.mcp_servers);
     const slim = slimEvent(ev);
     if (!slim) return;
     const progress = this.progressFor(ticketId);
@@ -684,6 +731,21 @@ export class Runner {
     if (ev.type === 'user' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'tool_result')) {
       this.onFilesMayChange(ticketId);
     }
+  }
+
+  /**
+   * Say so in the chat (as an error, which pushes) when the turn's own MCP server didn't connect:
+   * without it a minion can't set its status or ask questions, and a Taskmaster can't manage minions.
+   */
+  private checkMcp(ticketId: number, servers: any[]) {
+    const role = this.store.getTicket(ticketId)?.kind === 'coordinator' ? 'coordinator' : 'thread';
+    const status = servers.find((s) => s?.name === role)?.status;
+    // Pending: still starting after Claude Code's startup wait; it may yet connect.
+    if (status === 'connected' || status === 'pending') return;
+    const text = `The ${role} MCP server is ${typeof status === 'string' ? status : 'missing'} in this turn, so its mcp__${role} tools are unavailable. Check the server log.`;
+    console.error(`Ticket ${ticketId}: ${text}`);
+    this.emit(ticketId, 'error', { text });
+    this.onTurnError(ticketId, text);
   }
 
   /** Task-list state for a ticket, rebuilt from its stored events the first time it is needed. */

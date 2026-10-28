@@ -617,6 +617,8 @@ mark.find.current { background: var(--waiting); color: #fff; }
   /* The title leaves room for it (and the status dot, when there is one) on its line. */
   .ticket-head > .row > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 2.35rem); }
   .ticket-head > .row:has(> .dot) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 3.45rem); }
+  /* Pages with a close × (Settings, Artifacts…) keep it on the title's line too. */
+  .ticket-head > .row:has(> .close-view) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 4.7rem); }
 }
 .composer .add-image { line-height: 1.4; }
 
@@ -680,6 +682,9 @@ body.navigating #app .split > :last-child, body.navigating #app > :not(.split) {
 
 /* Settings: the link beside Sign out (with how many properties wait for review), and the page's tabs */
 .shelf .account .settings-link { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.6rem; }
+.shelf .account > .row:first-child { flex-wrap: nowrap; gap: 0.4rem; }
+.shelf .account > .row:first-child > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shelf .account > .row:first-child > :is(a, button) { flex: none; }
 .settings-link .count { background: var(--accent); color: #fff; border-radius: 999px; padding: 0 0.4rem; font-size: 0.85em; line-height: 1.4; }
 .settings-link .count[hidden] { display: none; }
 .settings-tabs { display: flex; gap: 0.25rem; margin-top: 0.5rem; overflow-x: auto; }

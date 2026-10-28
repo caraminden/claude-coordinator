@@ -63,7 +63,7 @@ const PROPERTIES = {
 
 const LIST_PROPERTIES = {
   name: 'list_properties',
-  description: "The property registry for this scheme: the global keys (type, stage, requestedBy) and this scheme's own, with their values and aliases. Read it before setting or proposing properties.",
+  description: "The property registry for this scheme: the global keys (type, stage, requestedBy, assigned) and this scheme's own, with their values and aliases. Read it before setting or proposing properties.",
   inputSchema: { type: 'object', properties: {} },
 };
 

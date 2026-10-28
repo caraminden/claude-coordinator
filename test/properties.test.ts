@@ -37,11 +37,36 @@ test('seeds global keys for every scheme and Delve keys only for Delve', () => {
   const s = freshStore();
   const delve = s.props.list(1).map((k) => k.key);
   const citadel = s.props.list(2).map((k) => k.key);
-  assert.deepEqual(citadel, ['type', 'stage', 'requestedBy']);
-  assert.deepEqual(delve, ['type', 'stage', 'requestedBy', 'playerClass', 'assetType', 'area', 'build']);
+  assert.deepEqual(citadel, ['type', 'stage', 'requestedBy', 'assigned']);
+  assert.deepEqual(delve, ['type', 'stage', 'requestedBy', 'assigned', 'playerClass', 'assetType', 'area', 'build']);
   const classes = s.props.list(1).find((k) => k.key === 'playerClass')!.values;
   assert.equal(classes.length, 23);
   assert.ok(!classes.some((v) => v.value === 'Untrained'));
+});
+
+test('a global key added to the seed later joins an existing registry once, and stays archived if archived', () => {
+  const s = freshStore();
+  const path = s.db.location()!;
+  s.db.exec("DELETE FROM property_keys WHERE scope IS NULL AND key = 'assigned'");
+  s.db.close();
+  const again = new Store(path);
+  assert.ok(again.props.list(2).some((k) => k.key === 'assigned'));
+  again.db.exec("UPDATE property_keys SET status = 'archived' WHERE key = 'assigned'");
+  again.db.close();
+  const third = new Store(path);
+  assert.equal(third.db.prepare("SELECT count(*) AS n FROM property_keys WHERE key = 'assigned'").get()!.n, 1);
+  assert.equal(third.props.list(2).find((k) => k.key === 'assigned')!.status, 'archived');
+});
+
+test("a person's name matches the spelling already in use, whatever its case", () => {
+  const s = freshStore();
+  const a = ticket(s, 2);
+  const b = ticket(s, 2);
+  s.props.set('minion', a, 2, { assigned: 'Josh' }, 'Cara');
+  s.props.set('minion', b, 2, { assigned: 'josh ', requestedBy: 'CARA' }, 'Cara');
+  assert.deepEqual(s.props.forTarget('minion', b), { requestedBy: 'CARA', assigned: 'Josh' });
+  s.props.set('minion', b, 2, { assigned: null }, 'Cara');
+  assert.equal(s.props.forTarget('minion', b).assigned, undefined);
 });
 
 test('backfills type from the old tag and stage from status, once', () => {

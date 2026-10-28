@@ -1,6 +1,7 @@
 // What the property registry starts with, taken from the hand-written vocabulary docs it replaces
 // (projects/2 and projects/1 shared/project/property-vocabulary.md, 2026-10-27). Used once, on an
-// empty registry; from then on the registry is the source of truth.
+// empty registry; from then on the registry is the source of truth, except that a global key added
+// here later is added once to a registry that lacks it.
 
 export interface SeedValue {
   value: string;
@@ -48,6 +49,13 @@ export const GLOBAL_SEED: SeedKey[] = [
     key: 'requestedBy',
     label: 'Requested by',
     description: "Who asked for the work: a person's login name. Set automatically when a person starts a minion.",
+    multi: false,
+    value_kind: 'user',
+  },
+  {
+    key: 'assigned',
+    label: 'Assigned to',
+    description: "Who the minion is assigned to: a person's login name (e.g. Cara). Set when a person asks to assign it (\"assign this to Josh\"); null unassigns it.",
     multi: false,
     value_kind: 'user',
   },

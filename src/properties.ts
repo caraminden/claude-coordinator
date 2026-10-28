@@ -159,7 +159,9 @@ export class Registry {
       this.db.prepare('SELECT 1 FROM property_keys WHERE scope IS ?').get(scope) !== undefined;
     this.db.exec('BEGIN');
     try {
-      if (!has(null)) for (const k of GLOBAL_SEED) this.insertSeed(null, k);
+      // A global key added to the seed later (assigned, 2026-10-28) joins a registry that lacks it, once.
+      const hasGlobal = (key: string) => this.db.prepare('SELECT 1 FROM property_keys WHERE scope IS NULL AND key = ?').get(key) !== undefined;
+      for (const k of GLOBAL_SEED) if (!hasGlobal(k.key)) this.insertSeed(null, k);
       const delve = this.db.prepare("SELECT id FROM projects WHERE name = 'Delve'").get() as { id: number } | undefined;
       if (delve && !has(delve.id)) for (const k of DELVE_SEED) this.insertSeed(delve.id, k);
       if (!this.db.prepare("SELECT 1 FROM settings WHERE key = 'properties_backfilled'").get()) {
@@ -285,7 +287,10 @@ export class Registry {
     if (k.value_kind === 'user' || k.value_kind === 'text') {
       const max = k.value_kind === 'user' ? 60 : 200;
       if (raw.trim().length > max) throw new PropertyError(`${code(k.key)} must be at most ${max} characters`);
-      return raw.trim();
+      if (k.value_kind === 'text') return raw.trim();
+      // One person, one value: "josh" becomes the "Josh" already in use, so the filter doesn't split them.
+      const seen = this.db.prepare('SELECT value FROM properties WHERE key_id = ? AND lower(value) = lower(?) LIMIT 1').get(k.id, raw.trim()) as { value: string } | undefined;
+      return seen?.value ?? raw.trim();
     }
     const values = this.valuesOf(k.id);
     const n = norm(raw);

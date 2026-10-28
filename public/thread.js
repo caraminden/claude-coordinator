@@ -162,6 +162,8 @@ export function renderTicketHead() {
   if (!el) return;
   const t = view.ticket;
   const coord = isCoordinator(t);
+  // Tints the whole chat column so a dismissed minion reads as dismissed at a glance.
+  el.closest('.chat')?.classList.toggle('dismissed', t.status === 'closed');
   const actions = [];
   if (t.status === 'running') {
     actions.push(h('button', { class: 'secondary', onclick: () => api(`/api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));

@@ -891,10 +891,17 @@ function statusLabel(t) {
  */
 const threadHref = (t) =>
   isCoordinator(t) ? `#/p/${t.project_id}` : t.number == null ? `#/t/${t.id}` : `#/p/${t.project_id}/t/${t.number}`;
-const threadLabel = (t) => (isCoordinator(t) ? 'Taskmaster' : `#${t.number ?? t.id} ${t.title}`);
+/** A scheme's Taskmaster goes by the scheme's name: "Delve Taskmaster". */
+function taskmasterName(projectId = view?.projectId) {
+  const p = view?.projects?.find((x) => x.id === projectId) ?? (view?.project?.id === projectId ? view.project : null);
+  return p?.name ? `${p.name} Taskmaster` : 'Taskmaster';
+}
+/** taskmasterName in a span that follows renames of the scheme. */
+const taskmasterLabel = (projectId = view?.projectId) => h('span', { 'data-taskmaster-name': projectId }, taskmasterName(projectId));
+const threadLabel = (t) => (isCoordinator(t) ? taskmasterName(t.project_id) : `#${t.number ?? t.id} ${t.title}`);
 /** The full name, Delve style: "🛠️ 12 FEATURE: Usage bar ✅". */
 function threadFullName(t) {
-  if (isCoordinator(t)) return 'Taskmaster';
+  if (isCoordinator(t)) return taskmasterName(t.project_id);
   const tag = TAGS[t.tag];
   const state = t.status !== 'running' && STATES[t.state];
   return [tag?.emoji, t.number ?? t.id, tag ? `${tag.label.toUpperCase()}: ${t.title}` : t.title, state?.emoji].filter(Boolean).join(' ');
@@ -902,7 +909,7 @@ function threadFullName(t) {
 
 /** threadFullName in parts; phones hide the tag word and state emoji, which the emoji and state label already say. */
 function threadTitleParts(t) {
-  if (isCoordinator(t)) return 'Taskmaster';
+  if (isCoordinator(t)) return taskmasterLabel(t.project_id);
   const tag = TAGS[t.tag];
   const state = t.status !== 'running' && STATES[t.state];
   return [tag ? `${tag.emoji} ` : '', `${t.number ?? t.id} `, tag ? h('span', { class: 'wide-only' }, `${tag.label.toUpperCase()}: `) : '', t.title,
@@ -972,7 +979,7 @@ function renderCrumbs(main) {
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
       : main.kind === 'shared' ? [projectLink, ' / ', h('a', { href: `#/p/${project.id}/shared` }, 'Shared files'), ' / ', main.file.name]
-      : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Taskmaster' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
+      : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? taskmasterLabel(main.ticket.project_id) : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
           : [h('span', { 'data-project-name': project.id }, project.name)]));
 }
@@ -1525,7 +1532,7 @@ function threadRow(t, href = threadHref(t), hit = null) {
   // Faint once you've opened the thread since it last changed; vibrant again when it changes.
   const yours = !coord && st.rank === 0 ? ` yours${st.cls === 'st' ? ' stuck' : ''}${isSeen(t) ? ' seen' : ''}` : '';
   return h('a', { class: `thread-row s-${t.status}${coord ? ' coordinator' : ''}${yours}${active ? ' active' : ''}`, href, title: details, 'data-id': t.id },
-    h('span', { class: 'name' }, coord ? 'Taskmaster' : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
+    h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     h('span', { class: `state ${st.cls}` }, st.cell),
     hit ? snippetLine(hit) : note ? h('span', { class: `note${working ? ' t' : ''}` }, note) : '');
@@ -1665,7 +1672,7 @@ function renderShelf() {
     h('span', { class: `badge k-${a.kind}` }, extOf(a)),
     h('span', { class: 'text' },
       h('span', { class: 'name' }, a.name),
-      h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? 'Taskmaster' : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
+      h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? taskmasterName() : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
   const sub = (title, count, items, empty, render = item) => h('div', { class: 'sub' },
     h('h4', {}, title, count ? h('span', { class: 'count' }, count) : ''),
     items.length ? items.map(render) : h('p', { class: 'muted small' }, empty));
@@ -1972,6 +1979,7 @@ const count = (n) => n.toLocaleString('en');
 
 function onProjectUpdate(project) {
   for (const el of document.querySelectorAll(`[data-project-name="${project.id}"]`)) el.textContent = project.name;
+  for (const el of document.querySelectorAll(`[data-taskmaster-name="${project.id}"]`)) el.textContent = `${project.name} Taskmaster`;
   if (view?.kind !== 'project') return;
   view.projects = view.projects.map((p) => (p.id === project.id ? { ...p, name: project.name } : p));
   if (view.projectId !== project.id) return;
@@ -3407,7 +3415,7 @@ function userBubble(author, text, imageSrcs, about = null) {
   if (author === COORDINATOR_NAME || author === 'Taskmaster') {
     const preview = (text ?? '').replace(/[#*_`>\[\]]/g, '').replace(/\s+/g, ' ').trim();
     msg.querySelector('.who').remove();
-    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, author === COORDINATOR_NAME ? 'Taskmaster' : author), h('span', { class: 'preview' }, preview)), msg);
+    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, taskmasterName()), h('span', { class: 'preview' }, preview)), msg);
   }
   return msg;
 }

@@ -136,7 +136,7 @@ export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectNam
   }
   const coordinator = ticket.kind === 'coordinator';
   return {
-    title: coordinator ? `Taskmaster${projectName ? ` · ${projectName}` : ''}` : `#${ticket.number ?? ticket.id} ${ticket.title}`,
+    title: coordinator ? `${projectName ? `${projectName} ` : ''}Taskmaster` : `#${ticket.number ?? ticket.id} ${ticket.title}`,
     body,
     tag: `thread-${ticket.id}`,
     url: coordinator || ticket.number == null ? `/#/p/${ticket.project_id}` : `/#/p/${ticket.project_id}/t/${ticket.number}`,

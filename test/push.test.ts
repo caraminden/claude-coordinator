@@ -100,7 +100,7 @@ test('only decisions, blockers and results make a notification', () => {
   assert.equal(notificationFor(ticket(), { kind: 'state', state: 'blocked', note: 'needs a token' })?.body, 'needs a token');
   for (const state of ['parked', 'outside', null]) assert.equal(notificationFor(ticket(), { kind: 'state', state, note: 'x' }), null);
   const coord = notificationFor(ticket({ kind: 'coordinator', number: null }), { kind: 'question', questions: [{ question: 'Which first?' }] }, 'Coordinator app');
-  assert.equal(coord?.title, 'Coordinator · Coordinator app');
+  assert.equal(coord?.title, 'Taskmaster · Coordinator app');
   assert.equal(coord?.url, '/#/p/2');
   assert.ok(notificationFor(ticket(), { kind: 'question', questions: [{ question: 'x'.repeat(1000) }] })!.body.length <= 300);
 });

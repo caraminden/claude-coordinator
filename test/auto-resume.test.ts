@@ -82,7 +82,7 @@ test('an interrupted turn resumes after a restart, with the messages queued behi
   assert.ok(notes(id).includes('Resumed after a server restart'));
   await until(() => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('also add a test'));
   const prompt = readFileSync(prompts, 'utf8');
-  assert.match(prompt, /\[System\]: The coordinator server restarted while you were working/);
+  assert.match(prompt, /\[System\]: The Overlord server restarted while you were working/);
   assert.match(prompt, /\[Josh\]: also add a test/);
   await finish(after, id);
   assert.equal(store.getSetting(`turn:${id}`), null);

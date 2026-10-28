@@ -186,7 +186,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   n = received.length;
   await call(`agent:${coordinator.id}`, `/api/tickets/${coordinator.id}/questions`, { method: 'POST', body: { questions: [{ question: 'Which first?', options: [{ label: 'A' }, { label: 'B' }] }] } });
   got = await pushes(n, 1);
-  assert.deepEqual(got.cara, { title: 'Coordinator · P', body: 'Which first?', tag: `thread-${coordinator.id}`, url: `/#/p/${project.id}` });
+  assert.deepEqual(got.cara, { title: 'Taskmaster · P', body: 'Which first?', tag: `thread-${coordinator.id}`, url: `/#/p/${project.id}` });
 });
 
 test('only people subscribe, and only https push services', async () => {

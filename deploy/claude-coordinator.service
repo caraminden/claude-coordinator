@@ -1,5 +1,5 @@
 [Unit]
-Description=Claude Coordinator web app
+Description=Overlord web app
 After=network-online.target
 
 [Service]

@@ -63,19 +63,19 @@ export async function instructionSources(project: Project, configDir: string, da
     if (file) out.push({ id: String(out.length), group, label, path: tilde(path), note, ...file });
   };
 
-  await add('Your Claude Code', 'Your instructions (CLAUDE.md)', join(configDir, 'CLAUDE.md'), 'Threads on this machine already read this, since they run as this login.');
+  await add('Your Claude Code', 'Your instructions (CLAUDE.md)', join(configDir, 'CLAUDE.md'), 'Minions on this machine already read this, since they run as this login.');
   for (const name of await markdownFiles(join(configDir, 'rules'))) {
-    await add('Your Claude Code', `Rule: ${name}`, join(configDir, 'rules', name), 'Threads on this machine already read this, since they run as this login.');
+    await add('Your Claude Code', `Rule: ${name}`, join(configDir, 'rules', name), 'Minions on this machine already read this, since they run as this login.');
   }
 
   const memorySlug = project.repo_dir ? projectSlug(project.repo_dir) : null;
   if (project.repo_dir) {
     for (const name of ['CLAUDE.md', join('.claude', 'CLAUDE.md'), 'CLAUDE.local.md']) {
-      await add('This project', `Repo ${name}`, join(project.repo_dir, name), 'Every thread already reads this from its own worktree; the coordinator does not.');
+      await add('This project', `Repo ${name}`, join(project.repo_dir, name), 'Every minion already reads this from its own worktree; the Taskmaster does not.');
     }
     const dir = join(configDir, 'projects', memorySlug!, 'memory');
     for (const name of await markdownFiles(dir)) {
-      await add('This project', `Memory: ${name}`, join(dir, name), 'Threads already load this auto-memory; the coordinator does not.');
+      await add('This project', `Memory: ${name}`, join(dir, name), 'Minions already load this auto-memory; the Taskmaster does not.');
     }
   }
 

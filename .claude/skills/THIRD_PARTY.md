@@ -1,7 +1,7 @@
 # Third-party skills
 
 Some skills here are copies of two open-source packs, plus one rules file. They are
-copied in, not installed as plugins, so every session that opens the repo (a Coordinator
+copied in, not installed as plugins, so every session that opens the repo (an Overlord
 ticket, a cloud session, a PC) loads the same set the same way.
 
 | Pack | Pinned at | License |
@@ -41,14 +41,14 @@ Every copy drops the Codex-only `agents/openai.yaml`.
   report. Its description now makes it the escalation for hard bugs.
 - **improve-codebase-architecture** was user-invoked (`disable-model-invocation: true`).
   User-invoked skills run only from a `/name` at the very start of a prompt, and a
-  Claude Coordinator ticket's messages reach Claude Code as `[Name]: text`, so it could
+  Overlord minion's messages reach Claude Code as `[Name]: text`, so it could
   never run. It is model-invoked now, with a description that only fires on request.
   Upstream writes its HTML report to a temp folder and opens it; a headless session
   gives the path and a plain-text summary instead. Keep this in mind for any skill
-  added later: a user-invoked one is unreachable from tickets.
+  added later: a user-invoked one is unreachable from minions.
 - **grilling** asked each round as one message of numbered questions. Cara answers
   faster on cards (2026-10-27), so where a decision-card tool exists each question is a
-  card; the numbered format stays for everything else, including Coordinator tickets
+  card; the numbered format stays for everything else, including Overlord minions
   today.
 
 ## Left out
@@ -69,7 +69,7 @@ Every copy drops the Codex-only `agents/openai.yaml`.
   `domain-modeling`). Say "grill me" instead.
 - **setup-matt-pocock-skills**, **to-spec**, **to-tickets**, **triage**, **wayfinder**,
   **implement**, **implement-spec**, **ask-matt**: built around an issue tracker. Worth a
-  second look if the Coordinator's tickets ever become that tracker.
+  second look if the Overlord's minions ever become that tracker.
 - **prototype**, **research**, **handoff**, **teach**, **to-questionnaire**,
   **wait-what**, **retro**, **wizard**: repeat what sessions already do, write to temp
   folders nobody sees, or assume someone at a terminal. (The `retro` here is Delve's own,

@@ -24,16 +24,16 @@ const STATE = {
   type: ['string', 'null'],
   enum: ['ready', 'try', 'parked', 'blocked', 'outside', null],
   description:
-    'Where the turn leaves things, for the threads list: ready (done; ready to merge or pick up), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the thread, not a person\'s answer), outside (work still running somewhere this thread cannot wait on, like CI). null when it is simply people\'s turn to answer, which the list shows by itself. Cleared automatically when the next turn starts.',
+    'Where the turn leaves things, for the minions list: ready (done; ready to merge or pick up), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person\'s answer), outside (work still running somewhere this minion cannot wait on, like CI). null when it is simply people\'s turn to answer, which the list shows by itself. Cleared automatically when the next turn starts.',
 };
 const NOTE = { type: ['string', 'null'], description: 'One terse line on where things stand, max 60 chars, e.g. "needs a pick: tabs or a list" or "merged, live after restart". No names or prefixes.' };
 
 const BUILD = {
   type: ['integer', 'null'],
-  description: 'The major build this work is assigned to, e.g. 8 for Build 8; the threads list groups the build\'s threads together. null takes it out of a build.',
+  description: 'The major build this work is assigned to, e.g. 8 for Build 8; the minions list groups the build\'s minions together. null takes it out of a build.',
 };
 
-const TICKET_ID = { type: 'integer', description: 'Ticket number in this project, e.g. 12 for #12 (as shown by list_tickets)' };
+const TICKET_ID = { type: 'integer', description: 'Minion number in this project, e.g. 12 for #12 (as shown by list_tickets)' };
 
 const ASK_QUESTION = {
   name: 'ask_question',
@@ -82,15 +82,15 @@ const ASK_QUESTION = {
 const TOOLS = [
   {
     name: 'list_tickets',
-    description: 'List the tickets in this project with their status and latest activity.',
+    description: 'List the minions in this project with their status and latest activity.',
     inputSchema: {
       type: 'object',
-      properties: { include_closed: { type: 'boolean', description: 'Include closed tickets (default false)' } },
+      properties: { include_closed: { type: 'boolean', description: 'Include dismissed minions (default false)' } },
     },
   },
   {
     name: 'read_ticket',
-    description: "Read a ticket's details and the most recent messages in its conversation.",
+    description: "Read a minion's details and the most recent messages in its conversation.",
     inputSchema: {
       type: 'object',
       properties: { ticket_id: TICKET_ID, last: { type: 'integer', description: 'How many recent entries to return (default 10, max 50)' } },
@@ -100,20 +100,20 @@ const TOOLS = [
   {
     name: 'create_ticket',
     description:
-      'Start a new ticket: a separate Claude Code session in its own git worktree and branch. The message is its first instruction, so make it self-contained.',
+      'Start a new minion: a separate Claude Code session in its own git worktree and branch. The message is its first instruction, so make it self-contained.',
     inputSchema: {
       type: 'object',
       properties: {
         title: { ...TITLE, description: `${TITLE.description} Also used for the branch name.` },
         tag: TAG,
-        message: { type: 'string', description: 'First message to the new ticket' },
+        message: { type: 'string', description: 'First message to the new minion' },
       },
       required: ['title', 'message'],
     },
   },
   {
     name: 'message_ticket',
-    description: 'Send a message to a ticket. It runs now, or after the current turn if the ticket is busy. Reopens it if closed.',
+    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed.',
     inputSchema: {
       type: 'object',
       properties: { ticket_id: TICKET_ID, text: { type: 'string' } },
@@ -122,7 +122,7 @@ const TOOLS = [
   },
   {
     name: 'update_ticket',
-    description: "Change a ticket's title, tag, state, note or build group (the major build it is assigned to); leave out what should stay. (The branch keeps its original name.)",
+    description: "Change a minion's title, tag, state, note or build group (the major build it is assigned to); leave out what should stay. (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
       properties: { ticket_id: TICKET_ID, title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD },
@@ -131,41 +131,41 @@ const TOOLS = [
   },
   {
     name: 'close_ticket',
-    description: 'Close a finished or abandoned ticket. Its worktree and branch are kept. A running ticket must be stopped first.',
+    description: 'Dismiss a finished or abandoned minion. Its worktree and branch are kept. A running minion must be stopped first.',
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
   },
   {
     name: 'reopen_ticket',
-    description: 'Reopen a closed ticket.',
+    description: 'Reopen a dismissed minion.',
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
   },
   {
     name: 'stop_ticket',
-    description: "Interrupt a ticket's running turn and drop its queued messages.",
+    description: "Interrupt a minion's running turn and drop its queued messages.",
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
   },
   ASK_QUESTION,
   {
     name: 'get_project_instructions',
-    description: "Read the project instructions: the standing rules people set for this project, which every ticket and you receive in the system prompt.",
+    description: "Read the project instructions: the standing rules people set for this project, which every minion and you receive in the system prompt.",
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'set_project_instructions',
     description:
-      'Replace the project instructions with new text (max 16,000 characters; empty clears them). They reach every ticket, and you, from its next turn. Read the current text first and send the whole new version, not just the change.',
+      'Replace the project instructions with new text (max 16,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change.',
     inputSchema: { type: 'object', properties: { instructions: { type: 'string' } }, required: ['instructions'] },
   },
   {
     name: 'get_project_settings',
     description:
-      "Read the project's approval rules (Claude Code permission rules a thread must get a person's OK for, via an Approve / Deny card in its chat) and plugin folders (folders in the repo every thread loads as Claude Code plugins).",
+      "Read the project's approval rules (Claude Code permission rules a minion must get a person's OK for, via an Approve / Deny card in its chat) and plugin folders (folders in the repo every minion loads as Claude Code plugins).",
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'set_project_settings',
     description:
-      'Replace the approval rules and/or plugin folders; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each thread\'s next turn. Only change them when people ask.',
+      'Replace the approval rules and/or plugin folders; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -177,7 +177,7 @@ const TOOLS = [
         plugin_folders: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Folder paths relative to the repo root, e.g. "tools/mods/delve". Each is loaded with --plugin-dir when it exists in a thread\'s worktree.',
+          description: 'Folder paths relative to the repo root, e.g. "tools/mods/delve". Each is loaded with --plugin-dir when it exists in a minion\'s worktree.',
         },
       },
     },
@@ -238,10 +238,10 @@ function transcript(events: any[]): string[] {
 /** Tickets are numbered per project; the API addresses them by their global id. */
 async function id(args: any): Promise<number> {
   const n = Number(args.ticket_id);
-  if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a ticket number');
+  if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
   const { tickets } = await call('GET', `/api/projects/${PROJECT}`);
   const ticket = tickets.find((t: any) => t.number === n);
-  if (!ticket) throw new Error(`There is no ticket #${n} in this project`);
+  if (!ticket) throw new Error(`There is no minion #${n} in this project`);
   return ticket.id;
 }
 
@@ -256,23 +256,23 @@ const THREAD_TOOLS = [
   {
     name: 'set_thread_status',
     description:
-      "Label this thread for the project's threads list: its short title, kind of work, and where things stand. Leave out what should stay. Call it when the work's kind becomes clear, and at the end of a turn whenever the state or note changes.",
+      "Label this minion for the project's minions list: its short title, kind of work, and where things stand. Leave out what should stay. Call it when the work's kind becomes clear, and at the end of a turn whenever the state or note changes.",
     inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD } },
   },
   ASK_QUESTION,
   {
     name: 'message_coordinator',
     description:
-      "Send a message to this project's coordinator, waking it: for what only it can do, such as passing information to another thread (#N), starting a new thread from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly.",
-    inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What you need, self-contained: name threads as #N and give file paths in full' } }, required: ['text'] },
+      "Send a message to this project's Taskmaster, waking it: for what only it can do, such as passing information to another minion (#N), starting a new minion from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly.",
+    inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What you need, self-contained: name minions as #N and give file paths in full' } }, required: ['text'] },
   },
   {
     name: 'close_self',
     description:
-      "Close this thread when the current turn ends, e.g. once a small fix is merged and shipped. It closes only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled. Not for threads whose result is a report or doc for people to read: those stay open until someone has read it.",
+      "Dismiss this minion when the current turn ends, e.g. once a small fix is merged and shipped. It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled. Not for minions whose result is a report or doc for people to read: those stay open until someone has read it.",
     inputSchema: {
       type: 'object',
-      properties: { reason: { type: 'string', description: 'Optional one-line summary shown in the thread with the close, e.g. "Merged abc1234; live after the restart"' } },
+      properties: { reason: { type: 'string', description: 'Optional one-line summary shown in the minion with the dismissal, e.g. "Merged abc1234; live after the restart"' } },
     },
   },
 ];
@@ -326,7 +326,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'list_tickets': {
       const { tickets } = await call('GET', `/api/projects/${PROJECT}`);
       const shown = tickets.filter((t: any) => args.include_closed || t.status !== 'closed');
-      return shown.length ? shown.map(ticketLine).join('\n') : 'No tickets.';
+      return shown.length ? shown.map(ticketLine).join('\n') : 'No minions.';
     }
     case 'read_ticket': {
       const n = await id(args);
@@ -362,7 +362,7 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders or both');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s). They apply from each thread's next turn.`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s). They apply from each minion's next turn.`;
     }
     case 'approve':
       return approve(args);
@@ -381,25 +381,25 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}`;
     case 'message_coordinator':
       await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text });
-      return 'Sent. The coordinator runs it now, or after its current turn.';
+      return 'Sent. The Taskmaster runs it now, or after its current turn.';
     case 'close_self':
       try {
         await call('POST', `/api/tickets/${TICKET}/close`, { reason: args.reason ?? null });
       } catch (err: any) {
         // A server from before close_self refuses the route with its generic "only itself" error.
         if (/only update itself|Not found/.test(err.message)) {
-          throw new Error('The coordinator server running now predates close_self, so it cannot close threads yet; it will after its next restart. End your reply with "Done, ready to close" instead.');
+          throw new Error('The Overlord server running now predates close_self, so it cannot dismiss minions yet; it will after its next restart. End your reply with "Done, ready to close" instead.');
         }
         throw err;
       }
-      return 'This thread will close when your turn ends (unless the turn fails or a new message arrives). Finish your reply now.';
+      return 'This minion will be dismissed when your turn ends (unless the turn fails or a new message arrives). Finish your reply now.';
     case 'close_ticket':
       return `Closed. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed' }))}`;
     case 'reopen_ticket':
       return `Reopened. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'idle' }))}`;
     case 'stop_ticket': {
       const { stopped } = await call('POST', `/api/tickets/${await id(args)}/stop`, {});
-      return stopped ? 'Stopped.' : 'That ticket was not running.';
+      return stopped ? 'Stopped.' : 'That minion was not running.';
     }
     default:
       throw new Error(`Unknown tool ${name}`);

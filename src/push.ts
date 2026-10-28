@@ -38,7 +38,7 @@ export type PushTrigger =
 export const NOTIFY_STATES: Record<string, string> = {
   ready: 'Ready to merge or pick up',
   try: 'Ready for you to try',
-  blocked: 'Blocked on something outside the thread',
+  blocked: 'Blocked on something outside the minion',
 };
 
 const KEY_FILE = 'vapid.json';
@@ -136,7 +136,7 @@ export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectNam
   }
   const coordinator = ticket.kind === 'coordinator';
   return {
-    title: coordinator ? `Coordinator${projectName ? ` · ${projectName}` : ''}` : `#${ticket.number ?? ticket.id} ${ticket.title}`,
+    title: coordinator ? `Taskmaster${projectName ? ` · ${projectName}` : ''}` : `#${ticket.number ?? ticket.id} ${ticket.title}`,
     body,
     tag: `thread-${ticket.id}`,
     url: coordinator || ticket.number == null ? `/#/p/${ticket.project_id}` : `/#/p/${ticket.project_id}/t/${ticket.number}`,

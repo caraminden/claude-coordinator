@@ -1,4 +1,4 @@
-// Claude Coordinator front end: hash-routed views over the JSON API, live via SSE.
+// Overlord front end: hash-routed views over the JSON API, live via SSE.
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 import { inAppHash, linkThreadRefs } from './threadrefs.js';
 import { initDrawers } from './drawers.js';
@@ -8,7 +8,7 @@ const app = document.getElementById('app');
 const crumbs = document.getElementById('crumbs');
 const meEl = document.getElementById('me');
 
-const STATUS_LABEL = { running: 'Running', idle: 'Waiting for you', new: 'Starting', error: 'Error', closed: 'Closed' };
+const STATUS_LABEL = { running: 'Running', idle: 'Waiting for you', new: 'Starting', error: 'Error', closed: 'Dismissed' };
 // Thread naming and the threads list follow Delve's Custom view: threads are grouped by kind of
 // work, and each is one compact row of number + short ask, a state, and a terse note.
 const TAGS = {
@@ -22,7 +22,7 @@ const STATES = {
   ready: { emoji: '✅', label: 'Ready to merge or pick up' },
   try: { emoji: '🧪', label: 'Ready for you to try' },
   parked: { emoji: '🧊', label: 'Parked' },
-  blocked: { emoji: '⛔', label: 'Blocked on something outside the thread' },
+  blocked: { emoji: '⛔', label: 'Blocked on something outside the minion' },
   outside: { emoji: '⏳', label: 'Waiting on work running elsewhere' },
 };
 
@@ -699,7 +699,7 @@ function pushControls(project) {
   const hint = h('span', { class: 'hint', hidden: true });
   const muteRow = h('label', { class: 'toggle', hidden: true, title: 'Stop notifications from this project on this device' }, mute, `Mute ${project.name} here`);
   const el = h('div', { class: 'push' },
-    h('label', { class: 'toggle', title: 'Questions for you, failed turns, and threads that are ready or blocked' }, on, 'Notify me on this device'),
+    h('label', { class: 'toggle', title: 'Questions for you, failed turns, and minions that are ready or blocked' }, on, 'Notify me on this device'),
     muteRow, hint);
   const show = (state, err) => {
     on.checked = state.subscribed;
@@ -759,7 +759,7 @@ async function showProjects() {
   crumbs.replaceChildren('Projects');
   const form = h('form', {},
     h('label', {}, 'Name', h('input', { name: 'name', required: true, maxlength: 80, 'data-draft': true })),
-    h('label', {}, 'Git repo URL (optional; each ticket gets its own worktree)',
+    h('label', {}, 'Git repo URL (optional; each minion gets its own worktree)',
       h('input', { name: 'repoUrl', 'data-draft': true, placeholder: 'https://github.com/caraminden/gamedevtest.git' })),
     h('p', { class: 'error', hidden: true }),
     h('button', { type: 'submit' }, 'Create project'));
@@ -807,10 +807,10 @@ function statusLabel(t) {
  */
 const threadHref = (t) =>
   isCoordinator(t) ? `#/p/${t.project_id}` : t.number == null ? `#/t/${t.id}` : `#/p/${t.project_id}/t/${t.number}`;
-const threadLabel = (t) => (isCoordinator(t) ? 'Coordinator' : `#${t.number ?? t.id} ${t.title}`);
+const threadLabel = (t) => (isCoordinator(t) ? 'Taskmaster' : `#${t.number ?? t.id} ${t.title}`);
 /** The full name, Delve style: "🛠️ 12 FEATURE: Usage bar ✅". */
 function threadFullName(t) {
-  if (isCoordinator(t)) return 'Coordinator';
+  if (isCoordinator(t)) return 'Taskmaster';
   const tag = TAGS[t.tag];
   const state = t.status !== 'running' && STATES[t.state];
   return [tag?.emoji, t.number ?? t.id, tag ? `${tag.label.toUpperCase()}: ${t.title}` : t.title, state?.emoji].filter(Boolean).join(' ');
@@ -818,7 +818,7 @@ function threadFullName(t) {
 
 /** threadFullName in parts; phones hide the tag word and state emoji, which the emoji and state label already say. */
 function threadTitleParts(t) {
-  if (isCoordinator(t)) return 'Coordinator';
+  if (isCoordinator(t)) return 'Taskmaster';
   const tag = TAGS[t.tag];
   const state = t.status !== 'running' && STATES[t.state];
   return [tag ? `${tag.emoji} ` : '', `${t.number ?? t.id} `, tag ? h('span', { class: 'wide-only' }, `${tag.label.toUpperCase()}: `) : '', t.title,
@@ -887,7 +887,7 @@ function renderCrumbs(main) {
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
       : main.kind === 'shared' ? [projectLink, ' / ', h('a', { href: `#/p/${project.id}/shared` }, 'Shared files'), ' / ', main.file.name]
-      : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Coordinator' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
+      : main.kind === 'file' ? [projectLink, ' / ', h('a', { href: threadHref(main.ticket) }, isCoordinator(main.ticket) ? 'Taskmaster' : `#${main.ticket.number ?? main.ticket.id}`), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
           : [h('span', { 'data-project-name': project.id }, project.name)]));
 }
@@ -913,7 +913,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   let chatId = null;
   if (main.kind === 'chat') {
     chatId = main.id ?? (main.number == null ? coordinator.id : tickets.find((t) => t.number === main.number)?.id);
-    if (!chatId) throw new Error(`There is no thread #${main.number} in ${project.name}.`);
+    if (!chatId) throw new Error(`There is no minion #${main.number} in ${project.name}.`);
   }
   const [{ ticket }, events] = chatId
     ? await Promise.all([api(`/api/tickets/${chatId}`), loadEvents(chatId)])
@@ -950,7 +950,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
     h('div', { id: 'machines-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
-    h('summary', { title: 'Show or hide threads' }, h('span', { class: 'label' }, 'Threads')),
+    h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label' }, 'Minions')),
     newTicketForm(projectId),
     // The coordinator sits above the search so it stays one click away while searching.
     h('div', { id: 'coordinator-row' }),
@@ -1048,7 +1048,7 @@ async function mountChat(chatId, ticket, events) {
 function chatSection(chatId, ticket, events) {
   const keys = matchMedia('(max-width: 800px)').matches ? '' : ' (Enter to send, Shift+Enter for a new line)';
   const textarea = h('textarea', {
-    placeholder: (isCoordinator(ticket) ? 'Ask the coordinator to start, check on, or close tickets…' : 'Message this ticket…') + keys,
+    placeholder: (isCoordinator(ticket) ? 'Ask the Taskmaster to start, check on, or dismiss minions…' : 'Message this minion…') + keys,
     'data-draft': true,
   });
   const draftKey = `cc-draft:${chatId}`;
@@ -1144,7 +1144,7 @@ function chatSection(chatId, ticket, events) {
   const log = h('div', { class: 'log', id: 'log' });
   if (isCoordinator(ticket) && !events.length) {
     log.append(h('div', { class: 'note' },
-      'This is the project coordinator. It keeps track of the threads on the left and can create, message, rename and close them for you.'));
+      'This is the Taskmaster for this project. It keeps track of the minions on the left and can create, message, rename and dismiss them for you.'));
   }
   // The working line is a shortcut to the readout in the thread bar.
   const openReadout = () => {
@@ -1162,7 +1162,7 @@ function chatSection(chatId, ticket, events) {
 function newTicketForm(projectId) {
   // A one-line chat box: what you type becomes the new thread's first message. The thread names
   // and tags itself from it, and every thread gets full access.
-  const box = h('textarea', { name: 'message', required: true, rows: 1, placeholder: 'New thread: what should it work on?', 'aria-label': 'Start a new thread', 'data-draft': true });
+  const box = h('textarea', { name: 'message', required: true, rows: 1, placeholder: 'New minion: what should it work on?', 'aria-label': 'Start a new minion', 'data-draft': true });
   const err = h('p', { class: 'error', hidden: true });
   const form = h('form', { class: 'new-thread' }, box, err);
   const fit = () => {
@@ -1227,12 +1227,12 @@ function renderSidebar() {
   let closedGroup = '';
   if (closed.length) {
     // Closed threads stay out of the way but can still be opened and reopened.
-    closedGroup = h('details', { class: 'thread-group g-closed', open: view.showClosed }, h('summary', {}, 'Closed'), closed.map((t) => threadRow(t)));
+    closedGroup = h('details', { class: 'thread-group g-closed', open: view.showClosed }, h('summary', {}, 'Dismissed'), closed.map((t) => threadRow(t)));
     closedGroup.addEventListener('toggle', () => { view.showClosed = closedGroup.open; });
   }
   el.replaceChildren(
     ...sections, closedGroup,
-    tickets.length ? '' : h('p', { class: 'muted' }, 'No threads yet. Ask the coordinator to start one, or type in the box above.'));
+    tickets.length ? '' : h('p', { class: 'muted' }, 'No minions yet. Ask the Taskmaster to start one, or type in the box above.'));
 }
 
 // ---------- search ----------
@@ -1244,7 +1244,7 @@ let pendingFind = '';
 
 function threadSearchBox(projectId) {
   if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '', hits: new Map() });
-  const input = h('input', { type: 'search', class: 'thread-search', placeholder: 'Search threads and what was said…', value: threadSearch.q, autocomplete: 'off' });
+  const input = h('input', { type: 'search', class: 'thread-search', placeholder: 'Search minions and what was said…', value: threadSearch.q, autocomplete: 'off' });
   input.addEventListener('input', () => {
     threadSearch.q = input.value.trim();
     renderSidebar();
@@ -1296,7 +1296,7 @@ function renderThreadResults(el, tickets) {
             card.addEventListener('click', () => { pendingFind = hit ? threadSearch.q : ''; });
             return card;
           })
-        : h('p', { class: 'muted small' }, threadSearch.q.length < 2 ? 'Keep typing to search conversations too.' : 'No threads mention that.')));
+        : h('p', { class: 'muted small' }, threadSearch.q.length < 2 ? 'Keep typing to search conversations too.' : 'No minions mention that.')));
 }
 
 /** Wrap matches of the text inside el in <mark>, returning the marks in document order. */
@@ -1408,7 +1408,7 @@ function rowState(t) {
   if (t.approvals) return { rank: 0, cls: 'q', cell: ['✋ ', waited()], label: 'Waiting for your approval' };
   if (t.status === 'running' || t.status === 'new') return { rank: 1, cls: 'w', cell: [`●${steps}`], label: 'Claude is working' };
   if (t.status === 'error') return { rank: 0, cls: 'st', cell: ['⚠️'], label: 'Stuck: the last turn failed' };
-  if (t.status === 'closed') return { rank: 5, cls: 'm', cell: ['✓'], label: 'Closed' };
+  if (t.status === 'closed') return { rank: 5, cls: 'm', cell: ['✓'], label: 'Dismissed' };
   const state = STATES[t.state];
   if (t.state === 'parked') return { rank: 4, cls: 'm', cell: [state.emoji], label: state.label };
   if (t.state === 'outside') return { rank: 2, cls: 'w', cell: [`${state.emoji}${steps}`], label: state.label };
@@ -1434,7 +1434,7 @@ function threadRow(t, href = threadHref(t), hit = null) {
   // Faint once you've opened the thread since it last changed; vibrant again when it changes.
   const yours = !coord && st.rank === 0 ? ` yours${st.cls === 'st' ? ' stuck' : ''}${isSeen(t) ? ' seen' : ''}` : '';
   return h('a', { class: `thread-row s-${t.status}${coord ? ' coordinator' : ''}${yours}${active ? ' active' : ''}`, href, title: details },
-    h('span', { class: 'name' }, coord ? 'Coordinator' : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
+    h('span', { class: 'name' }, coord ? 'Taskmaster' : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     h('span', { class: `state ${st.cls}` }, st.cell),
     hit ? snippetLine(hit) : note ? h('span', { class: `note${working ? ' t' : ''}` }, note) : '');
@@ -1574,7 +1574,7 @@ function renderShelf() {
     h('span', { class: `badge k-${a.kind}` }, extOf(a)),
     h('span', { class: 'text' },
       h('span', { class: 'name' }, a.name),
-      h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? 'Coordinator' : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
+      h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? 'Taskmaster' : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
   const sub = (title, count, items, empty, render = item) => h('div', { class: 'sub' },
     h('h4', {}, title, count ? h('span', { class: 'count' }, count) : ''),
     items.length ? items.map(render) : h('p', { class: 'muted small' }, empty));
@@ -1582,7 +1582,7 @@ function renderShelf() {
     h('h3', {}, 'Artifacts', h('span', { class: 'spacer' }),
       h('a', { class: `browse${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts`, title: `Browse all ${all.length} artifacts` }, 'Browse')),
     sub('Pinned', pinned.length, pinned, 'Pin artifacts with ☆ to keep them here.'),
-    sub('Recent', 0, recent, 'Documents, pages and canvases that threads create show up here.'),
+    sub('Recent', 0, recent, 'Documents, pages and canvases that minions create show up here.'),
     // The shared folder gets one link, not a list: its files are listed on their own page.
     h('a', { class: `shared-link${view.main === 'sharedList' ? ' active' : ''}`, href: `#/p/${view.projectId}/shared`, title: 'Handoffs and notes in the project\'s shared folder' }, 'Shared files')));
 }
@@ -1598,7 +1598,7 @@ function renderSharedList() {
   const el = document.getElementById('shared-results');
   if (!el) return;
   document.getElementById('shared-summary').textContent = `${view.shared.length} in the project's shared folder`;
-  el.replaceChildren(...(view.shared.length ? view.shared.map(sharedItem) : [h('p', { class: 'muted' }, 'Handoffs and notes threads put in the project\'s shared folder show up here.')]));
+  el.replaceChildren(...(view.shared.length ? view.shared.map(sharedItem) : [h('p', { class: 'muted' }, 'Handoffs and notes minions put in the project\'s shared folder show up here.')]));
 }
 
 /** A document or page in the project's shared folder, as a row of the Shared files list. */
@@ -1613,7 +1613,7 @@ function sharedItem(f) {
 /** Main panel: every artifact in the project, searchable, with pin toggles. */
 function artifactBrowser() {
   view.artifactFilter = 'all';
-  const search = h('input', { type: 'search', id: 'artifact-search', placeholder: 'Search by name, folder or thread…', autocomplete: 'off' });
+  const search = h('input', { type: 'search', id: 'artifact-search', placeholder: 'Search by name, folder or minion…', autocomplete: 'off' });
   search.addEventListener('input', renderArtifactResults);
   const chips = h('div', { class: 'chips', id: 'artifact-filters' });
   const section = h('section', { class: 'artifacts-main' },
@@ -1648,7 +1648,7 @@ function renderArtifactResults() {
   if (!results.length) {
     el.replaceChildren(h('p', { class: 'muted' }, view.artifacts.length
       ? 'Nothing matches.'
-      : 'No artifacts yet. When threads create documents, web pages or canvases in their folders, they appear here.'));
+      : 'No artifacts yet. When minions create documents, web pages or canvases in their folders, they appear here.'));
     return;
   }
   el.replaceChildren(...results.map((a) => {
@@ -1669,7 +1669,7 @@ function artifactViewer(a) {
   const body = h('div', { class: 'artifact-body' });
   const section = h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'artifact-head' }), body);
   if (a.missing) {
-    body.append(h('p', { class: 'muted' }, 'This file is no longer in the thread\'s folder. Unpin it to remove it from the list.'));
+    body.append(h('p', { class: 'muted' }, 'This file is no longer in the minion\'s folder. Unpin it to remove it from the list.'));
   } else {
     renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id });
     section.append(commentBox(artifactThread(a), a.path, a.name, body));
@@ -1695,7 +1695,7 @@ function fileViewer(ticket, file) {
  */
 function commentBox(t, path, name, body) {
   const draftKey = `cc-comment:${t.id}:${path}`;
-  const textarea = h('textarea', { rows: 1, placeholder: `Comment on ${name} to ${isCoordinator(t) ? 'the coordinator' : `#${t.number ?? t.id}`}…`, 'data-draft': true, maxlength: 10000 });
+  const textarea = h('textarea', { rows: 1, placeholder: `Comment on ${name} to ${isCoordinator(t) ? 'the Taskmaster' : `#${t.number ?? t.id}`}…`, 'data-draft': true, maxlength: 10000 });
   textarea.value = loadDraft(draftKey) ?? '';
   const sendBtn = h('button', { type: 'submit', class: 'small' }, 'Comment');
   const status = h('span', { class: 'muted small status', 'aria-live': 'polite' });
@@ -1790,7 +1790,7 @@ function renderSharedHead() {
       file.missing ? '' : h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open'),
       file.missing ? '' : h('a', { class: 'button secondary', href: `${src}&download` }, 'Download')),
     h('div', { class: 'meta' },
-      file.display_path, ' · in the folder every thread and the coordinator share',
+      file.display_path, ' · in the folder every minion and the Taskmaster share',
       file.missing ? ' · not found' : ` · ${formatSize(file.size)} · updated ${ago(file.mtime)}`));
 }
 
@@ -1856,7 +1856,7 @@ function renderArtifactHead() {
   const a = view.artifacts.find((x) => x.id === view.artifactId);
   if (!a) {
     el.replaceChildren(h('div', { class: 'row' }, h('h2', {}, 'Artifact removed'),
-      h('span', { class: 'muted' }, 'The file was deleted from its thread\'s folder.')));
+      h('span', { class: 'muted' }, 'The file was deleted from its minion\'s folder.')));
     return;
   }
   el.replaceChildren(
@@ -1963,7 +1963,7 @@ function renderInstructionsShelf() {
       ? h('a', { class: 'instructions-peek', href: `#/p/${view.projectId}/instructions` },
         h('span', { class: 'name' }, first ?? ''),
         h('span', { class: 'meta' }, `${count(text.length)} chars${p.instructions_updated_by ? ` · ${p.instructions_updated_by}, ${ago(p.instructions_updated_at)}` : ''}`))
-      : h('p', { class: 'muted small' }, 'Standing rules every thread and the coordinator follow. Import them from Claude Code.')));
+      : h('p', { class: 'muted small' }, 'Standing rules every minion and the Taskmaster follow. Import them from Claude Code.')));
 }
 
 const splitLines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
@@ -1981,7 +1981,7 @@ function renderApprovalsShelf() {
       h('a', { class: `browse${view.main === 'approvals' ? ' active' : ''}`, href }, rules.length || dirs.length ? 'Edit' : 'Add')),
     rules.length
       ? h('a', { class: 'rule-chips', href }, rules.map((r) => h('code', { class: 'rule' }, r)))
-      : h('p', { class: 'muted small' }, 'Nothing: threads run every tool without asking.'),
+      : h('p', { class: 'muted small' }, 'Nothing: minions run every tool without asking.'),
     dirs.length ? h('p', { class: 'muted small' }, `Plugins: ${dirs.join(', ')}`) : ''));
 }
 
@@ -2020,7 +2020,7 @@ function approvalsEditor() {
       view.project = await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { approval_rules: rules.value, plugin_dirs: dirs.value } });
       rules.value = view.project.approval_rules;
       dirs.value = view.project.plugin_dirs;
-      status.textContent = 'Saved. Threads pick this up on their next turn.';
+      status.textContent = 'Saved. Minions pick this up on their next turn.';
       renderApprovalsShelf();
     } catch (err) {
       status.textContent = err.message;
@@ -2036,18 +2036,18 @@ function approvalsEditor() {
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Approvals and plugins'), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the coordinator', 'aria-label': 'Close' }, '×')),
-      h('div', { class: 'meta' }, 'Threads in this project use these from their next turn. The coordinator is not affected.')),
+        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
+      h('div', { class: 'meta' }, 'Minions in this project use these from their next turn. The Taskmaster is not affected.')),
     h('h3', { class: 'settings-label' }, 'Needs approval'),
     h('p', { class: 'muted small' },
-      'Claude Code permission rules, one per line. A thread\'s tool call that matches one waits in its chat with Approve and Deny buttons until someone signed in clicks; everything else runs without asking. ',
+      'Claude Code permission rules, one per line. A minion\'s tool call that matches one waits in its chat with Approve and Deny buttons until someone signed in clicks; everything else runs without asking. ',
       'Examples: ', h('code', {}, 'Bash(gh pr merge:*)'), ', ', h('code', {}, 'mcp__*__merge_pull_request'), '. ',
       'Bash rules match how a command starts, so they catch mistakes rather than a determined workaround.'),
     rules,
     h('h3', { class: 'settings-label' }, 'Plugin folders'),
     h('p', { class: 'muted small' },
       'Folders relative to the repo root, one per line, like ', h('code', {}, 'tools/mods/delve'),
-      '. Each thread loads the ones that exist in its worktree as Claude Code plugins (', h('code', {}, '--plugin-dir'), ').'),
+      '. Each minion loads the ones that exist in its worktree as Claude Code plugins (', h('code', {}, '--plugin-dir'), ').'),
     dirs,
     h('div', { class: 'row instructions-actions' }, save, discard, status));
   sync();
@@ -2060,9 +2060,9 @@ function renderInstructionsHead() {
   const p = view.project;
   el.replaceChildren(
     h('div', { class: 'row' }, h('h2', {}, 'Project instructions'), h('span', { class: 'spacer' }),
-      h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the coordinator', 'aria-label': 'Close' }, '×')),
+      h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
     h('div', { class: 'meta' },
-      'The coordinator and every thread get these in their system prompt, from their next turn.',
+      'The Taskmaster and every minion get these in their system prompt, from their next turn.',
       p.instructions_updated_by ? ` Last changed by ${p.instructions_updated_by} ${ago(p.instructions_updated_at)}.` : ''));
 }
 
@@ -2071,7 +2071,7 @@ function instructionsEditor() {
   const p = view.project;
   const textarea = h('textarea', {
     id: 'instructions-text', class: 'instructions-text', spellcheck: 'false',
-    placeholder: 'What the project is for, where the work happens (branches, PR names), how a thread checks its work, what needs a go-ahead first…',
+    placeholder: 'What the project is for, where the work happens (branches, PR names), how a minion checks its work, what needs a go-ahead first…',
   });
   textarea.value = p.instructions ?? '';
   const counter = h('span', { class: 'muted counter' });
@@ -2098,7 +2098,7 @@ function instructionsEditor() {
     try {
       view.project = await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { instructions: textarea.value } });
       textarea.value = view.project.instructions;
-      status.textContent = 'Saved. Threads pick this up on their next turn.';
+      status.textContent = 'Saved. Minions pick this up on their next turn.';
       renderInstructionsShelf();
       renderInstructionsHead();
     } catch (err) {
@@ -2186,7 +2186,7 @@ function renderMachinesShelf() {
       ? view.machines.map((m) => h('a', { class: `machine-item${m.online ? ' online' : ''}`, href, title: m.command ? `Runs ${m.command}` : '' },
         h('span', { class: `dot${m.online ? ' online' : ''}` }),
         h('span', { class: 'text' }, h('span', { class: 'name' }, m.name), h('span', { class: 'meta' }, machineStatus(m)))))
-      : h('p', { class: 'muted small' }, 'Lend threads MCP tools from your own computers, like a Godot editor that runs builds.')));
+      : h('p', { class: 'muted small' }, 'Lend minions MCP tools from your own computers, like a Godot editor that runs builds.')));
 }
 
 /** The lines to run on a machine to connect it, for its token and what it should run. */
@@ -2251,16 +2251,16 @@ function machinesPage() {
   const section = h('section', { class: 'artifacts-main machines-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Machines'), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the coordinator', 'aria-label': 'Close' }, '×')),
-      h('div', { class: 'meta' }, 'Computers that lend every thread their MCP tools while they are connected. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.')),
+        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
+      h('div', { class: 'meta' }, 'Computers that lend every minion their MCP tools while they are connected. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.')),
     form,
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
     h('p', { class: 'muted small' },
       'Each machine runs one MCP server; add another machine for a second one. It needs Node 18 or newer. ',
       '"Claude Code MCP server" runs one already set up for Claude Code on that computer, like godot-ai after its dock\'s Configure. ',
-      'A thread gets the tools of machines online when its turn starts, named mcp__<name>__…, plus the machine\'s notes, and the tools act on that computer, ',
-      'so only add servers you trust threads to run.'));
+      'A minion gets the tools of machines online when its turn starts, named mcp__<name>__…, plus the machine\'s notes, and the tools act on that computer, ',
+      'so only add servers you trust minions to run.'));
   setTimeout(() => {
     renderMachineSetup();
     renderMachineList();
@@ -2305,12 +2305,12 @@ function renderMachineList() {
     };
     const remove = h('button', { type: 'button', class: 'secondary small' }, 'Remove');
     remove.onclick = async () => {
-      if (!confirm(`Remove ${m.name}? Threads lose its tools and its token stops working.`)) return;
+      if (!confirm(`Remove ${m.name}? Minions lose its tools and its token stops working.`)) return;
       await api(`/api/machines/${m.id}`, { method: 'DELETE' }).catch((err) => alert(err.message));
       if (view.machineToken?.id === m.id) view.machineToken = null;
       renderMachineSetup();
     };
-    const notes = h('textarea', { rows: 4, maxlength: 2000, placeholder: 'What threads should know: never restart it, where the repo is cloned, what to check first…' });
+    const notes = h('textarea', { rows: 4, maxlength: 2000, placeholder: 'What minions should know: never restart it, where the repo is cloned, what to check first…' });
     notes.value = m.notes ?? '';
     const saved = h('span', { class: 'muted small', role: 'status' });
     const save = h('button', { type: 'button', class: 'small' }, 'Save notes');
@@ -2318,7 +2318,7 @@ function renderMachineList() {
       saved.textContent = 'Saving…';
       try {
         await api(`/api/machines/${m.id}`, { method: 'PATCH', body: { notes: notes.value } });
-        saved.textContent = 'Saved; threads get them from their next turn.';
+        saved.textContent = 'Saved; minions get them from their next turn.';
       } catch (err) {
         saved.textContent = err.message;
       }
@@ -2335,7 +2335,7 @@ function renderMachineList() {
           h('span', { class: 'meta' }, [machineStatus(m), m.command, `added by ${m.created_by}`].filter(Boolean).join(' · '))),
         newToken, remove),
       h('details', { class: 'machine-notes', 'data-id': m.id, open: editing },
-        h('summary', {}, m.notes ? `Notes: ${m.notes.split('\n')[0]}` : 'Add notes for threads'),
+        h('summary', {}, m.notes ? `Notes: ${m.notes.split('\n')[0]}` : 'Add notes for minions'),
         notes, h('div', { class: 'row' }, save, saved)));
   }));
 }
@@ -2494,8 +2494,8 @@ function modelPicker(chatId) {
       sel.disabled = false;
     }
   };
-  const model = h('select', { class: 'picker', id: 'model-picker', title: 'Model for this thread', 'aria-label': 'Model for this thread', onchange: save('model') });
-  const effort = h('select', { class: 'picker', id: 'effort-picker', title: 'Effort for this thread', 'aria-label': 'Effort for this thread', onchange: save('effort') });
+  const model = h('select', { class: 'picker', id: 'model-picker', title: 'Model for this minion', 'aria-label': 'Model for this minion', onchange: save('model') });
+  const effort = h('select', { class: 'picker', id: 'effort-picker', title: 'Effort for this minion', 'aria-label': 'Effort for this minion', onchange: save('effort') });
   return h('span', { class: 'pickers' }, model, effort);
 }
 
@@ -2519,8 +2519,8 @@ function renderModelPicker() {
   model.classList.toggle('is-default', !t.model);
   effort.classList.toggle('is-default', !t.effort);
   const later = t.status === 'running' ? '; a change applies from the next turn' : '';
-  model.title = t.model ? `Model for this thread: ${modelName(t.model)}${later}` : `Model for this thread: the default${t.last_model ? ` (${modelName(t.last_model)} on its last turn)` : ''}${later}`;
-  effort.title = t.effort ? `Effort for this thread: ${t.effort}${later}` : `Effort for this thread: the default${t.last_effort ? ` (${t.last_effort} on its last turn)` : ''}${later}`;
+  model.title = t.model ? `Model for this minion: ${modelName(t.model)}${later}` : `Model for this minion: the default${t.last_model ? ` (${modelName(t.last_model)} on its last turn)` : ''}${later}`;
+  effort.title = t.effort ? `Effort for this minion: ${t.effort}${later}` : `Effort for this minion: the default${t.last_effort ? ` (${t.last_effort} on its last turn)` : ''}${later}`;
   model.setAttribute('aria-label', model.title);
   effort.setAttribute('aria-label', effort.title);
 }
@@ -2537,11 +2537,11 @@ function renderTicketHead() {
   } else if (coord) {
     // The coordinator stays open for the life of the project.
   } else if (t.status === 'closed') {
-    actions.push(h('button', { class: 'secondary', onclick: () => setStatus(t.id, 'idle') }, 'Reopen'));
+    actions.push(h('button', { class: 'secondary', onclick: () => setStatus(t.id, 'idle') }, 'Reopen minion'));
   } else {
     actions.push(h('button', { class: 'secondary', onclick: async () => {
       if (await setStatus(t.id, 'closed')) location.hash = `#/p/${t.project_id}`;
-    }, title: 'Close ticket' }, 'Close', h('span', { class: 'wide-only' }, ' ticket')));
+    }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
   }
   const state = (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '');
   // Titled too, since phones may cut it short to keep the buttons beside it.
@@ -2553,7 +2553,7 @@ function renderTicketHead() {
       stateLabel,
       h('span', { class: 'spacer' }), ...actions, view.findEl ?? '',
       // Leaves the thread as it is and goes back to the project's coordinator.
-      coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the coordinator', 'aria-label': 'Back to the coordinator' }, '×')),
+      coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, '×')),
     view.progressEl);
   renderTyping();
   // While a turn runs, a sent message waits for it; said on hover rather than in a line of its own.
@@ -2903,11 +2903,11 @@ function shortNote(text) {
   // Older threads stored a note on every session restore; restores are silent now.
   if (/^Restored this thread's Claude session from the app's database/.test(text)) return null;
   if (text === 'The server restarted during this turn, so it was interrupted.') return '⚠ Interrupted by a server restart';
-  if ((m = text.match(/^(.+?) renamed this ticket from ".*" to "(.*)"\.$/s))) return `✎ ${m[1] === 'Claude' ? 'Renamed' : `${m[1]} renamed it`} “${m[2]}”`;
-  if ((m = text.match(/^(.+?) set this thread to (.+?) (from the next turn|from now on)\.$/))) return `⚙ ${m[1]}: ${m[2]}${m[3] === 'from the next turn' ? ' next turn' : ''}`;
-  if ((m = text.match(/^(.+?) (updated|cleared) the project instructions; they apply from each thread's next turn\.$/))) return `📋 ${m[1]} ${m[2]} the project instructions`;
-  if ((m = text.match(/^(.+?) set the (approval rules|plugin folders) to: (.*)\. They apply from each thread's next turn\.$/s))) return `🔒 ${m[1]} set the ${m[2]}: ${m[3]}`;
-  if ((m = text.match(/^(.+?) reopened this ticket\.$/))) return `↻ ${m[1]} reopened it`;
+  if ((m = text.match(/^(.+?) renamed this (?:ticket|minion) from ".*" to "(.*)"\.$/s))) return `✎ ${m[1] === 'Claude' ? 'Renamed' : `${m[1]} renamed it`} “${m[2]}”`;
+  if ((m = text.match(/^(.+?) set this (?:thread|minion) to (.+?) (from the next turn|from now on)\.$/))) return `⚙ ${m[1]}: ${m[2]}${m[3] === 'from the next turn' ? ' next turn' : ''}`;
+  if ((m = text.match(/^(.+?) (updated|cleared) the project instructions; they apply from each (?:thread|minion)'s next turn\.$/))) return `📋 ${m[1]} ${m[2]} the project instructions`;
+  if ((m = text.match(/^(.+?) set the (approval rules|plugin folders) to: (.*)\. They apply from each (?:thread|minion)'s next turn\.$/s))) return `🔒 ${m[1]} set the ${m[2]}: ${m[3]}`;
+  if ((m = text.match(/^(.+?) reopened this (?:ticket|minion)\.$/))) return `↻ ${m[1]} reopened it`;
   return text;
 }
 
@@ -3117,10 +3117,10 @@ function userBubble(author, text, imageSrcs, about = null) {
       h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
   }
   // The coordinator's hand-offs are rarely worth reading in full, so they start folded to one line.
-  if (author === COORDINATOR_NAME) {
+  if (author === COORDINATOR_NAME || author === 'Taskmaster') {
     const preview = (text ?? '').replace(/[#*_`>\[\]]/g, '').replace(/\s+/g, ' ').trim();
     msg.querySelector('.who').remove();
-    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, author), h('span', { class: 'preview' }, preview)), msg);
+    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, author === COORDINATOR_NAME ? 'Taskmaster' : author), h('span', { class: 'preview' }, preview)), msg);
   }
   return msg;
 }

@@ -61,7 +61,7 @@ test('closes after a clean turn, with the reason as a close note', async () => {
   assert.equal(store.getTicket(id)!.status, 'running');
   await endTurn(id, 'ok');
   assert.equal(store.getTicket(id)!.status, 'closed');
-  assert.deepEqual(notes(id), ['Claude closed this ticket: Merged abc1234']);
+  assert.deepEqual(notes(id), ['Claude dismissed this minion: Merged abc1234']);
   assert.equal(runner.view(store.getTicket(id)!).closing, false);
   assert.ok(broadcasts.some((m) => m.type === 'ticket' && m.ticket.id === id && m.ticket.status === 'closed'));
 });

@@ -263,7 +263,7 @@ export class Store {
         const number = this.nextNumber(project_id);
         this.db.prepare('UPDATE tickets SET number = ? WHERE id = ?').run(number, id);
         if (number === id) continue;
-        this.addEvent(id, 'note', { text: `Threads are now numbered per project. This thread is now #${number} (it was #${id}).` });
+        this.addEvent(id, 'note', { text: `Minions are now numbered per project. This minion is now #${number} (it was #${id}).` });
         changed.set(project_id, [...(changed.get(project_id) ?? []), `#${id} → #${number}`]);
       }
       for (const [projectId, moves] of changed) {

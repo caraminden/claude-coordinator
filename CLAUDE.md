@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Claude Coordinator: a shared web UI that runs headless Claude Code sessions as tickets.
+Overlord: a shared web UI that runs headless Claude Code sessions as minions.
 What it does, its layout and how to run it: `README.md`. Node 24+ runs the TypeScript
 directly; there are no dependencies and no build step.
 
@@ -9,7 +9,7 @@ directly; there are no dependencies and no build step.
 - Working with Cara (tone, when to ask versus pick a default, run-backs, her words as the
   spec): `docs/working-with-cara.md`. Read it before your first reply to her in a session.
 - Never skip, loosen or delete a test to get green. Fix the code, or say why the test is wrong.
-- Never push to main on GitHub. Work on your ticket branch; when and how it lands in the local
+- Never push to main on GitHub. Work on your minion branch; when and how it lands in the local
   `main` and deploys follows the project instructions ("Shipping fixes"). No plain force pushes:
   `--force-with-lease`, and only on your own branch. `tools/guard.sh` and `.githooks/pre-push`
   enforce the push rules.
@@ -22,11 +22,11 @@ directly; there are no dependencies and no build step.
 - A PR description states what was actually run (tests, a boot, a screenshot, a curl) and says
   plainly what was not verified. Template: `.github/pull_request_template.md`.
 - While your own background job runs (a test run, a build, a server you're checking), wait for
-  it inside the turn with one blocking command rather than ending the turn: a ticket's turn is one
+  it inside the turn with one blocking command rather than ending the turn: a minion's turn is one
   `claude -p` process, the board shows it idle once that exits, and the job may not outlive it.
 - After a second permission denial for the same kind of action, stop and say what you need
   instead of trying another route.
-- Subagents: whether a step should leave the session, and which `effort` and `model` each job
+- Subagents (Grunts): whether a step should leave the session, and which `effort` and `model` each job
   gets: `docs/subagents.md`. Never put `effort` on a skill.
 
 ## Compact instructions
@@ -36,9 +36,9 @@ with their times, every open question and who owes the next step, the branch, PR
 is committed or pushed, the files written, and the checklist. Drop test and build logs, diffs,
 file contents and finished subagent reports, keeping one line for what each concluded.
 
-## Skills, subagents and rules
+## Skills, subagents (Grunts) and rules
 
-Skills (`.claude/skills/<name>/SKILL.md`) and subagents (`.claude/agents/<name>.md`) load by
+Skills (`.claude/skills/<name>/SKILL.md`) and subagents, or Grunts (`.claude/agents/<name>.md`) load by
 their descriptions. Several came from the Delve project, and some are copies of open-source
 packs, listed with their sources in `.claude/skills/THIRD_PARTY.md`. `.claude/rules/ponytail.md`
 loads whenever a session reads a code file.

@@ -50,7 +50,7 @@ function scrollsSideways(target, dir, stop) {
   return false;
 }
 
-const LABELS = { left: 'Overview', right: 'Threads' };
+const LABELS = { left: 'Overview', right: 'Minions' };
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
 export function initDrawers() {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Coordinator machine agent: lends this computer's MCP server (a Godot editor, say) to the
+// Overlord machine agent: lends this computer's MCP server (a Godot editor, say) to the
 // coordinator's threads. It dials out to the app and keeps that connection open, so the app never
 // needs to reach this computer; each thread session gets its own copy of the MCP server.
 //
@@ -158,7 +158,7 @@ async function connect() {
   if (!res.ok) throw new Error(`the app answered ${res.status}`);
   for await (const msg of events(res.body)) {
     if (msg.hello) {
-      log(`Connected to ${new URL(appUrl).host} as "${msg.hello}". Threads can use ${describe} while this runs.`);
+      log(`Connected to ${new URL(appUrl).host} as "${msg.hello}". Minions can use ${describe} while this runs.`);
       retry = 0;
     } else if (msg.close) {
       stopServer(msg.session);

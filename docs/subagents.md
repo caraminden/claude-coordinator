@@ -1,7 +1,7 @@
-# When to use a subagent
+# When to use a subagent (a Grunt)
 
 Learned on Delve (Cara, 2026-10-24 and 10-25, from two usage audits of long-running build
-threads). The first section sets which effort and model each kind of job gets; the rest covers
+minions). The first section sets which effort and model each kind of job gets; the rest covers
 whether a step should leave the session at all.
 
 ## Effort and model per job

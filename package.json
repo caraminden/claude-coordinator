@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Shared web UI that runs headless Claude Code sessions as tickets",
+  "description": "Shared web UI that runs headless Claude Code sessions as minions",
   "engines": {
     "node": ">=24"
   },

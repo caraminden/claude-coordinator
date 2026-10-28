@@ -14,7 +14,7 @@ export interface Session {
   agent?: number;
 }
 
-export const AGENT_NAME = 'Coordinator';
+export const AGENT_NAME = 'Taskmaster';
 
 /** A phone's password manager can fill the name field with the site's address; that is never a name. */
 export function looksLikeUrl(name: string): boolean {

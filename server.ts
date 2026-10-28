@@ -486,7 +486,7 @@ function provisionalTitle(message: string): string {
 
 function ticketView(id: number) {
   const t = store.getTicket(id);
-  if (!t) throw new HttpError(404, 'No such ticket');
+  if (!t) throw new HttpError(404, 'No such minion');
   return runner.view(t);
 }
 
@@ -515,10 +515,10 @@ async function ensureCoordinator(project: Project): Promise<Ticket> {
 function agentProject(session: Session, method: string, pathname: string): number | null {
   if (session.agent === undefined) return null;
   const t = store.getTicket(session.agent);
-  if (!t) throw new HttpError(403, 'No such ticket');
+  if (!t) throw new HttpError(403, 'No such minion');
   // A ticket's own token may only read and update that ticket (its title, tag, state and note),
   // ask a question card in its chat, and close itself.
-  if (t.kind !== 'coordinator' && !threadMayCall(t.id, method, pathname)) throw new HttpError(403, 'A thread may only update itself');
+  if (t.kind !== 'coordinator' && !threadMayCall(t.id, method, pathname)) throw new HttpError(403, 'A minion may only update itself');
   return t.project_id;
 }
 
@@ -637,7 +637,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const ip = clientIp(req);
     const body = await readJson(req);
     const name = cleanName(body.name);
-    if ([AGENT_NAME, GITHUB_NAME].some((n) => n.toLowerCase() === name.toLowerCase())) throw new HttpError(400, 'That name is reserved');
+    if ([AGENT_NAME, 'Coordinator', GITHUB_NAME].some((n) => n.toLowerCase() === name.toLowerCase())) throw new HttpError(400, 'That name is reserved');
     // Checked right before the password (no await in between) so parallel bursts are counted.
     if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
     if (!auth.checkPassword(ip, String(body.password ?? ''))) throw new HttpError(401, 'Wrong password');
@@ -673,10 +673,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   // A coordinator may only touch its own project's tickets, and not itself.
   const scope = agentProject(session, method, pathname);
   const inScope = (projectId: number) => {
-    if (scope !== null && scope !== projectId) throw new HttpError(403, 'Outside this coordinator\'s project');
+    if (scope !== null && scope !== projectId) throw new HttpError(403, 'Outside this Taskmaster\'s project');
   };
   if (scope !== null && !/^\/api\/(projects\/\d+(\/tickets)?|tickets\/\d+(\/[a-z]+)?)$/.test(pathname)) {
-    throw new HttpError(403, 'Not available to the coordinator');
+    throw new HttpError(403, 'Not available to the Taskmaster');
   }
 
   if (pathname.startsWith('/api/push/')) return pushApi(req, res, pathname, method, session);
@@ -776,10 +776,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const coordinator = store.getCoordinator(project.id);
       const shown = (text: string) => (text ? lines(text).join(', ') : 'none');
       if (coordinator && settings.approval_rules !== undefined) {
-        runner.emit(coordinator.id, 'note', { text: `${session.name} set the approval rules to: ${shown(settings.approval_rules)}. They apply from each thread's next turn.` });
+        runner.emit(coordinator.id, 'note', { text: `${session.name} set the approval rules to: ${shown(settings.approval_rules)}. They apply from each minion's next turn.` });
       }
       if (coordinator && settings.plugin_dirs !== undefined) {
-        runner.emit(coordinator.id, 'note', { text: `${session.name} set the plugin folders to: ${shown(settings.plugin_dirs)}. They apply from each thread's next turn.` });
+        runner.emit(coordinator.id, 'note', { text: `${session.name} set the plugin folders to: ${shown(settings.plugin_dirs)}. They apply from each minion's next turn.` });
       }
     }
     if (instructions !== project.instructions) {
@@ -787,7 +787,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const coordinator = store.getCoordinator(project.id);
       if (coordinator) {
         runner.emit(coordinator.id, 'note', {
-          text: `${session.name} ${instructions ? 'updated' : 'cleared'} the project instructions; they apply from each thread's next turn.`,
+          text: `${session.name} ${instructions ? 'updated' : 'cleared'} the project instructions; they apply from each minion's next turn.`,
         });
       }
     }
@@ -904,7 +904,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     inScope(ticket.project_id);
     // (Asking people a question card in its own chat is the one thing it may do to itself.)
     if (scope !== null && method !== 'GET' && ticket.kind === 'coordinator' && !(action === '/questions' && session.agent === id)) {
-      throw new HttpError(403, 'The coordinator cannot act on itself');
+      throw new HttpError(403, 'The Taskmaster cannot act on itself');
     }
     if (action === '' && method === 'GET') {
       return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
@@ -924,10 +924,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (Object.keys(fields).length) {
         store.updateTicket(id, fields);
         const who = session.agent === id ? 'Claude' : session.name;
-        if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this ticket from "${ticket.title}" to "${fields.title}".` });
+        if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this minion from "${ticket.title}" to "${fields.title}".` });
         const next = runner.isRunning(id) ? 'from the next turn' : 'from now on';
-        if ('model' in fields) runner.emit(id, 'note', { text: `${who} set this thread to ${fields.model ? modelName(fields.model) : 'the default model'} ${next}.` });
-        if ('effort' in fields) runner.emit(id, 'note', { text: `${who} set this thread to ${fields.effort ? `${fields.effort} effort` : 'the default effort'} ${next}.` });
+        if ('model' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.model ? modelName(fields.model) : 'the default model'} ${next}.` });
+        if ('effort' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.effort ? `${fields.effort} effort` : 'the default effort'} ${next}.` });
         runner.broadcastTicket(id);
         // A result or a blocker is worth a ping; whoever set it by hand already knows.
         if (fields.state && NOTIFY_STATES[fields.state]) {
@@ -938,7 +938,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       return json(res, 200, ticketView(id));
     }
     if (action === '/seen' && method === 'POST') {
-      if (session.agent !== undefined) throw new HttpError(403, 'Only people mark threads seen');
+      if (session.agent !== undefined) throw new HttpError(403, 'Only people mark minions seen');
       return json(res, 200, { seen_at: store.markSeen(session.name, id) });
     }
     if (action === '/branch' && method === 'GET') {
@@ -984,7 +984,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     }
     if (action === '/questions' && method === 'POST') {
       // Claude asks people multiple-choice questions; the card shows in the chat until someone answers.
-      if (session.agent !== id) throw new HttpError(403, 'Only the thread itself can ask in its chat');
+      if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can ask in its chat');
       const questions = await cleanQuestions(ticket, (await readJson(req)).questions);
       const questionId = randomBytes(6).toString('hex');
       runner.emit(id, 'question', { id: questionId, questions });
@@ -1011,15 +1011,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     }
     if (action === '/approvals' && method === 'POST') {
       // Claude Code wants to run a tool that matches an approval rule; show an Approve / Deny card.
-      if (session.agent !== id) throw new HttpError(403, 'Only the thread itself can ask for approval in its chat');
-      if (!runner.isRunning(id)) throw new HttpError(409, 'The thread is not mid-turn');
+      if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can ask for approval in its chat');
+      if (!runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
       const body = await readJson(req);
       const tool = str(body.tool_name, 'Tool name', 300);
       return json(res, 201, { id: runner.approvals.request(id, tool, body.input ?? {}) });
     }
     if (action === '/approvals' && method === 'GET') {
       // The thread's MCP server waits here for the card's outcome, half a minute at a time.
-      if (session.agent !== id) throw new HttpError(403, 'Only the thread itself can wait on its approvals');
+      if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can wait on its approvals');
       return json(res, 200, await runner.approvals.wait(id, url.searchParams.get('id') ?? '', APPROVAL_POLL_MS));
     }
     if (action === '/approve' && method === 'POST') {
@@ -1039,32 +1039,32 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (action === '/status' && method === 'POST') {
       const body = await readJson(req);
       if (body.status !== 'closed' && body.status !== 'idle') throw new HttpError(400, 'Status must be closed or idle');
-      if (ticket.kind === 'coordinator') throw new HttpError(400, 'The coordinator cannot be closed');
-      if (runner.isRunning(id)) throw new HttpError(409, 'Stop the ticket before closing it');
+      if (ticket.kind === 'coordinator') throw new HttpError(400, 'The Taskmaster cannot be dismissed');
+      if (runner.isRunning(id)) throw new HttpError(409, 'Stop the minion before dismissing it');
       if (body.status === 'closed') {
-        runner.close(id, `${session.name} closed this ticket.`);
+        runner.close(id, `${session.name} dismissed this minion.`);
       } else {
         store.updateTicket(id, { status: body.status });
-        runner.emit(id, 'note', { text: `${session.name} reopened this ticket.` });
+        runner.emit(id, 'note', { text: `${session.name} reopened this minion.` });
         runner.broadcastTicket(id);
       }
       return json(res, 200, ticketView(id));
     }
     if (action === '/coordinator' && method === 'POST') {
       // A thread asks its project's coordinator for something only the coordinator can do (message_coordinator).
-      if (session.agent !== id || ticket.kind === 'coordinator') throw new HttpError(403, 'Only a thread can message its coordinator');
+      if (session.agent !== id || ticket.kind === 'coordinator') throw new HttpError(403, 'Only a minion can message its Taskmaster');
       const text = str((await readJson(req)).text, 'Message', 10_000);
       const coordinator = await ensureCoordinator(store.getProject(ticket.project_id)!);
       runner.send(coordinator.id, `#${ticket.number} ${ticket.title}`, text, []);
-      runner.emit(id, 'note', { text: `Sent the coordinator: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
+      runner.emit(id, 'note', { text: `Sent the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
       return json(res, 202, { sent: true });
     }
     if (action === '/close' && method === 'POST') {
       // A thread closes itself once its current turn ends (close_self); the token decides which thread.
-      if (session.agent !== id) throw new HttpError(403, 'A thread may only close itself');
+      if (session.agent !== id) throw new HttpError(403, 'A minion may only be dismissed by itself');
       const body = await readJson(req);
       const reason = typeof body.reason === 'string' && body.reason.trim() ? str(body.reason.trim(), 'Reason', 500) : null;
-      if (!runner.closeAfterTurn(id, reason)) throw new HttpError(409, 'The thread is not mid-turn');
+      if (!runner.closeAfterTurn(id, reason)) throw new HttpError(409, 'The minion is not mid-turn');
       return json(res, 202, ticketView(id));
     }
   }
@@ -1154,7 +1154,7 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
   let m = pathname.match(/^\/api\/machines\/(\d+)\/session(?:\/([0-9a-f]{24}))?$/);
   if (m) {
     const ticket = session.agent === undefined ? null : store.getTicket(session.agent);
-    if (ticket?.kind !== 'ticket') throw new HttpError(403, 'Only a thread\'s turn can use a machine');
+    if (ticket?.kind !== 'ticket') throw new HttpError(403, 'Only a minion\'s turn can use a machine');
     const machineId = Number(m[1]);
     if (!m[2] && method === 'GET') {
       if (!machines.openSession(machineId, ticket.id, res)) throw new HttpError(503, 'That machine is offline');
@@ -1240,7 +1240,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => console.log(`Claude Coordinator listening on http://${HOST}:${PORT}`));
+server.listen(PORT, HOST, () => console.log(`Overlord listening on http://${HOST}:${PORT}`));
 
 // The machines-only listener: the agent's two endpoints and the agent script, nothing else.
 if (MACHINES_URL) {

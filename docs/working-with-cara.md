@@ -2,7 +2,7 @@
 
 How Cara (she/her) likes to work with Claude, carried over from the Delve project, where these
 were her standing rules and the patterns behind her calls (2026-10-14 to 10-27). They hold for
-any project of hers. Other people chatting on a ticket may want something different; follow
+any project of hers. Other people chatting on a minion may want something different; follow
 theirs for their asks.
 
 ## Tone and replies
@@ -89,6 +89,6 @@ a yes, update it in the open PR; on a no, leave it.
 
 ## Effort and models
 
-Sessions run at high effort by default; never above high unless she asks. Subagent effort and
+Sessions run at high effort by default; never above high unless she asks. Subagent (Grunt) effort and
 model choice: `docs/subagents.md`. Quality comes before cost: she doesn't want throughput capped
 or memory slimmed to save money, only waste cut.

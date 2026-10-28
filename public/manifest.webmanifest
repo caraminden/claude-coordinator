@@ -1,7 +1,7 @@
 {
-  "name": "Claude Coordinator",
-  "short_name": "Coordinator",
-  "description": "Chat with Claude Code threads together",
+  "name": "Overlord",
+  "short_name": "Overlord",
+  "description": "Chat with Claude Code minions together",
   "id": "/",
   "start_url": "/",
   "scope": "/",

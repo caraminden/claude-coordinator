@@ -147,8 +147,8 @@ const PHASES = {
   verify: { done: 'Tried it out and checked it works', now: 'Trying it out' },
   save: { done: 'Saved the work in git', now: 'Saving the work in git' },
   research: { done: 'Looked things up online', now: 'Looking things up online' },
-  delegate: { done: 'Had helper agents work on parts of it', now: 'Working with helper agents' },
-  coordinate: { done: 'Updated other tickets', now: 'Updating other tickets' },
+  delegate: { done: 'Had grunts work on parts of it', now: 'Working with grunts' },
+  coordinate: { done: 'Updated other minions', now: 'Updating other minions' },
   other: { done: 'Ran some other commands', now: 'Running commands' },
 };
 
@@ -215,7 +215,7 @@ export function describeAction(block) {
       return { kind: 'web', text: `Searched the web for “${clip(i.query, 60)}”` };
     case 'Task':
     case 'Agent':
-      return { kind: 'agent', text: `Asked a helper agent to ${clip(i.description || i.prompt, 70).replace(/^./, (c) => c.toLowerCase())}` };
+      return { kind: 'agent', text: `Asked a grunt to ${clip(i.description || i.prompt, 70).replace(/^./, (c) => c.toLowerCase())}` };
     case 'Skill':
       return { kind: 'other', text: `Used the ${i.skill} skill` };
     case 'Workflow':
@@ -264,8 +264,8 @@ export function summarizeActions(actions) {
   if (by.read) parts.push(`read ${plural(files(by.read).length, 'file')}`);
   if (by.search) parts.push(`searched the code ${by.search.length === 1 ? 'once' : `${by.search.length} times`}`);
   if (by.web) parts.push(`checked ${plural(by.web.length, 'web source')}`);
-  if (by.agent) parts.push(`used ${plural(by.agent.length, 'helper agent')}`);
-  if (by.tickets) parts.push(`${plural(by.tickets.length, 'ticket action')}`);
+  if (by.agent) parts.push(`used ${plural(by.agent.length, 'grunt')}`);
+  if (by.tickets) parts.push(`${plural(by.tickets.length, 'minion action')}`);
   if (by.other) parts.push(`${plural(by.other.length, 'other step')}`);
   if (!parts.length) return '';
   return capitalize(parts.join(' · ')) + (failed ? ` (${failed} failed)` : '');

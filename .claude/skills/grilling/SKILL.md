@@ -8,7 +8,7 @@ Interview the user relentlessly until you reach a shared understanding. Map this
 Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round, then wait for the user's answers before the next round.
 
 - **Where the session has a decision-card tool** (such as `request_decision`), each question is a card: the question in about twelve words, the background in its context, two to four options with what each one does, and your recommended answer marked with its reason. Post the whole frontier as cards in one turn, numbered Q1, Q2 and on, and say nothing else about them in a message. When the user answers a card in words instead of a tap, close it and take their words as the answer. Cara prefers cards when they exist.
-- **Everywhere else** (a Claude Coordinator ticket, a terminal), ask the round as one message of numbered questions, each with your recommended answer:
+- **Everywhere else** (an Overlord minion, a terminal), ask the round as one message of numbered questions, each with your recommended answer:
 
 ```
 ❓ **Q1** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>

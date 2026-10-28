@@ -566,9 +566,10 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .prop-filter .tag-chip::after { content: " ▾"; }
 .prop-filter .pf.on > .tag-chip { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
 .prop-filter .prop-pop { max-height: min(60vh, 22rem); overflow-y: auto; }
-@media (min-width: 801px) { .prop-filter .prop-pop { left: 0; right: auto; } }
-/* Phones: the list drops under the whole row of dropdowns, full width, so it never covers them. */
-@media (max-width: 800px) { .prop-filter { position: relative; } .prop-filter .prop-chip { position: static; } .prop-filter .prop-pop { position: absolute; top: calc(100% + 6px); left: 0; right: 0; width: auto; } }
+/* The list drops under the whole row of dropdowns, full width, so it never covers them or runs past the panel. */
+.prop-filter { position: relative; }
+.prop-filter .prop-chip { position: static; }
+.prop-filter .prop-pop { position: absolute; top: calc(100% + 6px); left: 0; right: 0; width: auto; }
 .pf-opt { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.1rem; cursor: pointer; color: var(--ink); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
 .pf-opt input { margin: 0; flex: none; width: auto; }
 .pf-opt .pf-n { margin-left: auto; padding-left: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -834,7 +835,9 @@ a.thread-ref:hover { text-decoration: underline; }
 .prop-pop h4 { margin: 0 0 0.4rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .prop-pop dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.6rem; margin: 0; align-items: center; }
 .prop-pop dt { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85em; }
-.prop-pop dd { margin: 0; }
+.prop-pop dd { margin: 0; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.prop-pop .pv-pick { color: var(--ink); cursor: pointer; }
+.prop-pop .pv-pick:hover, .prop-pop .pv-pick:focus-visible { border-color: var(--accent); }
 .prop-pop .foot { margin-top: 0.5rem; padding-top: 0.45rem; border-top: 1px solid var(--line); display: flex; gap: 0.5rem; align-items: center; font-size: 0.85em; color: var(--muted); }
 .prop-pop .foot a { color: var(--accent); text-decoration: none; white-space: nowrap; }
 .prop-pop .foot .spacer { flex: 1; }

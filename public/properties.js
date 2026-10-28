@@ -17,11 +17,29 @@ export function propertyChip(t) {
     h('div', { class: 'prop-pop' },
       h('h4', {}, 'Properties'),
       entries.length
-        ? h('dl', {}, entries.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, h('span', { class: 'pv' }, propertyValue(v)))]))
+        ? h('dl', {})
         : h('p', { class: 'muted small' }, 'None yet. The minion sets its own as the work becomes clear.'),
       h('div', { class: 'foot' }, h('span', {}, 'Minions and the Taskmaster set these'), h('span', { class: 'spacer' }),
         h('a', { href: `#/p/${t.project_id}/properties` }, 'All keys'))));
+  // Drawn on opening: which values the filter offers depends on the registry, which may load later.
+  chip.addEventListener('toggle', () => {
+    if (chip.open) chip.querySelector('dl')?.replaceChildren(...entries.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, filterLinks(t, k, v))]));
+  });
   return closeOnClickAway(chip);
+}
+
+/** A property's values, each a button that adds it to the minions list's filter when the filter offers it. */
+function filterLinks(t, key, value) {
+  const offered = propFilter.projectId === t.project_id
+    && filterChoices(propFilter.keys ?? [], [t]).find((c) => c.key === key)?.values;
+  if (!offered) return h('span', { class: 'pv' }, propertyValue(value));
+  return [value].flat().map((v) => offered.includes(v)
+    ? h('button', { type: 'button', class: 'pv pv-pick', title: `Filter the minions list by ${key}: ${v}`, onclick: (e) => {
+      propFilter.picks.set(key, (propFilter.picks.get(key) ?? new Set()).add(v));
+      e.currentTarget.closest('details').open = false;
+      renderSidebar();
+    } }, String(v))
+    : h('span', { class: 'pv' }, String(v)));
 }
 
 /** Close a <details> popover on a click elsewhere. */

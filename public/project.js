@@ -1,10 +1,10 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, setView, taskmasterLabel, threadHref, usageMeter, view } from './core.js';
-import { approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderApprovalsShelf, renderInstructionsShelf, renderMachinesShelf } from './settings.js';
+import { approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderMachinesShelf } from './settings.js';
 import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, fileViewer, renderArtifactHead, renderArtifactResults, renderFileHead, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
 import { chatSection, chatView, mountChat } from './thread.js';
-import { propertiesPage, renderPropertiesShelf } from './properties.js';
+import { propertiesPage, renderSettingsCount } from './properties.js';
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 export async function showTicket(ticketId) {
@@ -17,11 +17,12 @@ function renderCrumbs(main) {
   const { project } = view;
   const projectLink = h('a', { href: `#/p/${project.id}`, 'data-project-name': project.id }, project.name);
   const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
+  const settingsLink = h('a', { href: `#/p/${project.id}/settings` }, 'Settings');
   crumbs.replaceChildren(...(
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
-      : main.kind === 'instructions' ? [projectLink, ' / ', 'Instructions']
-      : main.kind === 'approvals' ? [projectLink, ' / ', 'Approvals']
-      : main.kind === 'properties' ? [projectLink, ' / ', 'Properties']
+      : main.kind === 'instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Instructions']
+      : main.kind === 'approvals' ? [projectLink, ' / ', settingsLink, ' / ', 'Needs approval']
+      : main.kind === 'properties' ? [projectLink, ' / ', settingsLink, ' / ', 'Properties']
       : main.kind === 'machines' ? [projectLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
@@ -78,6 +79,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('summary', { title: 'Show or hide the overview' }, projectTitle(project)),
     h('section', { class: 'account' },
       h('div', { class: 'row' }, h('strong', {}, me), h('span', { class: 'spacer' }),
+        h('a', { class: 'button secondary settings-link', href: `#/p/${projectId}/settings`, title: 'Instructions, approvals and properties for this scheme' },
+          'Settings', h('span', { id: 'settings-count', class: 'count', hidden: true })),
         h('button', { class: 'secondary small', onclick: logout }, 'Sign out')),
       usageMeter(),
       pushControls(project)),
@@ -86,9 +89,6 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
       projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
         h('span', { class: 'name', 'data-project-name': p.id }, p.name))),
       h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme')),
-    h('div', { id: 'instructions-shelf' }),
-    h('div', { id: 'approvals-shelf' }),
-    h('div', { id: 'properties-shelf' }),
     h('div', { id: 'machines-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
@@ -125,9 +125,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   // one slim sticky column; otherwise the panels sit directly in the grid.
   app.replaceChildren(h('div', { class: 'split' }, h('div', { class: 'panels' }, shelf, sidebar), section));
   renderUsage();
-  renderInstructionsShelf();
-  renderApprovalsShelf();
-  renderPropertiesShelf();
+  renderSettingsCount();
   renderMachinesShelf();
   renderShelf();
   renderSidebar();
@@ -162,7 +160,6 @@ async function switchChat(main, seq) {
   document.querySelector('#app .split').lastElementChild.replaceWith(chatSection(chatId, ticket, events));
   // On phones the panels sit above the chat; fold them away as a fresh load would.
   if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details:not(.as-drawer)')) el.open = false;
-  renderInstructionsShelf();
   renderShelf();
   renderSidebar();
   await mountChat(chatId, ticket, events);

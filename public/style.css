@@ -678,19 +678,21 @@ mark.find.current { background: var(--waiting); color: #fff; }
 body.navigating { cursor: progress; }
 body.navigating #app .split > :last-child, body.navigating #app > :not(.split) { opacity: 0.55; transition: opacity 0.15s 0.12s; }
 
-/* Project instructions: a peek in the overview panel, and the editor with its import picker */
-.instructions-peek { display: flex; flex-direction: column; min-width: 0; text-decoration: none; padding: 0.3rem 0.4rem; border-radius: 6px; }
-.instructions-peek:hover { background: var(--panel); }
-.instructions-peek .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
-.instructions-peek .meta { color: var(--muted); font-size: 0.78em; }
+/* Settings: the link beside Sign out (with how many properties wait for review), and the page's tabs */
+.shelf .account .settings-link { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.6rem; }
+.settings-link .count { background: var(--accent); color: #fff; border-radius: 999px; padding: 0 0.4rem; font-size: 0.85em; line-height: 1.4; }
+.settings-link .count[hidden] { display: none; }
+.settings-tabs { display: flex; gap: 0.25rem; margin-top: 0.5rem; overflow-x: auto; }
+.settings-tabs a { padding: 0.3rem 0.7rem; border-radius: 6px; color: var(--muted); text-decoration: none; white-space: nowrap; font-size: 0.9em; }
+.settings-tabs a:hover { background: var(--panel); color: var(--ink); }
+.settings-tabs a.active { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line); }
+/* Project instructions: the editor with its import picker */
 .instructions-tools { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.75rem 0; }
 .instructions-tools button { padding: 0.25rem 0.7rem; font-size: 0.9em; }
 .instructions-tools .small { font-size: 0.82em; }
 .instructions-text { width: 100%; min-height: 55vh; resize: vertical; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; line-height: 1.5; tab-size: 2; }
 .instructions-actions { margin-top: 0.6rem; }
-/* Approval rules and plugin folders: the overview peek and the editor's two lists */
-.rule-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; text-decoration: none; padding: 0.2rem 0; }
-.rule-chips .rule { font-size: 0.78em; padding: 0.15rem 0.45rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); overflow-wrap: anywhere; }
+/* Approval rules and plugin folders: the editor's two lists */
 .instructions-text.settings-list { min-height: 7rem; }
 .settings-label { margin: 1rem 0 0.2rem; font-size: 1em; }
 .instructions-actions .counter.over { color: var(--error); font-weight: 600; }

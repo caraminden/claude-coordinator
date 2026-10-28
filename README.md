@@ -38,9 +38,9 @@ Planned next: runners on other people's own Claude logins.
   with a bearer token that only reaches that scheme's minions (never the
   Taskmaster itself). The token is passed in the environment, not on the
   command line, so other users on the box can't read it from `ps`.
-- Each scheme can have **instructions** (up to 16,000 characters), edited from the
-  overview panel. They're appended to the system prompt of the Taskmaster and every
-  minion, so they apply from each one's next turn. "Import from Claude Code" lists
+- Each scheme can have **instructions** (up to 16,000 characters), edited on the
+  scheme's Settings page (beside Sign out in the overview panel). They're appended
+  to the system prompt of the Taskmaster and every minion, so they apply from each one's next turn. "Import from Claude Code" lists
   the instruction and memory files of the login the app runs as (`~/.claude/CLAUDE.md`
   and `rules/`, the repo's `CLAUDE.md` files, and auto-memory) to add with a tick.
   A file upload or a paste works too. The Taskmaster can read and change them
@@ -209,8 +209,8 @@ or a scheme's approval rules and denies anything else. The Taskmaster's prompts
 are denied (`--permission-prompts none`).
 
 **Needs approval.** A scheme can list Claude Code permission rules, such as
-`Bash(gh pr merge:*)` or `mcp__*__merge_pull_request`, in the overview panel's
-"Needs approval" section (or the Taskmaster's `set_project_settings` tool). Every
+`Bash(gh pr merge:*)` or `mcp__*__merge_pull_request`, on the "Needs approval"
+tab of the scheme's Settings page (or the Taskmaster's `set_project_settings` tool). Every
 minion runs with (the `ask` rules only when the scheme has some):
 
 ```

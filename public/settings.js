@@ -1,4 +1,4 @@
-// A scheme's settings: notifications, instructions, approvals and plugins, and the Machines page.
+// A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
 import { ago, api, h, view } from './core.js';
 import { openNewScheme, toggleSchemeMenu } from './sidebar.js';
 
@@ -115,8 +115,6 @@ export function onProjectUpdate(project) {
   view.projects = view.projects.map((p) => (p.id === project.id ? { ...p, name: project.name } : p));
   if (view.projectId !== project.id) return;
   view.project = project;
-  renderInstructionsShelf();
-  renderApprovalsShelf();
   for (const [id, key] of [['approval-rules', 'approval_rules'], ['plugin-dirs', 'plugin_dirs']]) {
     const el = document.getElementById(id);
     if (el && !el.hasAttribute('data-draft')) el.value = project[key];
@@ -184,40 +182,13 @@ export function projectTitle(project) {
   return wrap;
 }
 
-/** Overview panel: whether the project has instructions, and a way to edit them. */
-export function renderInstructionsShelf() {
-  const el = document.getElementById('instructions-shelf');
-  if (!el) return;
-  const p = view.project;
-  const text = p.instructions ?? '';
-  const first = text.split('\n').map((l) => l.replace(/^[#>*\-\s]+/, '').trim()).find(Boolean);
-  el.replaceChildren(h('section', { class: 'column' },
-    h('h3', {}, 'Instructions', h('span', { class: 'spacer' }),
-      h('a', { class: `browse${view.main === 'instructions' ? ' active' : ''}`, href: `#/p/${view.projectId}/instructions` }, text ? 'Edit' : 'Add')),
-    text
-      ? h('a', { class: 'instructions-peek', href: `#/p/${view.projectId}/instructions` },
-        h('span', { class: 'name' }, first ?? ''),
-        h('span', { class: 'meta' }, `${count(text.length)} chars${p.instructions_updated_by ? ` · ${p.instructions_updated_by}, ${ago(p.instructions_updated_at)}` : ''}`))
-      : h('p', { class: 'muted small' }, 'Standing rules every minion and the Taskmaster follow. Import them from Claude Code.')));
-}
-
 const splitLines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
 
-/** Overview panel: which tool calls need a person's OK, and which plugin folders threads load. */
-export function renderApprovalsShelf() {
-  const el = document.getElementById('approvals-shelf');
-  if (!el) return;
-  const p = view.project;
-  const rules = splitLines(p.approval_rules);
-  const dirs = splitLines(p.plugin_dirs);
-  const href = `#/p/${view.projectId}/approvals`;
-  el.replaceChildren(h('section', { class: 'column' },
-    h('h3', {}, 'Needs approval', h('span', { class: 'spacer' }),
-      h('a', { class: `browse${view.main === 'approvals' ? ' active' : ''}`, href }, rules.length || dirs.length ? 'Edit' : 'Add')),
-    rules.length
-      ? h('a', { class: 'rule-chips', href }, rules.map((r) => h('code', { class: 'rule' }, r)))
-      : h('p', { class: 'muted small' }, 'Nothing: minions run every tool without asking.'),
-    dirs.length ? h('p', { class: 'muted small' }, `Plugins: ${dirs.join(', ')}`) : ''));
+/** The Settings page's tabs; each is its own route, so old links to them still work. */
+export function settingsTabs() {
+  return h('nav', { class: 'settings-tabs' },
+    [['instructions', 'Instructions'], ['approvals', 'Needs approval'], ['properties', 'Properties']].map(([kind, label]) =>
+      h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label)));
 }
 
 /** Main panel: the project's approval rules and plugin folders. */
@@ -256,7 +227,6 @@ export function approvalsEditor() {
       rules.value = view.project.approval_rules;
       dirs.value = view.project.plugin_dirs;
       status.textContent = 'Saved. Minions pick this up on their next turn.';
-      renderApprovalsShelf();
     } catch (err) {
       status.textContent = err.message;
     }
@@ -270,8 +240,9 @@ export function approvalsEditor() {
   };
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Approvals and plugins'), h('span', { class: 'spacer' }),
+      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
+      settingsTabs(),
       h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster is not affected.')),
     h('h3', { class: 'settings-label' }, 'Needs approval'),
     h('p', { class: 'muted small' },
@@ -294,8 +265,9 @@ function renderInstructionsHead() {
   if (!el) return;
   const p = view.project;
   el.replaceChildren(
-    h('div', { class: 'row' }, h('h2', {}, 'Scheme instructions'), h('span', { class: 'spacer' }),
+    h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
       h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
+    settingsTabs(),
     h('div', { class: 'meta' },
       'The Taskmaster and every minion get these in their system prompt, from their next turn.',
       p.instructions_updated_by ? ` Last changed by ${p.instructions_updated_by} ${ago(p.instructions_updated_at)}.` : ''));
@@ -334,7 +306,6 @@ export function instructionsEditor() {
       view.project = await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { instructions: textarea.value } });
       textarea.value = view.project.instructions;
       status.textContent = 'Saved. Minions pick this up on their next turn.';
-      renderInstructionsShelf();
       renderInstructionsHead();
     } catch (err) {
       status.textContent = err.message;

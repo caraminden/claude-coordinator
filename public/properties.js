@@ -1,5 +1,6 @@
-// The scheme's property registry: the shelf, the Properties page and a minion's property chip.
+// The scheme's property registry: the Settings link's review count, the Properties tab and a minion's property chip.
 import { api, h, view } from './core.js';
+import { settingsTabs } from './settings.js';
 
 // ---------- properties (the scheme's property registry) ----------
 
@@ -48,23 +49,21 @@ async function loadProperties() {
   return view?.projectId === projectId ? reg : null;
 }
 
-export async function renderPropertiesShelf() {
-  const el = document.getElementById('properties-shelf');
+/** The overview's Settings link: how many property proposals wait for a person's review. */
+export async function renderSettingsCount() {
+  const el = document.getElementById('settings-count');
   if (!el) return;
   const reg = await loadProperties().catch(() => null);
   if (!reg || !el.isConnected) return;
-  const own = reg.keys.filter((k) => k.scope === 'scheme' && k.status === 'active').length;
   const waiting = toReview(reg).length;
-  el.replaceChildren(h('section', { class: 'column' },
-    h('h3', {}, 'Properties', h('span', { class: 'spacer' }),
-      h('a', { class: `browse${view.main === 'properties' ? ' active' : ''}`, href: `#/p/${view.projectId}/properties` }, 'Edit')),
-    h('p', { class: 'muted small' }, own ? `Global keys and ${own} of this scheme's own` : 'Global keys only',
-      waiting ? [' · ', h('a', { href: `#/p/${view.projectId}/properties` }, `${waiting} to review`)] : '')));
+  el.textContent = waiting || '';
+  el.title = waiting ? `${waiting} properties to review` : '';
+  el.hidden = !waiting;
 }
 
 export function onPropertiesChanged(projectId) {
   if (view?.kind !== 'project' || (projectId !== null && projectId !== view.projectId)) return;
-  renderPropertiesShelf();
+  renderSettingsCount();
   if (view.main === 'properties') renderPropertiesPage();
 }
 
@@ -73,8 +72,9 @@ export function propertiesPage() {
   const p = view.project;
   const section = h('section', { class: 'artifacts-main props-main' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Properties'), h('span', { class: 'spacer' }),
+      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
+      settingsTabs(),
       h('div', { class: 'meta' }, 'The keys and values minions and their files carry. Aliases resolve to their value; nothing else can be set.')),
     h('div', { id: 'props-body', class: 'props-body' }, h('p', { class: 'muted' }, 'Loading…')));
   setTimeout(renderPropertiesPage);
@@ -100,7 +100,7 @@ async function renderPropertiesPage() {
       if (r.warnings?.length) return r.warnings;
       done?.();
       renderPropertiesPage();
-      renderPropertiesShelf();
+      renderSettingsCount();
     } catch (err) {
       status.textContent = err.message;
     }

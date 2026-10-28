@@ -6,6 +6,8 @@ const run = promisify(execFile);
 
 export interface BranchStatus {
   branch: string;
+  /** The branch's newest commit. */
+  tip: string;
   /** The base the branch is compared with, like "main". */
   base: string | null;
   /** Commits on the branch that the base does not have. */
@@ -59,7 +61,8 @@ async function findPr(repoDir: string, branch: string): Promise<BranchStatus['pr
  * local default branch or origin's (tickets here are often merged locally rather than through a PR).
  */
 export async function branchStatus(repoDir: string, branch: string, startedAt: number, withPr: boolean, live: Live | null = null): Promise<BranchStatus | null> {
-  if (!(await tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repoDir))) return null;
+  const tip = await tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repoDir);
+  if (!tip) return null;
   const originHead = await tryGit(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repoDir);
   const localDefault = originHead?.replace(/^origin\//, '') ?? 'main';
   const bases = [];
@@ -78,6 +81,7 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
   }
   return {
     branch,
+    tip,
     base: bases[0] ?? null,
     ahead,
     merged,
@@ -105,4 +109,38 @@ async function deployed(repoDir: string, branch: string, live: Live): Promise<Br
   const checkout = isLive ? null : await tryGit(['rev-parse', 'HEAD'], live.checkoutDir);
   const pulled = isLive || (!!checkout && (await contains(repoDir, checkout, `refs/heads/${branch}`)) === true);
   return { pulled, live: isLive };
+}
+
+/**
+ * Where a minion's change is, as one line for its bar and a stage for its row's badge: on its branch,
+ * on main, deploying, live, or not live because the last deploy failed. Live is by ancestry: the
+ * running server contains the branch, whichever minion's deploy carried it there. Null before the
+ * minion has committed anything.
+ */
+export interface Ship {
+  stage: 'branch' | 'main' | 'deploying' | 'live' | 'failed';
+  text: string;
+  /** The branch's newest commit, short. */
+  commit: string;
+  /** The whole deploy report, for a failed deploy. */
+  detail?: string;
+}
+
+export function shipLine(s: BranchStatus | null, interruptible: number, failure: string | null): Ship | null {
+  if (!s || s.empty) return null;
+  const commit = s.tip.slice(0, 7);
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  if (!s.merged) return { stage: 'branch', text: `On its branch: ${plural(s.ahead, 'commit')} not on ${s.base ?? 'main'}`, commit };
+  // Another scheme's repo: merged is as far as it goes here.
+  if (!s.deploy) return { stage: 'main', text: `Merged into ${s.base ?? 'main'}`, commit };
+  if (s.deploy.live) return { stage: 'live', text: 'Live', commit };
+  if (failure) {
+    // Why, from the report: what follows "failed: ", or its first sentence. The bar shows it all on hover.
+    const why = failure.match(/failed: (.*?)[.,](\s|$)/)?.[1] ?? failure.split(/(?<=\.)\s/)[0].replace(/\.$/, '');
+    return { stage: 'failed', text: `Not live, the last deploy failed: ${why.length > 80 ? why.slice(0, 79) + '…' : why}`, commit, detail: failure };
+  }
+  if (s.deploy.pulled) {
+    return { stage: 'deploying', text: interruptible ? `Deploying: waiting on the idle restart, ${plural(interruptible, 'turn')} running` : 'Deploying', commit };
+  }
+  return { stage: 'main', text: 'On main, not deployed', commit };
 }

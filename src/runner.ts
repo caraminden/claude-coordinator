@@ -11,6 +11,7 @@ import { AGENT_NAME } from './auth.ts';
 import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
+import type { Ship } from './branch.ts';
 import { claudeConfigDir, lastEffort, projectSlug, restoreSession, saveSession } from './sessions.ts';
 import { restoreTicketDir } from './workspace.ts';
 import { previewKey } from './previews.ts';
@@ -503,6 +504,8 @@ export class Runner {
   machines: () => Machine[] = () => [];
   /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
   onFilesMayChange: (ticketId: number) => void = () => {};
+  /** Where the minion's change is, branch to live (src/branch.ts), for its bar and its row's badge. */
+  ship: (ticketId: number) => Ship | null = () => null;
   /** Called when a turn's process has exited, however the turn ended. */
   onTurnEnd: (ticketId: number) => void = () => {};
   /** Approve / Deny cards waiting on people, for projects with approval rules. */
@@ -553,6 +556,7 @@ export class Runner {
       ...ticket, queued: this.queued(ticket.id), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
       approvals: this.approvals.waiting(ticket.id), properties: this.store.props.forTarget('minion', ticket.id),
       preview: !!this.store.getSetting(previewKey(ticket.id)),
+      ship: this.ship(ticket.id),
       // What "Default" means in the composer: the effort a turn gets when the ticket has none of its own.
       default_effort: turnSettings({ ...ticket, effort: null }, this.store.getProject(ticket.project_id) ?? { default_effort: '' }).effort,
     };

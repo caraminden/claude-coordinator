@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { branchStatus } from '../src/branch.ts';
+import { branchStatus, shipLine, type BranchStatus } from '../src/branch.ts';
 
 // Where a minion's branch stands: merged into main, then pulled into the live checkout, then run by
 // the server. A scheme repo, a live checkout cloned from it, and another scheme's repo, in temp dirs.
@@ -83,4 +83,23 @@ test("another scheme's work, or an unknown running commit, has no deploy stage",
   branch('t/6');
   merge('t/6');
   assert.equal((await status('t/6', null))?.deploy, null);
+});
+
+test('the ship line says where the change is, and why it is not moving', () => {
+  const base: BranchStatus = { branch: 't/7', tip: 'abcdef0123', base: 'main', ahead: 0, merged: true, empty: false, pr: null, deploy: { pulled: false, live: false } };
+  const line = (s: Partial<BranchStatus>, turns = 0, failure: string | null = null) => shipLine({ ...base, ...s }, turns, failure);
+  assert.equal(line({ empty: true }), null, 'nothing committed yet');
+  assert.deepEqual(line({ merged: false, ahead: 2, deploy: null }), { stage: 'branch', text: 'On its branch: 2 commits not on main', commit: 'abcdef0' });
+  assert.deepEqual(line({ deploy: null }), { stage: 'main', text: 'Merged into main', commit: 'abcdef0' }, "another scheme's work");
+  assert.equal(line({})?.text, 'On main, not deployed');
+  assert.deepEqual(line({ deploy: { pulled: true, live: false } }, 2), { stage: 'deploying', text: 'Deploying: waiting on the idle restart, 2 turns running', commit: 'abcdef0' });
+  assert.equal(line({ deploy: { pulled: true, live: false } })?.text, 'Deploying');
+  assert.equal(line({ deploy: { pulled: true, live: true } }, 3, 'Deploy failed.')?.stage, 'live', 'live wins over an older failure');
+  const report = 'Deploy of abc1234 "x" failed: the server did not answer healthy on it within 30 s. Rolled back to last-good.';
+  assert.deepEqual(line({}, 0, report), {
+    stage: 'failed', commit: 'abcdef0', detail: report,
+    text: 'Not live, the last deploy failed: the server did not answer healthy on it within 30 s',
+  });
+  assert.equal(line({ deploy: { pulled: true, live: false } }, 0, 'Gave up after 120 min waiting for turns, so nothing restarted. Run it again.')?.text,
+    'Not live, the last deploy failed: Gave up after 120 min waiting for turns, so nothing restarted');
 });

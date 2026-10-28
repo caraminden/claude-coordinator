@@ -11,7 +11,7 @@ import { homedir } from 'node:os';
 import { commentMessage, fileType, findArtifacts, isArtifact, linkedPaths, optionImageProblem, resolveFile } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { AGENT_NAME, Auth, looksLikeUrl, threadMayCall, type Session } from './src/auth.ts';
-import { branchStatus, type BranchStatus } from './src/branch.ts';
+import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
@@ -330,7 +330,48 @@ async function ticketBranch(ticketId: number, maxPrAge = PR_TTL_MS): Promise<Bra
   const json = JSON.stringify(status);
   branchCache.set(ticketId, { status, prAt: prFresh ? cached.prAt : Date.now(), json });
   if (cached && cached.json !== json) broadcast({ type: 'branch', ticketId, status });
+  shipChanged(ticketId);
   return status;
+}
+
+// ---------- ship status: where a minion's change is, from branch to live ----------
+
+/** The last deploy report that failed, while the server still runs what it ran then. */
+const DEPLOY_FAILURE = 'deploy-failure';
+function deployFailure(): string | null {
+  const f = store.getSetting<{ text: string; head: string | null }>(DEPLOY_FAILURE);
+  return f && f.head === waiters.head ? f.text : null;
+}
+runner.ship = (ticketId) => shipLine(branchCache.get(ticketId)?.status ?? null, runner.interruptible(), deployFailure());
+
+/** The ship line each minion's row last showed; a change re-sends the minion. */
+const shipShown = new Map<number, string>();
+function shipChanged(ticketId: number) {
+  const now = JSON.stringify(runner.ship(ticketId));
+  if (shipShown.get(ticketId) === now) return;
+  const first = !shipShown.has(ticketId);
+  shipShown.set(ticketId, now);
+  if (!first || now !== 'null') runner.broadcastTicket(ticketId);
+}
+
+// Deploys happen in other minions' turns, so merged work that isn't live yet is looked at again every
+// SHIP_POLL_MS, and at startup every open minion's branch is, so the list has its badges.
+const SHIP_POLL_MS = 15_000;
+if (!BOOT_CHECK) {
+  (async () => {
+    for (const p of store.listProjects()) {
+      for (const t of store.listTickets(p.id)) {
+        if (t.kind === 'ticket' && t.branch && t.status !== 'closed') await ticketBranch(t.id).catch(() => {});
+      }
+    }
+  })();
+  setInterval(async () => {
+    for (const [id, { status }] of branchCache) {
+      if (store.getTicket(id)?.status === 'closed') continue;
+      if (status?.deploy && !status.deploy.live) await ticketBranch(id).catch(() => {});
+      else shipChanged(id);
+    }
+  }, SHIP_POLL_MS).unref();
 }
 
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
@@ -1452,6 +1493,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       (loud ? console.error : console.log)(`Deploy report for minion ${id}: ${text}`);
       runner.emit(id, loud ? 'error' : 'note', { text });
       if (loud) notify(id, { kind: 'error', text });
+      if (failed) store.setSetting(DEPLOY_FAILURE, { text, head: waiters.head });
       // A failed deploy leaves the minion in pending-deploy, so the error stays in view.
       const dismissed = !failed && runner.deployLive(id);
       return json(res, 201, { dismissed });

@@ -15,6 +15,11 @@ Planned next: runners on other people's own Claude logins.
 - Each chat message spawns one `claude -p --input-format stream-json --output-format stream-json` process
   in the minion's working directory, with `--resume <session_id>` after the
   first turn. Idle minions cost nothing, and a restart loses nothing.
+- Each turn runs in a transient user unit of its own (`systemd-run`, in
+  `citadel-turns.slice`) through `src/turn-wrapper.ts`, which writes claude's
+  output to a file in `$DATA_DIR/run/turns/` that the server tails. A restart
+  leaves running turns alone: the next server re-attaches and catches up, and the
+  turns' MCP calls wait for it (up to 2 min).
 - Every stream event is stored in SQLite and pushed to browsers over
   server-sent events.
 - Messages sent while a turn is running are queued and sent together as the
@@ -104,9 +109,9 @@ uses the built-in `node:sqlite`.
 | `src/auth.ts` | Shared-password login, signed session cookies |
 | `public/` | Front end (vanilla JS, no build) |
 | `public/progress.js` | Task-list and step tracking, shared with the server |
-| `deploy/claude-coordinator.service` | systemd user unit, with a resource-cap drop-in in `.service.d/` |
+| `deploy/claude-coordinator.service` | systemd user unit, with drop-ins in `.service.d/`; `citadel.slice` caps it and its turns, `claude-coordinator.socket` holds the port across restarts |
 | `deploy/backup.sh`, `deploy/prune.sh` | Nightly database backup; pruning of long-closed minions (each with a `.service` and `.timer`) |
-| `tools/deploy.sh`, `tools/boot-check.ts` | Safe deploys: checks, front-end reloads, idle restart with rollback |
+| `tools/deploy.sh`, `tools/boot-check.ts` | Safe deploys: checks, front-end reloads, restarts that keep turns running, rollback |
 
 ## Running
 
@@ -133,13 +138,23 @@ journalctl --user -u claude-coordinator -f
 ```
 
 The service runs with `UMask=0077`, so the database and everything it writes are
-private (mode 600). `resources.conf` caps it, and every turn it runs, at
-`MemoryMax=8G` and `CPUQuota=800%`, half of perigee, which is shared:
+private (mode 600). `citadel.slice` caps the service and every turn it runs, at
+`MemoryMax=8G` and `CPUQuota=800%`, half of perigee, which is shared
+(`resources.conf` puts the service in it). `claude-coordinator.socket` holds port
+8573 while the server restarts, so requests then wait instead of failing
+(`socket.conf` makes the service use it):
 
 ```sh
 mkdir -p ~/.config/systemd/user/claude-coordinator.service.d
+ln -s ~/claude-coordinator/deploy/citadel.slice ~/.config/systemd/user/
+ln -s ~/claude-coordinator/deploy/claude-coordinator.socket ~/.config/systemd/user/
 ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/resources.conf ~/.config/systemd/user/claude-coordinator.service.d/
+ln -s ~/claude-coordinator/deploy/claude-coordinator.service.d/socket.conf ~/.config/systemd/user/claude-coordinator.service.d/
+systemctl --user daemon-reload
 ```
+
+The socket takes effect at the next restart after that; until then the server
+binds the port itself.
 
 **Backups.** `deploy/backup.sh` takes an online `sqlite3 .backup` at 04:00 into
 `$DATA_DIR/backups/`, checks the copy restores (integrity check plus the core
@@ -169,7 +184,7 @@ minion currently uses Cara's account.
 ### Deploying
 
 Once a change is on `main` in the scheme repo, run `tools/deploy.sh` from the
-minion that made it. It never hard-restarts:
+minion that made it. Restarting doesn't interrupt turns:
 
 1. It fast-forwards `~/claude-coordinator` to `main`, runs `node --test`, and
    boots the new code on a spare port against a copy of the database
@@ -180,10 +195,16 @@ minion that made it. It never hard-restarts:
    `public/`, it sends `SIGHUP`. The server re-reads `public/` and tells open
    tabs, which reload once nobody is typing. No restart, no interrupted turns.
 3. Otherwise it queues the fixed-name `cc-restart-when-idle` unit (a second
-   deploy joins the one already queued). Once no minion is running it
-   restarts, waits up to 30 s for `/api/health` to answer from the new commit,
-   and tags it `last-good`. If it doesn't come up, it resets to `last-good`
-   and restarts again. After 2 h without an idle moment it gives up.
+   deploy joins the one already queued), which restarts straight away. Turns
+   in units of their own carry on and the new server re-attaches to them; it
+   only waits while turns a restart would cut off are running (`/api/health`'s
+   `interruptible`: turns an older server started as its own children), and
+   gives up after 2 h of that. On `SIGTERM` the old server has 5 s to finish
+   its requests. Then it waits up to 30 s for `/api/health` to answer from the
+   new commit, and tags it `last-good`. If it doesn't come up, it resets to
+   `last-good` and restarts again. `tools/deploy.sh --now` restarts without
+   waiting, cutting off those turns (#33's auto-resume picks them up); the
+   tripwire asks a person before it runs.
 4. Once the new code is live (after the reload, or after the healthy restart
    and `last-good` tag, inside the unit), it pushes that commit to `main` on
    GitHub (`origin`), with the gh CLI's git credentials. GitHub's `main` is

@@ -1,4 +1,5 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
+import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
@@ -41,19 +42,39 @@ const APPROVAL_POLL_MS = 25_000;
 const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 
 await mkdir(DATA_DIR, { recursive: true });
-// The front end as it was when this server started. Serving this copy, not the files on disk, keeps
-// pages in step with the running server: a deploy changes both at the restart, so a tab never gets
-// a new front end that calls API routes the old server doesn't have yet.
-const ASSETS = new Map<string, Buffer>();
-for (const f of (await readdir(PUBLIC_DIR, { withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name).sort()) {
-  const body = await readFile(join(PUBLIC_DIR, f));
-  ASSETS.set(f, /\.(html|js|webmanifest)$/.test(f) ? Buffer.from(body.toString('utf8').replaceAll('%APP_NAME%', APP_NAME)) : body);
-}
+// The front end as it was when this server started, or last reloaded on SIGHUP. Serving this copy,
+// not the files on disk, keeps pages in step with the running server: a deploy that changes the
+// server swaps both at the restart, so a tab never gets a new front end that calls API routes the old
+// server doesn't have yet. A deploy that changes only public/ sends SIGHUP instead (tools/deploy.sh).
+let ASSETS = new Map<string, Buffer>();
 // Fingerprint of the front end, so open tabs can tell they are stale after a deploy.
-const ASSET_VERSION = createHash('sha256')
-  .update([...ASSETS.values()].join('\0'))
-  .digest('hex')
-  .slice(0, 12);
+let ASSET_VERSION = '';
+let DARK_MANIFEST = Buffer.alloc(0);
+async function loadAssets() {
+  const assets = new Map<string, Buffer>();
+  for (const f of (await readdir(PUBLIC_DIR, { withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name).sort()) {
+    const body = await readFile(join(PUBLIC_DIR, f));
+    assets.set(f, /\.(html|js|webmanifest)$/.test(f) ? Buffer.from(body.toString('utf8').replaceAll('%APP_NAME%', APP_NAME)) : body);
+  }
+  // Built before anything is swapped, so a bad manifest leaves the old front end whole.
+  const dark = darkManifest(assets);
+  ASSETS = assets;
+  ASSET_VERSION = createHash('sha256').update([...assets.values()].join('\0')).digest('hex').slice(0, 12);
+  DARK_MANIFEST = dark;
+}
+// The commit this server's code came from, so a deploy can tell whether the change it ships is
+// front end only. null outside a git checkout.
+const BOOT_COMMIT = (() => {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: import.meta.dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return null;
+  }
+})();
+// Set by tools/deploy.sh when it boots new code on a copy of the database: serve and answer, but
+// don't resume interrupted turns or watch GitHub, which would act on the copy's minions for real.
+const BOOT_CHECK = process.env.BOOT_CHECK === '1';
+await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '');
 // Keep secrets out of the environment that claude and its tools inherit.
@@ -93,7 +114,7 @@ const runner = new Runner(
   }),
   process.env.CLAUDE_BIN ?? 'claude',
 );
-runner.recover();
+if (!BOOT_CHECK) runner.recover();
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 runner.machines = () => machines.online();
 
@@ -243,7 +264,7 @@ async function ticketBranch(ticketId: number, maxPrAge = PR_TTL_MS): Promise<Bra
 
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
 const github = new GithubWatcher(store, (ticketId, text) => runner.send(ticketId, GITHUB_NAME, text));
-github.start();
+if (!BOOT_CHECK) github.start();
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);
 
 /** After a turn's tool calls (commits, merges, `gh pr create`), look again shortly. */
@@ -657,11 +678,10 @@ const MIME: Record<string, string> = {
 // by light or dark mode yet (color_scheme_dark is still a proposal). Ask the browser for its colour
 // scheme and hand dark-mode devices a manifest with the dark colours, so the app doesn't get a white bar.
 const COLOR_SCHEME_HINT = 'Sec-CH-Prefers-Color-Scheme';
-const DARK_MANIFEST = (() => {
-  const manifest = JSON.parse(ASSETS.get('manifest.webmanifest')!.toString());
+function darkManifest(assets: Map<string, Buffer>) {
+  const manifest = JSON.parse(assets.get('manifest.webmanifest')!.toString());
   return Buffer.from(JSON.stringify({ ...manifest, ...manifest.color_scheme_dark }, null, 2));
-})();
-
+}
 async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string) {
   const name = path === '/' ? 'index.html' : path.replace(/^\//, '');
   let body = ASSETS.get(name);
@@ -691,6 +711,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   }
   if (pathname === '/api/logout' && method === 'POST') {
     return json(res, 200, {}, { 'Set-Cookie': auth.clearCookie() });
+  }
+  // For tools/deploy.sh, so no login: is this server up, which code it booted from, which front end
+  // it serves, and that it reloads public/ on SIGHUP (an older server would exit on one).
+  if (pathname === '/api/health' && method === 'GET') {
+    return json(res, 200, { ok: true, commit: BOOT_COMMIT, version: ASSET_VERSION, reload: 'sighup' });
   }
   // A machine's agent signs in with its own token, which reaches nothing else.
   if (pathname === '/api/machines/connect' || pathname === '/api/machines/send') {
@@ -1183,6 +1208,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       runner.emit(id, 'note', { text: `Sent the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
       return json(res, 202, { sent: true });
     }
+    if (action === '/deploy' && method === 'POST') {
+      // tools/deploy.sh, run for this minion, reports how its queued restart went. A failure shows as
+      // an error and pushes, so a deploy that rolled back or gave up is never silent.
+      if (session.agent !== id) throw new HttpError(403, 'Only the deploying minion can report its deploy');
+      const body = await readJson(req);
+      const text = str(body.text, 'Report', 4000);
+      const failed = body.ok === false;
+      (failed ? console.error : console.log)(`Deploy report for minion ${id}: ${text}`);
+      runner.emit(id, failed ? 'error' : 'note', { text });
+      if (failed) notify(id, { kind: 'error', text });
+      return json(res, 201, {});
+    }
     if (action === '/close' && method === 'POST') {
       // A thread closes itself once its current turn ends (close_self); the token decides which thread.
       if (session.agent !== id) throw new HttpError(403, 'A minion may only be dismissed by itself');
@@ -1365,6 +1402,18 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => console.log(`${APP_NAME} listening on http://${HOST}:${PORT}`));
+
+// A front-end-only deploy: re-read public/ and tell open tabs, which reload once nobody is typing.
+process.on('SIGHUP', () => {
+  const before = ASSET_VERSION;
+  loadAssets().then(
+    () => {
+      console.log(`Reloaded public/ on SIGHUP: front end ${before} → ${ASSET_VERSION}`);
+      if (ASSET_VERSION !== before) broadcast({ type: 'hello', version: ASSET_VERSION, usage: runner.usage });
+    },
+    (err) => console.error('Reloading public/ on SIGHUP failed; still serving the old front end:', err),
+  );
+});
 
 // The machines-only listener: the agent's two endpoints and the agent script, nothing else.
 if (MACHINES_URL) {

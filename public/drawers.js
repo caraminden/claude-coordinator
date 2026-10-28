@@ -249,9 +249,10 @@ export function initDrawers() {
   });
   document.addEventListener('click', (e) => {
     if (!drawer || !drawer.el.contains(e.target)) return;
-    // The panel's own bar folds it in the page; in a drawer it closes the drawer.
+    // The panel's own bar folds it in the page; in a drawer it closes the drawer. A button or field
+    // in the bar (the project's rename ✎) does its own thing instead.
     const summary = e.target.closest('summary');
-    if (summary?.parentElement === drawer.el) { e.preventDefault(); close(); return; }
+    if (summary?.parentElement === drawer.el && !e.target.closest('button, input')) { e.preventDefault(); close(); return; }
     // Picking a thread, project or artifact switches the view in place and puts the drawer away.
     const a = e.target.closest('a[href]');
     if (a && !e.defaultPrevented) {

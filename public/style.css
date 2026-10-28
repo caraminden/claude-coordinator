@@ -305,14 +305,18 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .nav-item { display: block; text-decoration: none; padding: 0.3rem 0.5rem; border-radius: 6px; font-size: 0.92em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nav-item:hover { background: var(--panel); }
 .nav-item.active { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); font-weight: 600; }
-.nav-row { display: flex; align-items: center; gap: 0.3rem; }
-.nav-row .nav-item { flex: 1; min-width: 0; }
-.nav-row button.link { flex: none; background: none; border: 0; color: var(--accent); padding: 0.3rem 0.4rem; cursor: pointer; }
-.nav-row button.link:hover { text-decoration: underline; }
-.rename-project { flex: 1; display: flex; flex-direction: column; gap: 0.4rem; }
-.rename-project input { width: 100%; box-sizing: border-box; }
-.rename-project .row { gap: 0.4rem; }
-.rename-project button.small { padding: 0.2rem 0.65rem; }
+.shelf > summary .project-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.25rem; }
+.shelf > summary .project-title .label { flex: 0 1 auto; }
+.shelf > summary .rename { flex: none; min-width: 32px; min-height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 6px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
+.shelf > summary .rename:hover, .shelf > summary .rename:focus-visible { color: var(--accent); background: var(--panel); }
+.shelf > summary .rename-input { flex: 1; min-width: 0; font-weight: 650; padding: 0.25rem 0.4rem; user-select: text; -webkit-user-select: text; }
+.shelf:not([open]) > summary .rename { display: none; }
+/* Mouse and trackpad: the pencil shows on hover; touch screens have no hover, so it stays. */
+@media (hover: hover) and (pointer: fine) {
+  .shelf > summary .label + .rename { opacity: 0; }
+  .shelf > summary:hover .rename, .shelf > summary .rename:focus-visible { opacity: 1; }
+}
+.rename-error { margin: -0.2rem 0 0.5rem; }
 .shelf .column h3 .browse { font-size: 0.85em; text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--accent); text-decoration: none; }
 .shelf .column h3 .more:hover, .shelf .column h3 .browse:hover, .shelf .column h3 .browse.active { text-decoration: underline; }
 .shelf .sub { margin-top: 0.6rem; }

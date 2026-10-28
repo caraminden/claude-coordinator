@@ -935,7 +935,7 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
   // The overview panel: account and usage (standing in for the top bar, which wider screens hide
   // on project pages), the projects, then this project's pinned and recent artifacts.
   const shelf = h('details', { class: 'shelf', open: panelOpen('shelf') },
-    h('summary', { title: 'Show or hide the overview' }, h('span', { class: 'label', 'data-project-name': project.id }, project.name)),
+    h('summary', { title: 'Show or hide the overview' }, projectTitle(project)),
     h('section', { class: 'account' },
       h('div', { class: 'row' }, h('strong', {}, me), h('span', { class: 'spacer' }),
         h('button', { class: 'secondary small', onclick: logout }, 'Sign out')),
@@ -943,8 +943,8 @@ async function showProject(projectId, main = { kind: 'chat', number: null }) {
       pushControls(project)),
     h('section', { class: 'column' },
       h('h3', {}, 'Projects', h('span', { class: 'spacer' }), h('a', { class: 'more', href: '#/' }, 'All')),
-      projects.map((p) => p.id === projectId ? renameableProject(p)
-        : h('a', { class: 'nav-item', href: `#/p/${p.id}` }, h('span', { class: 'name', 'data-project-name': p.id }, p.name)))),
+      projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
+        h('span', { class: 'name', 'data-project-name': p.id }, p.name)))),
     h('div', { id: 'instructions-shelf' }),
     h('div', { id: 'approvals-shelf' }),
     h('div', { id: 'machines-shelf' }),
@@ -1895,37 +1895,58 @@ function onProjectUpdate(project) {
   renderInstructionsHead();
 }
 
-/** The current project's row in the overview's project list, with a Rename button that swaps in a form. */
-function renameableProject(p) {
-  const row = h('div', { class: 'nav-row' });
-  const show = () => row.replaceChildren(
-    h('a', { class: 'nav-item active', href: `#/p/${p.id}` }, h('span', { class: 'name', 'data-project-name': p.id }, view.project.name)),
-    h('button', { type: 'button', class: 'link small', title: 'Rename this project (its repo stays as it is)', onclick: edit }, 'Rename'));
+/**
+ * The overview's header: the project name with a ✎ that turns it into a text field in place.
+ * Enter or ✓ saves; Esc or tapping away cancels. It sits in the panel's <summary>, so its own
+ * clicks and keys must not fold the panel or close the phone drawer.
+ */
+function projectTitle(project) {
+  const wrap = h('span', { class: 'project-title' });
+  const err = h('p', { class: 'error small rename-error', role: 'alert', hidden: true });
+  const show = () => {
+    err.hidden = true;
+    err.remove();
+    wrap.replaceChildren(
+      h('span', { class: 'label', 'data-project-name': project.id }, view.project.name),
+      h('button', { type: 'button', class: 'rename', 'aria-label': 'Rename project', title: 'Rename project (its repo stays as it is)', onclick: edit }, '✎'));
+  };
   const edit = () => {
-    const input = h('input', { name: 'name', value: view.project.name, maxlength: '80', required: true, 'aria-label': 'Project name' });
-    const err = h('p', { class: 'error small', hidden: true });
-    const form = h('form', { class: 'rename-project' }, input,
-      h('div', { class: 'row' },
-        h('button', { class: 'small' }, 'Save'),
-        h('button', { type: 'button', class: 'secondary small', onclick: show }, 'Cancel')),
-      err);
-    input.addEventListener('keydown', (e) => { if (e.key === 'Escape') show(); });
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
+    let saving = false;
+    const input = h('input', { class: 'rename-input', value: view.project.name, maxlength: '80', 'aria-label': 'Project name' });
+    const save = async () => {
+      if (saving) return;
       if (input.value.trim() === view.project.name) return show();
+      saving = true;
       try {
-        onProjectUpdate(await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { name: input.value } }));
+        onProjectUpdate(await api(`/api/projects/${project.id}`, { method: 'PATCH', body: { name: input.value } }));
         show();
       } catch (ex) {
         err.textContent = ex.message;
         err.hidden = false;
+        wrap.closest('summary').after(err);
+        input.focus();
       }
+      saving = false;
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); show(); }
     });
-    row.replaceChildren(form);
+    // A space let through to the <summary> would fold the panel in some browsers.
+    input.addEventListener('keyup', (e) => { if (e.key === ' ') e.preventDefault(); });
+    input.addEventListener('blur', () => { if (!saving) show(); });
+    wrap.replaceChildren(input,
+      // mousedown kept from blurring the field, so the tap reaches save instead of cancelling.
+      h('button', { type: 'button', class: 'rename', 'aria-label': 'Save name', onmousedown: (e) => e.preventDefault(), onclick: save }, '✓'));
+    input.focus();
     input.select();
   };
+  wrap.addEventListener('click', (e) => {
+    // Clicks inside the title edit it; they don't fold the panel or close the drawer.
+    if (e.target.closest('button, input')) { e.preventDefault(); e.stopPropagation(); }
+  });
   show();
-  return row;
+  return wrap;
 }
 
 /** Overview panel: whether the project has instructions, and a way to edit them. */

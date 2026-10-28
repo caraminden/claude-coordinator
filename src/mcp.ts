@@ -173,6 +173,11 @@ const TOOLS = [
         tag: TAG,
         properties: { ...PROPERTIES, description: `${PROPERTIES.description} Must include type; if no type fits, use "other" and ask people where it belongs.` },
         message: { type: 'string', description: 'First message to the new minion' },
+        start_after: {
+          type: 'integer',
+          description: "Optional: a minion number (#N) to chain this one after. It is created now but parked, with its message held until #N's work is live (or merged, see start_when), then starts by itself on a branch caught up to main. If #N is dismissed without its work merged, it stays parked and you and people hear about it. A message to it starts it early.",
+        },
+        start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it is on main, for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means merged.' },
         model: MODEL,
         effort: EFFORT,
       },
@@ -568,6 +573,8 @@ async function runTool(name: string, args: any): Promise<string> {
         tag: args.tag ?? null,
         properties,
         message: args.message,
+        start_after: args.start_after ?? null,
+        start_when: args.start_when ?? null,
         model: args.model ?? null,
         effort: args.effort ?? null,
       });

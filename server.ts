@@ -24,8 +24,8 @@ import { Runner, slimEvent, tripwireConfig } from './src/runner.ts';
 import { GLOBAL_OWNER, PropertyError, type Actor } from './src/properties.ts';
 import { TAG_TO_TYPE } from './src/property-seed.ts';
 import { PreviewError, Previews, previewPath } from './src/previews.ts';
-import { LiveWaiters } from './src/wake.ts';
-import { cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
+import { type Chain, LiveWaiters } from './src/wake.ts';
+import { catchUpTicketDir, cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -151,7 +151,6 @@ function liveOn(head: string | null) {
   waiters.check(head);
   for (const id of waiters.pendingLive()) runner.deployLive(id);
 }
-if (!BOOT_CHECK) liveOn(BOOT_COMMIT);
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 runner.machines = (project) => machines.online(project.id);
 
@@ -169,6 +168,39 @@ function notify(ticketId: number, trigger: PushTrigger, except: string | null = 
 }
 
 runner.onTurnError = (ticketId, text) => notify(ticketId, { kind: 'error', text });
+
+// Chained minions (create_ticket's start_after): one starts with its held brief, on a branch caught
+// up to main so it builds on the work it waited for, once its leader's work is in.
+async function startChained(c: Chain, why: string) {
+  const t = store.getTicket(c.ticket);
+  if (!t) return;
+  const repo = store.getProject(t.project_id)?.repo_dir ?? null;
+  await catchUpTicketDir(t.cwd, repo).catch((err) => console.error(`Catching up #${t.number}'s branch failed:`, err));
+  runner.emit(c.ticket, 'note', { text: `${why}, so this minion started.` });
+  runner.send(c.ticket, c.from, c.message);
+}
+waiters.start = (c, why) => void startChained(c, why);
+// Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.
+waiters.hold = (c, why) => {
+  const t = store.getTicket(c.ticket);
+  if (!t) return;
+  const leader = store.getTicket(c.after);
+  store.updateTicket(c.ticket, { state: 'blocked', note: `#${leader?.number ?? c.after} didn't ship: message it to start, or dismiss` });
+  runner.emit(c.ticket, 'note', { text: `${why}, so this minion hasn't started. A message to it starts it with its brief; or dismiss it.` });
+  runner.broadcastTicket(c.ticket);
+  notify(c.ticket, { kind: 'state', state: 'blocked', note: `${why}, so this one is held` });
+  const coordinator = store.getCoordinator(t.project_id);
+  if (coordinator) runner.send(coordinator.id, APP_NAME, `${why}, so #${t.number} ${t.title}, chained on it, is held and hasn't started. Ask people whether to start it (message_ticket starts it with its brief) or dismiss it.`);
+};
+if (!BOOT_CHECK) {
+  // A dismissal can be what a chained minion waits for.
+  const stopPreview = runner.onClose;
+  runner.onClose = (ticketId) => {
+    stopPreview(ticketId);
+    waiters.check();
+  };
+  liveOn(BOOT_COMMIT);
+}
 
 // ---------- artifacts ----------
 
@@ -974,6 +1006,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (scope !== null && !planned.type?.length) {
       throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');
     }
+    // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
+    let follow: { leader: Ticket; when: Chain['when']; base: string | null } | null = null;
+    if (body.start_after != null) {
+      const when = (oneOf(body.start_when ?? null, ['live', 'merged'], 'start_when') ?? 'live') as Chain['when'];
+      const leader = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.number === Number(body.start_after));
+      if (!leader) throw new HttpError(400, `No minion #${String(body.start_after).slice(0, 20)} in this scheme to start after`);
+      const f = waiters.follow(leader.id, when);
+      if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work being merged, so nothing can start after it`);
+      if (f.state === 'wait') follow = { leader, when, base: f.base };
+    }
     const { id, number } = store.createTicket({ project_id: project.id, title, tag, permission_mode: THREAD_PERMISSION_MODE, created_by: session.name });
     const { notes } = store.props.set('minion', id, project.id, props, session.name);
     store.props.startStage(id);
@@ -985,7 +1027,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       store.deleteTicket(id);
       throw new HttpError(500, `Could not create working directory: ${err.stderr?.trim() || err.message}`);
     }
-    runner.send(id, session.name, message);
+    if (follow) {
+      const { leader, when } = follow;
+      waiters.chain({ ticket: id, after: leader.id, when, message, from: session.name, base: follow.base });
+      store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} is ${when}` });
+      runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work is ${when}. A message to it starts it now.` });
+      runner.broadcastTicket(id);
+      notes.push(`Parked: it starts by itself once #${leader.number}'s work is ${when}. A message to it starts it now.`);
+    } else {
+      runner.send(id, session.name, message);
+    }
     return json(res, 201, { ...ticketView(id), notes });
   }
 
@@ -1181,6 +1232,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const body = await readJson(req, 45_000_000);
       const hasImages = Array.isArray(body.images) && body.images.length > 0;
       const text = hasImages && (typeof body.text !== 'string' || !body.text.trim()) ? '' : str(body.text, 'Message', 100_000);
+      // A chained minion that hasn't started: writing to it starts it now, its held brief first.
+      const chained = waiters.release(id);
+      if (chained) await startChained(chained, `${session.name} wrote to it before its leader's work was in`);
       // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
       if (session.agent !== undefined && ticket.kind !== 'coordinator') {
         return json(res, 202, { ...ticketView(id), held: runner.relay(id, id, session.name, text) });

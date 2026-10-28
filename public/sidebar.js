@@ -248,6 +248,15 @@ function limitState(t, waited) {
   return { rank: 2, fam: 'wait', cell: 'limit hit', label: STATES.limited.label };
 }
 
+/** Where a minion's change is (t.ship, src/branch.ts): its colour family, and its badge in the list (none on its branch). */
+export const SHIP = {
+  branch: { fam: 'idle', badge: '' },
+  main: { fam: 'work', badge: 'on main' },
+  deploying: { fam: 'wait', badge: 'deploying' },
+  live: { fam: 'done', badge: 'live' },
+  failed: { fam: 'broken', badge: 'deploy failed' },
+};
+
 /** One compact row: number + short ask and the state on top, the thread's note (or what it is doing) below. */
 function threadRow(t, href = threadHref(t)) {
   const coord = isCoordinator(t);
@@ -261,7 +270,10 @@ function threadRow(t, href = threadHref(t)) {
     threadFullName(t),
     [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, `updated ${ago(t.updated_at)}`].filter(Boolean).join(' · '),
     note,
+    !coord && t.ship ? `${t.ship.text} · ${t.ship.commit}` : '',
   ].filter(Boolean).join('\n');
+  const shipStage = !coord && t.status !== 'closed' && SHIP[t.ship?.stage];
+  const ship = shipStage?.badge ? h('span', { class: `ship-badge f-${shipStage.fam}`, title: `${t.ship.text} · ${t.ship.commit}` }, shipStage.badge) : '';
   const active = view.id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
   // Unread (a dot and a bold title) marks any settled row that changed since you last opened it.
@@ -271,7 +283,7 @@ function threadRow(t, href = threadHref(t)) {
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     st.cell ? h('span', { class: 'state' }, st.cell) : '',
-    note ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, note) : '');
+    note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '');
 }
 
 /** "40m", "1h40", "14h", "2d": time left, for tight spaces. */

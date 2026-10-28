@@ -342,7 +342,10 @@ function deployFailure(): string | null {
   const f = store.getSetting<{ text: string; head: string | null }>(DEPLOY_FAILURE);
   return f && f.head === waiters.head ? f.text : null;
 }
-runner.ship = (ticketId) => shipLine(branchCache.get(ticketId)?.status ?? null, runner.interruptible(), deployFailure());
+runner.ship = (ticketId) => {
+  const status = branchCache.get(ticketId)?.status;
+  return status ? shipLine(status, runner.interruptible(), deployFailure()) : null;
+};
 
 /** The ship line each minion's row last showed; a change re-sends the minion. */
 const shipShown = new Map<number, string>();
@@ -357,7 +360,8 @@ function shipChanged(ticketId: number) {
 // Deploys happen in other minions' turns, so merged work that isn't live yet is looked at again every
 // SHIP_POLL_MS, and at startup every open minion's branch is, so the list has its badges.
 const SHIP_POLL_MS = 15_000;
-if (!BOOT_CHECK) {
+// Only git reads, so a preview shows the badges too.
+if (!BOOT_CHECK || PREVIEW) {
   (async () => {
     for (const p of store.listProjects()) {
       for (const t of store.listTickets(p.id)) {

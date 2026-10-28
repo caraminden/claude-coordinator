@@ -1,7 +1,7 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, fileUrl, followChat, h, highlight, isCoordinator, markdown, markSeen, me, restoreScroll, scrollToBottom, statusLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
-import { rowState } from './sidebar.js';
+import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 
@@ -185,12 +185,21 @@ export function renderTicketHead() {
       h('span', { class: 'spacer' }), coord ? '' : propertyChip(t), ...actions, view.findEl ?? '',
       // Leaves the thread as it is and goes back to the project's coordinator.
       coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, '×')),
+    shipLine(t),
     view.progressEl);
   renderTyping();
   // While a turn runs, a sent message waits for it; said on hover rather than in a line of its own.
   const send = document.querySelector('.composer button[type=submit]');
   if (send) send.title = t.status === 'running' ? 'Runs after the current turn' : '';
   scheduleProgress();
+}
+
+/** Where the minion's change is, branch to live, and why it is stuck when it is (src/branch.ts). */
+function shipLine(t) {
+  const stage = !isCoordinator(t) && SHIP[t.ship?.stage];
+  if (!stage) return '';
+  return h('div', { class: `ship f-${stage.fam}`, title: t.ship.detail ?? t.ship.text },
+    h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, t.ship.text), h('code', {}, t.ship.commit));
 }
 
 async function setStatus(id, status) {

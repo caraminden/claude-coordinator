@@ -152,6 +152,14 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
   padding: 0.6rem 0;
   margin: -0.6rem 0 1rem;
 }
+/* Where the minion's change is: branch, on main, deploying, live (src/branch.ts) */
+.ticket-head .ship { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.35rem; font-size: 0.85em; color: var(--muted); min-width: 0; }
+.ticket-head .ship .ship-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.ticket-head .ship .text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ticket-head .ship.f-done .text, .ticket-head .ship.f-broken .text { color: var(--c); font-weight: 600; }
+.ticket-head .ship code { flex: none; font-size: 0.95em; }
+.thread-row .ship-badge { display: inline-block; margin-right: 0.4rem; padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.85em; font-weight: 650; line-height: 1.3;
+  color: var(--c); background: color-mix(in srgb, var(--c) 13%, var(--panel)); }
 .ticket-head .meta { color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ticket-head button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
 .ticket-head .close-view { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: 6px; font-size: 1.4rem; line-height: 1; color: var(--muted); text-decoration: none; }

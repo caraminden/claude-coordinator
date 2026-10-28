@@ -73,7 +73,7 @@ async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { mo
   return { ...run, flag, events };
 }
 
-test('a minion turn gets the compaction window, no service secrets, and its own model choice', async () => {
+test("a minion turn gets the compaction window, no service secrets, Claude Code's model and the scheme's effort", async () => {
   const t = await turn('ticket', 'connected');
   assert.equal(t.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '250000');
   assert.equal(t.env.MACHINES_URL, undefined);
@@ -83,7 +83,7 @@ test('a minion turn gets the compaction window, no service secrets, and its own 
   assert.equal(t.env.COORDINATOR_TOKEN, 't');
   assert.equal(t.env.COORDINATOR_ROLE, 'thread');
   assert.equal(t.flag('--model'), null);
-  assert.equal(t.flag('--effort'), null);
+  assert.equal(t.flag('--effort'), 'high', "the scheme's default effort");
   assert.deepEqual(t.events, []);
   assert.deepEqual(errors, []);
 });

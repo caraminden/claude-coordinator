@@ -385,12 +385,11 @@ export function renderMachinesShelf() {
   const el = document.getElementById('machines-shelf');
   if (!el) return;
   const href = `#/p/${view.projectId}/machines`;
-  const granted = view.machines.filter((m) => m.projects?.includes(view.projectId));
   el.replaceChildren(h('section', { class: 'column' },
     h('h3', {}, 'Machines', h('span', { class: 'spacer' }),
-      h('a', { class: `browse${view.main === 'machines' ? ' active' : ''}`, href }, granted.length ? 'Manage' : 'Add')),
-    granted.length
-      ? granted.map((m) => h('a', { class: `machine-item${m.online ? ' online' : ''}`, href, title: m.command ? `Runs ${m.command}` : '' },
+      h('a', { class: `browse${view.main === 'machines' ? ' active' : ''}`, href }, view.machines.length ? 'Manage' : 'Add')),
+    view.machines.length
+      ? view.machines.map((m) => h('a', { class: `machine-item${m.online ? ' online' : ''}`, href, title: m.command ? `Runs ${m.command}` : '' },
         h('span', { class: `dot${m.online ? ' online' : ''}` }),
         h('span', { class: 'text' }, h('span', { class: 'name' }, m.name), h('span', { class: 'meta' }, machineStatus(m)))))
       : h('p', { class: 'muted small' }, 'Lend minions MCP tools from your own computers, like a Godot editor that runs builds.')));
@@ -454,7 +453,7 @@ export function machinesPage() {
     e.preventDefault();
     status.textContent = 'Adding…';
     try {
-      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), project_id: view.projectId } });
+      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase() } });
       view.machineToken = { id: machine.id, name: machine.name, token, url: agent_url ?? location.origin };
       name.value = '';
       status.textContent = '';
@@ -467,14 +466,14 @@ export function machinesPage() {
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Machines'), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
-      h('div', { class: 'meta' }, 'Computers that lend their MCP tools to the minions of the schemes ticked under them, while they are connected. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.')),
+      h('div', { class: 'meta' }, 'Computers that lend their MCP tools to every minion, in every scheme, while they are connected. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.')),
     form,
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
     h('p', { class: 'muted small' },
       'Each machine runs one MCP server; add another machine for a second one. It needs Node 18 or newer. ',
       '"Claude Code MCP server" runs one already set up for Claude Code on that computer, like godot-ai after its dock\'s Configure. ',
-      'A minion gets the tools of machines online and ticked for its scheme when its turn starts, named mcp__<name>__…, plus the machine\'s notes, and the tools act on that computer, ',
+      'A minion gets the tools of every machine online when its turn starts, named mcp__<name>__…, plus the machine\'s notes, and the tools act on that computer, ',
       'so only add servers you trust minions to run.'));
   setTimeout(() => {
     renderMachineSetup();
@@ -538,12 +537,6 @@ function renderMachineList() {
         saved.textContent = err.message;
       }
     };
-    const grants = h('div', { class: 'machine-grants' }, ...view.projects.map((p) => {
-      const box = h('input', { type: 'checkbox', checked: !!m.projects?.includes(p.id) });
-      box.onchange = () => api(`api/machines/${m.id}/projects/${p.id}`, { method: box.checked ? 'PUT' : 'DELETE' })
-        .catch((err) => { box.checked = !box.checked; alert(err.message); });
-      return h('label', { class: 'toggle', title: `Let ${p.name}'s minions use ${m.name}` }, box, p.name);
-    }));
     // Keep an open notes editor open (and its draft) when the list re-renders for a status change.
     const old = document.querySelector(`.machine-notes[data-id="${m.id}"]`);
     const editing = old?.open;
@@ -555,7 +548,6 @@ function renderMachineList() {
           h('span', { class: 'name' }, m.name),
           h('span', { class: 'meta' }, [machineStatus(m), m.command, `added by ${m.created_by}`].filter(Boolean).join(' · '))),
         newToken, remove),
-      grants,
       h('details', { class: 'machine-notes', 'data-id': m.id, open: editing },
         h('summary', {}, m.notes ? `Notes: ${m.notes.split('\n')[0]}` : 'Add notes for minions'),
         notes, h('div', { class: 'row' }, save, saved)));

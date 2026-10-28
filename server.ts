@@ -152,7 +152,7 @@ function liveOn(head: string | null) {
   for (const id of waiters.pendingLive()) runner.deployLive(id);
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
-runner.machines = (project) => machines.online(project.id);
+runner.machines = () => machines.online();
 
 // ---------- push notifications ----------
 
@@ -1558,9 +1558,7 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
     if (ticket?.kind !== 'ticket') throw new HttpError(403, 'Only a minion\'s turn can use a machine');
     const machineId = Number(m[1]);
     if (!m[2] && method === 'GET') {
-      const opened = machines.openSession(machineId, ticket, res);
-      if (opened === 'not granted') throw new HttpError(403, 'That machine isn\'t granted to this scheme');
-      if (opened === 'offline') throw new HttpError(503, 'That machine is offline');
+      if (!machines.openSession(machineId, ticket.id, res)) throw new HttpError(503, 'That machine is offline');
       return;
     }
     if (m[2] && method === 'POST') {
@@ -1574,8 +1572,7 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
 
   if (pathname === '/api/machines' && method === 'GET') return json(res, 200, machines.list());
   if (pathname === '/api/machines' && method === 'POST') {
-    const body = await readJson(req);
-    const name = machineName(body.name);
+    const name = machineName((await readJson(req)).name);
     let machine;
     try {
       // The real hash goes in once the id (part of the token) is known.
@@ -1585,23 +1582,14 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
     }
     const token = newToken(machine.id);
     store.updateMachine(machine.id, { token_hash: hashToken(token) });
-    // Granted to the scheme it was added from; other schemes need a toggle on the Machines page.
-    if (Number.isInteger(body.project_id) && store.getProject(body.project_id)) store.setMachineGrant(machine.id, body.project_id, true);
     broadcast({ type: 'machines', machines: machines.list() });
     // The only time the token is shown; the app keeps just its hash.
     return json(res, 201, { machine: machines.view(store.getMachine(machine.id)!), token, agent_url: MACHINES_URL?.origin ?? null });
   }
 
-  m = pathname.match(/^\/api\/machines\/(\d+)(\/token|\/projects\/(\d+))?$/);
+  m = pathname.match(/^\/api\/machines\/(\d+)(\/token)?$/);
   const machine = m && store.getMachine(Number(m[1]));
   if (!m || !machine) throw new HttpError(404, 'No such machine');
-  if (m[3]) {
-    // PUT lets the scheme's minions use the machine, DELETE stops them.
-    if (method !== 'PUT' && method !== 'DELETE') throw new HttpError(405, 'Method not allowed');
-    if (!store.getProject(Number(m[3]))) throw new HttpError(404, 'No such scheme');
-    machines.setGrant(machine.id, Number(m[3]), method === 'PUT');
-    return json(res, 200, machines.view(store.getMachine(machine.id)!));
-  }
   if (m[2] && method === 'POST') {
     // A new token locks out whoever holds the old one, the connected agent included.
     const token = newToken(machine.id);

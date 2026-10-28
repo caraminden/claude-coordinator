@@ -133,7 +133,6 @@ test('a thread uses a connected machine\'s MCP server, one copy per turn', async
   await until('the machine to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'test-box' && m.online));
 
   const project = await call('/api/projects', { method: 'POST', body: { name: 'P' } });
-  await call(`/api/machines/${machine.id}/projects/${project.id}`, { method: 'PUT' });
   const ticket = await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'build it' } });
   const [turn] = await until('the first turn', () => turns().length >= 1 && turns());
   assert.equal(turn.error, undefined);
@@ -151,35 +150,19 @@ test('a thread uses a connected machine\'s MCP server, one copy per turn', async
   assert.match(output(), /Connected to/);
 });
 
-test('only schemes granted a machine get it, and the toggle changes that', async () => {
+test('an online machine reaches every scheme, and a minion in any scheme can open it by id', async () => {
   const [box] = (await call('/api/machines')).filter((x: any) => x.name === 'test-box');
   const project = await call('/api/projects', { method: 'POST', body: { name: 'Q' } });
-  assert.equal(box.projects.includes(project.id), false);
-  const openSession = (token: string) => fetch(`${base}/api/machines/${box.id}/session`, { headers: { Authorization: `Bearer ${token}` } });
-
-  // Ungranted: the turn doesn't get the machine, and can't open it by id either.
-  let before = turns().length;
-  const ticket = await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'peek' } });
-  let turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
-  assert.deepEqual(Object.keys(turn.results), []);
-  assert.ok(!turn.args.includes('mcp__test-box'));
-  assert.doesNotMatch(turn.args[turn.args.indexOf('--append-system-prompt') + 1], /Connected machines/);
-  const denied = await openSession(turn.token);
-  assert.equal(denied.status, 403);
-  assert.match((await denied.json()).error, /isn't granted to this scheme/);
-
-  // Granted: the next turn gets it.
-  assert.ok((await call(`/api/machines/${box.id}/projects/${project.id}`, { method: 'PUT' })).projects.includes(project.id));
-  await until('the turn to end', async () => (await call(`/api/tickets/${ticket.id}`)).ticket.status !== 'running');
-  before = turns().length;
-  await call(`/api/tickets/${ticket.id}/messages`, { method: 'POST', body: { text: 'now?' } });
-  turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
+  const before = turns().length;
+  await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'peek' } });
+  const turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
   assert.deepEqual(turn.results['test-box'].tools, ['whoami']);
-
-  // Revoked: shut out again.
-  assert.equal((await call(`/api/machines/${box.id}/projects/${project.id}`, { method: 'DELETE' })).projects.includes(project.id), false);
-  assert.equal((await openSession(turn.token)).status, 403);
-  await assert.rejects(call(`/api/machines/${box.id}/projects/999`, { method: 'PUT' }), /404/);
+  assert.match(turn.args[turn.args.indexOf('--append-system-prompt') + 1], /Connected machines: test-box/);
+  const opened = await fetch(`${base}/api/machines/${box.id}/session`, { headers: { Authorization: `Bearer ${turn.token}` } });
+  assert.equal(opened.status, 200);
+  await opened.body!.cancel();
+  // The per-scheme grant route from #62 is gone.
+  await assert.rejects(call(`/api/machines/${box.id}/projects/${project.id}`, { method: 'PUT' }), /404/);
 });
 
 test('a removed machine is cut off, and its token no longer works', async () => {
@@ -209,9 +192,7 @@ test('an agent can run a server from Claude Code\'s config, and threads get the 
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'godot-ai': { type: 'stdio', command: process.execPath, args: [mcpServer] } } }));
   const [project] = await call('/api/projects');
-  // Added from a scheme's Machines page, it is granted to that scheme.
-  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'desk', project_id: project.id } });
-  assert.deepEqual(machine.projects, [project.id]);
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'desk' } });
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: 'Never restart this PC.' } });
   startAgent(token, ['--claude-mcp', 'godot-ai'], { CLAUDE_CONFIG_DIR: home });
   const online = await until('desk to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'desk' && m.online));

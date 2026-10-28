@@ -59,6 +59,8 @@ async function crash(r: Runner, id: number) {
       // Already gone.
     }
   }
+  // A killed process lingers for a moment; the next server must find it dead, as it would after a real crash.
+  await until(() => !existsSync(`/proc/${wrapper}`) || !readFileSync(`/proc/${wrapper}/cmdline`, 'utf8').includes(dir));
 }
 
 async function until(check: () => boolean) {

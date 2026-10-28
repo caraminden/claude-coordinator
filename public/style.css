@@ -108,13 +108,20 @@ h2 { font-size: 1.15rem; margin: 0; }
 /* New scheme: a modal box on desktop, a sheet along the bottom on phones; the scheme switcher's menu. */
 .card.new-scheme { max-width: 480px; margin: 10vh auto; }
 .card.new-scheme h2 { margin-bottom: 1rem; }
-dialog.new-scheme { width: min(440px, calc(100vw - 2rem)); padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); }
-dialog.new-scheme::backdrop { background: rgb(0 0 0 / 0.4); }
-dialog.new-scheme > .row { margin-bottom: 0.75rem; }
-dialog.new-scheme .close { min-width: 32px; min-height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; color: var(--muted); font-size: 1.3rem; line-height: 1; }
+dialog:is(.new-scheme, .schedules) { width: min(440px, calc(100vw - 2rem)); padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); }
+dialog:is(.new-scheme, .schedules)::backdrop { background: rgb(0 0 0 / 0.4); }
+dialog.schedules { width: min(520px, calc(100vw - 2rem)); }
+.schedule-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.schedule { border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.75rem; display: grid; gap: 0.2rem; }
+.schedule.paused { opacity: 0.65; }
+.schedule .row { gap: 0.5rem; }
+.schedule .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedule .error { margin: 0.2rem 0 0; }
+dialog:is(.new-scheme, .schedules) > .row { margin-bottom: 0.75rem; }
+dialog:is(.new-scheme, .schedules) .close { min-width: 32px; min-height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; color: var(--muted); font-size: 1.3rem; line-height: 1; }
 dialog.new-scheme form > :last-child { margin-bottom: 0; }
 @media (max-width: 800px) {
-  dialog.new-scheme { width: 100%; max-width: none; margin: auto 0 0; border-radius: 12px 12px 0 0; border-bottom: 0; padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
+  dialog:is(.new-scheme, .schedules) { width: 100%; max-width: none; margin: auto 0 0; border-radius: 12px 12px 0 0; border-bottom: 0; padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
 }
 .scheme-menu { position: fixed; z-index: 40; min-width: 12rem; max-width: calc(100vw - 16px); max-height: 60vh; overflow-y: auto; padding: 0.3rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); box-shadow: 0 6px 20px rgb(0 0 0 / 0.15); }
 button.nav-item.add { width: 100%; text-align: left; background: none; border: 0; color: var(--accent); font-weight: normal; }
@@ -327,10 +334,10 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .nav-item.active { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); font-weight: 600; }
 .shelf > summary .project-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.25rem; }
 .shelf > summary .project-title .label { flex: 0 1 auto; }
-.shelf > summary .rename { flex: none; min-width: 32px; min-height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 6px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
-.shelf > summary .rename:hover, .shelf > summary .rename:focus-visible { color: var(--accent); background: var(--panel); }
+:is(.shelf, .sidebar) > summary .rename { flex: none; min-width: 32px; min-height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 6px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
+:is(.shelf, .sidebar) > summary .rename:is(:hover, :focus-visible) { color: var(--accent); background: var(--panel); }
 .shelf > summary .rename-input { flex: 1; min-width: 0; font-weight: 650; padding: 0.25rem 0.4rem; user-select: text; -webkit-user-select: text; }
-.shelf:not([open]) > summary .rename { display: none; }
+:is(.shelf, .sidebar):not([open]) > summary .rename { display: none; }
 /* Mouse and trackpad: the pencil shows on hover; touch screens have no hover, so it stays. */
 @media (hover: hover) and (pointer: fine) {
   .shelf > summary .label + .rename { opacity: 0; }

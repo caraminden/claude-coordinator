@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
 import { Registry } from './properties.ts';
+import { Schedules } from './schedules.ts';
 
 export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
 /** Each project has one long-lived coordinator ticket that manages the others. */
@@ -300,6 +301,8 @@ export class Store {
   db: DatabaseSync;
   /** The property registry and the properties minions and artifacts carry. */
   props: Registry;
+  /** Scheduled minions (src/schedules.ts). */
+  schedules: Schedules;
   /** The database file; the runner keeps its turn folders beside it. */
   readonly path: string;
 
@@ -317,6 +320,7 @@ export class Store {
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS ticket_number ON tickets(project_id, number)');
     this.props = new Registry(this.db);
     this.props.seed();
+    this.schedules = new Schedules(this.db);
   }
 
   /**

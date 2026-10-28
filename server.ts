@@ -27,6 +27,7 @@ import { PreviewError, Previews, previewPath } from './src/previews.ts';
 import { type Chain, LiveWaiters } from './src/wake.ts';
 import { catchUpTicketDir, cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
 import { costDays } from './src/costs.ts';
+import { describeCron } from './src/schedules.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -1180,6 +1181,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (!project) throw new HttpError(404, 'No such scheme');
     inScope(project.id);
     return json(res, 200, session.agent === undefined ? store.recap(session.name, project.id) : { since: null, turns: {} });
+  }
+
+  m = pathname.match(/^\/api\/projects\/(\d+)\/schedules$/);
+  if (m && method === 'GET') {
+    // The scheme's scheduled minions, for the Schedules panel; each with the number of the minion its last run started.
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such scheme');
+    inScope(project.id);
+    const schedules = store.schedules.list(project.id).map((s) => ({ ...s, when: describeCron(s.cron), last_number: s.last_ticket_id ? store.getTicket(s.last_ticket_id)?.number ?? null : null }));
+    return json(res, 200, { schedules });
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/search$/);

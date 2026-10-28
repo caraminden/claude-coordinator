@@ -13,6 +13,7 @@ import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, u
 import type { TripwireConfig } from './tripwire.ts';
 import { claudeConfigDir, lastEffort, projectSlug, restoreSession, saveSession } from './sessions.ts';
 import { restoreTicketDir } from './workspace.ts';
+import { previewKey } from './previews.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -481,6 +482,8 @@ export class Runner {
   private unitTag: string;
   /** Set in a preview (server.ts, PREVIEW=1): messages are kept, but no turn ever starts. */
   noTurns = false;
+  /** A ticket was dismissed (its preview goes with it). */
+  onClose: (ticketId: number) => void = () => {};
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
   filesDir: (ticket: Ticket) => string | null = () => null;
   /** The folder every thread and the coordinator of a project can read and write, for handoffs and notes. */
@@ -540,6 +543,7 @@ export class Runner {
     return {
       ...ticket, queued: this.queued(ticket.id), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
       approvals: this.approvals.waiting(ticket.id), properties: this.store.props.forTarget('minion', ticket.id),
+      preview: !!this.store.getSetting(previewKey(ticket.id)),
       // What "Default" means in the composer: the effort a turn gets when the ticket has none of its own.
       default_effort: turnSettings({ ...ticket, effort: null }, this.store.getProject(ticket.project_id) ?? { default_effort: '' }).effort,
     };
@@ -549,6 +553,7 @@ export class Runner {
   close(ticketId: number, text: string) {
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
+    this.onClose(ticketId);
   }
 
   /**

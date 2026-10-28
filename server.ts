@@ -23,6 +23,7 @@ import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigg
 import { Runner, slimEvent, tripwireConfig } from './src/runner.ts';
 import { GLOBAL_OWNER, PropertyError, type Actor } from './src/properties.ts';
 import { TAG_TO_TYPE } from './src/property-seed.ts';
+import { PreviewError, Previews, previewPath } from './src/previews.ts';
 import { LiveWaiters } from './src/wake.ts';
 import { cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
 
@@ -127,6 +128,12 @@ const runner = new Runner(
 // restart doesn't stop them; TURN_UNITS=0 or 1 overrides that.
 runner.units = process.env.TURN_UNITS ? process.env.TURN_UNITS === '1' : !!process.env.INVOCATION_ID;
 runner.noTurns = PREVIEW;
+// Minions' branches served for people to try (src/previews.ts); a preview serves none of its own.
+const previews = PREVIEW ? null : new Previews(store, DATA_DIR);
+if (previews) {
+  previews.onChange = (ticketId) => runner.broadcastTicket(ticketId);
+  runner.onClose = (ticketId) => previews.stop(ticketId, true);
+}
 if (!BOOT_CHECK) runner.recover();
 if (runner.units && !BOOT_CHECK) {
   execFile('systemctl', ['--user', 'show', '-p', 'MemoryMax', '--value', 'citadel.slice'], (err, out) => {
@@ -773,7 +780,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (origin && originHost !== host) throw new HttpError(403, 'Cross-origin request');
   }
 
-  if (pathname === '/api/me') return json(res, 200, { name: session.name });
+  if (pathname === '/api/me') {
+    // The app's public address, as Caddy forwards it, so start_preview can hand out a full link.
+    const host = req.headers['x-forwarded-host'];
+    const origin = typeof host === 'string' && session.agent === undefined ? `${isSecure(req) ? 'https' : 'http'}://${host}` : null;
+    if (origin && store.getSetting('public_origin') !== origin) store.setSetting('public_origin', origin);
+    return json(res, 200, { name: session.name });
+  }
 
   if (pathname === '/api/machines' || pathname.startsWith('/api/machines/')) return machinesApi(req, res, pathname, method, session);
 
@@ -1325,6 +1338,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const dismissed = !failed && runner.deployLive(id);
       return json(res, 201, { dismissed });
     }
+    if (action === '/preview' && method === 'POST') {
+      // start_preview: (re)start this minion's preview from its worktree as it is now.
+      if (!previews) throw new HttpError(403, 'A preview has no previews of its own');
+      try {
+        await previews.start(ticket);
+      } catch (err) {
+        if (err instanceof PreviewError) throw new HttpError(err.status, err.message);
+        throw err;
+      }
+      const origin = store.getSetting<string>('public_origin');
+      return json(res, 200, { url: `${origin ?? ''}/${previewPath(id)}` });
+    }
     if (action === '/wake' && method === 'POST') {
       // wake_when_live: the minion itself, or its Taskmaster for it, waits for a commit (or the next
       // deploy) to be live.
@@ -1519,8 +1544,24 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   try {
+    const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
     if (url.pathname.startsWith('/api/')) {
       await api(req, res, url, auth.session(req));
+    } else if (preview) {
+      const session = auth.session(req);
+      // People only, signed in to the live app; a page load without a login goes to the login.
+      if (!session || session.agent !== undefined) {
+        if (req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? ''))) return void res.writeHead(302, { Location: '/' }).end();
+        throw new HttpError(401, 'Not logged in');
+      }
+      // The front end's URLs are relative, so the page itself needs the trailing slash.
+      if (!preview[2]) return void res.writeHead(302, { Location: `/${previewPath(Number(preview[1]))}${url.search}` }).end();
+      try {
+        await previews.proxy(req, res, Number(preview[1]), preview[2] + url.search, session);
+      } catch (err) {
+        if (err instanceof PreviewError) throw new HttpError(err.status, err.message);
+        throw err;
+      }
     } else {
       await serveStatic(req, res, url.pathname);
     }

@@ -480,6 +480,12 @@ const THREAD_TOOLS = [
     inputSchema: { type: 'object', properties: WAKE_PROPS, required: ['reason'] },
   },
   {
+    name: 'start_preview',
+    description:
+      "Start (or restart) a preview of this minion's worktree for people to try before it merges: its server.ts runs on a copy of the app's data, behind the app's login, and never runs turns. Commit first: it serves the worktree as it is now. Returns the link; post it in your reply and set state try. It stops after an hour unused (opening the link starts it again) and goes when the minion is dismissed.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'close_self',
     description:
       "Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live. It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled. Not for minions whose result is a report or doc for people to read: those stay open until someone has read it.",
@@ -637,6 +643,10 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'message_coordinator':
       if ((await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text })).held) return `Held, not delivered: ${HELD}`;
       return 'Sent. The Taskmaster runs it now, or after its current turn.';
+    case 'start_preview': {
+      const { url } = await call('POST', `/api/tickets/${TICKET}/preview`, {});
+      return `The preview is up at ${url}. Post that link in your reply (the minion's view also shows an Open preview button) and set state try.`;
+    }
     case 'close_self':
       try {
         await call('POST', `/api/tickets/${TICKET}/close`, { reason: args.reason ?? null });

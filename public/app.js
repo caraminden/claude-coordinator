@@ -1085,7 +1085,8 @@ function chatSection(chatId, ticket, events) {
   });
   textarea.addEventListener('keydown', (e) => {
     // Leave Enter alone while an IME is composing text, or it would send half a word.
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    // On a phone Enter adds a line; the Send button sends.
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(max-width: 800px)').matches) {
       e.preventDefault();
       form.requestSubmit();
     }
@@ -1180,7 +1181,7 @@ function newTicketForm(projectId) {
     saveDraft(draftKey, box.value ? { message: box.value } : null);
   });
   box.addEventListener('keydown', (e) => {
-    // Same as the chat composer: Enter sends, Shift+Enter adds a line, IME composition is left alone.
+    // Enter sends (on phones too, unlike the chat composer), Shift+Enter adds a line, IME composition is left alone.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       form.requestSubmit();

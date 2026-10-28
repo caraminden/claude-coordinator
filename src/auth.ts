@@ -16,6 +16,11 @@ export interface Session {
 
 export const AGENT_NAME = 'Coordinator';
 
+/** A phone's password manager can fill the name field with the site's address; that is never a name. */
+export function looksLikeUrl(name: string): boolean {
+  return /^https?\W|\/|^www\./i.test(name);
+}
+
 function sha256(s: string): Buffer {
   return createHash('sha256').update(s).digest();
 }
@@ -114,7 +119,7 @@ export class Auth {
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
     try {
       const s = JSON.parse(Buffer.from(payload, 'base64url').toString()) as Session;
-      return s.exp > Date.now() && typeof s.name === 'string' ? s : null;
+      return s.exp > Date.now() && typeof s.name === 'string' && !looksLikeUrl(s.name) ? s : null;
     } catch {
       return null;
     }

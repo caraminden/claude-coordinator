@@ -8,7 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { gzip } from 'node:zlib';
 import { homedir } from 'node:os';
 import { commentMessage, fileType, findArtifacts, isArtifact, linkedPaths, optionImageProblem, resolveFile } from './src/artifacts.ts';
-import { AGENT_NAME, Auth, threadMayCall, type Session } from './src/auth.ts';
+import { AGENT_NAME, Auth, looksLikeUrl, threadMayCall, type Session } from './src/auth.ts';
 import { branchStatus, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
@@ -397,6 +397,7 @@ function clientIp(req: IncomingMessage): string {
 function cleanName(v: unknown): string {
   const name = typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f\[\]:]/g, '').replace(/\s+/g, ' ').trim() : '';
   if (!name) throw new HttpError(400, 'Name is required');
+  if (looksLikeUrl(name)) throw new HttpError(400, 'That looks like a web address. Type your name.');
   return name.slice(0, 40);
 }
 

@@ -615,7 +615,8 @@ function renderLogin() {
   meEl.replaceChildren();
   app.replaceChildren(document.getElementById('login-tpl').content.cloneNode(true));
   const form = document.getElementById('login-form');
-  try { form.name.value = localStorage.getItem('cc-name') || ''; } catch {}
+  // A saved name that is really the site's address (filled in by a phone's password manager) is dropped.
+  try { const saved = localStorage.getItem('cc-name') || ''; form.name.value = /^https?\W|\//i.test(saved) ? '' : saved; } catch {}
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const err = document.getElementById('login-error');

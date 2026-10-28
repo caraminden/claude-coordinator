@@ -288,8 +288,10 @@ export class Registry {
       const max = k.value_kind === 'user' ? 60 : 200;
       if (raw.trim().length > max) throw new PropertyError(`${code(k.key)} must be at most ${max} characters`);
       if (k.value_kind === 'text') return raw.trim();
-      // One person, one value: "josh" becomes the "Josh" already in use, so the filter doesn't split them.
-      const seen = this.db.prepare('SELECT value FROM properties WHERE key_id = ? AND lower(value) = lower(?) LIMIT 1').get(k.id, raw.trim()) as { value: string } | undefined;
+      // One person, one spelling: "josh" becomes the "Josh" already in use on any person key, this one first.
+      const seen = this.db
+        .prepare("SELECT p.value FROM properties p JOIN property_keys k ON k.id = p.key_id WHERE k.value_kind = 'user' AND lower(p.value) = lower(?) ORDER BY p.key_id = ? DESC LIMIT 1")
+        .get(raw.trim(), k.id) as { value: string } | undefined;
       return seen?.value ?? raw.trim();
     }
     const values = this.valuesOf(k.id);

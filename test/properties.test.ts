@@ -65,6 +65,9 @@ test("a person's name matches the spelling already in use, whatever its case", (
   s.props.set('minion', a, 2, { assigned: 'Josh' }, 'Cara');
   s.props.set('minion', b, 2, { assigned: 'josh ', requestedBy: 'CARA' }, 'Cara');
   assert.deepEqual(s.props.forTarget('minion', b), { requestedBy: 'CARA', assigned: 'Josh' });
+  // Across person keys too: Cara asked for b as CARA, so assigning "cara" uses that spelling.
+  s.props.set('minion', a, 2, { assigned: 'cara' }, 'Cara');
+  assert.equal(s.props.forTarget('minion', a).assigned, 'CARA');
   s.props.set('minion', b, 2, { assigned: null }, 'Cara');
   assert.equal(s.props.forTarget('minion', b).assigned, undefined);
 });

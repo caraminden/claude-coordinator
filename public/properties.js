@@ -1,6 +1,8 @@
 // The scheme's property registry: the Settings link's review count, the Properties tab and a minion's property chip.
 import { api, h, view } from './core.js';
 import { settingsTabs } from './settings.js';
+import { filterChoices } from './propfilter.js';
+import { renderSidebar } from './sidebar.js';
 
 // ---------- properties (the scheme's property registry) ----------
 
@@ -19,7 +21,11 @@ export function propertyChip(t) {
         : h('p', { class: 'muted small' }, 'None yet. The minion sets its own as the work becomes clear.'),
       h('div', { class: 'foot' }, h('span', {}, 'Minions and the Taskmaster set these'), h('span', { class: 'spacer' }),
         h('a', { href: `#/p/${t.project_id}/properties` }, 'All keys'))));
-  // Close it on a click elsewhere.
+  return closeOnClickAway(chip);
+}
+
+/** Close a <details> popover on a click elsewhere. */
+function closeOnClickAway(chip) {
   chip.addEventListener('toggle', () => {
     if (!chip.open) return;
     const away = (e) => {
@@ -30,6 +36,63 @@ export function propertyChip(t) {
     setTimeout(() => document.addEventListener('click', away));
   });
   return chip;
+}
+
+// ---------- the minions list's property filter ----------
+
+// The scheme's keys and the values ticked per key, kept across minion switches like the search.
+export const propFilter = { projectId: null, keys: null, picks: new Map() };
+
+/** One dropdown per key under the minions search, each a checklist of that key's values. */
+export async function renderPropFilter() {
+  const el = document.getElementById('prop-filter');
+  if (!el) return;
+  const projectId = view.projectId;
+  if (propFilter.projectId !== projectId) Object.assign(propFilter, { projectId, keys: null, picks: new Map() });
+  if (!propFilter.keys) {
+    const reg = await loadProperties().catch(() => null);
+    if (!reg || propFilter.projectId !== projectId) return;
+    propFilter.keys = reg.keys;
+  }
+  // Leave an open dropdown alone; it picks up new choices when it next draws.
+  if (!el.isConnected || el.querySelector('details[open]')) return;
+  const clear = h('button', { type: 'button', class: 'secondary small pf-clear', hidden: !propFilter.picks.size, onclick: () => {
+    propFilter.picks.clear();
+    renderSidebar();
+  } }, 'Clear');
+  const changed = () => {
+    clear.hidden = !propFilter.picks.size;
+    renderSidebar();
+  };
+  el.replaceChildren(...filterChoices(propFilter.keys, [...view.tickets.values()]).map((c) => filterDropdown(c, changed)), clear);
+}
+
+function filterDropdown({ key, values }, changed) {
+  const picked = () => propFilter.picks.get(key) ?? new Set();
+  const summary = h('summary', { class: 'tag-chip' });
+  const dd = h('details', { class: 'prop-chip pf' }, summary,
+    h('div', { class: 'prop-pop' },
+      h('h4', {}, key),
+      values.map((v) => {
+        const box = h('input', { type: 'checkbox', checked: picked().has(v) });
+        box.addEventListener('change', () => {
+          const set = picked();
+          if (box.checked) set.add(v);
+          else set.delete(v);
+          if (set.size) propFilter.picks.set(key, set);
+          else propFilter.picks.delete(key);
+          show();
+          changed();
+        });
+        return h('label', { class: 'pf-opt' }, box, `${key}: ${v}`);
+      })));
+  const show = () => {
+    const set = picked();
+    summary.textContent = set.size ? `${key}: ${[...set].join(', ')}` : key;
+    dd.classList.toggle('on', !!set.size);
+  };
+  show();
+  return closeOnClickAway(dd);
 }
 
 /** Whether people on this scheme's page change a key: its own keys, and global ones only on Citadel's. */
@@ -64,6 +127,8 @@ export async function renderSettingsCount() {
 export function onPropertiesChanged(projectId) {
   if (view?.kind !== 'project' || (projectId !== null && projectId !== view.projectId)) return;
   renderSettingsCount();
+  propFilter.keys = null;
+  renderPropFilter();
   if (view.main === 'properties') renderPropertiesPage();
 }
 

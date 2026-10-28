@@ -97,6 +97,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     // The coordinator sits above the search so it stays one click away while searching.
     h('div', { id: 'coordinator-row' }),
     threadSearchBox(projectId),
+    h('div', { id: 'prop-filter', class: 'prop-filter' }),
     h('div', { id: 'threads' }));
   // Don't hide a half-written new thread behind a collapsed sidebar.
   if (sidebar.querySelector('.new-thread textarea').value) sidebar.open = true;

@@ -554,6 +554,19 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 
 /* Search: threads list and find-in-chat */
 .thread-search { margin: 0 0 0.5rem; padding: 0.3rem 0.55rem; font-size: 0.9em; }
+/* Property filter: one checklist dropdown per key, under the search */
+.prop-filter { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 0.6rem; }
+.prop-filter:empty { display: none; }
+.prop-filter .tag-chip { font-family: ui-monospace, "SF Mono", Menlo, monospace; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.prop-filter .tag-chip::after { content: " ▾"; }
+.prop-filter .pf.on > .tag-chip { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.prop-filter .prop-pop { max-height: min(60vh, 22rem); overflow-y: auto; }
+@media (min-width: 801px) { .prop-filter .prop-pop { left: 0; right: auto; } }
+/* Phones: the list drops under the whole row of dropdowns, full width, so it never covers them. */
+@media (max-width: 800px) { .prop-filter { position: relative; } .prop-filter .prop-chip { position: static; } .prop-filter .prop-pop { position: absolute; top: calc(100% + 6px); left: 0; right: 0; width: auto; } }
+.pf-opt { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.1rem; cursor: pointer; color: var(--ink); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
+.pf-opt input { margin: 0; flex: none; width: auto; }
+.prop-filter .pf-clear { padding: 0.25rem 0.55rem; font-size: 0.78em; line-height: 1.3; border-radius: 999px; color: var(--muted); }
 mark.find { background: color-mix(in srgb, var(--waiting) 35%, transparent); color: inherit; border-radius: 2px; }
 mark.find.current { background: var(--waiting); color: #fff; }
 .find-box { display: inline-flex; align-items: center; gap: 0.25rem; }

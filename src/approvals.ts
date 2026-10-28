@@ -89,6 +89,9 @@ interface Request {
   tripwire: boolean;
   decision: Decision;
   wake: Set<() => void>;
+  /** The card as the chat shows it, and when it was posted, for the Needs-you inbox. */
+  card: unknown;
+  at: number;
 }
 
 type Emit = (ticketId: number, kind: string, data: unknown) => void;
@@ -108,10 +111,11 @@ export class Approvals {
   /** Post a card in the thread's chat for one tool call; returns its id. */
   request(ticketId: number, tool: string, input: unknown, tripwire?: { reason: string; explanation: string }): string {
     const id = randomBytes(8).toString('hex');
-    this.requests.set(id, { ticketId, tripwire: !!tripwire, decision: { state: 'pending' }, wake: new Set() });
     let shown = JSON.stringify(input ?? {});
     if (shown.length > MAX_INPUT) shown = JSON.stringify({ truncated: shown.slice(0, MAX_INPUT) });
-    this.emit(ticketId, 'approval', { id, tool, input: JSON.parse(shown), ...(tripwire ? { tripwire } : {}) });
+    const card = { id, tool, input: JSON.parse(shown), ...(tripwire ? { tripwire } : {}) };
+    this.requests.set(id, { ticketId, tripwire: !!tripwire, decision: { state: 'pending' }, wake: new Set(), card, at: Date.now() });
+    this.emit(ticketId, 'approval', card);
     return id;
   }
 
@@ -142,6 +146,11 @@ export class Approvals {
     let n = 0;
     for (const r of this.requests.values()) if (r.ticketId === ticketId && r.decision.state === 'pending') n++;
     return n;
+  }
+
+  /** Every card still waiting on a person, in any thread. */
+  pending(): { ticketId: number; at: number; card: unknown }[] {
+    return [...this.requests.values()].filter((r) => r.decision.state === 'pending').map(({ ticketId, at, card }) => ({ ticketId, at, card }));
   }
 
   /** The card's outcome so far; unknown cards (another thread's, or from before a restart) are expired. */

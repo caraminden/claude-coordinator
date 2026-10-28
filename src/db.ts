@@ -560,6 +560,21 @@ export class Store {
       .all(ticketId, afterId) as unknown as EventRow[];
   }
 
+  /**
+   * Stored cards still waiting on a person, in threads that aren't dismissed: questions nobody has
+   * answered, and plans still pending. Approval cards live in memory (Approvals.pending).
+   */
+  openCards(): EventRow[] {
+    return this.db.prepare(`
+      SELECT e.* FROM events e JOIN tickets t ON t.id = e.ticket_id
+      WHERE t.status != 'closed' AND (
+        (e.kind = 'plan' AND json_extract(e.data, '$.status') = 'pending')
+        OR (e.kind = 'question' AND NOT EXISTS (
+          SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message'
+            AND json_extract(a.data, '$.answer.questionId') = json_extract(e.data, '$.id'))))
+      ORDER BY e.id`).all() as unknown as EventRow[];
+  }
+
   /** The text of a ticket's replies that may link files (subagents' included). */
   replyTexts(ticketId: number): string[] {
     const rows = this.db

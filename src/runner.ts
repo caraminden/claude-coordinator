@@ -19,9 +19,11 @@ function pinnedCopy(file: string): string {
   writeFileSync(copy, readFileSync(join(import.meta.dirname, file)));
   return copy;
 }
-const MCP_SERVER = pinnedCopy('mcp.ts');
+// Every local file the pinned servers import must be pinned too, before them (test/pinned-mcp.test.ts).
+pinnedCopy('appname.ts');
+export const MCP_SERVER = pinnedCopy('mcp.ts');
 // Stands in for a connected machine's MCP server; see src/machines.ts.
-const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
+export const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);

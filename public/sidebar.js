@@ -1,5 +1,5 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
-import { ago, api, app, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, threadLabel, view } from './core.js';
+import { ago, api, app, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, view } from './core.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';

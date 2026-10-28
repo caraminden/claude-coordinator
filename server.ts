@@ -369,12 +369,16 @@ if (!BOOT_CHECK || PREVIEW) {
       }
     }
   })();
+  let polling = false; // a slow git can't stack up rounds
   setInterval(async () => {
+    if (polling) return;
+    polling = true;
     for (const [id, { status }] of branchCache) {
       if (store.getTicket(id)?.status === 'closed') continue;
       if (status?.deploy && !status.deploy.live) await ticketBranch(id).catch(() => {});
       else shipChanged(id);
     }
+    polling = false;
   }, SHIP_POLL_MS).unref();
 }
 

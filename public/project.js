@@ -7,7 +7,7 @@ import { chatSection, chatView, mountChat } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
 import { inboxStrip, refreshInbox } from './inbox.js';
-import { openSchedules } from './schedules.js';
+import { schedulesButton, showSchedules } from './schedules.js';
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 export async function showTicket(ticketId) {
@@ -94,15 +94,16 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('div', { id: 'machines-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
-    h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label' }, 'Minions'),
-      h('button', { type: 'button', class: 'rename schedules-btn', 'aria-label': 'Scheduled minions', title: 'Scheduled minions', onclick: openSchedules }, '◷')),
+    h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label' }, 'Minions'), schedulesButton()),
     newTicketForm(projectId),
     inboxStrip(),
     // The coordinator sits above the search so it stays one click away while searching.
     h('div', { id: 'coordinator-row' }),
     threadSearchBox(projectId),
     h('div', { id: 'prop-filter', class: 'prop-filter' }),
-    h('div', { id: 'threads' }));
+    h('div', { id: 'threads' }),
+    h('div', { class: 'schedules-pane' }));
+  showSchedules(sidebar);
   // Don't hide a half-written new thread behind a collapsed sidebar.
   if (sidebar.querySelector('.new-thread textarea').value) sidebar.open = true;
   for (const [name, el] of [['shelf', shelf], ['threads', sidebar]]) {

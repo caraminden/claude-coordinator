@@ -80,6 +80,26 @@ test('a question card the minion settled (answered in a typed reply) does not ke
   assert.equal(runner.deployLive(id), true);
 });
 
+test('a person who wrote after the deploy keeps it open, and its state is cleared', () => {
+  const id = newTicket();
+  runner.personWrote(id);
+  assert.equal(runner.deployLive(id), false);
+  assert.equal(status(id), 'idle');
+  assert.equal(store.getTicket(id)!.state, null);
+  assert.match(store.listEvents(id).at(-1)!.data, /someone wrote to this minion/);
+});
+
+test('only talk while in pending-deploy counts: earlier talk, or talk before a new deploy, does not', () => {
+  const before = newTicket('ready');
+  runner.personWrote(before);
+  store.updateTicket(before, { state: 'pending-deploy' });
+  assert.equal(runner.deployLive(before), true);
+  const redeployed = newTicket();
+  runner.personWrote(redeployed);
+  runner.deployPending(redeployed);
+  assert.equal(runner.deployLive(redeployed), true);
+});
+
 test('a minion whose last turn failed stays open', () => {
   const id = newTicket();
   store.updateTicket(id, { status: 'error' });
@@ -88,7 +108,7 @@ test('a minion whose last turn failed stays open', () => {
 
 test('pending-deploy outlasts a stray turn, and a deploy that lands mid-turn dismisses at its end', async () => {
   const id = newTicket();
-  runner.send(id, 'Cara', 'quick question');
+  runner.send(id, 'GitHub', 'CI passed on the PR');
   assert.equal(store.getTicket(id)!.state, 'pending-deploy', 'a new turn keeps it');
   assert.equal(runner.deployLive(id), false, 'not mid-turn');
   assert.equal(status(id), 'running');

@@ -645,6 +645,7 @@ function ticketView(id: number) {
  */
 function personWrote(ticket: Ticket, session: Session) {
   if (session.agent !== undefined) return;
+  runner.personWrote(ticket.id);
   const minions = ticket.kind === 'coordinator' ? store.listTickets(ticket.project_id).filter((t) => t.kind !== 'coordinator') : [ticket];
   for (const t of minions) runner.continueLoop(t.id, session.name);
 }
@@ -1188,6 +1189,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === ticket[k]) delete fields[k];
       if (Object.keys(fields).length) {
         store.updateTicket(id, fields);
+        if (fields.state === 'pending-deploy') runner.deployPending(id);
         if ('tag' in fields) store.props.setTypeFromTag(id, fields.tag ?? null, session.name);
         const who = session.agent === id ? 'Claude' : session.name;
         if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this minion from "${ticket.title}" to "${fields.title}".` });

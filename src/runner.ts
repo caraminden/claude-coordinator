@@ -194,6 +194,8 @@ function wrapperAlive(dir: string): boolean | null {
 }
 
 const turnKey = (ticketId: number) => `turn:${ticketId}`;
+/** Set when a person writes to a minion waiting in pending-deploy: its deploy then leaves it open. */
+const talkedKey = (ticketId: number) => `talked-since-deploy:${ticketId}`;
 
 /** Taskmaster↔minion messages (both ways) one minion may exchange per LOOP_WINDOW_MS before the next waits for a person. */
 export const LOOP_LIMIT = 6;
@@ -345,7 +347,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     '- At the end of every turn, set state and note: state ready (done, ready to merge or pick up), try (ready for people to try), parked, blocked (on something outside the minion), outside (work still running elsewhere) or pending-deploy (deployed with tools/deploy.sh, not live yet), or null when you are simply waiting on an answer; note is one terse line, max 60 chars, on where things stand ("needs a pick: tabs or list"). The state clears when the next turn starts, except pending-deploy, which stays until you set another state: change it if a later turn starts new work.',
     'When your branch has an open GitHub pull request, the app watches it and messages you as "[GitHub]: ..." when CI on its head commit passes or fails, someone reviews or comments, or it is merged or closed, so you need not wait on CI in a turn; act on those messages as the scheme expects (fix a red build, answer a review).',
     'Give every Bash call a short plain-English description (like "Run the test suite").',
-    'After you deploy with tools/deploy.sh, set state pending-deploy and do not call close_self: a successful deploy dismisses the minion once it is live and your turn has ended (the restart does not interrupt your turn), and a failed one leaves it open with the error.',
+    'After you deploy with tools/deploy.sh, set state pending-deploy and do not call close_self: a successful deploy dismisses the minion once it is live and your turn has ended (the restart does not interrupt your turn), and a failed one leaves it open with the error. pending-deploy means the deploy is all that is left: in a later turn, when someone still needs you (helping them use the change, an open question, more work), set another state or null, even while the deploy is still waiting.',
     'When the minion\'s work is done and should be dismissed with nothing to deploy, call the `close_self` tool (mcp__thread) near the end of your turn: the minion is dismissed once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not dismiss a minion whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can be dismissed, even if its brief says to dismiss.',
     'You cannot message other minions directly. When something needs the scheme\'s Taskmaster (passing information to another minion, starting a new minion, a decision for it), message it with the `message_coordinator` tool (mcp__thread) with a self-contained message.',
     `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state parked and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live.`,
@@ -558,7 +560,8 @@ export class Runner {
 
   /**
    * A deploy this minion queued is live (tools/deploy.sh reported ok). A minion waiting on it in state
-   * pending-deploy is dismissed, unless something is still open: a question card, or a failed last turn.
+   * pending-deploy is dismissed, unless something is still open: a question card, a failed last turn,
+   * or a person who wrote to it since it went into pending-deploy.
    * Mid-turn or with messages queued (approval cards only exist mid-turn), it waits for the last of
    * those turns to end. Returns whether it was dismissed.
    */
@@ -572,6 +575,13 @@ export class Runner {
     // shortcut: also takes the interim "outside" + "pending deploy" note, for minions that deployed before this state existed; drop it once none are left.
     const pending = t?.state === 'pending-deploy' || (t?.state === 'outside' && /pending deploy/i.test(t.note ?? ''));
     if (!t || t.status === 'closed' || t.status === 'error' || !pending) return false;
+    if (this.store.getSetting(talkedKey(ticketId))) {
+      this.store.deleteSetting(talkedKey(ticketId));
+      this.store.updateTicket(ticketId, { state: null });
+      this.broadcastTicket(ticketId);
+      this.emit(ticketId, 'note', { text: 'The deploy is live, but someone wrote to this minion after it deployed, so it stays open.' });
+      return false;
+    }
     const events = this.store.listEvents(ticketId);
     const answered = new Set(events.map((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId).filter(Boolean));
     if (events.some((e) => e.kind === 'question' && !answered.has(JSON.parse(e.data).id) && !JSON.parse(e.data).settled)) {
@@ -581,6 +591,16 @@ export class Runner {
     this.store.updateTicket(ticketId, { state: null });
     this.close(ticketId, 'The deploy is live, so it dismissed this minion.');
     return true;
+  }
+
+  /** A person wrote to this minion (a message, a comment or a card answer). */
+  personWrote(ticketId: number) {
+    if (this.store.getTicket(ticketId)?.state === 'pending-deploy') this.store.setSetting(talkedKey(ticketId), true);
+  }
+
+  /** The minion went into pending-deploy: a new deploy to wait on, so earlier talk no longer counts. */
+  deployPending(ticketId: number) {
+    this.store.deleteSetting(talkedKey(ticketId));
   }
 
   /**
@@ -898,7 +918,8 @@ export class Runner {
     // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
     if (ticket.kind !== 'coordinator') env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
-    // outlasts a stray turn, so the deploy still dismisses the minion unless the turn sets another state.
+    // outlasts a stray turn (a GitHub ping), so the deploy still dismisses the minion unless the turn
+    // sets another state or a person wrote to it (personWrote).
     if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, { state: null });
 
     // The session's transcript, task list and memory live in the database too; put back anything this

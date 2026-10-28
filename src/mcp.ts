@@ -33,7 +33,7 @@ const STATE = {
   type: ['string', 'null'],
   enum: ['ready', 'try', 'parked', 'blocked', 'outside', 'pending-deploy', null],
   description:
-    'Where the turn leaves things, for the minions list: ready (done; ready to merge or pick up), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person\'s answer), outside (work still running somewhere this minion cannot wait on, like CI), pending-deploy (deployed with tools/deploy.sh, waiting to go live; a successful deploy dismisses the minion). null when it is simply people\'s turn to answer, which the list shows by itself. Cleared automatically when the next turn starts, except pending-deploy, which stays until you set another state.',
+    'Where the turn leaves things, for the minions list: ready (done; ready to merge or pick up), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person\'s answer), outside (work still running somewhere this minion cannot wait on, like CI), pending-deploy (deployed with tools/deploy.sh, waiting to go live, and nothing else left: a successful deploy dismisses the minion, so not while someone still needs you). null when it is simply people\'s turn to answer, which the list shows by itself. Cleared automatically when the next turn starts, except pending-deploy, which stays until you set another state.',
 };
 const NOTE = { type: ['string', 'null'], description: 'One terse line on where things stand, max 60 chars, e.g. "needs a pick: tabs or a list" or "merged, live after restart". No names or prefixes.' };
 

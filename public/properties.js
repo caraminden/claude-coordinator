@@ -1,7 +1,7 @@
 // The scheme's property registry: the Settings link's review count, the Properties tab and a minion's property chip.
 import { api, h, view } from './core.js';
 import { settingsTabs } from './settings.js';
-import { filterChoices } from './propfilter.js';
+import { filterChoices, valueCounts } from './propfilter.js';
 import { renderSidebar } from './sidebar.js';
 
 // ---------- properties (the scheme's property registry) ----------
@@ -64,10 +64,13 @@ export async function renderPropFilter() {
     clear.hidden = !propFilter.picks.size;
     renderSidebar();
   };
-  el.replaceChildren(...filterChoices(propFilter.keys, [...view.tickets.values()]).map((c) => filterDropdown(c, changed)), clear);
+  const tickets = [...view.tickets.values()];
+  const open = tickets.filter((t) => t.status !== 'closed');
+  el.replaceChildren(...filterChoices(propFilter.keys, tickets).map((c) => filterDropdown(c, valueCounts(c.key, open, propFilter.picks), changed)), clear);
 }
 
-function filterDropdown({ key, values }, changed) {
+/** A key's checklist; each value shows how many open minions it would let through, given the other keys' picks. */
+function filterDropdown({ key, values }, counts, changed) {
   const picked = () => propFilter.picks.get(key) ?? new Set();
   const summary = h('summary', { class: 'tag-chip' });
   const dd = h('details', { class: 'prop-chip pf' }, summary,
@@ -84,7 +87,8 @@ function filterDropdown({ key, values }, changed) {
           show();
           changed();
         });
-        return h('label', { class: 'pf-opt' }, box, `${key}: ${v}`);
+        const n = counts.get(v) ?? 0;
+        return h('label', { class: n ? 'pf-opt' : 'pf-opt none' }, box, `${key}: ${v}`, h('span', { class: 'pf-n' }, String(n)));
       })));
   const show = () => {
     const set = picked();
@@ -92,6 +96,8 @@ function filterDropdown({ key, values }, changed) {
     dd.classList.toggle('on', !!set.size);
   };
   show();
+  // The other dropdowns' counts wait while this one is open (renderPropFilter leaves an open one alone).
+  dd.addEventListener('toggle', () => { if (!dd.open) renderPropFilter(); });
   return closeOnClickAway(dd);
 }
 

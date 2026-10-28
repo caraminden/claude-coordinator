@@ -571,6 +571,8 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 @media (max-width: 800px) { .prop-filter { position: relative; } .prop-filter .prop-chip { position: static; } .prop-filter .prop-pop { position: absolute; top: calc(100% + 6px); left: 0; right: 0; width: auto; } }
 .pf-opt { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.1rem; cursor: pointer; color: var(--ink); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
 .pf-opt input { margin: 0; flex: none; width: auto; }
+.pf-opt .pf-n { margin-left: auto; padding-left: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pf-opt.none { color: var(--muted); }
 .prop-filter .pf-clear { padding: 0.25rem 0.55rem; font-size: 0.78em; line-height: 1.3; border-radius: 999px; color: var(--muted); }
 mark.find { background: color-mix(in srgb, var(--waiting) 35%, transparent); color: inherit; border-radius: 2px; }
 mark.find.current { background: var(--waiting); color: #fff; }

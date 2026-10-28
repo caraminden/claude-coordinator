@@ -19,3 +19,14 @@ export function filterChoices(keys, tickets) {
 export function matchesPicks(t, picks) {
   return [...picks].every(([key, set]) => [t.properties?.[key] ?? []].flat().some((v) => set.has(v)));
 }
+
+/** For one key, value → how many minions carry it among those the other keys' picks let through. */
+export function valueCounts(key, tickets, picks) {
+  const others = new Map([...picks].filter(([k]) => k !== key));
+  const counts = new Map();
+  for (const t of tickets) {
+    if (!matchesPicks(t, others)) continue;
+    for (const v of new Set([t.properties?.[key] ?? []].flat())) counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  return counts;
+}

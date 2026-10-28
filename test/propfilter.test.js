@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filterChoices, matchesPicks } from '../public/propfilter.js';
+import { filterChoices, matchesPicks, valueCounts } from '../public/propfilter.js';
 
 const key = (key, value_kind, values = [], status = 'active') => ({ key, value_kind, status, values });
 const val = (value, status = 'active', reviewed = true) => ({ value, status, reviewed });
@@ -35,4 +35,17 @@ test('picks: any value within a key, every key across them; multi and number val
   assert.equal(match({ area: ['town'] }), 1);
   assert.equal(match({ build: [8] }), 1);
   assert.equal(match({ type: ['art'] }), 0);
+});
+
+test('counts: a value counts the minions carrying it that every other key\'s picks let through', () => {
+  const ts = [
+    { properties: { type: 'bug', stage: 'done', area: ['town', 'ui'] } },
+    { properties: { type: 'bug', stage: 'in-progress', area: ['ui'] } },
+    { properties: { type: 'feature', stage: 'in-progress' } },
+  ];
+  const picks = (o) => new Map(Object.entries(o).map(([k, v]) => [k, new Set(v)]));
+  assert.deepEqual(valueCounts('type', ts, picks({})), new Map([['bug', 2], ['feature', 1]]));
+  // The key's own picks don't narrow its counts (OR within a key); other keys' do.
+  assert.deepEqual(valueCounts('type', ts, picks({ type: ['bug'], stage: ['in-progress'] })), new Map([['bug', 1], ['feature', 1]]));
+  assert.deepEqual(valueCounts('area', ts, picks({ type: ['bug'] })), new Map([['town', 1], ['ui', 2]]));
 });

@@ -563,14 +563,14 @@ export class Store {
 
   /**
    * A project's stored cards still waiting on a person, in threads that aren't dismissed: questions
-   * nobody has answered, and plans still pending. Approval cards live in memory (Approvals.pending).
+   * nobody has answered (nor the minion settled), and plans still pending. Approval cards live in memory (Approvals.pending).
    */
   openCards(projectId: number): EventRow[] {
     return this.db.prepare(`
       SELECT e.* FROM events e JOIN tickets t ON t.id = e.ticket_id
       WHERE t.project_id = ? AND t.status != 'closed' AND (
         (e.kind = 'plan' AND json_extract(e.data, '$.status') = 'pending')
-        OR (e.kind = 'question' AND NOT EXISTS (
+        OR (e.kind = 'question' AND json_extract(e.data, '$.settled') IS NULL AND NOT EXISTS (
           SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message'
             AND json_extract(a.data, '$.answer.questionId') = json_extract(e.data, '$.id'))))
       ORDER BY e.id`).all(projectId) as unknown as EventRow[];

@@ -130,6 +130,16 @@ const ASK_QUESTION = {
   },
 };
 
+const SETTLE_QUESTION = {
+  name: 'settle_question',
+  description:
+    'Settle a question card of yours that someone answered by typing a reply instead of clicking it, or that a newer card replaced. Use your judgement: settle it only if their message really answers it. A settled card greys out as answered in the chat, leaves the needs-you list, and no longer holds the minion open after a deploy goes live. Leave out question_id to settle every open card.',
+  inputSchema: {
+    type: 'object',
+    properties: { question_id: { type: 'string', description: 'The id ask_question returned; leave out for all open cards' } },
+  },
+};
+
 const PROPOSE_PLAN = {
   name: 'propose_plan',
   description:
@@ -224,6 +234,7 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
   },
   ASK_QUESTION,
+  SETTLE_QUESTION,
   LIST_PROPERTIES,
   {
     name: 'set_properties',
@@ -439,6 +450,7 @@ const THREAD_TOOLS = [
     inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD } },
   },
   ASK_QUESTION,
+  SETTLE_QUESTION,
   PROPOSE_PLAN,
   LIST_PROPERTIES,
   {
@@ -640,9 +652,14 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'update_ticket':
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort }))}`;
-    case 'ask_question':
-      await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
-      return 'The question card is in the chat. End your turn now with a short reply; the answers will come as the next message.';
+    case 'ask_question': {
+      const { id: questionId } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
+      return `The question card (id ${questionId}) is in the chat. End your turn now with a short reply; the answers will come as the next message.`;
+    }
+    case 'settle_question': {
+      const { settled } = await call('POST', `/api/tickets/${TICKET}/settle`, { questionId: args.question_id ?? null });
+      return settled.length ? `Settled ${settled.join(', ')}: shown as answered in the chat.` : 'No question card was open.';
+    }
     case 'propose_plan':
       await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan });
       return 'The plan card is in the chat. End your turn now with a short reply and write no code; the go or the notes to revise it will come as the next message.';

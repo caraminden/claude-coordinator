@@ -433,6 +433,8 @@ export function appendEvent(event, scroll = true) {
     nodes.push(approvalCard(event.ticket_id, data));
   } else if (event.kind === 'plan') {
     nodes.push(planCard(event.ticket_id, data));
+  } else if (event.kind === 'question_result') {
+    view.cards.get(data.id)?.markSettled();
   } else if (event.kind === 'plan_result') {
     view.cards.get(data.id)?.settle(data);
   } else if (event.kind === 'loop_paused') {
@@ -829,7 +831,18 @@ function questionCard(ticketId, card) {
       status.textContent = `Answered by ${author}`;
       refresh();
     },
+    // The minion took a typed reply as the answer (settle_question).
+    markSettled() {
+      answered = true;
+      el.classList.remove('sending');
+      el.classList.add('answered');
+      for (const input of el.querySelectorAll('.opt, .other')) input.disabled = true;
+      for (const other of el.querySelectorAll('.other')) other.hidden = true;
+      sendBtn.hidden = true;
+      status.textContent = 'Answered in the chat';
+    },
   });
+  if (card.settled) view.cards.get(card.id).markSettled();
   return el;
 }
 

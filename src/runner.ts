@@ -335,7 +335,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     '- Mark each task in_progress with TaskUpdate when you start it. When you finish it, mark it completed and set metadata.outcome to one plain sentence on what it found, decided or changed.',
     '- If the plan changes, add, reword or delete tasks so the list stays true.',
     'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
-    'When you need people to decide between clear options, ask with the `ask_question` tool (mcp__thread) instead of listing choices in prose: it shows a card they answer with a click. Then end your turn; the answers arrive as the next message.',
+    'When you need people to decide between clear options, ask with the `ask_question` tool (mcp__thread) instead of listing choices in prose: it shows a card they answer with a click. Then end your turn; the answers arrive as the next message. If someone types a reply instead, judge whether it answers the card; if it does (or a newer card replaced it), call `settle_question` so the card stops waiting on people and stops holding the minion open.',
     'When people want to hear your plan before you build, post it with the `propose_plan` tool (mcp__thread): a card with Approve and Revise that only a person can approve. Then end your turn and write no code until the go arrives as the next message.',
     'The scheme\'s minions list groups minions by kind and shows each as one line: number, short title, state, note. Keep yours accurate with the `set_thread_status` tool (mcp__thread):',
     '- title: the short ask, about 30 characters ("Usage bar in the top bar"), no number, tag or emoji. Your starting title may just be the opening words of the first message; replace it early in your first turn with the short ask.',
@@ -574,7 +574,7 @@ export class Runner {
     if (!t || t.status === 'closed' || t.status === 'error' || !pending) return false;
     const events = this.store.listEvents(ticketId);
     const answered = new Set(events.map((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId).filter(Boolean));
-    if (events.some((e) => e.kind === 'question' && !answered.has(JSON.parse(e.data).id))) {
+    if (events.some((e) => e.kind === 'question' && !answered.has(JSON.parse(e.data).id) && !JSON.parse(e.data).settled)) {
       this.emit(ticketId, 'note', { text: 'The deploy is live, but a question card is still open, so this minion stays open.' });
       return false;
     }

@@ -1167,8 +1167,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const action = m[2] ?? '';
     const ticket = ticketView(id);
     inScope(ticket.project_id);
-    // (Asking people a question card in its own chat is the one thing it may do to itself.)
-    if (scope !== null && method !== 'GET' && ticket.kind === 'coordinator' && !(action === '/questions' && session.agent === id)) {
+    // (Asking people a question card in its own chat, and settling one, are the things it may do to itself.)
+    if (scope !== null && method !== 'GET' && ticket.kind === 'coordinator' && !((action === '/questions' || action === '/settle') && session.agent === id)) {
       throw new HttpError(403, 'The Taskmaster cannot act on itself');
     }
     if (action === '' && method === 'GET') {
@@ -1271,6 +1271,26 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       notify(id, { kind: 'question', questions });
       return json(res, 201, { id: questionId });
     }
+    if (action === '/settle' && method === 'POST') {
+      // settle_question: the minion judged that a typed reply answered its card (or a newer card replaced
+      // it). The card stops waiting on people: out of the inbox, no longer holding a deploy's dismissal.
+      if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can settle its question cards');
+      const only = (await readJson(req)).questionId;
+      const events = store.listEvents(id);
+      const answered = new Set(events.map((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId).filter(Boolean));
+      const open = events.filter((e) => {
+        const q = e.kind === 'question' ? JSON.parse(e.data) : null;
+        return q && !q.settled && !answered.has(q.id) && (only == null || q.id === only);
+      });
+      if (only != null && !open.length) throw new HttpError(404, 'No open question card with that id');
+      const settled = { at: Date.now() };
+      for (const e of open) {
+        const q = JSON.parse(e.data);
+        store.setEventData(e.id, { ...q, settled });
+        runner.emit(id, 'question_result', { id: q.id, settled });
+      }
+      return json(res, 200, { settled: open.map((e) => JSON.parse(e.data).id) });
+    }
     if (action === '/answer' && method === 'POST') {
       if (session.agent !== undefined) throw new HttpError(403, 'Only people answer question cards');
       const body = await readJson(req);
@@ -1280,6 +1300,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (events.some((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId === body.questionId)) {
         throw new HttpError(409, 'That question has already been answered');
       }
+      if (JSON.parse(card.data).settled) throw new HttpError(409, 'Claude took this as answered in the chat');
       const { questions } = JSON.parse(card.data);
       const answers = cleanAnswers(questions, body.answers);
       const text = questions.map((q: any, i: number) => {

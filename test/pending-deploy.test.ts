@@ -74,6 +74,12 @@ test('an open question card keeps it open; an answered one does not', () => {
   assert.equal(runner.deployLive(id), true);
 });
 
+test('a question card the minion settled (answered in a typed reply) does not keep it open', () => {
+  const id = newTicket();
+  store.addEvent(id, 'question', { id: 'q1', questions: [], settled: { at: 1 } });
+  assert.equal(runner.deployLive(id), true);
+});
+
 test('a minion whose last turn failed stays open', () => {
   const id = newTicket();
   store.updateTicket(id, { status: 'error' });

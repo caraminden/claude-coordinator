@@ -5,7 +5,7 @@ import { ago, api, h, isCoordinator, isSeen, STATES, taskmasterLabel, threadHref
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
 const inbox = { projectId: null, items: [], timer: 0 };
 // Chat events that open or settle a card.
-const CARD_EVENTS = new Set(['question', 'plan', 'plan_result', 'approval', 'approval_result']);
+const CARD_EVENTS = new Set(['question', 'question_result', 'plan', 'plan_result', 'approval', 'approval_result']);
 
 const ticketOf = (id) => (view?.coordinator?.id === id ? view.coordinator : view?.tickets?.get(id));
 // A ready/try minion you've opened since it changed goes faint and stops counting; cards count until answered.

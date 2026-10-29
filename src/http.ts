@@ -301,6 +301,6 @@ export function router(routes: Route[]) {
     if (ctx.caller) checkScope(route, ctx.caller, method, project, ctx.ticket?.id);
     return route.handler(ctx);
   };
-  // shortcut: while routes move over from server.ts's api(), which paths the table already has.
+  // Whether the table has a path at all, for a listener that serves more than its table.
   return Object.assign(dispatch, { knows: (path: string) => table.some((r) => r.re.test(path)) });
 }

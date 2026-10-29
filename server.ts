@@ -1,41 +1,32 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
 import { execFile, execFileSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { readFile, readdir, mkdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { basename, extname, isAbsolute, join, sep } from 'node:path';
-import { pipeline } from 'node:stream/promises';
+import { basename, extname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
-import { commentMessage, fileType, findArtifacts, isArtifact, linkedPaths, optionImageProblem, resolveFile } from './src/artifacts.ts';
+import { fileType, findArtifacts, isArtifact, linkedPaths } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
-import { AGENT_NAME, Auth, looksLikeUrl, NOT_PEOPLE, threadMayCall, type Nonces, type Session } from './src/auth.ts';
+import { Auth, type Nonces } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
-import { prOwners } from './src/prlinks.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
-import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
-import { historyPage } from './src/history.ts';
-import { cleanPluginDirs, cleanRules, lines } from './src/approvals.ts';
-import { inboxItems } from './src/inbox.ts';
-import { instructionSources, lineDiff } from './src/instructions.ts';
+import { Store, type Artifact, type Project, type Ticket, type TicketTag } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
-import { NOTIFY_STATES, Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
-import { Runner, slimEvent, tripwireConfig, type MessageFile } from './src/runner.ts';
-import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, saveUpload } from './src/uploads.ts';
-import { GLOBAL_OWNER, type Actor } from './src/properties.ts';
-import { TAG_TO_TYPE } from './src/property-seed.ts';
+import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
+import { Runner, slimEvent } from './src/runner.ts';
 import { Previews, previewPath } from './src/previews.ts';
 import { type Chain, LiveWaiters } from './src/wake.ts';
-import { catchUpTicketDir, cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
-import { costDays, dayBudget } from './src/costs.ts';
+import { catchUpTicketDir, createTicketDir, projectDir, projectSharedDir } from './src/workspace.ts';
 import { describeCron, runBrief, type Schedule } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, buildNumber, clientIp, HttpError, isSecure, json, oneOf, readJson, replyList, requestUrl, router, SECURITY_HEADERS, send, str, ticketView, type App } from './src/http.ts';
+import { acceptsGzip, HttpError, json, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
+import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
-import { ensureCoordinator, projectRoutes } from './src/routes/projects.ts';
-import { fileRoutes, fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './src/routes/files.ts';
+import { projectRoutes } from './src/routes/projects.ts';
+import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
+import { fileRoutes } from './src/routes/files.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -48,8 +39,6 @@ const PUBLIC_DIR = join(import.meta.dirname, 'public');
 // Headless turns can't ask for approval, so anything short of full access refuses most shell commands;
 // every thread gets full access.
 const THREAD_PERMISSION_MODE = 'bypassPermissions';
-// How long one wait for an approval card's outcome holds the request open.
-const APPROVAL_POLL_MS = 25_000;
 const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 
 await mkdir(DATA_DIR, { recursive: true });
@@ -109,7 +98,6 @@ const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSIO
 delete process.env.COORDINATOR_PASSWORD;
 delete process.env.SESSION_SECRET;
 
-const MAX_CLIENTS = 100;
 const MAX_CLIENT_BACKLOG = 4 * 1024 * 1024;
 const clients = new Set<ServerResponse>();
 function broadcast(msg: object) {
@@ -407,7 +395,6 @@ async function ticketBranch(ticketId: number, maxPrAge = PR_TTL_MS): Promise<Bra
 // ---------- ship status: where a minion's change is, from branch to live ----------
 
 /** The last deploy report that failed, while the server still runs what it ran then. */
-const DEPLOY_FAILURE = 'deploy-failure';
 function deployFailure(): string | null {
   const f = store.getSetting<{ text: string; head: string | null }>(DEPLOY_FAILURE);
   return f && f.head === waiters.head ? f.text : null;
@@ -475,77 +462,6 @@ function sharedDir(ticket: Ticket): string {
   return join(projectDir(DATA_DIR, ticket.project_id), 'shared', String(ticket.id));
 }
 
-/** Display names end up in prompts as "[Name]: ...", so keep them plain. */
-function cleanName(v: unknown): string {
-  const name = typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f\[\]:]/g, '').replace(/\s+/g, ' ').trim() : '';
-  if (!name) throw new HttpError(400, 'Name is required');
-  if (looksLikeUrl(name)) throw new HttpError(400, 'That looks like a web address. Type your name.');
-  return name.slice(0, 40);
-}
-
-// A label Claude ended with "(Recommended)" itself; the card adds those words to the flagged option.
-const SAYS_RECOMMENDED = /\s*\(recommended\)\s*$/i;
-
-/**
- * A question card from Claude: 1 to 4 questions, each with 2 to 6 options, one of them recommended
- * (any number on a pick-any question), so people always see what Claude would pick. An option's
- * image must be a picture or video the ticket may show, so a card can't reach files outside its folders.
- */
-async function cleanQuestions(ticket: Ticket, raw: unknown) {
-  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 4) throw new HttpError(400, 'questions must be a list of 1 to 4 questions');
-  const questions = raw.map((q: any, i: number) => {
-    const n = `Question ${i + 1}`;
-    if (!q || typeof q !== 'object') throw new HttpError(400, `${n} must be an object`);
-    if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 6) throw new HttpError(400, `${n} needs 2 to 6 options`);
-    const options = q.options.map((o: any, j: number) => {
-      const says = typeof o?.label === 'string' && SAYS_RECOMMENDED.test(o.label);
-      return {
-        label: str(says ? o.label.replace(SAYS_RECOMMENDED, '') : o?.label, `${n} option ${j + 1} label`, 80),
-        ...(o?.description ? { description: str(o.description, `${n} option ${j + 1} description`, 300) } : {}),
-        ...(o?.image ? { image: str(o.image, `${n} option ${j + 1} image`, 1000) } : {}),
-        ...(o?.recommended === true || says ? { recommended: true } : {}),
-      };
-    });
-    if (new Set(options.map((o: any) => o.label)).size !== options.length) throw new HttpError(400, `${n} has duplicate option labels`);
-    const recommended = options.filter((o: any) => o.recommended).length;
-    if (!recommended) throw new HttpError(400, `${n} needs a recommended option: set "recommended": true on the one you would pick`);
-    if (recommended > 1 && q.multiSelect !== true) throw new HttpError(400, `${n} recommends ${recommended} options; mark just one`);
-    return {
-      question: str(q.question, n, 500),
-      ...(q.header ? { header: str(q.header, `${n} header`, 24) } : {}),
-      multiSelect: q.multiSelect === true,
-      options,
-    };
-  });
-  for (const [i, q] of questions.entries()) {
-    for (const [j, o] of q.options.entries()) {
-      const problem = o.image && await optionImageProblem(o.image, ticket.cwd, ticketRoots(app, ticket));
-      if (problem) throw new HttpError(400, `Question ${i + 1} option ${j + 1} image ${problem}`);
-    }
-  }
-  return questions;
-}
-
-/** A person's picks for each question of a card: chosen option labels, plus optional free text. */
-function cleanAnswers(questions: any[], raw: unknown) {
-  if (!Array.isArray(raw) || raw.length !== questions.length) throw new HttpError(400, 'Answer every question on the card');
-  return questions.map((q, i) => {
-    const a: any = raw[i] ?? {};
-    const selected = Array.isArray(a.selected) ? [...new Set(a.selected.filter((l: unknown) => q.options.some((o: any) => o.label === l)))] as string[] : [];
-    const other = typeof a.other === 'string' ? a.other.trim().slice(0, 2000) : '';
-    if (!q.multiSelect && selected.length > 1) throw new HttpError(400, `Pick one answer for question ${i + 1}`);
-    if (!selected.length && !other) throw new HttpError(400, `Answer question ${i + 1}`);
-    return other ? { selected, other } : { selected };
-  });
-}
-
-/** One of a fixed set of values, or null when empty. */
-/** "Opus 5.5" for "claude-opus-5-5". */
-function modelName(id: string): string {
-  const m = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(id);
-  return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id;
-}
-
 /** Rewrite each scheme's property-vocabulary.md from the registry; a hand-written one is kept aside once. */
 async function writeVocabularies(projectIds = store.listProjects().map((p) => p.id)) {
   for (const id of projectIds) {
@@ -566,28 +482,6 @@ async function writeVocabularies(projectIds = store.listProjects().map((p) => p.
 function registryChanged(projectId: number, global: boolean) {
   writeVocabularies(global ? undefined : [projectId]).catch((err) => console.error('Could not write the property vocabulary:', err));
   broadcast({ type: 'properties', projectId: global ? null : projectId });
-}
-
-/**
- * A person wrote into a chat, which counts as continuing the loop guard there: for a minion's chat,
- * that minion; for the Taskmaster's, every minion of its scheme and its exchanges with other Taskmasters.
- */
-function personWrote(ticket: Ticket, session: Session) {
-  if (session.agent !== undefined) return;
-  runner.personWrote(ticket.id);
-  const minions = ticket.kind === 'coordinator' ? store.listTickets(ticket.project_id) : [ticket];
-  for (const t of minions) runner.continueLoop(t.id, session.name);
-}
-
-/** The project a coordinator's token may act on, or null for a signed-in person. */
-function agentProject(session: Session, method: string, pathname: string): number | null {
-  if (session.agent === undefined) return null;
-  const t = store.getTicket(session.agent);
-  if (!t) throw new HttpError(403, 'No such minion');
-  // A ticket's own token may only read and update that ticket (its title, tag, state and note),
-  // ask a question card in its chat, and close itself.
-  if (t.kind !== 'coordinator' && !threadMayCall(t.id, method, pathname, t.project_id)) throw new HttpError(403, 'A minion may only update itself');
-  return t.project_id;
 }
 
 const MIME: Record<string, string> = {
@@ -621,413 +515,6 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
   send(res, 200, headers, body);
 }
 
-async function api(req: IncomingMessage, res: ServerResponse, url: URL, session: Session | null) {
-  const { pathname } = url;
-  const method = req.method ?? 'GET';
-
-  if (pathname === '/api/login' && method === 'POST') {
-    const ip = clientIp(req);
-    const body = await readJson(req);
-    const name = cleanName(body.name);
-    if (NOT_PEOPLE.some((n) => n.toLowerCase() === name.toLowerCase())) throw new HttpError(400, 'That name is reserved');
-    // Checked right before the password (no await in between) so parallel bursts are counted.
-    if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
-    if (!auth.checkPassword(ip, String(body.password ?? ''))) throw new HttpError(401, 'Wrong password');
-    return json(res, 200, { name }, { 'Set-Cookie': auth.issueCookie(name, isSecure(req)) });
-  }
-  if (pathname === '/api/logout' && method === 'POST') {
-    return json(res, 200, {}, { 'Set-Cookie': auth.clearCookie() });
-  }
-  // For tools/deploy.sh, so no login: is this server up, which code it booted from, which front end
-  // it serves, and that it reloads public/ on SIGHUP (an older server would exit on one).
-  if (pathname === '/api/health' && method === 'GET') {
-    // interruptible: running turns a restart would stop (they don't run in a unit of their own).
-    return json(res, 200, { ok: true, commit: BOOT_COMMIT, version: ASSET_VERSION, reload: 'sighup', interruptible: runner.interruptible(), preview: PREVIEW });
-  }
-  if (!session) throw new HttpError(401, 'Not logged in');
-
-  // Reject cross-site writes (SameSite=Lax and the JSON content type cover most of this already).
-  if (method !== 'GET') {
-    const origin = req.headers.origin;
-    const host = req.headers['x-forwarded-host'] ?? req.headers.host;
-    let originHost: string | null = null;
-    try {
-      originHost = origin ? new URL(origin).host : null;
-    } catch {
-      throw new HttpError(403, 'Cross-origin request');
-    }
-    if (origin && originHost !== host) throw new HttpError(403, 'Cross-origin request');
-  }
-
-  if (pathname === '/api/me') {
-    // The app's public address, as Caddy forwards it, so start_preview can hand out a full link.
-    const host = req.headers['x-forwarded-host'];
-    const origin = typeof host === 'string' && session.agent === undefined ? `${isSecure(req) ? 'https' : 'http'}://${host}` : null;
-    if (origin && store.getSetting('public_origin') !== origin) store.setSetting('public_origin', origin);
-    return json(res, 200, { name: session.name });
-  }
-
-  // A coordinator may only touch its own project's tickets, and not itself.
-  const scope = agentProject(session, method, pathname);
-  const inScope = (projectId: number) => {
-    if (scope !== null && scope !== projectId) throw new HttpError(403, 'Outside this Taskmaster\'s scheme');
-  };
-  if (scope !== null && !/^\/api\/(taskmaster|projects\/\d+(\/tickets|\/schedules|\/properties(\/[a-z]+)?)?|tickets\/\d+(\/[a-z]+)?|schedules\/\d+)$/.test(pathname)) {
-    throw new HttpError(403, 'Not available to the Taskmaster');
-  }
-
-  if (pathname === '/api/stream') {
-    if (clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');
-    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
-    res.write(`data: ${JSON.stringify({ type: 'hello', version: ASSET_VERSION, usage: runner.usage })}\n\n`);
-    clients.add(res);
-    const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
-    req.on('close', () => {
-      clearInterval(ping);
-      clients.delete(res);
-    });
-    return;
-  }
-
-  if (pathname === '/api/costs' && method === 'GET') return json(res, 200, { days: costDays(store), dayBudget: dayBudget(store, runner.usage?.weekly) });
-  // Which minion owns each PR, so the front end can open it instead of GitHub (src/prlinks.ts).
-  if (pathname === '/api/prs' && method === 'GET') {
-    const projects = store.listProjects().filter((p) => scope === null || p.id === scope);
-    return json(res, 200, await prOwners(projects, (id) => store.listTickets(id)));
-  }
-
-  const m = pathname.match(/^\/api\/tickets\/(\d+)(\/[a-z]+)?$/);
-  if (m) {
-    const id = Number(m[1]);
-    const action = m[2] ?? '';
-    const ticket = ticketView(app, id);
-    inScope(ticket.project_id);
-    // (Asking people a question card in its own chat, settling one, and striking its own words are the things it may do to itself.)
-    if (scope !== null && method !== 'GET' && ticket.kind === 'coordinator' && !(['/questions', '/settle', '/strike'].includes(action) && session.agent === id)) {
-      throw new HttpError(403, 'The Taskmaster cannot act on itself');
-    }
-    if (action === '' && method === 'GET') {
-      return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
-    }
-    if (action === '' && method === 'PATCH') {
-      // Any of title, tag, state, note, replies, build, model and effort; null (or "") clears all but the title.
-      const body = await readJson(req);
-      const fields: Partial<Pick<Ticket, 'title' | 'tag' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort'>> = {};
-      if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
-      if (body.effort !== undefined) fields.effort = oneOf(body.effort, EFFORTS, 'Effort');
-      if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
-      if (body.tag !== undefined) fields.tag = oneOf(body.tag, TICKET_TAGS, 'Tag') as TicketTag | null;
-      if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
-      if (body.note !== undefined) fields.note = body.note ? str(body.note, 'Note', 60) : null;
-      if (body.build !== undefined) fields.build = buildNumber(body.build);
-      if (body.replies !== undefined) fields.replies = replyList(body.replies);
-      // The view's replies are a list; compare the stored JSON.
-      const stored = store.getTicket(id)!;
-      for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === stored[k]) delete fields[k];
-      if (Object.keys(fields).length) {
-        store.updateTicket(id, fields);
-        if (fields.state === 'pending-deploy') runner.deployPending(id);
-        if ('tag' in fields) store.props.setTypeFromTag(id, fields.tag ?? null, session.name);
-        if ('build' in fields) store.props.setBuild(id, fields.build ?? null, session.name);
-        const who = session.agent === id ? 'Claude' : session.name;
-        if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this minion from "${ticket.title}" to "${fields.title}".` });
-        const next = runner.isRunning(id) ? 'from the next turn' : 'from now on';
-        if ('model' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.model ? modelName(fields.model) : 'the default model'} ${next}.` });
-        if ('effort' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.effort ? `${fields.effort} effort` : 'the default effort'} ${next}.` });
-        runner.broadcastTicket(id);
-        // A result or a blocker is worth a ping; whoever set it by hand already knows.
-        if (fields.state && NOTIFY_STATES[fields.state]) {
-          const after = store.getTicket(id)!;
-          notify(id, { kind: 'state', state: after.state, note: after.note }, session.agent === undefined ? session.name : null);
-        }
-      }
-      return json(res, 200, ticketView(app, id));
-    }
-    if (action === '/seen' && method === 'POST') {
-      if (session.agent !== undefined) throw new HttpError(403, 'Only people mark minions seen');
-      return json(res, 200, { seen_at: store.markSeen(session.name, id) });
-    }
-    if (action === '/branch' && method === 'GET') {
-      return json(res, 200, { status: await ticketBranch(id) });
-    }
-    if (action === '/uploads' && method === 'PUT') {
-      // A file from the composer, streamed to disk as it arrives; the message that sends it names it.
-      if (session.agent !== undefined) throw new HttpError(403, 'Only people attach files');
-      if (Number(req.headers['content-length'] ?? 0) > MAX_UPLOAD_BYTES) throw new HttpError(413, 'Files must be under 200 MB');
-      const saved = await saveUpload(fileUploadsDir(app, ticket), url.searchParams.get('name') ?? '', req);
-      return json(res, 201, { name: saved.name, size: saved.size });
-    }
-    if (action === '/events' && method === 'GET') {
-      // ?after=: everything since (catch-up). Else a page of whole turns before ?before= (history.ts).
-      const num = (k: string) => Number(url.searchParams.get(k)) || undefined;
-      if (url.searchParams.has('after')) return json(res, 200, store.listEvents(id, num('after')));
-      return json(res, 200, historyPage(store, id, { before: num('before'), limit: num('limit'), from: num('from') }));
-    }
-    if (action === '/messages' && method === 'POST') {
-      // Room for MAX_IMAGES images at 5 MB each, base64-encoded.
-      const body = await readJson(req, 45_000_000);
-      const attached = (Array.isArray(body.images) && body.images.length > 0) || (Array.isArray(body.files) && body.files.length > 0);
-      const text = attached && (typeof body.text !== 'string' || !body.text.trim()) ? '' : str(body.text, 'Message', 100_000);
-      const files = await messageFiles(app, ticket, body.files);
-      // A chained minion that hasn't started: writing to it starts it now, its held brief first.
-      const chained = waiters.release(id);
-      if (chained) await startChained(chained, `${session.name} wrote to it before its leader's work was in`);
-      // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
-      if (session.agent !== undefined && ticket.kind !== 'coordinator') {
-        return json(res, 202, { ...ticketView(app, id), held: runner.relay(id, id, session.name, text) });
-      }
-      // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
-      runner.send(id, session.name, text, await saveImages(app, ticket, body.images), {}, session.agent === undefined && body.after !== true, files);
-      personWrote(ticket, session);
-      return json(res, 202, ticketView(app, id));
-    }
-    if (action === '/unqueue' && method === 'POST') {
-      if (session.agent !== undefined) throw new HttpError(403, 'Only people can take back a queued message');
-      const body = await readJson(req);
-      if (!runner.unqueue(id, Number(body.id), session.name)) throw new HttpError(409, 'That message is no longer queued');
-      return json(res, 200, ticketView(app, id));
-    }
-    if (action === '/continue' && method === 'POST') {
-      // Continue button on a loop-guard pause: the minion's held messages go through.
-      if (session.agent !== undefined) throw new HttpError(403, 'Only people continue a paused minion');
-      return json(res, 200, { released: runner.continueLoop(id, session.name) });
-    }
-    if (action === '/comments' && method === 'POST') {
-      // A comment from a file's viewer: a chat message to the ticket that made the file, saying which file.
-      if (session.agent !== undefined) throw new HttpError(403, 'Only people comment on files');
-      const body = await readJson(req);
-      const found = typeof body.path === 'string' && await resolveTicketFile(app, ticket, body.path);
-      if (!found) throw new HttpError(404, 'That file is no longer there');
-      const quote = typeof body.quote === 'string' ? body.quote.slice(0, 2000) : '';
-      // Named as the ticket would write it: relative to its working directory, else in full.
-      const path = found.abs.startsWith(ticket.cwd + sep) ? found.abs.slice(ticket.cwd.length + 1) : found.abs;
-      const { about, text } = commentMessage(path, str(body.text, 'Comment', 10_000), quote);
-      runner.send(id, session.name, text, [], { comment: { path: body.path, about } });
-      personWrote(ticket, session);
-      return json(res, 202, ticketView(app, id));
-    }
-    if (action === '/questions' && method === 'POST') {
-      // Claude asks people multiple-choice questions; the card shows in the chat until someone answers.
-      if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can ask in its chat');
-      const questions = await cleanQuestions(ticket, (await readJson(req)).questions);
-      const questionId = randomBytes(6).toString('hex');
-      runner.emit(id, 'question', { id: questionId, questions });
-      runner.broadcastTicket(id);
-      notify(id, { kind: 'question', questions });
-      return json(res, 201, { id: questionId });
-    }
-    if (action === '/settle' && method === 'POST') {
-      // settle_question: the minion judged that a typed reply answered its card (or a newer card replaced
-      // it). The card stops waiting on people: out of the inbox, no longer holding a deploy's dismissal.
-      if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can settle its question cards');
-      const only = (await readJson(req)).questionId;
-      const events = store.listEvents(id);
-      const answered = new Set(events.map((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId).filter(Boolean));
-      const open = events.filter((e) => {
-        const q = e.kind === 'question' ? JSON.parse(e.data) : null;
-        return q && !q.settled && !answered.has(q.id) && (only == null || q.id === only);
-      });
-      if (only != null && !open.length) throw new HttpError(404, 'No open question card with that id');
-      const settled = { at: Date.now() };
-      for (const e of open) {
-        const q = JSON.parse(e.data);
-        store.setEventData(e.id, { ...q, settled });
-        runner.emit(id, 'question_result', { id: q.id, settled });
-      }
-      if (open.length) runner.broadcastTicket(id);
-      return json(res, 200, { settled: open.map((e) => JSON.parse(e.data).id) });
-    }
-    if (action === '/strike' && method === 'POST') {
-      // strike_text: a minion or Taskmaster proven wrong strikes through its own words.
-      if (session.agent !== id) throw new HttpError(403, 'Only a thread itself can strike its words');
-      const body = await readJson(req);
-      const text = str(body.text, 'Text', 10_000);
-      const reason = str(body.reason, 'Reason', 1000);
-      try {
-        return json(res, 200, runner.strike(id, text, reason));
-      } catch (err: any) {
-        throw new HttpError(/already/.test(err.message) ? 409 : 404, err.message);
-      }
-    }
-    if (action === '/answer' && method === 'POST') {
-      if (session.agent !== undefined) throw new HttpError(403, 'Only people answer question cards');
-      const body = await readJson(req);
-      const events = store.listEvents(id);
-      const card = events.find((e) => e.kind === 'question' && JSON.parse(e.data).id === body.questionId);
-      if (!card) throw new HttpError(404, 'No such question');
-      if (events.some((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId === body.questionId)) {
-        throw new HttpError(409, 'That question has already been answered');
-      }
-      if (JSON.parse(card.data).settled) throw new HttpError(409, 'Claude took this as answered in the chat');
-      const { questions } = JSON.parse(card.data);
-      const answers = cleanAnswers(questions, body.answers);
-      const text = questions.map((q: any, i: number) => {
-        const picked = [...answers[i].selected, ...(answers[i].other ? [`Other: ${answers[i].other}`] : [])];
-        return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked.join('; ')}`;
-      }).join('\n\n');
-      runner.send(id, session.name, `My answers to your question card:\n\n${text}`, [], { answer: { questionId: body.questionId, answers } });
-      personWrote(ticket, session);
-      return json(res, 202, ticketView(app, id));
-    }
-    if (action === '/plans' && method === 'POST') {
-      // Claude proposes a plan: an Approve / Revise card that waits, across restarts, for a person.
-      if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can propose a plan in its chat');
-      const body = await readJson(req);
-      const plan = str(body.plan, 'Plan', 20_000);
-      const summary = str(body.summary, 'Summary', 200);
-      // A new plan replaces any earlier one still open (waiting, or sent back for changes).
-      for (const e of store.listEvents(id)) {
-        const old = e.kind === 'plan' ? JSON.parse(e.data) : null;
-        if (old?.status !== 'pending' && old?.status !== 'revising') continue;
-        store.setEventData(e.id, { ...old, status: 'superseded' });
-        runner.emit(id, 'plan_result', { id: old.id, status: 'superseded' });
-      }
-      const planId = randomBytes(6).toString('hex');
-      runner.emit(id, 'plan', { id: planId, summary, plan, status: 'pending' });
-      runner.broadcastTicket(id);
-      notify(id, { kind: 'plan', summary });
-      return json(res, 201, { id: planId });
-    }
-    if (action === '/verdict' && method === 'POST') {
-      // A person approves a plan card (the go) or sends it back with notes; never the minion or the Taskmaster.
-      if (session.agent !== undefined) throw new HttpError(403, 'Only people approve plans');
-      const body = await readJson(req);
-      if (body.verdict !== 'approve' && body.verdict !== 'revise') throw new HttpError(400, 'verdict must be approve or revise');
-      const notes = body.verdict === 'revise' ? str(body.notes, 'Notes', 10_000) : null;
-      const event = store.listEvents(id).find((e) => e.kind === 'plan' && JSON.parse(e.data).id === body.planId);
-      if (!event) throw new HttpError(404, 'No such plan');
-      const card = JSON.parse(event.data);
-      if (card.status === 'superseded') throw new HttpError(409, 'A newer plan replaced this one');
-      if (card.status !== 'pending') throw new HttpError(409, `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
-      const result = { status: body.verdict === 'approve' ? 'approved' : 'revising', by: session.name, at: Date.now() };
-      store.setEventData(event.id, { ...card, ...result });
-      runner.emit(id, 'plan_result', { id: card.id, ...result });
-      runner.send(id, session.name, notes === null
-        ? `Plan approved: build it this way. ("${card.summary}")`
-        : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
-        [], { plan: { planId: card.id, verdict: body.verdict } });
-      personWrote(ticket, session);
-      return json(res, 202, ticketView(app, id));
-    }
-    if (action === '/approvals' && method === 'POST') {
-      // Claude Code asks before a tool call (a tripwire ask or an approval rule): an Approve / Deny card, or a refusal.
-      if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can ask for approval in its chat');
-      if (!runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
-      const body = await readJson(req);
-      const tool = str(body.tool_name, 'Tool name', 300);
-      const input = body.input && typeof body.input === 'object' ? body.input : {};
-      const project = store.getProject(ticket.project_id)!;
-      const r = runner.approvals.ask(id, tool, input, ticket.cwd, tripwireConfig(project.id, claudeConfigDir(process.env), true), lines(project.approval_rules).length > 0);
-      return json(res, 'id' in r ? 201 : 200, r);
-    }
-    if (action === '/approvals' && method === 'GET') {
-      // The thread's MCP server waits here for the card's outcome, half a minute at a time.
-      if (session.agent !== id) throw new HttpError(403, 'Only the minion itself can wait on its approvals');
-      return json(res, 200, await runner.approvals.wait(id, url.searchParams.get('id') ?? '', APPROVAL_POLL_MS));
-    }
-    if (action === '/approve' && method === 'POST') {
-      // Only a signed-in person's click settles a card; the coordinator and threads cannot.
-      if (session.agent !== undefined) throw new HttpError(403, 'Only people approve tool calls');
-      const body = await readJson(req);
-      if (typeof body.allow !== 'boolean') throw new HttpError(400, 'allow must be true or false');
-      const approvalId = String(body.approvalId ?? '');
-      const before = runner.approvals.get(id, approvalId);
-      if (before.state === 'expired') throw new HttpError(409, 'This request expired; the turn that asked has ended');
-      if (before.state !== 'pending') throw new HttpError(409, `${before.by} already ${before.state === 'allowed' ? 'approved' : 'denied'} this`);
-      return json(res, 200, runner.approvals.decide(id, approvalId, body.allow, session.name));
-    }
-    if (action === '/properties' && method === 'PUT') {
-      // On the minion itself, or with `file` on one of the files it showed people (an artifact).
-      const body = await readJson(req);
-      if (body.file != null) {
-        const file = str(body.file, 'file', 4096);
-        const a = store.findArtifact(id, [isAbsolute(file) ? file : join(ticket.cwd, file), join(sharedDir(ticket), file)]);
-        if (!a) throw new HttpError(404, `#${ticket.number} has shown no file ${file}; link it in a reply first`);
-        return json(res, 200, store.props.set('artifact', a.id, a.project_id, body.properties, session.name));
-      }
-      const r = store.props.set('minion', id, ticket.project_id, body.properties, session.name);
-      runner.broadcastTicket(id);
-      return json(res, 200, r);
-    }
-    if (action === '/stop' && method === 'POST') {
-      return json(res, 200, { stopped: runner.stop(id) });
-    }
-    if (action === '/status' && method === 'POST') {
-      const body = await readJson(req);
-      if (body.status !== 'closed' && body.status !== 'idle') throw new HttpError(400, 'Status must be closed or idle');
-      if (ticket.kind === 'coordinator') throw new HttpError(400, 'The Taskmaster cannot be dismissed');
-      if (runner.isRunning(id)) throw new HttpError(409, 'Stop the minion before dismissing it');
-      if (body.status === 'closed') {
-        runner.close(id, `${session.name} dismissed this minion.`);
-      } else {
-        store.updateTicket(id, { status: body.status });
-        runner.emit(id, 'note', { text: `${session.name} reopened this minion.` });
-        runner.broadcastTicket(id);
-      }
-      return json(res, 200, ticketView(app, id));
-    }
-    if (action === '/coordinator' && method === 'POST') {
-      // A thread asks its project's coordinator for something only the coordinator can do (message_coordinator).
-      if (session.agent !== id || ticket.kind === 'coordinator') throw new HttpError(403, 'Only a minion can message its Taskmaster');
-      const text = str((await readJson(req)).text, 'Message', 10_000);
-      const coordinator = await ensureCoordinator(app, store.getProject(ticket.project_id)!);
-      if (runner.relay(id, coordinator.id, `#${ticket.number} ${ticket.title}`, text)) return json(res, 202, { sent: false, held: true });
-      runner.emit(id, 'note', { text: `Sent the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
-      return json(res, 202, { sent: true });
-    }
-    if (action === '/deploy' && method === 'POST') {
-      // tools/deploy.sh, run for this minion, reports how its queued restart went. A failure shows as
-      // an error and pushes, so a deploy that rolled back or gave up is never silent. A warning (live,
-      // but the push to GitHub failed) is just as loud, yet still counts as live.
-      if (session.agent !== id) throw new HttpError(403, 'Only the deploying minion can report its deploy');
-      const body = await readJson(req);
-      const text = str(body.text, 'Report', 4000);
-      const failed = body.ok === false;
-      const loud = failed || body.warn === true;
-      (loud ? console.error : console.log)(`Deploy report for minion ${id}: ${text}`);
-      runner.emit(id, loud ? 'error' : 'note', { text });
-      if (loud) notify(id, { kind: 'error', text });
-      if (failed) store.setSetting(DEPLOY_FAILURE, { text, head: waiters.head });
-      // A failed deploy leaves the minion in pending-deploy, so the error stays in view.
-      const dismissed = !failed && runner.deployLive(id);
-      return json(res, 201, { dismissed });
-    }
-    if (action === '/preview' && method === 'POST') {
-      // start_preview: (re)start this minion's preview from its worktree as it is now.
-      if (!previews) throw new HttpError(403, 'A preview has no previews of its own');
-      await previews.start(ticket);
-      const origin = store.getSetting<string>('public_origin');
-      return json(res, 200, { url: `${origin ?? ''}/${previewPath(id)}` });
-    }
-    if (action === '/wake' && method === 'POST') {
-      // wake_when_live: the minion itself, or its Taskmaster for it, waits for a commit (or the next
-      // deploy) to be live.
-      if (ticket.kind === 'coordinator') throw new HttpError(403, 'Only minions wait on deploys');
-      const body = await readJson(req);
-      const reason = str(body.reason, 'Reason', 1000);
-      let commit: string | null = null;
-      if (body.commit != null && body.commit !== '') {
-        commit = waiters.resolve(String(body.commit), store.getProject(ticket.project_id)?.repo_dir ?? null);
-        if (!commit) throw new HttpError(400, `No commit ${String(body.commit).slice(0, 40)} in the live checkout or the scheme's repo`);
-      }
-      const waiting = waiters.add(id, commit, reason);
-      return json(res, 201, { waiting, commit, head: waiters.head });
-    }
-    if (action === '/close' && method === 'POST') {
-      // A thread closes itself once its current turn ends (close_self); the token decides which thread.
-      if (session.agent !== id) throw new HttpError(403, 'A minion may only be dismissed by itself');
-      const body = await readJson(req);
-      const reason = typeof body.reason === 'string' && body.reason.trim() ? str(body.reason.trim(), 'Reason', 500) : null;
-      const kept = runner.keptOpen(id);
-      if (kept) throw new HttpError(409, `Not dismissed: ${kept}. Leave the minion open for them; if nothing is left for people (the card was answered in the chat, or there is nothing to try), settle the card or clear the state first`);
-      if (!runner.closeAfterTurn(id, reason)) throw new HttpError(409, 'The minion is not mid-turn');
-      return json(res, 202, ticketView(app, id));
-    }
-  }
-
-  throw new HttpError(404, 'Not found');
-}
-
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
   store, runner, auth, waiters, previews, machines, pusher, clients,
@@ -1037,7 +524,7 @@ const app: App = {
   },
   broadcast, notify, newMinion, startChained, ticketBranch, sharedFiles, sharedDir, registryChanged,
 };
-const routes = router([...pushRoutes, ...machineRoutes, ...fileRoutes, ...projectRoutes]);
+const routes = router([...appRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes]);
 
 const server = createServer(async (req, res) => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
@@ -1045,8 +532,7 @@ const server = createServer(async (req, res) => {
     const url = requestUrl(req);
     const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
     if (url.pathname.startsWith('/api/')) {
-      if (routes.knows(url.pathname)) await routes(app, req, res, url, auth.session(req));
-      else await api(req, res, url, auth.session(req));
+      await routes(app, req, res, url, auth.session(req));
     } else if (preview) {
       const session = auth.session(req);
       // People only, signed in to the live app; a page load without a login goes to the login.

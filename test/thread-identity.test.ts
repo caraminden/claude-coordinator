@@ -4,25 +4,52 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
-import { threadMayCall } from '../src/auth.ts';
+import { router, type Route } from '../src/http.ts';
+import { appRoutes } from '../src/routes/app.ts';
+import { fileRoutes } from '../src/routes/files.ts';
+import { machineRoutes } from '../src/routes/machines.ts';
+import { projectRoutes } from '../src/routes/projects.ts';
+import { pushRoutes } from '../src/routes/push.ts';
+import { ticketRoutes } from '../src/routes/tickets.ts';
 
 // Like #25 in the live project: shown as #25, stored as ticket 29 (the id its token is issued for).
 const ID = 29;
 const NUMBER = 25;
 
-test('a thread token may read, relabel, ask and close only its own internal id', () => {
-  assert.ok(threadMayCall(ID, 'GET', `/api/tickets/${ID}`));
-  assert.ok(threadMayCall(ID, 'PATCH', `/api/tickets/${ID}`));
-  assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/questions`));
-  assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/close`));
-  assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/coordinator`));
-  assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/strike`));
-  assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${NUMBER}/strike`));
-  assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${NUMBER}/coordinator`));
-  assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${NUMBER}/close`));
-  assert.ok(!threadMayCall(ID, 'PATCH', `/api/tickets/${NUMBER}`));
-  assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${ID}/status`));
-  assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${ID}/messages`));
+// The real route table, with every handler swapped for a no-op, over a stand-in store holding the
+// minion and another one numbered like its own #.
+const minion = { id: ID, number: NUMBER, project_id: 2, kind: 'ticket' };
+const other = { id: NUMBER, number: 21, project_id: 2, kind: 'ticket' };
+const stub: any = {
+  store: { getTicket: (id: number) => [minion, other].find((t) => t.id === id), getProject: (id: number) => ({ id }) },
+  runner: { view: (t: unknown) => t },
+};
+const all: Route[] = [...appRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes];
+const table = router(all.map((r) => ({ ...r, handler: () => 'ok' })));
+/** Would the route table let this minion's token make the call (anything but a 403)? */
+async function mayCall(method: string, path: string): Promise<boolean> {
+  try {
+    await table(stub, { method, headers: {} } as any, {} as any, new URL(path, 'http://x'), { name: '#25', exp: 0, agent: ID });
+    return true;
+  } catch (err: any) {
+    if (err.status === 403) return false;
+    throw err;
+  }
+}
+
+test('a thread token may read, relabel, ask and close only its own internal id', async () => {
+  assert.ok(await mayCall('GET', `/api/tickets/${ID}`));
+  assert.ok(await mayCall('PATCH', `/api/tickets/${ID}`));
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/questions`));
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/close`));
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/coordinator`));
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/strike`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/strike`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/coordinator`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/close`));
+  assert.ok(!await mayCall('PATCH', `/api/tickets/${NUMBER}`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${ID}/status`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${ID}/messages`));
 });
 
 // A stand-in API that records what the thread's MCP server calls, and answers like `respond` says.
@@ -72,7 +99,7 @@ test('close_self and set_thread_status address the internal id, whatever the mod
   const labelled = await tool('set_thread_status', { note: 'ok' });
   assert.ok(!labelled.isError, labelled.content[0].text);
   assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/close`, `PATCH /api/tickets/${ID}`]);
-  for (const c of calls) assert.ok(threadMayCall(ID, c.method, c.path), `${c.method} ${c.path} passes the guard`);
+  for (const c of calls) assert.ok(await mayCall(c.method, c.path), `${c.method} ${c.path} passes the guard`);
 });
 
 test('message_coordinator posts to its own internal id', async () => {
@@ -89,8 +116,8 @@ test('wake_when_live posts to its own internal id, which its token may do', asyn
   assert.ok(!r.isError, r.content[0].text);
   assert.match(r.content[0].text, /Waiting for `aaaaaaa`/);
   assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/wake`]);
-  assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/wake`));
-  assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${NUMBER}/wake`));
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/wake`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/wake`));
 });
 
 test('close_self on a server older than the tool says to wait for the restart', async () => {

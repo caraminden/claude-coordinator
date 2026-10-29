@@ -39,22 +39,6 @@ function sha256(s: string): Buffer {
   return createHash('sha256').update(s).digest();
 }
 
-/**
- * What a thread's own token may do: read and relabel that thread, ask a question card in its chat,
- * read and propose properties and set its own, settle its question cards, strike through its own words, post an approval card there and read its outcome, message its project's coordinator, start its preview, and close itself. `ticketId` is the internal id the token was issued for, which is also what the
- * API paths use; the per-project number people see (#25) can differ and plays no part here.
- */
-export function threadMayCall(ticketId: number, method: string, pathname: string, projectId?: number): boolean {
-  const base = `/api/tickets/${ticketId}`;
-  if (pathname === base) return method === 'GET' || method === 'PATCH';
-  // Properties: read the scheme's registry, propose additions, and set its own (or its files').
-  if (pathname === `/api/projects/${projectId}/properties`) return method === 'GET';
-  if (pathname === `/api/projects/${projectId}/properties/proposals`) return method === 'POST';
-  if (pathname === `${base}/properties`) return method === 'PUT';
-  if (pathname === `${base}/approvals`) return method === 'GET' || method === 'POST';
-  return method === 'POST' && (pathname === `${base}/questions` || pathname === `${base}/settle` || pathname === `${base}/strike` || pathname === `${base}/plans` || pathname === `${base}/close` || pathname === `${base}/deploy` || pathname === `${base}/coordinator` || pathname === `${base}/wake` || pathname === `${base}/preview`);
-}
-
 export class Auth {
   private failures = new Map<string, { count: number; since: number }>();
   private password: string;

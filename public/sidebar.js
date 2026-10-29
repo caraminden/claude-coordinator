@@ -175,6 +175,17 @@ export function renderSidebar() {
       : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : '');
 }
 
+/** Scroll the minion list (not the page) so the open minion's row is in view, after you navigate to one. */
+export function revealActiveRow() {
+  const row = document.querySelector('#threads .thread-row.active');
+  const box = row?.closest('.sidebar');
+  if (!box?.open) return;
+  const dismissed = row.closest('details.g-closed');
+  if (dismissed && !dismissed.open) dismissed.open = true;
+  const r = row.getBoundingClientRect(), b = box.getBoundingClientRect();
+  if (r.top < b.top || r.bottom > b.bottom) box.scrollTop += r.top - b.top - (box.clientHeight - r.height) / 2;
+}
+
 // ---------- search ----------
 
 // The threads search, kept across thread switches within a project.

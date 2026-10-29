@@ -1,7 +1,7 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, setView, threadHref, usageMeter, view } from './core.js';
 import { approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderMachinesShelf } from './settings.js';
-import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, threadSearchBox } from './sidebar.js';
+import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
 import { chatSection, chatView, mountChat } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
@@ -142,6 +142,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   if (main.kind === 'shared') renderSharedHead();
   if (main.kind === 'sharedList') renderSharedList();
   if (!chatId) return window.scrollTo(0, 0);
+  revealActiveRow();
   await mountChat(chatId, ticket, events);
 }
 
@@ -168,6 +169,7 @@ async function switchChat(main, seq) {
   if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details:not(.as-drawer)')) el.open = false;
   renderShelf();
   renderSidebar();
+  revealActiveRow();
   await mountChat(chatId, ticket, events);
   return true;
 }

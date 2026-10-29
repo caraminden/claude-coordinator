@@ -1,4 +1,5 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
+import { weekShare } from './cost.js';
 import { ago, api, app, costText, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, usage, view } from './core.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
@@ -281,9 +282,10 @@ export function threadRow(t, href = threadHref(t)) {
   // The state cell already shows steps done, so the activity line drops its own count.
   const activity = st.counted && t.last_activity ? withoutCount(t.last_activity) : t.last_activity;
   const note = (t.status === 'running' ? activity : t.note || activity) || '';
+  const share = t.cost && weekShare(t.cost);
   const details = [
     threadFullName(t),
-    [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, `updated ${ago(t.updated_at)}`, t.cost ? `${costText(t.cost)} at API prices` : ''].filter(Boolean).join(' · '),
+    [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, `updated ${ago(t.updated_at)}`, t.cost ? `${share ? `${share} of the weekly limit, ` : ''}${costText(t.cost)} at API prices` : ''].filter(Boolean).join(' · '),
     note,
     !coord && t.ship ? `${t.ship.text} · ${t.ship.commit}` : '',
   ].filter(Boolean).join('\n');
@@ -299,7 +301,7 @@ export function threadRow(t, href = threadHref(t)) {
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     st.cell ? h('span', { class: 'state' }, st.cell) : '',
     note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
-    t.cost ? h('span', { class: 'cost' }, costText(t.cost)) : '',
+    t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     coord ? '' : replyChips(t));
 }
 

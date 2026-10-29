@@ -1,6 +1,7 @@
 // Today's use beside the weekly meter, as a share of an even day (a seventh of the week), opening to the last 7 days.
 import { api, costText, h, view } from './core.js';
 import { closeOnClickAway } from './properties.js';
+import { renderSidebar } from './sidebar.js';
 
 let days = null;
 // What an even day's share of the weekly limit comes to at API prices (src/costs.ts dayBudget), or null.
@@ -28,11 +29,14 @@ export function costChip() {
 
 /** Fetch the daily totals again (a turn just ended) and redraw. */
 export async function renderCost() {
+  const before = budget;
   try {
     ({ days, dayBudget: budget } = await api('api/costs'));
   } catch {
     return; // keep the last figures; the next turn tries again
   }
+  // Minion rows show their cost against the week, so they redraw when that estimate moves.
+  if (budget !== before && view?.kind === 'project') renderSidebar();
   for (const chip of document.querySelectorAll('.cost-chip')) {
     chip.hidden = false;
     const today = days[0].total;
@@ -43,6 +47,13 @@ export async function renderCost() {
       : `Today's turns: ${costText(today)} at API prices. Shown against the weekly limit once its meter reaches 3%.`;
     if (chip.open) drawPop(chip);
   }
+}
+
+/** A cost as a share of the weekly limit, "0.4%", or null until the week can be priced. */
+export function weekShare(usd) {
+  if (!budget) return null;
+  const pct = (usd / (budget * 7)) * 100;
+  return `${pct < 0.1 ? '<0.1' : pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
 }
 
 /** A cost as a share of an even day: "38%". */

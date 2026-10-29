@@ -1,5 +1,6 @@
 // Artifacts and files: the shelf, the browser, and viewers for artifacts and linked or shared files.
 import { ago, api, baseName, fileExt, fileKind, fileUrl, followChat, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
+import { addBriefButtons } from './briefstart.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { showProject } from './project.js';
 import { replaceHash } from './navstack.js';
@@ -218,7 +219,7 @@ export function artifactViewer(a) {
   if (a.missing) {
     body.append(h('p', { class: 'muted' }, 'This file is no longer in the minion\'s folder. Unpin it to remove it from the list.'));
   } else {
-    renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id });
+    renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id, brief: { projectId: a.project_id, path: a.display_path ?? a.path, abs: a.abs, name: a.name } });
     section.append(commentBox(artifactThread(a), a.path, a.name, body));
   }
   return section;
@@ -267,7 +268,7 @@ function openViewer(ticket, file, inPlace) {
   viewer.stage.className = `viewer-stage k-${file.kind}`;
   viewer.stage.replaceChildren();
   if (file.missing) viewer.stage.append(h('p', { class: 'muted' }, `${file.missing}.`));
-  else renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id });
+  else renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.display_path, abs: file.abs, name: file.name } });
   renderViewerBar();
 }
 
@@ -391,7 +392,7 @@ function commentBox(t, path, name, body) {
 export function sharedViewer(file) {
   const body = h('div', { class: 'artifact-body' });
   if (file.missing) body.append(h('p', { class: 'muted' }, `${file.missing}.`));
-  else renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p) });
+  else renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), brief: { projectId: view.projectId, path: file.display_path, abs: file.abs, name: file.name } });
   return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body);
 }
 
@@ -412,8 +413,11 @@ export function renderSharedHead() {
       file.missing ? ' · not found' : ` · ${formatSize(file.size)} · updated ${ago(file.mtime)}`));
 }
 
-/** Show a file in `body` by its kind. Markdown's relative image links load from next to it. */
-function renderFileBody(body, { kind, src, size, name, path, ticketId, urlFor = (p) => fileUrl(ticketId, p) }) {
+/**
+ * Show a file in `body` by its kind. Markdown's relative image links load from next to it, and its
+ * briefs get Start buttons (`brief` says where the file is, see addBriefButtons).
+ */
+function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, urlFor = (p) => fileUrl(ticketId, p) }) {
   if (kind === 'image') {
     body.append(h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { class: 'artifact-media', src, alt: name })));
   } else if (kind === 'video') {
@@ -441,9 +445,9 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, urlFor = 
         // JSON Canvas files are JSON; lay them out readably.
         try { shown = JSON.stringify(JSON.parse(text), null, 2); } catch {}
       }
-      body.replaceChildren(kind === 'markdown'
-        ? h('div', { class: 'msg doc' }, markdownDoc(text, imageUrl))
-        : h('pre', { class: 'artifact-text' }, shown));
+      const doc = kind === 'markdown' && markdownDoc(text, imageUrl);
+      if (doc && brief) addBriefButtons(doc, text, brief);
+      body.replaceChildren(doc ? h('div', { class: 'msg doc' }, doc) : h('pre', { class: 'artifact-text' }, shown));
     }).catch((err) => body.replaceChildren(h('p', { class: 'error' }, `Could not load: ${err.message}`)));
   }
 }

@@ -124,7 +124,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'sharedList' ? sharedList()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)
-        : chatSection(chatId, ticket, page?.events ?? []);
+        : chatSection(chatId, ticket);
 
   // .panels only becomes a box of its own when both panels are collapsed, so their tabs can share
   // one slim sticky column; otherwise the panels sit directly in the grid.
@@ -164,7 +164,7 @@ async function switchChat(main, seq) {
   if (isCoordinator(ticket)) view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);
   renderCrumbs(main);
-  document.querySelector('#app .split').lastElementChild.replaceWith(chatSection(chatId, ticket, page.events));
+  document.querySelector('#app .split').lastElementChild.replaceWith(chatSection(chatId, ticket));
   // On phones the panels sit above the chat; fold them away as a fresh load would.
   if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details:not(.as-drawer)')) el.open = false;
   renderShelf();

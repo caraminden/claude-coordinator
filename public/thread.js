@@ -62,16 +62,24 @@ export async function mountChat(chatId, ticket, page) {
 function renderHistory() {
   const log = document.getElementById('log');
   const page = view.page;
-  const keep = [...view.pendingMessages.map((m) => m.el), document.getElementById('recap')].filter(Boolean);
+  // Held aside while replaying, so an older message of yours can't be taken for one still on its way.
+  const pending = view.pendingMessages;
+  const keep = [...pending.map((m) => m.el), document.getElementById('recap')].filter(Boolean);
   Object.assign(view, {
     lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
     actions: new Map(), turnActions: [], cards: new Map(), heldCards: [],
     // The session started on an earlier page, if there is one.
     sawInit: page.more, turnNote: null, turnInitAt: undefined, turnTexts: [], narrationEl: null, pendingRequest: [], turnRequest: undefined,
+    pendingMessages: [],
   });
   log.replaceChildren(...(page.more ? [h('div', { class: 'load-earlier' },
     h('button', { type: 'button', class: 'small secondary', onclick: (e) => showEarlier(e.currentTarget) }, 'Load earlier'))] : []));
+  if (isCoordinator(view.ticket) && !page.events.length) {
+    log.append(h('div', { class: 'note' },
+      'This is the Taskmaster for this scheme. It keeps track of the minions on the left and can create, message, rename and dismiss them for you.'));
+  }
   for (const ev of page.events) appendEvent(ev, false);
+  view.pendingMessages = pending;
   const at = [...log.children].find((el) => Number(el.dataset.at) > view.openedSeenAt);
   at?.before(h('div', { class: 'unread-divider', role: 'separator' }, h('span', {}, 'New')));
   log.append(...keep);
@@ -125,13 +133,9 @@ export async function showEarlier(button, from) {
 // Unread chat items (messages, cards, notes) past which a Taskmaster opens at the bottom.
 const TASKMASTER_UNREAD_LIMIT = 40;
 
-export function chatSection(chatId, ticket, events) {
+export function chatSection(chatId, ticket) {
   const form = composer(chatId, ticket);
   const log = h('div', { class: 'log', id: 'log' });
-  if (isCoordinator(ticket) && !events.length) {
-    log.append(h('div', { class: 'note' },
-      'This is the Taskmaster for this scheme. It keeps track of the minions on the left and can create, message, rename and dismiss them for you.'));
-  }
   // The working line is a shortcut to the readout in the thread bar.
   const openReadout = () => {
     view.ui.open = true;

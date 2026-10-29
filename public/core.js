@@ -569,7 +569,9 @@ export async function loadEvents(ticketId) {
   const page = cached ?? await api(`api/tickets/${ticketId}/events`);
   if (cached) {
     const fresh = await api(`api/tickets/${ticketId}/events?after=${page.events.at(-1)?.id ?? 0}`);
-    if (fresh.length) page.events = page.events.concat(fresh);
+    // Another load, or live events, may have added some of these while this one was on its way.
+    const last = page.events.at(-1)?.id ?? 0;
+    page.events = page.events.concat(fresh.filter((e) => e.id > last));
   }
   remember(ticketId, page);
   return page;

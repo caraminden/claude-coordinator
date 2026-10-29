@@ -875,6 +875,7 @@ a.thread-ref:hover { text-decoration: underline; }
 .prop-pop dd { margin: 0; display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .prop-pop .pv-pick { color: var(--ink); cursor: pointer; }
 .prop-pop .pv-pick:hover, .prop-pop .pv-pick:focus-visible { border-color: var(--accent); }
+.prop-pop .assign-input { flex: 1 1 8rem; min-width: 0; width: auto; padding: 0.2rem 0.5rem; }
 .prop-pop .foot { margin-top: 0.5rem; padding-top: 0.45rem; border-top: 1px solid var(--line); display: flex; gap: 0.5rem; align-items: center; font-size: 0.85em; color: var(--muted); }
 .prop-pop .foot a { color: var(--accent); text-decoration: none; white-space: nowrap; }
 .prop-pop .foot .spacer { flex: 1; }

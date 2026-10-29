@@ -1,5 +1,5 @@
 // The scheme's property registry: the Settings link's review count, the Properties tab and a minion's property chip.
-import { api, h, view } from './core.js';
+import { api, h, me, view } from './core.js';
 import { settingsTabs } from './settings.js';
 import { filterChoices, valueCounts } from './propfilter.js';
 import { renderSidebar } from './sidebar.js';
@@ -12,20 +12,49 @@ const propertyValue = (v) => (Array.isArray(v) ? v.join(', ') : String(v));
 /** The "🏷 N" chip in a minion's header; it opens to the minion's properties. */
 export function propertyChip(t) {
   const entries = Object.entries(t.properties ?? {});
+  const body = h('div', {});
   const chip = h('details', { class: 'prop-chip' },
     h('summary', { class: 'tag-chip', title: 'Properties', 'aria-label': `${entries.length} properties` }, h('span', { class: 'ic', 'aria-hidden': 'true' }, '🏷️'), String(entries.length)),
     h('div', { class: 'prop-pop' },
       h('h4', {}, 'Properties'),
-      entries.length
-        ? h('dl', {})
-        : h('p', { class: 'muted small' }, 'None yet. The minion sets its own as the work becomes clear.'),
+      body,
       h('div', { class: 'foot' }, h('span', {}, 'Minions and the Taskmaster set these'), h('span', { class: 'spacer' }),
         h('a', { href: `#/p/${t.project_id}/properties` }, 'All keys'))));
-  // Drawn on opening: which values the filter offers depends on the registry, which may load later.
+  // Drawn on opening: which values the filter offers, and whether assigned exists, depend on the registry, which may load later.
   chip.addEventListener('toggle', () => {
-    if (chip.open) chip.querySelector('dl')?.replaceChildren(...entries.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, filterLinks(t, k, v))]));
+    if (!chip.open) return;
+    const assignable = propFilter.projectId === t.project_id && propFilter.keys?.some((k) => k.key === 'assigned' && k.status === 'active');
+    const rows = entries.filter(([k]) => !(assignable && k === 'assigned')).flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, filterLinks(t, k, v))]);
+    if (assignable) rows.push(h('dt', {}, 'assigned'), h('dd', {}, assignPicker(t)));
+    body.replaceChildren(rows.length ? h('dl', {}, rows) : h('p', { class: 'muted small' }, 'None yet. The minion sets its own as the work becomes clear.'));
   });
   return closeOnClickAway(chip);
+}
+
+/** Who the minion is assigned to: type a name or pick one people already go by; empty unassigns it. */
+function assignPicker(t) {
+  const current = t.properties?.assigned ?? '';
+  const userKeys = propFilter.keys.filter((k) => k.value_kind === 'user').map((k) => k.key);
+  const names = [...new Set([me, ...[...view.tickets.values()].flatMap((m) => userKeys.map((k) => m.properties?.[k]))].filter(Boolean))].sort();
+  const list = h('datalist', { id: `assign-names-${t.id}` }, names.map((n) => h('option', { value: n })));
+  const note = h('span', { class: 'muted small', role: 'status' });
+  const input = h('input', { type: 'text', class: 'assign-input', value: current, placeholder: 'Nobody', list: list.id, 'aria-label': 'Assigned to', maxlength: '60' });
+  input.addEventListener('change', async () => {
+    const name = input.value.trim();
+    if (name === current) return;
+    input.disabled = true;
+    try {
+      // The minions list and this header redraw from the broadcast that follows.
+      await api(`api/tickets/${t.id}/properties`, { method: 'PUT', body: { properties: { assigned: name || null } } });
+      note.textContent = name ? 'Saved' : 'Unassigned';
+    } catch (err) {
+      note.textContent = err.message;
+    } finally {
+      input.disabled = false;
+    }
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
+  return [input, list, note];
 }
 
 /** A property's values, each a button that adds it to the minions list's filter when the filter offers it. */

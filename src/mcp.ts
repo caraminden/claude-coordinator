@@ -672,7 +672,8 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'read_ticket': {
       const n = await id(args);
       const last = Math.min(Math.max(Number(args.last) || 10, 1), 50);
-      const [{ ticket }, events] = await Promise.all([call('GET', `/api/tickets/${n}`), call('GET', `/api/tickets/${n}/events`)]);
+      // The whole history (?after=0), not a chat page: the skipped count needs every entry.
+      const [{ ticket }, events] = await Promise.all([call('GET', `/api/tickets/${n}`), call('GET', `/api/tickets/${n}/events?after=0`)]);
       const lines = transcript(events);
       const skipped = Math.max(lines.length - last, 0);
       return [ticketLine(ticket), skipped ? `(${skipped} earlier entries omitted)` : '', ...lines.slice(-last)].filter(Boolean).join('\n\n');

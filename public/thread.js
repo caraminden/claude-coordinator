@@ -885,11 +885,15 @@ export function userBubble(author, text, imageSrcs, about = null) {
     msg.append(h('div', { class: 'images' }, imageSrcs.map((src) =>
       h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
   }
-  // The coordinator's hand-offs are rarely worth reading in full, so they start folded to one line.
-  if (author === COORDINATOR_NAME || author === 'Taskmaster') {
+  // Hand-offs between Taskmasters and minions are rarely worth reading in full, so they start
+  // folded to one line: the Taskmaster's to a minion, and a minion's ("#12 Title") or another
+  // scheme's Taskmaster's ("Taskmaster of Delve") to this one (authors from server.ts).
+  const otherScheme = author?.match(/^Taskmaster of (.+)$/)?.[1];
+  if (author === COORDINATOR_NAME || author === 'Taskmaster' || otherScheme || /^#\d+ /.test(author ?? '')) {
     const preview = (text ?? '').replace(/[#*_`>\[\]]/g, '').replace(/\s+/g, ' ').trim();
+    const who = otherScheme ? `${otherScheme} Taskmaster` : author.startsWith('#') ? author : taskmasterName();
     msg.querySelector('.who').remove();
-    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, taskmasterName()), h('span', { class: 'preview' }, preview)), msg);
+    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, who), h('span', { class: 'preview' }, preview)), msg);
   }
   return msg;
 }

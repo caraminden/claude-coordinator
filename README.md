@@ -110,6 +110,7 @@ uses the built-in `node:sqlite`.
 | `src/mcp.ts` | MCP server giving the Taskmaster its minion-management tools |
 | `src/approvals.ts` | Approval rules, plugin folders, and the Approve / Deny cards |
 | `src/inbox.ts`, `public/inbox.js` | The Needs-you inbox: a scheme's open cards and ready/try minions, as a strip at the top of the minions list |
+| `src/schedules.ts`, `public/schedules.js` | Scheduled minions: cron parsing, the schedules table, and the panel the clock in the Minions header swaps in; the server's timer starts each due run as a fresh minion |
 | `src/tripwire.ts` | PreToolUse hook every turn gets: blocks known accidents (live data, checkout, units, keys) |
 | `src/push.ts` | Web Push: VAPID keys and signing, payload encryption, when to notify |
 | `src/machines.ts` | Relays MCP traffic between minion turns and connected machines |

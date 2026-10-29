@@ -227,7 +227,7 @@ test('a dismissed follower is dropped; release hands back the held brief once', 
   assert.equal(started.length, 0);
 });
 
-test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or a message starts it', async () => {
+test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or a message starts it; a brief is marked as one', async () => {
   const srv = createServer();
   await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
   const { port } = srv.address() as any;
@@ -256,8 +256,11 @@ test('through the server: start_after parks the minion with its brief held; the 
     });
     return { status: res.status, data: await res.json() };
   };
-  const said = async (id: number) => (await call(`/api/tickets/${id}/events?after=0`)).data
-    .filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data).text);
+  const messages = async (id: number) => (await call(`/api/tickets/${id}/events?after=0`)).data
+    .filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
+  const said = async (id: number) => (await messages(id)).map((m: any) => m.text);
+  // The brief that starts a minion is marked, so the chat shows it unfolded; later messages aren't.
+  const briefs = async (id: number) => (await messages(id)).map((m: any) => !!m.brief);
   const idle = async (id: number) => {
     while ((await call(`/api/tickets/${id}`)).data.ticket.status === 'running') await new Promise((r) => setTimeout(r, 20));
   };
@@ -265,6 +268,7 @@ test('through the server: start_after parks the minion with its brief held; the 
   const { data: p } = await call('/api/projects', { name: 'Scheme' });
   const create = (title: string, extra: object) => call(`/api/projects/${p.id}/tickets`, { title, message: `brief for ${title}`, ...extra });
   const leader = (await create('Leader', {})).data;
+  assert.deepEqual(await briefs(leader.id), [true]);
 
   assert.equal((await create('Bad', { start_after: 999 })).status, 400);
   const badWhen = await create('Bad', { start_after: leader.number, start_when: 'soon' });
@@ -285,12 +289,14 @@ test('through the server: start_after parks the minion with its brief held; the 
     if (Date.now() > end) throw new Error('The chained minion never started');
   }
   assert.deepEqual(await said(next.data.id), ['brief for Next']);
+  assert.deepEqual(await briefs(next.data.id), [true]);
 
   // Writing to a chained minion before its leader is done starts it, brief first.
   const later = (await create('Later', { start_after: next.data.number })).data;
   assert.equal(later.note, `starts when #${next.data.number} is live`);
   await call(`/api/tickets/${later.id}/messages`, { text: 'go now' });
   assert.deepEqual(await said(later.id), ['brief for Later', 'go now']);
+  assert.deepEqual(await briefs(later.id), [true, false]);
   await idle(later.id);
   await idle(next.data.id);
   await call(`/api/tickets/${next.data.id}/status`, { status: 'closed' });

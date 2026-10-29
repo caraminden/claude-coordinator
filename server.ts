@@ -191,7 +191,7 @@ async function startChained(c: Chain, why: string) {
   const repo = store.getProject(t.project_id)?.repo_dir ?? null;
   await catchUpTicketDir(t.cwd, repo).catch((err) => console.error(`Catching up #${t.number}'s branch failed:`, err));
   runner.emit(c.ticket, 'note', { text: `${why}, so this minion started.` });
-  runner.send(c.ticket, c.from, c.message);
+  runner.send(c.ticket, c.from, c.message, [], { brief: true });
 }
 waiters.start = (c, why) => void startChained(c, why);
 // Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.
@@ -252,7 +252,7 @@ async function startScheduled(s: Schedule, now: number) {
     const { id, number } = await newMinion(project, { title: s.name, tag: null, props: { type: s.type } }, APP_NAME);
     store.schedules.ran(s.id, { ticketId: id }, now);
     runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });
-    runner.send(id, APP_NAME, runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })));
+    runner.send(id, APP_NAME, runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })), [], { brief: true });
     console.log(`Schedule ${s.id} "${s.name}" started #${number}`);
   } catch (err: any) {
     console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);
@@ -1256,7 +1256,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       runner.broadcastTicket(id);
       notes.push(`Parked: it starts by itself once #${leader.number}'s work is ${when}. A message to it starts it now.`);
     } else {
-      runner.send(id, session.name, message);
+      runner.send(id, session.name, message, [], { brief: true });
     }
     return json(res, 201, { ...ticketView(id), notes });
   }

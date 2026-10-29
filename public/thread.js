@@ -566,7 +566,7 @@ export function appendEvent(event, scroll = true) {
       const bubble = userBubble(data.author, data.text,
         (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
         data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null,
-        { id: event.id, strikes: data.strikes },
+        { id: event.id, strikes: data.strikes, brief: data.brief },
         (data.files ?? []).map((f) => ({ ...f, href: uploadUrl(event.ticket_id, f.name) })));
       bubble.dataset.event = event.id;
       stamped(bubble, event);
@@ -1134,9 +1134,11 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
       h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
   }
   if (files.length) msg.append(h('div', { class: 'files' }, files.map(fileChip)));
-  // Messages between Claudes and from the app aren't meant for people, so they start folded to one line.
+  // Messages between Claudes and from the app aren't meant for people, so they start folded to one line,
+  // except the brief that started the minion: it says what the minion is for.
   const who = machineAuthor(author);
-  if (who) {
+  if (who && event?.brief) msg.querySelector('.who').textContent = who;
+  else if (who) {
     msg.querySelector('.who').remove();
     return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, who), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
   }

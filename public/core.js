@@ -707,19 +707,25 @@ document.addEventListener('click', (e) => {
 // rendered that way once api/prs has loaded. Ones rendered before it are re-pointed when it
 // arrives, and a GitHub link's href is also swapped as the pointer or focus reaches it.
 let prRepos = null;
+let prList = null; // the same, as a list: two schemes may share a repo
 let prsAt = 0;
 function loadPrs() {
   if (Date.now() - prsAt < 5 * 60_000) return;
   prsAt = Date.now();
   api('api/prs').then((r) => {
+    prList = r;
     prRepos = new Map(r.map((x) => [x.repo, x]));
     linkPrRefs();
   }).catch(() => {});
 }
 /** Where a GitHub PR link should go instead (see prOwnerRoute); null until api/prs has loaded. */
 const prUrlRoute = (href) => prOwnerRoute(prRepos, href, view?.id ?? null);
-/** Where "PR #n" said in scheme `projectId` goes (see prNumberRoute). */
-const prRefRoute = (projectId, n) => prNumberRoute(prRepos, projectId, n, view?.id ?? null);
+/** Where "PR #n" said in scheme `projectId` goes (see prNumberRoute); one not known yet looks again, at most every 5 minutes. */
+function prRefRoute(projectId, n) {
+  const to = prNumberRoute(prList, projectId, n, view?.id ?? null);
+  if (!to) loadPrs();
+  return to;
+}
 /** Point the PR links and "PR #186"s on the page at their owners, now that api/prs is known. */
 function linkPrRefs() {
   for (const a of document.querySelectorAll('a[href^="https://github.com/"]')) pointPrLink(a);

@@ -159,7 +159,7 @@ export function prOwnerRoute(repos, href, hereId = null) {
   return pr ? ownerRoute(repos?.get(pr.repo), pr.number, hereId) : null;
 }
 
-/** As prOwnerRoute, for "PR #`number`" said in scheme `projectId`: its repo's PR of that number. */
+/** As prOwnerRoute, for "PR #`number`" said in scheme `projectId`: its repo's PR of that number. `repos` is any list of api/prs entries. */
 export function prNumberRoute(repos, projectId, number, hereId = null) {
   for (const repo of repos?.values() ?? []) if (repo.projectId === projectId) return ownerRoute(repo, number, hereId);
   return null;

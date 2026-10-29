@@ -193,7 +193,8 @@ export class Previews {
     // Only a person's page load starts one; a file token's request reaches a running preview only.
     if (page && session && (!r || r.head !== head(ticket.cwd))) r = await this.boot(ticket);
     if (!r) throw new PreviewError(503, 'This preview stopped after an hour unused; reload the page to start it again');
-    r.lastUsed = Date.now();
+    // A file token's request comes from anyone holding the link, so only a person keeps a preview up.
+    if (session) r.lastUsed = Date.now();
 
     const headers = { ...req.headers };
     delete headers.authorization;

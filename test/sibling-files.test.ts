@@ -24,7 +24,7 @@ const P = store.createProject('A', null);
 const created = store.createTicket({ project_id: P.id, kind: 'ticket', title: 'Videos', permission_mode: 'default', created_by: 'Cara' });
 const work = join(root, 'work');
 const outside = join(root, 'outside');
-for (const d of [work, join(work, 'css'), join(work, 'sub'), outside]) mkdirSync(d, { recursive: true });
+for (const d of [work, join(work, 'css'), join(work, 'sub'), join(work, '.scratch'), outside]) mkdirSync(d, { recursive: true });
 store.setTicketDir(created.id, work, null);
 const M = store.getTicket(created.id)!;
 const TM = store.createTicket({ project_id: P.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Cara' });
@@ -37,6 +37,7 @@ writeFileSync(join(work, 'css', 'site.css'), 'body { color: red }');
 writeFileSync(join(work, 'app.js'), 'console.log(1)');
 writeFileSync(join(work, 'sub', 'page2.html'), '<p>two</p>');
 writeFileSync(join(work, 'notes.md'), '# Notes');
+writeFileSync(join(work, '.scratch', 'demo.html'), '<p>hidden</p>');
 writeFileSync(join(work, '.env.json'), '{"secret":1}');
 writeFileSync(join(work, 'main.ts'), 'export {}');
 writeFileSync(join(outside, 'secret.txt'), 'outside the root');
@@ -102,7 +103,10 @@ test('the token reads nothing outside its folder: symlinks, dotfiles, .., encode
   const token = page.split('/')[3];
   const base = `/api/files/${token}`;
   for (const rel of ['escape.txt', 'escdir/secret.txt', '.env.json', 'main.ts', 'sub%2F..%2Fpage.html', 'sub%2f..%2f..%2foutside%2fsecret.txt', 'sub/%5c..%5cpage.html', 'nothing.mp4']) {
-    assert.equal((await get(`${base}/${rel}`)).status, 404, rel);
+    const res = await get(`${base}/${rel}`);
+    assert.equal(res.status, 404, rel);
+    // A page's fetch() sees the 404 rather than a CORS failure.
+    assert.equal(res.headers.get('access-control-allow-origin'), '*');
   }
   // Sent raw, .. and %2e%2e collapse before routing, and can't climb past the token's folder.
   for (const rel of ['%2e%2e', '../../outside/secret.txt', '%2e%2e/%2e%2e/outside/secret.txt', 'sub/../../../../etc/passwd', '../escape.txt']) {
@@ -116,6 +120,8 @@ test('a forged or expired token is refused, unless a signed-in person reopens it
   const [, , , token] = page.split('/');
   const forged = `${token.slice(0, -2)}${token.endsWith('AA') ? 'BB' : 'AA'}`;
   assert.equal((await get(`/api/files/${forged}/clip.mp4`)).status, 403);
+  // Without a login a bad token says nothing about which minions exist.
+  assert.equal((await get('/api/files/t999-0.zzzzzz.forged/clip.mp4')).status, 403);
   // Signing another folder's scope needs the secret.
   assert.equal((await get(`/api/files/${token.replace(`t${M.id}-0`, `t${M.id}-2`)}/gallery.html`)).status, 403);
   const tokens = new Auth(PASSWORD, SECRET);
@@ -125,6 +131,8 @@ test('a forged or expired token is refused, unless a signed-in person reopens it
   assert.equal((await get(`/api/files/${expired}/sub/page2.html`, { Authorization: `Bearer ${agentToken(data, M.id)}` })).status, 403);
   const renewed = await follow(`/api/files/${expired}/sub/page2.html`);
   assert.match(renewed, new RegExp(`^/api/files/t${M.id}-0\\.[a-z0-9]+\\.[\\w-]+/sub/page2\\.html$`));
+  const again = await get(`/api/files/${expired}/clip.mp4?download`, { Cookie: srv.cookie });
+  assert.match(again.headers.get('location')!, /^\.\.\/t\d+-0\.[^/]+\/clip\.mp4\?download$/);
   assert.equal((await get(renewed)).status, 200);
   // A scope that names nothing is a 404, signed or not.
   assert.equal((await get(`/api/files/${tokens.fileToken('t999-0')}/page.html`)).status, 404);
@@ -144,6 +152,10 @@ test('scheme shared files and reply links redirect the same way; downloads, othe
   const asTaskmaster = await get(`/api/tickets/${M.id}/file?path=page.html`, { Authorization: `Bearer ${agentToken(data, TM.id)}` });
   assert.equal(asTaskmaster.status, 200);
   assert.match(await asTaskmaster.text(), /Test videos/);
+  // A page under a hidden folder opens as before, without a token (its siblings can't load).
+  const hidden = await get(`/api/tickets/${M.id}/file?path=.scratch/demo.html`, { Cookie: srv.cookie });
+  assert.equal(hidden.status, 200);
+  assert.match(await hidden.text(), /hidden/);
   // Without a login the old routes still refuse.
   assert.equal((await get(`/api/artifacts/${PAGE.id}/raw`)).status, 401);
 });

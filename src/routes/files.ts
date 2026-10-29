@@ -80,11 +80,10 @@ function findPinTarget(app: App, projectId: number, caller: Ticket, id: unknown,
 }
 
 /** Serve a file found by resolveFile, with byte ranges and a sandboxing CSP. */
-async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: Awaited<ReturnType<typeof resolveFile>>, path: string, download: boolean, extra: Record<string, string> = {}) {
+async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: Awaited<ReturnType<typeof resolveFile>>, path: string, download: boolean) {
   if (!found) throw new HttpError(404, 'That file is no longer there');
   const { file, type, size } = found;
   const headers: Record<string, string | number> = {
-    ...extra,
     'Content-Type': type.mime,
     'Content-Security-Policy': artifactCsp(type.kind),
     'X-Content-Type-Options': 'nosniff',
@@ -131,10 +130,6 @@ function scopeRoot(app: App, scope: string): string | null {
   return p && app.store.getProject(Number(p[1])) ? projectSharedDir(app.dataDir, Number(p[1])) : null;
 }
 
-/** Where a file sits under its token's folder: the redirect for `pathname` (relative, so it holds inside a preview). */
-function filesLocation(app: App, pathname: string, scope: string, rel: string): string {
-  return `${'../'.repeat(pathname.split('/').length - 3)}files/${app.auth.fileToken(scope)}/${rel.split(sep).map(encodeURIComponent).join('/')}`;
-}
 
 /**
  * Serve a file found under `roots` ([scope, folder] pairs). An HTML page a person opens goes to its
@@ -147,7 +142,13 @@ async function serveFound(ctx: { req: IncomingMessage; res: ServerResponse; url:
   if (found?.type.kind === 'html' && !download && session.agent === undefined) {
     for (const [scope, root] of roots) {
       const real = await realpath(root).catch(() => null);
-      if (real && found.file.startsWith(real + sep)) return void res.writeHead(302, { Location: filesLocation(app, url.pathname, scope, found.file.slice(real.length + 1)), 'Cache-Control': 'no-store' }).end();
+      if (!real || !found.file.startsWith(real + sep)) continue;
+      const rel = found.file.slice(real.length + 1).split(sep).map(encodeURIComponent).join('/');
+      // A page under a hidden folder still opens, just without its siblings.
+      if (tokenPath(rel) === null) break;
+      // Relative, so it stays inside a preview's /preview/N/.
+      const location = `${'../'.repeat(url.pathname.split('/').length - 3)}files/${app.auth.fileToken(scope)}/${rel}`;
+      return void res.writeHead(302, { Location: location, 'Cache-Control': 'no-store' }).end();
     }
   }
   return serveArtifact(req, res, found, path, download);
@@ -304,20 +305,22 @@ export const fileRoutes: Route[] = [
     // the token (see serveFound) is the login, and the path can't leave the token's one folder.
     method: ['GET', 'HEAD'], path: '/api/files/:token/*path', who: 'anyone',
     async handler({ req, res, url, app, params }) {
+      // The frame's origin is opaque, so fetch() and module scripts need CORS (errors included); no cookies are involved.
+      res.setHeader('Access-Control-Allow-Origin', '*');
       const scope = app.auth.fileScope(params.token);
-      const rel = tokenPath(params.path);
       const named = params.token.split('.')[0];
-      const root = rel === null ? null : scopeRoot(app, scope ?? named);
-      if (rel === null || root === null) throw new HttpError(404, 'Not found');
       if (!scope) {
         // A tab reopened from history after the token expired: a signed-in person gets a fresh one.
         const session = app.auth.session(req);
         if (!session || session.agent !== undefined) throw new HttpError(403, 'This link has expired; open the file from Citadel again');
+        if (!scopeRoot(app, named)) throw new HttpError(404, 'Not found');
         const up = '../'.repeat(params.path.split('/').length);
-        return void res.writeHead(302, { Location: `${up}${app.auth.fileToken(named)}/${params.path}`, 'Cache-Control': 'no-store' }).end();
+        return void res.writeHead(302, { Location: `${up}${app.auth.fileToken(named)}/${params.path}${url.search}`, 'Cache-Control': 'no-store' }).end();
       }
-      // The frame's origin is opaque, so fetch() and module scripts need CORS; no cookies are involved.
-      return serveArtifact(req, res, await resolveFile(rel, root, [root], siblingType), rel, url.searchParams.has('download'), { 'Access-Control-Allow-Origin': '*' });
+      const rel = tokenPath(params.path);
+      const root = scopeRoot(app, scope);
+      if (rel === null || root === null) throw new HttpError(404, 'Not found');
+      return serveArtifact(req, res, await resolveFile(rel, root, [root], siblingType), rel, url.searchParams.has('download'));
     },
   },
   {

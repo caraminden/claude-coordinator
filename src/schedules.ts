@@ -11,6 +11,8 @@ export interface Schedule {
   cron: string;
   /** The first message each run starts from. */
   brief: string;
+  /** The `type` property each run's minion gets. */
+  type: string;
   paused: number;
   /** When it is next due (ms); null while paused. */
   next_run_at: number | null;
@@ -30,6 +32,7 @@ CREATE TABLE IF NOT EXISTS schedules (
   name TEXT NOT NULL,
   cron TEXT NOT NULL,
   brief TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'chore',
   paused INTEGER NOT NULL DEFAULT 0,
   next_run_at INTEGER,
   last_run_at INTEGER,
@@ -143,17 +146,66 @@ export class Schedules {
     return (this.db.prepare('SELECT * FROM schedules WHERE id = ?').get(id) as unknown as Schedule | undefined) ?? null;
   }
 
-  create(s: Pick<Schedule, 'project_id' | 'name' | 'cron' | 'brief' | 'created_by'>, now = Date.now()): Schedule {
+  /** The next run after `now`, or a ScheduleError saying why there is none. */
+  private next(cron: string, now: number): number {
     let next: number | null;
     try {
-      next = nextRun(s.cron, now);
+      next = nextRun(cron, now);
     } catch (err: any) {
       throw new ScheduleError(err.message);
     }
-    if (next === null) throw new ScheduleError(`"${s.cron}" never runs`);
+    if (next === null) throw new ScheduleError(`"${cron}" never runs`);
+    return next;
+  }
+
+  create(s: Pick<Schedule, 'project_id' | 'name' | 'cron' | 'brief' | 'type' | 'created_by'>, now = Date.now()): Schedule {
     const r = this.db
-      .prepare('INSERT INTO schedules (project_id, name, cron, brief, next_run_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(s.project_id, s.name, s.cron.trim(), s.brief, next, s.created_by, now);
+      .prepare('INSERT INTO schedules (project_id, name, cron, brief, type, next_run_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.project_id, s.name, s.cron.trim(), s.brief, s.type, this.next(s.cron, now), s.created_by, now);
     return this.get(Number(r.lastInsertRowid))!;
   }
+
+  /** Change a schedule. A new cron or a resume counts the next run from now; a pause clears it. */
+  update(id: number, patch: Partial<Pick<Schedule, 'name' | 'cron' | 'brief' | 'type'>> & { paused?: boolean }, now = Date.now()): Schedule {
+    const old = this.get(id);
+    if (!old) throw new ScheduleError('No such schedule');
+    const s = { ...old, ...patch, cron: (patch.cron ?? old.cron).trim(), paused: patch.paused === undefined ? old.paused : Number(patch.paused) };
+    const next = s.paused ? null : patch.cron !== undefined || (old.paused && !s.paused) ? this.next(s.cron, now) : old.next_run_at;
+    this.db.prepare('UPDATE schedules SET name = ?, cron = ?, brief = ?, type = ?, paused = ?, next_run_at = ? WHERE id = ?').run(s.name, s.cron, s.brief, s.type, s.paused, next, id);
+    return this.get(id)!;
+  }
+
+  remove(id: number): boolean {
+    return this.db.prepare('DELETE FROM schedules WHERE id = ?').run(id).changes > 0;
+  }
+
+  /** Schedules whose run is due. One that came due while the server was down runs once, not once per missed slot. */
+  due(now = Date.now()): Schedule[] {
+    return this.db.prepare('SELECT * FROM schedules WHERE paused = 0 AND next_run_at <= ? ORDER BY next_run_at').all(now) as unknown as Schedule[];
+  }
+
+  /** Record a run: the minion it started, or why it didn't start; either way the next run counts from now. */
+  ran(id: number, outcome: { ticketId: number } | { error: string }, now = Date.now()) {
+    const s = this.get(id);
+    if (!s) return;
+    let next: number | null = null;
+    try {
+      next = nextRun(s.cron, now);
+    } catch {}
+    if ('ticketId' in outcome) {
+      this.db.prepare('UPDATE schedules SET last_run_at = ?, last_ticket_id = ?, last_error = NULL, next_run_at = ? WHERE id = ?').run(now, outcome.ticketId, next, id);
+    } else {
+      this.db.prepare('UPDATE schedules SET last_error = ?, next_run_at = ? WHERE id = ?').run(outcome.error, next, id);
+    }
+  }
+}
+
+/** The first message of a run's minion: what it is, how to file itself away when there is nothing to report, then the brief. */
+export function runBrief(s: Schedule, when: string): string {
+  return [
+    `Scheduled run of "${s.name}" (${describeCron(s.cron)}, this run ${when}). A schedule started this minion, not a person, and nobody is watching it live.`,
+    'Do the brief below. If you find nothing a person needs to see or act on, file the run away quietly: set only the note (e.g. "nothing to report"), leaving state null, since state ready pings people; call close_self; end your turn with one line on what you checked. If you do find something, leave the minion open in state ready with a short report: that pings people and shows in the Needs-you inbox.',
+    '',
+    s.brief,
+  ].join('\n');
 }

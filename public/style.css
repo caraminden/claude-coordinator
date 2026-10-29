@@ -118,6 +118,8 @@ dialog.new-scheme::backdrop { background: rgb(0 0 0 / 0.4); }
 .schedule .row { gap: 0.5rem; }
 .schedule .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .schedule .error { margin: 0.2rem 0 0; }
+.schedule .actions { gap: 0.4rem; margin-top: 0.3rem; }
+.schedule .actions button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
 dialog.new-scheme > .row { margin-bottom: 0.75rem; }
 dialog.new-scheme .close { min-width: 32px; min-height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; color: var(--muted); font-size: 1.3rem; line-height: 1; }
 dialog.new-scheme form > :last-child { margin-bottom: 0; }

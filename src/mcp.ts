@@ -246,6 +246,47 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID, ...WAKE_PROPS }, required: ['ticket_id', 'reason'] },
   },
   {
+    name: 'list_schedules',
+    description: "List this scheme's scheduled minions: when each runs, when it runs next, and its last run.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'schedule_minion',
+    description:
+      "Schedule a minion: on each run the server starts a fresh minion (its own worktree, a clean context) with the brief as its first message. Runs with nothing to report dismiss themselves; runs that find something stay open in state ready. Times are the server's (America/Los_Angeles). People see schedules, and pause or delete them, from the clock in the Minions header.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Short name, also each run\'s minion title, e.g. "Nightly health check"' },
+        cron: { type: 'string', description: 'Five cron fields (minute hour day-of-month month day-of-week), e.g. "0 3 * * *" for 03:00 daily, "0 9 * * 1" for Mondays 09:00; or @hourly, @daily, @weekly' },
+        brief: { type: 'string', description: "The run's first message: what to check and what counts as worth reporting" },
+        type: { type: 'string', description: 'The `type` property each run gets (default chore)' },
+      },
+      required: ['name', 'cron', 'brief'],
+    },
+  },
+  {
+    name: 'update_schedule',
+    description: 'Change, pause or resume a schedule. Pass only what changes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        schedule_id: { type: 'integer', description: 'The schedule id from list_schedules' },
+        name: { type: 'string' },
+        cron: { type: 'string' },
+        brief: { type: 'string' },
+        type: { type: 'string' },
+        paused: { type: 'boolean', description: 'true pauses it, false resumes it' },
+      },
+      required: ['schedule_id'],
+    },
+  },
+  {
+    name: 'delete_schedule',
+    description: 'Delete a schedule. Minions it already started stay.',
+    inputSchema: { type: 'object', properties: { schedule_id: { type: 'integer' } }, required: ['schedule_id'] },
+  },
+  {
     name: 'close_ticket',
     description: 'Dismiss a finished or abandoned minion. Its worktree and branch are kept. A running minion must be stopped first.',
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
@@ -728,6 +769,21 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!r.waiting) return `${what} is live already (the server runs \`${String(r.head).slice(0, 7)}\`), so there is nothing to wait for.`;
       return `Waiting for ${what}: ${APP_NAME} sends ${ROLE === 'thread' ? 'you' : 'the minion'} a message once it is live.${ROLE === 'thread' ? ' Set state parked and end your turn.' : ''}`;
     }
+    case 'list_schedules': {
+      const { schedules } = await call('GET', `/api/projects/${PROJECT}/schedules`);
+      return schedules.length ? schedules.map(scheduleLine).join('\n') : 'Nothing scheduled.';
+    }
+    case 'schedule_minion': {
+      const s = await call('POST', `/api/projects/${PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type });
+      return `Scheduled. ${scheduleLine(s)}`;
+    }
+    case 'update_schedule': {
+      const { schedule_id, ...patch } = args;
+      return `Updated. ${scheduleLine(await call('PATCH', `/api/schedules/${Number(schedule_id)}`, patch))}`;
+    }
+    case 'delete_schedule':
+      await call('DELETE', `/api/schedules/${Number(args.schedule_id)}`);
+      return 'Deleted.';
     case 'close_ticket':
       return `Closed. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed' }))}`;
     case 'reopen_ticket':
@@ -739,6 +795,13 @@ async function runTool(name: string, args: any): Promise<string> {
     default:
       throw new Error(`Unknown tool ${name}`);
   }
+}
+
+function scheduleLine(s: any): string {
+  const at = (ms: number) => new Date(ms).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+  const next = s.paused ? 'paused' : `next ${at(s.next_run_at)}`;
+  const last = s.last_run_at ? `last run ${at(s.last_run_at)}${s.last_number != null ? ` (#${s.last_number})` : ''}` : 'no run yet';
+  return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}; ${next}; ${last}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
 }
 
 function toolList() {

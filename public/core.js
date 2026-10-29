@@ -7,6 +7,7 @@ import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, 
 import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './thread.js';
 import { onPropertiesChanged } from './properties.js';
 import { inboxEvent, inboxTicket } from './inbox.js';
+import { onSchedulesChanged } from './schedules.js';
 import { inAppHash, linkThreadRefs } from './threadrefs.js';
 
 export const app = document.getElementById('app');
@@ -391,6 +392,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'artifacts') onArtifactsChanged(msg.projectId);
     if (msg.type === 'project') onProjectUpdate(msg.project);
     if (msg.type === 'properties') onPropertiesChanged(msg.projectId);
+    if (msg.type === 'schedules') onSchedulesChanged(msg.projectId);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };

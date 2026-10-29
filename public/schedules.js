@@ -12,7 +12,25 @@ function scheduleRow(s) {
     h('div', { class: 'row' }, h('strong', { class: 'name' }, s.name), h('span', { class: 'spacer' }),
       s.paused ? h('span', { class: 'chip' }, 'paused') : h('span', { class: 'muted small', title: new Date(s.next_run_at).toString() }, 'next ', when(s.next_run_at))),
     h('div', { class: 'muted small' }, h('span', { title: `cron: ${s.cron} (server time)` }, s.when), ' · last run ', last),
-    s.last_error ? h('p', { class: 'error small' }, "Last run didn't start: ", s.last_error) : '');
+    s.last_error ? h('p', { class: 'error small' }, "Last run didn't start: ", s.last_error) : '',
+    h('div', { class: 'row actions' },
+      h('button', { type: 'button', class: 'secondary small', onclick: () => change(s, 'PATCH', { paused: !s.paused }) }, s.paused ? 'Resume' : 'Pause'),
+      h('button', { type: 'button', class: 'secondary small', onclick: () => confirm(`Delete the schedule "${s.name}"? Minions it already started stay.`) && change(s, 'DELETE') }, 'Delete')));
+}
+
+async function change(s, method, body) {
+  try {
+    await api(`api/schedules/${s.id}`, { method, body });
+  } catch (ex) {
+    alert(ex.message);
+  }
+  // The server's broadcast redraws the list.
+}
+
+/** Someone added, changed or ran a schedule: redraw the list if it is open on that scheme. */
+export function onSchedulesChanged(projectId) {
+  const sidebar = document.querySelector('.sidebar.show-schedules');
+  if (sidebar && view?.projectId === projectId) showSchedules(sidebar);
 }
 
 // Whether the Minions panel shows the schedules in place of the list; kept while you move between chats.
@@ -32,7 +50,7 @@ export async function showSchedules(sidebar) {
   sidebar.querySelector(':scope > summary .label').textContent = showing ? 'Scheduled' : 'Minions';
   const pane = sidebar.querySelector('.schedules-pane');
   if (!showing) return pane.replaceChildren();
-  pane.replaceChildren(h('p', { class: 'muted small' }, 'Loading…'));
+  if (!pane.childElementCount) pane.replaceChildren(h('p', { class: 'muted small' }, 'Loading…'));
   try {
     const { schedules } = await api(`api/projects/${view.projectId}/schedules`);
     pane.replaceChildren(schedules.length

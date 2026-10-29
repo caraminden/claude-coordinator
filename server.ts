@@ -27,7 +27,7 @@ import { PreviewError, Previews, previewPath } from './src/previews.ts';
 import { type Chain, LiveWaiters } from './src/wake.ts';
 import { catchUpTicketDir, cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
 import { costDays } from './src/costs.ts';
-import { describeCron } from './src/schedules.ts';
+import { describeCron, runBrief, ScheduleError, type Schedule } from './src/schedules.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -203,6 +203,61 @@ if (!BOOT_CHECK) {
   };
   liveOn(BOOT_COMMIT);
 }
+
+/**
+ * A new minion with its properties and its own worktree in the scheme's repo, not started yet: the
+ * caller sends its first message. Properties must be checked already. Throws HttpError 500, leaving
+ * nothing behind, when the worktree can't be made.
+ */
+async function newMinion(project: Project, m: { title: string; tag: TicketTag | null; props: Record<string, unknown>; model?: string | null; effort?: string | null }, by: string) {
+  const { id, number } = store.createTicket({ project_id: project.id, title: m.title, tag: m.tag, permission_mode: THREAD_PERMISSION_MODE, created_by: by });
+  const { notes } = store.props.set('minion', id, project.id, m.props, by);
+  store.props.startStage(id);
+  if (m.model || m.effort) store.updateTicket(id, { model: m.model ?? null, effort: m.effort ?? null });
+  try {
+    const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number!, m.title);
+    store.setTicketDir(id, dir.cwd, dir.branch);
+  } catch (err: any) {
+    store.deleteTicket(id);
+    throw new HttpError(500, `Could not create working directory: ${err.stderr?.trim() || err.message}`);
+  }
+  return { id, number: number!, notes };
+}
+
+// Scheduled minions (src/schedules.ts): each due schedule starts a fresh minion with its brief. Checked
+// every half minute; a schedule that came due while the server was down runs once when it is back.
+async function runSchedule(s: Schedule, now = Date.now()) {
+  await startScheduled(s, now);
+  broadcast({ type: 'schedules', projectId: s.project_id });
+}
+async function startScheduled(s: Schedule, now: number) {
+  const project = store.getProject(s.project_id);
+  const last = s.last_ticket_id ? store.getTicket(s.last_ticket_id) : null;
+  if (!project) return store.schedules.remove(s.id);
+  // Two runs at once would step on each other (and double the cost), so a slot is skipped while the last run works.
+  if (last?.status === 'running') return store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
+  try {
+    const { id, number } = await newMinion(project, { title: s.name, tag: null, props: { type: s.type } }, APP_NAME);
+    store.schedules.ran(s.id, { ticketId: id }, now);
+    runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });
+    runner.send(id, APP_NAME, runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })));
+    console.log(`Schedule ${s.id} "${s.name}" started #${number}`);
+  } catch (err: any) {
+    console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);
+    store.schedules.ran(s.id, { error: err.message }, now);
+  }
+}
+let scheduling = false;
+async function runDueSchedules() {
+  if (scheduling) return;
+  scheduling = true;
+  try {
+    for (const s of store.schedules.due()) await runSchedule(s);
+  } finally {
+    scheduling = false;
+  }
+}
+if (!BOOT_CHECK) setInterval(() => void runDueSchedules(), 30_000).unref();
 
 // ---------- artifacts ----------
 
@@ -639,6 +694,31 @@ function str(v: unknown, field: string, max = 200): string {
   if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `${field} is required`);
   if (v.length > max) throw new HttpError(400, `${field} is too long`);
   return v.trim();
+}
+
+/** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
+function scheduleFields(projectId: number, body: any, all: boolean) {
+  const out: { name?: string; cron?: string; brief?: string; type?: string } = {};
+  if (all || body.name !== undefined) out.name = str(body.name, 'Name', 80);
+  if (all || body.cron !== undefined) out.cron = str(body.cron, 'cron', 100);
+  if (all || body.brief !== undefined) out.brief = str(body.brief, 'Brief', 100_000);
+  // Each run's minion gets this type; checked against the registry now so a run can't fail on it later.
+  if (all || body.type !== undefined) out.type = registry(() => store.props.check(projectId, { type: body.type ?? 'chore' })).type?.[0] ?? 'chore';
+  return out;
+}
+
+function scheduled<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof ScheduleError) throw new HttpError(err.status, err.message);
+    throw err;
+  }
+}
+
+/** A schedule for the API: its cron in words and its last run's minion number. */
+function scheduleView(s: Schedule) {
+  return { ...s, when: describeCron(s.cron), last_number: s.last_ticket_id ? (store.getTicket(s.last_ticket_id)?.number ?? null) : null };
 }
 
 /** A stand-in title from the start of a first message, cut at a word near 40 characters. */
@@ -1098,17 +1178,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work being merged, so nothing can start after it`);
       if (f.state === 'wait') follow = { leader, when, base: f.base };
     }
-    const { id, number } = store.createTicket({ project_id: project.id, title, tag, permission_mode: THREAD_PERMISSION_MODE, created_by: session.name });
-    const { notes } = store.props.set('minion', id, project.id, props, session.name);
-    store.props.startStage(id);
-    if (model || effort) store.updateTicket(id, { model, effort });
-    try {
-      const dir = await createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number!, title);
-      store.setTicketDir(id, dir.cwd, dir.branch);
-    } catch (err: any) {
-      store.deleteTicket(id);
-      throw new HttpError(500, `Could not create working directory: ${err.stderr?.trim() || err.message}`);
-    }
+    const { id, notes } = await newMinion(project, { title, tag, props, model, effort }, session.name);
     if (follow) {
       const { leader, when } = follow;
       waiters.chain({ ticket: id, after: leader.id, when, message, from: session.name, base: follow.base });
@@ -1184,13 +1254,42 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/schedules$/);
-  if (m && method === 'GET') {
-    // The scheme's scheduled minions, for the Schedules panel; each with the number of the minion its last run started.
+  if (m && (method === 'GET' || method === 'POST')) {
+    // The scheme's scheduled minions, for the Schedules panel and the Taskmaster; each with the number
+    // of the minion its last run started. People and the Taskmaster add them; minions can't.
     const project = store.getProject(Number(m[1]));
     if (!project) throw new HttpError(404, 'No such scheme');
     inScope(project.id);
-    const schedules = store.schedules.list(project.id).map((s) => ({ ...s, when: describeCron(s.cron), last_number: s.last_ticket_id ? store.getTicket(s.last_ticket_id)?.number ?? null : null }));
-    return json(res, 200, { schedules });
+    if (method === 'POST') {
+      const body = await readJson(req);
+      const fields = scheduleFields(project.id, body, true);
+      const s = scheduled(() => store.schedules.create({ project_id: project.id, ...(fields as Required<typeof fields>), created_by: session.name }));
+      broadcast({ type: 'schedules', projectId: project.id });
+      return json(res, 201, scheduleView(s));
+    }
+    return json(res, 200, { schedules: store.schedules.list(project.id).map(scheduleView) });
+  }
+
+  m = pathname.match(/^\/api\/schedules\/(\d+)$/);
+  if (m && (method === 'PATCH' || method === 'DELETE')) {
+    // Edit, pause or resume, or delete a schedule; runs it already started stay.
+    const s = store.schedules.get(Number(m[1]));
+    if (!s) throw new HttpError(404, 'No such schedule');
+    inScope(s.project_id);
+    if (method === 'DELETE') {
+      store.schedules.remove(s.id);
+      broadcast({ type: 'schedules', projectId: s.project_id });
+      return json(res, 200, { deleted: s.id });
+    }
+    const body = await readJson(req);
+    const patch: Record<string, unknown> = scheduleFields(s.project_id, body, false);
+    if (body.paused !== undefined) {
+      if (typeof body.paused !== 'boolean') throw new HttpError(400, 'paused must be true or false');
+      patch.paused = body.paused;
+    }
+    const updated = scheduled(() => store.schedules.update(s.id, patch));
+    broadcast({ type: 'schedules', projectId: s.project_id });
+    return json(res, 200, scheduleView(updated));
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/search$/);

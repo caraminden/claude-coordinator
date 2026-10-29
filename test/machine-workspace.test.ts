@@ -1,0 +1,142 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+// @ts-ignore: a plain .mjs the agent's computers download
+import { WorkspaceHost, expand, loadConfig, workspaceReply } from '../public/machine-agent.mjs';
+
+// The agent's workspace tools against a real clone with a real origin, as on a laptop.
+const root = mkdtempSync(join(tmpdir(), 'machine-ws-'));
+after(() => rmSync(root, { recursive: true, force: true }));
+const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' }).trim();
+
+const origin = join(root, 'origin.git');
+const seed = join(root, 'seed');
+const clone = join(root, 'clone');
+const outside = join(root, 'outside');
+const logs = join(root, 'appdata-logs');
+mkdirSync(seed);
+mkdirSync(outside);
+mkdirSync(logs);
+writeFileSync(join(outside, 'secret.txt'), 'nope');
+writeFileSync(join(logs, 'godot.log'), 'line one\nline two\n');
+git(root, 'init', '-q', '--bare', '-b', 'main', origin);
+git(seed, 'init', '-q', '-b', 'main');
+writeFileSync(join(seed, 'project.godot'), 'a\nb\n');
+writeFileSync(join(seed, 'readme.txt'), 'hello\n');
+git(seed, 'add', '.');
+git(seed, 'commit', '-q', '-m', 'first');
+git(seed, 'remote', 'add', 'origin', origin);
+git(seed, 'push', '-q', 'origin', 'main');
+git(root, 'clone', '-q', origin, clone);
+// The laptop's standing local change: a reorder of project.godot.
+writeFileSync(join(clone, 'project.godot'), 'b\na\n');
+symlinkSync(outside, join(clone, 'escape'));
+
+const node = process.execPath;
+const configFile = join(root, 'machine-agent.json');
+writeFileSync(configFile, JSON.stringify({
+  workspaces: {
+    delve: {
+      path: clone,
+      read: [logs, join(root, 'missing')],
+      tasks: {
+        ok: { run: [node, '-e', 'console.log("built fine")'], about: 'says hi' },
+        nogodot: { run: [node, '-e', 'process.exit(2)'], hints: [{ exit: 2, say: 'Unzip Godot into Downloads or set GODOT.' }] },
+        locked: { run: [node, '-e', 'console.log("error MSB3027: being used by another process"); process.exit(1)'], hints: [{ match: 'MSB3027|used by another process', say: 'Close the game and the Delve Editor, then retry.' }] },
+        slow: { run: [node, '-e', 'setTimeout(() => console.log("done"), 1500)'] },
+        unset: { run: ['%CITADEL_NOT_SET%'] },
+        'bad task!': { run: ['x'] },
+        empty: { run: [] },
+      },
+    },
+    gone: { path: join(root, 'nowhere') },
+  },
+}));
+const host = new WorkspaceHost({ configFile, jobsDir: join(root, 'jobs') });
+const call = (tool: string, args: object = {}) => host.call(tool, args, '#90 in Citadel', async (name: string, bytes: Buffer) => `/srv/${name}:${bytes.length}`);
+const refused = (p: Promise<unknown>, re: RegExp) => assert.rejects(p, (err: Error) => re.test(err.message));
+
+test('the config keeps good workspaces and tasks and says what it left out', () => {
+  assert.deepEqual([...host.workspaces.keys()], ['delve']);
+  assert.deepEqual([...host.workspaces.get('delve').tasks.keys()], ['ok', 'nogodot', 'locked', 'slow', 'unset']);
+  const problems = host.problems.join('\n');
+  assert.match(problems, /gone: .*does not exist/);
+  assert.match(problems, /read folder .*missing/);
+  assert.match(problems, /bad task!: names use/);
+  assert.match(problems, /empty: "run" must be/);
+  assert.deepEqual(loadConfig(join(root, 'none.json')), { workspaces: new Map(), problems: [] });
+  assert.match(loadConfig(seed + '/readme.txt').problems[0], /JSON/);
+  assert.equal(expand('%Home%/x', { HOME: '/h' }), '/h/x');
+  assert.throws(() => expand('%NOPE%', {}), /NOPE is not set/);
+});
+
+test('reads stay inside the workspace and its read folders', async () => {
+  assert.match((await call('read_file', { workspace: 'delve', path: 'readme.txt' })).text, /1\thello/);
+  assert.match((await call('read_file', { workspace: 'delve', path: join(logs, 'godot.log'), offset: 2 })).text, /2\tline two/);
+  assert.match((await call('list_files', { workspace: 'delve' })).text, /readme\.txt/);
+  assert.doesNotMatch((await call('list_files', { workspace: 'delve' })).text, /^\.git/m);
+  await refused(call('read_file', { workspace: 'delve', path: '../outside/secret.txt' }), /outside workspace delve/);
+  await refused(call('read_file', { workspace: 'delve', path: join(outside, 'secret.txt') }), /outside workspace delve/);
+  await refused(call('read_file', { workspace: 'delve', path: 'escape/secret.txt' }), /outside workspace delve/);
+  await refused(call('read_file', { workspace: 'delve', path: '.git/config' }), /\.git folder is off limits/);
+  await refused(call('read_file', { workspace: 'nope', path: 'x' }), /No workspace "nope".*delve/);
+  assert.equal((await call('fetch_file', { workspace: 'delve', path: join(logs, 'godot.log') })).text.match(/to (\S+) on/)[1], '/srv/godot.log:18');
+  await refused(call('fetch_file', { workspace: 'delve', path: 'escape/secret.txt' }), /outside/);
+});
+
+test('git_sync checks out a pushed branch, carries local changes, and stops on a conflict', async () => {
+  git(seed, 'checkout', '-q', '-b', 'build-7');
+  writeFileSync(join(seed, 'readme.txt'), 'build seven\n');
+  git(seed, 'commit', '-qam', 'seven');
+  git(seed, 'push', '-q', 'origin', 'build-7');
+  const synced = await call('git_sync', { workspace: 'delve', ref: 'build-7' });
+  assert.match(synced.text, /Checked out build-7 in delve: detached at \w+ seven/);
+  assert.match(synced.text, /Before: branch main/);
+  assert.match(synced.text, /M project\.godot/);
+
+  git(seed, 'checkout', '-q', '-b', 'touches-project');
+  writeFileSync(join(seed, 'project.godot'), 'c\n');
+  git(seed, 'commit', '-qam', 'project change');
+  git(seed, 'push', '-q', 'origin', 'touches-project');
+  await refused(call('git_sync', { workspace: 'delve', ref: 'origin/touches-project' }), /would overwrite local changes on this computer in:\nproject\.godot\nNothing was changed/);
+  assert.match(git(clone, 'log', '-1', '--format=%s'), /seven/);
+  assert.equal(git(clone, 'status', '--porcelain', '-uno'), 'M project.godot');
+
+  await refused(call('git_sync', { workspace: 'delve', ref: 'no-such' }), /origin has no branch no-such/);
+  for (const ref of ['--upload-pack=x', 'a..b', 'x@{1}', '']) await refused(call('git_sync', { workspace: 'delve', ref }), /isn't a branch name/);
+  assert.match((await call('workspaces')).text, /Checked out: detached at \w+ seven[\s\S]*- ok: .* \(says hi\)/);
+});
+
+test('only configured tasks run, with hints, one at a time, and long ones become jobs', async () => {
+  const ok = await call('run_task', { workspace: 'delve', task: 'ok' });
+  assert.match(ok.text, /ok in delve succeeded \(exit 0\)[\s\S]*built fine/);
+  assert.equal(ok.isError, false);
+  const missing = await call('run_task', { workspace: 'delve', task: 'nogodot' });
+  assert.equal(missing.isError, true);
+  assert.match(missing.text, /FAILED \(exit 2\)[\s\S]*Unzip Godot/);
+  assert.match((await call('run_task', { workspace: 'delve', task: 'locked' })).text, /Close the game and the Delve Editor/);
+  await refused(call('run_task', { workspace: 'delve', task: 'rm -rf' }), /no task "rm -rf".*Only this computer's owner/);
+  await refused(call('run_task', { workspace: 'delve', task: 'unset' }), /CITADEL_NOT_SET is not set/);
+
+  const started = await call('run_task', { workspace: 'delve', task: 'slow', wait: 0 });
+  const id = started.text.match(/job (\w+)\)/)[1];
+  assert.match(started.text, /still running/);
+  await refused(call('git_sync', { workspace: 'delve', ref: 'main' }), /busy: task slow for #90 in Citadel/);
+  await refused(call('run_task', { workspace: 'delve', task: 'ok' }), /busy/);
+  const finished = await call('job', { id, wait: 10 });
+  assert.match(finished.text, /slow in delve succeeded[\s\S]*done/);
+  assert.match((await call('run_task', { workspace: 'delve', task: 'ok' })).text, /succeeded/);
+  await refused(call('job', { id: 'nope' }), /No job nope/);
+});
+
+test('the MCP side lists the tools and answers calls and unknown methods', async () => {
+  const list = await workspaceReply(host, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, 'x');
+  assert.deepEqual(list.result.tools.map((t: any) => t.name), ['workspaces', 'git_sync', 'run_task', 'job', 'read_file', 'list_files', 'fetch_file']);
+  const bad = await workspaceReply(host, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'run_task', arguments: { workspace: 'delve', task: 'nope' } } }, 'x');
+  assert.equal(bad.result.isError, true);
+  assert.equal((await workspaceReply(host, { jsonrpc: '2.0', id: 3, method: 'resources/list' }, 'x')).error.code, -32601);
+  assert.equal(await workspaceReply(host, { jsonrpc: '2.0', method: 'notifications/initialized' }, 'x'), null);
+});

@@ -1,0 +1,180 @@
+// Machines: people list and manage them; a machine's agent connects with its own token; a minion's
+// turn opens sessions to one and sends them messages.
+import { mkdir, writeFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
+import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, hashToken, newToken } from '../machines.ts';
+import type { Machine } from '../db.ts';
+import { HttpError, json, readJson, type Ctx, type Route } from '../http.ts';
+
+// The agent caps fetch_file at 20 MB too.
+const MAX_MACHINE_UPLOAD = 20_000_000;
+// Notes go into every thread's system prompt while the machine is online, so keep them short.
+const MAX_MACHINE_NOTES = 2000;
+
+function machineName(v: unknown): string {
+  const name = typeof v === 'string' ? v.trim().toLowerCase() : '';
+  if (!MACHINE_NAME.test(name)) throw new HttpError(400, 'Use 1 to 30 lowercase letters, digits and dashes, like godot-laptop');
+  if (RESERVED_NAMES.has(name)) throw new HttpError(400, 'That name is taken by the app\'s own tools');
+  if (name.endsWith(WS_SUFFIX)) throw new HttpError(400, `Names can't end in ${WS_SUFFIX}: that's how a machine's workspace tools are named`);
+  return name;
+}
+
+/** A file a workspace session's fetch_file sends: saved in that minion's shared files, under machine-files/<machine>/. */
+async function machineUpload({ req, res, url, app }: Ctx, machine: Machine) {
+  const ticketId = app.machines.workspaceTicket(machine, url.searchParams.get('session') ?? '');
+  const ticket = ticketId === null ? undefined : app.store.getTicket(ticketId);
+  if (!ticket) throw new HttpError(410, 'No such workspace session');
+  const name = basename((url.searchParams.get('name') ?? '').replace(/\\/g, '/')).replace(/[^\w.-]/g, '_').replace(/^\.+/, '').slice(0, 100) || 'file';
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_MACHINE_UPLOAD) throw new HttpError(413, 'Files are limited to 20 MB');
+    chunks.push(chunk);
+  }
+  const dir = join(app.sharedDir(ticket), 'machine-files', machine.name);
+  await mkdir(dir, { recursive: true });
+  const dot = name.lastIndexOf('.');
+  const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+  // Never overwrite: a second fetch of report.zip lands as report-2.zip.
+  for (let n = 1; ; n++) {
+    const path = join(dir, n === 1 ? name : `${stem}-${n}${ext}`);
+    try {
+      await writeFile(path, Buffer.concat(chunks), { flag: 'wx' });
+      return json(res, 201, { path });
+    } catch (err: any) {
+      if (err.code !== 'EEXIST' || n > 999) throw err;
+    }
+  }
+}
+
+/** A route a machine's agent calls with its token, which reaches nothing else. */
+const agent = (method: string, path: string, handler: (ctx: Ctx, machine: Machine) => unknown): Route => ({
+  method, path, who: 'machine',
+  handler(ctx) {
+    const machine = ctx.app.machines.authenticate(ctx.req);
+    if (!machine) throw new HttpError(401, 'Unknown machine token; make a new one in the Machines panel');
+    return handler(ctx, machine);
+  },
+});
+
+/** What a machine's agent calls: hold its stream open, pass on a message from its MCP server, its details, a file. */
+export const agentRoutes: Route[] = [
+  agent('GET', '/api/machines/connect', ({ url, res, app }, machine) => {
+    const info = (k: string) => (url.searchParams.get(k) ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200);
+    return app.machines.connectAgent(machine, res, { host: info('host'), command: info('command') });
+  }),
+  agent('POST', '/api/machines/send', async ({ req, res, app }, machine) => {
+    // Room for screenshots, which MCP servers send as base64 images.
+    const body = await readJson(req, 50_000_000);
+    if (typeof body.session !== 'string') throw new HttpError(400, 'session is required');
+    // A gone session tells the agent to stop that copy of its MCP server.
+    if (!app.machines.fromAgent(machine, body.session, body)) throw new HttpError(410, 'No such session');
+    return json(res, 202, {});
+  }),
+  agent('POST', '/api/machines/info', async ({ req, res, app }, machine) => {
+    if (!app.machines.setInfo(machine, await readJson(req, 200_000))) throw new HttpError(409, 'Connect first');
+    return json(res, 202, {});
+  }),
+  agent('POST', '/api/machines/upload', machineUpload),
+];
+
+const people = { who: ['person'], refuse: 'Only people manage machines' } as const;
+const turns = { who: ['minion'], refuse: 'Only a minion\'s turn can use a machine' } as const;
+
+export const machineRoutes: Route[] = [
+  // On the app's own address only when machines have no address of their own (MACHINES_URL).
+  ...agentRoutes.map((r): Route => ({
+    ...r,
+    handler(ctx) {
+      if (ctx.app.machinesUrl) throw new HttpError(403, `Machines connect at ${ctx.app.machinesUrl.origin}, not here`);
+      if (ctx.app.preview) throw new HttpError(403, 'Machines connect to the live app, not a preview');
+      return r.handler(ctx);
+    },
+  })),
+
+  { method: 'GET', path: '/api/machines', ...people, handler: ({ res, app }) => json(res, 200, app.machines.list()) },
+  {
+    method: 'POST', path: '/api/machines', ...people,
+    async handler({ req, res, app, session }) {
+      const name = machineName((await readJson(req)).name);
+      let machine;
+      try {
+        // The real hash goes in once the id (part of the token) is known.
+        machine = app.store.createMachine(name, '', session.name);
+      } catch {
+        throw new HttpError(409, 'A machine with that name already exists');
+      }
+      const token = newToken(machine.id);
+      app.store.updateMachine(machine.id, { token_hash: hashToken(token) });
+      app.broadcast({ type: 'machines', machines: app.machines.list() });
+      // The only time the token is shown; the app keeps just its hash.
+      return json(res, 201, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? null });
+    },
+  },
+  {
+    method: 'POST', path: '/api/machines/:machine/token', ...people,
+    handler({ res, app, machine }) {
+      // A new token locks out whoever holds the old one, the connected agent included.
+      const token = newToken(machine.id);
+      app.store.updateMachine(machine.id, { token_hash: hashToken(token) });
+      app.machines.disconnect(machine.id);
+      return json(res, 200, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? null });
+    },
+  },
+  {
+    method: 'PATCH', path: '/api/machines/:machine', ...people,
+    async handler({ req, res, app, machine }) {
+      // Any of name, notes and workspace_tools.
+      const body = await readJson(req);
+      const fields: { name?: string; notes?: string; workspace_tools?: number } = {};
+      if (body.workspace_tools !== undefined) {
+        if (typeof body.workspace_tools !== 'boolean') throw new HttpError(400, 'workspace_tools must be true or false');
+        fields.workspace_tools = body.workspace_tools ? 1 : 0;
+      }
+      if (body.name !== undefined) fields.name = machineName(body.name);
+      if (body.notes !== undefined) {
+        if (typeof body.notes !== 'string') throw new HttpError(400, 'notes must be text');
+        fields.notes = body.notes.replace(/\r\n/g, '\n').trim();
+        if (fields.notes.length > MAX_MACHINE_NOTES) throw new HttpError(400, `Notes are limited to ${MAX_MACHINE_NOTES.toLocaleString('en')} characters`);
+      }
+      try {
+        app.store.updateMachine(machine.id, fields);
+      } catch {
+        throw new HttpError(409, 'A machine with that name already exists');
+      }
+      // Switched off: minions mid-turn lose the tools now, not at their next turn.
+      if (fields.workspace_tools === 0) app.machines.endServer(machine.id, 'ws');
+      app.broadcast({ type: 'machines', machines: app.machines.list() });
+      return json(res, 200, app.machines.view(app.store.getMachine(machine.id)!));
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/machines/:machine', ...people,
+    handler({ res, app, machine }) {
+      app.store.deleteMachine(machine.id);
+      app.machines.disconnect(machine.id);
+      app.broadcast({ type: 'machines', machines: app.machines.list() });
+      return json(res, 200, {});
+    },
+  },
+
+  // A minion's MCP proxy: open a session to a machine (held open as a stream), then send it messages.
+  {
+    method: 'GET', path: '/api/machines/:machineId/session', ...turns,
+    handler({ res, url, app, caller, params }) {
+      const server = url.searchParams.get('server') === 'ws' ? 'ws' : 'mcp';
+      const who = `#${caller!.number} in ${app.store.getProject(caller!.project_id)?.name ?? 'a scheme'}`;
+      if (!app.machines.openSession(Number(params.machineId), caller!.id, server, who, res)) throw new HttpError(503, server === 'ws' ? 'That machine is offline, or its workspace tools are off' : 'That machine is offline');
+    },
+  },
+  {
+    method: 'POST', path: '/api/machines/:machineId/session/:session', ...turns,
+    async handler({ req, res, app, caller, params }) {
+      if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
+      const body = await readJson(req, 50_000_000);
+      if (!app.machines.fromSession(params.session, caller!.id, body.message)) throw new HttpError(503, 'That machine went offline');
+      return json(res, 202, {});
+    },
+  },
+];

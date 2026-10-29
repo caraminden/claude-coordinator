@@ -46,7 +46,7 @@ export const MIN_EXPLANATION = 20;
 
 const ASK = 'If a person really wants this, they can run it themselves.';
 
-const under = (p: string, root: string) => p === root || p.startsWith(root + '/');
+const under = (p: string, root: string) => p === root || p.startsWith(root.endsWith('/') ? root : root + '/');
 
 function deployNote(cfg: TripwireConfig): string {
   return hasDeployScript(cfg)
@@ -100,6 +100,27 @@ function secretInside(root: string, cfg: TripwireConfig): string | null {
   return secrets.find((x) => x !== root && under(x, root)) ?? null;
 }
 const SEARCHERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag']);
+// grep and rg options whose value is the next word (alone, or ending a cluster like -rnA 3).
+const SEARCH_VALUE = /^-[a-zA-Z]*[efmABCdDtTgjM]$|^--(regexp|file|max-count|context|before-context|after-context|type|type-not|glob|iglob|threads|max-depth|include|exclude|exclude-dir|max-columns)$/;
+
+/** The folders a grep or rg names to search: its plain words after the pattern, which -e or -f give instead. */
+function searchRoots(args: Word[]): Word[] {
+  const plain: Word[] = [];
+  let given = false;
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k].text;
+    if (t === '--') {
+      plain.push(...args.slice(k + 1));
+      break;
+    }
+    if (!t.startsWith('-') || t === '-') plain.push(args[k]);
+    else {
+      if (/^-[a-zA-Z]*[ef]|^--(regexp|file)\b/.test(t)) given = true;
+      if (SEARCH_VALUE.test(t)) k++;
+    }
+  }
+  return given ? plain : plain.slice(1);
+}
 
 const LIVE_DB = ['coordinator.db', 'coordinator.db-wal', 'coordinator.db-shm', 'coordinator.db-journal'];
 
@@ -526,17 +547,21 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const bsdE = (w: Word, k: number) => /^[a-zA-Z]*e[a-zA-Z]*$/.test(w.text) && !/^-[a-zA-Z]*[oOpCuUgGtq]$|^--\w+$|^[a-zA-Z]*[oOpUt]$/.test(args[k - 1]?.text ?? '');
   if (name === 'ps' && args.some(bsdE)) return hard(`This \`ps\` prints processes' environments. ${ENVIRON_WHY}`);
   const sub = args.filter((w) => !w.text.startsWith('-')).map((w) => w.text);
-  const auth = sub.indexOf('auth');
-  if (name === 'gh' && auth >= 0 && (sub[auth + 1] === 'token' || (sub[auth + 1] === 'status' && args.some((w) => /^(-t|--show-token)$/.test(w.text))))) return hard(`\`gh auth\` would print the token. ${GH_TOKEN_WHY}`);
+  if (name === 'gh' && sub[0] === 'auth' && (sub[1] === 'token' || (sub[1] === 'status' && args.some((w) => /^(-t|--show-token)$/.test(w.text))))) return hard(`\`gh auth\` would print the token. ${GH_TOKEN_WHY}`);
 
   const recursive = name === 'rg' || name === 'ag' || args.some((w) => /^-[a-zA-Z]*[rR]|^--recursive$|^--dereference-recursive$|^--directories=recurse$/.test(w.text));
+  if (SEARCHERS.has(name) && recursive) {
+    const roots = searchRoots(args);
+    for (const p of roots.length ? roots.flatMap((w) => pathsOf(w, st, cfg)) : st.cwd ? [st.cwd] : []) {
+      const secret = secretInside(p, cfg);
+      if (secret) return hard(`Searching ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
+    }
+  }
   for (const w of METADATA.has(name) ? [] : args) {
     if (w.unknown && ENVIRON_HIDDEN.test(w.text)) return hard(`Reading ${w.text.replace('//', '/<pid>/')} is blocked. ${ENVIRON_WHY}`);
     for (const p of pathsOf(w, st, cfg)) {
       const why = readReason(p, cfg);
       if (why) return hard(`Reading ${p} is blocked. ${why}`);
-      const secret = SEARCHERS.has(name) && recursive ? secretInside(p, cfg) : null;
-      if (secret) return hard(`Searching ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
     }
   }
 

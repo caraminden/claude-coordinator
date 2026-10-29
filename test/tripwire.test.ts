@@ -86,7 +86,6 @@ const BLOCKED: [string, string?][] = [
   ['cat ~/.config/gh/hosts.yml'],
   ['gh auth token'],
   ['gh auth status --show-token'],
-  ['gh -R a/b auth token'],
   ['ps aux e'],
   ['ps -p 1 e'],
   ['cat "/proc/$p/task/$t/environ"'],
@@ -94,6 +93,10 @@ const BLOCKED: [string, string?][] = [
   ['cd ~ && grep -rn token .'],
   ['rg oauth_token ~/.config/gh'],
   ['grep -R PRIVATE /home/u'],
+  ['grep -r SESSION_SECRET /'],
+  ['cd ~/.config && rg token'],
+  ['rg -t ts -e foo ~/.config'],
+  ['rm -rf /'],
   // other schemes
   ['touch ~/.local/share/claude-coordinator/projects/1/shared/project/note.md'],
   ['cd ../../../1/tickets/4 && git commit -am wip'],
@@ -192,6 +195,12 @@ const ALLOWED = [
   'grep -rn foo src ~/.claude/projects',
   'rg foo ~/.local/share/claude-coordinator/projects/2/shared',
   'grep -n token ~/.config/gh/config.yml',
+  'grep -rn "/home/u" src',
+  'rg -t ts "/home/u/.config" docs',
+  'grep -rn -A 3 /home/u/.config src test',
+  'gh search issues auth token',
+  'gh issue create -t auth -b token',
+  'rg -n "/" src',
   'cd ~/claude-coordinator && git pull --ff-only /home/u/.local/share/claude-coordinator/projects/2/repo main && systemd-run --user --collect --unit=cc-restart-when-idle /tmp/cc-restart-when-idle.sh',
   'cd ~/claude-coordinator && curl -s localhost:8573/api/version && gh pr list',
   'chmod 600 ~/.local/share/claude-coordinator/coordinator.db*',
@@ -279,6 +288,7 @@ test('file tools: writes, edits and reads', () => {
   assert.equal(t('Read', { file_path: '/proc/1234/status' }), null);
   assert.ok(t('Grep', { pattern: 'SECRET', path: `${home}/.config` }));
   assert.ok(t('Grep', { pattern: 'x', path: home }));
+  assert.ok(t('Grep', { pattern: 'x', path: '/' }));
   assert.equal(t('Grep', { pattern: 'x', path: `${home}/.config/systemd` }), null);
   assert.equal(t('Grep', { pattern: 'x', path: worktree }), null);
   assert.equal(t('Glob', { pattern: '*', path: `${home}/.config` }), null);

@@ -19,6 +19,17 @@ export function agentToken(data: string, id: number): string {
   return new Auth(PASSWORD, SECRET).agentToken(id, row ? JSON.parse(row.value).current ?? undefined : undefined);
 }
 
+/** Poll `fn` every 50 ms until it returns something truthy, or fail after `ms`. */
+export async function until<T>(what: string, fn: () => Promise<T | undefined | null | false> | T | undefined | null | false, ms = 30_000): Promise<T> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 /** A port nothing is listening on right now. */
 export async function freePort(): Promise<number> {
   const srv = createServer();
@@ -44,15 +55,16 @@ export type Booted = {
 };
 
 /**
- * Start server.ts on a fresh scratch folder (or `root`) and sign in as `name`. Turns can't run
- * (CLAUDE_BIN is /bin/false) unless `env` says otherwise; `env` entries override the defaults.
+ * Start server.ts (or a copy of it, `script`) on a fresh scratch folder (or `root`, which is then the
+ * caller's to delete) and sign in as `name`. Turns can't run (CLAUDE_BIN is /bin/false) unless `env`
+ * says otherwise; `env` entries override the defaults, and an undefined one removes it.
  */
-export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean } = {}): Promise<Booted> {
+export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean; script?: string } = {}): Promise<Booted> {
   const root = opts.root ?? mkdtempSync(join(tmpdir(), 'boot-'));
   const data = join(root, 'data');
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
-  const proc = spawn(process.execPath, [join(REPO, 'server.ts')], {
+  const proc = spawn(process.execPath, [opts.script ?? join(REPO, 'server.ts')], {
     env: {
       ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: data, CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,

@@ -686,9 +686,9 @@ async function approve(args: any): Promise<string> {
 }
 
 /** The text of a replace-it-all tool. Only an explicit string counts: a missing or misnamed argument must never mean "clear". */
-function wholeText(args: any, what: string): string {
+function wholeText(args: any): string {
   if (typeof args.instructions !== 'string') {
-    throw new Error(`instructions is required and must be text: send the whole new ${what}. Nothing was changed. To clear it on purpose, pass instructions: "" (an empty string).`);
+    throw new Error(`instructions is required and must be text: send the whole new text. Nothing was changed. To clear it on purpose, pass instructions: "" (an empty string).`);
   }
   return args.instructions;
 }
@@ -793,11 +793,11 @@ async function runTool(name: string, args: any): Promise<string> {
       return `${APP_NAME}-wide instructions${app.by ? ` (last changed by ${app.by})` : ''}:\n\n${app.text}`;
     }
     case 'set_app_instructions': {
-      const app = await call('PUT', '/api/app/instructions', { text: wholeText(args, 'text') });
+      const app = await call('PUT', '/api/app/instructions', { text: wholeText(args) });
       return app.text ? `Saved (${app.text.length} characters).` : `Cleared the ${APP_NAME}-wide instructions.`;
     }
     case 'set_project_instructions': {
-      const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: wholeText(args, 'text') });
+      const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: wholeText(args) });
       return project.instructions ? `Saved (${project.instructions.length} characters).` : 'Cleared the scheme instructions.';
     }
     case 'message_ticket': {

@@ -99,3 +99,8 @@ test('update_ticket, set_thread_status and update_schedule refuse when given not
   refused(await tool(TM, 'coordinator', 'update_schedule', { schedule_id: 1 }), /at least one of/);
   assert.equal(store.getTicket(Minion.id)!.title, title);
 });
+
+test('explicit empties still go through: replies [], note null', async () => {
+  assert.ok(!(await tool(Minion, 'thread', 'set_thread_status', { replies: [] })).isError);
+  assert.ok(!(await tool(TM, 'coordinator', 'update_ticket', { ticket_id: Minion.number, note: null })).isError);
+});

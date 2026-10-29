@@ -55,7 +55,16 @@ echo "Total: $(mb $total)"
 if [[ $apply == 1 && $total -gt 0 ]]; then
   sql "DELETE FROM claude_state WHERE ticket_id IN ($closed_state)"
   # state.db is auto_vacuum=incremental: hand the freed pages back to the disk.
-  if [[ -f $STATE_DB ]]; then sqlite3 -cmd ".timeout 30000" "$STATE_DB" "PRAGMA incremental_vacuum;" >/dev/null; fi
+  # 16 MB a step, so the server's writes to state.db never wait long behind it; stops when a step frees
+  # nothing (a state.db without auto_vacuum).
+  free() { sqlite3 -cmd ".timeout 30000" "$STATE_DB" "PRAGMA freelist_count;"; }
+  if [[ -f $STATE_DB ]]; then
+    left=$(free) was=$((left + 1))
+    while ((left > 0 && left < was)); do
+      sqlite3 -cmd ".timeout 30000" "$STATE_DB" "PRAGMA incremental_vacuum(4096);" >/dev/null
+      was=$left left=$(free)
+    done
+  fi
 fi
 
 # Worktrees of long-closed minions; their branches stay.

@@ -365,8 +365,8 @@ export class Store {
 
   /**
    * Attach state.db (claude_state's home), and move claude_state there from the main file if it is
-   * still in it: from before state.db, or created empty by an older release after a rollback (whose
-   * rows are then the newer ones). Copy, then drop, as two commits: SQLite doesn't commit two WAL
+   * still in it: from before state.db, created by an older release after a rollback, or in a restored
+   * backup. Copy, then drop, as two commits: SQLite doesn't commit two WAL
    * files as one, so a crash in between leaves the rows in both and the next start repeats it.
    */
   private attachState() {
@@ -376,8 +376,13 @@ export class Store {
     this.db.exec(STATE_SCHEMA);
     if (!this.db.prepare("SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'claude_state'").get()) return;
     const cols = 'path, project_id, ticket_id, size, mtime, data';
-    this.db.exec(`BEGIN; INSERT OR REPLACE INTO state.claude_state (${cols}) SELECT ${cols} FROM main.claude_state; COMMIT;`);
+    // The newer copy of each file wins: an older release's after a rollback, state.db's after restoring an old backup.
+    this.db.exec(`BEGIN; INSERT INTO state.claude_state (${cols}) SELECT ${cols} FROM main.claude_state WHERE true
+      ON CONFLICT(path) DO UPDATE SET project_id = excluded.project_id, ticket_id = excluded.ticket_id, size = excluded.size,
+        mtime = excluded.mtime, data = excluded.data WHERE excluded.mtime > claude_state.mtime; COMMIT;`);
     this.db.exec('DROP TABLE main.claude_state');
+    // Minions an older release deleted meanwhile cleared only its own table.
+    this.db.exec('DELETE FROM state.claude_state WHERE ticket_id IS NOT NULL AND ticket_id NOT IN (SELECT id FROM main.tickets)');
     this.db.exec('VACUUM main'); // hand the freed pages back, so the main file shrinks
   }
 

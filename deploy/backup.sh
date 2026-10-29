@@ -66,8 +66,8 @@ if [[ -f $state ]]; then
   rm -f "$tmp"
   trap 'rm -f "$tmp"' EXIT
   sqlite3 "$state" ".timeout 30000" ".backup '$tmp'"
-  scheck=$(sqlite3 :memory: ".restore '$tmp'" "PRAGMA integrity_check;")
-  [[ $scheck == ok ]] || { echo "Session state backup failed its restore check: $scheck" >&2; exit 1; }
+  scheck=$(sqlite3 :memory: ".restore '$tmp'" "PRAGMA integrity_check;" "SELECT 'rows', count(*) FROM claude_state;")
+  [[ $scheck == ok$'\n'rows\|* ]] || { echo "Session state backup failed its restore check: $scheck" >&2; exit 1; }
   chmod 600 "$tmp"
   mv -f "$tmp" "$sout"
   trap - EXIT

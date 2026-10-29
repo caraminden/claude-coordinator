@@ -93,3 +93,17 @@ test('a copy of the main file (previews, boot-check) leaves session state out', 
   copy.db.close();
   s.db.close();
 });
+
+test('restoring an old backup brings back only what state.db lacks or holds an older copy of, and drops deleted minions\' rows', () => {
+  const d = dir();
+  const file = join(d, 'coordinator.db');
+  const ticket = oldLayout(file, [row('projects/a/1.jsonl', 1, 20, 1)]);
+  const st = new DatabaseSync(join(d, 'state.db'));
+  st.prepare('INSERT INTO claude_state VALUES (?, 1, ?, 30, 5, ?)').run('projects/a/1.jsonl', ticket, new Uint8Array(30));
+  st.prepare('INSERT INTO claude_state VALUES (?, 1, 99, 5, 1, ?)').run('projects/a/gone.jsonl', new Uint8Array(5)); // deleted while a rollback ran
+  st.close();
+  const s = new Store(file);
+  assert.equal(s.getClaudeState('projects/a/1.jsonl')!.size, 30, "state.db's newer copy stays");
+  assert.equal(s.getClaudeState('projects/a/gone.jsonl'), undefined, 'minion 99 is not in the database');
+  s.db.close();
+});

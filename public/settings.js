@@ -187,7 +187,7 @@ const splitLines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filte
 /** The Settings page's tabs; each is its own route, so old links to them still work. */
 export function settingsTabs() {
   return h('nav', { class: 'settings-tabs' },
-    [['instructions', 'Instructions'], ['approvals', 'Needs approval'], ['properties', 'Properties']].map(([kind, label]) =>
+    [['instructions', 'Instructions'], ['app-instructions', 'Citadel-wide'], ['approvals', 'Needs approval'], ['properties', 'Properties']].map(([kind, label]) =>
       h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label)));
 }
 
@@ -273,6 +273,116 @@ function renderInstructionsHead() {
       p.instructions_updated_by ? ` Last changed by ${p.instructions_updated_by} ${ago(p.instructions_updated_at)}.` : ''));
 }
 
+/** The last few saves of some instructions, each with what it removed and added, and how to reload them. */
+function recentChanges(url) {
+  const history = h('div', { class: 'instructions-history' });
+  const load = async () => {
+    try {
+      const { history: saves } = await api(url);
+      history.replaceChildren(...(saves.length ? [h('h3', { class: 'settings-label' }, 'Recent changes')] : []),
+        ...saves.map((s) => h('details', {},
+          h('summary', {}, `${s.by}, ${ago(s.at)} `,
+            h('span', { class: 'muted small' }, `+${s.diff.filter((d) => d.op === '+').length} −${s.diff.filter((d) => d.op === '-').length} lines`)),
+          h('pre', { class: 'instructions-diff' }, ...s.diff.map((d) => h('div', { class: d.op === '+' ? 'add' : d.op === '-' ? 'del' : 'gap' }, d.op === '…' ? '…' : `${d.op} ${d.text}`))))));
+    } catch (err) {
+      history.replaceChildren(h('p', { class: 'muted small' }, `Could not load recent changes: ${err.message}`));
+    }
+  };
+  return [history, load];
+}
+
+/** The Citadel-wide instructions as last loaded or broadcast, for the tab below. */
+let appInstructions = null;
+
+export function onAppInstructionsUpdate(instructions) {
+  appInstructions = instructions;
+  const text = document.getElementById('app-instructions-text');
+  if (text && !text.hasAttribute('data-draft')) text.value = instructions.text;
+  renderAppInstructionsHead();
+}
+
+function renderAppInstructionsHead() {
+  const el = document.getElementById('app-instructions-head');
+  if (!el) return;
+  const a = appInstructions;
+  el.replaceChildren(
+    h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
+      h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+    settingsTabs(),
+    h('div', { class: 'meta' },
+      'Every minion and Taskmaster in every scheme gets these in its system prompt, right before its scheme instructions, from its next turn. ',
+      'A scheme instruction overrides one of these only where it names the rule it replaces.',
+      a?.by ? ` Last changed by ${a.by} ${ago(a.at)}.` : ''));
+}
+
+/** Main panel: edit the instructions every scheme shares. */
+export function appInstructionsEditor() {
+  const textarea = h('textarea', {
+    id: 'app-instructions-text', class: 'instructions-text', spellcheck: 'false', disabled: true,
+    placeholder: 'How people like to work in every scheme: tone, when to ask, how to hand work off…',
+  });
+  const counter = h('span', { class: 'muted counter' });
+  const status = h('span', { class: 'muted', role: 'status' }, 'Loading…');
+  const save = h('button', { type: 'button', disabled: true }, 'Save');
+  const discard = h('button', { type: 'button', class: 'secondary', disabled: true }, 'Discard');
+  const saved = () => appInstructions?.text ?? '';
+  const sync = () => {
+    const dirty = textarea.value.trim() !== saved().trim();
+    textarea.toggleAttribute('data-draft', dirty);
+    const n = textarea.value.trim().length;
+    counter.textContent = `${count(n)} / ${count(MAX_INSTRUCTIONS)}`;
+    counter.classList.toggle('over', n > MAX_INSTRUCTIONS);
+    save.disabled = !dirty || n > MAX_INSTRUCTIONS;
+    discard.disabled = !dirty;
+  };
+  textarea.addEventListener('input', () => {
+    status.textContent = '';
+    sync();
+  });
+  const [history, loadHistory] = recentChanges('api/app/instructions/history');
+  save.onclick = async () => {
+    save.disabled = true;
+    status.textContent = 'Saving…';
+    try {
+      appInstructions = await api('api/app/instructions', { method: 'PUT', body: { text: textarea.value } });
+      textarea.value = appInstructions.text;
+      status.textContent = 'Saved. Every scheme picks this up on its next turn.';
+      renderAppInstructionsHead();
+      loadHistory();
+    } catch (err) {
+      status.textContent = err.message;
+    }
+    sync();
+  };
+  discard.onclick = () => {
+    textarea.value = saved();
+    status.textContent = '';
+    sync();
+  };
+  const section = h('section', { class: 'artifacts-main instructions-main' },
+    h('div', { class: 'ticket-head', id: 'app-instructions-head' }),
+    textarea,
+    h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
+    history);
+  (async () => {
+    try {
+      appInstructions = await api('api/app/instructions');
+      textarea.value = appInstructions.text;
+      textarea.disabled = false;
+      status.textContent = '';
+      renderAppInstructionsHead();
+      textarea.focus();
+    } catch (err) {
+      status.textContent = `Could not load them: ${err.message}`;
+    }
+    sync();
+  })();
+  sync();
+  loadHistory();
+  setTimeout(renderAppInstructionsHead);
+  return section;
+}
+
 /** Main panel: edit the project's instructions, or import them from Claude Code. */
 export function instructionsEditor() {
   const p = view.project;
@@ -344,20 +454,7 @@ export function instructionsEditor() {
     loadInstructionSources(picker, insert);
   };
 
-  // The last few saves, each with what it removed and added.
-  const history = h('div', { class: 'instructions-history' });
-  const loadHistory = async () => {
-    try {
-      const { history: saves } = await api(`api/projects/${p.id}/instructions/history`);
-      history.replaceChildren(...(saves.length ? [h('h3', { class: 'settings-label' }, 'Recent changes')] : []),
-        ...saves.map((s) => h('details', {},
-          h('summary', {}, `${s.by}, ${ago(s.at)} `,
-            h('span', { class: 'muted small' }, `+${s.diff.filter((d) => d.op === '+').length} −${s.diff.filter((d) => d.op === '-').length} lines`)),
-          h('pre', { class: 'instructions-diff' }, ...s.diff.map((d) => h('div', { class: d.op === '+' ? 'add' : d.op === '-' ? 'del' : 'gap' }, d.op === '…' ? '…' : `${d.op} ${d.text}`))))));
-    } catch (err) {
-      history.replaceChildren(h('p', { class: 'muted small' }, `Could not load recent changes: ${err.message}`));
-    }
-  };
+  const [history, loadHistory] = recentChanges(`api/projects/${p.id}/instructions/history`);
 
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head', id: 'instructions-head' }),

@@ -3,6 +3,7 @@
 import { mkdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { cleanPluginDirs, cleanRules, lines } from '../approvals.ts';
+import { APP_NAME } from '../appname.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, TICKET_TAGS, type Project, type Ticket, type TicketTag } from '../db.ts';
 import { inboxItems } from '../inbox.ts';
@@ -262,6 +263,40 @@ export const projectRoutes: Route[] = [
     method: 'GET', path: '/api/projects/:project/instructions/history', who: ['person'],
     handler({ res, app, project }) {
       const history = app.store.instructionHistory(project.id, 5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text) }));
+      return json(res, 200, { history });
+    },
+  },
+  {
+    // The Citadel-wide instructions: people, and the Citadel scheme's Taskmaster only (checked below).
+    method: ['GET', 'PUT'], path: '/api/app/instructions', who: PEOPLE_AND_TASKMASTER,
+    async handler({ req, res, app, session, caller }) {
+      const { store, runner } = app;
+      if (caller && caller.project_id !== GLOBAL_OWNER) {
+        throw new HttpError(403, `Only people and the ${APP_NAME} scheme's ${AGENT_NAME} use this. The ${APP_NAME}-wide instructions are already in your prompt; to propose a change, message that ${AGENT_NAME} with message_taskmaster`);
+      }
+      if (req.method === 'GET') return json(res, 200, store.appInstructions());
+      const body = await readJson(req);
+      if (typeof body.text !== 'string') throw new HttpError(400, 'text must be text');
+      const text = body.text.replace(/\r\n/g, '\n').trim();
+      if (text.length > MAX_INSTRUCTIONS) {
+        throw new HttpError(400, `Instructions are ${text.length.toLocaleString('en')} characters; the limit is ${MAX_INSTRUCTIONS.toLocaleString('en')}`);
+      }
+      if (text !== store.appInstructions().text) {
+        store.setAppInstructions(text, session.name);
+        // Every Taskmaster gets the line, since the text reaches every scheme.
+        for (const p of store.listProjects()) {
+          const coordinator = store.getCoordinator(p.id);
+          if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} ${text ? 'updated' : 'cleared'} the ${APP_NAME}-wide instructions; they apply from each minion's next turn in every scheme.` });
+        }
+        app.broadcast({ type: 'app-instructions', instructions: store.appInstructions() });
+      }
+      return json(res, 200, store.appInstructions());
+    },
+  },
+  {
+    method: 'GET', path: '/api/app/instructions/history', who: ['person'],
+    handler({ res, app }) {
+      const history = app.store.appInstructionHistory(5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text) }));
       return json(res, 200, { history });
     },
   },

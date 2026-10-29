@@ -1,5 +1,5 @@
 // Shared by every view: state, API and DOM helpers, live updates, routing and sign-in.
-import { onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
+import { onAppInstructionsUpdate, onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
 import { costChip, renderCost } from './cost.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
 import { showProject, showTicket } from './project.js';
@@ -449,6 +449,7 @@ function connectStream(catchUp = false) {
     }
     if (msg.type === 'artifacts') onArtifactsChanged(msg.projectId);
     if (msg.type === 'project') onProjectUpdate(msg.project);
+    if (msg.type === 'app-instructions') onAppInstructionsUpdate(msg.instructions);
     if (msg.type === 'properties') onPropertiesChanged(msg.projectId);
     if (msg.type === 'schedules') onSchedulesChanged(msg.projectId);
     if (msg.type === 'views') onViewsChanged(msg.projectId);
@@ -714,6 +715,7 @@ async function route() {
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/(?:settings|instructions)$/))) await showProject(Number(m[1]), { kind: 'instructions' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/app-instructions$/))) await showProject(Number(m[1]), { kind: 'app-instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });

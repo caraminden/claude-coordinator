@@ -14,6 +14,8 @@ const TICKET = Number(process.env.COORDINATOR_TICKET);
 const APPROVALS = process.env.COORDINATOR_APPROVALS === '1';
 // A minion of the scheme whose code this server runs (runner.ts): only there do deploys and previews mean anything.
 const DEPLOYS = process.env.COORDINATOR_DEPLOYS === '1';
+// Set for the Citadel scheme's Taskmaster: it alone edits the Citadel-wide instructions.
+const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
 const MAX_TEXT = 4000;
 /** What message_ticket and message_coordinator say when the loop guard holds a message. */
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
@@ -436,6 +438,20 @@ const TOOLS = [
   ...ARTIFACT_TOOLS,
 ];
 
+const APP_INSTRUCTION_TOOLS = [
+  {
+    name: 'get_app_instructions',
+    description: `Read the ${APP_NAME}-wide instructions: the standing rules people set for every scheme, which every minion and Taskmaster in every scheme receives in its system prompt, right before its scheme instructions.`,
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_app_instructions',
+    description:
+      `Replace the ${APP_NAME}-wide instructions with new text (max 16,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change. A scheme instruction overrides one of these only where it names the rule it replaces.`,
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string' } }, required: ['instructions'] },
+  },
+];
+
 /** How long a call keeps trying while the app restarts: the turn outlives the server, its calls wait for the next one. */
 const RETRY_MS = 120_000;
 
@@ -755,6 +771,15 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'approve':
       return approve(args);
+    case 'get_app_instructions': {
+      const app = await call('GET', '/api/app/instructions');
+      if (!app.text) return `The ${APP_NAME}-wide instructions are empty.`;
+      return `${APP_NAME}-wide instructions${app.by ? ` (last changed by ${app.by})` : ''}:\n\n${app.text}`;
+    }
+    case 'set_app_instructions': {
+      const app = await call('PUT', '/api/app/instructions', { text: String(args.instructions ?? '') });
+      return app.text ? `Saved (${app.text.length} characters).` : `Cleared the ${APP_NAME}-wide instructions.`;
+    }
     case 'set_project_instructions': {
       const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: String(args.instructions ?? '') });
       return project.instructions ? `Saved (${project.instructions.length} characters).` : 'Cleared the scheme instructions.';
@@ -872,7 +897,7 @@ function scheduleLine(s: any): string {
 }
 
 function toolList() {
-  if (ROLE !== 'thread') return TOOLS;
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS] : TOOLS;
   return APPROVALS ? [...THREAD_TOOLS, APPROVE] : THREAD_TOOLS;
 }
 

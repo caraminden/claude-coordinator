@@ -31,6 +31,13 @@ export interface Project {
 /** Longest project instructions the app accepts, the same cap as Claude Code's own projects. */
 export const MAX_INSTRUCTIONS = 16_000;
 
+const APP_INSTRUCTIONS = 'app_instructions';
+export interface AppInstructions {
+  text: string;
+  by: string | null;
+  at: number | null;
+}
+
 /** Models a thread can be set to (null = Claude Code's default), and effort levels for `claude --effort`. */
 export const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'] as const;
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -287,6 +294,14 @@ CREATE TABLE IF NOT EXISTS instruction_history (
   new_text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS instruction_history_project ON instruction_history(project_id, id);
+-- Saves of the Citadel-wide instructions (#148), whose text is in settings under app_instructions.
+CREATE TABLE IF NOT EXISTS app_instruction_history (
+  id INTEGER PRIMARY KEY,
+  by TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  old_text TEXT NOT NULL,
+  new_text TEXT NOT NULL
+);
 -- A brief in a file that someone started as a minion (#129), keyed by the file's absolute path and the brief's
 -- heading ('' for a whole handoff file). ticket_id is null while its minion is being made. No foreign key on
 -- ticket_id, so an older release's deleteTicket still works after a rollback; reads join tickets instead.
@@ -374,7 +389,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 6; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools
+export const SCHEMA_VERSION = 7; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -554,6 +569,31 @@ export class Store {
     return this.db
       .prepare('SELECT by, at, old_text, new_text FROM instruction_history WHERE project_id = ? ORDER BY id DESC LIMIT ?')
       .all(projectId, limit) as any[];
+  }
+
+  /** The Citadel-wide instructions every minion and Taskmaster in every scheme gets; '' when unset. */
+  appInstructions(): AppInstructions {
+    return this.getSetting<AppInstructions>(APP_INSTRUCTIONS) ?? { text: '', by: null, at: null };
+  }
+
+  /** Saves the Citadel-wide instructions, with a history row of who changed them from what. */
+  setAppInstructions(text: string, by: string) {
+    const at = Date.now();
+    this.db.exec('BEGIN');
+    try {
+      const old = this.appInstructions().text;
+      this.setSetting(APP_INSTRUCTIONS, { text, by, at });
+      this.db.prepare('INSERT INTO app_instruction_history (by, at, old_text, new_text) VALUES (?, ?, ?, ?)').run(by, at, old, text);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /** The latest Citadel-wide instruction saves, newest first. */
+  appInstructionHistory(limit: number): { by: string; at: number; old_text: string; new_text: string }[] {
+    return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
   setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort' | 'machine_tools'>>) {

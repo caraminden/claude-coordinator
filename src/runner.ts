@@ -17,6 +17,7 @@ import type { Ship } from './branch.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession } from './sessions.ts';
 import { restoreTicketDir } from './workspace.ts';
 import { previewKey } from './previews.ts';
+import { GLOBAL_OWNER } from './properties.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
@@ -427,17 +428,36 @@ function showingFiles(ticket: Ticket, filesDir: string | null, sharedDir: string
   ].filter(Boolean);
 }
 
+/** The Citadel-wide instructions, set in the app for every scheme; right before the scheme's own. */
+function appInstructions(text: string): string[] {
+  if (!text.trim()) return [];
+  return [
+    '',
+    `# ${APP_NAME}-wide instructions`,
+    `People set these in ${APP_NAME}'s settings. They apply to every minion and Taskmaster in every scheme and take precedence over the defaults above. Where a scheme instruction below conflicts with one of these, the scheme instruction wins only if it names the ${APP_NAME}-wide rule it replaces; otherwise this one wins.`,
+    '',
+    text.trim(),
+  ];
+}
+
 /** The project's standing instructions, set by people in the app; last, so they read as the final word. */
-function projectInstructions(project: Project): string[] {
+function projectInstructions(project: Project, layered: boolean): string[] {
   const text = project.instructions?.trim();
   if (!text) return [];
   return [
     '',
     `# Scheme instructions for "${project.name}"`,
-    'People set these in the scheme\'s settings. They apply to every minion in the scheme and to the Taskmaster, and take precedence over the defaults above:',
+    layered
+      ? `People set these in the scheme's settings. They apply to every minion in the scheme and to the Taskmaster, and take precedence over the defaults above (over the ${APP_NAME}-wide instructions only as those say):`
+      : 'People set these in the scheme\'s settings. They apply to every minion in the scheme and to the Taskmaster, and take precedence over the defaults above:',
     '',
     text,
   ];
+}
+
+/** Both layers of people's instructions, Citadel-wide first, for the end of a prompt. */
+function instructionLayers(project: Project, appText: string): string[] {
+  return [...appInstructions(appText), ...projectInstructions(project, !!appText.trim())];
 }
 
 /** How the chat shows a turn's words and links, for minions and Taskmasters alike. */
@@ -450,8 +470,8 @@ const CHAT_FACTS = [
  * `deploys`: the server runs this scheme's code (runsRepo), so tools/deploy.sh and pending-deploy
  * mean something here; elsewhere those lines are left out.
  */
-export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false): string {
-  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir), ...showingFiles(ticket, filesDir, sharedDir), ...projectInstructions(project)].join('\n');
+export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = ''): string {
+  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this minion.';
@@ -493,7 +513,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     ...machineTools(machines),
     ...approvalNote(project),
     'People read your replies in a web UI, often later. When you finish a turn, end with a short summary of what you did and, if you are blocked, exactly what you need from them.',
-    ...projectInstructions(project),
+    ...instructionLayers(project, appText),
   ].join('\n');
 }
 
@@ -577,6 +597,9 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
     'People open the scheme and talk to you first. You keep track of the scheme\'s minions and manage them with the `coordinator` MCP tools: list_tickets, read_ticket, create_ticket, message_ticket, update_ticket, close_ticket, reopen_ticket and stop_ticket. When you park a minion that waits on another minion\'s deploy, call wake_when_live for it rather than remembering to wake it yourself. When new work should start only once another minion\'s work is live (or merged), create it now with create_ticket\'s start_after (and start_when) rather than remembering to start it later. For recurring work (a nightly check, a weekly review), schedule_minion starts a fresh minion on a cron schedule; list_schedules, update_schedule and delete_schedule manage them.',
     `Properties: minions and their files carry properties from the property registry (list_properties). Global keys (type, stage, requestedBy, assigned) belong to the ${APP_NAME} scheme's Taskmaster; each scheme's Taskmaster registers its own keys and values. Every new minion gets properties in create_ticket, always with a \`type\` (feature, bug, art, ideation, design, research, chore; \`other\` when none fits, and then ask people with a card whether it stays \`other\` or moves to another bucket), plus any scheme keys that apply. Stage moves by itself (new → in-progress, dismissed → done). Fix them with set_properties. When someone asks to assign a minion to a person, set its \`assigned\` to their login name with set_properties (null unassigns it); people filter the minions list by it. You may add a new distinct value to one of your scheme's keys with register_property_values when nothing fits (never a near-duplicate: add an alias instead); it is live at once but unreviewed, so say in your reply which values you added so people can approve or correct them. New keys (register_property_key) wait for a person. When a minion proposes a value, approve or reject it with review_property, and archive values that are no longer used. Show properties as \`key: value\`, since one word can be a value of two keys. The scheme's shared property-vocabulary.md is generated from the registry: never edit it.`,
     'The scheme instructions (shown at the end of this prompt when set) reach you and every minion on its next turn. When people ask you to add, change or drop a standing rule for the whole scheme, read the current text with get_project_instructions and save the full new text with set_project_instructions; tell them what changed.',
+    project.id === GLOBAL_OWNER
+      ? `The ${APP_NAME}-wide instructions (shown right before the scheme instructions when set) reach every minion and Taskmaster in every scheme on its next turn, and you are the only Taskmaster who edits them. When people ask to add, change or drop a standing rule for every scheme, read the current text with get_app_instructions and save the full new text with set_app_instructions; tell them what changed. Other schemes' Taskmasters propose changes to you with message_taskmaster: weigh them like any other ask, and check with people before changing a rule they set.`
+      : `The ${APP_NAME}-wide instructions (shown right before the scheme instructions when set) apply to every scheme. Only people (in ${APP_NAME}'s settings) and the ${APP_NAME} scheme's ${AGENT_NAME} change them: to propose a change, message that ${AGENT_NAME} with message_taskmaster, and put rules for this scheme alone in the scheme instructions.`,
     'Each minion is a separate Claude Code session with its own git worktree and branch. Hand real work (code changes, investigations) to minions rather than doing it yourself; give each new minion a self-contained first message, since it cannot see this conversation.',
     'Minion titles are the short ask, about 30 characters ("Usage bar in the top bar"), with no number, tag, build or emoji ("Lairs", not "Lairs · Build #8"); the app shows the number and build, and the minions label themselves as they work. Give each new minion a tag too when one fits: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet). You can fix a minion\'s title, tag, state or note with update_ticket, and assign it to a major build with its build field (the minions list groups each build\'s minions together; null takes it out).',
     'Minions run in the background. To see progress, read them; do not wait or poll in a loop. Dismiss minions when people agree they are done.',
@@ -1267,7 +1290,7 @@ export class Runner {
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', ticket.permission_mode,
-      '--append-system-prompt', systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys),
+      '--append-system-prompt', systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text),
       // A minion's tripwire asks and approval rules become Approve / Deny cards; nobody can answer a
       // Taskmaster's prompts, so those are denied instead of waiting.
       ...permissionArgs(ticket.kind !== 'coordinator'),
@@ -1311,6 +1334,8 @@ export class Runner {
     // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
     if (ticket.kind !== 'coordinator') env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
     if (deploys) env.COORDINATOR_DEPLOYS = '1';
+    // Only the Citadel scheme's Taskmaster is offered get_app_instructions and set_app_instructions (the API checks too).
+    if (ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER) env.COORDINATOR_APP_INSTRUCTIONS = '1';
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
     // outlasts a stray turn (a GitHub ping), so the deploy still dismisses the minion unless the turn
     // sets another state or a person wrote to it (personWrote).

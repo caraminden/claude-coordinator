@@ -1,6 +1,6 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, setView, threadHref, usageMeter, view } from './core.js';
-import { approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderMachinesShelf } from './settings.js';
+import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderMachinesShelf } from './settings.js';
 import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
 import { chatSection, chatView, mountChat } from './thread.js';
@@ -25,6 +25,7 @@ function renderCrumbs(main) {
   crumbs.replaceChildren(...(
     main.kind === 'artifacts' ? [projectLink, ' / ', 'Artifacts']
       : main.kind === 'instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Instructions']
+      : main.kind === 'app-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Citadel-wide instructions']
       : main.kind === 'approvals' ? [projectLink, ' / ', settingsLink, ' / ', 'Needs approval']
       : main.kind === 'properties' ? [projectLink, ' / ', settingsLink, ' / ', 'Properties']
       : main.kind === 'machines' ? [projectLink, ' / ', 'Machines']
@@ -121,6 +122,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   };
   const section = main.kind === 'artifacts' ? artifactBrowser()
     : main.kind === 'instructions' ? instructionsEditor()
+    : main.kind === 'app-instructions' ? appInstructionsEditor()
     : main.kind === 'approvals' ? approvalsEditor()
     : main.kind === 'properties' ? propertiesPage()
     : main.kind === 'machines' ? machinesPage()

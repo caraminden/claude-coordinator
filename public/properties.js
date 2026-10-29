@@ -172,7 +172,7 @@ function renderSavedViews() {
     return h('span', { class: `tag-chip sv${on ? ' on' : ''}` },
       h('button', { type: 'button', class: 'sv-name', 'aria-pressed': String(on), title: on ? 'Show every minion again' : `Saved by ${v.created_by}`,
         onclick: () => apply(on ? new Map() : vp) }, v.name),
-      on ? h('button', { type: 'button', class: 'sv-del', title: `Delete the view ${v.name}`, 'aria-label': `Delete the view ${v.name}`, onclick: () => deleteView(v) }, '×') : '');
+      on ? h('button', { type: 'button', class: 'sv-del', title: `Delete the view ${v.name}`, 'aria-label': `Delete the view ${v.name}`, onclick: () => deleteView(v) }, '🗑') : '');
   });
   const unsaved = picks.size > 0 && !views.some((v) => samePicks(picks, viewPicks(v.picks, keys)));
   el.replaceChildren(...chips, unsaved ? h('button', { type: 'button', class: 'secondary small sv-save', onclick: saveView }, '＋ Save view') : '');

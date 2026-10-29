@@ -671,8 +671,8 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .saved-views .sv button { background: none; border: 0; color: inherit; font-weight: normal; border-radius: 999px; line-height: 1.3; }
 .saved-views .sv-name { padding: 0.25rem 0.55rem; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .saved-views .sv.on .sv-name { padding-right: 0.2rem; }
-.saved-views .sv-del { padding: 0.25rem 0.5rem 0.25rem 0.2rem; color: var(--muted); }
-.saved-views .sv-del:hover { color: var(--ink); }
+.saved-views .sv-del { padding: 0.25rem 0.5rem 0.25rem 0.2rem; color: var(--muted); filter: grayscale(1); opacity: 0.75; }
+.saved-views .sv-del:hover { opacity: 1; }
 .saved-views .sv-save { padding: 0.25rem 0.55rem; font-size: 0.78em; line-height: 1.3; border-radius: 999px; color: var(--accent); border-style: dashed; }
 mark.find { background: color-mix(in srgb, var(--waiting) 35%, transparent); color: inherit; border-radius: 2px; }
 mark.find.current { background: var(--waiting); color: #fff; }

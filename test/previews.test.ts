@@ -222,15 +222,27 @@ createServer((req, res) => res.end(JSON.stringify({ ok: true, preview: true })))
   s3.setTicketDir(t.id, wt, 'ticket/3-stubborn');
   const previews = new Previews(s3, d3);
   const dir = join(previews.root, String(t.id));
-  await previews.start(s3.getTicket(t.id)!);
-  const pid = Number(readFileSync(join(previews.root, 'stubborn.pid'), 'utf8'));
+  const pid = () => Number(readFileSync(join(previews.root, 'stubborn.pid'), 'utf8'));
+  const pids: number[] = [];
   try {
+    await previews.start(s3.getTicket(t.id)!);
+    pids.push(pid());
+    // A restart while the old one is still stopping waits for it, so its delete can't take the new copy.
+    const stopping = previews.stop(t.id);
+    await previews.start(s3.getTicket(t.id)!);
+    pids.push(pid());
+    await stopping;
+    assert.throws(() => process.kill(pids[0], 0), { code: 'ESRCH' });
+    assert.equal(existsSync(join(dir, 'coordinator.db')), true, 'the new copy survives the old stop');
+
     await previews.stop(t.id, true);
-    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'the process is gone once stop returns');
+    assert.throws(() => process.kill(pids[1], 0), { code: 'ESRCH' }, 'the process is gone once stop returns');
     assert.equal(existsSync(dir), false);
   } finally {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {}
+    for (const p of pids) {
+      try {
+        process.kill(p, 'SIGKILL');
+      } catch {}
+    }
   }
 });

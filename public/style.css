@@ -965,15 +965,6 @@ dialog.viewer .composer .picker { display: none; }
 .recap-group h4 { margin: 0 0 0.1rem; font-size: 0.72em; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .recap-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }
 
-/* Settings, Cost: a week of daily totals at API prices. */
-.cost-table { border-collapse: collapse; margin: 1rem 0 0.5rem; font-variant-numeric: tabular-nums; }
-.cost-table th, .cost-table td { padding: 0.35rem 0.75rem; border-bottom: 1px solid var(--line); text-align: left; font-weight: normal; white-space: nowrap; }
-.cost-table thead th { color: var(--muted); font-size: 0.85em; }
-.cost-table tfoot th, .cost-table tfoot td { font-weight: 600; border-bottom: none; }
-.cost-table .num { text-align: right; }
-.cost-main .warn { color: var(--waiting); font-weight: 600; }
-.settings-link[data-cost-warn]::after { content: ''; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--waiting); margin-left: 0.35rem; display: inline-block; vertical-align: middle; }
-@media (max-width: 600px) { .settings-tabs { flex-wrap: wrap; } }
 /* Send, and while a turn runs a ▾ beside it for "Send after this turn" (Send itself steers the turn). */
 .composer .send-group { position: relative; display: inline-flex; }
 .composer .send-group .more { display: none; padding-left: 0.5rem; padding-right: 0.5rem; border-left: 1px solid color-mix(in srgb, #fff 35%, transparent); border-radius: 0 6px 6px 0; }
@@ -990,3 +981,20 @@ dialog.viewer .composer .picker { display: none; }
 .msg .who .take-back:hover, .msg .who .take-back:focus-visible { color: var(--ink); border-color: var(--accent); }
 .msg.user.withdrawn { opacity: 0.55; }
 .msg.user.withdrawn > :not(.who), .msg.user.withdrawn > summary .preview { text-decoration: line-through; }
+
+/* Today's cost after the weekly bar (public/cost.js), opening to the last 7 days. */
+.cost-chip { flex: none; }
+.cost-chip[hidden] { display: none; }
+.cost-chip > summary { list-style: none; cursor: pointer; padding: 0.1rem 0.4rem; border-radius: 6px; }
+.cost-chip > summary::-webkit-details-marker { display: none; }
+.cost-chip > summary:hover, .cost-chip[open] > summary { background: var(--line); color: var(--ink); }
+.cost-chip b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.cost-chip .warn { color: var(--waiting); }
+.cost-pop { position: fixed; inset: auto; margin: 0; width: max-content; max-width: calc(100vw - 16px); box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 0.45); padding: 0.6rem 0.7rem; font-size: 1.1em; color: var(--ink); white-space: normal; cursor: default; }
+.cost-pop h4 { margin: 0 0 0.3rem; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.cost-pop table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.cost-pop th, .cost-pop td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); text-align: left; font-weight: normal; white-space: nowrap; }
+.cost-pop thead th { color: var(--muted); font-size: 0.9em; }
+.cost-pop tfoot :is(th, td) { font-weight: 600; border-bottom: none; }
+.cost-pop .num { text-align: right; }
+.cost-pop .foot { margin: 0.4rem 0 0; padding-top: 0.4rem; border-top: 1px solid var(--line); font-size: 0.9em; color: var(--muted); max-width: 22rem; }

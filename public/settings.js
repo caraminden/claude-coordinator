@@ -1,5 +1,5 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
-import { DAY_SHARE_WARN, ago, api, costText, h, todayShare, view } from './core.js';
+import { ago, api, h, view } from './core.js';
 import { openNewScheme, toggleSchemeMenu } from './sidebar.js';
 
 // ---------- push notifications ----------
@@ -187,54 +187,8 @@ const splitLines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filte
 /** The Settings page's tabs; each is its own route, so old links to them still work. */
 export function settingsTabs() {
   return h('nav', { class: 'settings-tabs' },
-    [['instructions', 'Instructions'], ['approvals', 'Needs approval'], ['properties', 'Properties'], ['cost', 'Cost']].map(([kind, label]) =>
+    [['instructions', 'Instructions'], ['approvals', 'Needs approval'], ['properties', 'Properties']].map(([kind, label]) =>
       h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label)));
-}
-
-/** Main panel: what Claude turns cost each day of the last week, here and in every scheme. */
-export function costPage() {
-  const body = h('div', { class: 'cost-body' }, h('p', { class: 'muted' }, 'Loading…'));
-  renderCost(body);
-  return h('section', { class: 'artifacts-main props-main cost-main' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
-      settingsTabs(),
-      h('div', { class: 'meta' }, 'What Claude turns would cost at API prices, Taskmasters included. Not a bill: the plan covers them.')),
-    body);
-}
-
-export function onCostChanged() {
-  if (view?.kind === 'project' && view.main === 'cost') renderCost(document.querySelector('.cost-body'));
-}
-
-async function renderCost(body) {
-  let days;
-  try {
-    ({ days } = await api('api/costs'));
-  } catch (err) {
-    body?.replaceChildren(h('p', { class: 'error' }, err.message));
-    return;
-  }
-  if (!body || view?.main !== 'cost') return;
-  const pid = view.projectId;
-  const share = todayShare();
-  const label = (day, i) => i === 0 ? 'Today' : i === 1 ? 'Yesterday'
-    : new Date(`${day}T12:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
-  const sum = (f) => days.reduce((s, d) => s + f(d), 0);
-  const cell = (usd) => h('td', { class: 'num' }, usd ? costText(usd) : '–');
-  body.replaceChildren(
-    h('table', { class: 'cost-table' },
-      h('thead', {}, h('tr', {}, h('th', {}, 'Day'), h('th', { class: 'num' }, 'This scheme'), h('th', { class: 'num' }, 'All schemes'))),
-      h('tbody', {}, days.map((d, i) => h('tr', {},
-        h('th', { scope: 'row' }, label(d.day, i)),
-        cell(d.byProject[pid] ?? 0),
-        i === 0 && share > DAY_SHARE_WARN
-          ? h('td', { class: 'num warn', title: "More than a seventh of the week's limit" }, costText(d.total))
-          : cell(d.total)))),
-      h('tfoot', {}, h('tr', {}, h('th', { scope: 'row' }, '7 days'), cell(sum((d) => d.byProject[pid] ?? 0)), cell(sum((d) => d.total))))),
-    h('p', { class: 'muted small' },
-      `Today so far: ${Math.round(share * 100)}% of the week's limit, by the usage meter. Today's total turns amber above a seventh (${Math.round(DAY_SHARE_WARN * 100)}%).`));
 }
 
 /** Main panel: the project's approval rules and plugin folders. */

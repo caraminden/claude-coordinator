@@ -42,7 +42,7 @@ function filterLinks(t, key, value) {
 }
 
 /** Close a <details> popover on a click elsewhere. */
-function closeOnClickAway(chip) {
+export function closeOnClickAway(chip) {
   chip.addEventListener('toggle', () => {
     if (!chip.open) return;
     const away = (e) => {

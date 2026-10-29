@@ -110,6 +110,10 @@ test('Revise needs notes, sends them to the minion, and the next plan supersedes
   const next = (await until('the revise turn', () => turns().length > before && turns())).at(-1);
   assert.match(next.prompt.message.content[0].text, /^\[Cara\]: Revise the plan \("First plan"\) before building:\n\nDrop step one\./);
   await idle(ticket.id);
+  // The revise turn got a new token, and the first turn's stopped working.
+  assert.notEqual(next.token, turn.token);
+  await assert.rejects(call(`/api/tickets/${ticket.id}`, { token: turn.token }), /401/);
+  await call(`/api/tickets/${ticket.id}`, { token: next.token });
   assert.deepEqual((await plans())[0], { id, summary: 'First plan', plan: '## First plan\n\n- step one', status: 'revising', by: 'Cara', at: (await plans())[0].at });
   await assert.rejects(call(`/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId: id, verdict: 'approve' } }), /409 Cara already asked for changes/);
 
@@ -138,4 +142,11 @@ test('Approve sends the go once and records who and when', async () => {
   // An approved plan stays approved when a later one arrives.
   await propose('Third plan');
   assert.deepEqual((await plans()).map((p: any) => p.status), ['superseded', 'approved', 'pending']);
+});
+
+test('a dismissed minion\'s token stops working', async () => {
+  const token = live();
+  await call(`/api/tickets/${ticket.id}`, { token });
+  await call(`/api/tickets/${ticket.id}/status`, { method: 'POST', body: { status: 'closed' } });
+  await assert.rejects(call(`/api/tickets/${ticket.id}`, { token }), /401/);
 });

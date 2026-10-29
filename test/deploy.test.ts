@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { appendFileSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -248,4 +248,31 @@ test('deploy.sh pushes the live commit to main, never forced, and a failed push 
   assert.deepEqual(spawnSync('bash', [join(repo, 'tools', 'deploy.sh'), 'push-github', c], {
     encoding: 'utf8', env: { ...env, DEPLOY_REMOTE: '' },
   }).stdout, '', 'an empty DEPLOY_REMOTE skips the push');
+});
+
+test('deploy.sh copies the database before a restart and keeps the newest 3 copies', () => {
+  const live = join(root, 'backup-live');
+  const dir = join(root, 'backup-data');
+  mkdirSync(dir);
+  execFileSync('git', ['init', '-q', '-b', 'main', live]);
+  const db = new Store(join(dir, 'coordinator.db'));
+  db.createProject('Saved', null);
+  const commits = [1, 2, 3, 4].map((n) => {
+    execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', String(n)]);
+    return execFileSync('git', ['-C', live, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+  });
+  const backupDb = (commit: string, file = join(dir, 'coordinator.db')) =>
+    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'backup-db', commit], { encoding: 'utf8', env: { ...process.env, DEPLOY_LIVE: live, DEPLOY_DB: file } }).trim();
+  for (const [i, c] of commits.entries()) {
+    const out = backupDb(c);
+    assert.equal(out, join(dir, 'backups', `pre-deploy-${c}.db`));
+    utimesSync(out, 1e9 + i, 1e9 + i); // in deploy order, without waiting out ls -t's resolution
+  }
+  const saved = readdirSync(join(dir, 'backups')).sort();
+  assert.deepEqual(saved, commits.slice(1).map((c) => `pre-deploy-${c}.db`).sort(), 'the oldest copy is dropped');
+  assert.equal(statSync(join(dir, 'backups', saved[0])).mode & 0o777, 0o600);
+  const copy = new Store(join(dir, 'backups', `pre-deploy-${commits[3]}.db`));
+  assert.deepEqual(copy.listProjects().map((p) => p.name), ['Saved'], 'the copy holds the data');
+  assert.equal(backupDb(commits[0], join(dir, 'missing.db')), '', 'no database, nothing to copy');
+  assert.ok(!existsSync(join(dir, 'missing.db')), 'and none is created');
 });

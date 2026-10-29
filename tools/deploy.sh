@@ -10,7 +10,8 @@
 #    would cut off are running, see interruptible), waits up to 30 s for a healthy server and tags it
 #    last-good. If the new code doesn't come up, it rolls the checkout back to last-good and restarts
 #    again. It reports how it went in the deploying minion's chat (failures as errors, which push) and
-#    in the journal.
+#    in the journal. Before restarting it copies the database to backups/pre-deploy-<commit>.db (newest
+#    3 kept), so a rollback that can't read what the new code wrote can be restored by hand.
 # 4. Once the new code is live (either way), pushes that commit to GitHub's main, never forced. A failed
 #    push is logged and shows in the report, but the deploy stands.
 # Every path and name can be overridden with DEPLOY_* variables, which is how it is tested on a dev copy.
@@ -26,6 +27,7 @@ IDLE_TRIES=${DEPLOY_IDLE_TRIES:-720} # 10 s apart: 2 h
 NOW=${DEPLOY_NOW:-} # set: restart without waiting for interruptible turns (--now)
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-30}
 REMOTE=${DEPLOY_REMOTE-origin} # set it empty to skip the push (dev copies)
+BACKUPS=${DEPLOY_BACKUPS:-3} # pre-deploy copies of the database to keep
 
 say() { echo "deploy: $*" >&2; }
 git_live() { git -C "$LIVE" "$@"; }
@@ -131,6 +133,20 @@ turn_units() {
   echo "citadel-turn-$tag-*.service"
 }
 
+# Copy the database to backups/pre-deploy-<commit $1>.db before the new code migrates it, and keep the
+# newest $BACKUPS. Prints the copy's path; no database (a dev copy) prints nothing.
+backup_db() {
+  [ -f "$DB" ] || return 0
+  local dir out tmp
+  dir=$(dirname "$DB")/backups
+  out=$dir/pre-deploy-$(git_live rev-parse --short "$1").db
+  tmp=$dir/.pre-deploy.db.tmp
+  (umask 077 && mkdir -p "$dir" && rm -f "$tmp" && sqlite3 "$DB" ".timeout 30000" ".backup '$tmp'") || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$out"
+  ls -1t "$dir"/pre-deploy-*.db | tail -n +$((BACKUPS + 1)) | xargs -r rm -f --
+  echo "$out"
+}
+
 # Restart the service and wait for it to answer healthy from commit $1.
 restart_healthy() {
   systemctl --user restart "$SERVICE" || return 1
@@ -164,8 +180,13 @@ restart() {
   exec 9>"$STATE/lock"
   flock 9
   rm -f "$STATE/now"
-  local target good
+  local target good saved
   target=$(git_live rev-parse HEAD)
+  if ! saved=$(backup_db "$target"); then
+    report fail "Could not copy the database to backups/ before restarting on $(short "$target") (see journalctl --user -u $UNIT), so nothing restarted. The checkout is at $(short "$target"), but the server still runs $(health commit | cut -c1-7). Free some disk or fix the copy, then run tools/deploy.sh again."
+    exit 1
+  fi
+  [ -n "$saved" ] && say "database copied to $saved"
   say "restarting $SERVICE on $(short "$target")"
   if restart_healthy "$target"; then
     git_live tag -f last-good "$target" >/dev/null
@@ -189,10 +210,10 @@ restart() {
     systemctl --user stop "$(turn_units)" || true
   fi
   if restart_healthy "$good"; then
-    report fail "Deploy of $(short "$target") failed: $why. Rolled back to last-good $(short "$good"), which is up and healthy. main still has the bad commit: fix forward and deploy again. Details: journalctl --user -u $SERVICE."
+    report fail "Deploy of $(short "$target") failed: $why. Rolled back to last-good $(short "$good"), which is up and healthy.${saved:+ The database from before the deploy is in $saved, should the rollback have trouble with what the new code wrote.} main still has the bad commit: fix forward and deploy again. Details: journalctl --user -u $SERVICE."
   else
     touch "$STATE/FAILED"
-    report fail "Deploy of $(short "$target") failed: $why, and the rollback to $(short "$good") did not come up healthy either. The service is likely down: check journalctl --user -u $SERVICE."
+    report fail "Deploy of $(short "$target") failed: $why, and the rollback to $(short "$good") did not come up healthy either. The service is likely down: check journalctl --user -u $SERVICE.${saved:+ The database from before the deploy is in $saved.}"
   fi
   exit 1
 }
@@ -268,7 +289,7 @@ deploy() {
   if out=$(systemd-run --user --collect --unit="$UNIT" --description="Restart $SERVICE (tools/deploy.sh)" \
     --setenv=DEPLOY_LIVE="$LIVE" --setenv=DEPLOY_SERVICE="$SERVICE" --setenv=DEPLOY_URL="$URL" --setenv=DEPLOY_DB="$DB" \
     --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
-    --setenv=DEPLOY_NOW="$NOW" --setenv=PATH="$PATH" \
+    --setenv=DEPLOY_NOW="$NOW" --setenv=DEPLOY_BACKUPS="$BACKUPS" --setenv=PATH="$PATH" \
     bash "$copy" restart 2>&1); then
     if [ -n "$NOW" ]; then say "restart queued as $UNIT with --now: it restarts at once, cutting off turns not in a unit of their own (this one too, if so)"
     else say "restart queued as $UNIT: running turns carry on through it, and it reports here"; fi
@@ -305,5 +326,6 @@ case "${1:-}" in
   turn-units) turn_units ;;
   change-kind) change_kind "$2" "$3" "$4" ;;
   push-github) push_github "$2" ;;
-  *) echo "usage: $0 [--now | restart | interruptible | turn-units | change-kind <dir> <from> <to> | push-github <commit>]" >&2; exit 2 ;;
+  backup-db) backup_db "$2" ;;
+  *) echo "usage: $0 [--now | restart | interruptible | turn-units | change-kind <dir> <from> <to> | push-github <commit> | backup-db <commit>]" >&2; exit 2 ;;
 esac

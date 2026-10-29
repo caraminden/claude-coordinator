@@ -1,6 +1,16 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { gzip } from 'node:zlib';
+// Types only: this module loads nothing of the app's, so any module can import it.
+import type { Auth, Session } from './auth.ts';
+import type { BranchStatus } from './branch.ts';
+import type { Artifact, Machine, Project, Store, Ticket, TicketTag } from './db.ts';
+import type { MachineRelay } from './machines.ts';
+import type { Previews } from './previews.ts';
+import type { Pusher, PushTrigger } from './push.ts';
+import type { Runner } from './runner.ts';
+import type { Schedule } from './schedules.ts';
+import type { Chain, LiveWaiters } from './wake.ts';
 
 /** An answer with a status: what any route or module throws to refuse a request. */
 export class HttpError extends Error {
@@ -110,4 +120,173 @@ export function str(v: unknown, field: string, max = 200): string {
   if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `${field} is required`);
   if (v.length > max) throw new HttpError(400, `${field} is too long`);
   return v.trim();
+}
+
+// ---------- the route table ----------
+
+/**
+ * Who may call a route, besides a signed-in person ('person'): a scheme's Taskmaster, on its own scheme
+ * and not on itself except to read ('taskmaster'); a minion, on itself or its own scheme ('minion'); any
+ * thread on its own chat, the Taskmaster included ('self').
+ */
+export type Who = 'person' | 'taskmaster' | 'minion' | 'self';
+
+/** What the routes reach of the running server (built once in server.ts). */
+export interface App {
+  store: Store;
+  runner: Runner;
+  auth: Auth;
+  waiters: LiveWaiters;
+  previews: Previews | null;
+  machines: MachineRelay;
+  pusher: Pusher;
+  /** Open event streams (GET /api/stream). */
+  clients: Set<ServerResponse>;
+  dataDir: string;
+  preview: boolean;
+  machinesUrl: URL | null;
+  bootCommit: string | null;
+  readonly assetVersion: string;
+  broadcast(msg: object): void;
+  notify(ticketId: number, trigger: PushTrigger, except?: string | null): void;
+  newMinion(project: Project, m: { title: string; tag: TicketTag | null; props: Record<string, unknown>; model?: string | null; effort?: string | null }, by: string): Promise<{ id: number; number: number; notes: string[] }>;
+  startChained(c: Chain, why: string): Promise<void>;
+  ticketBranch(ticketId: number): Promise<BranchStatus | null>;
+  sharedFiles(projectId: number): Promise<unknown[]>;
+  sharedDir(ticket: Ticket): string;
+  registryChanged(projectId: number, global: boolean): void;
+}
+
+export type TicketView = ReturnType<Runner['view']>;
+
+/** One request as a route's handler sees it, with the rows its path names already loaded. */
+export interface Ctx {
+  req: IncomingMessage;
+  res: ServerResponse;
+  url: URL;
+  app: App;
+  /** Null only on 'anyone' and 'machine' routes. */
+  session: Session;
+  /** The minion or Taskmaster calling, or null for a person. */
+  caller: Ticket | null;
+  /** Path parameters as sent (still percent-encoded). */
+  params: Record<string, string>;
+  ticket: TicketView;
+  project: Project;
+  schedule: Schedule;
+  artifact: Artifact;
+  machine: Machine;
+}
+
+export interface Route {
+  method: string | readonly string[];
+  /** Segments, with `:name` for a parameter; :ticket, :project, :schedule, :artifact and :machine load that row. */
+  path: string;
+  /** 'anyone' needs no login; 'machine' is a machine's agent, which checks its own token. */
+  who: readonly Who[] | 'anyone' | 'machine';
+  /** The 403 for a caller `who` leaves out (a minion always gets "A minion may only update itself"). */
+  refuse?: string;
+  handler(ctx: Ctx): unknown;
+}
+
+const LOADED = ['ticket', 'project', 'schedule', 'artifact', 'machine'];
+const NUMERIC = new Set([...LOADED, 'machineId']);
+
+/** Load a row a path names, onto ctx; returns the scheme it belongs to, if any. */
+function load(ctx: Ctx, name: string, id: number): number | undefined {
+  const { store, runner } = ctx.app;
+  if (name === 'ticket') {
+    const t = store.getTicket(id);
+    if (!t) throw new HttpError(404, 'No such minion');
+    ctx.ticket = runner.view(t);
+    return t.project_id;
+  }
+  if (name === 'project') {
+    const p = store.getProject(id);
+    if (!p) throw new HttpError(404, 'No such scheme');
+    ctx.project = p;
+    return p.id;
+  }
+  if (name === 'schedule') {
+    const s = store.schedules.get(id);
+    if (!s) throw new HttpError(404, 'No such schedule');
+    ctx.schedule = s;
+    return s.project_id;
+  }
+  if (name === 'artifact') {
+    const a = store.getArtifact(id);
+    if (!a) throw new HttpError(404, 'No such artifact');
+    ctx.artifact = a;
+    return a.project_id;
+  }
+  const m = store.getMachine(id);
+  if (!m) throw new HttpError(404, 'No such machine');
+  ctx.machine = m;
+}
+
+/** The 403 for a caller the route's `who` leaves out, or for one reaching past its own scheme or chat. */
+function checkWho(route: Route, ctx: Ctx, method: string, project: number | undefined, ticket: number | undefined) {
+  const who = route.who as readonly Who[];
+  const { caller } = ctx;
+  if (!caller) {
+    if (!who.includes('person')) throw new HttpError(403, route.refuse ?? 'Not for people');
+    return;
+  }
+  if (who.includes('self') && ticket === caller.id) return;
+  if (caller.kind === 'coordinator') {
+    if (!who.includes('taskmaster')) throw new HttpError(403, route.refuse ?? 'Not available to the Taskmaster');
+    if (project !== undefined && project !== caller.project_id) throw new HttpError(403, 'Outside this Taskmaster\'s scheme');
+    if (ticket === caller.id && method !== 'GET') throw new HttpError(403, 'The Taskmaster cannot act on itself');
+    return;
+  }
+  const own = ticket !== undefined ? ticket === caller.id : project === undefined || project === caller.project_id;
+  if (!who.includes('minion') || !own) throw new HttpError(403, 'A minion may only update itself');
+}
+
+/**
+ * The API as one table: match the path and method, check the login and the origin, load the rows the
+ * path names (404 when gone), check who may call it, then run its handler.
+ */
+export function router(routes: Route[]) {
+  const table = routes.map((route) => ({
+    route,
+    methods: typeof route.method === 'string' ? [route.method] : route.method,
+    names: route.path.split('/').filter((s) => s.startsWith(':')).map((s) => s.slice(1)),
+    re: new RegExp(`^${route.path.split('/').map((s) => (s.startsWith(':') ? (NUMERIC.has(s.slice(1)) ? '(\\d+)' : '([^/]+)') : s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('/')}$`),
+  }));
+  const dispatch = async (app: App, req: IncomingMessage, res: ServerResponse, url: URL, session: Session | null) => {
+    const method = req.method ?? 'GET';
+    const onPath = table.filter((r) => r.re.test(url.pathname));
+    const hit = onPath.find((r) => r.methods.includes(method));
+    const { route } = hit ?? {};
+    const ctx = { req, res, url, app, session, caller: null, params: {} } as unknown as Ctx;
+    if (hit) hit.re.exec(url.pathname)!.slice(1).forEach((v, i) => (ctx.params[hit.names[i]] = v));
+    if (route?.who === 'anyone' || route?.who === 'machine') return route.handler(ctx);
+    if (!session) throw new HttpError(401, 'Not logged in');
+
+    // Reject cross-site writes (SameSite=Lax and the JSON content type cover most of this already).
+    if (method !== 'GET') {
+      const origin = req.headers.origin;
+      const host = req.headers['x-forwarded-host'] ?? req.headers.host;
+      let originHost: string | null = null;
+      try {
+        originHost = origin ? new URL(origin).host : null;
+      } catch {
+        throw new HttpError(403, 'Cross-origin request');
+      }
+      if (origin && originHost !== host) throw new HttpError(403, 'Cross-origin request');
+    }
+    if (!route) throw onPath.length ? new HttpError(405, 'Method not allowed') : new HttpError(404, 'Not found');
+
+    let project: number | undefined;
+    for (const name of hit!.names) if (LOADED.includes(name)) project = load(ctx, name, Number(ctx.params[name])) ?? project;
+    if (session.agent !== undefined) {
+      ctx.caller = app.store.getTicket(session.agent) ?? null;
+      if (!ctx.caller) throw new HttpError(403, 'No such minion');
+    }
+    checkWho(route, ctx, method, project, ctx.ticket?.id);
+    return route.handler(ctx);
+  };
+  // shortcut: while routes move over from server.ts's api(), which paths the table already has.
+  return Object.assign(dispatch, { knows: (path: string) => table.some((r) => r.re.test(path)) });
 }

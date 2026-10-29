@@ -20,7 +20,7 @@ import { cleanPluginDirs, cleanRules, lines } from './src/approvals.ts';
 import { inboxItems } from './src/inbox.ts';
 import { instructionSources, lineDiff } from './src/instructions.ts';
 import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, WS_SUFFIX, hashToken, newToken } from './src/machines.ts';
-import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigger } from './src/push.ts';
+import { NOTIFY_STATES, Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent, tripwireConfig, type MessageFile } from './src/runner.ts';
 import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, saveUpload } from './src/uploads.ts';
 import { GLOBAL_OWNER, type Actor } from './src/properties.ts';
@@ -31,7 +31,8 @@ import { catchUpTicketDir, cloneProject, createTicketDir, projectDir, projectSha
 import { costDays, dayBudget } from './src/costs.ts';
 import { describeCron, runBrief, type Schedule } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, buildNumber, clientIp, HttpError, isSecure, json, oneOf, readJson, replyList, requestUrl, SECURITY_HEADERS, send, str } from './src/http.ts';
+import { acceptsGzip, buildNumber, clientIp, HttpError, isSecure, json, oneOf, readJson, replyList, requestUrl, router, SECURITY_HEADERS, send, str, type App } from './src/http.ts';
+import { pushRoutes } from './src/routes/push.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -927,8 +928,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     throw new HttpError(403, 'Not available to the Taskmaster');
   }
 
-  if (pathname.startsWith('/api/push/')) return pushApi(req, res, pathname, method, session);
-
   if (pathname === '/api/taskmaster' && method === 'POST') {
     // message_taskmaster: one scheme's Taskmaster writes to another's, the only way past inScope. It
     // reaches that Taskmaster alone, never its minions; minions' tokens were refused above.
@@ -1676,52 +1675,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   throw new HttpError(404, 'Not found');
 }
 
-// ---------- push subscriptions ----------
-
-/** This browser's subscription as the account panel needs it. */
-const pushView = (endpoint: string) => {
-  const row = store.getPushSubscription(endpoint);
-  return { subscribed: !!row, muted: row ? JSON.parse(row.muted) as number[] : [] };
-};
-
-/** Each signed-in person turns notifications on per browser, and can mute projects there. */
-async function pushApi(req: IncomingMessage, res: ServerResponse, pathname: string, method: string, session: Session) {
-  if (session.agent !== undefined) throw new HttpError(403, 'Only people get notifications');
-  if (pathname === '/api/push/key' && method === 'GET') return json(res, 200, { publicKey: pusher.publicKey });
-  if (pathname !== '/api/push/subscription') throw new HttpError(404, 'Not found');
-  const body = await readJson(req, 10_000);
-  if (method === 'PUT') {
-    if (!validSubscription(body.subscription)) throw new HttpError(400, 'Not a usable push subscription');
-    const { endpoint, keys } = body.subscription;
-    store.savePushSubscription(session.name, endpoint, keys.p256dh, keys.auth);
-    if (!process.env.PUSH_SUBJECT && !store.getSetting('push_subject')) {
-      const host = req.headers['x-forwarded-host'] ?? req.headers.host;
-      pusher.subject = `https://${host}`;
-      store.setSetting('push_subject', pusher.subject);
-    }
-    return json(res, 200, pushView(endpoint));
-  }
-  const endpoint = typeof body.endpoint === 'string' ? body.endpoint : '';
-  const row = store.getPushSubscription(endpoint);
-  // Only the person a browser is subscribed for may change or see it.
-  if (row && row.name !== session.name) return json(res, 200, { subscribed: false, muted: [] });
-  if (method === 'POST') return json(res, 200, pushView(endpoint));
-  if (method === 'PATCH') {
-    if (!row) throw new HttpError(404, 'This browser is not subscribed');
-    const projectId = Number(body.projectId);
-    const muted = new Set<number>(JSON.parse(row.muted));
-    if (body.muted) muted.add(projectId);
-    else muted.delete(projectId);
-    store.setPushMuted(endpoint, [...muted].filter((id) => store.getProject(id)));
-    return json(res, 200, pushView(endpoint));
-  }
-  if (method === 'DELETE') {
-    if (row) store.deletePushSubscription(endpoint);
-    return json(res, 200, pushView(endpoint));
-  }
-  throw new HttpError(405, 'Method not allowed');
-}
-
 // ---------- machines ----------
 
 /** What a machine's agent calls: hold its stream open, or pass on a message from its MCP server. */
@@ -1873,13 +1826,25 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
   throw new HttpError(405, 'Method not allowed');
 }
 
+/** What the route table (src/routes/) reaches of this server. */
+const app: App = {
+  store, runner, auth, waiters, previews, machines, pusher, clients,
+  dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
+  get assetVersion() {
+    return ASSET_VERSION;
+  },
+  broadcast, notify, newMinion, startChained, ticketBranch, sharedFiles, sharedDir, registryChanged,
+};
+const routes = router([...pushRoutes]);
+
 const server = createServer(async (req, res) => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   try {
     const url = requestUrl(req);
     const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
     if (url.pathname.startsWith('/api/')) {
-      await api(req, res, url, auth.session(req));
+      if (routes.knows(url.pathname)) await routes(app, req, res, url, auth.session(req));
+      else await api(req, res, url, auth.session(req));
     } else if (preview) {
       const session = auth.session(req);
       // People only, signed in to the live app; a page load without a login goes to the login.

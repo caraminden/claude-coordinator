@@ -297,17 +297,19 @@ export function renderTicketHead() {
   // Titled too, since phones may cut it short to keep the buttons beside it. While Claude works,
   // a cut-short state shows dots that count up instead of "Cla…".
   const working = t.status === 'running';
-  const stateLabel = h('span', { class: 'muted', title: state }, h('span', { class: 'state-text' }, state),
+  const stateLabel = h('span', { class: 'muted head-state', title: state }, h('span', { class: 'state-text' }, state),
     working ? h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')) : '');
   stateFit?.disconnect();
   if (working) stateFit?.observe(stateLabel);
+  // The title's line keeps who it is, its state, its buttons and the way out; a minion's line under it
+  // takes where the change is and the smaller tools (#158), so the title has room. The Taskmaster has
+  // only the find box to move, which fits up top.
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
-      coord ? '' : personNoteButton(t),
       stateLabel,
-      h('span', { class: 'spacer' }), coord ? '' : propertyChip(t), ...actions, view.findEl ?? '',
+      h('span', { class: 'spacer' }), ...actions, coord ? view.findEl ?? '' : '',
       h('span', { class: 'head-nav' },
         // Through the views opened in this tab, never off the site (public/navstack.js).
         h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
@@ -315,7 +317,7 @@ export function renderTicketHead() {
         // Leaves the thread as it is and goes back to the project's coordinator.
         coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close')))),
     coord ? '' : personNoteLine(t),
-    shipLine(t),
+    coord ? '' : h('div', { class: 'head-sub' }, shipLine(t), personNoteButton(t), propertyChip(t), view.findEl ?? ''),
     view.progressEl);
   renderTyping();
   // While a turn runs, a sent message waits for it; said on hover rather than in a line of its own.
@@ -337,7 +339,7 @@ const PERSON_NOTE_MAX = 200; // the server's limit, PERSON_NOTE_MAX in src/db.ts
 // The note being edited, { id, el }: kept across the head's re-renders, which a running turn makes often.
 let noteEdit = null;
 
-/** "✎ Note" just after the title (on phones, on the title's line), while a minion has no note and none is being written. */
+/** "✎ Note" after the ship status, under the title, while a minion has no note and none is being written. */
 function personNoteButton(t) {
   if (view.personNotes?.[t.id] || noteEdit?.id === t.id) return '';
   return h('button', { type: 'button', class: 'note-btn', title: 'Add a note only people see', 'aria-label': 'Add a note', onclick: () => editPersonNote(t) },

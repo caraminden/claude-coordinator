@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -74,19 +74,32 @@ test('a reopened minion gets its worktree back from its branch', () => {
   assert.equal(restoreTicketDir(join(root, 'nowhere'), null, null), false);
 });
 
-test('ad-hoc copies go only once a nightly backup restores, and the backup is private', () => {
+test('ad-hoc copies go at 7 days old, only while a recent nightly backup restores, and the backup is private', () => {
   const stale = join(root, 'coordinator.db.bak-machines');
+  const fresh = join(root, 'coordinator.db.backup-today');
   writeFileSync(stale, 'x');
+  writeFileSync(fresh, 'x');
+  const ago = (n: number) => (Date.now() - n * DAY) / 1000;
+  utimesSync(stale, ago(8), ago(8));
   assert.match(run(prune, '--apply', '--stale-backups'), /Keeping them/);
   assert.ok(existsSync(stale));
 
   assert.match(run(backup), /Backed up to .*coordinator-\d{4}-\d\d-\d\d\.db/);
   const mode = execFileSync('stat', ['-c', '%a', join(root, 'backups')], { encoding: 'utf8' }).trim();
   assert.equal(mode, '700');
-  assert.match(run(prune, '--stale-backups'), /Would delete: coordinator\.db\.bak-machines/);
+  const nightly = readdirSync(join(root, 'backups')).filter((f) => /^coordinator-\d/.test(f)).map((f) => join(root, 'backups', f));
+  for (const f of nightly) utimesSync(f, ago(3), ago(3));
+  assert.match(run(prune, '--apply', '--stale-backups'), /Keeping them: no nightly backup from the last 2 days/, 'a backup that stopped running unlocks nothing');
+  assert.ok(existsSync(stale));
+  for (const f of nightly) utimesSync(f, ago(0), ago(0));
+
+  const dry = run(prune, '--stale-backups');
+  assert.match(dry, /Would delete: coordinator\.db\.bak-machines/);
+  assert.match(dry, /Keeping \(under 7 days old\): coordinator\.db\.backup-today/);
   assert.ok(existsSync(stale));
   run(prune, '--apply', '--stale-backups');
   assert.ok(!existsSync(stale));
+  assert.ok(existsSync(fresh), 'a copy taken before a change today stays');
 });
 
 test('the nightly backup drops hand-made before-* copies once they are 7 days old', () => {

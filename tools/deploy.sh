@@ -11,7 +11,8 @@
 #    last-good. If the new code doesn't come up, it rolls the checkout back to last-good and restarts
 #    again. It reports how it went in the deploying minion's chat (failures as errors, which push) and
 #    in the journal. Before restarting it copies the database to backups/pre-deploy-<commit>.db (newest
-#    3 kept), so a rollback that can't read what the new code wrote can be restored by hand.
+#    3 kept, rotated only after a healthy deploy), so a rollback that can't read what the new code
+#    wrote can be restored by hand. No copy, no restart.
 # 4. Once the new code is live (either way), pushes that commit to GitHub's main, never forced. A failed
 #    push is logged and shows in the report, but the deploy stands.
 # Every path and name can be overridden with DEPLOY_* variables, which is how it is tested on a dev copy.
@@ -133,18 +134,25 @@ turn_units() {
   echo "citadel-turn-$tag-*.service"
 }
 
-# Copy the database to backups/pre-deploy-<commit $1>.db before the new code migrates it, and keep the
-# newest $BACKUPS. Prints the copy's path; no database (a dev copy) prints nothing.
+# Copy the database to backups/pre-deploy-<commit $1>.db before the new code migrates it. Prints the
+# copy's path; no database (a dev copy) prints nothing. A copy already there stays: a retry after a
+# rollback would otherwise replace the clean copy with what the failed code left.
 backup_db() {
   [ -f "$DB" ] || return 0
   local dir out tmp
   dir=$(dirname "$DB")/backups
-  out=$dir/pre-deploy-$(git_live rev-parse --short "$1").db
-  tmp=$dir/.pre-deploy.db.tmp
-  (umask 077 && mkdir -p "$dir" && rm -f "$tmp" && sqlite3 "$DB" ".timeout 30000" ".backup '$tmp'") || { rm -f "$tmp"; return 1; }
-  mv -f "$tmp" "$out"
-  ls -1t "$dir"/pre-deploy-*.db | tail -n +$((BACKUPS + 1)) | xargs -r rm -f --
+  out=$dir/pre-deploy-$(git_live rev-parse --short "$1").db || return 1
+  if [ ! -e "$out" ]; then
+    tmp=$dir/.pre-deploy.db.tmp
+    (umask 077 && mkdir -p "$dir" && rm -f "$tmp" && sqlite3 "$DB" ".timeout 30000" ".backup '$tmp'" && mv -f "$tmp" "$out") || { rm -f "$tmp"; return 1; }
+  fi
   echo "$out"
+}
+
+# Keep the newest $BACKUPS pre-deploy copies. Only after a healthy deploy, so fixing forward after a
+# failed one never rotates out the clean copy its report named.
+rotate_backups() {
+  { ls -1t "$(dirname "$DB")"/backups/pre-deploy-*.db 2>/dev/null || true; } | tail -n +$((BACKUPS + 1)) | xargs -r rm -f -- || true
 }
 
 # Restart the service and wait for it to answer healthy from commit $1.
@@ -190,6 +198,7 @@ restart() {
   say "restarting $SERVICE on $(short "$target")"
   if restart_healthy "$target"; then
     git_live tag -f last-good "$target" >/dev/null
+    rotate_backups
     local pushed kind=ok
     pushed=$(push_github "$target") || kind=warn
     report "$kind" "Deployed $(short "$target"): the server restarted and is healthy.$pushed"
@@ -327,5 +336,6 @@ case "${1:-}" in
   change-kind) change_kind "$2" "$3" "$4" ;;
   push-github) push_github "$2" ;;
   backup-db) backup_db "$2" ;;
-  *) echo "usage: $0 [--now | restart | interruptible | turn-units | change-kind <dir> <from> <to> | push-github <commit> | backup-db <commit>]" >&2; exit 2 ;;
+  rotate-backups) rotate_backups ;;
+  *) echo "usage: $0 [--now | restart | interruptible | turn-units | change-kind <dir> <from> <to> | push-github <commit> | backup-db <commit> | rotate-backups]" >&2; exit 2 ;;
 esac

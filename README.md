@@ -183,8 +183,11 @@ state (`claude_state`) of minions closed over 14 days ago and the worktrees of
 minions closed over 30 days ago. Branches are kept, worktrees with uncommitted
 changes are skipped, and a reopened minion gets its worktree back from its
 branch. `--stale-backups` also removes the ad-hoc `coordinator.db.backup-*` and
-`.bak-*` copies, once a nightly backup passes its check; the nightly timer runs
-`--apply --stale-backups`. Always read a dry run before the first `--apply`.
+`.bak-*` copies once they are 7 days old, while the newest nightly backup is
+under 2 days old and passes its check; the nightly timer runs `--apply
+--stale-backups`. Always read a dry run before the first `--apply`. The units are
+symlinks into this checkout, so after a deploy that changes one, run
+`systemctl --user daemon-reload` for systemd to pick it up.
 
 ```sh
 for u in backup prune; do
@@ -244,8 +247,9 @@ How a queued restart went is posted in the deploying minion's chat (a failure
 as an error, which pushes) and in the journal: `journalctl --user -u
 cc-restart-when-idle` and `-u claude-coordinator`. A rollback leaves the bad
 commit on `main`, so fix forward. Before every restart the unit copies the
-database to `backups/pre-deploy-<commit>.db` (newest 3 kept; no copy, no
-restart), and a rollback report names it. `src/db.ts` keeps a `schema_version`
+database to `backups/pre-deploy-<commit>.db` (no copy, no restart; a retry
+keeps the first copy; the newest 3 are kept, rotated only after a healthy
+deploy), and a rollback report names it. `src/db.ts` keeps a `schema_version`
 setting: bump `SCHEMA_VERSION` with any schema or data migration, and
 `test/schema-compat.test.ts` checks the last release (`last-good`, else
 `origin/main`) still reads and writes the migrated database.

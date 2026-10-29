@@ -250,29 +250,57 @@ test('deploy.sh pushes the live commit to main, never forced, and a failed push 
   }).stdout, '', 'an empty DEPLOY_REMOTE skips the push');
 });
 
-test('deploy.sh copies the database before a restart and keeps the newest 3 copies', () => {
+test('deploy.sh copies the database before a restart, keeps a copy already there, and rotates to 3', () => {
   const live = join(root, 'backup-live');
   const dir = join(root, 'backup-data');
   mkdirSync(dir);
   execFileSync('git', ['init', '-q', '-b', 'main', live]);
-  const db = new Store(join(dir, 'coordinator.db'));
+  const file = join(dir, 'coordinator.db');
+  const db = new Store(file);
   db.createProject('Saved', null);
   const commits = [1, 2, 3, 4].map((n) => {
     execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', String(n)]);
     return execFileSync('git', ['-C', live, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
   });
-  const backupDb = (commit: string, file = join(dir, 'coordinator.db')) =>
-    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'backup-db', commit], { encoding: 'utf8', env: { ...process.env, DEPLOY_LIVE: live, DEPLOY_DB: file } }).trim();
+  const deploySh = (args: string[], db = file) =>
+    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), ...args], { encoding: 'utf8', env: { ...process.env, DEPLOY_LIVE: live, DEPLOY_DB: db } }).trim();
   for (const [i, c] of commits.entries()) {
-    const out = backupDb(c);
+    const out = deploySh(['backup-db', c]);
     assert.equal(out, join(dir, 'backups', `pre-deploy-${c}.db`));
     utimesSync(out, 1e9 + i, 1e9 + i); // in deploy order, without waiting out ls -t's resolution
   }
+  assert.equal(readdirSync(join(dir, 'backups')).length, 4, 'nothing rotates until a deploy is healthy');
+  const first = join(dir, 'backups', `pre-deploy-${commits[0]}.db`);
+  db.createProject('After the deploy', null);
+  deploySh(['backup-db', commits[0]]);
+  const kept = new Store(first);
+  assert.deepEqual(kept.listProjects().map((p) => p.name), ['Saved'], 'a retry keeps the clean copy');
+  kept.db.close();
+
+  deploySh(['rotate-backups']);
   const saved = readdirSync(join(dir, 'backups')).sort();
-  assert.deepEqual(saved, commits.slice(1).map((c) => `pre-deploy-${c}.db`).sort(), 'the oldest copy is dropped');
+  assert.deepEqual(saved, commits.slice(1).map((c) => `pre-deploy-${c}.db`).sort(), 'the oldest copy goes');
   assert.equal(statSync(join(dir, 'backups', saved[0])).mode & 0o777, 0o600);
-  const copy = new Store(join(dir, 'backups', `pre-deploy-${commits[3]}.db`));
-  assert.deepEqual(copy.listProjects().map((p) => p.name), ['Saved'], 'the copy holds the data');
-  assert.equal(backupDb(commits[0], join(dir, 'missing.db')), '', 'no database, nothing to copy');
+  assert.equal(deploySh(['backup-db', commits[0]], join(dir, 'missing.db')), '', 'no database, nothing to copy');
   assert.ok(!existsSync(join(dir, 'missing.db')), 'and none is created');
+  assert.equal(deploySh(['rotate-backups'], join(root, 'nowhere', 'coordinator.db')), '', 'no copies, nothing to rotate');
+});
+
+test('the restart refuses to restart when it cannot copy the database first', () => {
+  const live = join(root, 'refuse-live');
+  const dir = join(root, 'refuse-data');
+  mkdirSync(dir);
+  execFileSync('git', ['init', '-q', '-b', 'main', live]);
+  execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x']);
+  new Store(join(dir, 'coordinator.db')).db.close();
+  writeFileSync(join(dir, 'backups'), 'not a folder');
+  const copy = join(root, 'refuse-deploy.sh'); // the restart deletes its own script, as the unit's is a private copy
+  cpSync(join(repo, 'tools', 'deploy.sh'), copy);
+  const r = spawnSync('bash', [copy, 'restart'], {
+    encoding: 'utf8',
+    env: { ...process.env, DEPLOY_LIVE: live, DEPLOY_DB: join(dir, 'coordinator.db'), DEPLOY_NOW: '1', DEPLOY_URL: 'http://127.0.0.1:1', DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_REMOTE: '' },
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /FAILED: Could not copy the database to backups\/ .*so nothing restarted/);
+  assert.doesNotMatch(r.stderr, /restarting no-such-citadel-unit/);
 });

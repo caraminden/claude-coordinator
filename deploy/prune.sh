@@ -9,7 +9,8 @@
 #     runner recreates the worktree from its branch if the minion is reopened. Worktrees with
 #     uncommitted changes are listed and skipped.
 # --stale-backups also handles the ad-hoc copies beside the database (coordinator.db.backup-*,
-# coordinator.db.bak-*), and only once a nightly backup in backups/ passes its restore check.
+# coordinator.db.bak-*) once they are COPY_DAYS (7) old, the dailies' window, and only while the
+# newest nightly backup in backups/ is under 2 days old and passes its restore check.
 #
 # "Closed N days ago" is the minion's last update while closed, which is when it was dismissed.
 set -euo pipefail
@@ -18,6 +19,7 @@ DATA_DIR=${DATA_DIR:-$HOME/.local/share/claude-coordinator}
 DB=$DATA_DIR/coordinator.db
 STATE_DAYS=${STATE_DAYS:-14}
 WORKTREE_DAYS=${WORKTREE_DAYS:-30}
+COPY_DAYS=${COPY_DAYS:-7}
 apply=0 backups=0
 for a in "$@"; do
   case $a in
@@ -68,14 +70,18 @@ echo "Total: $(mb $total)"
 [[ $backups == 1 ]] || exit 0
 echo "== Ad-hoc database copies beside coordinator.db"
 latest=$(ls -1 "$DATA_DIR"/backups/coordinator-[0-9]*.db 2>/dev/null | sort | tail -n 1 || true)
-if [[ -z $latest ]] || [[ $(sqlite3 :memory: ".restore '$latest'" "PRAGMA integrity_check;") != ok ]]; then
-  echo "Keeping them: no nightly backup that passes its restore check yet."
+if [[ -z $latest ]] || [[ -z $(find "$latest" -mmin -2880) ]] || [[ $(sqlite3 :memory: ".restore '$latest'" "PRAGMA integrity_check;") != ok ]]; then
+  echo "Keeping them: no nightly backup from the last 2 days that passes its restore check."
   exit 0
 fi
 echo "Nightly backup checked: $latest"
 total=0
 for f in "$DB".backup-* "$DB".bak-*; do
   [[ -e $f ]] || continue
+  if [[ -z $(find "$f" -mmin +$((COPY_DAYS * 1440))) ]]; then
+    echo "Keeping (under $COPY_DAYS days old): $(basename "$f")"
+    continue
+  fi
   bytes=$(stat -c %s "$f")
   echo "$verb: $(basename "$f"), $(mb "$bytes")"
   total=$((total + bytes))

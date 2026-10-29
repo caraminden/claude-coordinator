@@ -35,7 +35,10 @@ export function propertyChip(t) {
 function assignPicker(t) {
   const current = t.properties?.assigned ?? '';
   const userKeys = propFilter.keys.filter((k) => k.value_kind === 'user').map((k) => k.key);
-  const names = [...new Set([me, ...[...view.tickets.values()].flatMap((m) => userKeys.map((k) => m.properties?.[k]))].filter(Boolean))].sort();
+  // One spelling per person, the one already in use before the signed-in name, as the server matches them.
+  const byLower = new Map();
+  for (const n of [...[...view.tickets.values()].flatMap((m) => userKeys.map((k) => m.properties?.[k])), me]) if (n && !byLower.has(n.toLowerCase())) byLower.set(n.toLowerCase(), n);
+  const names = [...byLower.values()].sort();
   const list = h('datalist', { id: `assign-names-${t.id}` }, names.map((n) => h('option', { value: n })));
   const note = h('span', { class: 'muted small', role: 'status' });
   const input = h('input', { type: 'text', class: 'assign-input', value: current, placeholder: 'Nobody', list: list.id, 'aria-label': 'Assigned to', maxlength: '60' });

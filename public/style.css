@@ -872,7 +872,7 @@ a.thread-ref:hover { text-decoration: underline; }
 .prop-pop h4 { margin: 0 0 0.4rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .prop-pop dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.6rem; margin: 0; align-items: center; }
 .prop-pop dt { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85em; }
-.prop-pop dd { margin: 0; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.prop-pop dd { margin: 0; display: flex; flex-wrap: wrap; gap: 0.3rem; min-width: 0; }
 .prop-pop .pv-pick { color: var(--ink); cursor: pointer; }
 .prop-pop .pv-pick:hover, .prop-pop .pv-pick:focus-visible { border-color: var(--accent); }
 .prop-pop .assign-input { flex: 1 1 8rem; min-width: 0; width: auto; padding: 0.2rem 0.5rem; }

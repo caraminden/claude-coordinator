@@ -175,10 +175,10 @@ export class LiveWaiters {
     return this.store.getSetting<Waiter[]>(KEY) ?? [];
   }
 
-  /** The full hash of a commit the live checkout or `otherRepo` (the scheme's repo) knows, or null. */
-  resolve(commit: string, otherRepo: string | null): string | null {
+  /** The full hash of a commit the live checkout (unless `only`) or `otherRepo` (the scheme's repo) knows, or null. */
+  resolve(commit: string, otherRepo: string | null, only = false): string | null {
     if (!/^[0-9a-f]{4,40}$/i.test(commit)) return null;
-    for (const dir of [this.repo, otherRepo]) {
+    for (const dir of only ? [otherRepo] : [this.repo, otherRepo]) {
       const full = dir && git(dir, ['rev-parse', '-q', '--verify', `${commit}^{commit}`]);
       if (full) return full;
     }

@@ -8,6 +8,7 @@ import { APP_NAME } from '../src/appname.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { LiveWaiters } from '../src/wake.ts';
+import { bootServer, REPO } from './helpers.ts';
 
 // wake_when_live: a waiter is messaged once the server runs a commit containing its commit (or, with
 // none, once the server runs anything new), then dropped. A stand-in live checkout in a temp repo.
@@ -129,9 +130,9 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   assert.equal(store.getSetting(`loop:${id}`), null);
 });
 
-test('in a scheme whose code this server does not run, a commit waiter wakes once the commit is on its main', () => {
-  // #150: a Delve commit resolved in Delve's repo, but live() checked it against the live checkout, so it never fired.
-  const other = join(root, 'other');
+/** A scheme repo this server doesn't run (Delve's, say), with one commit on branch ticket/x not yet on main. */
+function otherScheme(name: string) {
+  const other = join(root, name);
   mkdirSync(other);
   const og = (...args: string[]) => execFileSync('git', args, { cwd: other, encoding: 'utf8' }).trim();
   og('init', '-q', '-b', 'main');
@@ -142,6 +143,12 @@ test('in a scheme whose code this server does not run, a commit waiter wakes onc
   og('commit', '-q', '--allow-empty', '-m', 'o2');
   const work = og('rev-parse', 'HEAD');
   og('checkout', '-q', 'main');
+  return { other, og, work };
+}
+
+test('in a scheme whose code this server does not run, a commit waiter wakes once the commit is on its main', () => {
+  // #150: a Delve commit resolved in Delve's repo, but live() checked it against the live checkout, so it never fired.
+  const { other, og, work } = otherScheme('other');
   const delve = store.createProject('D', null);
   store.setProjectRepoDir(delve.id, other);
   const t = store.createTicket({ project_id: delve.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
@@ -156,6 +163,29 @@ test('in a scheme whose code this server does not run, a commit waiter wakes onc
   assert.deepEqual(sent, [{ id: t.id, text: `\`${work.slice(0, 7)}\` is on the scheme's main now: play the new level` }]);
   assert.equal(w.add(t.id, work, 'x'), false, 'already merged');
   assert.equal(w.list().length, 0);
+});
+
+test('through the server, in a scheme it does not run: no commit is refused, a commit of its own is waited on until merged', async () => {
+  const boot = join(root, 'boot');
+  mkdirSync(join(boot, 'data'), { recursive: true });
+  const { other, work } = otherScheme('other-boot');
+  const seed = new Store(join(boot, 'data', 'coordinator.db'));
+  const delve = seed.createProject('D', null);
+  seed.setProjectRepoDir(delve.id, other);
+  const t = seed.createTicket({ project_id: delve.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  const { call, stop } = await bootServer({ root: boot });
+  try {
+    const none = await call(`/api/tickets/${t.id}/wake`, { reason: 'x' });
+    assert.equal(none.status, 400);
+    assert.equal(none.data.error, "This scheme has no deploys; give the commit you're waiting on");
+    const ours = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim(); // the booted server's own commit
+    assert.equal((await call(`/api/tickets/${t.id}/wake`, { commit: ours, reason: 'x' })).status, 400);
+    const r = await call(`/api/tickets/${t.id}/wake`, { commit: work.slice(0, 7), reason: 'x' });
+    assert.equal(r.status, 201);
+    assert.deepEqual([r.data.waiting, r.data.commit, r.data.merged], [true, work, true]);
+  } finally {
+    stop();
+  }
 });
 
 test('pending-deploy minions whose branch the live commit contains are found, whoever deployed it', () => {

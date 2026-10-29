@@ -19,7 +19,7 @@ const MAX_TEXT = 4000;
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
 
 const WAKE_DESCRIPTION =
-  `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as merged: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead, and a commit is required. Woken once, then forgotten; a dismissed minion is skipped.`;
+  `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as merged: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it merges), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
 const WAKE_PROPS = {
   commit: { type: 'string', description: 'Optional: the commit to wait for (a hash, short or full)' },
   reason: { type: 'string', description: 'What to do once it is live; it comes back in the wake message, e.g. "#63\'s approve cards are live: retry the tripwire test"' },

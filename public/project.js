@@ -57,9 +57,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     chatId = main.id ?? (main.number == null ? coordinator.id : tickets.find((t) => t.number === main.number)?.id);
     if (!chatId) throw new Error(`There is no minion #${main.number} in ${project.name}.`);
   }
-  const [{ ticket }, events] = chatId
+  const [{ ticket }, page] = chatId
     ? await Promise.all([api(`api/tickets/${chatId}`), loadEvents(chatId)])
-    : [{ ticket: null }, []];
+    : [{ ticket: null }, null];
   if (seq !== routeSeq) return; // overtaken by another click while loading
   setView({
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
@@ -124,7 +124,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'sharedList' ? sharedList()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)
-        : chatSection(chatId, ticket, events);
+        : chatSection(chatId, ticket, page?.events ?? []);
 
   // .panels only becomes a box of its own when both panels are collapsed, so their tabs can share
   // one slim sticky column; otherwise the panels sit directly in the grid.
@@ -143,7 +143,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   if (main.kind === 'sharedList') renderSharedList();
   if (!chatId) return window.scrollTo(0, 0);
   revealActiveRow();
-  await mountChat(chatId, ticket, events);
+  await mountChat(chatId, ticket, page);
 }
 
 /**
@@ -153,7 +153,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
 async function switchChat(main, seq) {
   const chatId = main.id ?? (main.number == null ? view.coordinator.id : [...view.tickets.values()].find((t) => t.number === main.number)?.id);
   if (!chatId) return false;
-  const [{ ticket }, events] = await Promise.all([api(`api/tickets/${chatId}`), loadEvents(chatId)]);
+  const [{ ticket }, page] = await Promise.all([api(`api/tickets/${chatId}`), loadEvents(chatId)]);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
   const { kind, projectId, project, coordinator, tickets, seen, artifacts, shared, showClosed } = view;
   setView({
@@ -164,12 +164,12 @@ async function switchChat(main, seq) {
   if (isCoordinator(ticket)) view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);
   renderCrumbs(main);
-  document.querySelector('#app .split').lastElementChild.replaceWith(chatSection(chatId, ticket, events));
+  document.querySelector('#app .split').lastElementChild.replaceWith(chatSection(chatId, ticket, page.events));
   // On phones the panels sit above the chat; fold them away as a fresh load would.
   if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details:not(.as-drawer)')) el.open = false;
   renderShelf();
   renderSidebar();
   revealActiveRow();
-  await mountChat(chatId, ticket, events);
+  await mountChat(chatId, ticket, page);
   return true;
 }

@@ -1,5 +1,5 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, isCoordinator, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
+import { api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, isCoordinator, loadEarlier, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
@@ -29,23 +29,20 @@ export function chatView(chatId, ticket) {
 }
 
 /** Fill in a chat section just put on the page: its head, its history, and where you were in it. */
-export async function mountChat(chatId, ticket, events) {
+export async function mountChat(chatId, ticket, page) {
   renderTicketHead();
-  const seenAt = view.seen?.[chatId];
-  for (const ev of events) appendEvent(ev, false);
+  view.page = page;
+  view.openedSeenAt = view.seen?.[chatId] ?? 0;
+  renderHistory();
   if (ticket.branch) refreshBranch(chatId);
   markSeen(chatId);
-  // Open at the first thing you haven't seen, marked New; a minion you've never opened, at its start.
-  const items = [...document.getElementById('log').children];
-  const at = items.findIndex((el) => Number(el.dataset.at) > (seenAt ?? 0));
-  if (at < 0) restoreScroll(chatId);
-  else {
-    const divider = h('div', { class: 'unread-divider', role: 'separator' }, h('span', {}, 'New'));
-    items[at].before(divider);
-    // A Taskmaster's history runs long; past that much unread, its newest matters more than where you left off.
-    if (isCoordinator(ticket) && items.length - at > TASKMASTER_UNREAD_LIMIT) scrollToBottom();
-    else scrollToUnread(divider);
-  }
+  // Open at the first thing you haven't seen, marked New; a minion you've never opened, at the top of
+  // what's loaded. Unread from before the loaded page also opens there, under "Load earlier".
+  const divider = document.querySelector('#log > .unread-divider');
+  if (!divider) restoreScroll(chatId);
+  // A Taskmaster's history runs long; past that much unread, its newest matters more than where you left off.
+  else if (isCoordinator(ticket) && divider.parentElement.querySelectorAll(':scope > .unread-divider ~ [data-at]').length > TASKMASTER_UNREAD_LIMIT) scrollToBottom();
+  else scrollToUnread(divider);
   try {
     if (sessionStorage.getItem('cc-refocus')) {
       sessionStorage.removeItem('cc-refocus');
@@ -55,6 +52,51 @@ export async function mountChat(chatId, ticket, events) {
   // Events broadcast while the snapshot was loading arrived before `view` existed.
   await catchUpEvents();
   if (isCoordinator(ticket)) await showRecap();
+}
+
+/**
+ * Draw the log from the loaded history (view.page), from scratch: earlier pages go above, and a card
+ * answered or a message struck by a later event has to see that event after its own. Messages still
+ * on their way and the recap stay where they are.
+ */
+function renderHistory() {
+  const log = document.getElementById('log');
+  const page = view.page;
+  const keep = [...view.pendingMessages.map((m) => m.el), document.getElementById('recap')].filter(Boolean);
+  Object.assign(view, {
+    lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
+    actions: new Map(), turnActions: [], cards: new Map(), heldCards: [],
+    // The session started on an earlier page, if there is one.
+    sawInit: page.more, turnNote: null, turnInitAt: undefined, turnTexts: [], narrationEl: null, pendingRequest: [], turnRequest: undefined,
+  });
+  log.replaceChildren(...(page.more ? [h('div', { class: 'load-earlier' },
+    h('button', { type: 'button', class: 'small secondary', onclick: (e) => showEarlier(e.currentTarget) }, 'Load earlier'))] : []));
+  for (const ev of page.events) appendEvent(ev, false);
+  const at = [...log.children].find((el) => Number(el.dataset.at) > view.openedSeenAt);
+  at?.before(h('div', { class: 'unread-divider', role: 'separator' }, h('span', {}, 'New')));
+  log.append(...keep);
+  renderProgress();
+}
+
+/** Load the page before what's shown (or back to event `from`) and redraw, keeping your place. */
+export async function showEarlier(button, from) {
+  const { id, page } = view;
+  if (button) button.disabled = true;
+  try {
+    await loadEarlier(id, page, from);
+  } catch (err) {
+    if (button) button.disabled = false;
+    return alertNote(`Couldn't load earlier messages: ${err.message}`);
+  }
+  if (view.id !== id) return;
+  // Everything below what was added draws the same, so the distance to the bottom stays put.
+  const scroller = chatScroller() ?? document.scrollingElement;
+  const fromBottom = scroller.scrollHeight - scroller.scrollTop;
+  renderHistory();
+  scroller.scrollTop = scroller.scrollHeight - fromBottom;
+  // The redraw dropped find's highlights; find again over the longer history.
+  const find = view.findEl?.querySelector('input');
+  if (find?.value.trim()) find.dispatchEvent(new Event('input'));
 }
 
 // Unread chat items (messages, cards, notes) past which a Taskmaster opens at the bottom.
@@ -114,6 +156,14 @@ function chatFindBox() {
     count.textContent = q.length >= 2 ? (state.marks.length ? `0/${state.marks.length}` : 'none') : '';
     // Start from the newest match, nearest where you usually are.
     if (state.marks.length) show(state.marks.length - 1);
+    if (q.length >= 2 && view.page?.more) reachBack(q);
+  };
+  // Matches older than the loaded history: load back to the oldest of them (showEarlier finds again).
+  const reachBack = async (q) => {
+    const { id, projectId, page } = view;
+    const hits = await api(`api/projects/${projectId}/search?q=${encodeURIComponent(q)}&ticket=${id}`).catch(() => []);
+    const oldest = hits[0]?.oldestId;
+    if (oldest && view.page === page && input.value.trim() === q && oldest < page.events[0].id) await showEarlier(null, oldest);
   };
   // Highlighting a long chat on every key is wasted work; wait for a pause, and for 2+ characters.
   let timer = null;
@@ -432,6 +482,8 @@ function renderProgress() {
 }
 
 export function appendEvent(event, scroll = true) {
+  // Live events join the loaded history, so a redraw (Load earlier) and the cache keep them.
+  if (view.page && event.id > (view.page.events.at(-1)?.id ?? 0)) view.page.events.push(event);
   view.lastEventId = Math.max(view.lastEventId, event.id);
   const log = document.getElementById('log');
   if (!log) return;

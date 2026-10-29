@@ -320,7 +320,7 @@ export function markdownDoc(src, opts = {}) {
 // scrolling up even a little leaves you where you are.
 const BOTTOM_SLACK = 24;
 // In the full-screen file viewer the chat scrolls in its own column instead of the page.
-const chatScroller = () => document.querySelector('dialog.viewer[open] > .chat');
+export const chatScroller = () => document.querySelector('dialog.viewer[open] > .chat');
 const atBottom = () => {
   const el = chatScroller();
   return el ? el.scrollTop + el.clientHeight >= el.scrollHeight - BOTTOM_SLACK
@@ -549,34 +549,50 @@ async function resync() {
   } catch {}
 }
 
-// Threads' histories already downloaded this session, so reopening one only fetches what is new.
-// Events are append-only, so the cached part never goes stale. Most recently used last.
+// Threads' histories downloaded this session, each its newest page or more ({ events, more, tasks },
+// as the events route gives it), so reopening one only fetches what is new. Events are append-only,
+// so the cached part never goes stale. Most recently used last.
 const eventCache = new Map();
 const EVENT_CACHE_THREADS = 12;
 
+function remember(ticketId, page) {
+  eventCache.delete(ticketId);
+  eventCache.set(ticketId, page);
+  if (eventCache.size > EVENT_CACHE_THREADS) eventCache.delete(eventCache.keys().next().value);
+}
+
+/** A thread's newest page of history, from the cache topped up with what came since, or fetched. */
 export async function loadEvents(ticketId) {
   // A prefetch already on its way is the head start: wait for it, then fetch only what came after.
   await prefetching.get(ticketId);
-  const cached = eventCache.get(ticketId) ?? [];
-  const after = cached.length ? cached[cached.length - 1].id : 0;
-  const fresh = await api(`api/tickets/${ticketId}/events${after ? `?after=${after}` : ''}`);
-  const events = fresh.length ? cached.concat(fresh) : cached;
-  eventCache.delete(ticketId);
-  eventCache.set(ticketId, events);
-  if (eventCache.size > EVENT_CACHE_THREADS) eventCache.delete(eventCache.keys().next().value);
-  return events;
+  const cached = eventCache.get(ticketId);
+  const page = cached ?? await api(`api/tickets/${ticketId}/events`);
+  if (cached) {
+    const fresh = await api(`api/tickets/${ticketId}/events?after=${page.events.at(-1)?.id ?? 0}`);
+    if (fresh.length) page.events = page.events.concat(fresh);
+  }
+  remember(ticketId, page);
+  return page;
 }
 
-// Prefetching: a thread's history starts downloading when you point at (or touch) its row, and the
-// top few rows load quietly once a project page settles, so a first click opens from the cache.
+/** Add the page before the oldest loaded event to a thread's history; with `from`, reach back to that event. */
+export async function loadEarlier(ticketId, page, from) {
+  const older = await api(`api/tickets/${ticketId}/events?before=${page.events[0].id}${from ? `&from=${from}` : ''}`);
+  Object.assign(page, { events: older.events.concat(page.events), more: older.more, tasks: older.tasks });
+  remember(ticketId, page);
+  return page;
+}
+
+// Prefetching: a thread's newest page starts downloading when you point at (or touch) its row, and
+// the top two rows load quietly once a project page settles, so a first click opens from the cache.
 // A prefetch only fills a free cache slot, never evicting a thread you actually opened.
 const prefetching = new Map(); // ticket id -> its download in flight
-const PREFETCH_ROWS = 6;
+const PREFETCH_ROWS = 2;
 
 function prefetchEvents(ticketId) {
   if (eventCache.has(ticketId) || prefetching.has(ticketId) || eventCache.size >= EVENT_CACHE_THREADS) return prefetching.get(ticketId);
   const p = api(`api/tickets/${ticketId}/events`)
-    .then((events) => { if (!eventCache.has(ticketId) && eventCache.size < EVENT_CACHE_THREADS) eventCache.set(ticketId, events); })
+    .then((page) => { if (!eventCache.has(ticketId) && eventCache.size < EVENT_CACHE_THREADS) eventCache.set(ticketId, page); })
     .catch(() => {})
     .finally(() => prefetching.delete(ticketId));
   prefetching.set(ticketId, p);
@@ -591,7 +607,7 @@ for (const type of ['pointerover', 'touchstart']) {
   }, { passive: true });
 }
 
-/** Once the page is idle, load the first few minions in the list, two at a time. Not on data saver. */
+/** Once the page is idle, load the first two minions in the list. Not on data saver. */
 export function prefetchTopRows() {
   if (navigator.connection?.saveData) return;
   const whenIdle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 1500));

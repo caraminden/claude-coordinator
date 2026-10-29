@@ -168,6 +168,8 @@ interface TurnState {
   result?: { error: boolean; text: string | null };
   /** Its minion's deploy went live mid-turn (see deployLive). */
   deployed?: true;
+  /** Usage-limit resumes in a row that led to this turn. */
+  limitTries?: number;
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
@@ -236,6 +238,57 @@ const clip = (text: string) => (text.length > 140 ? text.slice(0, 140) + '…' :
 
 /** Claude Code's words when a turn hits the plan's usage limit: "You've hit your 5-hour limit · resets 3:30pm (…)". */
 export const USAGE_LIMIT = /hit your [\w -]*limit/i;
+/** Claude's words for an account problem only a person can fix, like "API Error: 400 Identity verification is required to continue.": never retried. */
+export const ACCOUNT_ERROR = /identity verification|credit balance|oauth token|invalid api key|run \/login|organization has been disabled/i;
+/** Usage-limit resumes in a row before a minion waits for a person. */
+export const MAX_LIMIT_RESUMES = 3;
+const LIMIT_RESUMES = 'limit-resumes';
+/** Minions waiting for the usage limit to reset, in the settings table so the wait outlives a restart. */
+interface LimitResume {
+  ticket: number;
+  /** When it resumes (ms): a while after the reset, spaced from the others. */
+  at: number;
+  /** Limit resumes in a row this one will be. */
+  tries: number;
+  /** Messages people sent while it waited; they go into the resume. */
+  queued?: QueuedMessage[];
+  /** The account's time zone from Claude's words, for saying the time. */
+  tz?: string;
+}
+const RESUME_LIMIT_PROMPT =
+  `Your last turn stopped at the account's usage limit, which has now reset. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
+
+/** When "resets 3:30pm (America/Los_Angeles)" next comes round after `now`, or null for words without a plain time of day. */
+export function parseResetTime(text: string, now = Date.now()): number | null {
+  const m = /resets (\d{1,2})(?::(\d{2}))?\s*([ap]m)\b(?:\s*\(([\w/+-]+)\))?/i.exec(text);
+  if (!m) return null;
+  const hour = (Number(m[1]) % 12) + (m[3].toLowerCase() === 'pm' ? 12 : 0);
+  const minute = Number(m[2] ?? 0);
+  // The zone's offset at `t`: its wall clock read as UTC, minus t.
+  const offset = (t: number) => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: m[4], hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+      .formatToParts(t).map((x) => [x.type, Number(x.value)]));
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(t / 1000) * 1000;
+  };
+  try {
+    const wall = new Date(now + offset(now));
+    let at = Date.UTC(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate(), hour, minute) - offset(now);
+    if (at <= now) at += 24 * 60 * 60 * 1000;
+    return at;
+  } catch {
+    return null; // a time zone Intl doesn't know
+  }
+}
+
+/** "3:31pm", in the account's zone when Claude named it. */
+function clockTime(ms: number, tz?: string): string {
+  const say = (timeZone?: string) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone }).replace(' ', '').toLowerCase();
+  try {
+    return say(tz);
+  } catch {
+    return say();
+  }
+}
 
 /** Auto-resumes in a row before a thread is left alone, in case its own turn is what kills the server. */
 export const MAX_RESUMES = 2;
@@ -512,6 +565,15 @@ export class Runner {
   now = () => Date.now();
   /** Gap between auto-resumes after a restart, so they don't all start at once. */
   resumeGapMs = 3000;
+  /** After the usage limit resets, before the first minion resumes; then between resumes, so they don't all hit it again at once. */
+  limitDelayMs = 60_000;
+  limitGapMs = 30_000;
+  /** When Claude's words don't say when the limit resets. */
+  limitFallbackMs = 60 * 60 * 1000;
+  private limitTimer?: NodeJS.Timeout;
+  private lastLimitResume = 0;
+  /** When each account error last pushed: one push per error for everyone, not one per minion. */
+  private accountPushes = new Map<string, number>();
   /** How often a running turn's stream file is read. */
   pollMs = 250;
   /** Run turns in transient systemd user units, which outlive this server, rather than as its children. */
@@ -586,6 +648,8 @@ export class Runner {
       ...ticket, queued: this.queued(ticket.id), queued_ids: (this.queues.get(ticket.id) ?? []).flatMap((m) => m.id ?? []), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
       turnStartedAt: this.turns.get(ticket.id)?.startedAt ?? null,
+      // When it resumes by itself after the usage limit, if it waits for that.
+      limit_resume_at: this.limitWait(ticket.id)?.at ?? null,
       approvals: this.approvals.waiting(ticket.id), properties: this.store.props.forTarget('minion', ticket.id),
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
@@ -598,6 +662,7 @@ export class Runner {
 
   /** Close a ticket that is not running. Its worktree and branch are kept. */
   close(ticketId: number, text: string) {
+    if (this.cancelLimitWait(ticketId)) this.queues.delete(ticketId);
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
     this.onClose(ticketId);
@@ -713,6 +778,9 @@ export class Runner {
       }
     }
     later.forEach((start, i) => setTimeout(start, this.resumeGapMs * (i + 1)));
+    // Minions waiting on the usage limit keep waiting, with the messages held for them.
+    for (const w of this.limitResumes()) if (w.queued?.length) this.queues.set(w.ticket, [...w.queued]);
+    this.armLimitTimer();
     // Folders of turns nobody follows any more and whose process is gone.
     try {
       const followed = new Set([...this.turns.values()].map((t) => t.dir));
@@ -745,16 +813,88 @@ export class Runner {
     return wrapperAlive(live.dir) ?? Date.now() - live.startedAt < 60_000;
   }
 
-  /** Start an auto-resume turn, with any messages that were queued behind the cut-off one. */
-  private resume(ticketId: number, resumes: number) {
+  /**
+   * Start an auto-resume turn, after a restart or (limitTries > 0) the usage limit, with any messages
+   * that were queued behind the cut-off one.
+   */
+  private resume(ticketId: number, resumes: number, limitTries = 0) {
     // Someone's message got in first; its turn took the queue, and that is resume enough.
     if (this.isRunning(ticketId)) return;
     const ticket = this.store.getTicket(ticketId);
     const project = ticket && this.store.getProject(ticket.project_id);
     if (!ticket || !project || ticket.status === 'closed') return;
-    this.emit(ticketId, 'note', { text: 'Resumed after a server restart' });
+    this.emit(ticketId, 'note', { text: limitTries ? 'Resumed after the usage limit reset' : 'Resumed after a server restart' });
     const batch = this.queues.get(ticketId)?.splice(0) ?? [];
-    this.startTurn(project, ticket, promptMessage([{ author: 'System', text: RESUME_PROMPT, images: [] }, ...batch]), resumes);
+    this.startTurn(project, ticket, promptMessage([{ author: 'System', text: limitTries ? RESUME_LIMIT_PROMPT : RESUME_PROMPT, images: [] }, ...batch]), resumes, limitTries);
+  }
+
+  private limitResumes(): LimitResume[] {
+    return this.store.getSetting<LimitResume[]>(LIMIT_RESUMES) ?? [];
+  }
+
+  /** The minion's usage-limit wait, if it has one. */
+  limitWait(ticketId: number): LimitResume | null {
+    return this.limitResumes().find((w) => w.ticket === ticketId) ?? null;
+  }
+
+  private saveLimitResumes(list: LimitResume[]) {
+    if (list.length) this.store.setSetting(LIMIT_RESUMES, list);
+    else this.store.deleteSetting(LIMIT_RESUMES);
+    this.armLimitTimer();
+  }
+
+  /** Wait for the limit to reset, a while after `resetAt` and spaced from the minions already waiting; returns when it resumes. */
+  private waitForLimit(ticketId: number, resetAt: number, tries: number, tz?: string): number {
+    const list = this.limitResumes().filter((w) => w.ticket !== ticketId);
+    let at = resetAt + this.limitDelayMs;
+    for (const w of [...list].sort((a, b) => a.at - b.at)) if (Math.abs(w.at - at) < this.limitGapMs) at = w.at + this.limitGapMs;
+    const queued = this.queues.get(ticketId);
+    list.push({ ticket: ticketId, at, tries, ...(queued?.length ? { queued } : {}), ...(tz ? { tz } : {}) });
+    this.saveLimitResumes(list);
+    return at;
+  }
+
+  /** Stop waiting on the usage limit (a stop, a dismissal); true if it was waiting. */
+  cancelLimitWait(ticketId: number): boolean {
+    const list = this.limitResumes();
+    if (!list.some((w) => w.ticket === ticketId)) return false;
+    this.saveLimitResumes(list.filter((w) => w.ticket !== ticketId));
+    return true;
+  }
+
+  /** Hold the minion's queued messages for its usage-limit resume, if it waits for one. */
+  private holdForLimit(ticketId: number): boolean {
+    const list = this.limitResumes();
+    const w = list.find((x) => x.ticket === ticketId);
+    if (!w) return false;
+    w.queued = [...(this.queues.get(ticketId) ?? [])];
+    this.store.setSetting(LIMIT_RESUMES, list);
+    return true;
+  }
+
+  /** Time the next usage-limit resume: the earliest due, and never sooner than limitGapMs after the last. */
+  private armLimitTimer() {
+    clearTimeout(this.limitTimer);
+    const list = this.limitResumes();
+    if (!list.length) return;
+    const due = Math.max(Math.min(...list.map((w) => w.at)), this.lastLimitResume + this.limitGapMs);
+    // setTimeout overflows past 24.8 days; a weekly limit is at most 7.
+    this.limitTimer = setTimeout(() => this.limitResumeNext(), Math.min(Math.max(0, due - Date.now()), 2 ** 31 - 1));
+    this.limitTimer.unref();
+  }
+
+  private limitResumeNext() {
+    const list = this.limitResumes().sort((a, b) => a.at - b.at);
+    const w = list[0];
+    if (!w || w.at > Date.now()) return this.armLimitTimer();
+    this.lastLimitResume = Date.now();
+    this.saveLimitResumes(list.slice(1));
+    // A turn already running (a GitHub ping, a steer) is resume enough; its held messages queue behind it.
+    if (this.isRunning(w.ticket)) {
+      if (this.queued(w.ticket)) this.saveTurn(w.ticket, { queued: this.queues.get(w.ticket) });
+      return;
+    }
+    this.resume(w.ticket, 0, w.tries);
   }
 
   /** Merge into the saved state of a ticket's running turn. */
@@ -789,7 +929,15 @@ export class Runner {
     const q = this.queues.get(ticketId) ?? [];
     q.push(msg);
     this.queues.set(ticketId, q);
-    if (!this.isRunning(ticketId)) return this.next(ticketId);
+    if (!this.isRunning(ticketId)) {
+      this.next(ticketId);
+      const wait = this.limitWait(ticketId);
+      if (wait) {
+        this.emit(ticketId, 'note', { text: `Held for the resume at ${clockTime(wait.at, wait.tz)}, after the usage limit resets.` });
+        this.broadcastTicket(ticketId);
+      }
+      return;
+    }
     this.saveTurn(ticketId, { queued: q });
     this.broadcastTicket(ticketId);
   }
@@ -801,6 +949,7 @@ export class Runner {
     if (i < 0) return false;
     q!.splice(i, 1);
     if (this.isRunning(ticketId)) this.saveTurn(ticketId, { queued: q });
+    else this.holdForLimit(ticketId);
     this.emit(ticketId, 'unqueued', { id: eventId, by });
     this.broadcastTicket(ticketId);
     return true;
@@ -921,7 +1070,15 @@ export class Runner {
 
   stop(ticketId: number): boolean {
     const live = this.turns.get(ticketId);
-    if (!live) return false;
+    if (!live) {
+      // Waiting on the usage limit: a stop ends the wait, and as with a turn, its held messages go too.
+      if (!this.cancelLimitWait(ticketId)) return false;
+      this.queues.delete(ticketId);
+      this.store.updateTicket(ticketId, { note: 'Usage limit: stopped, send a message to carry on' });
+      this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
+      this.broadcastTicket(ticketId);
+      return true;
+    }
     this.queues.delete(ticketId);
     this.saveTurn(ticketId, { stopped: true, queued: [], steered: [] });
     this.emit(ticketId, 'note', { text: 'Stopped by user.' });
@@ -959,6 +1116,8 @@ export class Runner {
   private next(ticketId: number) {
     const q = this.queues.get(ticketId);
     if (!q?.length) return;
+    // Waiting for the usage limit to reset: the messages go into the resume, not a turn that would fail at once.
+    if (this.holdForLimit(ticketId)) return;
     // Everything queued while the last turn ran goes into one turn.
     const batch = q.splice(0);
     const ticket = this.store.getTicket(ticketId);
@@ -967,7 +1126,7 @@ export class Runner {
     this.startTurn(project, ticket, promptMessage(batch));
   }
 
-  private startTurn(project: Project, ticket: Ticket, prompt: string, resumes = 0) {
+  private startTurn(project: Project, ticket: Ticket, prompt: string, resumes = 0, limitTries = 0) {
     // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
     if (this.noTurns) {
       this.emit(ticket.id, 'note', { text: 'This is a preview: it shows the app on a copy of the data, but it never runs turns.' });
@@ -1061,7 +1220,9 @@ export class Runner {
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
     // outlasts a stray turn (a GitHub ping), so the deploy still dismisses the minion unless the turn
     // sets another state or a person wrote to it (personWrote).
-    if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, { state: null });
+    // A limited minion's note is the server's, about the wait this turn ends.
+    if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, ticket.state === 'limited' ? { state: null, note: null } : { state: null });
+    this.cancelLimitWait(ticket.id);
 
     // The session's transcript, task list and memory live in the database too; put back anything this
     // config dir lacks (another account, a fresh machine) before resuming.
@@ -1086,7 +1247,7 @@ export class Runner {
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: this.claudeBin, args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort };
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     this.setStatus(ticket.id, 'running');
@@ -1215,14 +1376,7 @@ export class Runner {
       // Stopped by the user; leave it waiting for the next message.
     } else if (!sawResult || code !== 0 || resultIsError) {
       status = 'error';
-      const detail = stderr.slice(-10).join('\n');
-      const text = `claude exited with code ${code}${detail ? `:\n${detail}` : ''}`;
-      this.emit(ticketId, 'error', { text });
-      this.onTurnError(ticketId, resultError ?? text);
-      // Waiting on the usage window, not stuck; the note keeps Claude's words on when it resets.
-      if (resultError && USAGE_LIMIT.test(resultError) && this.store.getTicket(ticketId)?.state !== 'pending-deploy') {
-        this.store.updateTicket(ticketId, { state: 'limited', note: resultError });
-      }
+      this.turnFailed(ticketId, resultError?.trim() || null, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0);
     }
     const closing = this.closing.has(ticketId);
     const reason = this.closing.get(ticketId);
@@ -1254,6 +1408,49 @@ export class Runner {
         .catch((err) => console.error(`Saving the session of ticket ${ticketId} failed:`, err));
     }
     this.next(ticketId);
+  }
+
+  /**
+   * Say why a turn failed, leading with Claude's own words (its result's error, else its last stderr
+   * lines). A usage limit is a wait, not an error: no push, and it resumes after the reset. An account
+   * problem needs a person: it blocks, never retries, and pushes once for everyone.
+   */
+  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number) {
+    const exited = code ? `claude exited with code ${code}` : 'claude ended without finishing';
+    const why = reason || stderr;
+    const text = why ? `${why}${reason && stderr ? `\n${stderr}` : ''}\n(${exited})` : exited;
+    const first = (why || exited).split('\n')[0];
+    const short = (s: string) => (s.length > 60 ? s.slice(0, 59) + '…' : s);
+    // A deploy still waiting to go live keeps its state, so the deploy can dismiss the minion.
+    const keepState = this.store.getTicket(ticketId)?.state === 'pending-deploy';
+    if (reason && USAGE_LIMIT.test(reason)) {
+      const tz = /\(([\w/+-]+)\)/.exec(reason)?.[1];
+      if (limitTries >= MAX_LIMIT_RESUMES) {
+        this.emit(ticketId, 'note', { text: `${reason}\nIt has already resumed ${limitTries} times in a row after the usage limit, so it waits for a message now.` });
+        if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit: gave up after ${limitTries} tries, send a message` });
+        return;
+      }
+      const usage = this.usage;
+      const hit = [usage?.session, usage?.weekly].filter((w) => w?.status === 'rejected' && w.resetsAt && w.resetsAt > Date.now()).map((w) => w!.resetsAt!);
+      const resetAt = hit.length ? Math.max(...hit) : parseResetTime(reason) ?? Date.now() + this.limitFallbackMs;
+      const at = this.waitForLimit(ticketId, resetAt, limitTries + 1, tz);
+      this.emit(ticketId, 'note', { text: `${reason}\nIt resumes by itself at ${clockTime(at, tz)}; messages sent before then go into that turn.` });
+      if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit, resumes ${clockTime(at, tz)}` });
+      return;
+    }
+    if (reason && ACCOUNT_ERROR.test(reason)) {
+      this.emit(ticketId, 'error', { text: `${text}\nThis needs a person to sort out the Claude account; it won't retry by itself.` });
+      if (!keepState) this.store.updateTicket(ticketId, { state: 'blocked', note: short(`Needs a person: ${first.replace(/^API Error: \d+ /, '')}`) });
+      const last = this.accountPushes.get(first);
+      if (last === undefined || Date.now() - last > 60 * 60 * 1000) {
+        this.accountPushes.set(first, Date.now());
+        this.onTurnError(ticketId, first);
+      }
+      return;
+    }
+    this.emit(ticketId, 'error', { text });
+    this.store.updateTicket(ticketId, { note: short(first) });
+    this.onTurnError(ticketId, text);
   }
 
   private handleLine(ticketId: number, line: string, onResult: (isError: boolean, result: string | null) => void) {

@@ -249,10 +249,11 @@ export function rowState(t) {
 }
 
 /**
- * A minion that hit the usage limit: a countdown while the account's limit is still hit, your move
+ * A minion that hit the usage limit: a countdown to its own resume when it has one, else a countdown while the account's limit is still hit, your move
  * once a later turn shows it has reset, and just "limit hit" when neither is known (the note says when).
  */
 function limitState(t, waited) {
+  if (t.limit_resume_at) return { rank: 2, fam: 'wait', cell: `resumes ${shortIn(t.limit_resume_at)}`, label: 'Usage limit: resumes by itself' };
   const hit = [usage?.session, usage?.weekly].find((w) => w?.status === 'rejected' && w.resetsAt > Date.now());
   if (hit) return { rank: 2, fam: 'wait', cell: `resets ${shortIn(hit.resetsAt)}`, label: STATES.limited.label };
   if (usage?.updatedAt > t.updated_at) return { rank: 0, fam: 'you', cell: waited('resume'), label: 'The usage limit has reset: send a message to carry on' };

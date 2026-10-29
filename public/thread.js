@@ -168,8 +168,9 @@ export function renderTicketHead() {
   if (t.preview && t.status !== 'closed') {
     actions.push(h('button', { class: 'secondary', title: 'Open this minion\'s preview in a new tab', onclick: () => window.open(`preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
   }
-  if (t.status === 'running') {
-    actions.push(h('button', { class: 'secondary', onclick: () => api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));
+  // Waiting on the usage limit, Stop ends the wait (src/runner.ts, stop).
+  if (t.status === 'running' || t.limit_resume_at) {
+    actions.push(h('button', { class: 'secondary', title: t.limit_resume_at ? 'Don\'t resume after the usage limit resets' : undefined, onclick: () => api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));
   } else if (coord) {
     // The coordinator stays open for the life of the project.
   } else if (t.status === 'closed') {

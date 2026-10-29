@@ -45,7 +45,11 @@ try {
   failed(err);
 }
 child!.on('error', failed);
-if (child!.pid) writeFileSync(file('pid.json'), JSON.stringify({ wrapper: process.pid, claude: child.pid }));
+// Renamed into place, like exit.json: the runner and tests read it as soon as it exists.
+if (child!.pid) {
+  writeFileSync(file('pid.json.tmp'), JSON.stringify({ wrapper: process.pid, claude: child.pid }));
+  renameSync(file('pid.json.tmp'), file('pid.json'));
+}
 child!.on('exit', (code, signal) => done({ code, signal }));
 
 // Claude reads stdin line by line, mid-turn too, and waits for more until it closes. So steers go in

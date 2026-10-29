@@ -1,11 +1,12 @@
-// The message box under a chat: drafts, pasted images, model and effort.
-import { api, catchUpEvents, h, isCoordinator, me, reloadWhenIdle, scrollToBottom, sending, setSending, view } from './core.js';
+// The message box under a chat: drafts, pasted images, attached files, model and effort.
+import { api, catchUpEvents, formatSize, h, isCoordinator, me, reloadWhenIdle, scrollToBottom, sending, setSending, uploadUrl, view } from './core.js';
 import { base64Url, renderTicketHead, renderTyping, userBubble } from './thread.js';
 
 // ---------- drafts ----------
 
 // Unsent text survives reloads and switching threads: it is saved per thread as you type.
-// Text goes to localStorage; images are too big for it, so they go to IndexedDB.
+// Text goes to localStorage; images are too big for it, so they go to IndexedDB, with the names of
+// files already uploaded.
 export function loadDraft(key) {
   try { return JSON.parse(localStorage.getItem(key)) ?? null; } catch { return null; }
 }
@@ -82,30 +83,31 @@ export function composer(chatId, ticket) {
       moreBtn.focus();
     }
   });
-  const attachments = createAttachments((items) => saveDraftImages(chatId, items));
+  const attachments = createAttachments(chatId, (items) => saveDraftImages(chatId, items));
   loadDraftImages(chatId).then((items) => attachments.restore(items));
-  const picker = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
+  // No accept filter, so a phone offers its files as well as the photo library.
+  const picker = h('input', { type: 'file', multiple: true, hidden: true });
   picker.addEventListener('change', () => {
     attachments.add(picker.files);
     picker.value = '';
   });
   const form = h('form', { class: 'composer' }, attachments.el, textarea, picker,
     h('div', { class: 'row' },
-      h('button', { type: 'button', class: 'secondary small add-image', title: 'Add image', 'aria-label': 'Add image', onclick: () => picker.click() },
-        h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Add image')),
+      h('button', { type: 'button', class: 'secondary small add-image', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() },
+        h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach')),
       h('span', { class: 'spacer' }),
       modelPicker(chatId), sendGroup));
   textarea.addEventListener('paste', (e) => {
-    const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+    const files = [...(e.clipboardData?.files ?? [])];
     if (!files.length) return;
     e.preventDefault();
     attachments.add(files);
   });
   form.addEventListener('dragover', (e) => {
-    if ([...e.dataTransfer.items].some((i) => i.type.startsWith('image/'))) e.preventDefault();
+    if (e.dataTransfer.types.includes('Files')) e.preventDefault();
   });
   form.addEventListener('drop', (e) => {
-    const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith('image/'));
+    const files = [...e.dataTransfer.files];
     if (!files.length) return;
     e.preventDefault();
     attachments.add(files);
@@ -124,14 +126,18 @@ export function composer(chatId, ticket) {
     after = false;
     const text = textarea.value.trim();
     if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.');
+    if (attachments.items.some((i) => i.upload && !i.upload.name)) return alertNote('Still uploading a file; send once it shows its size.');
     if (!text && !attachments.items.length) return;
     sendBtn.disabled = moreBtn.disabled = true;
     setSending(sending + 1);
     const sent = attachments.items.slice();
-    const images = sent.map(({ mediaType, data }) => ({ mediaType, data }));
+    const images = sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data }));
+    const uploads = sent.filter((i) => i.upload).map((i) => i.upload);
+    const files = uploads.map(({ name, type }) => ({ name, type }));
     // Show the message and "Claude is thinking…" straight away, and clear the composer; the
     // server's copy of the message replaces this one when it arrives.
-    const pending = userBubble(me, text, images.map(({ mediaType, data }) => base64Url(mediaType, data)));
+    const pending = userBubble(me, text, images.map(({ mediaType, data }) => base64Url(mediaType, data)), null, null,
+      uploads.map((u) => ({ ...u, href: uploadUrl(chatId, u.name) })));
     pending.classList.add('pending');
     view.pendingMessages.push({ el: pending, text });
     document.getElementById('log').append(pending);
@@ -142,7 +148,7 @@ export function composer(chatId, ticket) {
     renderTyping();
     scrollToBottom();
     try {
-      const ticket = await api(`api/tickets/${chatId}/messages`, { method: 'POST', body: { text, images, ...(queue ? { after: true } : {}) } });
+      const ticket = await api(`api/tickets/${chatId}/messages`, { method: 'POST', body: { text, images, ...(files.length ? { files } : {}), ...(queue ? { after: true } : {}) } });
       // Show the message now even if the live stream is down; duplicates are skipped by id.
       if (view?.kind === 'project' && view.id === chatId) {
         // You just sent something, so follow the reply.
@@ -157,7 +163,7 @@ export function composer(chatId, ticket) {
       if (view?.id === chatId) view.pendingMessages = view.pendingMessages.filter((m) => m.el !== pending);
       textarea.value = textarea.value.trim() ? `${text}\n${textarea.value}` : text;
       saveDraft(draftKey, textarea.value);
-      attachments.restore(images);
+      attachments.restore([...images, ...uploads.map((upload) => ({ upload }))]);
       alertNote(ex.message);
     } finally {
       if (view?.sendingTo === chatId) {
@@ -172,68 +178,130 @@ export function composer(chatId, ticket) {
   return form;
 }
 
-// ---------- pasted images ----------
+// ---------- pasted images and attached files ----------
 
 const MAX_IMAGES = 6;
 const MAX_IMAGE_EDGE = 2000;
 const MAX_IMAGE_BYTES = 3.5 * 1024 * 1024; // base64 adds a third; the server caps decoded images at 5 MB
 const SENDABLE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const MAX_FILES = 20;
+const MAX_FILE_BYTES = 200 * 1024 * 1024; // the server's cap (src/uploads.ts)
 
-/** Pending images in the composer: thumbnails with a remove button, read as base64 for sending. */
-function createAttachments(onChange) {
+/**
+ * What a message will carry: images as thumbnails, read as base64 so Claude sees them, and files,
+ * each uploaded to the thread's files folder as soon as it is added. An image that had to be shrunk
+ * or converted goes both ways: the preview for Claude to see, the untouched original as a file.
+ * Items are { url, mediaType, data } for an image or { upload: { name, size, type } } for a file,
+ * whose name is empty until its upload is done.
+ */
+function createAttachments(chatId, onChange) {
   const el = h('div', { class: 'attachments', hidden: true });
   const state = { el, items: [], busy: 0 };
+  const removeButton = (item) => h('button', { type: 'button', title: 'Remove', 'aria-label': 'Remove', onclick: () => state.remove([item]) }, '×');
   const render = () => {
-    onChange(state.items.map(({ mediaType, data }) => ({ mediaType, data })));
+    onChange(state.items.filter((i) => i.data || i.upload?.name).map(({ mediaType, data, upload }) => (upload ? { upload } : { mediaType, data })));
     el.hidden = !state.items.length;
-    el.replaceChildren(...state.items.map((item) => h('div', { class: 'thumb' },
-      h('img', { src: item.url, alt: 'Image to send' }),
-      h('button', { type: 'button', title: 'Remove', onclick: () => {
-        URL.revokeObjectURL(item.url);
-        state.items.splice(state.items.indexOf(item), 1);
-        render();
-      } }, '×'))));
+    el.replaceChildren(...state.items.map((item) => item.upload
+      ? h('div', { class: 'file-chip' }, h('span', { class: 'icon', 'aria-hidden': 'true' }, '📄'), h('span', { class: 'name' }, item.upload.label ?? item.file?.name ?? item.upload.name),
+        h('span', { class: 'size' }, item.upload.name ? formatSize(item.upload.size) : `${Math.round((item.progress ?? 0) * 100)}%`), removeButton(item))
+      : h('div', { class: 'thumb' }, h('img', { src: item.url, alt: 'Image to send' }), removeButton(item))));
+  };
+  const addFile = async (file, label) => {
+    if (state.items.filter((i) => i.upload).length >= MAX_FILES) return alertNote(`At most ${MAX_FILES} files per message.`);
+    if (file.size > MAX_FILE_BYTES) return alertNote(`${file.name} is ${formatSize(file.size)}; files must be under ${formatSize(MAX_FILE_BYTES)}.`);
+    const item = { file, upload: { name: '', size: file.size, type: file.type || 'application/octet-stream', label }, progress: 0 };
+    state.items.push(item);
+    render();
+    try {
+      const saved = await uploadFile(chatId, file, item, () => {
+        const size = el.children[state.items.indexOf(item)]?.querySelector('.size');
+        if (size) size.textContent = `${Math.round(item.progress * 100)}%`;
+      });
+      Object.assign(item.upload, saved);
+      delete item.file;
+      delete item.xhr;
+      render();
+    } catch (err) {
+      if (!state.items.includes(item)) return; // removed while uploading
+      state.items.splice(state.items.indexOf(item), 1);
+      render();
+      alertNote(`Could not attach ${file.name}: ${err.message}`);
+    }
+  };
+  const addImage = async (file) => {
+    if (state.items.filter((i) => i.data).length + state.busy >= MAX_IMAGES) return alertNote(`At most ${MAX_IMAGES} images per message.`);
+    state.busy++;
+    let blob;
+    try {
+      blob = await prepareImage(file);
+      const data = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1]);
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(blob);
+      });
+      state.items.push({ url: URL.createObjectURL(blob), mediaType: blob.type, data });
+      render();
+    } catch {
+      // A format the browser can't draw (TIFF, PSD, HEIC on most browsers) still goes, as a file.
+      blob = null;
+    } finally {
+      state.busy--;
+    }
+    // Shrunk or converted, or not drawable at all: send the untouched original too, so art isn't lost.
+    if (blob !== file) await addFile(file, blob ? `${file.name || 'image'} (original)` : undefined);
   };
   state.add = async (files) => {
     for (const file of files) {
-      if (state.items.length + state.busy >= MAX_IMAGES) {
-        alertNote(`At most ${MAX_IMAGES} images per message.`);
-        break;
-      }
-      state.busy++;
-      try {
-        const blob = await prepareImage(file);
-        const data = await new Promise((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(String(r.result).split(',')[1]);
-          r.onerror = () => reject(r.error);
-          r.readAsDataURL(blob);
-        });
-        state.items.push({ url: URL.createObjectURL(blob), mediaType: blob.type, data });
-        render();
-      } catch (err) {
-        alertNote(`Could not add image: ${err.message}`);
-      } finally {
-        state.busy--;
-      }
+      if (file.type.startsWith('image/')) await addImage(file);
+      else addFile(file);
     }
   };
   state.remove = (items) => {
-    for (const item of items) URL.revokeObjectURL(item.url);
+    for (const item of items) {
+      if (item.url) URL.revokeObjectURL(item.url);
+      // shortcut: a file already uploaded stays in the thread's uploads folder; delete it here if they pile up.
+      item.xhr?.abort();
+    }
     state.items = state.items.filter((item) => !items.includes(item));
     render();
   };
-  /** Bring back images saved with a draft (they are already prepared and encoded). */
+  /** Bring back images and uploaded files saved with a draft (already prepared and encoded, or uploaded). */
   state.restore = (saved) => {
     if (!saved.length) return;
-    const restored = saved.map(({ mediaType, data }) => ({ url: base64Url(mediaType, data), mediaType, data }));
-    state.items = [...restored, ...state.items].slice(0, MAX_IMAGES);
+    const restored = saved.map(({ mediaType, data, upload }) => (upload ? { upload } : { url: base64Url(mediaType, data), mediaType, data }));
+    state.items = [...restored, ...state.items];
     render();
   };
   return state;
 }
 
-/** Shrink big images (and convert odd formats) so they fit the API's size limits. */
+/** PUT a file into the thread's uploads folder, streamed, with progress (fetch can't report upload progress). */
+function uploadFile(chatId, file, item, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    item.xhr = xhr;
+    xhr.open('PUT', `api/tickets/${chatId}/uploads?name=${encodeURIComponent(file.name || 'file')}`);
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      item.progress = e.loaded / e.total;
+      onProgress();
+    };
+    xhr.onload = () => {
+      let data = {};
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {}
+      if (xhr.status === 201) resolve(data);
+      else reject(new Error(data.error || `HTTP ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error('the upload broke off'));
+    xhr.onabort = () => reject(new Error('cancelled'));
+    xhr.send(file);
+  });
+}
+
+/** Shrink big images (and convert odd formats) so they fit the API's size limits; the file itself if it already does. */
 async function prepareImage(file) {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));

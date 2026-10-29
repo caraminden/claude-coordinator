@@ -284,6 +284,14 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .attachments .thumb button { position: absolute; top: -0.4rem; right: -0.4rem; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
 .msg .images { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.4rem 0 0.2rem; }
 .msg .images img { display: block; max-height: 14rem; max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
+.attachments { align-items: center; }
+.msg .files { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 0.2rem; }
+.file-chip { display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%; padding: 0.4rem 0.6rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font-size: 0.9em; line-height: 1.3; text-decoration: none; }
+a.file-chip:hover { border-color: var(--muted); }
+.file-chip .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-chip .size { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.attachments .file-chip { max-width: min(100%, 22rem); }
+.attachments .file-chip button { flex: none; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
 
 /* Project view: artifacts shelf and threads sidebar beside the main panel */
 .split { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 1.25rem; align-items: start; }

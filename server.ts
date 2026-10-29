@@ -2,7 +2,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, mkdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { basename, extname, isAbsolute, join, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -21,7 +21,8 @@ import { inboxItems } from './src/inbox.ts';
 import { instructionSources } from './src/instructions.ts';
 import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, WS_SUFFIX, hashToken, newToken } from './src/machines.ts';
 import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigger } from './src/push.ts';
-import { Runner, slimEvent, tripwireConfig } from './src/runner.ts';
+import { Runner, slimEvent, tripwireConfig, type MessageFile } from './src/runner.ts';
+import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, saveUpload, UploadTooLarge } from './src/uploads.ts';
 import { GLOBAL_OWNER, PropertyError, type Actor } from './src/properties.ts';
 import { TAG_TO_TYPE } from './src/property-seed.ts';
 import { PreviewError, Previews, previewPath } from './src/previews.ts';
@@ -519,7 +520,8 @@ async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: A
     'Cache-Control': 'private, no-cache',
     'Accept-Ranges': 'bytes',
   };
-  if (download || type.kind === 'download') headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(basename(path))}`;
+  // Something people uploaded is only ever saved, never rendered, unless it's an image or a PDF.
+  if (download || type.kind === 'download' || (/[/\\]shared[/\\]\d+[/\\]uploads[/\\]/.test(file) && !opensInline(file))) headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(basename(path))}`;
   // Byte ranges, so videos can seek (Safari won't play them without).
   let start = 0;
   let end = size - 1;
@@ -856,6 +858,37 @@ async function saveImages(ticket: Ticket, raw: unknown): Promise<{ name: string;
     const path = join(dir, name);
     await writeFile(path, buf);
     return { name, path, mediaType: kind.type };
+  }));
+}
+
+/** A thread's attached files: its files folder (COORDINATOR_FILES_DIR), so Claude can read them. */
+const fileUploadsDir = (ticket: Ticket) => join(sharedDir(ticket), 'uploads');
+
+/** An uploaded file by its name in the thread's uploads folder, or null; the name can't leave the folder. */
+async function findUpload(ticket: Ticket, name: unknown) {
+  if (typeof name !== 'string' || !isUploadName(name)) return null;
+  const dir = fileUploadsDir(ticket);
+  try {
+    const path = await realpath(join(dir, name));
+    if (!path.startsWith(await realpath(dir) + sep)) return null;
+    const st = await stat(path);
+    return st.isFile() ? { name, path, size: st.size } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The files a message names (uploaded beforehand with PUT .../uploads), each with its type for Claude. */
+async function messageFiles(ticket: Ticket, raw: unknown): Promise<MessageFile[]> {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) throw new HttpError(400, 'files must be a list');
+  if (raw.length > MAX_UPLOADS) throw new HttpError(400, `At most ${MAX_UPLOADS} files per message`);
+  return Promise.all(raw.map(async (f) => {
+    const found = await findUpload(ticket, f?.name);
+    if (!found) throw new HttpError(400, 'An attached file is no longer there; attach it again');
+    // The browser's word for the type, only as a hint to Claude.
+    const type = typeof f.type === 'string' && /^[\w.+-]{1,60}\/[\w.+-]{1,100}$/.test(f.type) ? f.type : 'application/octet-stream';
+    return { ...found, type };
   }));
 }
 
@@ -1367,6 +1400,32 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     return res.end(body);
   }
 
+  m = pathname.match(/^\/api\/tickets\/(\d+)\/uploads\/([^/]+)$/);
+  if (m && (method === 'GET' || method === 'HEAD')) {
+    const ticket = ticketView(Number(m[1]));
+    inScope(ticket.project_id);
+    let name = '';
+    try {
+      name = decodeURIComponent(m[2]);
+    } catch {}
+    const found = await findUpload(ticket, name);
+    if (!found) throw new HttpError(404, 'That file is no longer there');
+    // Images and PDFs open in the browser; anything else downloads and is never rendered.
+    const inline = opensInline(name);
+    const type = inline ? fileType(name)!.mime : 'application/octet-stream';
+    res.writeHead(200, {
+      'Content-Type': type,
+      'Content-Length': found.size,
+      'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`,
+      'Content-Security-Policy': artifactCsp(inline ? fileType(name)!.kind : 'download'),
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'same-origin',
+      'Cache-Control': 'private, no-cache',
+    });
+    if (method === 'HEAD') return res.end();
+    return pipeline(createReadStream(found.path), res).catch(() => {});
+  }
+
   m = pathname.match(/^\/api\/tickets\/(\d+)(\/[a-z]+)?$/);
   if (m) {
     const id = Number(m[1]);
@@ -1432,14 +1491,27 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         artifact: artifact ? artifactView(artifact) : null,
       });
     }
+    if (action === '/uploads' && method === 'PUT') {
+      // A file from the composer, streamed to disk as it arrives; the message that sends it names it.
+      if (session.agent !== undefined) throw new HttpError(403, 'Only people attach files');
+      if (Number(req.headers['content-length'] ?? 0) > MAX_UPLOAD_BYTES) throw new HttpError(413, 'Files must be under 200 MB');
+      try {
+        const saved = await saveUpload(fileUploadsDir(ticket), url.searchParams.get('name') ?? '', req);
+        return json(res, 201, { name: saved.name, size: saved.size });
+      } catch (err) {
+        if (err instanceof UploadTooLarge) throw new HttpError(413, 'Files must be under 200 MB');
+        throw err;
+      }
+    }
     if (action === '/events' && method === 'GET') {
       return json(res, 200, store.listEvents(id, Number(url.searchParams.get('after') ?? 0)));
     }
     if (action === '/messages' && method === 'POST') {
       // Room for MAX_IMAGES images at 5 MB each, base64-encoded.
       const body = await readJson(req, 45_000_000);
-      const hasImages = Array.isArray(body.images) && body.images.length > 0;
-      const text = hasImages && (typeof body.text !== 'string' || !body.text.trim()) ? '' : str(body.text, 'Message', 100_000);
+      const attached = (Array.isArray(body.images) && body.images.length > 0) || (Array.isArray(body.files) && body.files.length > 0);
+      const text = attached && (typeof body.text !== 'string' || !body.text.trim()) ? '' : str(body.text, 'Message', 100_000);
+      const files = await messageFiles(ticket, body.files);
       // A chained minion that hasn't started: writing to it starts it now, its held brief first.
       const chained = waiters.release(id);
       if (chained) await startChained(chained, `${session.name} wrote to it before its leader's work was in`);
@@ -1448,7 +1520,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         return json(res, 202, { ...ticketView(id), held: runner.relay(id, id, session.name, text) });
       }
       // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
-      runner.send(id, session.name, text, await saveImages(ticket, body.images), {}, session.agent === undefined && body.after !== true);
+      runner.send(id, session.name, text, await saveImages(ticket, body.images), {}, session.agent === undefined && body.after !== true, files);
       personWrote(ticket, session);
       return json(res, 202, ticketView(id));
     }
@@ -1931,6 +2003,10 @@ const server = createServer(async (req, res) => {
     else res.end();
   }
 });
+
+// Node's default 5 minutes to receive a whole request is too short for a 200 MB attachment on a slow
+// uplink; headers still have to arrive within headersTimeout.
+server.requestTimeout = 30 * 60_000;
 
 // Under socket activation (deploy/claude-coordinator.socket) systemd holds the listening socket, fd 3,
 // across restarts: requests made while the server restarts wait for the next one instead of failing.

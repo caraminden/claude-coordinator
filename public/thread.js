@@ -1,5 +1,5 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, fileUrl, followChat, h, highlight, isCoordinator, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, view } from './core.js';
+import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, isCoordinator, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
@@ -463,7 +463,8 @@ export function appendEvent(event, scroll = true) {
       const bubble = userBubble(data.author, data.text,
         (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
         data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null,
-        { id: event.id, strikes: data.strikes });
+        { id: event.id, strikes: data.strikes },
+        (data.files ?? []).map((f) => ({ ...f, href: uploadUrl(event.ticket_id, f.name) })));
       bubble.dataset.event = event.id;
       stamped(bubble, event);
       if (data.steered) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'Sent into the turn that was running: Claude read it between steps' }, 'into the running turn'));
@@ -989,7 +990,7 @@ function markQueued(bubble, ticket) {
       } }, '✕')));
 }
 
-export function userBubble(author, text, imageSrcs, about = null, event = null) {
+export function userBubble(author, text, imageSrcs, about = null, event = null, files = []) {
   const github = author === GITHUB_NAME;
   const preview = (text ?? '').replace(/[#*_`>\[\]~]/g, '').replace(/\s+/g, ' ').trim();
   const msg = h('div', { class: github ? 'msg user github' : 'msg user' }, h('div', { class: 'who' }, author,
@@ -1001,6 +1002,7 @@ export function userBubble(author, text, imageSrcs, about = null, event = null) 
     msg.append(h('div', { class: 'images' }, imageSrcs.map((src) =>
       h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
   }
+  if (files.length) msg.append(h('div', { class: 'files' }, files.map(fileChip)));
   // Messages between Claudes and from the app aren't meant for people, so they start folded to one line.
   const who = machineAuthor(author);
   if (who) {
@@ -1008,6 +1010,13 @@ export function userBubble(author, text, imageSrcs, about = null, event = null) 
     return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, who), h('span', { class: 'preview' }, preview)), msg);
   }
   return msg;
+}
+
+/** An attached file in a message: images and PDFs open in a tab (the server says so), anything else downloads. */
+export function fileChip({ name, size, href }) {
+  const opens = /\.(png|jpe?g|gif|webp|avif|pdf)$/i.test(name);
+  return h('a', { class: 'file-chip', href, title: opens ? `Open ${name}` : `Download ${name}`, ...(opens ? { target: '_blank', rel: 'noopener' } : { download: name }) },
+    h('span', { class: 'icon', 'aria-hidden': 'true' }, '📄'), h('span', { class: 'name' }, name), h('span', { class: 'size' }, formatSize(size)));
 }
 
 /** Whether the running turn's init event has arrived: until then the per-turn state is still the last turn's. */

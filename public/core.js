@@ -106,6 +106,13 @@ export const fileExt = (path) => (baseName(path).includes('.') ? baseName(path).
 export const isLocalPath = (href) => !/^[a-z][a-z0-9+.-]*:|^\/\/|^#/i.test(href);
 export const fileUrl = (ticketId, path) => `api/tickets/${ticketId}/file?path=${encodeURIComponent(path)}`;
 export const fileHref = (ticketId, path) => `#/f/${ticketId}/${encodeURIComponent(path)}`;
+/** A file people attached to a message, by its name in the thread's uploads folder. */
+export const uploadUrl = (ticketId, name) => `api/tickets/${ticketId}/uploads/${encodeURIComponent(name)}`;
+export function formatSize(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
 export const sharedUrl = (projectId, path) => `api/projects/${projectId}/shared/file?path=${encodeURIComponent(path)}`;
 export const sharedHref = (projectId, path) => `#/s/${projectId}/${encodeURIComponent(path)}`;
 /** A linked path short enough for a card: a thread's shared folder by name, other absolute paths by their tail. */

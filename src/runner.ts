@@ -132,10 +132,19 @@ export interface MessageImage {
   mediaType: string;
 }
 
+/** A file people attached, saved in the thread's files folder (src/uploads.ts). */
+export interface MessageFile {
+  name: string;
+  path: string;
+  size: number;
+  type: string;
+}
+
 interface QueuedMessage {
   author: string;
   text: string;
   images: MessageImage[];
+  files?: MessageFile[];
   about?: string; // the file a comment is on
   id?: number; // its user_message event, for taking it back while queued
 }
@@ -301,8 +310,12 @@ const RESUME_PROMPT =
 export function promptMessage(batch: QueuedMessage[]): string {
   const content: object[] = [];
   for (const m of batch) {
-    const text = m.text || (m.images.length ? '(sent an image)' : '');
+    const text = m.text || (m.images.length ? '(sent an image)' : m.files?.length ? '(sent a file)' : '');
     content.push({ type: 'text', text: `[${m.author}${m.about ? ` on ${m.about}` : ''}]: ${text}` });
+    if (m.files?.length) {
+      content.push({ type: 'text', text: [`${m.author} attached ${m.files.length === 1 ? 'a file' : `${m.files.length} files`}, saved on this machine (Read, unzip or copy from there):`,
+        ...m.files.map((f) => `- ${f.path} (${byteSize(f.size)}, ${f.type})`)].join('\n') });
+    }
     for (const img of m.images) {
       try {
         content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: readFileSync(img.path).toString('base64') } });
@@ -312,6 +325,18 @@ export function promptMessage(batch: QueuedMessage[]): string {
     }
   }
   return JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
+}
+
+/** "12.3 MB" style. */
+export function byteSize(n: number): string {
+  if (n < 1024) return `${n} bytes`;
+  const units = ['KB', 'MB', 'GB'];
+  let i = -1;
+  do {
+    n /= 1024;
+    i++;
+  } while (n >= 1024 && i < units.length - 1);
+  return `${n < 10 ? n.toFixed(1) : Math.round(n)} ${units[i]}`;
 }
 
 function truncate(s: string): string {
@@ -909,15 +934,16 @@ export class Runner {
    * to Claude; a comment's file (`extra.comment.about`) is, in its "[Name on file]:" prefix.
    * `extra.from` is the thread that sent a relayed message, so it can strike_text it later.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number } & object = {}, steer = false) {
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number } & object = {}, steer = false, files: MessageFile[] = []) {
     const live = this.turns.get(ticketId);
     const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
     // A turn from before steering (no steer.jsonl) can't take one; nor can one whose reply is already out.
     const steers = !!(steer && live && turn && !turn.result && existsSync(join(live.dir, 'steer.jsonl')));
     const row = this.emit(ticketId, 'user_message', {
-      author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra, ...(steers ? { steered: true } : {}),
+      author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}),
+      ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}),
     });
-    const msg: QueuedMessage = { author, text, images, about: extra.comment?.about, id: row.id };
+    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id };
     if (steers) {
       const line = promptMessage([msg]);
       const file = join(live!.dir, 'steer.jsonl');

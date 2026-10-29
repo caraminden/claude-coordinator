@@ -198,7 +198,6 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .ticket-head .head-sub > .head-state { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
 .ticket-head .head-sub > .find-box { flex: none; margin-left: auto; }
 .ticket-head > .row > .find-box { flex: none; }
-/* With no ship status the chip sits at the line's start, so its popover opens rightwards. */
 /* People's own note (#146): a dashed amber strip, so it never reads as the minion's words. */
 .ticket-head .pnote { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.9em; line-height: 1.4;
   background: color-mix(in srgb, var(--waiting-tint) 13%, var(--panel)); border: 1px dashed color-mix(in srgb, var(--waiting-tint) 60%, transparent); min-width: 0; }
@@ -1067,9 +1066,9 @@ dialog.viewer .composer .picker { display: none; }
   dialog.viewer > .chat { border-left: 0; border-top: 1px solid var(--line); }
   .viewer-bar .meta, .viewer-bar a.wide-only { display: none; }
   .viewer-stage { padding: 0.4rem; }
-  /* The chat gets little height here: title, state and Stop share one line, and the readout waits for the full chat. */
-  dialog.viewer .ticket-head > .row > h2 { flex: 1 1 0; -webkit-line-clamp: 1; line-clamp: 1; }
-  dialog.viewer .ticket-head > .row > .muted { flex: 0 1 auto; max-width: 30%; }
+  /* The chat gets little height here: title and Stop share one line, the state and where the change is the next, and the readout waits for the full chat. */
+  dialog.viewer .ticket-head > .row > h2:is(*, :has(+ .refresh-btn)) { flex: 1 1 0; -webkit-line-clamp: 1; line-clamp: 1; }
+  dialog.viewer .ticket-head .head-sub > .head-state { flex-basis: auto; }
   dialog.viewer .ticket-head .progress { display: none; }
   dialog.viewer .ticket-head { margin-bottom: 0.5rem; }
 }

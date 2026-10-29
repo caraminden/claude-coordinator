@@ -294,7 +294,7 @@ export function renderTicketHead() {
     }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
   }
   const state = (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '');
-  // Titled too, since phones may cut it short to keep the buttons beside it. While Claude works,
+  // Titled too, since a narrow line may cut it short. While Claude works,
   // a cut-short state shows dots that count up instead of "Cla…".
   const working = t.status === 'running';
   const stateLabel = h('span', { class: 'muted head-state', title: state }, h('span', { class: 'state-text' }, state),

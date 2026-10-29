@@ -33,10 +33,10 @@ function makeRepo(name: string) {
     return git('rev-parse', 'HEAD');
   };
   commit();
-  /** A commit on `branch` only, made without checking it out. */
+  /** A commit on `branch` only, made without checking it out; its reflog line is the one git commit writes. */
   const work = (branch: string) => {
     const c = git('commit-tree', '-p', `refs/heads/${branch}`, '-m', 'work', `refs/heads/${branch}^{tree}`);
-    git('update-ref', `refs/heads/${branch}`, c);
+    git('update-ref', '-m', 'commit: work', `refs/heads/${branch}`, c);
     return c;
   };
   return { dir, git, commit, work };
@@ -113,6 +113,52 @@ test('a merged chain starts once the leader\'s work is on main, live or not', ()
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
   assert.equal(w.check(), 1);
   assert.match(started[0].why, /work is merged$/);
+});
+
+// #126: a leader whose branch had no commits of its own started its follower once the branch was
+// caught up to a newer main, since that tip was on main and wasn't the one the chain recorded.
+for (const when of ['merged', 'live'] as const) {
+  test(`a ${when} chain ignores a leader branch caught up to main, and starts on the leader's own landed commit`, () => {
+    reset();
+    const w = waiters(live.git('rev-parse', 'HEAD'));
+    const leader = minion();
+    const dir = join(root, `wt-${leader.branch.replace('/', '-')}`);
+    live.git('worktree', 'add', '-q', dir, leader.branch);
+    const inTree = (...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+    chain(w, leader.id, when);
+
+    live.commit(); // another minion lands, and the server restarts onto it
+    inTree('merge', '-q', '--ff-only', 'main'); // the leader catches up: a new tip, on main, none of its own
+    assert.equal(w.check(live.git('rev-parse', 'HEAD')), 0, 'an empty branch caught up to main is not work');
+    assert.equal(w.chains().length, 1);
+
+    writeFileSync(join(dir, 'g'), when);
+    inTree('add', '-A');
+    inTree('commit', '-q', '-m', 'own work');
+    assert.equal(w.check(), 0, 'committed but not merged');
+    live.git('merge', '-q', '--ff-only', leader.branch); // as land.sh fast-forwards main
+    if (when === 'live') assert.equal(w.check(), 0, 'merged, but the server still runs the old commit');
+    assert.equal(w.check(live.git('rev-parse', 'HEAD')), 1);
+    assert.match(started[0].why, new RegExp(`work is ${when}$`));
+  });
+}
+
+test('a leader that shipped before the chain was set only counts once it commits again', () => {
+  reset();
+  const w = waiters(live.git('rev-parse', 'HEAD'));
+  const leader = minion();
+  // Its earlier work, an hour back: the reflog stamps entries with the committer date.
+  const old = { ...process.env, GIT_COMMITTER_DATE: `${Math.floor(Date.now() / 1000) - 3600} +0000` };
+  const shipped = execFileSync('git', ['commit-tree', '-p', 'main', '-m', 'old work', 'main^{tree}'], { cwd: live.dir, encoding: 'utf8', env: old }).trim();
+  execFileSync('git', ['update-ref', '-m', 'commit: old work', `refs/heads/${leader.branch}`, shipped], { cwd: live.dir, env: old });
+  live.git('merge', '-q', '--ff-only', leader.branch);
+  chain(w, leader.id, 'merged');
+  live.commit();
+  live.git('update-ref', '-m', 'merge main: Fast-forward', `refs/heads/${leader.branch}`, 'main');
+  assert.equal(w.check(), 0, 'its old work is not new work');
+  live.work(leader.branch);
+  live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
+  assert.equal(w.check(), 1);
 });
 
 test('a leader dismissed without its work merged holds the chain and tells people once; it starts if the work lands after all', () => {

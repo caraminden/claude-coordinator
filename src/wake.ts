@@ -27,6 +27,8 @@ export interface Chain {
   from: string;
   /** The followed minion's branch tip when the chain was set, if that was already on main: no work of its own yet. */
   base: string | null;
+  /** When the chain was set (unix seconds; chain() fills it in): with base, only commits after this count. */
+  since?: number;
   /** People were told the followed minion was dismissed without shipping; kept, in case it ships after all. */
   held?: boolean;
 }
@@ -71,18 +73,32 @@ export class LiveWaiters {
     return ['HEAD', 'refs/remotes/origin/HEAD'].some((ref) => git(repo, ['merge-base', '--is-ancestor', commit, ref]) !== null);
   }
 
-  /** The followed minion's scheme repo and branch tip, or null when it has neither. */
-  private tip(after: number): { repo: string; tip: string } | null {
+  /** The followed minion's scheme repo, branch and its tip, or null when it has neither. */
+  private tip(after: number): { repo: string; branch: string; tip: string } | null {
     const t = this.store.getTicket(after);
     const repo = t && this.store.getProject(t.project_id)?.repo_dir;
     const tip = repo && t.branch ? git(repo, ['rev-parse', '-q', '--verify', `refs/heads/${t.branch}^{commit}`]) : null;
-    return repo && tip ? { repo, tip } : null;
+    return repo && tip ? { repo, branch: t.branch!, tip } : null;
+  }
+
+  /**
+   * Did the minion commit on `branch` at or after `since` (unix seconds)? Asks the branch's reflog, since
+   * its tip alone can't tell: a branch caught up to a newer main (a fast-forward) has a new tip that is
+   * on main, but none of its own work. Merge commits don't count; a rebase keeps the commits it moves.
+   */
+  private committed(repo: string, branch: string, since: number): boolean {
+    const log = git(repo, ['reflog', 'show', '--date=unix', '--format=%gd %gs', `refs/heads/${branch}`]) ?? '';
+    return log.split('\n').some((line) => {
+      const m = line.match(/@\{(\d+)\}\s+(.*)$/);
+      return !!m && Number(m[1]) >= since && /^(commit(?! \(merge\))|cherry-pick|revert)\b/.test(m[2]);
+    });
   }
 
   /**
    * Where a chain stands: 'go' once the followed minion's work is in (live: the running server; merged:
    * its scheme's main), 'unshipped' once it was dismissed with its work in neither, else 'wait'. Work
-   * means commits made since the chain was set, or anything at all once it is dismissed. A scheme whose
+   * means commits it made (since the chain was set, if its tip was on main then), or anything at all once
+   * it is dismissed: a dismissed minion that never committed counts as done. A scheme whose
    * code this server doesn't run can't be live, so there live means merged.
    */
   private chainState(c: Chain): 'go' | 'wait' | 'unshipped' {
@@ -93,7 +109,7 @@ export class LiveWaiters {
     if (!b) return closed ? 'go' : 'wait'; // no repo: dismissed is all there is to wait for
     const merged = this.merged(b.repo, b.tip);
     if (closed && !merged) return 'unshipped';
-    if (!merged || (!closed && b.tip === c.base)) return 'wait';
+    if (!merged || (!closed && !this.committed(b.repo, b.branch, c.base ? (c.since ?? 0) : 0))) return 'wait';
     const runsThisScheme = !!this.head && git(b.repo, ['cat-file', '-e', `${this.head}^{commit}`]) !== null;
     if (c.when === 'merged' || !runsThisScheme) return 'go';
     return this.live({ ticket: c.ticket, commit: b.tip, reason: '', since: null }) ? 'go' : 'wait';
@@ -106,12 +122,13 @@ export class LiveWaiters {
   follow(after: number, when: Chain['when']): { state: 'go' | 'wait' | 'unshipped'; base: string | null } {
     const b = this.tip(after);
     const base = b && this.merged(b.repo, b.tip) ? b.tip : null;
-    return { state: this.chainState({ ticket: 0, after, when, message: '', from: '', base }), base };
+    return { state: this.chainState({ ticket: 0, after, when, message: '', from: '', base, since: Math.floor(Date.now() / 1000) }), base };
   }
 
   /** Hold a chained minion's brief (after follow said 'wait'). */
   chain(c: Chain): void {
-    this.store.setSetting(CHAINS, [...this.chains().filter((o) => o.ticket !== c.ticket), c]);
+    const set = { ...c, since: c.since ?? Math.floor(Date.now() / 1000) };
+    this.store.setSetting(CHAINS, [...this.chains().filter((o) => o.ticket !== c.ticket), set]);
   }
 
   /** Take `ticket`'s held brief out of the chain (someone wrote to it: it starts now), or null. */

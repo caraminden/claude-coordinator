@@ -125,7 +125,7 @@ export function composer(chatId, ticket) {
     after = false;
     const text = textarea.value.trim();
     if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.');
-    if (attachments.items.some((i) => i.upload && !i.upload.name)) return alertNote('Still uploading a file; send once it shows its size.');
+    if (attachments.uploading) return alertNote('Still uploading a file; send once it shows its size.');
     if (!text && !attachments.items.length) return;
     const sent = attachments.items.slice();
     textarea.value = '';
@@ -207,8 +207,8 @@ function chatAttachments(chatId) {
   return attachments;
 }
 
-/** Whether any chat has a file still uploading; a reload now would lose it. */
-export const uploadsRunning = () => [...attachmentsByChat.values()].some((a) => a.items.some((i) => i.upload && !i.upload.name));
+/** Whether any chat has a file uploading or an image being prepared; a reload now would lose it. */
+export const uploadsRunning = () => [...attachmentsByChat.values()].some((a) => a.busy || a.uploading);
 
 /**
  * What a message will carry: images as thumbnails, read as base64 so Claude sees them, and files,
@@ -219,7 +219,10 @@ export const uploadsRunning = () => [...attachmentsByChat.values()].some((a) => 
  */
 function createAttachments(chatId, onChange) {
   const el = h('div', { class: 'attachments', hidden: true });
-  const state = { el, items: [], busy: 0 };
+  const state = {
+    el, items: [], busy: 0,
+    get uploading() { return state.items.some((i) => i.upload && !i.upload.name); },
+  };
   const removeButton = (item) => h('button', { type: 'button', title: 'Remove', 'aria-label': 'Remove', onclick: () => state.remove([item]) }, '×');
   const render = () => {
     onChange(state.items.filter((i) => i.data || i.upload?.name).map(({ mediaType, data, upload }) => (upload ? { upload } : { mediaType, data })));

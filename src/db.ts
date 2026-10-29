@@ -266,6 +266,15 @@ CREATE TABLE IF NOT EXISTS turns (
 );
 CREATE INDEX IF NOT EXISTS turns_ticket ON turns(ticket_id, id);
 CREATE INDEX IF NOT EXISTS turns_ended ON turns(ended_at);
+CREATE TABLE IF NOT EXISTS instruction_history (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  by TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  old_text TEXT NOT NULL,
+  new_text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS instruction_history_project ON instruction_history(project_id, id);
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -421,10 +430,28 @@ export class Store {
     this.db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(dir, id);
   }
 
+  /** Saves a scheme's instructions, with a history row of who changed them from what. */
   setProjectInstructions(id: number, instructions: string, by: string) {
-    this.db
-      .prepare('UPDATE projects SET instructions = ?, instructions_updated_by = ?, instructions_updated_at = ? WHERE id = ?')
-      .run(instructions, by, Date.now(), id);
+    const at = Date.now();
+    this.db.exec('BEGIN');
+    try {
+      const old = (this.db.prepare('SELECT instructions FROM projects WHERE id = ?').get(id) as { instructions: string } | undefined)?.instructions ?? '';
+      this.db
+        .prepare('UPDATE projects SET instructions = ?, instructions_updated_by = ?, instructions_updated_at = ? WHERE id = ?')
+        .run(instructions, by, at, id);
+      this.db.prepare('INSERT INTO instruction_history (project_id, by, at, old_text, new_text) VALUES (?, ?, ?, ?, ?)').run(id, by, at, old, instructions);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /** A scheme's latest instruction saves, newest first. */
+  instructionHistory(projectId: number, limit: number): { by: string; at: number; old_text: string; new_text: string }[] {
+    return this.db
+      .prepare('SELECT by, at, old_text, new_text FROM instruction_history WHERE project_id = ? ORDER BY id DESC LIMIT ?')
+      .all(projectId, limit) as any[];
   }
 
   setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort'>>) {

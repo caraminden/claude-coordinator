@@ -791,6 +791,12 @@ body.navigating #app .split > :last-child, body.navigating #app > :not(.split) {
 /* Approval rules and plugin folders: the editor's two lists */
 .instructions-text.settings-list { min-height: 7rem; }
 .settings-label { margin: 1rem 0 0.2rem; font-size: 1em; }
+.instructions-history details { margin: 0.3rem 0; }
+.instructions-history summary { cursor: pointer; padding: 0.2rem 0; }
+.instructions-diff { margin: 0.3rem 0 0.6rem; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.instructions-diff .add { color: var(--done); }
+.instructions-diff .del { color: var(--error); }
+.instructions-diff .gap { color: var(--muted); }
 .instructions-actions .counter.over { color: var(--error); font-weight: 600; }
 .import-picker { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 0.75rem; }
 .import-picker .sub + .sub { margin-top: 0.7rem; }

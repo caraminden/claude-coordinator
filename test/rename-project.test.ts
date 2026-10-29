@@ -92,3 +92,17 @@ test('PATCH /api/projects/:id renames, with friendly errors', async () => {
   const texts = notes.data.map((e: any) => JSON.parse(e.data).text);
   assert.ok(texts.includes('Cara renamed the scheme from "Old name" to "New name".'), 'the coordinator hears about it');
 });
+
+test('GET /api/projects/:id/instructions/history shows the last saves with their diffs', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'History' } });
+  await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { instructions: 'keep\nold' } });
+  await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { instructions: 'keep\nold' } }); // unchanged: no row
+  await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { instructions: 'keep\nnew' } });
+  const { status, data } = await call(`/api/projects/${p.id}/instructions/history`);
+  assert.equal(status, 200);
+  assert.deepEqual(data.history.map((h: any) => [h.by, h.diff]), [
+    ['Cara', [{ op: '-', text: 'old' }, { op: '+', text: 'new' }]],
+    ['Cara', [{ op: '+', text: 'keep' }, { op: '+', text: 'old' }]],
+  ]);
+  assert.equal(typeof data.history[0].at, 'number');
+});

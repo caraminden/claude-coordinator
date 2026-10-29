@@ -307,6 +307,7 @@ export function instructionsEditor() {
       textarea.value = view.project.instructions;
       status.textContent = 'Saved. Minions pick this up on their next turn.';
       renderInstructionsHead();
+      loadHistory();
     } catch (err) {
       status.textContent = err.message;
     }
@@ -343,6 +344,21 @@ export function instructionsEditor() {
     loadInstructionSources(picker, insert);
   };
 
+  // The last few saves, each with what it removed and added.
+  const history = h('div', { class: 'instructions-history' });
+  const loadHistory = async () => {
+    try {
+      const { history: saves } = await api(`api/projects/${p.id}/instructions/history`);
+      history.replaceChildren(...(saves.length ? [h('h3', { class: 'settings-label' }, 'Recent changes')] : []),
+        ...saves.map((s) => h('details', {},
+          h('summary', {}, `${s.by}, ${ago(s.at)} `,
+            h('span', { class: 'muted small' }, `+${s.diff.filter((d) => d.op === '+').length} −${s.diff.filter((d) => d.op === '-').length} lines`)),
+          h('pre', { class: 'instructions-diff' }, ...s.diff.map((d) => h('div', { class: d.op === '+' ? 'add' : d.op === '-' ? 'del' : 'gap' }, d.op === '…' ? '…' : `${d.op} ${d.text}`))))));
+    } catch (err) {
+      history.replaceChildren(h('p', { class: 'muted small' }, `Could not load recent changes: ${err.message}`));
+    }
+  };
+
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head', id: 'instructions-head' }),
     h('div', { class: 'instructions-tools' },
@@ -352,8 +368,10 @@ export function instructionsEditor() {
       h('span', { class: 'muted small' }, 'Or paste: from a Claude Code project at claude.ai/code, copy Project settings › Memory › Project instructions.')),
     picker,
     textarea,
-    h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter));
+    h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
+    history);
   sync();
+  loadHistory();
   setTimeout(() => {
     renderInstructionsHead();
     textarea.focus();

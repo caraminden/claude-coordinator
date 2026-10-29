@@ -18,7 +18,7 @@ import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Machine, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
 import { cleanPluginDirs, cleanRules, lines } from './src/approvals.ts';
 import { inboxItems } from './src/inbox.ts';
-import { instructionSources } from './src/instructions.ts';
+import { instructionSources, lineDiff } from './src/instructions.ts';
 import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, WS_SUFFIX, hashToken, newToken } from './src/machines.ts';
 import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent, tripwireConfig, type MessageFile } from './src/runner.ts';
@@ -1180,6 +1180,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const saved = store.getProject(project.id)!;
     broadcast({ type: 'project', project: saved });
     return json(res, 200, saved);
+  }
+
+  m = pathname.match(/^\/api\/projects\/(\d+)\/instructions\/history$/);
+  if (m && method === 'GET') {
+    const project = store.getProject(Number(m[1]));
+    if (!project) throw new HttpError(404, 'No such scheme');
+    inScope(project.id);
+    const history = store.instructionHistory(project.id, 5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text) }));
+    return json(res, 200, { history });
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/instructions\/sources$/);

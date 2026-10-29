@@ -97,3 +97,36 @@ export async function instructionSources(project: Project, configDir: string, da
   }
   return out;
 }
+
+/** One line of a diff: removed, added, or '…' standing for unchanged lines left out. */
+export interface DiffLine {
+  op: '-' | '+' | '…';
+  text: string;
+}
+
+/** The lines that changed from `a` to `b` (a longest-common-subsequence line diff), with '…' where unchanged lines were skipped. */
+export function lineDiff(a: string, b: string): DiffLine[] {
+  const x = a ? a.split('\n') : [];
+  const y = b ? b.split('\n') : [];
+  // shortcut: past a million line pairs (thousands of lines), shows it all as replaced instead of using ~MBs; fine for prose instructions.
+  if (x.length * y.length > 1_000_000) return [...x.map((text) => ({ op: '-' as const, text })), ...y.map((text) => ({ op: '+' as const, text }))];
+  // keep[i][j]: the longest common run of x[i..] and y[j..].
+  const keep = Array.from({ length: x.length + 1 }, () => new Uint16Array(y.length + 1));
+  for (let i = x.length - 1; i >= 0; i--) {
+    for (let j = y.length - 1; j >= 0; j--) keep[i][j] = x[i] === y[j] ? keep[i + 1][j + 1] + 1 : Math.max(keep[i + 1][j], keep[i][j + 1]);
+  }
+  const out: DiffLine[] = [];
+  const gap = () => out.length && out[out.length - 1].op !== '…' && out.push({ op: '…', text: '' });
+  let i = 0;
+  let j = 0;
+  while (i < x.length || j < y.length) {
+    if (i < x.length && j < y.length && x[i] === y[j]) {
+      gap();
+      i++;
+      j++;
+    } else if (i < x.length && (j === y.length || keep[i + 1][j] >= keep[i][j + 1])) out.push({ op: '-', text: x[i++] });
+    else out.push({ op: '+', text: y[j++] });
+  }
+  if (out[out.length - 1]?.op === '…') out.pop();
+  return out;
+}

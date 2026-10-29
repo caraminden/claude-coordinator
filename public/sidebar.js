@@ -244,7 +244,7 @@ export function rowState(t) {
   if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, fam: 'wait', cell: `${t.state === 'outside' ? 'waiting' : 'deploying'}${steps}`, counted: !!steps, label: state.label };
   if (t.state === 'blocked') return { rank: 2, fam: 'broken', cell: 'blocked', label: state.label };
   // An open question or plan card is the more specific ask than ready, try it or reply; timed from when it was posted.
-  if (t.pending_card_at) return { rank: 0, fam: 'you', cell: `? ${shortAgo(t.pending_card_at)}`, label: 'Waiting for you to answer a question', since: t.pending_card_at };
+  if (t.pending_card_at) return { rank: 0, fam: 'you', cell: `? ${shortAgo(t.pending_card_at)}`, label: 'Waiting for you to answer a question or plan', since: t.pending_card_at };
   if (t.state === 'ready') return { rank: 0, fam: 'done', cell: waited('ready'), label: state.label };
   if (t.state === 'try') return { rank: 0, fam: 'you', cell: waited('try it'), label: state.label };
   return { rank: 0, fam: 'you', cell: waited('reply'), label: 'Your move' };

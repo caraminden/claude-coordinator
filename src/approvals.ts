@@ -2,7 +2,7 @@
 // before a thread runs a tool matching one of the rules.
 import { randomBytes } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { explanation, tripwire, type TripwireConfig } from './tripwire.ts';
 
 /** The thread MCP server's tool that Claude Code calls instead of showing a permission prompt. */
@@ -40,13 +40,13 @@ export function cleanRules(raw: unknown): string {
   return rules.join('\n');
 }
 
-/** Validate plugin folders from the API: paths inside the repo, one per line; returns them as stored. */
+/** Validate plugin folders from the API: paths relative to the repo root, or absolute, one per line; returns them as stored. */
 export function cleanPluginDirs(raw: unknown): string {
   const dirs = [...new Set(list(raw, 'Plugin folders').map((d) => d.replace(/\/+$/, '').replace(/^\.\//, '')))].filter(Boolean);
   if (dirs.length > MAX_PLUGIN_DIRS) throw new Error(`At most ${MAX_PLUGIN_DIRS} plugin folders`);
   for (const d of dirs) {
-    if (d.length > MAX_RULE || d.startsWith('/') || d.startsWith('~') || d.split('/').some((s) => s === '..' || s === '.' || !s)) {
-      throw new Error(`"${d.slice(0, 80)}" must be a folder path relative to the repo root, like tools/mods/delve`);
+    if (d.length > MAX_RULE || d.startsWith('~') || d.replace(/^\//, '').split('/').some((s) => s === '..' || s === '.' || !s)) {
+      throw new Error(`"${d.slice(0, 80)}" must be a folder path relative to the repo root, like tools/mods/delve, or an absolute one`);
     }
   }
   return dirs.join('\n');
@@ -66,10 +66,10 @@ export function permissionArgs(cards: boolean): string[] {
   ];
 }
 
-/** `--plugin-dir` for each of the project's plugin folders that exists in this worktree. */
+/** `--plugin-dir` for each of the project's plugin folders that exists: in this worktree, or at its absolute path. */
 export function pluginDirArgs(dirs: string[], cwd: string): string[] {
   return dirs.flatMap((d) => {
-    const path = join(cwd, d);
+    const path = isAbsolute(d) ? d : join(cwd, d);
     try {
       return statSync(path).isDirectory() ? ['--plugin-dir', path] : [];
     } catch {

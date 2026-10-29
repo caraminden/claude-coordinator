@@ -253,7 +253,7 @@ export function approvalsEditor() {
     h('h3', { class: 'settings-label' }, 'Plugin folders'),
     h('p', { class: 'muted small' },
       'Folders relative to the repo root, one per line, like ', h('code', {}, 'tools/mods/delve'),
-      '. Each minion loads the ones that exist in its worktree as Claude Code plugins (', h('code', {}, '--plugin-dir'), ').'),
+      ', or absolute paths. Each minion loads the ones that exist (relative ones in its worktree) as Claude Code plugins (', h('code', {}, '--plugin-dir'), ').'),
     dirs,
     h('div', { class: 'row instructions-actions' }, save, discard, status));
   sync();

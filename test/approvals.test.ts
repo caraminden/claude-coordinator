@@ -25,9 +25,9 @@ test('approval rules: one per line, validated, deduplicated', () => {
   assert.throws(() => cleanRules(42), /list of text lines/);
 });
 
-test('plugin folders must stay inside the repo', () => {
-  assert.equal(cleanPluginDirs('./tools/mods/delve/\nplugins'), 'tools/mods/delve\nplugins');
-  for (const bad of ['/etc', '~/x', '../up', 'a/../../b', 'a//b']) assert.throws(() => cleanPluginDirs(bad), /relative to the repo root/, bad);
+test('plugin folders are relative to the repo root, or absolute', () => {
+  assert.equal(cleanPluginDirs('./tools/mods/delve/\nplugins\n/opt/kit/'), 'tools/mods/delve\nplugins\n/opt/kit');
+  for (const bad of ['~/x', '../up', 'a/../../b', 'a//b', '/opt/../etc', '//x']) assert.throws(() => cleanPluginDirs(bad), /relative to the repo root/, bad);
 });
 
 test('a Taskmaster denies prompts; a minion asks the approval tool', () => {
@@ -37,11 +37,13 @@ test('a Taskmaster denies prompts; a minion asks the approval tool', () => {
   assert.ok(!args.includes('none'));
 });
 
-test('--plugin-dir only for folders that exist in the worktree', () => {
+test('--plugin-dir only for folders that exist, in the worktree or at their absolute path', () => {
   const wt = join(root, 'wt');
+  const outside = join(root, 'outside-kit');
   mkdirSync(join(wt, 'tools/mods/delve'), { recursive: true });
+  mkdirSync(outside);
   writeFileSync(join(wt, 'file'), '');
-  assert.deepEqual(pluginDirArgs(['tools/mods/delve', 'missing', 'file'], wt), ['--plugin-dir', join(wt, 'tools/mods/delve')]);
+  assert.deepEqual(pluginDirArgs(['tools/mods/delve', 'missing', 'file', outside, join(root, 'gone')], wt), ['--plugin-dir', join(wt, 'tools/mods/delve'), '--plugin-dir', outside]);
   assert.deepEqual(pluginDirArgs([], wt), []);
 });
 
@@ -247,10 +249,15 @@ test('a project without rules or plugins still sends a minion\'s prompts to card
   const t = await turn(plain.id, ['tools/mods/delve']);
   assert.ok(!t.args.includes('none'));
   assert.equal(t.args[t.args.indexOf('--permission-prompt-tool') + 1], APPROVAL_TOOL);
-  assert.ok(!t.args.includes('--plugin-dir'));
-  // Every turn gets the tripwire hook, here able to ask, and the claude.ai opt-outs (#138); no rules.
+  // Only the kit, no folder of the scheme's, and the kit is the turn's own copy, there while it runs.
+  const plugins = t.args.filter((_: string, i: number) => t.args[i - 1] === '--plugin-dir');
+  assert.equal(plugins.length, 1);
+  assert.ok(plugins[0].endsWith('/pin/kit') && existsSync(join(plugins[0], '.claude-plugin', 'plugin.json')), plugins[0]);
+  // Every turn gets the tripwire hook, here able to ask, the claude.ai opt-outs (#138), the shared
+  // settings and the merge asks; no rules of the scheme's.
   const settings = JSON.parse(readFileSync(t.args[t.args.indexOf('--settings') + 1], 'utf8'));
-  assert.deepEqual(Object.keys(settings), ['hooks', 'syncClaudeAiSkills', 'disableClaudeAiConnectors']);
+  assert.deepEqual(Object.keys(settings), ['hooks', 'syncClaudeAiSkills', 'disableClaudeAiConnectors', 'autoCompactWindow', 'bashOutputMaxChars', 'permissions']);
+  assert.deepEqual(settings.permissions, { ask: ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge'] });
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /"ask":true/);
   assert.ok(Number(t.timeout) >= 24 * 3600_000);
   assert.equal(t.approvals, '1');
@@ -265,9 +272,11 @@ test('rules and plugin folders reach the turn, and Stop expires a waiting card',
   assert.equal(t.args[t.args.indexOf('--permission-prompt-tool') + 1], APPROVAL_TOOL);
   assert.equal(t.args.filter((a: string) => a === '--settings').length, 1);
   const settings = JSON.parse(readFileSync(t.args[t.args.indexOf('--settings') + 1], 'utf8'));
-  assert.deepEqual(settings.permissions, { ask: ['Bash(gh pr merge:*)'] });
+  assert.deepEqual(settings.permissions, { ask: ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge', 'Bash(gh pr merge:*)'] });
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /tripwire\.ts/);
-  assert.deepEqual(t.args.filter((_: string, i: number) => t.args[i - 1] === '--plugin-dir'), [join(t.cwd, 'tools/mods/delve')]);
+  const plugins = t.args.filter((_: string, i: number) => t.args[i - 1] === '--plugin-dir');
+  assert.deepEqual(plugins.slice(1), [join(t.cwd, 'tools/mods/delve')], 'after the kit');
+  assert.ok(plugins[0].endsWith('/pin/kit'));
   assert.ok(Number(t.timeout) >= 24 * 3600_000);
   assert.equal(t.approvals, '1');
 

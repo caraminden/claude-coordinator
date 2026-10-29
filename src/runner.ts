@@ -60,6 +60,13 @@ export const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
 // Pinned too, so a deploy can't change the rules under a running turn.
 export const TRIPWIRE = pinnedCopy('tripwire.ts');
 export const TURN_WRAPPER = pinnedCopy('turn-wrapper.ts');
+/**
+ * The Citadel kit (kit/), the plugin every turn of every scheme loads; pinned like the tripwire, so a
+ * deploy only reaches turns that start after the restart, and a branch's kit never reaches other schemes.
+ */
+export const KIT = join(MCP_DIR, 'kit');
+const KIT_SOURCE = join(import.meta.dirname, '..', 'kit');
+if (existsSync(KIT_SOURCE)) cpSync(KIT_SOURCE, KIT, { recursive: true });
 /** The slice turn units run in; its name puts it under citadel.slice, which deploy/citadel.slice caps. */
 export const TURN_SLICE = 'citadel-turns.slice';
 
@@ -111,8 +118,14 @@ export const UNUSED_TOOLS = ['Workflow', 'ScheduleWakeup', 'CronCreate', 'CronDe
  * --settings both apply to that one invocation only.
  */
 export const LEAN_CONTEXT = { syncClaudeAiSkills: false, disableClaudeAiConnectors: true };
-/** Where a turn compacts, in tokens; the Taskmasters' folders have no .claude/settings.json to set it. */
-const AUTO_COMPACT_WINDOW = '250000';
+/**
+ * Claude Code settings every turn of every scheme gets, whatever the repo's own .claude/settings.json
+ * says (Taskmasters' folders have none): where a turn compacts, in tokens, and how much of a Bash
+ * command's output it keeps.
+ */
+export const TURN_SETTINGS = { autoCompactWindow: 250_000, bashOutputMaxChars: 12_000 };
+/** Merging a pull request through a GitHub MCP server waits for a person, in every scheme's minions. */
+export const MERGE_ASKS = ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge'];
 
 // Stream events that carry no information for the ticket view.
 const DROPPED_TYPES = new Set(['rate_limit_event', 'stream_event']);
@@ -1273,8 +1286,9 @@ export class Runner {
     }
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now.
     const machines = ticket.kind === 'coordinator' || !project.machine_tools ? [] : this.machines();
-    // Tool calls matching the project's approval rules wait for a person (threads only).
-    const rules = ticket.kind === 'coordinator' ? [] : lines(project.approval_rules);
+    // Tool calls matching the merge asks or the project's approval rules wait for a person (threads only:
+    // a Taskmaster can't show cards, so an ask would be a silent deny there).
+    const rules = ticket.kind === 'coordinator' ? [] : [...new Set([...MERGE_ASKS, ...lines(project.approval_rules)])];
     // The turn's folder, with its own copy of the pinned files: a restart sweeps the server's copy, and
     // the tripwire hook must still be there for a turn that outlives it.
     const dir = join(this.turnsDir, `${ticket.id}-${Date.now()}`);
@@ -1297,8 +1311,8 @@ export class Runner {
     ];
     // Lets edit-only sessions write there too, not just in their working directory.
     const addDirs = [filesDir, sharedDir].filter((d): d is string => !!d);
-    // One --settings per turn: the tripwire hook, plus approval rules or the Taskmaster's access rules.
-    const settings: { permissions?: object; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)), ...LEAN_CONTEXT };
+    // One --settings per turn: the tripwire hook and the shared settings, plus approval rules or the Taskmaster's access rules.
+    const settings: { permissions?: object; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)), ...LEAN_CONTEXT, ...TURN_SETTINGS };
     if (rules.length) settings.permissions = { ask: rules };
     if (ticket.kind === 'coordinator') {
       const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project), sharedDir, memoryDir);
@@ -1309,13 +1323,14 @@ export class Runner {
     writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings));
     args.push('--settings', join(dir, 'settings.json'));
     if (addDirs.length) args.push('--add-dir', ...addDirs);
+    if (existsSync(pinned(KIT))) args.push('--plugin-dir', pinned(KIT));
     if (ticket.kind !== 'coordinator') args.push(...pluginDirArgs(lines(project.plugin_dirs), ticket.cwd));
     if (ticket.session_id) args.push('--resume', ticket.session_id);
     const { model, effort } = turnSettings(ticket, project);
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
-    let env: Record<string, string> = { ...turnEnv(process.env), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', CLAUDE_CODE_AUTO_COMPACT_WINDOW: AUTO_COMPACT_WINDOW };
+    let env: Record<string, string> = { ...turnEnv(process.env), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
     // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
     // title, tag, state and note. The token travels in the environment (which the MCP server
     // inherits), never on the command line.

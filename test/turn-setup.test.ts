@@ -3,7 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
@@ -24,7 +24,7 @@ process.env.LC_TIME = 'en_GB.UTF-8';
 process.env.COORDINATOR_API = 'http://service.invalid';
 process.env.COORDINATOR_TOKEN = 'service-token';
 process.env.COORDINATOR_TICKET = '999';
-const { MCP_DIR, MCP_SERVER, Runner, turnEnv } = await import('../src/runner.ts');
+const { KIT, MCP_DIR, MCP_SERVER, Runner, turnEnv } = await import('../src/runner.ts');
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -33,6 +33,14 @@ test('pinned MCP copies live in the data dir, one folder per server, and stale o
   assert.equal(dirname(MCP_SERVER), MCP_DIR);
   assert.ok(!existsSync(stale));
   assert.ok(readdirSync(MCP_DIR).includes('appname.ts'));
+});
+
+test('the Citadel kit is pinned beside them, a copy of the repo\'s kit/ plugin', () => {
+  assert.equal(KIT, join(MCP_DIR, 'kit'));
+  const manifest = readFileSync(join(KIT, '.claude-plugin', 'plugin.json'), 'utf8');
+  assert.equal(manifest, readFileSync(join(import.meta.dirname, '..', 'kit', '.claude-plugin', 'plugin.json'), 'utf8'));
+  assert.equal(JSON.parse(manifest).name, 'citadel');
+  for (const d of ['skills', 'agents', 'hooks']) assert.ok(existsSync(join(KIT, d)), d);
 });
 
 test('a turn inherits only the allowlisted environment', () => {
@@ -84,7 +92,7 @@ async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { mo
 
 test("a minion turn gets the compaction window, no service secrets, Claude Code's model and the scheme's effort", async () => {
   const t = await turn('ticket', 'connected');
-  assert.equal(t.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '250000');
+  assert.equal(t.settings.autoCompactWindow, 250000);
   assert.equal(t.env.MACHINES_URL, undefined);
   assert.equal(t.env.COORDINATOR_PASSWORD, undefined);
   assert.equal(t.env.XDG_RUNTIME_DIR, '/run/user/1000');
@@ -102,12 +110,40 @@ test("a minion turn gets the compaction window, no service secrets, Claude Code'
 
 test('a Taskmaster turn defaults to opus at high effort, and keeps a choice people made', async () => {
   const t = await turn('coordinator', 'connected');
-  assert.equal(t.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '250000');
+  assert.equal(t.settings.autoCompactWindow, 250000);
   assert.equal(t.flag('--model'), 'opus');
   assert.equal(t.flag('--effort'), 'high');
   const chosen = await turn('coordinator', 'connected', { model: 'sonnet', effort: 'medium' });
   assert.equal(chosen.flag('--model'), 'sonnet');
   assert.equal(chosen.flag('--effort'), 'medium');
+});
+
+test('every turn of every scheme loads its own pinned copy of the kit, and shares the compact window and output cap', async () => {
+  const a = store.createProject(`Kit A ${Math.random()}`, null);
+  const b = store.createProject(`Kit B ${Math.random()}`, null);
+  store.setProjectSettings(b.id, { plugin_dirs: 'tools/mods/x' });
+  const turns = [await turn('ticket', 'connected', {}, undefined, a.id), await turn('ticket', 'connected', {}, undefined, b.id), await turn('coordinator', 'connected', {}, undefined, b.id)];
+  for (const t of turns) {
+    const dirs = t.args.flatMap((arg: string, i: number) => (arg === '--plugin-dir' ? [t.args[i + 1]] : []));
+    assert.equal(dirs.length, 1, 'the kit, and no scheme folder that does not exist');
+    const kit = dirs[0];
+    assert.equal(basename(kit), 'kit');
+    // The turn's own folder (beside its settings), not the server's copy a restart sweeps, nor the repo.
+    assert.equal(dirname(dirname(kit)), dirname(t.flag('--settings')));
+    assert.equal(t.settings.autoCompactWindow, 250000);
+    assert.equal(t.settings.bashOutputMaxChars, 12000);
+  }
+});
+
+test("a minion asks before merging through a GitHub MCP server, beside its scheme's approval rules; a Taskmaster doesn't", async () => {
+  const p = store.createProject(`Asks ${Math.random()}`, null);
+  store.setProjectSettings(p.id, { approval_rules: 'Bash(gh pr merge:*)\nmcp__*__merge_pull_request' });
+  const minion = await turn('ticket', 'connected', {}, undefined, p.id);
+  assert.deepEqual(minion.settings.permissions.ask, ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge', 'Bash(gh pr merge:*)']);
+  const plain = await turn('ticket', 'connected');
+  assert.deepEqual(plain.settings.permissions.ask, ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge']);
+  const tm = await turn('coordinator', 'connected', {}, undefined, p.id);
+  assert.equal(tm.settings.permissions.ask, undefined);
 });
 
 test("minion and Taskmaster turns both leave out unused built-in tools and the account's claude.ai skills and connectors", async () => {

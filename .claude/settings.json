@@ -1,10 +1,4 @@
 {
-  "env": { "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000" },
-  "autoCompactWindow": 250000,
-  "bashOutputMaxChars": 12000,
-  "permissions": {
-    "ask": ["mcp__*__merge_pull_request", "mcp__*__enable_pr_auto_merge"]
-  },
   "hooks": {
     "SessionStart": [
       {

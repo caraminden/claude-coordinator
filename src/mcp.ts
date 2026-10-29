@@ -428,7 +428,7 @@ const TOOLS = [
         plugin_folders: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Folder paths relative to the repo root, e.g. "tools/mods/delve". Each is loaded with --plugin-dir when it exists in a minion\'s worktree.',
+          description: 'Folder paths relative to the repo root, e.g. "tools/mods/delve", or absolute. Each is loaded with --plugin-dir when it exists (a relative one in the minion\'s worktree).',
         },
         default_effort: { ...EFFORT, description: "Effort for every minion's turns that has none of its own. null leaves it to Claude Code's default." },
         machine_tools: { type: 'boolean', description: "Whether this scheme's minions get the connected machines' MCP tools (Godot editors and the like). Off saves ~1.1k tokens a call in schemes that never use them." },

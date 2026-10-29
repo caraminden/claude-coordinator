@@ -122,6 +122,7 @@ uses the built-in `node:sqlite`.
 | `src/db.ts` | SQLite schema and queries |
 | `src/auth.ts` | Shared-password login, signed session cookies |
 | `public/` | Front end (vanilla JS, no build) |
+| `kit/` | The Citadel kit: a Claude Code plugin (skills, agents, hooks) every turn of every scheme loads |
 | `public/progress.js` | Task-list and step tracking, shared with the server |
 | `deploy/claude-coordinator.service` | systemd user unit, with drop-ins in `.service.d/`; `citadel.slice` caps it and its turns, `claude-coordinator.socket` holds the port across restarts |
 | `deploy/backup.sh`, `deploy/prune.sh` | Nightly database backup; pruning of long-closed minions (each with a `.service` and `.timer`) |
@@ -321,9 +322,11 @@ the live checkout, the env file, other schemes, restarts, `server.ts` on live da
 and clobbering the live database file. A Taskmaster's turn can't show cards, so its
 asks are blocks.
 
-**Plugin folders.** A scheme can also list folders relative to the repo root
-(e.g. `tools/mods/delve`); each minion turn gets `--plugin-dir <worktree>/<folder>`
-for every one that exists in its worktree. Turns also get `COORDINATOR_SHARED_DIR` (the
+**Plugin folders.** Every turn of every scheme, the Taskmaster's too, loads the
+Citadel kit (`kit/`, see its README) from a copy pinned when the server started. A
+scheme can also list folders relative to the repo root (e.g. `tools/mods/delve`) or
+absolute ones; each minion turn gets `--plugin-dir <worktree>/<folder>` (or the
+absolute path) for every one that exists. Turns also get `COORDINATOR_SHARED_DIR` (the
 scheme's shared folder) and `COORDINATOR_FILES_DIR` (the minion's own) in their environment,
 for plugins and hooks that write files people should see.
 

@@ -1,0 +1,5 @@
+{
+  "name": "citadel",
+  "version": "0.1.0",
+  "description": "Skills, agents and hooks every Citadel turn loads, in every scheme."
+}

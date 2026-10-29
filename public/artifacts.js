@@ -47,6 +47,7 @@ const ARTIFACT_FILTERS = [
   { key: 'docs', label: 'Documents', match: (a) => a.kind === 'markdown' || a.kind === 'pdf' },
   { key: 'web', label: 'Web pages', match: (a) => a.kind === 'html' },
   { key: 'canvas', label: 'Canvases', match: (a) => a.kind === 'canvas' },
+  { key: 'downloads', label: 'Downloads', match: (a) => a.kind === 'download' },
 ];
 
 const rawUrl = (a) => `api/artifacts/${a.id}/raw?v=${a.mtime}`;
@@ -429,6 +430,8 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, urlFor = 
     body.append(h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals', title: name }));
   } else if (kind === 'pdf') {
     body.append(h('iframe', { class: 'artifact-frame', src, title: name }));
+  } else if (kind === 'download') {
+    body.append(h('p', {}, h('a', { class: 'button', href: `${src}&download`, download: '' }, `Download ${name} (${formatSize(size)})`)));
   } else if (size > MAX_TEXT_PREVIEW) {
     body.append(h('p', { class: 'muted' }, `Too large to preview (${formatSize(size)}). Open or download it instead.`));
   } else {

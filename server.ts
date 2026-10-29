@@ -462,7 +462,7 @@ async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: A
     'Cache-Control': 'private, no-cache',
     'Accept-Ranges': 'bytes',
   };
-  if (download) headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(basename(path))}`;
+  if (download || type.kind === 'download') headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(basename(path))}`;
   // Byte ranges, so videos can seek (Safari won't play them without).
   let start = 0;
   let end = size - 1;

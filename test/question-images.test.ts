@@ -154,3 +154,11 @@ test('a thread can message its coordinator, which wakes with the thread named', 
   await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', body: { text: 'x' } }), /403/);
   await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: next.token, body: { text: 'x' } }), /403/);
 });
+
+test('a zip in the thread\'s folders is served as a download, never shown', async () => {
+  writeFileSync(join(shared, 'Game build.zip'), 'PK');
+  const res = await fetch(`${base}/api/tickets/${ticket.id}/file?path=${encodeURIComponent(join(shared, 'Game build.zip'))}`, { headers: { Cookie: cookie } });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/zip');
+  assert.equal(res.headers.get('content-disposition'), "attachment; filename*=UTF-8''Game%20build.zip");
+});

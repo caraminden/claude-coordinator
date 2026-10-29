@@ -95,6 +95,7 @@ const FILE_KINDS = {
   md: 'markdown', markdown: 'markdown', canvas: 'canvas', html: 'html', htm: 'html', pdf: 'pdf', txt: 'text', csv: 'text',
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', avif: 'image', svg: 'image',
   mp4: 'video', webm: 'video', mov: 'video', mp3: 'audio', wav: 'audio', ogg: 'audio', m4a: 'audio',
+  zip: 'download', '7z': 'download', tar: 'download', gz: 'download', tgz: 'download',
 };
 export const fileKind = (path) => FILE_KINDS[(path.split(/[?#]/)[0].split('.').pop() || '').toLowerCase()] ?? null;
 export const baseName = (path) => path.split('/').filter(Boolean).pop() ?? path;
@@ -118,7 +119,9 @@ export function shortPath(path) {
 function fileCardHtml(ticketId, path, title) {
   const kind = isLocalPath(path) && fileKind(path);
   if (!kind) return null;
-  return `<a class="file-card" href="${escapeHtml(fileHref(ticketId, path))}" title="${escapeHtml(path)}">`
+  // An archive has nothing to preview: the card saves it.
+  const href = kind === 'download' ? `${fileUrl(ticketId, path)}&download` : fileHref(ticketId, path);
+  return `<a class="file-card" href="${escapeHtml(href)}"${kind === 'download' ? ' download' : ''} title="${escapeHtml(path)}">`
     + (kind === 'image' ? `<img src="${escapeHtml(fileUrl(ticketId, path))}" alt="" loading="lazy">` : `<span class="badge k-${kind}">${escapeHtml(fileExt(path))}</span>`)
     + `<span class="text"><span class="name">${title}</span><span class="meta">${escapeHtml(shortPath(path))}</span></span></a>`;
 }

@@ -359,6 +359,7 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .badge.k-canvas { background: #7c3aed; }
 .badge.k-pdf { background: #b91c1c; }
 .badge.k-html { background: #c2410c; }
+.badge.k-download { background: #047857; }
 .badge.big { font-size: 1rem; padding: 0.4rem 0.6rem; }
 
 /* Artifacts in the main panel */

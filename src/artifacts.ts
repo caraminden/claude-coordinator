@@ -6,11 +6,12 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 
-export type FileKind = 'markdown' | 'text' | 'canvas' | 'html' | 'pdf' | 'image' | 'video' | 'audio';
+export type FileKind = 'markdown' | 'text' | 'canvas' | 'html' | 'pdf' | 'image' | 'video' | 'audio' | 'download';
 
 /**
- * File types the app will serve from a ticket's folder. Only documents and pages (`artifact`)
- * are listed as artifacts; images and media are served when a document embeds them.
+ * File types the app will serve from a ticket's folder. Only documents, pages and downloads
+ * (`artifact`) are listed as artifacts; images and media are served when a document embeds them.
+ * Downloads (archives such as a game build) are never shown, only saved.
  * Source code is left out on purpose; it lives in the branch.
  */
 export const FILE_TYPES: Record<string, { kind: FileKind; mime: string; artifact?: true }> = {
@@ -36,6 +37,11 @@ export const FILE_TYPES: Record<string, { kind: FileKind; mime: string; artifact
   '.wav': { kind: 'audio', mime: 'audio/wav' },
   '.ogg': { kind: 'audio', mime: 'audio/ogg' },
   '.m4a': { kind: 'audio', mime: 'audio/mp4' },
+  '.zip': { kind: 'download', mime: 'application/zip', artifact: true },
+  '.7z': { kind: 'download', mime: 'application/octet-stream', artifact: true },
+  '.tar': { kind: 'download', mime: 'application/octet-stream', artifact: true },
+  '.gz': { kind: 'download', mime: 'application/octet-stream', artifact: true },
+  '.tgz': { kind: 'download', mime: 'application/octet-stream', artifact: true },
 };
 
 export function fileType(path: string) {

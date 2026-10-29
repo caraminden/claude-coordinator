@@ -319,9 +319,9 @@ function describeActivity(ev: any): string | null {
 function showingFiles(ticket: Ticket, filesDir: string | null, sharedDir: string | null): string[] {
   const where = filesDir ? `inside your working directory or in ${filesDir}` : 'inside your working directory';
   return [
-    `You can show people files (documents, images, GIFs, videos, web pages, PDFs) by linking them in your reply with a path ${where}; the app turns those links into previews that open the file in place of the chat:`,
+    `You can show people files (documents, images, GIFs, videos, web pages, PDFs, and zip or other archives to download) by linking them in your reply with a path ${where}; the app turns those links into previews that open the file in place of the chat:`,
     '- `![caption](path)` shows an inline preview: use it for images, GIFs and videos.',
-    '- `[title](path)` shows a card: use it for documents, web pages and PDFs.',
+    '- `[title](path)` shows a card: use it for documents, web pages and PDFs. A card for a .zip, .7z, .tar or .gz file downloads it when clicked.',
     filesDir
       ? `Put files you fetch from elsewhere or make only to show people (not part of the work in your branch) in ${filesDir}, so they never end up in a commit. Files elsewhere on disk can't be shown; copy them there first.`
       : '',

@@ -354,7 +354,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 3; // 2: claude_state moved to state.db; 3: brief_starts
+export const SCHEMA_VERSION = 4; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".

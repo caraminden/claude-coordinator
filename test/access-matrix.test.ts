@@ -73,6 +73,7 @@ const OTHER_ROUTES: Probe[] = [
   P('POST', '/api/projects/:p/tickets'), P('GET', '/api/projects/:p/briefs'), P('GET', '/api/projects/:p/properties'), P('POST', '/api/projects/:p/properties/keys'),
   P('POST', '/api/projects/:p/properties/values'), P('POST', '/api/projects/:p/properties/review'),
   P('POST', '/api/projects/:p/properties/proposals'), P('GET', '/api/projects/:p/inbox'), P('GET', '/api/projects/:p/recap'),
+  P('GET', '/api/projects/:p/views'), P('POST', '/api/projects/:p/views'), P('DELETE', '/api/projects/:p/views/0'),
   P('GET', '/api/projects/:p/schedules'), P('POST', '/api/projects/:p/schedules'), P('PATCH', '/api/schedules/:s'),
   P('DELETE', '/api/schedules/:s', 'schedule'), P('GET', '/api/projects/:p/search'), P('GET', '/api/projects/:p/search?q=one&ticket=:t'), P('GET', '/api/projects/:p/artifacts'),
   P('GET', '/api/projects/:p/shared'), P('GET', '/api/projects/:p/shared/file'), P('GET', '/api/artifacts/:a'),

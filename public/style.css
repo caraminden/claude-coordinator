@@ -196,7 +196,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .ticket-head .head-sub { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; margin-top: 0.35rem; min-width: 0; }
 /* A state too long for its line gets the line to itself, the rest wrapping under it; only then is it cut short. */
 .ticket-head .head-sub > .head-state { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
-.ticket-head .head-sub > .find-box { flex: none; margin-left: auto; }
+.ticket-head .head-sub > :is(button, .find-box) { flex: none; white-space: nowrap; }
 .ticket-head > .row > .find-box { flex: none; }
 /* People's own note (#146): a dashed amber strip, so it never reads as the minion's words. */
 .ticket-head .pnote { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.9em; line-height: 1.4;
@@ -734,6 +734,8 @@ mark.find.current { background: var(--waiting); color: #fff; }
 @media (min-width: 801px) {
   .ticket-head > .row { flex-wrap: nowrap; }
   .ticket-head > .row > h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The line under it stays one line too: a long state gives way, cut short with … (its full text on hover). */
+  .ticket-head .head-sub { flex-wrap: nowrap; }
   .ticket-head > .row > .muted { white-space: nowrap; }
   .ticket-head > .row > button { flex: none; white-space: nowrap; }
   .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 11rem; }
@@ -771,10 +773,14 @@ mark.find.current { background: var(--waiting); color: #fff; }
   .ticket-head > .row:has(> .dot) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 3.45rem); }
   /* Pages with a close × (Settings, Artifacts…) keep it on the title's line too. */
   .ticket-head > .row:has(> .close-view) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 5.3rem); }
-  /* A minion's state has its own line, so where the change is and the tools share the next. */
-  .ticket-head .head-sub:has(> .prop-chip) > .head-state { flex-basis: 100%; }
-  /* With no buttons (the Taskmaster between turns), ‹ › share the title's line. */
-  .chat > .ticket-head > .row:not(:has(> button:not(.refresh-btn))) > h2:is(*, :has(+ .refresh-btn)) { flex: 1 1 0; }
+  /* ‹ › × share the title's line. */
+  .chat > .ticket-head > .row > h2:is(*, :has(+ .refresh-btn)) { flex: 1 1 0; }
+  /* A minion's state shares its line with the buttons (wrapping to two lines before it is cut short);
+     where the change is, the tools and Find take the next, after a break (::after). */
+  .ticket-head .head-sub > .head-state { flex: 1 1 0; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; }
+  .ticket-head .head-sub:has(> .prop-chip) > button { order: 1; }
+  .ticket-head .head-sub:has(> .prop-chip)::after { content: ''; order: 2; flex-basis: 100%; height: 0; margin-top: -0.35rem; }
+  .ticket-head .head-sub:has(> .prop-chip) > :not(.head-state, button) { order: 3; }
   /* A minion's ✎ for a new person note (#146): just the pen on phones. */
   .ticket-head .note-btn { width: 1.9rem; height: 1.9rem; justify-content: center; padding: 0; }
 }
@@ -1068,7 +1074,7 @@ dialog.viewer .composer .picker { display: none; }
   .viewer-stage { padding: 0.4rem; }
   /* The chat gets little height here: title and Stop share one line, the state and where the change is the next, and the readout waits for the full chat. */
   dialog.viewer .ticket-head > .row > h2:is(*, :has(+ .refresh-btn)) { flex: 1 1 0; -webkit-line-clamp: 1; line-clamp: 1; }
-  dialog.viewer .ticket-head .head-sub > .head-state { flex-basis: auto; }
+  dialog.viewer .ticket-head .head-sub::after { display: none; }
   dialog.viewer .ticket-head .progress { display: none; }
   dialog.viewer .ticket-head { margin-bottom: 0.5rem; }
 }

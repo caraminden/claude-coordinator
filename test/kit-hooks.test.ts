@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { jobCheck, MAX_STOP_BLOCKS, stopHook } from '../kit/hooks/job-check.ts';
-import { bashLines, failedTests, logPath, note, tripwireRefusals } from '../kit/hooks/retro-log.ts';
+import { bashLines, failedTests, logPath, note, refusals } from '../kit/hooks/retro-log.ts';
 
 const HOOKS = join(import.meta.dirname, '..', 'kit', 'hooks');
 const running = { id: 'b1', type: 'shell', status: 'running', description: 'Run the test suite', command: 'node --test' };
@@ -74,16 +74,19 @@ test('retro log: a red test or a failed push earns a line; a green run, a backgr
   assert.deepEqual(bashLines(failure('node --test test/', 'Exit code 1\nℹ fail 2')), [['red test', '2 failed: node --test test/']]);
   assert.deepEqual(bashLines({ hook_event_name: 'PostToolUse', tool_input: { command: 'npm test | tail' }, tool_response: { stdout: 'ℹ fail 1', stderr: '' } })[0][0], 'red test');
   assert.deepEqual(bashLines(failure('git push origin ticket/1', 'Exit code 1\n! [rejected] (non-fast-forward)'))[0], ['failed push', 'git push origin ticket/1: Exit code 1 ! [rejected] (non-fast-forward)']);
+  assert.equal(bashLines(failure('git -C ../x push -u origin b', 'Exit code 128'))[0][0], 'failed push');
+  assert.deepEqual(bashLines(failure('git commit -m "fix push race"', 'Exit code 1\nhook failed')), [], 'not a push');
   assert.deepEqual(bashLines({ hook_event_name: 'PostToolUse', tool_input: { command: 'git push' }, tool_response: { stdout: '', stderr: 'ok' } }), []);
   assert.deepEqual(bashLines({ hook_event_name: 'PostToolUse', tool_input: { command: 'node --test' }, tool_response: { stdout: 'ℹ fail 0' } }), []);
   assert.deepEqual(bashLines({ hook_event_name: 'PostToolUse', tool_input: { command: 'node --test', run_in_background: true }, tool_response: { stdout: 'ℹ fail 3' } }), []);
 });
 
-test('retro log: reads this prompt\'s tripwire refusals from the transcript', () => {
+test('retro log: reads this prompt\'s tripwire and guard refusals from the transcript', () => {
   const refusal = (promptId: string, id: string) => JSON.stringify({ type: 'user', promptId, message: { content: [{ type: 'tool_result', is_error: true, tool_use_id: id, content: `PreToolUse:Bash hook error: ['/usr/bin/node' '/x/tripwire.ts' '{"home":"/h"}']: [tripwire] ~/claude-coordinator is the live checkout.\n[tripwire] This guard stops known accidents in Citadel.\n` }] } });
-  const transcript = [refusal('p0', 't0'), refusal('p1', 't1'), JSON.stringify({ type: 'user', promptId: 'p1', message: { content: 'mentions [tripwire] PreToolUse: in prose' } }), 'not json [tripwire] PreToolUse:'].join('\n');
-  assert.deepEqual(tripwireRefusals(transcript, 'p1'), [['t1', 'Bash', '~/claude-coordinator is the live checkout.']]);
-  assert.equal(tripwireRefusals(transcript).length, 2, 'a subagent\'s transcript is read whole');
+  const guard = JSON.stringify({ type: 'user', promptId: 'p1', message: { content: [{ type: 'tool_result', is_error: true, tool_use_id: 'g1', content: [{ type: 'text', text: 'PreToolUse:Bash hook error: ["$CLAUDE_PROJECT_DIR"/tools/guard.sh --hook bash]: [guard] Push to main refused.\n[guard] main only changes through a merged pull request.\n' }] }] } });
+  const transcript = [refusal('p0', 't0'), refusal('p1', 't1'), guard, JSON.stringify({ type: 'user', promptId: 'p1', message: { content: 'mentions [tripwire] PreToolUse: in prose' } }), 'not json [tripwire] PreToolUse:'].join('\n');
+  assert.deepEqual(refusals(transcript, 'p1'), [['t1', 'tripwire', 'Bash', '~/claude-coordinator is the live checkout.'], ['g1', 'guard', 'Bash', 'Push to main refused.']]);
+  assert.equal(refusals(transcript).length, 3, 'a subagent\'s transcript is read whole');
 });
 
 test('retro log script: writes each line once, under the shared folder\'s retro-log/<date>/<session>.md', () => {

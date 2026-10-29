@@ -8,7 +8,7 @@ import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './th
 import { onPropertiesChanged } from './properties.js';
 import { inboxEvent, inboxTicket } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
-import { inAppHash, linkThreadRefs, linkUrls, prOwnerRoute } from './threadrefs.js';
+import { inAppHash, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
@@ -165,13 +165,16 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
-/** Link "#12" in some HTML to thread 12 of the project on screen, titled with its name when known, and "Delve #12" to Delve's. */
+/**
+ * Link "#12" in some HTML to thread 12 of the project on screen, titled with its name when known,
+ * "Delve #12" to Delve's, and "PR #186" to the minion owning that PR (see linkPrRefs).
+ */
 function threadRefsHtml(html) {
   if (view?.kind !== 'project') return html;
   return linkThreadRefs(html, view.projectId, (n) => {
     for (const t of view.tickets.values()) if (t.number === n) return threadLabel(t);
     return null;
-  }, view.projects);
+  }, view.projects, prRefRoute);
 }
 
 /** Plain text as nodes, with its "#12"s linked (see threadRefsHtml). */
@@ -217,6 +220,8 @@ export function markdownDoc(src, opts = {}) {
         // Links into this app (a thread, an artifact…) switch view in place; others open a new tab.
         const route = inAppHash(unescapeHtml(href), location);
         if (route) return `<a href="${escapeHtml(route)}">${text}</a>`;
+        const pr = prLinkOpen(href, prUrlRoute(unescapeHtml(href)));
+        if (pr) return `${pr}${text}</a>`;
         return /^https?:\/\//.test(href)
           ? `<a href="${href}" target="_blank" rel="noopener">${text}</a>`
           : `<span class="link" title="${href}">${text}</span>`;
@@ -224,7 +229,7 @@ export function markdownDoc(src, opts = {}) {
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/~~(.+?)~~/g, '<del>$1</del>')
       .replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>');
-    html = threadRefsHtml(linkUrls(html, location));
+    html = threadRefsHtml(linkUrls(html, location, (url) => prUrlRoute(unescapeHtml(url))));
     return html.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
   };
   const isItem = (l) => /^\s*([-*+]|\d+\.)\s+/.test(l);
@@ -698,14 +703,30 @@ document.addEventListener('click', (e) => {
   if (location.hash !== hash) location.hash = hash;
 });
 
-// A link to a pull request goes to the minion that owns it instead of GitHub: its href is swapped
-// as the pointer or focus reaches it, so hovering, copying and new tabs agree with a click.
+// A pull request goes to the minion that owns it instead of GitHub: PR links and "PR #186"s are
+// rendered that way once api/prs has loaded. Ones rendered before it are re-pointed when it
+// arrives, and a GitHub link's href is also swapped as the pointer or focus reaches it.
 let prRepos = null;
 let prsAt = 0;
 function loadPrs() {
   if (Date.now() - prsAt < 5 * 60_000) return;
   prsAt = Date.now();
-  api('api/prs').then((r) => { prRepos = new Map(r.map((x) => [x.repo, x])); }).catch(() => {});
+  api('api/prs').then((r) => {
+    prRepos = new Map(r.map((x) => [x.repo, x]));
+    linkPrRefs();
+  }).catch(() => {});
+}
+/** Where a GitHub PR link should go instead (see prOwnerRoute); null until api/prs has loaded. */
+const prUrlRoute = (href) => prOwnerRoute(prRepos, href, view?.id ?? null);
+/** Where "PR #n" said in scheme `projectId` goes (see prNumberRoute). */
+const prRefRoute = (projectId, n) => prNumberRoute(prRepos, projectId, n, view?.id ?? null);
+/** Point the PR links and "PR #186"s on the page at their owners, now that api/prs is known. */
+function linkPrRefs() {
+  for (const a of document.querySelectorAll('a[href^="https://github.com/"]')) pointPrLink(a);
+  for (const span of document.querySelectorAll('span.pr-ref')) {
+    const to = prRefRoute(Number(span.dataset.project), Number(span.dataset.pr));
+    if (to) span.replaceWith(h('a', { class: 'thread-ref', href: to.hash, title: to.title }, ...span.childNodes));
+  }
 }
 function pointPrLink(a) {
   if (!a.href.startsWith('https://github.com/')) return;

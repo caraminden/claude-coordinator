@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { linkThreadRefs, linkUrls, prOwnerRoute, prUrlParts } from '../public/threadrefs.js';
+import { linkThreadRefs, linkUrls, prNumberRoute, prOwnerRoute, prUrlParts } from '../public/threadrefs.js';
 
 const link = (html, titleOf) => linkThreadRefs(html, 2, titleOf);
 const a = (n, text = `#${n}`) => `<a class="thread-ref" href="#/p/2/t/${n}">${text}</a>`;
@@ -50,6 +50,29 @@ test('"<Scheme> #N" links into that scheme', () => {
   assert.equal(lnk('#68'), a(68));
   assert.equal(lnk('Delve PR #68'), 'Delve PR #68');
   assert.equal(lnk('<code>Delve #68</code>'), '<code>Delve #68</code>');
+});
+
+test('a scheme\'s name scopes "\'s", "minion" and "minion #N in <Scheme>" to that scheme', () => {
+  const schemes = [{ id: 1, name: 'Delve' }, { id: 2, name: 'Citadel' }, { id: 9, name: "Tom's game" }];
+  const lnk = (html) => linkThreadRefs(html, 2, () => null, schemes);
+  const at = (p, n, text = `#${n}`) => `<a class="thread-ref" href="#/p/${p}/t/${n}">${text}</a>`;
+  // Escaped as the renderer escapes it: a straight apostrophe is &#39;.
+  assert.equal(lnk('Delve&#39;s #5'), at(1, 5, 'Delve&#39;s #5'));
+  assert.equal(lnk('Delve\u2019s #5'), at(1, 5, 'Delve\u2019s #5'));
+  assert.equal(lnk("Delve's minion #5."), `${at(1, 5, "Delve's minion #5")}.`);
+  assert.equal(lnk('Delve&#39;s minion #5'), at(1, 5, 'Delve&#39;s minion #5'));
+  assert.equal(lnk('Delve minion #5'), at(1, 5, 'Delve minion #5'));
+  assert.equal(lnk('Delve&#39;s minions #5 and #6'), `${at(1, 5, 'Delve&#39;s minions #5')} and ${at(1, 6)}`);
+  assert.equal(lnk('see minion #5 in Delve.'), `see ${at(1, 5, 'minion #5')} in Delve.`);
+  assert.equal(lnk('minions #5, #6 in Delve'), `${at(1, 5, 'minions #5')}, ${at(1, 6)} in Delve`);
+  assert.equal(lnk('Tom&#39;s game&#39;s #3'), at(9, 3, 'Tom&#39;s game&#39;s #3'));
+  // A plain #5 is still the scheme on screen, and so is anything looser than the forms above.
+  assert.equal(lnk('#5'), at(2, 5));
+  assert.equal(lnk('minion #5'), `minion ${at(2, 5)}`);
+  assert.equal(lnk('#5 in Delve'), `${at(2, 5)} in Delve`);
+  assert.equal(lnk('Delve #5 and #6'), `${at(1, 5, 'Delve #5')} and ${at(2, 6)}`);
+  assert.equal(lnk('Delve&#39;s new minion #5'), `Delve&#39;s new minion ${at(2, 5)}`);
+  assert.equal(lnk('minion #5 in Delveland'), `minion ${at(2, 5)} in Delveland`);
 });
 
 test('titles known threads and needs a project', () => {
@@ -126,4 +149,54 @@ test('a PR link routes to the minion that owns it, not the one on screen', () =>
   assert.equal(prOwnerRoute(repos, 'https://github.com/o/r/pull/7', 5), null);
   assert.equal(prOwnerRoute(null, 'https://github.com/o/r/pull/186', 5), null);
   assert.equal(prOwnerRoute(repos, 'https://example.com/', 5), null);
+});
+
+// Delve (scheme 1) owns o/r, where minion #68 (id 162) opened PR #186.
+const delveRepos = new Map([['o/r', { projectId: 1, scheme: 'Delve', repo: 'o/r', prs: { 186: { id: 162, number: 68, title: 'Laptop "scripts"' } } }]]);
+const toOwner = (text) => `<a class="thread-ref" href="#/p/1/t/68" title="Delve #68 Laptop &quot;scripts&quot; (owns PR #186)">${text}</a>`;
+const pending = (n, text = `#${n}`, p = 1) => `<span class="pr-ref" data-project="${p}" data-pr="${n}">${text}</span>`;
+
+test('prNumberRoute finds a PR by its scheme\'s repo', () => {
+  assert.deepEqual(prNumberRoute(delveRepos, 1, 186, 5), { hash: '#/p/1/t/68', title: 'Delve #68 Laptop "scripts" (owns PR #186)' });
+  assert.equal(prNumberRoute(delveRepos, 1, 186, 162), null, 'the minion on screen');
+  assert.equal(prNumberRoute(delveRepos, 1, 7, 5), null, 'no owner');
+  assert.equal(prNumberRoute(delveRepos, 2, 186, 5), null, 'another scheme');
+  assert.equal(prNumberRoute(null, 1, 186, 5), null, 'not loaded yet');
+});
+
+test('"PR #N" links to the minion owning the PR in the scheme on screen', () => {
+  const schemes = [{ id: 1, name: 'Delve' }, { id: 2, name: 'Citadel' }];
+  const lnk = (html, p = 1) => linkThreadRefs(html, p, () => null, schemes, (projectId, n) => prNumberRoute(delveRepos, projectId, n, 5));
+  const at = (p, n, text = `#${n}`) => `<a class="thread-ref" href="#/p/${p}/t/${n}">${text}</a>`;
+  assert.equal(lnk('PR #186 shipped. #187 next'), `${toOwner('PR #186')} shipped. ${at(1, 187)} next`);
+  assert.equal(lnk('pull request #186.'), `${toOwner('pull request #186')}.`);
+  assert.equal(lnk('Pull Requests #186'), toOwner('Pull Requests #186'));
+  assert.equal(lnk('[PR 186]'), `[${toOwner('PR 186')}]`);
+  // Each number of a list, the first with its words; one nobody owns waits in a span for linkPrRefs.
+  assert.equal(lnk('PRs #186, #7 and #186'), `${toOwner('PRs #186')}, ${pending(7)} and ${toOwner('#186')}`);
+  assert.equal(lnk('PRs #7 &amp; #186'), `${pending(7, 'PRs #7')} &amp; ${toOwner('#186')}`);
+  // "PR 12" without a "#" is one number: "and 3 more" isn't a PR.
+  assert.equal(lnk('PR 12 and 3 more'), `${pending(12, 'PR 12')} and 3 more`);
+  // Issues stay plain; so do look-alikes.
+  for (const s of ['issues #4 and #5', 'issue #186', 'Pulls 3', 'PR #186abc', 'PR 2026-10-28', 'PRESS 186', 'PR186', '<code>PR #186</code>', '<a href="x">PR #186</a>']) {
+    assert.equal(lnk(s), s, s);
+  }
+  // In Citadel, "PR #186" is Citadel's PR, and "Delve PR #186" Delve's.
+  assert.equal(lnk('PR #186', 2), pending(186, 'PR #186', 2));
+  assert.equal(lnk('see Delve PR #186 and Delve #5', 2), `see ${toOwner('Delve PR #186')} and ${at(1, 5, 'Delve #5')}`);
+  assert.equal(lnk('Delve&#39;s PR #186', 2), toOwner('Delve&#39;s PR #186'));
+  assert.equal(lnk('delve PRs #7 and #186', 2), `${pending(7, 'delve PRs #7')} and ${toOwner('#186')}`);
+  // Without a PR lookup, PR mentions stay plain text as before.
+  assert.equal(linkThreadRefs('PR #186 and Delve PR #186', 2, () => null, schemes), 'PR #186 and Delve PR #186');
+});
+
+test('bare PR URLs go to their owner from the start, GitHub otherwise', () => {
+  const route = (url) => prOwnerRoute(delveRepos, url.replace(/&amp;/g, '&'), 5);
+  const owned = 'https://github.com/o/r/pull/186';
+  assert.equal(linkUrls(`see ${owned}.`, null, route),
+    `see <a href="#/p/1/t/68" title="Delve #68 Laptop &quot;scripts&quot; (owns PR #186)" data-pr-url="${owned}">${owned}</a>.`);
+  for (const url of ['https://github.com/o/r/pull/7', `${owned}/files`, 'https://github.com/x/y/pull/186']) {
+    assert.equal(linkUrls(url, null, route), tab(url), url);
+  }
+  assert.equal(linkUrls(owned, null, (url) => prOwnerRoute(delveRepos, url, 162)), tab(owned), 'its own PR opens GitHub');
 });

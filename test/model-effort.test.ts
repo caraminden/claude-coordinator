@@ -85,6 +85,13 @@ test('a new minion takes a model and effort; the scheme default shows when it ha
 
   const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
   assert.ok(notes.includes("Cara set the scheme's default effort to medium. It applies from each minion's next turn."));
+
+  // #138: machine tools are on until someone turns them off, and only true or false is taken.
+  assert.equal(changed.data.machine_tools, 1);
+  assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { machine_tools: 'no' } })).status, 400);
+  assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { machine_tools: false } })).data.machine_tools, 0);
+  const later = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  assert.ok(later.includes("Cara took the connected machines' tools from this scheme's minions. It applies from each minion's next turn."));
 });
 
 test("the Taskmaster's create_ticket and update_ticket pass model and effort on", async () => {

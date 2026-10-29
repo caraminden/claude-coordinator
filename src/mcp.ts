@@ -414,7 +414,7 @@ const TOOLS = [
   {
     name: 'set_project_settings',
     description:
-      'Replace the approval rules, plugin folders and/or default effort; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask.',
+      'Replace the approval rules, plugin folders, default effort and/or machine tools switch; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -429,6 +429,7 @@ const TOOLS = [
           description: 'Folder paths relative to the repo root, e.g. "tools/mods/delve". Each is loaded with --plugin-dir when it exists in a minion\'s worktree.',
         },
         default_effort: { ...EFFORT, description: "Effort for every minion's turns that has none of its own. null leaves it to Claude Code's default." },
+        machine_tools: { type: 'boolean', description: "Whether this scheme's minions get the connected machines' MCP tools (Godot editors and the like). Off saves ~1.1k tokens a call in schemes that never use them." },
       },
     },
   },
@@ -739,17 +740,18 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'get_project_settings': {
       const { project } = await call('GET', `/api/projects/${PROJECT}`);
       const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
-      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders:\n${show(project.plugin_dirs)}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}`;
+      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders:\n${show(project.plugin_dirs)}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nMachine tools for minions: ${project.machine_tools ? 'on' : 'off'}`;
     }
     case 'set_project_settings': {
       const body: Record<string, unknown> = {};
       if (args.approval_rules !== undefined) body.approval_rules = args.approval_rules;
       if (args.plugin_folders !== undefined) body.plugin_dirs = args.plugin_folders;
       if (args.default_effort !== undefined) body.default_effort = args.default_effort;
-      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, default_effort or a mix');
+      if (args.machine_tools !== undefined) body.machine_tools = args.machine_tools;
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, default_effort, machine_tools or a mix');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), default effort ${project.default_effort || "Claude Code's default"}. They apply from each minion's next turn.`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), default effort ${project.default_effort || "Claude Code's default"}, machine tools ${project.machine_tools ? 'on' : 'off'}. They apply from each minion's next turn.`;
     }
     case 'approve':
       return approve(args);

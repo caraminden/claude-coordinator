@@ -1249,7 +1249,7 @@ export class Runner {
       memoryDir = null;
     }
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now.
-    const machines = ticket.kind === 'coordinator' ? [] : this.machines();
+    const machines = ticket.kind === 'coordinator' || !project.machine_tools ? [] : this.machines();
     // Tool calls matching the project's approval rules wait for a person (threads only).
     const rules = ticket.kind === 'coordinator' ? [] : lines(project.approval_rules);
     // The turn's folder, with its own copy of the pinned files: a restart sweeps the server's copy, and

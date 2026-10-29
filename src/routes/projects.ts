@@ -191,15 +191,19 @@ export const projectRoutes: Route[] = [
     method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, project }) {
       const { store, runner } = app;
-      // Any of name, instructions, approval_rules, plugin_dirs and default_effort; what is left out stays.
+      // Any of name, instructions, approval_rules, plugin_dirs, default_effort and machine_tools; what is left out stays.
       const body = await readJson(req);
-      if (body.name === undefined && body.instructions === undefined && body.approval_rules === undefined && body.plugin_dirs === undefined && body.default_effort === undefined) {
+      if (body.name === undefined && body.instructions === undefined && body.approval_rules === undefined && body.plugin_dirs === undefined && body.default_effort === undefined && body.machine_tools === undefined) {
         throw new HttpError(400, 'Nothing to change');
       }
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort' | 'machine_tools'>> = {};
       // null or "" leaves effort to Claude Code's default.
       if (body.default_effort !== undefined) settings.default_effort = oneOf(body.default_effort || null, EFFORTS, 'Default effort') ?? '';
+      if (body.machine_tools !== undefined) {
+        if (typeof body.machine_tools !== 'boolean') throw new HttpError(400, 'machine_tools must be true or false');
+        settings.machine_tools = body.machine_tools ? 1 : 0;
+      }
       try {
         if (body.approval_rules !== undefined) settings.approval_rules = cleanRules(body.approval_rules);
         if (body.plugin_dirs !== undefined) settings.plugin_dirs = cleanPluginDirs(body.plugin_dirs);
@@ -235,6 +239,9 @@ export const projectRoutes: Route[] = [
         }
         if (coordinator && settings.default_effort !== undefined) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });
+        }
+        if (coordinator && settings.machine_tools !== undefined) {
+          runner.emit(coordinator.id, 'note', { text: `${session.name} ${settings.machine_tools ? 'gave' : 'took'} the connected machines' tools ${settings.machine_tools ? 'to' : 'from'} this scheme's minions. It applies from each minion's next turn.` });
         }
       }
       if (instructions !== project.instructions) {

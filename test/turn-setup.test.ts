@@ -61,11 +61,12 @@ const errors: string[] = [];
 const runner = new Runner(store, () => {}, (t) => ({ COORDINATOR_API: 'http://127.0.0.1:8573', COORDINATOR_TOKEN: `token-${t.id}` }), fake);
 runner.onTurnError = (_id, text) => errors.push(text);
 
-async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string } = {}, repoDir?: string) {
+async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; machine_tools?: number } = {}, repoDir?: string) {
   writeFileSync(join(root, 'mcp-status'), mcpStatus);
   // A scheme has one Taskmaster, so each turn gets a scheme of its own.
   const project = store.createProject(`P${Math.random()}`, null);
   if (repoDir) store.setProjectRepoDir(project.id, repoDir);
+  if (set.machine_tools !== undefined) store.setProjectSettings(project.id, { machine_tools: set.machine_tools });
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara', kind });
   const cwd = join(root, `ticket-${t.id}`);
   mkdirSync(cwd, { recursive: true });
@@ -116,6 +117,21 @@ test("minion and Taskmaster turns both leave out unused built-in tools and the a
     assert.equal(t.settings.syncClaudeAiSkills, false, kind);
     assert.equal(t.settings.disableClaudeAiConnectors, true, kind);
     assert.ok(t.settings.hooks.PreToolUse, `${kind}: the tripwire hook is still there`);
+  }
+});
+
+test("a scheme with machine tools off gives its minions no machine servers or notes", async () => {
+  runner.machines = () => [{ id: 1, name: 'perigee-godot', token_hash: '', created_by: 'Cara', created_at: 0, last_seen_at: 0, notes: 'Never restart it.', workspace_tools: 0 }];
+  try {
+    const servers = (t: any) => Object.keys(JSON.parse(t.flag('--mcp-config')).mcpServers);
+    const on = await turn('ticket', 'connected');
+    assert.deepEqual(servers(on), ['thread', 'perigee-godot'], 'on by default');
+    assert.match(on.flag('--append-system-prompt'), /Never restart it/);
+    const off = await turn('ticket', 'connected', { machine_tools: 0 });
+    assert.deepEqual(servers(off), ['thread']);
+    assert.doesNotMatch(off.flag('--append-system-prompt'), /perigee-godot|Never restart it/);
+  } finally {
+    runner.machines = () => [];
   }
 });
 

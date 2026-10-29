@@ -68,13 +68,16 @@ export function prUrlParts(href) {
 /** A bare http(s) URL in escaped HTML text: it ends at a space, a tag, a quote or a code-span marker. */
 const BARE_URL = /(?<![\w/])https?:\/\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>"'\u0000])+/gi;
 
-/** A URL without the punctuation that ends the sentence around it; a ")" stays when it closes a "(" in the URL. */
+/** A URL without the punctuation that ends the sentence around it; a ")" or "]" stays when it closes one in the URL. */
 function trimUrl(url) {
+  const opens = { ')': url.split('(').length, ']': url.split('[').length };
+  const closes = { ')': url.split(')').length, ']': url.split(']').length };
+  let end = url.length;
   for (;;) {
-    const last = url.at(-1);
-    const unbalanced = last === ')' && url.split('(').length < url.split(')').length;
-    if (!/[.,:;!?]/.test(last) && !unbalanced) return url;
-    url = url.slice(0, -1);
+    const c = url[end - 1];
+    if (/[.,:;!?]/.test(c)) end--;
+    else if (closes[c] > opens[c]) { closes[c]--; end--; }
+    else return url.slice(0, end);
   }
 }
 

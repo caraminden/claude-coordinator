@@ -99,8 +99,11 @@ test('bare URLs link without the punctuation around them', () => {
     assert.equal(linkUrls(`at ${url}${p}`), `at ${tab(url)}${p}`, p);
   }
   assert.equal(linkUrls(`(see ${url})`), `(see ${tab(url)})`);
+  assert.equal(linkUrls(`[preview: ${url}]`), `[preview: ${tab(url)}]`);
+  assert.equal(linkUrls(`https://a.io/${')'.repeat(30000)}`), `${tab('https://a.io/')}${')'.repeat(30000)}`);
   const wiki = 'https://en.wikipedia.org/wiki/Foo_(bar)';
   assert.equal(linkUrls(`${wiki}.`), `${tab(wiki)}.`);
+  assert.equal(linkUrls('https://a.io/?q[0]=1).'), `${tab('https://a.io/?q[0]=1')}).`);
   const query = 'https://x.io/a?b=1&amp;c=2';
   assert.equal(linkUrls(`${query} and &quot;${query}&quot;`), `${tab(query)} and &quot;${tab(query)}&quot;`);
   // A code span's placeholder (core.js inline()) is not part of the URL.

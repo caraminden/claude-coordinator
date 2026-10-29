@@ -39,7 +39,7 @@ test('starting a brief creates the minion once, records it, and notes it to the 
   try {
     const { data: p } = await s.call('/api/projects', { name: 'Scheme' });
     const tm = (await s.call(`/api/projects/${p.id}`)).data.coordinator; // opening the scheme makes its Taskmaster
-    const path = 'scheme shared/citadel-retro-2026-10.md';
+    const path = '/data/projects/2/shared/project/citadel-retro-2026-10.md';
     const heading = 'Brief 6: Page the chat history (feature/perf, M)';
     const start = () => s.call(`/api/projects/${p.id}/tickets`, {
       title: 'Page the chat history', message: '### Brief 6…', properties: { type: 'feature' }, brief: { path, heading },

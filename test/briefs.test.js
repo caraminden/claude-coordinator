@@ -68,6 +68,11 @@ test('a handoff file is a brief as a whole, with its Brief headings as well', ()
   assert.deepEqual(findBriefs(src, 'start-from-brief.md').map((b) => b.heading), ['Brief 1: Part one (design, S)'], 'only handoff-*.md is one');
 });
 
+test('a repeated Brief heading gets a number, as the heading is its key', () => {
+  assert.deepEqual(findBriefs('## Brief 1: Setup\na\n## Brief 1: Setup\nb', 'x.md').map((b) => [b.heading, b.title, b.body]),
+    [['Brief 1: Setup', 'Setup', '## Brief 1: Setup\na'], ['Brief 1: Setup (2)', 'Setup', '## Brief 1: Setup\nb']]);
+});
+
 test('comments are dropped, as markdownDoc drops them', () => {
   const briefs = findBriefs('<!--\n# Hidden\n-->\n# Top\n## Brief 1: X\nbody', 'x.md');
   assert.deepEqual(briefs.map((b) => [b.index, b.body]), [[1, '## Brief 1: X\nbody']]);

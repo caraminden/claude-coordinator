@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { basename, join, sep } from 'node:path';
+import { basename, isAbsolute, join, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { fileType, resolveFile } from '../artifacts.ts';
 import type { Artifact, Ticket } from '../db.ts';
@@ -15,10 +15,12 @@ import { HttpError, json, readJson, SECURITY_HEADERS, type App, type Route } fro
 
 export function artifactView(app: App, a: Artifact & { ticket_title?: string; ticket_kind?: string; ticket_number?: number | null }) {
   const ticket = a.ticket_title === undefined ? app.store.getTicket(a.ticket_id) : null;
+  const owner = ticket ?? app.store.getTicket(a.ticket_id)!;
   return {
     ...a,
     name: basename(a.path),
-    display_path: displayPath(app, ticket ?? app.store.getTicket(a.ticket_id)!, a.path),
+    display_path: displayPath(app, owner, a.path),
+    abs: isAbsolute(a.path) ? a.path : join(owner.cwd, a.path),
     kind: fileType(a.path)?.kind ?? 'text',
     ticket_title: a.ticket_title ?? ticket?.title ?? '',
     ticket_kind: a.ticket_kind ?? ticket?.kind ?? 'ticket',
@@ -177,7 +179,7 @@ export const fileRoutes: Route[] = [
       if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
       if (!url.searchParams.has('info')) return serveArtifact(req, res, found, path, url.searchParams.has('download'));
       return json(res, 200, {
-        path, name: basename(found.abs), display_path: `scheme shared/${path}`,
+        path, name: basename(found.abs), display_path: `scheme shared/${path}`, abs: found.abs,
         kind: found.type.kind, size: found.size, mtime: found.mtime,
       });
     },
@@ -214,7 +216,7 @@ export const fileRoutes: Route[] = [
       const relPath = found.abs.startsWith(ticket.cwd + sep) ? found.abs.slice(ticket.cwd.length + 1) : found.abs;
       const artifact = app.store.findArtifact(ticket.id, [relPath, found.abs]);
       return json(res, 200, {
-        path, name: basename(found.abs), display_path: displayPath(app, ticket, found.abs),
+        path, name: basename(found.abs), display_path: displayPath(app, ticket, found.abs), abs: found.abs,
         kind: found.type.kind, size: found.size, mtime: found.mtime,
         artifact: artifact ? artifactView(app, artifact) : null,
       });

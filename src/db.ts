@@ -267,7 +267,7 @@ CREATE TABLE IF NOT EXISTS instruction_history (
   new_text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS instruction_history_project ON instruction_history(project_id, id);
--- A brief in a file that someone started as a minion (#129), keyed by the file's display path and the brief's
+-- A brief in a file that someone started as a minion (#129), keyed by the file's absolute path and the brief's
 -- heading ('' for a whole handoff file). ticket_id is null while its minion is being made. No foreign key on
 -- ticket_id, so an older release's deleteTicket still works after a rollback; reads join tickets instead.
 CREATE TABLE IF NOT EXISTS brief_starts (

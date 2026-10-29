@@ -34,10 +34,14 @@ export function findBriefs(src, name = '') {
     const top = hs[0]?.text ?? name.replace(/^handoff-|\.md$/gi, '').replace(/-/g, ' ');
     briefs.push({ index: -1, heading: '', ...titleAndType(top.replace(/^handoff\b\s*[:\-–—]?\s*/i, '')), body: lines.join('\n').trim() });
   }
+  const seen = new Map();
   hs.forEach((hd, index) => {
     if (!/^brief\b/i.test(hd.text)) return;
     const end = hs.slice(index + 1).find((x) => x.level <= hd.level)?.line ?? lines.length;
-    briefs.push({ index, heading: hd.text, ...titleAndType(hd.text.replace(/^brief\b[^:]{0,12}:\s*/i, '')), body: lines.slice(hd.line, end).join('\n').trim() });
+    // The heading is the brief's key, so a repeat of one gets a number to keep it apart.
+    const n = (seen.get(hd.text) ?? 0) + 1;
+    seen.set(hd.text, n);
+    briefs.push({ index, heading: n > 1 ? `${hd.text} (${n})` : hd.text, ...titleAndType(hd.text.replace(/^brief\b[^:]{0,12}:\s*/i, '')), body: lines.slice(hd.line, end).join('\n').trim() });
   });
   return briefs;
 }

@@ -4,8 +4,8 @@ import { api, h } from './core.js';
 import { briefMessage, findBriefs, matchType } from './briefs.js';
 
 /**
- * Hang a Start button on each brief in `doc`, the markdownDoc of `text`. `file` says where it is:
- * its scheme, the path the viewer shows (the brief's key), the path a minion can read, and its name.
+ * Hang a Start button on each brief in `doc`, the markdownDoc of `text`. `file` says where it is: its
+ * scheme, its absolute path (the brief's key, and what the minion reads) and its name.
  */
 export function addBriefButtons(doc, text, file) {
   const briefs = findBriefs(text, file.name);
@@ -46,7 +46,7 @@ async function typeValues(projectId) {
 
 async function openSheet(slot, brief, file) {
   const values = await typeValues(file.projectId);
-  const message = briefMessage(brief, file.abs ?? file.path);
+  const message = briefMessage(brief, file.path);
   const err = h('p', { class: 'error', hidden: true });
   const title = h('input', { name: 'title', required: true, maxlength: 120, value: brief.title, autocomplete: 'off' });
   const type = h('select', { name: 'type' },

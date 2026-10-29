@@ -219,7 +219,7 @@ export function artifactViewer(a) {
   if (a.missing) {
     body.append(h('p', { class: 'muted' }, 'This file is no longer in the minion\'s folder. Unpin it to remove it from the list.'));
   } else {
-    renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id, brief: { projectId: a.project_id, path: a.display_path ?? a.path, abs: a.abs, name: a.name } });
+    renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id, brief: { projectId: a.project_id, path: a.abs ?? a.path, name: a.name } });
     section.append(commentBox(artifactThread(a), a.path, a.name, body));
   }
   return section;
@@ -268,7 +268,7 @@ function openViewer(ticket, file, inPlace) {
   viewer.stage.className = `viewer-stage k-${file.kind}`;
   viewer.stage.replaceChildren();
   if (file.missing) viewer.stage.append(h('p', { class: 'muted' }, `${file.missing}.`));
-  else renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.display_path, abs: file.abs, name: file.name } });
+  else renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.abs ?? file.display_path, name: file.name } });
   renderViewerBar();
 }
 
@@ -392,7 +392,7 @@ function commentBox(t, path, name, body) {
 export function sharedViewer(file) {
   const body = h('div', { class: 'artifact-body' });
   if (file.missing) body.append(h('p', { class: 'muted' }, `${file.missing}.`));
-  else renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), brief: { projectId: view.projectId, path: file.display_path, abs: file.abs, name: file.name } });
+  else renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name } });
   return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body);
 }
 

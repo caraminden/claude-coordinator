@@ -326,10 +326,10 @@ export function renderTicketHead() {
   scheduleProgress();
 }
 
-// Squeezed is measured against the text's own width, taken while it shows: once the dots are in,
-// the label is narrower than its text for as long as the room stays short.
+// Squeezed is measured against the text's own width, taken while it shows (the label itself may have
+// grown into spare room): once the dots are in, the label is narrower than its text for as long as the room stays short.
 const stateFit = typeof ResizeObserver === 'function' ? new ResizeObserver(([{ target: el }]) => {
-  if (!el.classList.contains('squeezed')) el.need = el.scrollWidth;
+  if (!el.classList.contains('squeezed')) el.need = el.firstChild.offsetWidth;
   el.classList.toggle('squeezed', el.clientWidth < el.need);
 }) : null;
 

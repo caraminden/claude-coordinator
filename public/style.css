@@ -200,8 +200,8 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .ticket-head .head-sub > .ship { flex: 1 1 10rem; }
 .ticket-head .head-sub > .find-box { flex: none; margin-left: auto; }
 .ticket-head > .row > .find-box { flex: none; }
-/* The chip's popover opens from the line's right end, so it stays on screen wherever the chip lands. */
-.ticket-head .head-sub > .prop-chip { position: static; }
+/* With no ship status the chip sits at the line's start, so its popover opens rightwards. */
+@media (min-width: 801px) { .ticket-head .head-sub:not(:has(> .ship)) .prop-pop { left: 0; right: auto; } }
 /* People's own note (#146): a dashed amber strip, so it never reads as the minion's words. */
 .ticket-head .pnote { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.9em; line-height: 1.4;
   background: color-mix(in srgb, var(--waiting-tint) 13%, var(--panel)); border: 1px dashed color-mix(in srgb, var(--waiting-tint) 60%, transparent); min-width: 0; }
@@ -1029,7 +1029,7 @@ a.thread-ref:hover { text-decoration: underline; }
 .pv-add label { display: inline-flex; align-items: center; gap: 0.3rem; width: auto; margin: 0; color: var(--muted); }
 .pv-add input[type=checkbox] { width: auto; margin: 0; }
 /* On a phone the popover spans the line under the title (.head-sub) instead of hanging off the screen's left edge. */
-@media (max-width: 800px) { .prop-pop { left: 0; width: auto; } }
+@media (max-width: 800px) { .ticket-head .head-sub > .prop-chip { position: static; } .ticket-head .head-sub .prop-pop { left: 0; right: 0; width: auto; } }
 
 /* Full-screen file viewer (#79): a file a chat linked, as big as it fits, with that chat in a
    compact column beside it (below it on phones) and nothing else on screen. */

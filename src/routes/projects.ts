@@ -171,7 +171,7 @@ export const projectRoutes: Route[] = [
   },
   {
     // The scheme's minions as list_tickets prints them, for its minions too: read-only, and only the
-    // line's fields (no approval cards, costs or paths). checkRole keeps a minion to its own scheme.
+    // line's fields, the latest activity line among them (no approval cards, costs or paths). checkRole keeps a minion to its own scheme.
     method: 'GET', path: '/api/projects/:project/tickets', who: ['person', 'taskmaster', 'minion'],
     handler({ res, url, app, project }) {
       const closed = url.searchParams.get('include_closed') === '1';

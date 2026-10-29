@@ -556,7 +556,7 @@ const THREAD_TOOLS = [
   SETTLE_QUESTION,
   STRIKE_TEXT,
   PROPOSE_PLAN,
-  { ...LIST_TICKETS, description: `${LIST_TICKETS.description} Read-only: their titles, states and notes, not their conversations.` },
+  { ...LIST_TICKETS, description: `${LIST_TICKETS.description} Read-only: each one's line, with its latest activity line, not its conversation.` },
   LIST_PROPERTIES,
   {
     name: 'set_properties',

@@ -1312,6 +1312,8 @@ export class Runner {
       configDir: turn.configDir ?? claudeConfigDir(process.env), chosenEffort: !!turn.chosenEffort, ticks: 0,
       timer: setInterval(() => this.poll(ticketId), this.pollMs),
     };
+    // The server's listener keeps the process up; a Runner alone (a test) can exit with turns followed.
+    live.timer.unref();
     this.turns.set(ticketId, live);
     return live;
   }

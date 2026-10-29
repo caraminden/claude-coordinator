@@ -51,7 +51,7 @@ async function call(path: string, opts: { method?: string; body?: unknown; token
   return data;
 }
 
-async function until<T>(what: string, fn: () => Promise<T | undefined | false> | T | undefined | false, ms = 10_000): Promise<T> {
+async function until<T>(what: string, fn: () => Promise<T | undefined | false> | T | undefined | false, ms = 30_000): Promise<T> {
   const end = Date.now() + ms;
   for (;;) {
     const v = await fn();

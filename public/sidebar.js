@@ -8,7 +8,6 @@ import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { renderInbox } from './inbox.js';
-import { replyChips } from './replies.js';
 
 // ---------- projects ----------
 
@@ -296,13 +295,13 @@ export function threadRow(t, href = threadHref(t)) {
   // Unread (a dot and a bold title) marks any settled row that changed since you last opened it.
   const yours = !coord && st.rank === 0 ? ' yours' : '';
   const unread = !coord && st.fam !== 'work' && st.fam !== 'idle' && !isSeen(t) ? ' unread' : '';
+  // No one-tap replies on list rows (#130): a stray tap on "Merge it" would ship work nobody opened.
   return h('a', { class: `thread-row s-${t.status} f-${st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${active ? ' active' : ''}`, href, title: details, 'data-id': t.id },
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     st.cell ? h('span', { class: 'state' }, st.cell) : '',
     note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
-    t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
-    coord ? '' : replyChips(t));
+    t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '');
 }
 
 /** "40m", "1h40", "14h", "2d": time left, for tight spaces. */

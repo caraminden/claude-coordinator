@@ -1,7 +1,6 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, STATES, taskmasterLabel, threadHref, view } from './core.js';
-import { replyChips } from './replies.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
 const inbox = { projectId: null, items: [], timer: 0 };
@@ -37,8 +36,6 @@ export function inboxEvent(event) {
 /** A minion changed: refetch when it moved into or out of ready/try, offered or lost its replies, or was dismissed or reopened. */
 export function inboxTicket(before, after) {
   if (!before || before.state !== after.state || !before.replies?.length !== !after.replies?.length || (before.status === 'closed') !== (after.status === 'closed')) refreshSoon();
-  // Its row shows the replies themselves, so a change in them (or a turn starting, which hides them) redraws it.
-  else if (String(before.replies) !== String(after.replies) || (before.status === 'running') !== (after.status === 'running')) renderInbox();
 }
 
 // What each kind of item asks of you, as a chip on its minion's row.
@@ -96,6 +93,6 @@ function inboxRow(items) {
   return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: threadHref(t) },
     h('span', { class: 'name' }, isCoordinator(t) ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     h('span', { class: 'asks' }, [...asks].map(([ask, n]) => h('span', { class: 'chip' }, n > 1 ? `${ask} ×${n}` : ask))),
-    h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))),
-    replyChips(t));
+    // No one-tap replies on these rows (#130): a stray tap on "Merge it" would ship work nobody opened.
+    h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))));
 }

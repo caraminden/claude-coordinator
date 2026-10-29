@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { bootServer } from './helpers.ts';
+import { bootServer, until } from './helpers.ts';
 
 // One-tap replies (#105): set with set_thread_status, gone once anyone writes or the next turn starts.
 const root = mkdtempSync(join(tmpdir(), 'replies-'));
@@ -58,6 +58,8 @@ test('replies are checked, shown as a list, and go once someone writes', async (
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Scheme' } });
   const { data: t } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'T', message: 'hi' } });
   assert.deepEqual(t.replies, []);
+  // The message starts a turn that fails (CLAUDE_BIN is /bin/false); its end writes the ticket, so let it land first.
+  await until('the first turn to end', async () => (await call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
   const patch = (replies: unknown) => call(`/api/tickets/${t.id}`, { method: 'PATCH', body: { replies } });
 
   assert.equal((await patch(['a', 'b', 'c', 'd'])).status, 400, 'at most 3');

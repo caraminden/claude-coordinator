@@ -10,8 +10,9 @@ import { bootServer, until } from './helpers.ts';
 // `claude -p` records each turn's prompt, folder and thread token, then ends the turn.
 const root = mkdtempSync(join(tmpdir(), 'question-images-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+// The server writes into root until it exits, and its exit handler deletes its run/mcp-<pid> folder, so wait for that.
+after(async () => {
+  await Promise.all(procs.map((p) => p.exitCode !== null || p.signalCode !== null ? undefined : new Promise((r) => { p.once('exit', r); p.kill(); })));
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -124,6 +125,8 @@ test('a thread can message its coordinator, which wakes with the thread named', 
   const next = (await until('the coordinator\'s turn', () => turns().length > before && turns())).at(-1);
   assert.match(next.prompt.message.content[0].text, /^\[#1 .+\]: Send #2 the handoff$/);
   assert.notEqual(next.token, turn.token);
+  // Let the coordinator's turn end here, or its wind-down writes into root while after() deletes it.
+  await idle(Number(next.token.split('.')[0]));
   await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', body: { text: 'x' } }), /403/);
   await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: next.token, body: { text: 'x' } }), /403/);
 });

@@ -60,7 +60,11 @@ const BRIDGE_FILE = join(import.meta.dirname, '..', 'public', 'artifact-bridge.j
 let bridge = { mtime: -1, src: '' };
 function bridgeSource(): string {
   const mtime = statSync(BRIDGE_FILE).mtimeMs;
-  if (mtime !== bridge.mtime) bridge = { mtime, src: readFileSync(BRIDGE_FILE, 'utf8') };
+  if (mtime !== bridge.mtime) {
+    // The function alone: its header comment needn't ride along in every page.
+    const src = readFileSync(BRIDGE_FILE, 'utf8');
+    bridge = { mtime, src: src.slice(src.indexOf('(function (cfg)')).trim() };
+  }
   return bridge.src;
 }
 
@@ -75,6 +79,6 @@ const scriptJson = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c').re
 export function injectBridge(html: Buffer, cfg: { page: string; entries: ReturnType<typeof entriesView> }): Buffer {
   const text = html.toString('utf8');
   const lead = /^\uFEFF?(?:\s|<!--[\s\S]*?-->)*(?:<!doctype[^>]*>)?/i.exec(text)![0];
-  const script = `<script>(${bridgeSource().trim().replace(/;$/, '')})(${scriptJson(cfg)});</script>`;
+  const script = `<script>${bridgeSource()}(${scriptJson(cfg)});</script>`;
   return Buffer.from(lead + script + text.slice(lead.length));
 }

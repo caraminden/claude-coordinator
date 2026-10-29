@@ -406,7 +406,7 @@ function commentBox(t, path, name, body) {
     textarea.value = text;
     saveDraft(draftKey, text);
     grow();
-    status.textContent = 'Written by the page: read it, then Comment to send';
+    status.textContent = 'From the page, not sent yet';
     textarea.focus();
     form.scrollIntoView({ block: 'nearest' });
   };

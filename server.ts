@@ -26,7 +26,7 @@ import { TAG_TO_TYPE } from './src/property-seed.ts';
 import { PreviewError, Previews, previewPath } from './src/previews.ts';
 import { type Chain, LiveWaiters } from './src/wake.ts';
 import { catchUpTicketDir, cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
-import { costDays } from './src/costs.ts';
+import { costDays, dayBudget } from './src/costs.ts';
 import { describeCron, runBrief, ScheduleError, type Schedule } from './src/schedules.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
@@ -1025,7 +1025,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     return;
   }
 
-  if (pathname === '/api/costs' && method === 'GET') return json(res, 200, { days: costDays(store) });
+  if (pathname === '/api/costs' && method === 'GET') return json(res, 200, { days: costDays(store), dayBudget: dayBudget(store, runner.usage?.weekly) });
 
   if (pathname === '/api/projects') {
     if (method === 'GET') {

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { costDays, localDay, trackDay } from '../src/costs.ts';
+import { costDays, dayBudget, localDay } from '../src/costs.ts';
 import { Store } from '../src/db.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'costs-'));
@@ -69,22 +69,14 @@ test('daily totals: seven local days, today first, per scheme and overall', () =
   assert.equal(localDay(yesterday), '2026-10-27');
 });
 
-test("the day's share of the weekly limit follows the weekly meter, across days and resets", () => {
-  const week = 1_000_000_000_000;
-  const next = week + 7 * 86400_000;
-  let d = trackDay(null, { utilization: 0.3, resetsAt: week }, '2026-10-28');
-  assert.equal(d.share, 0); // the first reading only sets where the day starts
-  d = trackDay(d, { utilization: 0.4, resetsAt: week }, '2026-10-28');
-  close(d.share, 0.1);
-  // The window resets mid-day: what was used before it carries over.
-  d = trackDay(d, { utilization: 0.05, resetsAt: next }, '2026-10-28');
-  close(d.share, 0.15);
-  d = trackDay(d, { utilization: 0.08, resetsAt: next + 1000 }, '2026-10-28');
-  close(d.share, 0.18);
-  // A new day starts from the last reading.
-  d = trackDay(d, { utilization: 0.1, resetsAt: next }, '2026-10-29');
-  close(d.share, 0.02);
-  // A new day that also crossed a reset counts from zero.
-  d = trackDay(d, { utilization: 0.03, resetsAt: next + 7 * 86400_000 }, '2026-10-30');
-  close(d.share, 0.03);
+test("an even day's share of the weekly limit, priced from the meter and what turns cost in its window", () => {
+  const { store, t } = setup('budget');
+  const resetsAt = Date.now() + 5 * 86400_000; // the window opened two days ago
+  store.recordTurn(t.id, { session_id: 'a', ended_at: Date.now() - 86400_000, session_cost_usd: 140 });
+  store.recordTurn(t.id, { session_id: 'b', ended_at: Date.now(), session_cost_usd: 70 });
+  // Before the window: not counted.
+  store.recordTurn(t.id, { session_id: 'c', ended_at: Date.now() - 3 * 86400_000, session_cost_usd: 1000 });
+  close(dayBudget(store, { utilization: 0.1, resetsAt })!, 210 / 0.1 / 7);
+  assert.equal(dayBudget(store, { utilization: 0.02, resetsAt }), null); // too coarse yet
+  assert.equal(dayBudget(store, null), null);
 });

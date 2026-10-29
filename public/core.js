@@ -1,6 +1,6 @@
 // Shared by every view: state, API and DOM helpers, live updates, routing and sign-in.
 import { onMachinesUpdate, onProjectUpdate, pushOff } from './settings.js';
-import { costChip, drawCost, renderCost } from './cost.js';
+import { costChip, renderCost } from './cost.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
 import { showProject, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
@@ -452,17 +452,6 @@ setInterval(reloadWhenIdle, 2000);
 
 export let usage = null;
 
-/** A day using more than this share of the weekly limit, a week's even pace, shows its cost in amber. */
-export const DAY_SHARE_WARN = 1 / 7;
-
-/** How much of the weekly limit today has used so far, by the server's tally (src/costs.ts trackDay). */
-export function todayShare() {
-  const t = usage?.today;
-  const d = new Date();
-  // shortcut: compares with the browser's date, so it is off around midnight if the browser and server zones differ.
-  return t?.day === `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` ? t.share : 0;
-}
-
 /** A weekly-limit bar; one lives in the top bar and one in a project's side panel. */
 export const usageMeter = () => h('div', { class: 'usage', hidden: true },
   h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })), costChip());
@@ -485,8 +474,6 @@ export function renderUsage(next = usage) {
       `As of the last turn, ${ago(usage.updatedAt)}`,
     ].filter(Boolean).join('\n');
   }
-  // Today's share of the week decides whether its cost shows amber.
-  drawCost();
 }
 
 // Phones and sleeping laptops drop connections quietly; recheck when the page comes back.

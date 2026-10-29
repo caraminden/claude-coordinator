@@ -1,10 +1,12 @@
-// Today's cost beside the usage meter, opening to the last 7 days (GET api/costs, src/costs.ts).
-import { DAY_SHARE_WARN, api, costText, h, todayShare, view } from './core.js';
+// Today's use beside the weekly meter, as a share of an even day (a seventh of the week), opening to the last 7 days.
+import { api, costText, h, view } from './core.js';
 import { closeOnClickAway } from './properties.js';
 
 let days = null;
+// What an even day's share of the weekly limit comes to at API prices (src/costs.ts dayBudget), or null.
+let budget = null;
 
-/** "Today ≈ $25" after the weekly bar; it opens to each day of the last week, this scheme and all. */
+/** "Day 38%" after the weekly bar: today against an even day's share of the week. It opens to the last 7 days. */
 export function costChip() {
   const chip = h('details', { class: 'cost-chip', hidden: true },
     h('summary', {}),
@@ -27,42 +29,42 @@ export function costChip() {
 /** Fetch the daily totals again (a turn just ended) and redraw. */
 export async function renderCost() {
   try {
-    ({ days } = await api('api/costs'));
+    ({ days, dayBudget: budget } = await api('api/costs'));
   } catch {
     return; // keep the last figures; the next turn tries again
   }
-  drawCost();
-}
-
-/** Redraw every cost chip from the last figures, e.g. when today's share of the week changes. */
-export function drawCost() {
-  if (!days) return;
-  const warn = todayShare() > DAY_SHARE_WARN;
   for (const chip of document.querySelectorAll('.cost-chip')) {
     chip.hidden = false;
-    const summary = chip.querySelector('summary');
-    summary.replaceChildren('Today ', h('b', { class: warn ? 'warn' : '' }, costText(days[0].total)));
-    summary.title = `What today's Claude turns would cost at API prices, every scheme${warn ? `.\nMore than a seventh of the week's limit used today` : ''}`;
+    const today = days[0].total;
+    const over = budget && today > budget;
+    chip.querySelector('summary').replaceChildren(budget ? 'Day ' : 'Today ', h('b', { class: over ? 'warn' : '' }, budget ? pct(today) : costText(today)));
+    chip.querySelector('summary').title = budget
+      ? `Today's turns: ${costText(today)} at API prices, ${pct(today)} of an even day's share of the weekly limit (${costText(budget)}).${over ? '\nOver it: at this pace the week runs out early.' : ''}`
+      : `Today's turns: ${costText(today)} at API prices. Shown against the weekly limit once its meter reaches 3%.`;
     if (chip.open) drawPop(chip);
   }
 }
 
+/** A cost as a share of an even day: "38%". */
+const pct = (usd) => `${Math.round((usd / budget) * 100)}%`;
+
 function drawPop(chip) {
   if (!days) return;
   const pid = view?.projectId;
-  const share = todayShare();
   const label = (day, i) => i === 0 ? 'Today' : i === 1 ? 'Yesterday'
     : new Date(`${day}T12:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
-  const cell = (usd, cls = '') => h('td', { class: `num ${cls}` }, usd ? costText(usd) : '–');
-  const sum = (f) => days.reduce((s, d) => s + f(d), 0);
+  // The share of an even day first, the dollars beside it; a day over its share in amber.
+  const cell = (usd, n = 1) => h('td', { class: `num${budget && usd > budget * n ? ' warn' : ''}` },
+    !usd ? '–' : budget ? [pct(usd / n), h('span', { class: 'usd' }, costText(usd / n))] : costText(usd));
   const here = (d) => d.byProject[pid] ?? 0;
+  const sum = (f) => days.reduce((s, d) => s + f(d), 0);
   chip.querySelector('.cost-pop').replaceChildren(
-    h('h4', {}, 'Cost at API prices, not a bill'),
+    h('h4', {}, budget ? "Each day against an even share of the week" : 'Cost at API prices, not a bill'),
     h('table', {},
       h('thead', {}, h('tr', {}, h('th', {}), h('th', { class: 'num' }, 'This scheme'), h('th', { class: 'num' }, 'All schemes'))),
-      h('tbody', {}, days.map((d, i) => h('tr', {},
-        h('th', { scope: 'row' }, label(d.day, i)), cell(here(d)), cell(d.total, i === 0 && share > DAY_SHARE_WARN ? 'warn' : '')))),
-      h('tfoot', {}, h('tr', {}, h('th', { scope: 'row' }, '7 days'), cell(sum(here)), cell(sum((d) => d.total))))),
-    h('p', { class: 'foot' },
-      `Today has used ${Math.round(share * 100)}% of the week's limit; its total turns amber past a seventh. Taskmasters included.`));
+      h('tbody', {}, days.map((d, i) => h('tr', {}, h('th', { scope: 'row' }, label(d.day, i)), cell(here(d)), cell(d.total)))),
+      h('tfoot', {}, h('tr', {}, h('th', { scope: 'row' }, budget ? '7-day average' : '7 days'), cell(sum(here), budget ? days.length : 1), cell(sum((d) => d.total), budget ? days.length : 1)))),
+    h('p', { class: 'foot' }, budget
+      ? `100% is a seventh of the weekly limit, ≈ ${costText(budget).slice(2)} a day at API prices, worked out from the weekly meter and this week's turns. Over it, the week runs out early. Taskmasters included; not a bill.`
+      : "At API prices, not a bill. Taskmasters included. Shown against the weekly limit once its meter reaches 3%."));
 }

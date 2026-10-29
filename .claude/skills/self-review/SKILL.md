@@ -56,12 +56,13 @@ list with a reason, not silently away.
 ## 4. Label the risk
 
 You set the label, not the Grunt; take the highest row that matches what the final diff does.
-Judge the change, not the file: `src/db.ts` holds every query, so editing it is not high by itself.
+Judge data changes by what they do: `src/db.ts` holds every query, so editing it is not high by
+itself. Auth, deploy and tripwire code stay high by file, since a slip there can stop the service or open it up.
 
 | Risk | When the change |
 |---|---|
-| high | rewrites, moves or drops existing data or schema (a migration that changes rows or columns already there); changes auth (`src/auth.ts`), deploy and restart code (`tools/deploy.sh`, `tools/boot-check.ts`, `deploy/`) or the tripwire (`src/tripwire.ts`, `tools/guard.sh`, `.githooks/`); or deletes data with no person asking (cleanups, pruning, retention) |
-| medium | adds a table or column the way existing ones were added; changes queries in `src/db.ts`; adds a delete a person triggers for their own data; other server logic (`src/`, `server.ts`, `tools/`); agent instructions (`CLAUDE.md`, `.claude/`); anything not in another row |
+| high | rewrites, moves or drops existing data or schema (a migration that changes rows or columns already there); changes auth (`src/auth.ts`), deploy and restart code (`tools/deploy.sh`, `tools/land.sh`, `tools/boot-check.ts`, `deploy/`) or the tripwire (`src/tripwire.ts`, `tools/guard.sh`, `.githooks/`); or deletes data with no person asking (cleanups, pruning, retention), in bulk, or across other people's data (a whole scheme or minion) |
+| medium | adds a table, or a nullable or defaulted column, leaving existing rows as they are; changes queries in `src/db.ts`; adds a delete a person triggers for one record of their own; other server logic (`src/`, `server.ts`, `tools/`); agent instructions (`CLAUDE.md`, `.claude/`); anything not in another row |
 | low | front end only (`public/`), docs (`docs/`, `README.md`), tests |
 
 ## 5. Report and ship

@@ -5,6 +5,7 @@ import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { recapEvent, showRecap } from './recap.js';
 import { noteStrike, struckSource } from './strike.js';
+import { CLAMP_OVER, isBookkeeping, isNarration } from './narration.js';
 import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
@@ -70,7 +71,7 @@ function renderHistory() {
     lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
     actions: new Map(), turnActions: [], cards: new Map(), heldCards: [],
     // The session started on an earlier page, if there is one.
-    sawInit: page.more, turnNote: null, turnInitAt: undefined, turnTexts: [], narrationEl: null, pendingRequest: [], turnRequest: undefined,
+    sawInit: page.more, turnNote: null, turnInitAt: undefined, turnTexts: [], lastText: null, narrationEl: null, pendingRequest: [], turnRequest: undefined,
     pendingMessages: [],
   });
   log.replaceChildren(...(page.more ? [h('div', { class: 'load-earlier' },
@@ -170,6 +171,8 @@ function chatFindBox() {
     mark.classList.add('current');
     // Open any collapsed block it is in, then bring it to the middle of the screen.
     for (let d = mark.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true;
+    const clamped = mark.closest('.clamped');
+    if (clamped) unclamp(clamped);
     mark.scrollIntoView({ block: 'center' });
     count.textContent = `${state.at + 1}/${state.marks.length}`;
   };
@@ -528,6 +531,7 @@ export function appendEvent(event, scroll = true) {
     view.turnNote = null;
     view.turnInitAt = event.created_at;
     view.turnTexts = [];
+    view.lastText = null;
     view.narrationEl = null;
     // Messages queued since the last turn are what this turn works on.
     if (view.pendingRequest?.length) view.turnRequest = view.pendingRequest;
@@ -543,9 +547,12 @@ export function appendEvent(event, scroll = true) {
   }
   if (event.kind === 'claude') scheduleProgress();
   const nodes = [];
-  let fold = false;
+  // Runs of the turn's words to sort into folded narration and kept messages once they're in the log.
+  const settle = [];
 
   if (event.kind === 'user_message') {
+    // Narration after a message goes in a row below it, not back into the one above.
+    view.narrationEl = null;
     if (data.author === me && view.pendingMessages.length) {
       // Our own message, already shown when it was sent: swap in the server's copy.
       const i = Math.max(0, view.pendingMessages.findIndex((m) => m.text === (data.text ?? '')));
@@ -616,14 +623,21 @@ export function appendEvent(event, scroll = true) {
     } else if (data.type === 'assistant') {
       for (const block of data.message?.content ?? []) {
         if (block.type === 'text' && block.text.trim()) {
+          // Words followed by nothing but bookkeeping before these weren't narrating work: they stay.
+          if (view.turnTexts?.length) settle.push({ texts: view.turnTexts.splice(0), work: false });
           const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
           const msg = stamped(h('div', { class: 'msg' }, h('div', { class: 'who' }, speaker()), body), event);
           nodes.push(msg);
-          (view.turnTexts ??= []).push({ el: msg, body });
+          view.lastText = { el: msg, body, text: block.text };
+          (view.turnTexts ??= []).push(view.lastText);
         } else if (block.type === 'tool_use') {
-          // Words followed by more work were narration; words that lead into a question card stay.
-          if (block.name === 'mcp__thread__ask_question' || block.name === 'mcp__thread__propose_plan') view.turnTexts = [];
-          else fold = true;
+          // Words that lead into a question or plan card explain it, so they stay as they are.
+          if (block.name === 'mcp__thread__ask_question' || block.name === 'mcp__thread__propose_plan') {
+            view.turnTexts = [];
+            view.narrationEl = null;
+          } else if (!isBookkeeping(block.name) && view.turnTexts?.length) {
+            settle.push({ texts: view.turnTexts.splice(0), work: true });
+          }
         }
       }
     } else if (data.type === 'user') {
@@ -664,7 +678,7 @@ export function appendEvent(event, scroll = true) {
   else log.append(...nodes);
   if (event.kind === 'question' || event.kind === 'plan') view.heldCards.push(...nodes);
   else if (event.kind === 'user_message' || (event.kind === 'claude' && data.type === 'result')) view.heldCards = [];
-  if (fold) foldNarration(event.ticket_id);
+  for (const { texts, work } of settle) settleTexts(texts, work);
   renderTyping();
   if (scroll && followChat) scrollToBottom();
 }
@@ -693,25 +707,42 @@ function stamped(el, event) {
 }
 
 /**
- * Claude's in-between remarks ("Worktree is behind main; merging.") leave the chat for one folded
- * "updates along the way" row per turn, where the first of them was; the turn's last words stay a
- * bubble. While the turn runs, the newest remark also shows in the working line.
+ * Sort a run of the turn's words that more came after. Short plain remarks followed by work
+ * ("Worktree is behind main; merging.") fold into an "updates along the way" row, one per stretch
+ * between kept messages, where the first of them was; anything else stays a bubble, and a long one
+ * shows its first lines. The turn's last words never get here, so they always stay whole. While the
+ * turn runs, the newest folded remark also shows in the working line.
  */
-function foldNarration(ticketId) {
-  const texts = view.turnTexts?.splice(0) ?? [];
-  if (!texts.length) return;
-  if (!view.narrationEl?.isConnected) {
-    view.narrationEl = h('details', { class: 'narration', 'data-at': texts[0].el.dataset.at }, h('summary', {}), h('div', { class: 'notes' }));
-    texts[0].el.before(view.narrationEl);
-  }
-  const notes = view.narrationEl.querySelector('.notes');
+function settleTexts(texts, work) {
   for (const t of texts) {
+    if (!work || !isNarration(t.text)) {
+      if (t.text.length > CLAMP_OVER) clamp(t.el);
+      view.narrationEl = null;
+      continue;
+    }
+    if (!view.narrationEl?.isConnected) {
+      view.narrationEl = h('details', { class: 'narration', 'data-at': t.el.dataset.at }, h('summary', {}), h('div', { class: 'notes' }));
+      t.el.before(view.narrationEl);
+    }
     t.el.remove();
+    t.folded = true;
+    const notes = view.narrationEl.querySelector('.notes');
     notes.append(h('div', { class: 'note-text' }, t.body));
+    const n = notes.childElementCount;
+    view.narrationEl.querySelector('summary').replaceChildren(
+      h('span', { class: 'st' }, '⋯'), ` ${n} update${n === 1 ? '' : 's'} along the way`);
   }
-  const n = notes.childElementCount;
-  view.narrationEl.querySelector('summary').replaceChildren(
-    h('span', { class: 'st' }, '⋯'), ` ${n} update${n === 1 ? '' : 's'} along the way`);
+}
+
+/** Show a long message's first lines, with a button for the rest. */
+function clamp(msg) {
+  msg.classList.add('clamped');
+  msg.append(h('button', { type: 'button', class: 'show-all small secondary', onclick: () => unclamp(msg) }, 'Show all'));
+}
+
+function unclamp(msg) {
+  msg.classList.remove('clamped');
+  msg.querySelector(':scope > .show-all')?.remove();
 }
 
 /** A message's rendered text, keeping its source so a strike_text that lands later can redraw it. */
@@ -1170,7 +1201,7 @@ export function renderTyping() {
   const sep = () => h('span', { class: 'sep' }, '·');
   el.title = 'Show the work so far';
   // Only once folded away, so a remark that is still a bubble isn't said twice.
-  const said = current && view.turnNote && !view.turnTexts?.length ? firstSentence(view.turnNote, 200) : '';
+  const said = current && view.lastText?.folded ? firstSentence(view.lastText.text.trim(), 200) : '';
   el.replaceChildren(
     h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
     h('span', { class: 'lines' },

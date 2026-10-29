@@ -1,0 +1,33 @@
+// Which of Claude's words fold out of the chat and which stay. Pure string work, so it can be
+// tested without a browser.
+
+/** Narration is shorter than this; anything this long is something Claude is telling you. */
+export const NARRATION_MAX = 300;
+/** A message kept mid-turn that's longer than this shows its first lines, with "Show all". */
+export const CLAMP_OVER = 2000;
+
+// A line that starts a heading, list item, table row, code block or quote.
+const STRUCTURE = /^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\||```|~~~|>)/m;
+
+/**
+ * Whether `text` is an in-between remark ("Checking the merged code boots:") that may fold once
+ * more work follows it: one plain paragraph, short, with no Markdown structure. Answers, lists,
+ * tables and reports never are.
+ */
+export function isNarration(text) {
+  const t = text.trim();
+  return t.length < NARRATION_MAX && !/\n\s*\n/.test(t) && !STRUCTURE.test(t);
+}
+
+// Tools that only keep the minion's own records (its status, properties, task list, cards), so
+// words followed by nothing else weren't narrating any work.
+const BOOKKEEPING = new Set([
+  'mcp__thread__set_thread_status', 'mcp__thread__set_properties', 'mcp__thread__settle_question',
+  'mcp__thread__strike_text', 'mcp__thread__close_self',
+  'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'ToolSearch',
+]);
+
+/** Whether a tool call is bookkeeping rather than work, by its name. */
+export function isBookkeeping(name) {
+  return BOOKKEEPING.has(name);
+}

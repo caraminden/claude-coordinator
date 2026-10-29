@@ -6,9 +6,10 @@ import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { cleanEntries, entriesView, injectBridge, LIMITS, storeId, writeStore } from '../artifact-data.ts';
 import { fileTitle, fileType, listable, resolveFile, siblingType } from '../artifacts.ts';
 import type { Session } from '../auth.ts';
-import type { Artifact, Ticket } from '../db.ts';
+import type { Artifact, Project, Ticket } from '../db.ts';
 import type { MessageFile } from '../runner.ts';
 import { isUploadName, MAX_UPLOADS, opensInline } from '../uploads.ts';
 import { projectDir, projectSharedDir } from '../workspace.ts';
@@ -33,7 +34,7 @@ export function artifactView(app: App, a: Artifact & { ticket_title?: string; ti
 function artifactCsp(kind: string): string {
   // Tickets write these files, so never let them run as the app: sandboxed pages get an opaque
   // origin with no cookies or API access. HTML may still run its own scripts (canvases, demos).
-  if (kind === 'html') return "sandbox allow-scripts allow-popups allow-forms allow-modals; frame-ancestors 'self'";
+  if (kind === 'html') return "sandbox allow-scripts allow-popups allow-forms allow-modals allow-downloads; frame-ancestors 'self'";
   // Chrome's PDF viewer refuses to load in a sandbox; PDFs can't script the page anyway.
   if (kind === 'pdf') return "frame-ancestors 'self'";
   return "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'self'";
@@ -107,10 +108,22 @@ async function pinShared(app: App, projectId: number, rel: string, by: string | 
 /** A shared-folder file for an agent: marked as Shared, with its absolute path. */
 const sharedView = (app: App, projectId: number, f: SharedFile) => ({ ...f, shared: true, abs: join(projectSharedDir(app.dataDir, projectId), f.path) });
 
-/** Serve a file found by resolveFile, with byte ranges and a sandboxing CSP. */
-async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: Awaited<ReturnType<typeof resolveFile>>, path: string, download: boolean) {
+// Bigger pages are served as they are, without the bridge.
+const MAX_BRIDGED_BYTES = 20 * 1024 * 1024;
+
+/**
+ * Serve a file found by resolveFile, with byte ranges and a sandboxing CSP. An HTML page given `bridge`
+ * (scheme `projectId`, served at token path `page`) gets the artifact bridge and what it saved inlined.
+ */
+async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: Awaited<ReturnType<typeof resolveFile>>, path: string, download: boolean, app?: App, bridge?: { projectId: number; page: string }) {
   if (!found) throw new HttpError(404, 'That file is no longer there');
-  const { file, type, size } = found;
+  const { file, type } = found;
+  let { size } = found;
+  let body: Buffer | null = null;
+  if (bridge && app && type.kind === 'html' && !download && size <= MAX_BRIDGED_BYTES) {
+    body = injectBridge(await readFile(file), { page: bridge.page, entries: entriesView(app.store.artifactData(bridge.projectId, file)) });
+    size = body.length;
+  }
   const headers: Record<string, string | number> = {
     'Content-Type': type.mime,
     'Content-Security-Policy': artifactCsp(type.kind),
@@ -125,6 +138,10 @@ async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: A
   let start = 0;
   let end = size - 1;
   const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+  if (body) {
+    res.writeHead(200, { ...headers, 'Content-Length': size });
+    return res.end(req.method === 'HEAD' ? undefined : body);
+  }
   if (range && (range[1] || range[2])) {
     if (range[1]) {
       start = Number(range[1]);
@@ -180,6 +197,69 @@ async function serveFound(ctx: { req: IncomingMessage; res: ServerResponse; url:
     }
   }
   return serveArtifact(req, res, found, path, download);
+}
+
+/** The scheme a file token's scope belongs to. */
+function scopeProject(app: App, scope: string): number | null {
+  const t = /^t(\d+)-[012]$/.exec(scope);
+  if (t) return app.store.getTicket(Number(t[1]))?.project_id ?? null;
+  const p = /^p(\d+)$/.exec(scope);
+  return p ? Number(p[1]) : null;
+}
+
+/**
+ * The real file of the page a frame shows, from the token path the bridge was served with. An expired
+ * token still names its file (the signature is what counts here, not access), so a page left open keeps saving.
+ */
+async function bridgedPage(app: App, page: unknown): Promise<string | null> {
+  if (typeof page !== 'string' || page.length > 4000) return null;
+  const slash = page.indexOf('/');
+  const scope = slash > 0 ? app.auth.fileScope(page.slice(0, slash), 0) : null;
+  const root = scope && scopeRoot(app, scope);
+  const rel = root && tokenPath(page.slice(slash + 1));
+  const found = rel ? await resolveFile(rel, root!, [root!], siblingType) : null;
+  return found?.type.kind === 'html' ? found.file : null;
+}
+
+/** The HTML file a person's viewer opened, as it says it did: an artifact, a file a minion linked, or a shared file. */
+async function openedPage(app: App, open: any): Promise<{ project: Project; file: string; name: string }> {
+  let found: Awaited<ReturnType<typeof resolveFile>> = null;
+  let projectId = 0;
+  if (Number.isInteger(open?.artifact)) {
+    const a = app.store.getArtifact(open.artifact);
+    const ticket = a && app.store.getTicket(a.ticket_id);
+    if (ticket) [found, projectId] = [await resolveTicketFile(app, ticket, a.path), ticket.project_id];
+  } else if (Number.isInteger(open?.ticket) && typeof open.path === 'string') {
+    const ticket = app.store.getTicket(open.ticket);
+    if (ticket) [found, projectId] = [await resolveTicketFile(app, ticket, open.path), ticket.project_id];
+  } else if (Number.isInteger(open?.project) && typeof open.path === 'string' && !isAbsolute(open.path)) {
+    const dir = projectSharedDir(app.dataDir, open.project);
+    if (app.store.getProject(open.project)) [found, projectId] = [await resolveFile(open.path, dir, [dir]), open.project];
+  }
+  const project = projectId ? app.store.getProject(projectId) : undefined;
+  if (!found || !project || found.type.kind !== 'html') throw new HttpError(404, 'That page is no longer there');
+  return { project, file: found.file, name: basename(found.abs) };
+}
+
+/**
+ * The HTML page an agent names for artifact_data: an artifact id, or a path (absolute, relative to its
+ * working directory, or "scheme shared/…") inside a folder of its scheme.
+ */
+async function agentPage(app: App, project: Project, caller: Ticket, body: any): Promise<string> {
+  let found: Awaited<ReturnType<typeof resolveFile>> = null;
+  const shared = projectSharedDir(app.dataDir, project.id);
+  if (body.artifact != null) {
+    const a = findPinTarget(app, project.id, caller, body.artifact, null);
+    found = await resolveTicketFile(app, app.store.getTicket(a.ticket_id)!, a.path);
+  } else {
+    if (typeof body.path !== 'string' || !body.path.trim() || body.path.includes('\0')) throw new HttpError(400, 'Give the artifact (its id) or the page\'s path');
+    const p = body.path.trim();
+    const abs = p.startsWith('scheme shared/') ? join(shared, p.slice('scheme shared/'.length)) : isAbsolute(p) ? normalize(p) : caller.cwd ? join(caller.cwd, p) : '';
+    const roots = [shared, ...app.store.listTickets(project.id).flatMap((t) => (t.cwd ? ticketRoots(app, t) : []))];
+    found = abs ? await resolveFile(abs, '/', roots) : null;
+  }
+  if (!found || found.type.kind !== 'html') throw new HttpError(404, 'No HTML page there in this scheme; list_artifacts shows them');
+  return found.file;
 }
 
 const ticketScopes = (app: App, ticket: Ticket) => ticketRoots(app, ticket).map((root, i): [string, string] => [`t${ticket.id}-${i}`, root]);
@@ -383,7 +463,37 @@ export const fileRoutes: Route[] = [
       const rel = tokenPath(params.path);
       const root = scopeRoot(app, scope);
       if (rel === null || root === null) throw new HttpError(404, 'Not found');
-      return serveArtifact(req, res, await resolveFile(rel, root, [root], siblingType), rel, url.searchParams.has('download'));
+      const projectId = scopeProject(app, scope)!;
+      return serveArtifact(req, res, await resolveFile(rel, root, [root], siblingType), rel, url.searchParams.has('download'), app, { projectId, page: `${params.token}/${params.path}` });
+    },
+  },
+  {
+    // The artifact bridge (#168): a person's viewer, for the page in its frame, lists or writes the page's
+    // store. `open` is what the viewer opened and `page` the token path the page in the frame was served
+    // under; both must be the same file, so a frame that has moved on to another page can't write here.
+    method: 'POST', path: '/api/artifact-data', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const body = await readJson(req, 4 * 1024 * 1024);
+      const { project, file } = await openedPage(app, body.open);
+      if (await bridgedPage(app, body.page) !== file) throw new HttpError(409, 'The frame shows a different page from the one this viewer opened; reopen it');
+      if (body.op === 'write') {
+        writeStore(app.store, project.id, file, cleanEntries(body.entries), session.name);
+        app.broadcast({ type: 'artifact-data', projectId: project.id, store: storeId(project.id, file) });
+      } else if (body.op !== 'list') throw new HttpError(400, 'op is list or write');
+      return json(res, 200, { store: storeId(project.id, file), entries: entriesView(app.store.artifactData(project.id, file)), person: session.name });
+    },
+  },
+  {
+    // artifact_data: an agent reads, or sets and deletes keys of, what an HTML page of its scheme saved.
+    method: 'POST', path: '/api/projects/:project/artifact-data', who: ['taskmaster', 'minion'],
+    async handler({ req, res, app, project, caller }) {
+      const body = await readJson(req, 4 * 1024 * 1024);
+      const file = await agentPage(app, project, caller!, body);
+      if (body.entries != null) {
+        writeStore(app.store, project.id, file, cleanEntries(body.entries), caller!.kind === 'coordinator' ? 'Taskmaster' : `#${caller!.number}`);
+        app.broadcast({ type: 'artifact-data', projectId: project.id, store: storeId(project.id, file) });
+      }
+      return json(res, 200, { file, entries: entriesView(app.store.artifactData(project.id, file)), limits: LIMITS });
     },
   },
   {

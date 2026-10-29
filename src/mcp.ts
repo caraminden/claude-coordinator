@@ -198,6 +198,18 @@ const ARTIFACT_TOOLS = [
     inputSchema: { type: 'object', properties: PIN_TARGET, required: ['requested_by'] },
   },
   {
+    name: 'artifact_data',
+    description: "Read what an HTML page of this scheme saved through Citadel's artifact bridge: picks, marks and notes people made in it, each key with its JSON value, who wrote it and when. Keys from claude.ai-style pages read `db/<collection>/<doc>` (window.claude.use('db')), `localStorage/<key>` or `storage/<key>` (window.storage); `citadel.storage` keys are as the page named them. Give `entries` to set keys (value: any JSON) or delete them (value: null); the open page updates live.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        artifact: PIN_TARGET.artifact,
+        path: { type: 'string', description: 'Or the page\'s path: absolute, relative to your working directory, or "scheme shared/…"' },
+        entries: { type: 'array', description: 'Optional: keys to set or delete, at most 100', items: { type: 'object', properties: { key: { type: 'string' }, value: { description: 'Any JSON; null deletes the key' } }, required: ['key'] } },
+      },
+    },
+  },
+  {
     name: 'unpin_artifact',
     description: "Unpin an artifact of this scheme. Only when a person asked you to. Unpinning a missing one (its file is gone) removes it from the panel for good, as the panel's own unpin does.",
     inputSchema: { type: 'object', properties: PIN_TARGET, required: ['requested_by'] },
@@ -869,6 +881,11 @@ async function runTool(name: string, args: any): Promise<string> {
       if (r.removed) return 'Unpinned. Its file was gone, so it is off the Artifacts panel now.';
       if (r.already) return `Already pinned, so left as it was. ${artifactLine(r.artifact)}`;
       return `${pinned ? 'Pinned' : 'Unpinned'}. ${artifactLine(r.artifact)}`;
+    }
+    case 'artifact_data': {
+      const r = await call('POST', `/api/projects/${PROJECT}/artifact-data`, { artifact: args.artifact ?? null, path: args.path ?? null, entries: args.entries ?? null });
+      const head = `${r.file}: ${r.entries.length} key${r.entries.length === 1 ? '' : 's'}${args.entries ? ' after your write' : ''}.`;
+      return [head, ...r.entries.map((e: any) => `${e.key} = ${JSON.stringify(e.value)} (${e.by}, ${new Date(e.at).toISOString().slice(0, 16)}Z)`)].join('\n');
     }
     case 'list_schedules': {
       const { schedules } = await call('GET', `/api/projects/${PROJECT}/schedules`);

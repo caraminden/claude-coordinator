@@ -94,6 +94,14 @@ export interface Artifact {
   missing: number;
 }
 
+/** One key an HTML page saved through the artifact bridge; `value` is JSON text. */
+export interface ArtifactDatum {
+  key: string;
+  value: string;
+  by: string;
+  at: number;
+}
+
 export interface SharedPin {
   path: string;
   pinned_at: number;
@@ -354,6 +362,17 @@ CREATE TABLE IF NOT EXISTS shared_pins (
   pinned_by TEXT NOT NULL,
   PRIMARY KEY (project_id, path)
 );
+-- What HTML artifacts saved through the artifact bridge (#168): one row per key, per page, keyed by the
+-- page's real path so a page shares its store however it was opened. Values are JSON.
+CREATE TABLE IF NOT EXISTS artifact_data (
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  file TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  by TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, file, key)
+);
 `;
 
 /**
@@ -402,7 +421,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 8; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins
+export const SCHEMA_VERSION = 9; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -764,6 +783,29 @@ export class Store {
   setSharedPin(projectId: number, path: string, by: string | null) {
     if (by) this.db.prepare('INSERT INTO shared_pins (project_id, path, pinned_at, pinned_by) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING').run(projectId, path, Date.now(), by);
     else this.db.prepare('DELETE FROM shared_pins WHERE project_id = ? AND path = ?').run(projectId, path);
+  }
+
+  /** What an HTML page saved through the artifact bridge, oldest key first; values still JSON text. */
+  artifactData(projectId: number, file: string): ArtifactDatum[] {
+    return this.db.prepare('SELECT key, value, by, at FROM artifact_data WHERE project_id = ? AND file = ? ORDER BY at, key').all(projectId, file) as unknown as ArtifactDatum[];
+  }
+
+  /** Set (JSON text) or delete (null) keys of a page's store, all or none. */
+  writeArtifactData(projectId: number, file: string, entries: { key: string; value: string | null }[], by: string) {
+    const set = this.db.prepare('INSERT INTO artifact_data (project_id, file, key, value, by, at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET value = excluded.value, by = excluded.by, at = excluded.at');
+    const del = this.db.prepare('DELETE FROM artifact_data WHERE project_id = ? AND file = ? AND key = ?');
+    const now = Date.now();
+    this.db.exec('BEGIN');
+    try {
+      for (const e of entries) {
+        if (e.value === null) del.run(projectId, file, e.key);
+        else set.run(projectId, file, e.key, e.value, by, now);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   /** Bring a ticket's artifact rows in line with what is on disk. Returns whether anything changed. */

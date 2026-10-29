@@ -1,6 +1,7 @@
 // Artifacts and files: the shelf, the browser, and viewers for artifacts and linked or shared files.
 import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, followChat, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
 import { addBriefButtons } from './briefstart.js';
+import { attachBridge } from './bridge-host.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { showProject } from './project.js';
 import { replaceHash } from './navstack.js';
@@ -228,8 +229,10 @@ export function artifactViewer(a) {
   if (a.missing) {
     body.append(h('p', { class: 'muted' }, 'This file is no longer in the minion\'s folder. Unpin it to remove it from the list.'));
   } else {
-    renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id, brief: { projectId: a.project_id, path: a.abs ?? a.path, name: a.name } });
-    section.append(commentBox(artifactThread(a), a.path, a.name, body));
+    const comment = commentBox(artifactThread(a), a.path, a.name, body);
+    const bridge = { open: { artifact: a.id }, owner: threadName(a), onSend: comment.fill };
+    renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id, brief: { projectId: a.project_id, path: a.abs ?? a.path, name: a.name }, bridge });
+    section.append(comment);
   }
   return section;
 }
@@ -277,7 +280,11 @@ function openViewer(ticket, file, inPlace) {
   viewer.stage.className = `viewer-stage k-${file.kind}`;
   viewer.stage.replaceChildren();
   if (file.missing) viewer.stage.append(h('p', { class: 'muted' }, `${file.missing}.`));
-  else renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.abs ?? file.display_path, name: file.name } });
+  else {
+    // A page's send goes in the chat's own composer, beside it.
+    const bridge = { open: { ticket: ticket.id, path: file.path }, owner: threadLabel(ticket), onSend: (text) => fillComposer(viewer?.chat, text) };
+    renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.abs ?? file.display_path, name: file.name }, bridge });
+  }
   renderViewerBar();
 }
 
@@ -394,15 +401,36 @@ function commentBox(t, path, name, body) {
       reloadWhenIdle();
     }
   });
+  // The artifact bridge's send: the page's text, for a person to read, change and send (or not).
+  form.fill = (text) => {
+    textarea.value = text;
+    saveDraft(draftKey, text);
+    grow();
+    status.textContent = 'Written by the page: read it, then Comment to send';
+    textarea.focus();
+    form.scrollIntoView({ block: 'nearest' });
+  };
   return form;
+}
+
+/** Put a page's text in a chat's composer, ahead of any draft, for a person to send. */
+function fillComposer(chat, text) {
+  const textarea = chat?.querySelector('form.composer textarea');
+  if (!textarea) throw new Error('This view has no message box to put that in');
+  textarea.value = textarea.value.trim() ? `${text}\n\n${textarea.value}` : text;
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  textarea.focus();
 }
 
 /** Main panel: a file from the project's shared folder. */
 export function sharedViewer(file) {
   const body = h('div', { class: 'artifact-body' });
   if (file.missing) body.append(h('p', { class: 'muted' }, `${file.missing}.`));
-  else renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name } });
-  return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body);
+  // A shared page's send goes to the Taskmaster, in a comment box under it.
+  const comment = !file.missing && file.kind === 'html' && view.coordinator ? commentBox(view.coordinator, file.abs, file.name, body) : null;
+  const bridge = comment && { open: { project: view.projectId, path: file.path }, owner: threadLabel(view.coordinator), onSend: comment.fill };
+  if (!file.missing) renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name }, bridge });
+  return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body, comment ?? '');
 }
 
 export function renderSharedHead() {
@@ -431,7 +459,7 @@ export function renderSharedHead() {
  * to files beside it open them (`hrefFor`), and its briefs get Start buttons (`brief` says where the
  * file is, see addBriefButtons).
  */
-function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, urlFor = (p) => fileUrl(ticketId, p), hrefFor = (p) => fileHref(ticketId, p) }) {
+function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, bridge, urlFor = (p) => fileUrl(ticketId, p), hrefFor = (p) => fileHref(ticketId, p) }) {
   if (kind === 'image') {
     body.append(h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { class: 'artifact-media', src, alt: name })));
   } else if (kind === 'video') {
@@ -440,7 +468,10 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, ur
     body.append(h('audio', { src, controls: true, preload: 'metadata' }));
   } else if (kind === 'html') {
     // Sandboxed (here and by the server's CSP) so a page a thread wrote can't act as the app.
-    body.append(h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals', title: name }));
+    // Its page reaches the app only through the artifact bridge (bridge-host.js), as the person viewing it.
+    const frame = h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals allow-downloads', allow: 'clipboard-write *', title: name });
+    if (bridge) attachBridge(frame, { ...bridge, name, api });
+    body.append(frame);
   } else if (kind === 'pdf') {
     body.append(h('iframe', { class: 'artifact-frame', src, title: name }));
   } else if (kind === 'download') {

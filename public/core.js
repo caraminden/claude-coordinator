@@ -4,6 +4,7 @@ import { costChip, renderCost } from './cost.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
 import { showProject, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
+import { onArtifactData } from './bridge-host.js';
 import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './thread.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
 import { inboxEvent, inboxTicket } from './inbox.js';
@@ -371,6 +372,7 @@ function connectStream(catchUp = false) {
       inboxEvent(msg.event);
     }
     if (msg.type === 'artifacts') onArtifactsChanged(msg.projectId);
+    if (msg.type === 'artifact-data') onArtifactData(msg.store);
     if (msg.type === 'project') onProjectUpdate(msg.project);
     if (msg.type === 'app-instructions') onAppInstructionsUpdate(msg.instructions);
     if (msg.type === 'properties') onPropertiesChanged(msg.projectId);

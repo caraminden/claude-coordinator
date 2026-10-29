@@ -8,7 +8,7 @@ import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './th
 import { onPropertiesChanged } from './properties.js';
 import { inboxEvent, inboxTicket } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
-import { inAppHash, linkThreadRefs } from './threadrefs.js';
+import { inAppHash, linkPrUrls, linkThreadRefs, prOwnerRoute } from './threadrefs.js';
 
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
@@ -217,7 +217,7 @@ export function markdownDoc(src, opts = {}) {
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/~~(.+?)~~/g, '<del>$1</del>')
       .replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>');
-    html = threadRefsHtml(html);
+    html = threadRefsHtml(linkPrUrls(html));
     return html.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
   };
   const isItem = (l) => /^\s*([-*+]|\d+\.)\s+/.test(l);
@@ -653,11 +653,35 @@ document.addEventListener('click', (e) => {
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const a = e.target.closest?.('a[href]');
   if (!a || a.hasAttribute('download')) return;
+  pointPrLink(a);
   const hash = inAppHash(a.getAttribute('href'), location);
   if (!hash) return;
   e.preventDefault();
   if (location.hash !== hash) location.hash = hash;
 });
+
+// A link to a pull request goes to the minion that owns it instead of GitHub: its href is swapped
+// as the pointer or focus reaches it, so hovering, copying and new tabs agree with a click.
+let prRepos = null;
+let prsAt = 0;
+function loadPrs() {
+  if (Date.now() - prsAt < 5 * 60_000) return;
+  prsAt = Date.now();
+  api('api/prs').then((r) => { prRepos = new Map(r.map((x) => [x.repo, x])); }).catch(() => {});
+}
+function pointPrLink(a) {
+  if (!a.href.startsWith('https://github.com/')) return;
+  loadPrs();
+  const to = prOwnerRoute(prRepos, a.getAttribute('href'), view?.id ?? null);
+  if (!to) return;
+  a.dataset.prUrl = a.getAttribute('href');
+  a.setAttribute('href', to.hash);
+  a.removeAttribute('target');
+  a.title = to.title;
+}
+for (const type of ['pointerover', 'focusin']) {
+  document.addEventListener(type, (e) => { const a = e.target.closest?.('a[href^="https://github.com/"]'); if (a) pointPrLink(a); });
+}
 
 // ---------- login ----------
 
@@ -687,6 +711,7 @@ export function start(name) {
   me = name;
   meEl.replaceChildren(name, h('button', { class: 'secondary', onclick: logout }, 'Sign out'));
   connectStream();
+  loadPrs();
   route();
 }
 

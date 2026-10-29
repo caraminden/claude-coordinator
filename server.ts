@@ -12,6 +12,7 @@ import { commentMessage, fileType, findArtifacts, isArtifact, linkedPaths, optio
 import { APP_NAME } from './src/appname.ts';
 import { AGENT_NAME, Auth, looksLikeUrl, NOT_PEOPLE, threadMayCall, type Session } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
+import { prOwners } from './src/prlinks.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Machine, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
@@ -1026,6 +1027,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   }
 
   if (pathname === '/api/costs' && method === 'GET') return json(res, 200, { days: costDays(store), dayBudget: dayBudget(store, runner.usage?.weekly) });
+  // Which minion owns each PR, so the front end can open it instead of GitHub (src/prlinks.ts).
+  if (pathname === '/api/prs' && method === 'GET') {
+    const projects = store.listProjects().filter((p) => scope === null || p.id === scope);
+    return json(res, 200, await prOwners(projects, (id) => store.listTickets(id)));
+  }
 
   if (pathname === '/api/projects') {
     if (method === 'GET') {

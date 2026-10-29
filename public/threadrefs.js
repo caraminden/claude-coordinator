@@ -41,3 +41,28 @@ export function inAppHash(href, here) {
   if (url.origin !== here.origin || url.pathname !== here.pathname || url.search !== here.search) return null;
   return /^#\/./.test(url.hash) || url.hash === '#/' ? url.hash : null;
 }
+
+/** A GitHub pull request's own page ("https://github.com/o/r/pull/12"), as { repo: "o/r", number }. */
+export function prUrlParts(href) {
+  const m = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)\/?$/i.exec(href ?? '');
+  return m ? { repo: `${m[1]}/${m[2]}`.toLowerCase(), number: Number(m[3]) } : null;
+}
+
+/** Make bare PR URLs in some HTML links, leaving tags, links and code alone (as linkThreadRefs does). */
+export function linkPrUrls(html) {
+  if (!html.includes('github.com/')) return html;
+  return html.replace(/(<(a|code|pre)\b[\s\S]*?<\/\2>|<[^>]*>)|([^<]+)/gi, (all, tag, _name, text) => tag ? all
+    : text.replace(/(?<![\w/])https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+(?![\w/#?-])/gi, (url) => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`));
+}
+
+/**
+ * Where a link to a PR should go instead: the minion that owns it, from `repos` (GET api/prs as a
+ * Map by repo). Null for other links, PRs no minion owns, and the PR of the minion on screen (`hereId`).
+ */
+export function prOwnerRoute(repos, href, hereId = null) {
+  const pr = prUrlParts(href);
+  const repo = pr && repos?.get(pr.repo);
+  const owner = repo?.prs[pr.number];
+  if (!owner || owner.id === hereId) return null;
+  return { hash: threadNumberHref(repo.projectId, owner.number), title: `${repo.scheme} #${owner.number} ${owner.title} (owns PR #${pr.number})` };
+}

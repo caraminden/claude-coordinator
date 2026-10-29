@@ -269,7 +269,7 @@ test('deploy.sh copies the database before a restart, keeps a copy already there
     assert.equal(out, join(dir, 'backups', `pre-deploy-${c}.db`));
     utimesSync(out, 1e9 + i, 1e9 + i); // in deploy order, without waiting out ls -t's resolution
   }
-  assert.equal(readdirSync(join(dir, 'backups')).length, 4, 'nothing rotates until a deploy is healthy');
+  assert.equal(readdirSync(join(dir, 'backups')).filter((f) => f.startsWith('pre-deploy-')).length, 4, 'nothing rotates until a deploy is healthy');
   const first = join(dir, 'backups', `pre-deploy-${commits[0]}.db`);
   db.createProject('After the deploy', null);
   deploySh(['backup-db', commits[0]]);
@@ -278,7 +278,7 @@ test('deploy.sh copies the database before a restart, keeps a copy already there
   kept.db.close();
 
   deploySh(['rotate-backups']);
-  const saved = readdirSync(join(dir, 'backups')).sort();
+  const saved = readdirSync(join(dir, 'backups')).filter((f) => f.startsWith('pre-deploy-')).sort(); // opening a copy adds its state.db
   assert.deepEqual(saved, commits.slice(1).map((c) => `pre-deploy-${c}.db`).sort(), 'the oldest copy goes');
   assert.equal(statSync(join(dir, 'backups', saved[0])).mode & 0o777, 0o600);
   assert.equal(deploySh(['backup-db', commits[0]], join(dir, 'missing.db')), '', 'no database, nothing to copy');

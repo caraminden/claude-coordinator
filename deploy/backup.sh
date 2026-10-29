@@ -2,7 +2,8 @@
 # Nightly backup of Citadel's database (run by claude-coordinator-backup.timer).
 #
 # Takes an online `sqlite3 .backup` (safe while the server is writing), proves it restores, then
-# keeps the newest 7 dailies and 4 weeklies under $DATA_DIR/backups, all mode 600. Hand-made copies
+# keeps the newest 7 dailies and 4 weeklies under $DATA_DIR/backups, all mode 600. Session state
+# (state.db) gets its own state-<day>.db, 3 dailies and no weeklies. Hand-made copies
 # there (coordinator-before-<what>.db, taken before a risky change) go once they are 7 days old, when
 # the dailies cover the same days. deploy.sh keeps its own pre-deploy-*.db copies.
 # A weekly is a hard link to that Sunday's daily (or the first daily of a week with no weekly yet),
@@ -15,6 +16,7 @@ DB=$DATA_DIR/coordinator.db
 DIR=$DATA_DIR/backups
 DAILIES=${DAILIES:-7}
 WEEKLIES=${WEEKLIES:-4}
+STATE_DAILIES=${STATE_DAILIES:-3}
 
 [[ -f $DB ]] || { echo "No database at $DB" >&2; exit 1; }
 mkdir -p "$DIR"
@@ -55,4 +57,22 @@ prune 'coordinator-[0-9]*.db' "$DAILIES"
 prune 'coordinator-weekly-*.db' "$WEEKLIES"
 find "$DIR" -maxdepth 1 -name 'coordinator-before-*' -mmin +$((DAILIES * 1440)) -delete
 
-echo "Backed up to $out ($(du -h "$out" | cut -f1); projects ${lines[1]}, minions ${lines[2]}), weekly $(basename "$weekly")"
+# Session state (state.db): big, and only recent minions need it, so a few dailies and no weeklies.
+state=$DATA_DIR/state.db
+state_note=""
+if [[ -f $state ]]; then
+  sout=$DIR/state-$day.db
+  tmp=$DIR/.state-$day.db.tmp
+  rm -f "$tmp"
+  trap 'rm -f "$tmp"' EXIT
+  sqlite3 "$state" ".timeout 30000" ".backup '$tmp'"
+  scheck=$(sqlite3 :memory: ".restore '$tmp'" "PRAGMA integrity_check;")
+  [[ $scheck == ok ]] || { echo "Session state backup failed its restore check: $scheck" >&2; exit 1; }
+  chmod 600 "$tmp"
+  mv -f "$tmp" "$sout"
+  trap - EXIT
+  prune 'state-[0-9]*.db' "$STATE_DAILIES"
+  state_note=", sessions to $(basename "$sout") ($(du -h "$sout" | cut -f1))"
+fi
+
+echo "Backed up to $out ($(du -h "$out" | cut -f1); projects ${lines[1]}, minions ${lines[2]}), weekly $(basename "$weekly")$state_note"

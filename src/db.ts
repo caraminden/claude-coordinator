@@ -1,3 +1,4 @@
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
 import { Registry } from './properties.ts';
@@ -208,15 +209,6 @@ CREATE TABLE IF NOT EXISTS artifacts (
   UNIQUE (ticket_id, path)
 );
 CREATE INDEX IF NOT EXISTS artifacts_project ON artifacts(project_id, mtime);
-CREATE TABLE IF NOT EXISTS claude_state (
-  path TEXT PRIMARY KEY,
-  project_id INTEGER NOT NULL REFERENCES projects(id),
-  ticket_id INTEGER REFERENCES tickets(id),
-  size INTEGER NOT NULL,
-  mtime INTEGER NOT NULL,
-  data BLOB NOT NULL
-);
-CREATE INDEX IF NOT EXISTS claude_state_owner ON claude_state(project_id, ticket_id);
 CREATE TABLE IF NOT EXISTS ticket_seen (
   name TEXT NOT NULL,
   ticket_id INTEGER NOT NULL REFERENCES tickets(id),
@@ -286,6 +278,23 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 `;
 
+/**
+ * Session state lives in state.db beside the database, attached as `state`: it is most of the bytes,
+ * and previews, boot-check and the pre-deploy copy (which copy only the main file) never need it.
+ * No foreign keys, as SQLite can't enforce them across files; deleteTicket clears a minion's rows.
+ */
+const STATE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS state.claude_state (
+  path TEXT PRIMARY KEY,
+  project_id INTEGER NOT NULL,
+  ticket_id INTEGER,
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  data BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS state.claude_state_owner ON claude_state(project_id, ticket_id);
+`;
+
 /** Columns added after the first release, for databases created before them. */
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
@@ -314,7 +323,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2; // 2: claude_state moved to state.db
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -339,6 +348,7 @@ export class Store {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.db.exec(SCHEMA);
+    this.attachState();
     for (const [table, column, ddl] of MIGRATIONS) {
       const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
       if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
@@ -351,6 +361,24 @@ export class Store {
     this.settleBuilds();
     this.schedules = new Schedules(this.db);
     this.noteSchemaVersion();
+  }
+
+  /**
+   * Attach state.db (claude_state's home), and move claude_state there from the main file if it is
+   * still in it: from before state.db, or created empty by an older release after a rollback (whose
+   * rows are then the newer ones). Copy, then drop, as two commits: SQLite doesn't commit two WAL
+   * files as one, so a crash in between leaves the rows in both and the next start repeats it.
+   */
+  private attachState() {
+    this.db.prepare('ATTACH DATABASE ? AS state').run(this.path === ':memory:' ? ':memory:' : join(dirname(this.path), 'state.db'));
+    // auto_vacuum only takes before the file's first table, so a new state.db gets it; the prune frees space with incremental_vacuum.
+    this.db.exec('PRAGMA state.auto_vacuum = INCREMENTAL; PRAGMA state.journal_mode = WAL;');
+    this.db.exec(STATE_SCHEMA);
+    if (!this.db.prepare("SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'claude_state'").get()) return;
+    const cols = 'path, project_id, ticket_id, size, mtime, data';
+    this.db.exec(`BEGIN; INSERT OR REPLACE INTO state.claude_state (${cols}) SELECT ${cols} FROM main.claude_state; COMMIT;`);
+    this.db.exec('DROP TABLE main.claude_state');
+    this.db.exec('VACUUM main'); // hand the freed pages back, so the main file shrinks
   }
 
   /** Records SCHEMA_VERSION, never lowering it: after a rollback, the newer number says what migrated it. */

@@ -29,7 +29,13 @@ for a in "$@"; do
   esac
 done
 
-sql() { sqlite3 -cmd ".timeout 30000" "$DB" "$@"; }
+# Session state is in state.db (attached as the server attaches it), or still in the main file before
+# the server has moved it.
+STATE_DB=$DATA_DIR/state.db
+sql() {
+  if [[ -f $STATE_DB ]]; then sqlite3 -cmd ".timeout 30000" -cmd "ATTACH '$STATE_DB' AS state" "$DB" "$@"
+  else sqlite3 -cmd ".timeout 30000" "$DB" "$@"; fi
+}
 mb() { awk -v b="$1" 'BEGIN { printf "%.1f MB", b / 1e6 }'; }
 now=$(date +%s%3N)
 verb=$([[ $apply == 1 ]] && echo Deleting || echo "Would delete")
@@ -48,6 +54,8 @@ done <<<"$rows"
 echo "Total: $(mb $total)"
 if [[ $apply == 1 && $total -gt 0 ]]; then
   sql "DELETE FROM claude_state WHERE ticket_id IN ($closed_state)"
+  # state.db is auto_vacuum=incremental: hand the freed pages back to the disk.
+  if [[ -f $STATE_DB ]]; then sqlite3 -cmd ".timeout 30000" "$STATE_DB" "PRAGMA incremental_vacuum;" >/dev/null; fi
 fi
 
 # Worktrees of long-closed minions; their branches stay.

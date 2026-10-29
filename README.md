@@ -174,9 +174,14 @@ binds the port itself.
 **Backups.** `deploy/backup.sh` takes an online `sqlite3 .backup` at 04:00 into
 `$DATA_DIR/backups/`, checks the copy restores (integrity check plus the core
 tables), and keeps 7 dailies and 4 weeklies (hard links), mode 600. Hand-made
-`backups/coordinator-before-<what>.db` copies go once they are 7 days old. They live on
-the same disk, so they cover mistakes, not a dead disk. To restore, stop the
-service and copy a backup over `coordinator.db` (removing its `-wal`/`-shm`).
+`backups/coordinator-before-<what>.db` copies go once they are 7 days old.
+Session state (`claude_state`, most of the bytes) lives in `state.db` beside
+`coordinator.db`, attached by the server; it gets its own `state-<day>.db`, 3
+dailies and no weeklies. Previews, boot-check and the pre-deploy copy copy only
+`coordinator.db`. The backups live on the same disk, so they cover mistakes, not
+a dead disk. To restore, stop the service and copy a backup over
+`coordinator.db` (and a `state-*` one over `state.db`), removing their
+`-wal`/`-shm`.
 
 **Pruning.** `deploy/prune.sh` lists, and with `--apply` deletes, the session
 state (`claude_state`) of minions closed over 14 days ago and the worktrees of

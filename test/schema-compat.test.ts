@@ -34,7 +34,7 @@ const shape = (S: typeof Store, file: string) => {
 };
 
 test(`the last release's Store (${prev}) reads and writes a database this code has migrated`, async () => {
-  const { Store: PrevStore } = await loadPrev();
+  const { Store: PrevStore, SCHEMA_VERSION: prevVersion = 0 } = await loadPrev();
   const file = join(root, 'migrated.db');
   const now = new Store(file);
   const project = now.createProject('Compat', null);
@@ -47,7 +47,10 @@ test(`the last release's Store (${prev}) reads and writes a database this code h
   assert.deepEqual(old.listProjects().map((p: any) => p.name), ['Compat']);
   assert.equal(old.getTicket(ticket.id).title, 'Before');
   assert.equal(old.listEvents(ticket.id).at(-1).data, JSON.stringify({ text: 'written by this code' }));
-  assert.equal(old.listClaudeState(project.id, ticket.id).length, 1);
+  // Releases before state.db (version 2) look for session state in the main file: they find an empty
+  // table there and refill it from Claude's config dir at start; the next release folds it back.
+  assert.equal(old.listClaudeState(project.id, ticket.id).length, prevVersion < 2 ? 0 : 1);
+  old.putClaudeState({ path: 'projects/x/2.jsonl', project_id: project.id, ticket_id: ticket.id, size: 1, mtime: 1, data: new Uint8Array(1) });
   old.listTickets(project.id);
   old.listArtifacts(project.id);
   old.listTurns(ticket.id);
@@ -62,6 +65,7 @@ test(`the last release's Store (${prev}) reads and writes a database this code h
   const again = new Store(file); // and forward again, as the fixed deploy that follows would
   assert.equal(again.getTicket(added.id)!.title, 'After rollback');
   assert.equal(again.getSetting('schema_version'), SCHEMA_VERSION);
+  assert.deepEqual(again.listClaudeState(project.id, ticket.id).map((r) => r.path).sort(), ['projects/x/1.jsonl', 'projects/x/2.jsonl'], "sessions from both releases");
   again.db.close();
 });
 

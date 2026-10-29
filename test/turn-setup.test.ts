@@ -108,6 +108,17 @@ test('a Taskmaster turn defaults to opus at high effort, and keeps a choice peop
   assert.equal(chosen.flag('--effort'), 'medium');
 });
 
+test("minion and Taskmaster turns both leave out unused built-in tools and the account's claude.ai skills and connectors", async () => {
+  for (const kind of ['ticket', 'coordinator'] as const) {
+    const t = await turn(kind, 'connected');
+    const denied = t.args.slice(t.args.indexOf('--disallowedTools') + 1);
+    for (const tool of ['AskUserQuestion', 'Workflow', 'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger']) assert.ok(denied.includes(tool), `${kind}: ${tool}`);
+    assert.equal(t.settings.syncClaudeAiSkills, false, kind);
+    assert.equal(t.settings.disableClaudeAiConnectors, true, kind);
+    assert.ok(t.settings.hooks.PreToolUse, `${kind}: the tripwire hook is still there`);
+  }
+});
+
 test("a Taskmaster's settings travel as a file, so hundreds of worktrees stay under Linux's 128 KiB argument cap", async () => {
   // Citadel's Taskmaster stopped starting (spawn E2BIG) once ~90 worktrees put its inline --settings over 128 KiB.
   const scheme = join(root, 'big-scheme');

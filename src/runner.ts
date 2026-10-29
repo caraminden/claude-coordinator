@@ -97,6 +97,17 @@ export function turnEnv(from: NodeJS.ProcessEnv): Record<string, string> {
   }
   return env;
 }
+/**
+ * Built-in tools no turn calls, kept out of the context every API call re-reads (#138, ~3.7k tokens):
+ * Citadel schedules and fans out its own work, so /loop's wakeups, cron, remote triggers and workflows go.
+ */
+export const UNUSED_TOOLS = ['Workflow', 'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger'];
+/**
+ * The account's claude.ai skill packs (docx, pptx, browsers, morning brief…) and connectors (Claude Docs)
+ * stay out of turns too (#138, ~3.3k tokens, ~1.8k more once the connector attaches mid-turn). In
+ * --settings both apply to that one invocation only.
+ */
+export const LEAN_CONTEXT = { syncClaudeAiSkills: false, disableClaudeAiConnectors: true };
 /** Where a turn compacts, in tokens; the Taskmasters' folders have no .claude/settings.json to set it. */
 const AUTO_COMPACT_WINDOW = '250000';
 
@@ -1242,7 +1253,7 @@ export class Runner {
     // Lets edit-only sessions write there too, not just in their working directory.
     const addDirs = [filesDir, sharedDir].filter((d): d is string => !!d);
     // One --settings per turn: the tripwire hook, plus approval rules or the Taskmaster's access rules.
-    const settings: { permissions?: object; autoMemoryDirectory?: string; hooks: object } = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)) };
+    const settings: { permissions?: object; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)), ...LEAN_CONTEXT };
     if (rules.length) settings.permissions = { ask: rules };
     if (ticket.kind === 'coordinator') {
       const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project), sharedDir, memoryDir);
@@ -1270,7 +1281,7 @@ export class Runner {
     }
     const allowed = Object.keys(servers).map((name) => `mcp__${name}`);
     // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
-    args.push('--mcp-config', JSON.stringify({ mcpServers: servers }), '--allowedTools', ...allowed, '--disallowedTools', 'AskUserQuestion');
+    args.push('--mcp-config', JSON.stringify({ mcpServers: servers }), '--allowedTools', ...allowed, '--disallowedTools', 'AskUserQuestion', ...UNUSED_TOOLS);
     env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
     // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
     if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;

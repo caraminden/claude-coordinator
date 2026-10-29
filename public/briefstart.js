@@ -62,7 +62,7 @@ async function openSheet(slot, brief, file) {
     h('div', { class: 'label' }, 'Start after (optional)', h('div', { class: 'row' }, after, h('span', { class: 'muted' }, 'once it'), when)),
     h('details', {}, h('summary', {}, `First message (${lines} line${lines === 1 ? '' : 's'})`), h('pre', { class: 'artifact-text' }, message)),
     err,
-    h('div', { class: 'row actions' }, h('span', { class: 'spacer' }),
+    h('div', { class: 'row sheet-actions' }, h('span', { class: 'spacer' }),
       h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel'), btn));
   const dialog = h('dialog', { class: 'new-scheme start-brief', 'aria-label': 'Start a minion' },
     h('div', { class: 'row' }, h('h2', {}, 'Start a minion'), h('span', { class: 'spacer' }),

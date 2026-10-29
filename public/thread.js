@@ -1,5 +1,5 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, isCoordinator, loadEarlier, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
+import { api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
@@ -7,6 +7,7 @@ import { recapEvent, showRecap } from './recap.js';
 import { noteStrike, struckSource } from './strike.js';
 import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
+import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
@@ -298,8 +299,12 @@ export function renderTicketHead() {
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       stateLabel,
       h('span', { class: 'spacer' }), coord ? '' : propertyChip(t), ...actions, view.findEl ?? '',
-      // Leaves the thread as it is and goes back to the project's coordinator.
-      coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, '×')),
+      h('span', { class: 'head-nav' },
+        // Through the views opened in this tab, never off the site (public/navstack.js).
+        h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
+        h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
+        // Leaves the thread as it is and goes back to the project's coordinator.
+        coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close')))),
     shipLine(t),
     view.progressEl);
   renderTyping();

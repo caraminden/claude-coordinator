@@ -73,6 +73,19 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
+const ICONS = { back: 'M10.25 3.5 5.75 8l4.5 4.5', forward: 'M5.75 3.5 10.25 8l-4.5 4.5', close: 'M4 4l8 8M12 4l-8 8' };
+/** A line icon in the text colour. Drawn on its own centre, so it sits dead centre in its button, as a font's glyph doesn't. */
+export function icon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('class', 'icon');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', ICONS[name]);
+  svg.append(path);
+  return svg;
+}
+
 /** A cost at API prices, marked as an estimate: "≈ $0.42", "≈ $12". Not a bill on a subscription. */
 export function costText(usd) {
   return `≈ $${usd >= 10 ? Math.round(usd) : usd.toFixed(2)}`;

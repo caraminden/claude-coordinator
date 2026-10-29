@@ -1,7 +1,8 @@
 // Artifacts and files: the shelf, the browser, and viewers for artifacts and linked or shared files.
-import { ago, api, baseName, fileExt, fileKind, fileUrl, followChat, formatSize, h, isCoordinator, isLocalPath, joinPath, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
+import { ago, api, baseName, fileExt, fileKind, fileUrl, followChat, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { showProject } from './project.js';
+import { replaceHash } from './navstack.js';
 
 /** A file a thread linked in its reply, shown full screen over its chat, which stays beside it. */
 export async function showFile(ticketId, path) {
@@ -251,7 +252,7 @@ function openViewer(ticket, file, inPlace) {
       const a = e.target.closest?.('a[href^="#/f/"]');
       if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       e.preventDefault();
-      location.replace(a.getAttribute('href'));
+      replaceHash(a.getAttribute('href'));
     });
     document.body.append(dialog);
     dialog.showModal();
@@ -287,7 +288,7 @@ export function closeViewer() {
 /** × or Esc: back to the chat, as the browser's back button would when it was opened from there. */
 function leaveViewer() {
   if (viewer.inPlace) history.back();
-  else location.replace(threadHref(viewer.ticket));
+  else replaceHash(threadHref(viewer.ticket));
 }
 
 function renderViewerBar() {
@@ -303,7 +304,7 @@ function renderViewerBar() {
     a ? pinButton(a) : '',
     file.missing ? '' : h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open'),
     file.missing ? '' : h('a', { class: 'button secondary wide-only', href: `${src}&download` }, 'Download'),
-    h('button', { type: 'button', class: 'close-view', title: 'Back to the chat', 'aria-label': 'Back to the chat', onclick: leaveViewer }, '×'));
+    h('button', { type: 'button', class: 'close-view', title: 'Back to the chat', 'aria-label': 'Back to the chat', onclick: leaveViewer }, icon('close')));
 }
 
 /**

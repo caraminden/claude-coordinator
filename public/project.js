@@ -8,11 +8,12 @@ import { propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
 import { inboxStrip, refreshInbox } from './inbox.js';
 import { schedulesButton, showSchedules } from './schedules.js';
+import { replaceHash } from './navstack.js';
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 export async function showTicket(ticketId) {
   const { ticket } = await api(`api/tickets/${ticketId}`);
-  if (isCoordinator(ticket) || ticket.number != null) return location.replace(threadHref(ticket));
+  if (isCoordinator(ticket) || ticket.number != null) return replaceHash(threadHref(ticket));
   await showProject(ticket.project_id, { kind: 'chat', id: ticketId });
 }
 

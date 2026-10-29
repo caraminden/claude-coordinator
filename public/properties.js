@@ -1,5 +1,5 @@
 // The scheme's property registry: the Settings link's review count, the Properties tab and a minion's property chip.
-import { api, h, me, view } from './core.js';
+import { api, h, icon, me, view } from './core.js';
 import { settingsTabs } from './settings.js';
 import { filterChoices, valueCounts } from './propfilter.js';
 import { renderSidebar } from './sidebar.js';
@@ -196,7 +196,7 @@ export function propertiesPage() {
   const section = h('section', { class: 'artifacts-main props-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
+        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'The keys and values minions and their files carry. Aliases resolve to their value; nothing else can be set.')),
     h('div', { id: 'props-body', class: 'props-body' }, h('p', { class: 'muted' }, 'Loading…')));

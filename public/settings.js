@@ -1,5 +1,5 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
-import { ago, api, h, view } from './core.js';
+import { ago, api, h, icon, view } from './core.js';
 import { openNewScheme, toggleSchemeMenu } from './sidebar.js';
 
 // ---------- push notifications ----------
@@ -241,7 +241,7 @@ export function approvalsEditor() {
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
+        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster is not affected.')),
     h('h3', { class: 'settings-label' }, 'Needs approval'),
@@ -266,7 +266,7 @@ function renderInstructionsHead() {
   const p = view.project;
   el.replaceChildren(
     h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
-      h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
+      h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     h('div', { class: 'meta' },
       'The Taskmaster and every minion get these in their system prompt, from their next turn.',
@@ -483,7 +483,7 @@ export function machinesPage() {
   const section = h('section', { class: 'artifacts-main machines-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Machines'), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, '×')),
+        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       h('div', { class: 'meta' }, 'Computers that lend their MCP tools to every minion, in every scheme, while they are connected. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.')),
     form,
     h('div', { id: 'machine-setup' }),

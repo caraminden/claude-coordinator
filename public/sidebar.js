@@ -8,6 +8,7 @@ import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { renderInbox } from './inbox.js';
+import { replaceHash } from './navstack.js';
 
 // ---------- projects ----------
 
@@ -19,7 +20,7 @@ export async function openStartScheme() {
   let last = NaN;
   try { last = Number(localStorage.getItem(LAST_SCHEME)); } catch {}
   const id = startScheme(projects, last);
-  if (id != null) return location.replace(`#/p/${id}`); // replace: Back shouldn't bounce through here
+  if (id != null) return replaceHash(`#/p/${id}`); // replace: Back shouldn't bounce through here
   setView({ kind: 'projects' });
   crumbs.replaceChildren('New scheme');
   app.replaceChildren(h('div', { class: 'card new-scheme' }, h('h2', {}, 'New scheme'), newSchemeForm()));

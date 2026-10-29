@@ -89,8 +89,17 @@ function readReason(p: string, cfg: TripwireConfig): string | null {
 const ENVIRON = /^\/proc\/[^/]+(\/task\/[^/]+)?\/environ$/;
 const ENVIRON_WHY = "A process's environment can hold the live service's password and session secret. Use `env` for your own; to find your dev server, take the pid from `ss -ltnp 'sport = :<your port>'` (or `$!` when you start it) and check `readlink /proc/<pid>/cwd`.";
 const GH_TOKEN_WHY = "That is Cara's GitHub login; gh and git use it on their own.";
-// The same read with the pid in a variable, a glob or `$(…)`, which the word-by-word reading can't resolve.
-const ENVIRON_TEXT = /\/proc\/(?:\$\([^)]*\)|[^\s;&|<>()'"])*\/environ\b/;
+// The same read with the pid in a variable, where the lexer leaves an unknown `/proc//environ`, or in
+// `$(…)`, where it splits the path into `/proc/`, the ( … ) and the rest (see commandReason).
+const ENVIRON_HIDDEN = /^\/proc\/[^/]*(\/task\/[^/]*)?\/environ$/;
+const ENVIRON_REST = /^(\/task\/[^/]*)?\/environ$/;
+
+/** For a recursive search: a secret readReason guards that lies inside this folder, or null. */
+function secretInside(root: string, cfg: TripwireConfig): string | null {
+  const secrets = [join(cfg.home, '.ssh'), join(cfg.claudeConfig, '.credentials.json'), join(cfg.home, '.claude/.credentials.json'), join(cfg.home, '.config/claude-coordinator'), join(cfg.home, '.config/gh/hosts.yml')];
+  return secrets.find((x) => x !== root && under(x, root)) ?? null;
+}
+const SEARCHERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag']);
 
 const LIVE_DB = ['coordinator.db', 'coordinator.db-wal', 'coordinator.db-shm', 'coordinator.db-journal'];
 
@@ -448,6 +457,7 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
 function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | null {
   for (const r of seg.redirects) {
     if (r.op === '<<<') continue;
+    if (r.target.unknown && ENVIRON_HIDDEN.test(r.target.text)) return hard(`The redirect from ${r.target.text} is blocked. ${ENVIRON_WHY}`);
     for (const p of pathsOf(r.target, st, cfg)) {
       const read = readReason(p, cfg);
       if (read) return hard(`The redirect to ${p} is blocked. ${read}`);
@@ -511,15 +521,22 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     }
   }
   if (REMOTE.has(name)) return null;
-  // `ps e`, `ps eww`, `ps auxe`: BSD-style e prints each process's environment.
-  if (name === 'ps' && /^[a-zA-Z]*e[a-zA-Z]*$/.test(args[0]?.text ?? '')) return hard(`\`ps ${args[0].text}\` prints processes' environments. ${ENVIRON_WHY}`);
+  // `ps e`, `ps aux e`, `ps auxe`: BSD-style e prints each process's environment. A word after -o, -C,
+  // -u and the like is that option's value.
+  const bsdE = (w: Word, k: number) => /^[a-zA-Z]*e[a-zA-Z]*$/.test(w.text) && !/^-[a-zA-Z]*[oOpCuUgGtq]$|^--\w+$|^[a-zA-Z]*[oOpUt]$/.test(args[k - 1]?.text ?? '');
+  if (name === 'ps' && args.some(bsdE)) return hard(`This \`ps\` prints processes' environments. ${ENVIRON_WHY}`);
   const sub = args.filter((w) => !w.text.startsWith('-')).map((w) => w.text);
-  if (name === 'gh' && sub[0] === 'auth' && (sub[1] === 'token' || (sub[1] === 'status' && args.some((w) => /^(-t|--show-token)$/.test(w.text))))) return hard(`\`gh auth\` would print the token. ${GH_TOKEN_WHY}`);
+  const auth = sub.indexOf('auth');
+  if (name === 'gh' && auth >= 0 && (sub[auth + 1] === 'token' || (sub[auth + 1] === 'status' && args.some((w) => /^(-t|--show-token)$/.test(w.text))))) return hard(`\`gh auth\` would print the token. ${GH_TOKEN_WHY}`);
 
+  const recursive = name === 'rg' || name === 'ag' || args.some((w) => /^-[a-zA-Z]*[rR]|^--recursive$|^--dereference-recursive$|^--directories=recurse$/.test(w.text));
   for (const w of METADATA.has(name) ? [] : args) {
+    if (w.unknown && ENVIRON_HIDDEN.test(w.text)) return hard(`Reading ${w.text.replace('//', '/<pid>/')} is blocked. ${ENVIRON_WHY}`);
     for (const p of pathsOf(w, st, cfg)) {
       const why = readReason(p, cfg);
       if (why) return hard(`Reading ${p} is blocked. ${why}`);
+      const secret = SEARCHERS.has(name) && recursive ? secretInside(p, cfg) : null;
+      if (secret) return hard(`Searching ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
     }
   }
 
@@ -566,8 +583,11 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
 
 /** Why this Bash command is blocked, or null. One hard-blocked part makes the whole command a hard block. */
 export function commandReason(command: string, st: State, cfg: TripwireConfig): Verdict | null {
-  if (ENVIRON_TEXT.test(command)) return hard(`Reading /proc/<pid>/environ is blocked. ${ENVIRON_WHY}`);
   const stack: (string | null)[] = [];
+  // For /proc/$(…)/environ: whether each open ( follows a word ending in /proc/, and whether one just closed.
+  const procs: boolean[] = [];
+  let prev: Tok | null = null;
+  let afterProc = false;
   let seg: Segment = { words: [], redirects: [] };
   let redir: string | null = null;
   let asked: Verdict | null = null;
@@ -577,6 +597,10 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
     return why;
   };
   for (const tok of [...lex(command, cfg.home), { kind: 'op', text: ';' } as Tok]) {
+    if (tok.kind === 'word' && afterProc && ENVIRON_REST.test(tok.word.text)) return hard(`Reading /proc/<pid>/environ is blocked. ${ENVIRON_WHY}`);
+    afterProc = tok.kind === 'op' && tok.text === ')' && !!procs.pop();
+    if (tok.kind === 'op' && tok.text === '(') procs.push(prev?.kind === 'word' && prev.word.text.endsWith('/proc/'));
+    prev = tok;
     if (tok.kind === 'word') {
       if (redir) seg.redirects.push({ op: redir, target: tok.word });
       else seg.words.push(tok.word);
@@ -618,6 +642,8 @@ export function tripwire(input: any, cfg: TripwireConfig): Verdict | null {
   if (!p) return null;
   const read = readReason(p, cfg);
   if (read) return hard(`${tool} of ${p} is blocked. ${read}`);
+  const secret = tool === 'Grep' ? secretInside(p, cfg) : null;
+  if (secret) return hard(`Grep of ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
   if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)) {
     const why = writeReason(p, cfg);
     if (why) return hard(`${tool} of ${p} is blocked. ${why}`);

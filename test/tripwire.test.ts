@@ -86,6 +86,14 @@ const BLOCKED: [string, string?][] = [
   ['cat ~/.config/gh/hosts.yml'],
   ['gh auth token'],
   ['gh auth status --show-token'],
+  ['gh -R a/b auth token'],
+  ['ps aux e'],
+  ['ps -p 1 e'],
+  ['cat "/proc/$p/task/$t/environ"'],
+  ['grep -r SESSION_SECRET ~/.config'],
+  ['cd ~ && grep -rn token .'],
+  ['rg oauth_token ~/.config/gh'],
+  ['grep -R PRIVATE /home/u'],
   // other schemes
   ['touch ~/.local/share/claude-coordinator/projects/1/shared/project/note.md'],
   ['cd ../../../1/tickets/4 && git commit -am wip'],
@@ -174,6 +182,16 @@ const ALLOWED = [
   'grep -n environ src/tripwire.ts',
   'gh auth status && gh pr view 3',
   'cat ~/.config/gh/config.yml',
+  'git commit -m "Tripwire: block reads of /proc/1/environ and /proc/*/environ"',
+  "gh pr create --title x --body 'Blocks /proc/$PID/environ reads'",
+  'git commit -F - <<EOF\nBlocks cat /proc/$(pgrep node)/environ\nEOF',
+  'cat /tmp/x/proc/1/environ',
+  'ps -C node -o pid,etime',
+  'ps --sort etime -e',
+  'ps -u cara -o pid,cmd | grep server',
+  'grep -rn foo src ~/.claude/projects',
+  'rg foo ~/.local/share/claude-coordinator/projects/2/shared',
+  'grep -n token ~/.config/gh/config.yml',
   'cd ~/claude-coordinator && git pull --ff-only /home/u/.local/share/claude-coordinator/projects/2/repo main && systemd-run --user --collect --unit=cc-restart-when-idle /tmp/cc-restart-when-idle.sh',
   'cd ~/claude-coordinator && curl -s localhost:8573/api/version && gh pr list',
   'chmod 600 ~/.local/share/claude-coordinator/coordinator.db*',
@@ -259,6 +277,11 @@ test('file tools: writes, edits and reads', () => {
   assert.ok(t('Read', { file_path: '/proc/1234/environ' }));
   assert.ok(t('Read', { file_path: '~/.config/gh/hosts.yml' }));
   assert.equal(t('Read', { file_path: '/proc/1234/status' }), null);
+  assert.ok(t('Grep', { pattern: 'SECRET', path: `${home}/.config` }));
+  assert.ok(t('Grep', { pattern: 'x', path: home }));
+  assert.equal(t('Grep', { pattern: 'x', path: `${home}/.config/systemd` }), null);
+  assert.equal(t('Grep', { pattern: 'x', path: worktree }), null);
+  assert.equal(t('Glob', { pattern: '*', path: `${home}/.config` }), null);
   assert.equal(t('Read', { file_path: `${home}/claude-coordinator/server.ts` }), null);
   assert.equal(t('Read', { file_path: `${data}/projects/1/shared/project/plan.md` }), null);
   assert.equal(t('Write', { file_path: `${worktree}/src/x.ts` }), null);

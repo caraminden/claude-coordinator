@@ -360,7 +360,7 @@ function renderProgress() {
   const { total, done, current } = stepInfo(p);
   // The line carries its own worded step count; the turn's action count shows only when no plan is underway.
   const planned = total && (current || done < total);
-  const count = !planned && running && p.turnActions ? `${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
+  const count = !planned && running && initSeen() && p.turnActions ? `${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
 
   const bar = h('button', { class: 'progress-line', 'aria-expanded': String(view.ui.open), onclick: () => {
     view.ui.open = !view.ui.open;
@@ -944,6 +944,11 @@ export function userBubble(author, text, imageSrcs, about = null) {
   return msg;
 }
 
+/** Whether the running turn's init event has arrived: until then the per-turn state is still the last turn's. */
+function initSeen() {
+  return view.turnInitAt >= view.ticket.turnStartedAt;
+}
+
 /** "1m 05s" style, for how long a turn has run. */
 function elapsedText(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -964,8 +969,7 @@ export function renderTyping() {
   el.hidden = !show;
   if (!show) return;
   const running = t.status === 'running';
-  // Until this turn's init event arrives, the per-turn state is still the last turn's.
-  const current = running && view.turnInitAt >= t.turnStartedAt;
+  const current = running && initSeen();
   const last = current && view.turnActions.at(-1);
   const busy = last && !last.result;
   const doing = busy ? actionLabel(last.block) : 'thinking…';

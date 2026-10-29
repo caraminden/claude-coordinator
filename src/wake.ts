@@ -27,7 +27,7 @@ export interface Chain {
   from: string;
   /** The followed minion's branch tip when the chain was set, if that was already on main: no work of its own yet. */
   base: string | null;
-  /** When the chain was set (unix seconds; chain() fills it in): with base, only commits after this count. */
+  /** When the chain was set (unix seconds, from follow()): with base, only commits after this count; none if unset (set before #126). */
   since?: number;
   /** People were told the followed minion was dismissed without shipping; kept, in case it ships after all. */
   held?: boolean;
@@ -84,7 +84,7 @@ export class LiveWaiters {
   /**
    * Did the minion commit on `branch` at or after `since` (unix seconds)? Asks the branch's reflog, since
    * its tip alone can't tell: a branch caught up to a newer main (a fast-forward) has a new tip that is
-   * on main, but none of its own work. Merge commits don't count; a rebase keeps the commits it moves.
+   * on main, but none of its own work. Merge commits don't count; work land.sh rebased still has its commit lines.
    */
   private committed(repo: string, branch: string, since: number): boolean {
     const log = git(repo, ['reflog', 'show', '--date=unix', '--format=%gd %gs', `refs/heads/${branch}`]) ?? '';
@@ -109,7 +109,7 @@ export class LiveWaiters {
     if (!b) return closed ? 'go' : 'wait'; // no repo: dismissed is all there is to wait for
     const merged = this.merged(b.repo, b.tip);
     if (closed && !merged) return 'unshipped';
-    if (!merged || (!closed && !this.committed(b.repo, b.branch, c.base ? (c.since ?? 0) : 0))) return 'wait';
+    if (!merged || (!closed && !this.committed(b.repo, b.branch, c.base ? (c.since ?? Infinity) : 0))) return 'wait';
     const runsThisScheme = !!this.head && git(b.repo, ['cat-file', '-e', `${this.head}^{commit}`]) !== null;
     if (c.when === 'merged' || !runsThisScheme) return 'go';
     return this.live({ ticket: c.ticket, commit: b.tip, reason: '', since: null }) ? 'go' : 'wait';
@@ -117,18 +117,18 @@ export class LiveWaiters {
 
   /**
    * Where following minion `after` stands right now, checked before a chained minion is created:
-   * 'go' (start it at once), 'wait' (hold it, with `base` for add), or 'unshipped' (refuse).
+   * 'go' (start it at once), 'wait' (hold it, with `base` and `since` for chain), or 'unshipped' (refuse).
    */
-  follow(after: number, when: Chain['when']): { state: 'go' | 'wait' | 'unshipped'; base: string | null } {
+  follow(after: number, when: Chain['when']): { state: 'go' | 'wait' | 'unshipped'; base: string | null; since: number } {
     const b = this.tip(after);
     const base = b && this.merged(b.repo, b.tip) ? b.tip : null;
-    return { state: this.chainState({ ticket: 0, after, when, message: '', from: '', base, since: Math.floor(Date.now() / 1000) }), base };
+    const since = Math.floor(Date.now() / 1000);
+    return { state: this.chainState({ ticket: 0, after, when, message: '', from: '', base, since }), base, since };
   }
 
   /** Hold a chained minion's brief (after follow said 'wait'). */
   chain(c: Chain): void {
-    const set = { ...c, since: c.since ?? Math.floor(Date.now() / 1000) };
-    this.store.setSetting(CHAINS, [...this.chains().filter((o) => o.ticket !== c.ticket), set]);
+    this.store.setSetting(CHAINS, [...this.chains().filter((o) => o.ticket !== c.ticket), c]);
   }
 
   /** Take `ticket`'s held brief out of the chain (someone wrote to it: it starts now), or null. */

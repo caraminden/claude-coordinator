@@ -1225,19 +1225,19 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');
     }
     // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
-    let follow: { leader: Ticket; when: Chain['when']; base: string | null } | null = null;
+    let follow: { leader: Ticket; when: Chain['when']; base: string | null; since: number } | null = null;
     if (body.start_after != null) {
       const when = (oneOf(body.start_when ?? null, ['live', 'merged'], 'start_when') ?? 'live') as Chain['when'];
       const leader = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.number === Number(body.start_after));
       if (!leader) throw new HttpError(400, `No minion #${String(body.start_after).slice(0, 20)} in this scheme to start after`);
       const f = waiters.follow(leader.id, when);
       if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work being merged, so nothing can start after it`);
-      if (f.state === 'wait') follow = { leader, when, base: f.base };
+      if (f.state === 'wait') follow = { leader, when, base: f.base, since: f.since };
     }
     const { id, notes } = await newMinion(project, { title, tag, props, model, effort }, session.name);
     if (follow) {
       const { leader, when } = follow;
-      waiters.chain({ ticket: id, after: leader.id, when, message, from: session.name, base: follow.base });
+      waiters.chain({ ticket: id, after: leader.id, when, message, from: session.name, base: follow.base, since: follow.since });
       store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} is ${when}` });
       runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work is ${when}. A message to it starts it now.` });
       runner.broadcastTicket(id);

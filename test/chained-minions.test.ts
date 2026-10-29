@@ -74,7 +74,7 @@ function chain(w: LiveWaiters, leader: number, when: Chain['when'], project = ci
   const f = w.follow(leader, when);
   assert.equal(f.state, 'wait');
   const follower = minion(project, repo).id;
-  w.chain({ ticket: follower, after: leader, when, message: 'build part two', from: 'Taskmaster', base: f.base });
+  w.chain({ ticket: follower, after: leader, when, message: 'build part two', from: 'Taskmaster', base: f.base, since: f.since });
   return follower;
 }
 const reset = () => {

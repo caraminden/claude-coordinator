@@ -63,6 +63,8 @@ async function onMessage(e) {
   try {
     if (req.op === 'send') {
       if (!frame.onSend) throw new Error('This view has no comment box to put that in');
+      // Only on a person's click or key: a page can't fill the box while someone types in it.
+      if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
       frame.onSend(req.text);
       return reply({ ok: true, result: { shown: true } });
     }

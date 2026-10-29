@@ -32,7 +32,8 @@
 
   // Who is looking and who made the page, once the viewer answers; false when there is no viewer.
   let info = null;
-  const ready = host ? request('hello', {}, 5000).then((r) => {
+  const hello = (tries) => request('hello', {}, 5000).catch((err) => (tries > 1 ? hello(tries - 1) : Promise.reject(err)));
+  const ready = host ? hello(2).then((r) => {
     info = { person: r.person, file: r.file, owner: r.owner };
     replace(r.entries);
     return true;
@@ -50,7 +51,8 @@
     return () => watchers.delete(w);
   }
 
-  // Writes: applied here at once, sent to the viewer in batches of what one tick wrote.
+  // Writes: applied here at once, sent to the viewer at most every 100 ms with each key's latest value,
+  // so a slider moving fast stays under the viewer's 20 writes a second and its last value always lands.
   let queue = new Map();
   let flushing = null;
   function write(key, value) {
@@ -59,7 +61,7 @@
     else data.set(key, v);
     notify([key]);
     queue.set(key, v === undefined ? null : v);
-    flushing ??= Promise.resolve().then(async () => {
+    flushing ??= new Promise((r) => setTimeout(r, 100)).then(async () => {
       const entries = [...queue].map(([k, val]) => ({ key: k, value: val }));
       queue = new Map();
       flushing = null;

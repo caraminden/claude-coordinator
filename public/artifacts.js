@@ -403,8 +403,8 @@ function commentBox(t, path, name, body) {
   });
   // The artifact bridge's send: the page's text, for a person to read, change and send (or not).
   form.fill = (text) => {
-    textarea.value = text;
-    saveDraft(draftKey, text);
+    putPageText(textarea, text);
+    saveDraft(draftKey, textarea.value);
     grow();
     status.textContent = 'From the page, not sent yet';
     textarea.focus();
@@ -413,11 +413,22 @@ function commentBox(t, path, name, body) {
   return form;
 }
 
+/**
+ * A page's text at the top of `textarea`, keeping what the person wrote below it. A later send from
+ * the page replaces its earlier text rather than piling up.
+ */
+function putPageText(textarea, text) {
+  const last = textarea.dataset.pageText;
+  const rest = last && textarea.value.startsWith(last) ? textarea.value.slice(last.length).replace(/^\n+/, '') : textarea.value;
+  textarea.value = rest.trim() ? `${text}\n\n${rest}` : text;
+  textarea.dataset.pageText = text;
+}
+
 /** Put a page's text in a chat's composer, ahead of any draft, for a person to send. */
 function fillComposer(chat, text) {
   const textarea = chat?.querySelector('form.composer textarea');
   if (!textarea) throw new Error('This view has no message box to put that in');
-  textarea.value = textarea.value.trim() ? `${text}\n\n${textarea.value}` : text;
+  putPageText(textarea, text);
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
   textarea.focus();
 }
@@ -428,7 +439,7 @@ export function sharedViewer(file) {
   if (file.missing) body.append(h('p', { class: 'muted' }, `${file.missing}.`));
   // A shared page's send goes to the Taskmaster, in a comment box under it.
   const comment = !file.missing && file.kind === 'html' && view.coordinator ? commentBox(view.coordinator, file.abs, file.name, body) : null;
-  const bridge = comment && { open: { project: view.projectId, path: file.path }, owner: threadLabel(view.coordinator), onSend: comment.fill };
+  const bridge = { open: { project: view.projectId, path: file.path }, owner: view.coordinator ? threadLabel(view.coordinator) : null, onSend: comment?.fill };
   if (!file.missing) renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name }, bridge });
   return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body, comment ?? '');
 }

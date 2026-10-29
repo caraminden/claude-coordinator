@@ -37,6 +37,14 @@ const STATE = {
 };
 const NOTE = { type: ['string', 'null'], description: 'One terse line on where things stand, max 60 chars, e.g. "needs a pick: tabs or a list" or "merged, live after restart". No names or prefixes.' };
 
+const REPLIES = {
+  type: ['array', 'null'],
+  items: { type: 'string' },
+  maxItems: 3,
+  description:
+    'Up to 3 one-tap replies, each at most 40 characters, e.g. ["Merge it", "Make it live"]: buttons people tap to send that text as their own message, for when the obvious next step only needs their go. Not for a choice between options: ask_question does that. They go away once anyone writes or the next turn starts; [] or null takes them away now.',
+};
+
 const BUILD = {
   type: ['integer', 'null'],
   description: 'The major build this work is assigned to, e.g. 8 for Build 8; the minions list groups the build\'s minions together. null takes it out of a build.',
@@ -507,7 +515,7 @@ async function id(args: any): Promise<number> {
 /** The label fields a call sets; ones left out stay as they are. */
 function labelFields(args: any) {
   const out: Record<string, unknown> = {};
-  for (const k of ['title', 'tag', 'state', 'note', 'build']) if (args[k] !== undefined) out[k] = args[k];
+  for (const k of ['title', 'tag', 'state', 'note', 'replies', 'build']) if (args[k] !== undefined) out[k] = args[k];
   return out;
 }
 
@@ -516,7 +524,7 @@ const THREAD_TOOLS = [
     name: 'set_thread_status',
     description:
       "Label this minion for the scheme's minions list: its short title, kind of work, and where things stand. Leave out what should stay. Call it when the work's kind becomes clear, and at the end of a turn whenever the state or note changes.",
-    inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD } },
+    inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE, replies: REPLIES, build: BUILD } },
   },
   ASK_QUESTION,
   SETTLE_QUESTION,

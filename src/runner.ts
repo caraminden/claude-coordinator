@@ -446,6 +446,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     '- build: the major build number, only when the work has been assigned to one (the list groups a build\'s minions together).',
     'Your minion also carries properties from the scheme\'s property registry (`list_properties`, mcp__thread): a `type` (feature, bug, art, ideation, design, research, chore or other), a `stage`, and any keys the scheme registers. Set them with `set_properties` once the work is clear, and keep `type` right if the work changes kind (setting the tag sets the type too). Use only registered keys and values; aliases are fine. If nothing fits, set `type: other` and ask people with a card whether it stays `other` or moves to another bucket; for any other key, use `propose_property` instead of a near-duplicate. When someone asks to assign this minion to a person, set `assigned` to their login name (null unassigns it); to assign another minion, ask the Taskmaster with `message_coordinator`. Show properties as `key: value`.',
     '- At the end of every turn, set state and note: state ready (done, ready to merge or pick up), try (ready for people to try), parked, blocked (on something outside the minion), outside (work still running elsewhere) or pending-deploy (deployed with tools/deploy.sh, not live yet), or null when you are simply waiting on an answer; note is one terse line, max 60 chars, on where things stand ("needs a pick: tabs or list"). The state clears when the next turn starts, except pending-deploy, which stays until you set another state: change it if a later turn starts new work.',
+    '- replies: when the obvious next step only needs a go from people ("Merge it", "Make it live", "Build it this way"), offer it as 1 to 3 short replies (at most 40 characters each); each shows as a button that sends its text as the tapper\'s message, so word it as their instruction to you. They go once anyone writes or the next turn starts. For a real choice between options, ask with a question card instead, and offer no replies while a card or plan waits.',
     'When your branch has an open GitHub pull request, the app watches it and messages you as "[GitHub]: ..." when CI on its head commit passes or fails, someone reviews or comments, or it is merged or closed, so you need not wait on CI in a turn; act on those messages as the scheme expects (fix a red build, answer a review).',
     'Give every Bash call a short plain-English description (like "Run the test suite").',
     'After you deploy with tools/deploy.sh, set state pending-deploy and do not call close_self: a successful deploy dismisses the minion once it is live and your turn has ended (the restart does not interrupt your turn), and a failed one leaves it open with the error. pending-deploy means the deploy is all that is left: in a later turn, when someone still needs you (helping them use the change, an open question, more work), set another state or null, even while the deploy is still waiting.',
@@ -670,7 +671,7 @@ export class Runner {
   view(ticket: Ticket) {
     const { total, done } = stepInfo(this.progressFor(ticket.id));
     return {
-      ...ticket, queued: this.queued(ticket.id), queued_ids: (this.queues.get(ticket.id) ?? []).flatMap((m) => m.id ?? []), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
+      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id), queued_ids: (this.queues.get(ticket.id) ?? []).flatMap((m) => m.id ?? []), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
       turnStartedAt: this.turns.get(ticket.id)?.startedAt ?? null,
       // When it resumes by itself after the usage limit, if it waits for that.
@@ -1248,6 +1249,8 @@ export class Runner {
     // A limited minion's note is the server's, about the wait this turn ends.
     if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, ticket.state === 'limited' ? { state: null, note: null } : { state: null });
     this.cancelLimitWait(ticket.id);
+    // One-tap replies answer the turn that offered them; a new turn makes them stale.
+    if (ticket.replies) this.store.updateTicket(ticket.id, { replies: null });
 
     // The session's transcript, task list and memory live in the database too; put back anything this
     // config dir lacks (another account, a fresh machine) before resuming.

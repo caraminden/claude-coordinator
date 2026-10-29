@@ -693,6 +693,13 @@ function buildNumber(v: unknown): number | null {
   return v as number;
 }
 
+/** One-tap replies: up to 3 short texts, stored as JSON; none (null or []) clears them. */
+function replyList(v: unknown): string | null {
+  if (v === null || (Array.isArray(v) && !v.length)) return null;
+  if (!Array.isArray(v) || v.length > 3) throw new HttpError(400, 'Replies must be a list of at most 3');
+  return JSON.stringify(v.map((r) => str(r, 'Reply', 40)));
+}
+
 function str(v: unknown, field: string, max = 200): string {
   if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `${field} is required`);
   if (v.length > max) throw new HttpError(400, `${field} is too long`);
@@ -1429,9 +1436,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       return json(res, 200, { ticket, project: store.getProject(ticket.project_id) });
     }
     if (action === '' && method === 'PATCH') {
-      // Any of title, tag, state, note, build, model and effort; null (or "") clears all but the title.
+      // Any of title, tag, state, note, replies, build, model and effort; null (or "") clears all but the title.
       const body = await readJson(req);
-      const fields: Partial<Pick<Ticket, 'title' | 'tag' | 'state' | 'note' | 'build' | 'model' | 'effort'>> = {};
+      const fields: Partial<Pick<Ticket, 'title' | 'tag' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort'>> = {};
       if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
       if (body.effort !== undefined) fields.effort = oneOf(body.effort, EFFORTS, 'Effort');
       if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
@@ -1439,6 +1446,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
       if (body.note !== undefined) fields.note = body.note ? str(body.note, 'Note', 60) : null;
       if (body.build !== undefined) fields.build = buildNumber(body.build);
+      if (body.replies !== undefined) fields.replies = replyList(body.replies);
       for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === ticket[k]) delete fields[k];
       if (Object.keys(fields).length) {
         store.updateTicket(id, fields);
@@ -1510,6 +1518,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       }
       // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
       runner.send(id, session.name, text, await saveImages(ticket, body.images), {}, session.agent === undefined && body.after !== true, files);
+      // Anything said answers the one-tap replies, so they go (the next turn would clear them too, but a steer doesn't start one).
+      if (ticket.replies.length) {
+        store.updateTicket(id, { replies: null });
+        runner.broadcastTicket(id);
+      }
       personWrote(ticket, session);
       return json(res, 202, ticketView(id));
     }

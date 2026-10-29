@@ -11,8 +11,9 @@ import { bootServer, until } from './helpers.ts';
 // One-tap replies (#105): set with set_thread_status, gone once anyone writes or the next turn starts.
 const root = mkdtempSync(join(tmpdir(), 'replies-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+// The server writes into root until it exits, and its exit handler deletes its run/mcp-<pid> folder, so wait for that.
+after(async () => {
+  await Promise.all(procs.map((p) => p.exitCode !== null || p.signalCode !== null ? undefined : new Promise((r) => { p.once('exit', r); p.kill(); })));
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -80,4 +81,6 @@ test('replies are checked, shown as a list, and go once someone writes', async (
   const sent = await call(`/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: 'Merge it' } });
   assert.equal(sent.status, 202);
   assert.deepEqual((await call(`/api/tickets/${t.id}`)).data.ticket.replies, []);
+  // That message started a turn; let it end before after() deletes the folder it runs in.
+  await until('the message\'s turn to end', async () => (await call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
 });

@@ -231,6 +231,8 @@ test('file tools: writes, edits and reads', () => {
   assert.equal(t('Write', { file_path: `${worktree}/src/x.ts` }), null);
   assert.equal(t('Edit', { file_path: 'src/runner.ts' }), null);
   assert.equal(t('Write', { file_path: `${data}/projects/2/shared/project/handoff.md` }), null);
+  // The scheme's repo memory, which the Taskmaster's prompt says it may write.
+  assert.equal(t('Edit', { file_path: `${home}/.claude/projects/-home-u--local-share-claude-coordinator-projects-2-repo/memory/MEMORY.md` }), null);
   assert.equal(t('mcp__thread__set_thread_status', { title: 'x' }), null);
 });
 

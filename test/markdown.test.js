@@ -153,3 +153,17 @@ test('chat: #N refs link outside code, and #127\'s strikes render', () => {
   assert.equal(chat(struck), '<ul><li><del>the build is green</del></li><li>next</li></ul>');
   assert.equal(chat('~~**bold** struck~~ then ~~ spaced ~~'), '<p><del><strong>bold</strong> struck</del> then ~~ spaced ~~</p>');
 });
+
+test('a NUL or \\u0001 in the text can neither hang the render nor reach held HTML', () => {
+  assert.equal(md('a\u0000b `c\u0000d`'), '<p>a�b <code>c�d</code></p>');
+  const image = (href, alt) => `<img src="${href}" alt="${alt}">`;
+  assert.equal(md('![\u00001\u0000](p.png) [x](http://e/"onerror=1)', { image }),
+    '<p><img src="p.png" alt="�1�"> <a href="http://e/&quot;onerror=1" target="_blank" rel="noopener">x</a></p>');
+});
+
+test('a linked image keeps its picture, and alt text is plain', () => {
+  const image = (href, alt) => `<img src="${href}" alt="${alt}">`;
+  assert.equal(md('[![badge](b.png)](https://x.io)', { image }),
+    '<p><a href="https://x.io" target="_blank" rel="noopener"><img src="b.png" alt="badge"></a></p>');
+  assert.equal(md('![a `x` b](u.png)', { image }), '<p><img src="u.png" alt="a x b"></p>');
+});

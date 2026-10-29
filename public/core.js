@@ -245,7 +245,9 @@ export function markdownDoc(src, opts = {}) {
     const a = e.target.closest?.('a.anchor');
     if (!a) return;
     e.preventDefault();
-    div.querySelector(`[data-slug="${CSS.escape(decodeURIComponent(a.getAttribute('href').slice(1)))}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    let id = a.getAttribute('href').slice(1);
+    try { id = decodeURIComponent(id); } catch {}
+    div.querySelector(`[data-slug="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   return div;
 }

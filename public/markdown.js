@@ -11,6 +11,8 @@ const HEADING = /^(#{1,6})\s+(.*?)\s*#*$/;
 const HR = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const QUOTE = /^ {0,3}>/;
 const ITEM = /^( *)([-*+]|\d{1,9}[.)])(?:[ \t]+(.*)|$)/;
+/** `[label](target "title")`, on escaped text. */
+const LINK = /\[((?:[^[\]]|\[[^\]]*\])*)\]\(\s*(?:&lt;)?([^\s()]*?)(?:&gt;)?(?:\s+&quot;(.*?)&quot;)?\s*\)/g;
 const DELIM = /^\s*\|?(?:\s*:?-+:?\s*\|)*\s*:?-+:?\s*\|?\s*$/;
 
 const indentOf = (l) => /^ */.exec(l)[0].length;
@@ -58,6 +60,8 @@ export function renderMarkdown(src, { link, image, text = (s) => s, breaks = fal
     // Code, escapes, links and URLs are held out as \0n\0 so emphasis can't reach into them.
     const held = [];
     const hold = (html) => `\u0000${held.push(html) - 1}\u0000`;
+    // An image's alt is an attribute, so what was held in it comes back as text.
+    const plain = (html) => html.replace(/\u0000(\d+)\u0000/g, (_, i) => held[i].replace(/<[^>]*>/g, ''));
     const urls = [];
     let s = escapeHtml(t)
       .replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (_, _ticks, c) => hold(`<code>${/^ .*[^ ].* $/.test(c) ? c.slice(1, -1) : c}</code>`))
@@ -65,9 +69,9 @@ export function renderMarkdown(src, { link, image, text = (s) => s, breaks = fal
       // "C:\Users\x\..." and "\\server" read as typed; widen it if someone needs "\." or "\\".
       .replace(/\\(&lt;|&gt;|[*_`|[\]~#])/g, (_, c) => hold(c))
       .replace(/&lt;br\s*\/?&gt;/gi, () => hold('<br>'))
-      .replace(/(!?)\[((?:[^[\]]|\[[^\]]*\])*)\]\(\s*(?:&lt;)?([^\s()]*?)(?:&gt;)?(?:\s+&quot;(.*?)&quot;)?\s*\)/g, (_, bang, label, href, title) => hold(bang
-        ? image(unescapeHtml(href), label, title ?? null)
-        : link(unescapeHtml(href), emphasis(label))))
+      // Images first, so a linked image ("[![alt](a.png)](https://x)") keeps its picture.
+      .replace(new RegExp(`!${LINK.source}`, 'g'), (_, alt, href, title) => hold(image(unescapeHtml(href), plain(alt), title ?? null)))
+      .replace(LINK, (_, label, href) => hold(link(unescapeHtml(href), emphasis(label))))
       // A URL's trailing marks stay outside it: "**https://x/**." is bold, then a full stop.
       .replace(/https?:\/\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>\u0000])+/gi, (url) => {
         const tail = /[*_~.,:;!?]*$/.exec(url)[0];
@@ -195,7 +199,8 @@ export function renderMarkdown(src, { link, image, text = (s) => s, breaks = fal
     return out.join('');
   };
 
-  let lines = src.replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '').split('\n');
+  // \0 and \1 mark held-out pieces inside inline(), so the text itself can't carry them.
+  let lines = src.replace(/[\u0000\u0001]/g, '\uFFFD').replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '').split('\n');
   let front = '';
   // YAML front matter stays apart from the doc, as GitHub keeps it.
   const fm = !breaks && lines[0] === '---' ? lines.indexOf('---', 1) : -1;

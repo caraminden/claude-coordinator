@@ -21,3 +21,10 @@ export function struckSource(text, strikes) {
   }
   return text;
 }
+
+/** A strike_text note's struck words, reason and chat, or null for another note. Older notes kept only text, read back here. */
+export function noteStrike(data) {
+  if (data.strike) return data.strike;
+  const old = data.text?.match(/^Struck through as wrong: "(.*?)"\. (.*)$/s);
+  return old && { quote: old[1], reason: old[2] };
+}

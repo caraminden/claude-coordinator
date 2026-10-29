@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { struckSource } from '../public/strike.js';
+import { noteStrike, struckSource } from '../public/strike.js';
 
 // strike_text: a thread proven wrong strikes its own words, in its replies or in the messages it
 // sent another thread. A stand-in `claude -p` ends every turn at once.
@@ -68,4 +68,10 @@ test('struck words render as ~~strikethrough~~ line by line, keeping list and qu
   assert.equal(struckSource('same same', [{ text: 'same' }]), '~~same~~ same');
   assert.equal(struckSource('untouched', undefined), 'untouched');
   assert.equal(struckSource('gone', [{ text: 'missing' }]), 'gone');
+});
+
+test('a strike note is read from its payload, or from the text of a note written before it had one', () => {
+  assert.deepEqual(noteStrike({ text: 'x', strike: { quote: 'q', reason: 'r', chat: null } }), { quote: 'q', reason: 'r', chat: null });
+  assert.deepEqual(noteStrike({ text: 'Struck through as wrong: "it is merged". It was "reverted". Then fixed.' }), { quote: 'it is merged', reason: 'It was "reverted". Then fixed.' });
+  assert.equal(noteStrike({ text: 'Stopped by user.' }), null);
 });

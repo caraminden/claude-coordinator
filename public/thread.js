@@ -4,7 +4,7 @@ import { alertNote, composer, composerPlaceholder, renderModelPicker } from './c
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { recapEvent, showRecap } from './recap.js';
-import { struckSource } from './strike.js';
+import { noteStrike, struckSource } from './strike.js';
 import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
@@ -652,14 +652,12 @@ export function base64Url(mediaType, data) {
   return URL.createObjectURL(new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: mediaType }));
 }
 
-/** Short wording for the notes the server writes often (null hides one); anything else stays as it is. */
 /**
  * A strike_text note, or null: "Struck through in #116: ~~the wrong words~~ → the reason", linking the
- * chat that shows the message when that's another one. Older notes kept only text, read back here.
+ * chat that shows the message when that's another one.
  */
 function strikeNote(data) {
-  const old = !data.strike && data.text?.match(/^Struck through as wrong: "(.*)"\. (.*)$/s);
-  const s = data.strike ?? (old && { quote: old[1], reason: old[2] });
+  const s = noteStrike(data);
   if (!s) return null;
   const c = s.chat;
   const where = c === null ? ' above' : c ? [' in ', h('a', { class: 'thread-ref', href: c.number == null ? `#/p/${c.project}` : threadNumberHref(c.project, c.number) },
@@ -667,6 +665,7 @@ function strikeNote(data) {
   return h('div', { class: 'note strike-note' }, `✎ Struck through`, where, ': ', h('del', {}, s.quote), ' → ', threadRefs(s.reason));
 }
 
+/** Short wording for the notes the server writes often (null hides one); anything else stays as it is. */
 function shortNote(text) {
   let m;
   // Older threads stored a note on every session restore; restores are silent now.

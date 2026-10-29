@@ -199,7 +199,8 @@ restart() {
 
 deploy() {
   init_state
-  exec 9>"$STATE/lock"
+  # DEPLOY_LOCKED: run by tools/land.sh, which already holds the lock on fd 9.
+  [ -n "${DEPLOY_LOCKED:-}" ] || exec 9>"$STATE/lock"
   flock -w 900 9 || { say "another deploy has held the lock for 15 min; try again later"; exit 1; }
   [ -f "$STATE/FAILED" ] && say "warning: the last rollback failed too (see journalctl --user -u $UNIT); carrying on" && rm -f "$STATE/FAILED"
   if [ -n "$(git_live status --porcelain --untracked-files=no)" ]; then
@@ -283,6 +284,8 @@ deploy() {
     say "could not queue the restart: $out"
     exit 1
   fi
+  # The queued restart takes the lock before it restarts: let go, or it waits out the 60 s below.
+  flock -u 9
   # Usually it is live within seconds; say so here, as this turn carries on through the restart.
   for _ in $(seq 60); do
     sleep 1

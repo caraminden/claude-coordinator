@@ -194,8 +194,9 @@ if (!BOOT_CHECK) {
   // A dismissal can be what a chained minion waits for.
   const stopPreview = runner.onClose;
   runner.onClose = (ticketId) => {
-    stopPreview(ticketId);
+    const stopped = stopPreview(ticketId);
     waiters.check();
+    return stopped;
   };
   liveOn(BOOT_COMMIT);
 }

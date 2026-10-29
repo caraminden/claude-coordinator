@@ -475,7 +475,7 @@ export const ticketRoutes: Route[] = [
       if (ticket.kind === 'coordinator') throw new HttpError(400, 'The Taskmaster cannot be dismissed');
       if (runner.isRunning(id)) throw new HttpError(409, 'Stop the minion before dismissing it');
       if (body.status === 'closed') {
-        runner.close(id, `${session.name} dismissed this minion.`);
+        await runner.close(id, `${session.name} dismissed this minion.`);
       } else {
         store.updateTicket(id, { status: body.status });
         runner.emit(id, 'note', { text: `${session.name} reopened this minion.` });

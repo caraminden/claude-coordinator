@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -190,11 +190,47 @@ test('idle previews stop (a page load starts them again) and at most `max` run a
     assert.equal(previews.isRunning(a.id), false, 'the least recently used one made room');
     assert.equal(existsSync(join(previews.root, String(a.id))), false);
     assert.equal(previews.offered(a.id), true, 'still offered: a page load starts it again');
-    previews.sweep(Date.now() + previews.idleMs + 1);
+    await previews.sweep(Date.now() + previews.idleMs + 1);
     assert.equal(previews.isRunning(b.id), false);
     assert.equal(existsSync(join(previews.root, String(b.id))), false);
   } finally {
-    previews.stop(a.id, true);
-    previews.stop(b.id, true);
+    await previews.stop(a.id, true);
+    await previews.stop(b.id, true);
+  }
+});
+
+test('stopping a preview waits for its process to exit before deleting its copy', async () => {
+  // A preview that ignores SIGTERM and keeps writing into its folder, as a shutting-down server does
+  // (its exit handler removes run/mcp-<pid>, which made a delete racing it leave the folder behind).
+  const d3 = join(root, 'data3');
+  mkdirSync(d3);
+  const s3 = new Store(join(d3, 'coordinator.db'));
+  const t = s3.createTicket({ project_id: s3.createProject('Three', null).id, title: 'Stubborn', permission_mode: 'default', created_by: 'Cara' });
+  const wt = join(root, 'stubborn');
+  mkdirSync(wt);
+  writeFileSync(join(wt, 'server.ts'), `import { mkdirSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { join } from 'node:path';
+const dir = process.env.DATA_DIR!;
+writeFileSync(join(dir, '..', 'stubborn.pid'), String(process.pid));
+process.on('SIGTERM', () => setInterval(() => {
+  mkdirSync(join(dir, 'run'), { recursive: true });
+  writeFileSync(join(dir, 'run', String(Date.now())), 'x');
+}, 1));
+createServer((req, res) => res.end(JSON.stringify({ ok: true, preview: true }))).listen(Number(process.env.PORT), '127.0.0.1');
+`);
+  s3.setTicketDir(t.id, wt, 'ticket/3-stubborn');
+  const previews = new Previews(s3, d3);
+  const dir = join(previews.root, String(t.id));
+  await previews.start(s3.getTicket(t.id)!);
+  const pid = Number(readFileSync(join(previews.root, 'stubborn.pid'), 'utf8'));
+  try {
+    await previews.stop(t.id, true);
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'the process is gone once stop returns');
+    assert.equal(existsSync(dir), false);
+  } finally {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {}
   }
 });

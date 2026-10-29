@@ -25,6 +25,7 @@ const IDLE_MS = 60 * 60 * 1000;
 const SWEEP_MS = 5 * 60 * 1000;
 const MAX_RUNNING = 5;
 const BOOT_TIMEOUT_MS = 30_000;
+const KILL_AFTER_MS = 2000;
 
 export class PreviewError extends HttpError {}
 
@@ -45,6 +46,16 @@ function head(cwd: string): string | null {
   }
 }
 
+/** End a preview's process and wait until it has exited, so nothing writes into its folder as we delete it. */
+async function end(proc: ChildProcess): Promise<void> {
+  if (proc.exitCode !== null || proc.signalCode !== null) return;
+  const exited = new Promise((r) => proc.once('exit', r));
+  proc.kill();
+  const timer = setTimeout(() => proc.kill('SIGKILL'), KILL_AFTER_MS);
+  await exited;
+  clearTimeout(timer);
+}
+
 async function freePort(): Promise<number> {
   const srv = createServer();
   await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
@@ -58,6 +69,7 @@ export class Previews {
   readonly root: string;
   private running = new Map<number, Running>();
   private starting = new Map<number, Promise<Running>>();
+  private stopping = new Map<number, Promise<void>>();
   /** A ticket's offer changed (its view's preview flag). */
   onChange: (ticketId: number) => void = () => {};
   idleMs = IDLE_MS;
@@ -94,23 +106,30 @@ export class Previews {
     }
   }
 
-  /** Stop a ticket's preview and delete its copy of the data; `forget` also withdraws the offer. */
-  stop(ticketId: number, forget = false) {
+  /**
+   * Stop a ticket's preview and, once its process has exited, delete its copy of the data; `forget`
+   * also withdraws the offer. Resolves when the folder is gone.
+   */
+  stop(ticketId: number, forget = false): Promise<void> {
     const r = this.running.get(ticketId);
     if (r) {
       this.running.delete(ticketId);
-      r.proc.kill();
-      rmSync(r.dir, { recursive: true, force: true });
+      const job = end(r.proc)
+        .then(() => rmSync(r.dir, { recursive: true, force: true }))
+        .finally(() => this.stopping.delete(ticketId));
+      this.stopping.set(ticketId, job);
     }
     if (forget && this.offered(ticketId)) {
       this.store.deleteSetting(previewKey(ticketId));
       this.onChange(ticketId);
     }
+    return this.stopping.get(ticketId) ?? Promise.resolve();
   }
 
   /** Stop previews nobody has used for idleMs; a page load starts them again. */
-  sweep(now = Date.now()) {
-    for (const [id, r] of this.running) if (now - r.lastUsed > this.idleMs) this.stop(id);
+  async sweep(now = Date.now()) {
+    const idle = [...this.running].filter(([, r]) => now - r.lastUsed > this.idleMs);
+    await Promise.all(idle.map(([id]) => this.stop(id)));
   }
 
   /** One boot at a time per ticket: a page load during a start waits for it. */
@@ -123,10 +142,11 @@ export class Previews {
   }
 
   private async spawnPreview(ticket: Ticket): Promise<Running> {
-    this.stop(ticket.id);
+    // Also waits out a stop already under way, which would otherwise delete the new copy.
+    await this.stop(ticket.id);
     while (this.running.size >= this.max) {
       const [lru] = [...this.running].sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-      this.stop(lru);
+      await this.stop(lru);
     }
     const dir = join(this.root, String(ticket.id));
     rmSync(dir, { recursive: true, force: true });
@@ -162,18 +182,18 @@ export class Previews {
       this.running.delete(ticket.id);
       rmSync(dir, { recursive: true, force: true });
     });
-    const fail = (why: string) => {
-      proc.kill();
+    const fail = async (why: string) => {
+      await end(proc);
       rmSync(dir, { recursive: true, force: true });
       return new PreviewError(502, `${why}${log ? `\n--- preview output ---\n${log}` : ''}`);
     };
-    for (const end = Date.now() + BOOT_TIMEOUT_MS; ; await new Promise((res) => setTimeout(res, 100))) {
-      if (proc.exitCode !== null || proc.signalCode) throw fail(`The preview exited during boot (code ${proc.exitCode})`);
-      if (Date.now() > end) throw fail(`The preview did not answer within ${BOOT_TIMEOUT_MS / 1000} s`);
+    for (const deadline = Date.now() + BOOT_TIMEOUT_MS; ; await new Promise((res) => setTimeout(res, 100))) {
+      if (proc.exitCode !== null || proc.signalCode) throw await fail(`The preview exited during boot (code ${proc.exitCode})`);
+      if (Date.now() > deadline) throw await fail(`The preview did not answer within ${BOOT_TIMEOUT_MS / 1000} s`);
       const health = await fetch(`http://127.0.0.1:${port}/api/health`).then((res) => (res.ok ? res.json() : null), () => null);
       if (!health) continue;
       // A branch from before preview mode would serve with turns and pushes switched on.
-      if (health.preview !== true) throw fail('This branch\'s server has no preview mode; rebase it onto main first');
+      if (health.preview !== true) throw await fail('This branch\'s server has no preview mode; rebase it onto main first');
       break;
     }
     this.running.set(ticket.id, r);

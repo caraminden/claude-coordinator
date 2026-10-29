@@ -652,7 +652,7 @@ export class Runner {
   /** The commit the server runs now (server.ts: the waiters' head), to tell whether a scheme deploys here. */
   liveHead: () => string | null = () => null;
   /** A ticket was dismissed (its preview goes with it). */
-  onClose: (ticketId: number) => void = () => {};
+  onClose: (ticketId: number) => Promise<void> | void = () => {};
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
   filesDir: (ticket: Ticket) => string | null = () => null;
   /** The folder every thread and the coordinator of a project can read and write, for handoffs and notes. */
@@ -730,14 +730,14 @@ export class Runner {
     };
   }
 
-  /** Close a ticket that is not running. Its worktree and branch are kept. */
-  close(ticketId: number, text: string) {
+  /** Close a ticket that is not running. Its worktree and branch are kept. Resolves once its preview is gone. */
+  close(ticketId: number, text: string): Promise<void> | void {
     if (this.cancelLimitWait(ticketId)) this.queues.delete(ticketId);
     // A reopened minion shouldn't offer the go-ahead it had when dismissed.
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
-    this.onClose(ticketId);
+    return this.onClose(ticketId);
   }
 
   /**

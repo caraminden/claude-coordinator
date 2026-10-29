@@ -4,6 +4,8 @@
 // Chained minions (create_ticket's start_after) use the same check: one is created parked, with its
 // brief held until the minion it follows has its work live (or merged); also checked when a minion
 // is dismissed.
+// In a scheme whose code this server doesn't run (Delve), nothing deploys here, so live means merged
+// on that scheme's main, for chains and commit waiters alike: checked whenever chains are.
 import { execFileSync } from 'node:child_process';
 import type { Store } from './db.ts';
 
@@ -71,6 +73,13 @@ export class LiveWaiters {
 
   chains(): Chain[] {
     return this.store.getSetting<Chain[]>(CHAINS) ?? [];
+  }
+
+  /** The repo of `ticket`'s scheme, when this server doesn't run its code: there live means merged. */
+  elsewhere(ticket: number): string | null {
+    const t = this.store.getTicket(ticket);
+    const repo = t && this.store.getProject(t.project_id)?.repo_dir;
+    return repo && this.head && !runsRepo(repo, this.head) ? repo : null;
   }
 
   /** Is `commit` on the scheme's main, locally or on origin? */
@@ -176,9 +185,11 @@ export class LiveWaiters {
     return null;
   }
 
-  /** Is this waiter's deploy live? */
+  /** Is this waiter's deploy live (in a scheme this server doesn't run: its commit merged)? */
   private live(w: Waiter): boolean {
     if (!this.head) return false;
+    const other = this.elsewhere(w.ticket);
+    if (other) return !!w.commit && this.merged(other, w.commit);
     if (!w.commit) return this.head !== w.since;
     return git(this.repo, ['merge-base', '--is-ancestor', w.commit, this.head]) !== null;
   }
@@ -212,8 +223,8 @@ export class LiveWaiters {
     this.store.setSetting(KEY, waiting);
     const short = (c: string) => c.slice(0, 7);
     for (const w of woken) {
-      const what = w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now';
-      this.send(w.ticket, `${what} (the server runs \`${short(head!)}\`): ${w.reason}`);
+      if (w.commit && this.elsewhere(w.ticket)) this.send(w.ticket, `\`${short(w.commit)}\` is on the scheme's main now: ${w.reason}`);
+      else this.send(w.ticket, `${w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now'} (the server runs \`${short(head!)}\`): ${w.reason}`);
     }
     return woken.length + this.checkChains();
   }

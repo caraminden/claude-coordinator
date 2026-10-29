@@ -129,6 +129,35 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   assert.equal(store.getSetting(`loop:${id}`), null);
 });
 
+test('in a scheme whose code this server does not run, a commit waiter wakes once the commit is on its main', () => {
+  // #150: a Delve commit resolved in Delve's repo, but live() checked it against the live checkout, so it never fired.
+  const other = join(root, 'other');
+  mkdirSync(other);
+  const og = (...args: string[]) => execFileSync('git', args, { cwd: other, encoding: 'utf8' }).trim();
+  og('init', '-q', '-b', 'main');
+  og('config', 'user.email', 't@example.com');
+  og('config', 'user.name', 'T');
+  og('commit', '-q', '--allow-empty', '-m', 'o1');
+  og('checkout', '-q', '-b', 'ticket/x');
+  og('commit', '-q', '--allow-empty', '-m', 'o2');
+  const work = og('rev-parse', 'HEAD');
+  og('checkout', '-q', 'main');
+  const delve = store.createProject('D', null);
+  store.setProjectRepoDir(delve.id, other);
+  const t = store.createTicket({ project_id: delve.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(t.id, { status: 'idle' });
+  const w = waiters(commit());
+  assert.equal(w.elsewhere(t.id), other, 'so the route refuses a wait with no commit');
+  sent.length = 0;
+  assert.equal(w.add(t.id, work, 'play the new level'), true);
+  assert.equal(w.check(), 0, 'not merged yet');
+  og('merge', '-q', '--ff-only', 'ticket/x');
+  assert.equal(w.check(), 1);
+  assert.deepEqual(sent, [{ id: t.id, text: `\`${work.slice(0, 7)}\` is on the scheme's main now: play the new level` }]);
+  assert.equal(w.add(t.id, work, 'x'), false, 'already merged');
+  assert.equal(w.list().length, 0);
+});
+
 test('pending-deploy minions whose branch the live commit contains are found, whoever deployed it', () => {
   // #81: a deploy reports only to the minions that ran it, so one waiting on a commit that went live
   // in someone else's restart stayed pending-deploy.

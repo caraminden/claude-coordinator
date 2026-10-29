@@ -545,12 +545,15 @@ export const ticketRoutes: Route[] = [
       const body = await readJson(req);
       const reason = str(body.reason, 'Reason', 1000);
       let commit: string | null = null;
-      if (body.commit != null && body.commit !== '') {
+      const elsewhere = waiters.elsewhere(id);
+      if (body.commit == null || body.commit === '') {
+        if (elsewhere) throw new HttpError(400, "This scheme has no deploys; give the commit you're waiting on");
+      } else {
         commit = waiters.resolve(String(body.commit), store.getProject(ticket.project_id)?.repo_dir ?? null);
         if (!commit) throw new HttpError(400, `No commit ${String(body.commit).slice(0, 40)} in the live checkout or the scheme's repo`);
       }
       const waiting = waiters.add(id, commit, reason);
-      return json(res, 201, { waiting, commit, head: waiters.head });
+      return json(res, 201, { waiting, commit, head: waiters.head, merged: !!elsewhere });
     },
   },
   {

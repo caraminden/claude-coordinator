@@ -224,23 +224,31 @@ function load(ctx: Ctx, name: string, id: number): number | undefined {
   ctx.machine = m;
 }
 
-/** The 403 for a caller the route's `who` leaves out, or for one reaching past its own scheme or chat. */
-function checkWho(route: Route, ctx: Ctx, method: string, project: number | undefined, ticket: number | undefined) {
+/**
+ * The 403 for a caller the route's `who` leaves out, checked before any row is loaded so a refused
+ * caller learns nothing of what exists. A minion's reach is all in the path: its own ticket, or its own scheme.
+ */
+function checkRole(route: Route, caller: Ticket | null, params: Record<string, string>) {
   const who = route.who as readonly Who[];
-  const { caller } = ctx;
   if (!caller) {
     if (!who.includes('person')) throw new HttpError(403, route.refuse ?? 'Not for people');
     return;
   }
+  const ticket = params.ticket === undefined ? undefined : Number(params.ticket);
   if (who.includes('self') && ticket === caller.id) return;
   if (caller.kind === 'coordinator') {
     if (!who.includes('taskmaster')) throw new HttpError(403, route.refuse ?? 'Not available to the Taskmaster');
-    if (project !== undefined && project !== caller.project_id) throw new HttpError(403, 'Outside this Taskmaster\'s scheme');
-    if (ticket === caller.id && method !== 'GET') throw new HttpError(403, 'The Taskmaster cannot act on itself');
     return;
   }
-  const own = ticket !== undefined ? ticket === caller.id : project === undefined || project === caller.project_id;
+  const own = ticket !== undefined ? ticket === caller.id : params.project === undefined || Number(params.project) === caller.project_id;
   if (!who.includes('minion') || !own) throw new HttpError(403, 'A minion may only update itself');
+}
+
+/** Once its rows are loaded: a Taskmaster stays in its own scheme, and only reads itself (its 'self' routes aside). */
+function checkScope(route: Route, caller: Ticket, method: string, project: number | undefined, ticket: number | undefined) {
+  if (caller.kind !== 'coordinator' || (ticket === caller.id && (route.who as readonly Who[]).includes('self'))) return;
+  if (project !== undefined && project !== caller.project_id) throw new HttpError(403, 'Outside this Taskmaster\'s scheme');
+  if (ticket === caller.id && method !== 'GET') throw new HttpError(403, 'The Taskmaster cannot act on itself');
 }
 
 /**
@@ -278,13 +286,14 @@ export function router(routes: Route[]) {
     }
     if (!route) throw onPath.length ? new HttpError(405, 'Method not allowed') : new HttpError(404, 'Not found');
 
-    let project: number | undefined;
-    for (const name of hit!.names) if (LOADED.includes(name)) project = load(ctx, name, Number(ctx.params[name])) ?? project;
     if (session.agent !== undefined) {
       ctx.caller = app.store.getTicket(session.agent) ?? null;
       if (!ctx.caller) throw new HttpError(403, 'No such minion');
     }
-    checkWho(route, ctx, method, project, ctx.ticket?.id);
+    checkRole(route, ctx.caller, ctx.params);
+    let project: number | undefined;
+    for (const name of hit!.names) if (LOADED.includes(name)) project = load(ctx, name, Number(ctx.params[name])) ?? project;
+    if (ctx.caller) checkScope(route, ctx.caller, method, project, ctx.ticket?.id);
     return route.handler(ctx);
   };
   // shortcut: while routes move over from server.ts's api(), which paths the table already has.

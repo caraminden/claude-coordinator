@@ -34,6 +34,7 @@ import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, buildNumber, clientIp, HttpError, isSecure, json, oneOf, readJson, replyList, requestUrl, router, SECURITY_HEADERS, send, str, type App } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { pushRoutes } from './src/routes/push.ts';
+import { fileRoutes, fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './src/routes/files.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -470,87 +471,9 @@ function scheduleBranchCheck(ticketId: number) {
   }, SCAN_DELAY_MS));
 }
 
-function artifactView(a: Artifact & { ticket_title?: string; ticket_kind?: string; ticket_number?: number | null }) {
-  const ticket = a.ticket_title === undefined ? store.getTicket(a.ticket_id) : null;
-  return {
-    ...a,
-    name: basename(a.path),
-    display_path: displayPath(ticket ?? store.getTicket(a.ticket_id)!, a.path),
-    kind: fileType(a.path)?.kind ?? 'text',
-    ticket_title: a.ticket_title ?? ticket?.title ?? '',
-    ticket_kind: a.ticket_kind ?? ticket?.kind ?? 'ticket',
-    ticket_number: a.ticket_number ?? ticket?.number ?? null,
-  };
-}
-
-/** Content-Security-Policy for an artifact opened directly or framed by the app. */
-function artifactCsp(kind: string): string {
-  // Tickets write these files, so never let them run as the app: sandboxed pages get an opaque
-  // origin with no cookies or API access. HTML may still run its own scripts (canvases, demos).
-  if (kind === 'html') return "sandbox allow-scripts allow-popups allow-forms allow-modals; frame-ancestors 'self'";
-  // Chrome's PDF viewer refuses to load in a sandbox; PDFs can't script the page anyway.
-  if (kind === 'pdf') return "frame-ancestors 'self'";
-  return "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'self'";
-}
-
 /** Where a ticket keeps files it fetched or made to show people, outside its repo. */
 function sharedDir(ticket: Ticket): string {
   return join(projectDir(DATA_DIR, ticket.project_id), 'shared', String(ticket.id));
-}
-
-/** A path as people should see it: relative to the working directory, or under "shared files". */
-function displayPath(ticket: Ticket, path: string): string {
-  const projectShared = projectSharedDir(DATA_DIR, ticket.project_id) + sep;
-  if (path.startsWith(projectShared)) return `scheme shared/${path.slice(projectShared.length)}`;
-  const shared = sharedDir(ticket) + sep;
-  if (path.startsWith(shared)) return `shared files/${path.slice(shared.length)}`;
-  if (ticket.cwd && path.startsWith(ticket.cwd + sep)) return path.slice(ticket.cwd.length + 1);
-  return path;
-}
-
-/** The folders a ticket may show files from: its working directory, its shared folder and the project's. */
-const ticketRoots = (ticket: Ticket) => [ticket.cwd, sharedDir(ticket), projectSharedDir(DATA_DIR, ticket.project_id)];
-
-/** A file a ticket may show (see resolveFile), or null. */
-function resolveTicketFile(ticket: Ticket, path: string) {
-  return resolveFile(path, ticket.cwd, ticketRoots(ticket));
-}
-
-/** Serve a file found by resolveFile, with byte ranges and a sandboxing CSP. */
-async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: Awaited<ReturnType<typeof resolveFile>>, path: string, download: boolean) {
-  if (!found) throw new HttpError(404, 'That file is no longer there');
-  const { file, type, size } = found;
-  const headers: Record<string, string | number> = {
-    'Content-Type': type.mime,
-    'Content-Security-Policy': artifactCsp(type.kind),
-    'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'same-origin',
-    'Cache-Control': 'private, no-cache',
-    'Accept-Ranges': 'bytes',
-  };
-  // Something people uploaded is only ever saved, never rendered, unless it's an image or a PDF.
-  if (download || type.kind === 'download' || (/[/\\]shared[/\\]\d+[/\\]uploads[/\\]/.test(file) && !opensInline(file))) headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(basename(path))}`;
-  // Byte ranges, so videos can seek (Safari won't play them without).
-  let start = 0;
-  let end = size - 1;
-  const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
-  if (range && (range[1] || range[2])) {
-    if (range[1]) {
-      start = Number(range[1]);
-      if (range[2]) end = Math.min(end, Number(range[2]));
-    } else {
-      start = Math.max(0, size - Number(range[2]));
-    }
-    if (start > end || start >= size) {
-      res.writeHead(416, { ...headers, 'Content-Range': `bytes */${size}` });
-      return res.end();
-    }
-    res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
-  } else {
-    res.writeHead(200, { ...headers, 'Content-Length': size });
-  }
-  if (req.method === 'HEAD' || size === 0) return res.end();
-  await pipeline(createReadStream(file, { start, end }), res).catch(() => {});
 }
 
 /** Display names end up in prompts as "[Name]: ...", so keep them plain. */
@@ -597,7 +520,7 @@ async function cleanQuestions(ticket: Ticket, raw: unknown) {
   });
   for (const [i, q] of questions.entries()) {
     for (const [j, o] of q.options.entries()) {
-      const problem = o.image && await optionImageProblem(o.image, ticket.cwd, ticketRoots(ticket));
+      const problem = o.image && await optionImageProblem(o.image, ticket.cwd, ticketRoots(app, ticket));
       if (problem) throw new HttpError(400, `Question ${i + 1} option ${j + 1} image ${problem}`);
     }
   }
@@ -726,76 +649,6 @@ function agentProject(session: Session, method: string, pathname: string): numbe
   // ask a question card in its chat, and close itself.
   if (t.kind !== 'coordinator' && !threadMayCall(t.id, method, pathname, t.project_id)) throw new HttpError(403, 'A minion may only update itself');
   return t.project_id;
-}
-
-// Images people paste into a chat. 5 MB is the API's per-image limit.
-const MAX_IMAGES = 6;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const IMAGE_TYPES: { type: string; ext: string; magic: (b: Buffer) => boolean }[] = [
-  { type: 'image/png', ext: '.png', magic: (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
-  { type: 'image/jpeg', ext: '.jpg', magic: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
-  { type: 'image/gif', ext: '.gif', magic: (b) => b.subarray(0, 4).toString('latin1') === 'GIF8' },
-  { type: 'image/webp', ext: '.webp', magic: (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP' },
-];
-const IMAGE_NAME = /^[0-9a-f]{24}\.(png|jpg|gif|webp)$/;
-
-function uploadsDir(ticket: Ticket): string {
-  return join(projectDir(DATA_DIR, ticket.project_id), 'uploads', String(ticket.id));
-}
-
-/** Check pasted images (base64 in the request body) and write them to the ticket's uploads folder. */
-async function saveImages(ticket: Ticket, raw: unknown): Promise<{ name: string; path: string; mediaType: string }[]> {
-  if (raw == null || (Array.isArray(raw) && !raw.length)) return [];
-  if (!Array.isArray(raw)) throw new HttpError(400, 'images must be a list');
-  if (raw.length > MAX_IMAGES) throw new HttpError(400, `At most ${MAX_IMAGES} images per message`);
-  const decoded = raw.map((img) => {
-    const buf = Buffer.from(typeof img?.data === 'string' ? img.data : '', 'base64');
-    if (!buf.length) throw new HttpError(400, 'Empty image');
-    if (buf.length > MAX_IMAGE_BYTES) throw new HttpError(413, 'Images must be under 5 MB each');
-    // Trust the bytes, not the declared type, since these get served back to browsers.
-    const kind = IMAGE_TYPES.find((t) => t.magic(buf));
-    if (!kind) throw new HttpError(415, 'Images must be PNG, JPEG, GIF or WebP');
-    return { buf, kind };
-  });
-  const dir = uploadsDir(ticket);
-  await mkdir(dir, { recursive: true });
-  return Promise.all(decoded.map(async ({ buf, kind }) => {
-    const name = randomBytes(12).toString('hex') + kind.ext;
-    const path = join(dir, name);
-    await writeFile(path, buf);
-    return { name, path, mediaType: kind.type };
-  }));
-}
-
-/** A thread's attached files: its files folder (COORDINATOR_FILES_DIR), so Claude can read them. */
-const fileUploadsDir = (ticket: Ticket) => join(sharedDir(ticket), 'uploads');
-
-/** An uploaded file by its name in the thread's uploads folder, or null; the name can't leave the folder. */
-async function findUpload(ticket: Ticket, name: unknown) {
-  if (typeof name !== 'string' || !isUploadName(name)) return null;
-  const dir = fileUploadsDir(ticket);
-  try {
-    const path = await realpath(join(dir, name));
-    if (!path.startsWith(await realpath(dir) + sep)) return null;
-    const st = await stat(path);
-    return st.isFile() ? { name, path, size: st.size } : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The files a message names (uploaded beforehand with PUT .../uploads), each with its type for Claude. */
-async function messageFiles(ticket: Ticket, raw: unknown): Promise<MessageFile[]> {
-  if (raw == null) return [];
-  if (!Array.isArray(raw)) throw new HttpError(400, 'files must be a list');
-  if (raw.length > MAX_UPLOADS) throw new HttpError(400, `At most ${MAX_UPLOADS} files per message`);
-  return Promise.all(raw.map(async (f) => {
-    const found = await findUpload(ticket, f?.name);
-    if (!found) throw new HttpError(400, 'An attached file is no longer there; attach it again');
-    // The browser's word for the type, only as a hint to Claude.
-    const type = typeof f.type === 'string' && /^[\w.+-]{1,60}\/[\w.+-]{1,100}$/.test(f.type) ? f.type : 'application/octet-stream';
-    return { ...found, type };
-  }));
 }
 
 // ---------- search ----------
@@ -1246,82 +1099,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     return json(res, 200, q.length < 2 ? [] : searchProject(project.id, q, ticket));
   }
 
-  m = pathname.match(/^\/api\/projects\/(\d+)\/artifacts$/);
-  if (m && method === 'GET') {
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    return json(res, 200, store.listArtifacts(project.id).map(artifactView));
-  }
-
-  m = pathname.match(/^\/api\/projects\/(\d+)\/shared(\/file)?$/);
-  if (m && (method === 'GET' || (method === 'HEAD' && m[2]))) {
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    if (!m[2]) return json(res, 200, await sharedFiles(project.id));
-    // One file of the folder, by path relative to it (or ?info for its details).
-    const dir = projectSharedDir(DATA_DIR, project.id);
-    const path = url.searchParams.get('path') ?? '';
-    const found = await resolveFile(path, dir, [dir]);
-    if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
-    if (!url.searchParams.has('info')) return serveArtifact(req, res, found, path, url.searchParams.has('download'));
-    return json(res, 200, {
-      path, name: basename(found.abs), display_path: `scheme shared/${path}`,
-      kind: found.type.kind, size: found.size, mtime: found.mtime,
-    });
-  }
-
-  m = pathname.match(/^\/api\/artifacts\/(\d+)(\/[a-z]+)?$/);
-  if (m) {
-    const a = store.getArtifact(Number(m[1]));
-    if (!a) throw new HttpError(404, 'No such artifact');
-    const action = m[2] ?? '';
-    if (action === '' && method === 'GET') {
-      return json(res, 200, { artifact: artifactView(a), project: store.getProject(a.project_id) });
-    }
-    if (action === '/raw' && (method === 'GET' || method === 'HEAD')) {
-      return serveArtifact(req, res, await resolveTicketFile(store.getTicket(a.ticket_id)!, a.path), a.path, url.searchParams.has('download'));
-    }
-    if (action === '/pin' && method === 'POST') {
-      const body = await readJson(req);
-      store.setArtifactPinned(a.id, body.pinned ? session.name : null);
-      broadcast({ type: 'artifacts', projectId: a.project_id });
-      const updated = store.getArtifact(a.id);
-      return json(res, 200, updated ? artifactView(updated) : null);
-    }
-  }
-
-  m = pathname.match(/^\/api\/tickets\/(\d+)\/images\/([^/]+)$/);
-  if (m && method === 'GET') {
-    const ticket = ticketView(Number(m[1]));
-    inScope(ticket.project_id);
-    if (!IMAGE_NAME.test(m[2])) throw new HttpError(404, 'Not found');
-    let body: Buffer;
-    try {
-      body = await readFile(join(uploadsDir(ticket), m[2]));
-    } catch {
-      throw new HttpError(404, 'Not found');
-    }
-    const type = IMAGE_TYPES.find((t) => m![2].endsWith(t.ext))!.type;
-    // Names are random and never reused, so the browser can keep them.
-    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': type, 'Cache-Control': 'private, max-age=31536000, immutable' });
-    return res.end(body);
-  }
-
-  m = pathname.match(/^\/api\/tickets\/(\d+)\/uploads\/([^/]+)$/);
-  if (m && (method === 'GET' || method === 'HEAD')) {
-    const ticket = ticketView(Number(m[1]));
-    inScope(ticket.project_id);
-    let name = '';
-    try {
-      name = decodeURIComponent(m[2]);
-    } catch {}
-    const found = await findUpload(ticket, name);
-    if (!found) throw new HttpError(404, 'That file is no longer there');
-    // Images and PDFs open in the browser; anything else downloads and is never rendered (see serveArtifact).
-    const type = opensInline(name) ? fileType(name)! : { kind: 'download' as const, mime: 'application/octet-stream' };
-    return serveArtifact(req, res, { file: found.path, abs: found.path, type, size: found.size, mtime: 0 }, name, false);
-  }
-
   m = pathname.match(/^\/api\/tickets\/(\d+)(\/[a-z]+)?$/);
   if (m) {
     const id = Number(m[1]);
@@ -1376,25 +1153,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (action === '/branch' && method === 'GET') {
       return json(res, 200, { status: await ticketBranch(id) });
     }
-    if (action === '/file' && (method === 'GET' || method === 'HEAD')) {
-      // A file the ticket linked in its reply: ?path= as written there; ?info for its details.
-      const path = url.searchParams.get('path') ?? '';
-      if (!url.searchParams.has('info')) return serveArtifact(req, res, await resolveTicketFile(ticket, path), path, url.searchParams.has('download'));
-      const found = await resolveTicketFile(ticket, path);
-      if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
-      const relPath = found.abs.startsWith(ticket.cwd + sep) ? found.abs.slice(ticket.cwd.length + 1) : found.abs;
-      const artifact = store.findArtifact(ticket.id, [relPath, found.abs]);
-      return json(res, 200, {
-        path, name: basename(found.abs), display_path: displayPath(ticket, found.abs),
-        kind: found.type.kind, size: found.size, mtime: found.mtime,
-        artifact: artifact ? artifactView(artifact) : null,
-      });
-    }
     if (action === '/uploads' && method === 'PUT') {
       // A file from the composer, streamed to disk as it arrives; the message that sends it names it.
       if (session.agent !== undefined) throw new HttpError(403, 'Only people attach files');
       if (Number(req.headers['content-length'] ?? 0) > MAX_UPLOAD_BYTES) throw new HttpError(413, 'Files must be under 200 MB');
-      const saved = await saveUpload(fileUploadsDir(ticket), url.searchParams.get('name') ?? '', req);
+      const saved = await saveUpload(fileUploadsDir(app, ticket), url.searchParams.get('name') ?? '', req);
       return json(res, 201, { name: saved.name, size: saved.size });
     }
     if (action === '/events' && method === 'GET') {
@@ -1408,7 +1171,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const body = await readJson(req, 45_000_000);
       const attached = (Array.isArray(body.images) && body.images.length > 0) || (Array.isArray(body.files) && body.files.length > 0);
       const text = attached && (typeof body.text !== 'string' || !body.text.trim()) ? '' : str(body.text, 'Message', 100_000);
-      const files = await messageFiles(ticket, body.files);
+      const files = await messageFiles(app, ticket, body.files);
       // A chained minion that hasn't started: writing to it starts it now, its held brief first.
       const chained = waiters.release(id);
       if (chained) await startChained(chained, `${session.name} wrote to it before its leader's work was in`);
@@ -1417,7 +1180,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         return json(res, 202, { ...ticketView(id), held: runner.relay(id, id, session.name, text) });
       }
       // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
-      runner.send(id, session.name, text, await saveImages(ticket, body.images), {}, session.agent === undefined && body.after !== true, files);
+      runner.send(id, session.name, text, await saveImages(app, ticket, body.images), {}, session.agent === undefined && body.after !== true, files);
       personWrote(ticket, session);
       return json(res, 202, ticketView(id));
     }
@@ -1436,7 +1199,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       // A comment from a file's viewer: a chat message to the ticket that made the file, saying which file.
       if (session.agent !== undefined) throw new HttpError(403, 'Only people comment on files');
       const body = await readJson(req);
-      const found = typeof body.path === 'string' && await resolveTicketFile(ticket, body.path);
+      const found = typeof body.path === 'string' && await resolveTicketFile(app, ticket, body.path);
       if (!found) throw new HttpError(404, 'That file is no longer there');
       const quote = typeof body.quote === 'string' ? body.quote.slice(0, 2000) : '';
       // Named as the ticket would write it: relative to its working directory, else in full.
@@ -1677,7 +1440,7 @@ const app: App = {
   },
   broadcast, notify, newMinion, startChained, ticketBranch, sharedFiles, sharedDir, registryChanged,
 };
-const routes = router([...pushRoutes, ...machineRoutes]);
+const routes = router([...pushRoutes, ...machineRoutes, ...fileRoutes]);
 
 const server = createServer(async (req, res) => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);

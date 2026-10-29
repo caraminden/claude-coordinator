@@ -760,6 +760,51 @@ export class Store {
   }
 
   /**
+   * A page of a ticket's history before `before`, oldest first, in whole turns: as many of the newest
+   * turns as fit in `limit` events, and always at least one, so a running or long turn comes whole.
+   * A turn starts just after the previous turn's result, so the messages that started it come with it.
+   * With `from`, the page reaches back to the start of the turn holding that event too.
+   */
+  eventsPage(ticketId: number, before: number, limit: number, from?: number): { events: EventRow[]; more: boolean } {
+    const recent = this.db.prepare(`
+      SELECT id, kind = 'claude' AND json_extract(data, '$.type') = 'result' AS ends FROM events
+      WHERE ticket_id = ? AND id < ? ORDER BY id DESC LIMIT ?`).all(ticketId, before, limit + 1) as { id: number; ends: number }[];
+    if (!recent.length) return { events: [], more: false };
+    let start = recent.at(-1)!.id;
+    if (recent.length > limit) {
+      // The oldest turn start in the newest `limit` events: the event after a result.
+      const i = recent.findLastIndex((r, n) => n > 0 && r.ends);
+      start = i > 0 ? recent[i - 1].id : this.turnStart(ticketId, recent[0].id);
+    }
+    if (from != null) start = Math.min(start, this.turnStart(ticketId, from));
+    const events = this.db
+      .prepare('SELECT * FROM events WHERE ticket_id = ? AND id >= ? AND id < ? ORDER BY id')
+      .all(ticketId, start, before) as unknown as EventRow[];
+    const more = !!this.db.prepare('SELECT 1 FROM events WHERE ticket_id = ? AND id < ? LIMIT 1').get(ticketId, start);
+    return { events, more };
+  }
+
+  /** The first event of the turn holding event `id`: the one after the last result before it. */
+  private turnStart(ticketId: number, id: number): number {
+    const row = this.db.prepare(`
+      SELECT MIN(id) AS id FROM events WHERE ticket_id = ? AND id > COALESCE((
+        SELECT MAX(id) FROM events WHERE ticket_id = ? AND id < ? AND kind = 'claude' AND json_extract(data, '$.type') = 'result'), 0)`)
+      .get(ticketId, ticketId, id) as { id: number | null };
+    return row.id ?? id;
+  }
+
+  /**
+   * A ticket's events before `before` that can change its task list (progress.js applyEvent): turn
+   * starts, Claude's messages and tool calls, and the results that give a TaskCreate its id.
+   */
+  planEvents(ticketId: number, before: number): EventRow[] {
+    return this.db.prepare(`
+      SELECT * FROM events WHERE ticket_id = ? AND id < ? AND kind = 'claude' AND (
+        json_extract(data, '$.type') IN ('system', 'assistant') OR (json_extract(data, '$.type') = 'user' AND data LIKE '%Task #%'))
+      ORDER BY id`).all(ticketId, before) as unknown as EventRow[];
+  }
+
+  /**
    * A project's stored cards still waiting on a person, in threads that aren't dismissed: questions
    * nobody has answered (nor the minion settled), and plans still pending. Approval cards live in memory (Approvals.pending).
    * A person writing in the minion after a card counts as handling it there: typed replies clear it, not just clicks.

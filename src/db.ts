@@ -623,6 +623,13 @@ export class Store {
     return { since, turns: Object.fromEntries(rows.map((r) => [r.ticket_id, r.n])) };
   }
 
+  /** Words a thread wrote that show in a chat, newest first: its own replies, and its messages relayed into other threads (strike_text). */
+  wordsBy(ticketId: number): EventRow[] {
+    return this.db
+      .prepare(`SELECT * FROM events WHERE (ticket_id = ? AND kind = 'claude') OR (kind = 'user_message' AND json_extract(data, '$.from') = ?) ORDER BY id DESC`)
+      .all(ticketId, ticketId) as unknown as EventRow[];
+  }
+
   listEvents(ticketId: number, afterId = 0): EventRow[] {
     return this.db
       .prepare('SELECT * FROM events WHERE ticket_id = ? AND id > ? ORDER BY id')

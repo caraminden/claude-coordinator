@@ -154,6 +154,20 @@ const PROPOSE_PLAN = {
   },
 };
 
+const STRIKE_TEXT = {
+  name: 'strike_text',
+  description:
+    'Strike through words of yours that turned out wrong, once you are proven wrong in a disagreement (with the Taskmaster, a minion, or anyone): it finds the newest of your replies, or of your messages to another thread, containing the text, shows that text struck through there, and posts a note with your reason. Say what is right in your reply as usual.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', description: 'The wrong words, verbatim from one of your messages (Markdown and all), as short as still pins down the claim' },
+      reason: { type: 'string', description: 'One sentence on what proved it wrong, e.g. "git log shows abc123 is on main."' },
+    },
+    required: ['text', 'reason'],
+  },
+};
+
 const TOOLS = [
   {
     name: 'list_tickets',
@@ -248,6 +262,7 @@ const TOOLS = [
   },
   ASK_QUESTION,
   SETTLE_QUESTION,
+  STRIKE_TEXT,
   LIST_PROPERTIES,
   {
     name: 'set_properties',
@@ -464,6 +479,7 @@ const THREAD_TOOLS = [
   },
   ASK_QUESTION,
   SETTLE_QUESTION,
+  STRIKE_TEXT,
   PROPOSE_PLAN,
   LIST_PROPERTIES,
   {
@@ -679,6 +695,9 @@ async function runTool(name: string, args: any): Promise<string> {
       const { settled } = await call('POST', `/api/tickets/${TICKET}/settle`, { questionId: args.question_id ?? null });
       return settled.length ? `Settled ${settled.join(', ')}: shown as answered in the chat.` : 'No question card was open.';
     }
+    case 'strike_text':
+      await call('POST', `/api/tickets/${TICKET}/strike`, { text: args.text, reason: args.reason });
+      return 'Struck through in the chat, with your reason in a note.';
     case 'propose_plan':
       await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan });
       return 'The plan card is in the chat. End your turn now with a short reply and write no code; the go or the notes to revise it will come as the next message.';

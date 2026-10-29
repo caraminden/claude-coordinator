@@ -214,6 +214,7 @@ export function markdownDoc(src, opts = {}) {
           : `<span class="link" title="${href}">${text}</span>`;
       })
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/~~(.+?)~~/g, '<del>$1</del>')
       .replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>');
     html = threadRefsHtml(html);
     return html.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);

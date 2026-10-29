@@ -229,7 +229,7 @@ interface LoopState {
   /** When each recent message went through. */
   sent: number[];
   /** Messages waiting for a person to continue, oldest first. */
-  held: { to: number; author: string; text: string }[];
+  held: { to: number; author: string; text: string; from?: number }[];
 }
 
 const loopKey = (minionId: number) => `loop:${minionId}`;
@@ -376,6 +376,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     'After you deploy with tools/deploy.sh, set state pending-deploy and do not call close_self: a successful deploy dismisses the minion once it is live and your turn has ended (the restart does not interrupt your turn), and a failed one leaves it open with the error. pending-deploy means the deploy is all that is left: in a later turn, when someone still needs you (helping them use the change, an open question, more work), set another state or null, even while the deploy is still waiting.',
     'When the minion\'s work is done and should be dismissed with nothing to deploy, call the `close_self` tool (mcp__thread) near the end of your turn: the minion is dismissed once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not dismiss a minion whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can be dismissed, even if its brief says to dismiss.',
     'You cannot message other minions directly. When something needs the scheme\'s Taskmaster (passing information to another minion, starting a new minion, a decision for it), message it with the `message_coordinator` tool (mcp__thread) with a self-contained message. For work in another scheme, ask your Taskmaster the same way: it can pass it to that scheme\'s Taskmaster.',
+    'When you and the Taskmaster disagree and you are proven wrong (by a test, git, the live state, a person), strike through your incorrect words with the `strike_text` tool (mcp__thread), quoting them exactly from your reply or your message to it, then say what is right. Only strike your own words, and only once the evidence is in.',
     `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state parked and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live.`,
     ...showingFiles(ticket, filesDir, sharedDir),
     ...machineTools(machines),
@@ -474,6 +475,7 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
       : '',
     'When you need people to decide between clear options, ask with your `ask_question` tool: it shows a card in this chat they answer with a click. Then end your turn; the answers arrive as the next message.',
     'Minions can message you with their `message_coordinator` tool; those arrive named by the minion, like "[#12 Some title]: ...". Do what they ask when it is yours to do (relay to another minion with message_ticket, start a minion from a handoff), and do not reply to a minion just to acknowledge it.',
+    'When you and a minion (or another scheme\'s Taskmaster) disagree and you are proven wrong (by its evidence, git, the live state, a person), strike through your incorrect words with your `strike_text` tool, quoting them exactly from your reply or your message to it, then say what is right. Only strike your own words, and only once the evidence is in.',
     `When work touches another scheme, message that scheme's ${AGENT_NAME} with message_taskmaster: hand it what its scheme should do and let it run its own minions, since you cannot reach them. Its messages arrive as "[${AGENT_NAME} of <scheme>]: ..."; do what they ask when it is yours to do in this scheme, as with a minion's message, and answer with message_taskmaster when it needs an answer, never just to acknowledge. Each pair of ${AGENT_NAME}s may exchange ${TASKMASTER_LOOP_LIMIT} messages in ${TASKMASTER_LOOP_WINDOW_MS / 60_000} minutes before the next waits for a person; if you have a good reason to go past that, ask people with ask_question and say why.`,
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short and end each turn with what you did and what, if anything, you need from them.',
   ].join('\n');
@@ -769,8 +771,9 @@ export class Runner {
    * (Claude reads it between tool calls) or else queue it behind the turn.
    * `extra` is stored with the message for the UI (e.g. which question card it answers), not sent
    * to Claude; a comment's file (`extra.comment.about`) is, in its "[Name on file]:" prefix.
+   * `extra.from` is the thread that sent a relayed message, so it can strike_text it later.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string } } & object = {}, steer = false) {
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number } & object = {}, steer = false) {
     const live = this.turns.get(ticketId);
     const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
     // A turn from before steering (no steer.jsonl) can't take one; nor can one whose reply is already out.
@@ -812,9 +815,10 @@ export class Runner {
    * a person to continue, until continueLoop. Returns whether it was held.
    */
   relay(minionId: number, to: number, author: string, text: string): boolean {
-    const { held } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId);
-    if (!held) return false;
     const minion = this.store.getTicket(minionId)!;
+    const from = to === minionId ? this.store.getCoordinator(minion.project_id)?.id : minionId;
+    const { held } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, from);
+    if (!held) return false;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
     const note = held === 1
       ? `Paused: #${minion.number} and the ${AGENT_NAME} have exchanged ${LOOP_LIMIT} messages in the last hour, so ${what} is held until a person continues.`
@@ -830,7 +834,7 @@ export class Runner {
    * with a note in both chats, until a person continues in either. `left` is how many more may go now.
    */
   relayTaskmaster(from: number, to: number, author: string, text: string): { held: boolean; left: number } {
-    const { held, left } = this.guard(pairKey(from, to), TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, to, author, text, false);
+    const { held, left } = this.guard(pairKey(from, to), TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, to, author, text, false, from);
     if (held) {
       const [a, b] = [from, to].map((id) => this.store.getProject(this.store.getTicket(id)!.project_id)!.name);
       const what = `${a}'s message to ${b} ("${clip(text)}")`;
@@ -844,19 +848,42 @@ export class Runner {
   }
 
   /** Count a message against the loop at `key`: send it (steering a running turn with `steer`), or hold it once `limit` went in `windowMs` (or one is held already). `held` is how many wait now (0 if it went), `left` how many more may go. */
-  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean): { held: number; left: number } {
+  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean, from?: number): { held: number; left: number } {
     const loop = this.store.getSetting<LoopState>(key) ?? { sent: [], held: [] };
     const now = this.now();
     loop.sent = loop.sent.filter((t) => now - t < windowMs);
     if (!loop.held.length && loop.sent.length < limit) {
       loop.sent.push(now);
       this.store.setSetting(key, loop);
-      this.send(to, author, text, [], {}, steer);
+      this.send(to, author, text, [], { from }, steer);
       return { held: 0, left: limit - loop.sent.length };
     }
-    loop.held.push({ to, author, text });
+    loop.held.push({ to, author, text, from });
     this.store.setSetting(key, loop);
     return { held: loop.held.length, left: 0 };
+  }
+
+  /**
+   * strike_text: thread `by` was proven wrong, so `quote` (its own words, verbatim) is struck through
+   * where it shows: in the newest of its replies, or of its messages to another thread, that contains
+   * it. A note with the reason goes in that chat, and in `by`'s own if that's another one.
+   */
+  strike(by: number, quote: string, reason: string): { ticketId: number } {
+    const texts = (e: EventRow, data: any): string[] =>
+      e.kind === 'claude' ? (data.type === 'assistant' ? (data.message?.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text) : []) : [data.text ?? ''];
+    for (const e of this.store.wordsBy(by)) {
+      const data = JSON.parse(e.data);
+      if (!texts(e, data).some((t) => t.includes(quote))) continue;
+      const strikes: { text: string; reason: string; at: number }[] = data.strikes ?? [];
+      if (strikes.some((s) => s.text === quote)) throw new Error('That text is struck through already');
+      strikes.push({ text: quote, reason, at: this.now() });
+      this.store.setEventData(e.id, { ...data, strikes });
+      this.emit(e.ticket_id, 'strike', { event: e.id, strikes });
+      const note = `Struck through as wrong: "${clip(quote)}". ${reason}`;
+      for (const id of new Set([e.ticket_id, by])) this.emit(id, 'note', { text: note });
+      return { ticketId: e.ticket_id };
+    }
+    throw new Error('None of your replies or messages contains that text. Quote it exactly as you wrote it, Markdown and all, from a single message.');
   }
 
   /**
@@ -882,7 +909,7 @@ export class Runner {
       // A minion's note is keyed by the minion in both chats; a Taskmasters' note by each chat's own Taskmaster.
       for (const id of chats) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' ? id : ticketId, by, text });
       // Only the Taskmaster's messages to its minion steer; Taskmasters' to each other queue.
-      for (const m of loop.held) this.send(m.to, m.author, m.text, [], {}, ticket.kind !== 'coordinator' && m.to === ticketId);
+      for (const m of loop.held) this.send(m.to, m.author, m.text, [], { from: m.from }, ticket.kind !== 'coordinator' && m.to === ticketId);
       total += n;
     }
     return total;

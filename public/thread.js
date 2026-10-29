@@ -4,6 +4,7 @@ import { alertNote, composer, composerPlaceholder, renderModelPicker } from './c
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { recapEvent, showRecap } from './recap.js';
+import { struckSource } from './strike.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
@@ -440,7 +441,8 @@ export function appendEvent(event, scroll = true) {
     } else {
       const bubble = userBubble(data.author, data.text,
         (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
-        data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null);
+        data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null,
+        { id: event.id, strikes: data.strikes });
       bubble.dataset.event = event.id;
       if (data.steered) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'Sent into the turn that was running: Claude read it between steps' }, 'into the running turn'));
       markQueued(bubble, view.ticket);
@@ -461,6 +463,9 @@ export function appendEvent(event, scroll = true) {
     nodes.push(planCard(event.ticket_id, data));
   } else if (event.kind === 'question_result') {
     view.cards.get(data.id)?.markSettled();
+  } else if (event.kind === 'strike') {
+    // strike_text: redraw the message it struck, wherever it shows now (a bubble or a folded update).
+    for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) el.replaceWith(messageBody(el.source, data.strikes, el.ticketId, data.event));
   } else if (event.kind === 'plan_result') {
     view.cards.get(data.id)?.settle(data);
   } else if (event.kind === 'loop_paused') {
@@ -487,10 +492,10 @@ export function appendEvent(event, scroll = true) {
     } else if (data.type === 'assistant') {
       for (const block of data.message?.content ?? []) {
         if (block.type === 'text' && block.text.trim()) {
-          const msg = h('div', { class: 'msg' }, h('div', { class: 'who' }, 'Claude'));
-          msg.append(markdown(block.text, event.ticket_id));
+          const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
+          const msg = h('div', { class: 'msg' }, h('div', { class: 'who' }, 'Claude'), body);
           nodes.push(msg);
-          (view.turnTexts ??= []).push({ el: msg, text: block.text });
+          (view.turnTexts ??= []).push({ el: msg, body });
         } else if (block.type === 'tool_use') {
           // Words followed by more work were narration; words that lead into a question card stay.
           if (block.name === 'mcp__thread__ask_question' || block.name === 'mcp__thread__propose_plan') view.turnTexts = [];
@@ -547,11 +552,19 @@ function foldNarration(ticketId) {
   const notes = view.narrationEl.querySelector('.notes');
   for (const t of texts) {
     t.el.remove();
-    notes.append(h('div', { class: 'note-text' }, markdown(t.text, ticketId)));
+    notes.append(h('div', { class: 'note-text' }, t.body));
   }
   const n = notes.childElementCount;
   view.narrationEl.querySelector('summary').replaceChildren(
     h('span', { class: 'st' }, '⋯'), ` ${n} update${n === 1 ? '' : 's'} along the way`);
+}
+
+/** A message's rendered text, keeping its source so a strike_text that lands later can redraw it. */
+function messageBody(text, strikes, ticketId, eventId) {
+  const body = markdown(struckSource(text, strikes), ticketId);
+  body.dataset.body = eventId;
+  Object.assign(body, { source: text, ticketId });
+  return body;
 }
 
 /** "45s", "1m 47s", "12m", "1h 5m". */
@@ -923,14 +936,14 @@ function markQueued(bubble, ticket) {
       } }, '✕')));
 }
 
-export function userBubble(author, text, imageSrcs, about = null) {
+export function userBubble(author, text, imageSrcs, about = null, event = null) {
   const github = author === GITHUB_NAME;
-  const preview = (text ?? '').replace(/[#*_`>\[\]]/g, '').replace(/\s+/g, ' ').trim();
+  const preview = (text ?? '').replace(/[#*_`>\[\]~]/g, '').replace(/\s+/g, ' ').trim();
   const msg = h('div', { class: github ? 'msg user github' : 'msg user' }, h('div', { class: 'who' }, author,
     about ? [' on ', h('a', { class: 'about', href: fileHref(about.ticketId, about.path), title: about.path }, about.name)] : ''));
   // GitHub's messages end lines with bare URLs, which Markdown alone would leave as text.
   if (github && text) text = text.replace(/(^|\s)(https?:\/\/[^\s<>]*[^\s<>.,;:!?'")\]])/g, '$1[$2]($2)');
-  if (text) msg.append(markdown(text));
+  if (text) msg.append(event ? messageBody(text, event.strikes, null, event.id) : markdown(text));
   if (imageSrcs.length) {
     msg.append(h('div', { class: 'images' }, imageSrcs.map((src) =>
       h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));

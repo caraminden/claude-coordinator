@@ -1257,8 +1257,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const action = m[2] ?? '';
     const ticket = ticketView(id);
     inScope(ticket.project_id);
-    // (Asking people a question card in its own chat, and settling one, are the things it may do to itself.)
-    if (scope !== null && method !== 'GET' && ticket.kind === 'coordinator' && !((action === '/questions' || action === '/settle') && session.agent === id)) {
+    // (Asking people a question card in its own chat, settling one, and striking its own words are the things it may do to itself.)
+    if (scope !== null && method !== 'GET' && ticket.kind === 'coordinator' && !(['/questions', '/settle', '/strike'].includes(action) && session.agent === id)) {
       throw new HttpError(403, 'The Taskmaster cannot act on itself');
     }
     if (action === '' && method === 'GET') {
@@ -1388,6 +1388,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         runner.emit(id, 'question_result', { id: q.id, settled });
       }
       return json(res, 200, { settled: open.map((e) => JSON.parse(e.data).id) });
+    }
+    if (action === '/strike' && method === 'POST') {
+      // strike_text: a minion or Taskmaster proven wrong strikes through its own words.
+      if (session.agent !== id) throw new HttpError(403, 'Only a thread itself can strike its words');
+      const body = await readJson(req);
+      const text = str(body.text, 'Text', 10_000);
+      const reason = str(body.reason, 'Reason', 1000);
+      try {
+        return json(res, 200, runner.strike(id, text, reason));
+      } catch (err: any) {
+        throw new HttpError(/already/.test(err.message) ? 409 : 404, err.message);
+      }
     }
     if (action === '/answer' && method === 'POST') {
       if (session.agent !== undefined) throw new HttpError(403, 'Only people answer question cards');

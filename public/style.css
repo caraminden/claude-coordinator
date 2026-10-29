@@ -181,6 +181,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .msg p { margin: 0.35rem 0; }
 .msg pre, .tool pre { background: var(--code-bg); padding: 0.6rem; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; margin: 0.4rem 0; }
 .msg :not(pre) > code { background: var(--code-bg); padding: 0.05rem 0.3rem; border-radius: 4px; }
+.msg del { color: var(--muted); }
 .tool { font-size: 0.9em; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .tool summary { cursor: pointer; padding: 0.35rem 0.7rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool summary b { color: var(--ink); font-weight: 600; }

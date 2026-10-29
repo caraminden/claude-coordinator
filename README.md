@@ -125,6 +125,7 @@ uses the built-in `node:sqlite`.
 | `public/progress.js` | Task-list and step tracking, shared with the server |
 | `deploy/claude-coordinator.service` | systemd user unit, with drop-ins in `.service.d/`; `citadel.slice` caps it and its turns, `claude-coordinator.socket` holds the port across restarts |
 | `deploy/backup.sh`, `deploy/prune.sh` | Nightly database backup; pruning of long-closed minions (each with a `.service` and `.timer`) |
+| `tools/land.sh` | Lands a minion's branch: rebase onto main, test, fast-forward main, deploy, under the deploy lock |
 | `tools/deploy.sh`, `tools/boot-check.ts` | Safe deploys: checks, front-end reloads, restarts that keep turns running, rollback |
 
 ## Running
@@ -197,8 +198,14 @@ minion currently uses Cara's account.
 
 ### Deploying
 
-Once a change is on `main` in the scheme repo, run `tools/deploy.sh` from the
-minion that made it. Restarting doesn't interrupt turns:
+A minion lands its branch with `tools/land.sh`, run from its worktree. Under
+the deploy lock it rebases the branch onto the local `main`, runs `node --test`,
+fast-forwards `main` in the scheme repo, then runs `tools/deploy.sh`. A conflict
+or a red test stops it before `main` moves; a deploy whose checks fail puts
+`main` back too.
+
+`tools/deploy.sh` on its own deploys whatever is on `main`. Restarting doesn't
+interrupt turns:
 
 1. It fast-forwards `~/claude-coordinator` to `main`, runs `node --test`, and
    boots the new code on a spare port against a copy of the database

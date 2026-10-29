@@ -80,7 +80,6 @@ function checkoutHead(): string | null {
   }
 }
 const BOOT_COMMIT = checkoutHead();
-keepServing();
 // Set by tools/deploy.sh when it boots new code on a copy of the database: serve and answer, but
 // don't resume interrupted turns or watch GitHub, which would act on the copy's minions for real.
 // A preview (src/previews.ts): a minion's branch served on a copy of the database for people to try.
@@ -2034,6 +2033,9 @@ const server = createServer(async (req, res) => {
 // Node's default 5 minutes to receive a whole request is too short for a 200 MB attachment on a slow
 // uplink; headers still have to arrive within headersTimeout.
 server.requestTimeout = 30 * 60_000;
+// Once up, a stray error is logged rather than fatal. Not before: a failed start (a port in use, a
+// database that won't open) must still exit non-zero so systemd restarts it.
+server.on('listening', keepServing);
 
 // Under socket activation (deploy/claude-coordinator.socket) systemd holds the listening socket, fd 3,
 // across restarts: requests made while the server restarts wait for the next one instead of failing.

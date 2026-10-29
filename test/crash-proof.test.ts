@@ -1,10 +1,13 @@
 // Brief 1: no request and no background job can take the server down.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { request } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, REPO, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 
 let srv: Booted;
 before(async () => {
@@ -47,4 +50,27 @@ test('a throwing background job, a stray rejection and an uncaught throw are log
   assert.match(r.stderr, /Background job "async job" failed:.*async boom/s);
   assert.match(r.stderr, /UNHANDLED REJECTION.*stray rejection/s);
   assert.match(r.stderr, /UNCAUGHT EXCEPTION.*stray throw/s);
+});
+
+test('a server that can\'t start still exits non-zero, so systemd restarts it', async () => {
+  const busy = createServer();
+  await new Promise<void>((r) => busy.listen(0, '127.0.0.1', r));
+  const root = mkdtempSync(join(tmpdir(), 'crash-proof-'));
+  try {
+    const proc = spawn(process.execPath, [join(REPO, 'server.ts')], {
+      env: {
+        ...process.env, MACHINES_URL: undefined, PORT: String((busy.address() as any).port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
+        CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
+      },
+      stdio: 'ignore',
+    });
+    const timer = setTimeout(() => proc.kill('SIGKILL'), 15_000);
+    const code = await new Promise((r) => proc.on('exit', (c) => r(c)));
+    clearTimeout(timer);
+    assert.notEqual(code, 0);
+    assert.notEqual(code, null, 'it exited by itself rather than hanging');
+  } finally {
+    busy.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

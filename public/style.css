@@ -685,6 +685,10 @@ mark.find.current { background: var(--waiting); color: #fff; }
   .ticket-head > .row:has(> .close-view) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 4.7rem); }
 }
 .composer .add-image { line-height: 1.4; }
+/* Attach, the pickers and Send (with its ▾) share one height, content centred; taller on phones to stay tappable. */
+.composer { --control-h: 2rem; }
+@media (max-width: 800px) { .composer { --control-h: 2.5rem; } }
+.composer button.add-image, .composer select.picker, .composer .send-group > button { height: var(--control-h); padding-top: 0.2rem; padding-bottom: 0.2rem; }
 
 /* Question cards: Claude's multiple-choice questions, answered with a click */
 .qcard { border: 1px solid color-mix(in srgb, var(--running) 45%, var(--line)); border-radius: 10px; background: var(--panel); padding: 0.6rem 0.85rem; display: flex; flex-direction: column; gap: 0.75rem; }

@@ -1,6 +1,6 @@
 # ADR Format
 
-ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
+When the repo's CLAUDE.md names a decisions log under "Project facts", an ADR is an entry there in that file's own format (a table row, say), and only "When to offer an ADR" below applies. Otherwise ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
 
 ## Template
 

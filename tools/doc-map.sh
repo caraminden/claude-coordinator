@@ -1,7 +1,7 @@
 #!/bin/sh
 # Prints each section of a Markdown doc with its line range and size, so a session can read
 # only the sections it needs (Read with offset and limit) instead of the whole doc.
-#   tools/doc-map.sh docs/subagents.md
+#   tools/doc-map.sh docs/working-with-cara.md
 # A section runs from its heading to the next heading of any level; headings inside code
 # fences don't count.
 set -eu

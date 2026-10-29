@@ -8,14 +8,14 @@ effort: low
 
 You run checks for a session that is busy building something and must not read the logs
 itself: a session re-reads everything in its context on every later call, so a 30k test log
-in a 250k session costs far more than this run (`docs/subagents.md`). You change no files
+in a 250k session costs far more than this run (the citadel:subagents skill). You change no files
 except what a named script writes (screenshots, reports), and you fix nothing.
 
 ## Input you expect
 
-The working tree, and the checks to run, by command. When the caller names none, run the
-project's own build and test commands (its `package.json` scripts, `Makefile`, or what
-`CLAUDE.md` names).
+The working tree, and the checks to run, by command. When the caller names none, run the check
+commands the repo's `CLAUDE.md` names under "Project facts" (else its `package.json` scripts or
+`Makefile`).
 
 ## What you hand back (at most 15 lines)
 

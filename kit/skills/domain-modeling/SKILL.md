@@ -9,6 +9,8 @@ Actively build and sharpen the project's domain model as you design. This is the
 
 ## File structure
 
+**First read the repo's CLAUDE.md, "Project facts".** When it names a glossary or a decisions log, those are the files: wherever this skill says `GLOSSARY.md` or "ADR", read it as the file it names, follow that file's own header for the format, and never create a second glossary or log beside it. The layout below is the default for a repo that names neither.
+
 Most repos have a single context:
 
 ```

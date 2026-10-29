@@ -1,8 +1,8 @@
 # Third-party skills
 
-Some skills here are copies of two open-source packs, plus one rules file. They are
-copied in, not installed as plugins, so every session that opens the repo (a Citadel
-ticket, a cloud session, a PC) loads the same set the same way.
+Some skills in the Citadel kit are copies of two open-source packs, plus one rules file in
+Citadel's repo. They are copied in, not installed as the upstream plugins, so every Citadel
+turn of every scheme loads the same set the same way, through the kit (`kit/README.md`).
 
 | Pack | Pinned at | License |
 |------|-----------|---------|
@@ -12,19 +12,20 @@ ticket, a cloud session, a PC) loads the same set the same way.
 ## What is here
 
 Carried over from the Delve repo (`.claude/skills/THIRD_PARTY.md` there, 2026-10-27), with
-Delve's paths taken back out.
+Delve's paths taken back out, then moved into the kit (Citadel #164, 2026-10-29), where repo
+paths come from each repo's CLAUDE.md "Project facts".
 
 | Path | From | Local change |
 |------|------|--------------|
-| `.claude/rules/ponytail.md` | ponytail `AGENTS.md` | Path-scoped to code files; "In this repo" section added |
+| `.claude/rules/ponytail.md` (Citadel's repo; a plugin can't carry rules) | ponytail `AGENTS.md` | Path-scoped to code files; "In this repo" section added |
 | `ponytail-review/` | ponytail `skills/ponytail-review` | none |
 | `ponytail-audit/` | ponytail `skills/ponytail-audit` | none |
 | `ponytail-debt/` | ponytail `skills/ponytail-debt` | none |
 | `grilling/` | mattpocock `skills/productivity/grilling` | A round is asked as decision cards where the session has a card tool, numbered questions elsewhere |
-| `domain-modeling/` | mattpocock `skills/engineering/domain-modeling` | none |
+| `domain-modeling/` | mattpocock `skills/engineering/domain-modeling` | Glossary and decisions log from Project facts |
 | `codebase-design/` | mattpocock `skills/engineering/codebase-design` | none |
-| `diagnosing-bugs/` | mattpocock `skills/engineering/diagnosing-bugs` | Narrower description (the escalation from `bug-fixing`), glossary is optional |
-| `improve-codebase-architecture/` | mattpocock `skills/engineering/improve-codebase-architecture` | Model-invoked; headless output |
+| `diagnosing-bugs/` | mattpocock `skills/engineering/diagnosing-bugs` | Narrower description (the escalation from `bug-fixing`), glossary from Project facts and optional |
+| `improve-codebase-architecture/` | mattpocock `skills/engineering/improve-codebase-architecture` | Model-invoked; headless output; glossary and decisions log from Project facts |
 | `writing-for-agents/` | mattpocock `skills/productivity/writing-for-agents` | none |
 
 Every copy drops the Codex-only `agents/openai.yaml`.
@@ -47,9 +48,8 @@ Every copy drops the Codex-only `agents/openai.yaml`.
   gives the path and a plain-text summary instead. Keep this in mind for any skill
   added later: a user-invoked one is unreachable from minions.
 - **grilling** asked each round as one message of numbered questions. Cara answers
-  faster on cards (2026-10-27), so where a decision-card tool exists each question is a
-  card; the numbered format stays for everything else, including Citadel minions
-  today.
+  faster on cards (2026-10-27), so where a card tool exists (`ask_question` in a Citadel
+  turn) each question is a card; the numbered format stays for everything else.
 
 ## Left out
 

@@ -90,5 +90,5 @@ a yes, update it in the open PR; on a no, leave it.
 ## Effort and models
 
 Sessions run at high effort by default; never above high unless she asks. Subagent (Grunt) effort and
-model choice: `docs/subagents.md`. Quality comes before cost: she doesn't want throughput capped
+model choice: the `citadel:subagents` skill. Quality comes before cost: she doesn't want throughput capped
 or memory slimmed to save money, only waste cut.

@@ -9,8 +9,8 @@ Surface architectural friction and propose **deepening opportunities**: refactor
 
 This command is _informed_ by the project's domain model and built on a shared design vocabulary:
 
-- Call the Skill tool with "codebase-design" for the architecture vocabulary (**module**, **interface**, **depth**, **seam**, **adapter**, **leverage**, **locality**) and its principles (the deletion test, "the interface is the test surface", "one adapter = hypothetical seam, two = real"). Use these terms exactly in every suggestion, and don't drift into "component," "service," "API," or "boundary."
-- The domain language in `GLOSSARY.md` gives names to good seams; the ADRs in `docs/adr/` record decisions this command should not re-litigate.
+- Call the Skill tool with "citadel:codebase-design" for the architecture vocabulary (**module**, **interface**, **depth**, **seam**, **adapter**, **leverage**, **locality**) and its principles (the deletion test, "the interface is the test surface", "one adapter = hypothetical seam, two = real"). Use these terms exactly in every suggestion, and don't drift into "component," "service," "API," or "boundary."
+- The domain language in the glossary gives names to good seams; the decisions log (ADRs) records decisions this command should not re-litigate. The repo's CLAUDE.md names both under "Project facts"; read every `GLOSSARY.md` and `docs/adr/` below as those files.
 
 ## Process
 
@@ -37,7 +37,7 @@ Apply the **deletion test** to anything you suspect is shallow: would deleting i
 
 Write a self-contained HTML file to the OS temp directory so nothing lands in the repo. Resolve the temp dir from `$TMPDIR`, falling back to `/tmp` (or `%TEMP%` on Windows), and write to `<tmpdir>/architecture-review-<timestamp>.html` so each run gets a fresh file. Open it for the user (`xdg-open <path>` on Linux, `open <path>` on macOS, `start <path>` on Windows) and tell them the absolute path.
 
-In a headless session (a Citadel minion, a cloud session) nobody can open the file for you. Publish it with the Artifact tool if the session has one; otherwise still write it, give its absolute path, and put a one-paragraph plain-text summary of each candidate in the reply so it can be read in chat.
+In a headless session nobody can open a temp file for you. In a Citadel turn, write it instead to the folder your system prompt names for files you show people (not the repo) and link it in the reply; in a cloud session, publish it with the Artifact tool if the session has one. Either way, also put a one-paragraph plain-text summary of each candidate in the reply so it can be read in chat.
 
 The report uses **Tailwind via CDN** for layout and styling, and **Mermaid via CDN** for diagrams where a graph/flow/sequence reliably communicates the structure. Mix Mermaid with hand-crafted CSS/SVG visuals: use Mermaid when relationships are graph-shaped (call graphs, dependencies, sequences), and hand-built divs/SVG when you want something more editorial (mass diagrams, cross-sections, collapse animations). Each candidate gets a **before/after visualisation**. Be visual.
 
@@ -62,11 +62,11 @@ Do NOT propose interfaces yet. After the file is written, ask the user: "Which o
 
 ### 3. Grilling loop
 
-Once the user picks a candidate, call the Skill tool with "grilling" to walk the decision tree with them: constraints, dependencies, the shape of the deepened module, what sits behind the seam, what tests survive.
+Once the user picks a candidate, call the Skill tool with "citadel:grilling" to walk the decision tree with them: constraints, dependencies, the shape of the deepened module, what sits behind the seam, what tests survive.
 
-Side effects happen inline as decisions crystallize; call the Skill tool with "domain-modeling" to keep the domain model current as you go:
+Side effects happen inline as decisions crystallize; call the Skill tool with "citadel:domain-modeling" to keep the domain model current as you go:
 
 - **Naming a deepened module after a concept not in `GLOSSARY.md`?** Add the term to `GLOSSARY.md`. Create the file lazily if it doesn't exist.
 - **Sharpening a fuzzy term during the conversation?** Update `GLOSSARY.md` right there.
 - **User rejects the candidate with a load-bearing reason?** Offer an ADR, framed as: _"Want me to record this as an ADR so future architecture reviews don't re-suggest it?"_ Only offer when the reason would actually be needed by a future explorer to avoid re-suggesting the same thing; skip ephemeral reasons ("not worth it right now") and self-evident ones.
-- **Want to explore alternative interfaces for the deepened module?** Call the Skill tool with "codebase-design" and use its design-it-twice parallel sub-agent pattern.
+- **Want to explore alternative interfaces for the deepened module?** Call the Skill tool with "citadel:codebase-design" and use its design-it-twice parallel sub-agent pattern.

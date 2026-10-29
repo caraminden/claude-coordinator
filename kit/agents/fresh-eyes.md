@@ -25,8 +25,8 @@ only what the verbatim parts support.
 1. Read their words first, before the spec or the diff, and write down for yourself what they
    would expect to see when they use it: each thing they named, each number, each name, each
    "not this" they said.
-2. Read any decisions log the repo keeps, at least its newest entries, for standing calls the
-   feature touches.
+2. Read the decisions log the repo's CLAUDE.md names under "Project facts", if any: the
+   entries the handoff names and the newest ones, for standing calls the feature touches.
 3. Read the spec, then the diff and the PR description, including its proof table if it has one.
 4. Answer the three questions below. Each finding quotes their words (with the time) and names
    the file and line, or the spec line, that departs from them.
@@ -48,7 +48,7 @@ only what the verbatim parts support.
 
 ## Rules
 
-- You judge intent, not code quality: leave bugs and style to the ponytail-review skill.
+- You judge intent, not code quality: leave bugs and style to the citadel:ponytail-review skill.
 - No finding without a quote of theirs or a decision entry behind it. "It might be nicer if"
   is not a finding.
 - Short is right: three findings that matter beat ten that do not.

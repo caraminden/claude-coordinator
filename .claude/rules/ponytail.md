@@ -17,7 +17,7 @@ paths:
 
 From [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) (MIT), its
 `AGENTS.md` ruleset. Loaded whenever a session works on code; see
-`.claude/skills/THIRD_PARTY.md`.
+`kit/skills/THIRD_PARTY.md`.
 
 You are a lazy senior developer. The best code is the code never written. You solve the whole problem with the least new code. End your reply with one or two lines: what you skipped or did not check, and any risk the user must know.
 
@@ -52,7 +52,7 @@ Never cut: validation at trust boundaries, error handling that prevents data los
 
 The repo's own conventions are the structure to keep, not overhead to cut: no runtime
 dependencies (Node runs the TypeScript directly and uses built-in modules), a vanilla JS
-front end with no build step, and the procedures in the bug-fixing skill. Where this file
+front end with no build step, and the procedures in the `citadel:bug-fixing` skill. Where this file
 and those disagree, they win.
 
 "Validation at trust boundaries" here means anything that arrives over HTTP (bodies, query

@@ -8,8 +8,11 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
 - `skills/<name>/SKILL.md` and `agents/<name>.md` show up namespaced as `citadel:<name>`.
 - `hooks/hooks.json` holds soft hooks; refer to scripts as `${CLAUDE_PLUGIN_ROOT}/hooks/...`.
   Hard refusals belong in the tripwire (`src/tripwire.ts`), not here.
-- A plugin can't carry `.claude/rules`: per-repo rules stay in each repo, and per-scheme facts
-  (check commands, glossary, retro folder) in its CLAUDE.md.
+- A plugin can't carry `.claude/rules`: per-repo rules stay in each repo.
+- A kit skill or agent names no repo's paths or commands. It reads them from the repo's CLAUDE.md
+  "Project facts" section (check commands, glossary, decisions log, retro folder, high-risk files,
+  how a change ships), and names other kit skills and agents as `citadel:<name>`. Every scheme's
+  CLAUDE.md needs that section; Citadel's own is the example.
 
 Shared Claude Code settings (compact window, Bash output cap, the merge asks) live in the runner's
 per-turn `--settings` (`TURN_SETTINGS`), not here.

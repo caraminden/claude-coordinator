@@ -27,6 +27,31 @@ test('skips URLs, entities, words and other numbering', () => {
   }
 });
 
+test('every number in a PR or issue list is a PR, not a minion', () => {
+  for (const s of ['PRs #186 and #187', 'PRs #186, #187 and #188', 'PRs #186, #187, and #188', 'PRs #186/#187', 'issues #4 or #5', 'PRs #1 &amp; #2']) {
+    assert.equal(link(s), s, s);
+  }
+  assert.equal(link('PR #186 shipped. #187 next'), `PR #186 shipped. ${a(187)} next`);
+});
+
+test('"<Scheme> #N" links into that scheme', () => {
+  const schemes = [{ id: 1, name: 'Delve' }, { id: 2, name: 'Citadel' }, { id: 7, name: 'Delve Two' }, { id: 9, name: "Tom's game" }];
+  const lnk = (html, titleOf) => linkThreadRefs(html, 2, titleOf, schemes);
+  const at = (p, n, text) => `<a class="thread-ref" href="#/p/${p}/t/${n}">${text}</a>`;
+  assert.equal(lnk('Delve #68'), at(1, 68, 'Delve #68'));
+  assert.equal(lnk('see delve #68.'), `see ${at(1, 68, 'delve #68')}.`);
+  assert.equal(lnk('Delve Two #3 and Delve #4'), `${at(7, 3, 'Delve Two #3')} and ${at(1, 4, 'Delve #4')}`);
+  assert.equal(lnk('Tom&#39;s game #5'), at(9, 5, 'Tom&#39;s game #5'));
+  assert.equal(lnk('Citadel #68', (n) => (n === 68 ? '#68 Sixty' : null)),
+    '<a class="thread-ref" href="#/p/2/t/68" title="#68 Sixty">Citadel #68</a>');
+  // Not a whole word, or not a scheme: today's behaviour.
+  assert.equal(lnk('Undelve #6'), `Undelve ${a(6)}`);
+  assert.equal(lnk('Perigee #6'), `Perigee ${a(6)}`);
+  assert.equal(lnk('#68'), a(68));
+  assert.equal(lnk('Delve PR #68'), 'Delve PR #68');
+  assert.equal(lnk('<code>Delve #68</code>'), '<code>Delve #68</code>');
+});
+
 test('titles known threads and needs a project', () => {
   assert.equal(link('#3', (n) => (n === 3 ? '#3 Fix "it"' : null)),
     '<a class="thread-ref" href="#/p/2/t/3" title="#3 Fix &quot;it&quot;">#3</a>');

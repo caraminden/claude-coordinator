@@ -1,11 +1,19 @@
 // "#12" in any text the UI shows becomes a link to thread 12 of the current project.
 // Pure string work, so it can be tested without a browser.
 
-/**
- * A standalone #N: not part of a word, URL, path, HTML entity (&#39;) or another #, and not a
- * GitHub-style "PR #12" / "issue #12", which mean something else.
- */
-const THREAD_REF = /(?<![\w&/#.:?=+-])(?<!\b(?:PRs?|[Ii]ssues?|[Pp]ull [Rr]equests?|[Pp]ulls?)\s)#(\d{1,6})(?![\w#/-])/g;
+/** A GitHub-style "PR #12" / "issues #4, #5 and #6": every number in it means something else. */
+const PR_LIST = String.raw`\b(?:PRs?|[Ii]ssues?|[Pp]ull [Rr]equests?|[Pp]ulls?)\s#\d{1,6}(?:(?:\s*(?:,|\/|&amp;)\s*|,?\s+(?:and|or)\s+)#\d{1,6})*`;
+/** A standalone #N: not part of a word, URL, path, HTML entity (&#39;) or another #. */
+const REF = String.raw`(?<![\w&/#.:?=+-])#(?<n>\d{1,6})(?![\w#/-])`;
+
+/** Scheme names as the HTML has them, compared without case or spacing: "delve two" -> id. */
+const nameKey = (name) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+/** A regex matching `name` in any case, with any run of spaces where it has one. */
+const namePattern = (name) => [...name].map((c) => {
+  if (/\s/.test(c)) return String.raw`\s+`;
+  const [lo, up] = [c.toLowerCase(), c.toUpperCase()];
+  return lo !== up && lo.length === 1 && up.length === 1 ? `[${lo}${up}]` : c.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+}).join('');
 
 /** Where thread `number` of project `projectId` lives (see threadHref in app.js). */
 export const threadNumberHref = (projectId, number) => `#/p/${projectId}/t/${number}`;
@@ -14,15 +22,24 @@ export const threadNumberHref = (projectId, number) => `#/p/${projectId}/t/${num
  * Link #N references in a string of HTML. Only text between tags is touched, and nothing inside
  * an existing <a>, <code> or <pre>, so links, code and attributes are left alone. `titleOf(n)` may
  * give a hover title for a thread it knows; numbers it doesn't know still link, and opening one
- * that doesn't exist shows the usual "There is no thread #N" message.
+ * that doesn't exist shows the usual "There is no thread #N" message. With `schemes` (the
+ * projects list, { id, name }), "Delve #68" links to Delve's #68 instead.
  */
-export function linkThreadRefs(html, projectId, titleOf = () => null) {
+export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = []) {
   if (projectId == null || !html.includes('#')) return html;
+  const ids = new Map(schemes.filter((p) => p.name?.trim()).map((p) => [nameKey(escapeAttr(p.name)), p.id]));
+  // Longest first, so "Delve Two #3" isn't read as "Delve" + "Two #3".
+  const names = [...ids.keys()].sort((x, y) => y.length - x.length).map(namePattern);
+  const scheme = names.length ? String.raw`(?<![\p{L}\p{N}_])(?<name>${names.join('|')})\s+#(?<sn>\d{1,6})(?![\w#/-])|` : '';
+  const refs = new RegExp(`(?<pr>${PR_LIST})|${scheme}${REF}`, 'gu');
   return html.replace(/(<(a|code|pre)\b[\s\S]*?<\/\2>|<[^>]*>)|([^<]+)/gi, (all, tag, _name, text) => {
     if (tag) return all;
-    return text.replace(THREAD_REF, (ref, n) => {
-      const title = titleOf(Number(n));
-      return `<a class="thread-ref" href="${threadNumberHref(projectId, Number(n))}"${title ? ` title="${escapeAttr(title)}"` : ''}>${ref}</a>`;
+    return text.replace(refs, (ref, ...args) => {
+      const { pr, name, sn, n } = args.at(-1);
+      if (pr) return ref;
+      const p = name ? ids.get(nameKey(name)) : projectId;
+      const title = p === projectId ? titleOf(Number(sn ?? n)) : null;
+      return `<a class="thread-ref" href="${threadNumberHref(p, Number(sn ?? n))}"${title ? ` title="${escapeAttr(title)}"` : ''}>${ref}</a>`;
     });
   });
 }

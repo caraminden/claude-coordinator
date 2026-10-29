@@ -158,13 +158,13 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
-/** Link "#12" in some HTML to thread 12 of the project on screen, titled with its name when known. */
+/** Link "#12" in some HTML to thread 12 of the project on screen, titled with its name when known, and "Delve #12" to Delve's. */
 function threadRefsHtml(html) {
   if (view?.kind !== 'project') return html;
   return linkThreadRefs(html, view.projectId, (n) => {
     for (const t of view.tickets.values()) if (t.number === n) return threadLabel(t);
     return null;
-  });
+  }, view.projects);
 }
 
 /** Plain text as nodes, with its "#12"s linked (see threadRefsHtml). */

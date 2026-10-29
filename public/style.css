@@ -62,7 +62,8 @@ button.secondary, a.button.secondary { background: transparent; color: var(--ink
 a.button { display: inline-block; text-decoration: none; border-radius: 6px; padding: 0.2rem 0.65rem; font-size: 0.85em; }
 button:disabled { opacity: 0.5; cursor: default; }
 /* The minion header's Stop, Dismiss and Reopen, tinted by what they do so the minion's state reads at a glance (#166). */
-button.secondary:is(.act-stop, .act-dismiss, .act-reopen) { --act: var(--error); color: var(--act); border-color: color-mix(in srgb, var(--act) 55%, var(--line)); background: color-mix(in srgb, var(--act) 9%, transparent); font-weight: 600; }
+button.secondary:is(.act-stop, .act-dismiss, .act-reopen) { color: var(--act); border-color: color-mix(in srgb, var(--act) 55%, var(--line)); background: color-mix(in srgb, var(--act) 9%, transparent); font-weight: 600; }
+button.secondary.act-stop { --act: var(--error); }
 button.secondary.act-dismiss { --act: var(--waiting); }
 button.secondary.act-reopen { --act: var(--done); }
 input, textarea, select {

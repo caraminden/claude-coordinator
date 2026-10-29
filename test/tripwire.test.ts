@@ -70,6 +70,22 @@ const BLOCKED: [string, string?][] = [
   ['grep token ~/.claude/.credentials.json'],
   ['base64 < ~/.claude/.credentials.json'],
   ['echo $(cat ~/.ssh/id_rsa)'],
+  // the service's env file, any process's environment, the GitHub login (#115)
+  ['cat ~/.config/claude-coordinator/env'],
+  ['grep SECRET /home/u/.config/claude-coordinator/env'],
+  ['source ~/.config/claude-coordinator/env && echo $SESSION_SECRET'],
+  ['. ~/.config/claude-coordinator/env'],
+  ['cat /proc/1234/environ'],
+  ['cat /proc/1/task/1/environ'],
+  ['tr "\\0" "\\n" < /proc/*/environ'],
+  ['cat /proc/$(pgrep -f server.ts)/environ'],
+  ['xargs -0 -n1 < "/proc/$PID/environ"'],
+  ['cd /proc/1234 && strings environ'],
+  ['ps eww 1234'],
+  ['ps auxe | grep SESSION'],
+  ['cat ~/.config/gh/hosts.yml'],
+  ['gh auth token'],
+  ['gh auth status --show-token'],
   // other schemes
   ['touch ~/.local/share/claude-coordinator/projects/1/shared/project/note.md'],
   ['cd ../../../1/tickets/4 && git commit -am wip'],
@@ -146,6 +162,18 @@ const ALLOWED = [
   'cd ~/.local/share/claude-coordinator && sqlite3 "file:coordinator.db?mode=ro" ".backup coordinator.db.bak-x"',
   'git clone -q ~/.local/share/claude-coordinator/projects/1/repo /tmp/delve',
   'ls -la ~/.claude/.credentials.json ~/.ssh',
+  // normal process and env inspection next to the #115 blocks
+  'ps aux | grep node',
+  'ps -ef | grep claude',
+  'ps -eo pid,etime,cmd --sort=etime',
+  'ps -p 1234 -o pid,comm,etime',
+  'cat /proc/1234/status && cat /proc/meminfo',
+  'ls -la /proc/1234/',
+  'ls -la ~/.config/claude-coordinator/',
+  'env | grep PORT && printenv HOME',
+  'grep -n environ src/tripwire.ts',
+  'gh auth status && gh pr view 3',
+  'cat ~/.config/gh/config.yml',
   'cd ~/claude-coordinator && git pull --ff-only /home/u/.local/share/claude-coordinator/projects/2/repo main && systemd-run --user --collect --unit=cc-restart-when-idle /tmp/cc-restart-when-idle.sh',
   'cd ~/claude-coordinator && curl -s localhost:8573/api/version && gh pr list',
   'chmod 600 ~/.local/share/claude-coordinator/coordinator.db*',
@@ -226,6 +254,11 @@ test('file tools: writes, edits and reads', () => {
   assert.ok(t('Read', { file_path: `${home}/.ssh/id_ed25519` }));
   assert.ok(t('Read', { file_path: '~/.claude/.credentials.json' }));
   assert.ok(t('Grep', { pattern: 'x', path: `${home}/.ssh` }));
+  assert.ok(t('Read', { file_path: `${home}/.config/claude-coordinator/env` }));
+  assert.ok(t('Grep', { pattern: 'SECRET', path: `${home}/.config/claude-coordinator` }));
+  assert.ok(t('Read', { file_path: '/proc/1234/environ' }));
+  assert.ok(t('Read', { file_path: '~/.config/gh/hosts.yml' }));
+  assert.equal(t('Read', { file_path: '/proc/1234/status' }), null);
   assert.equal(t('Read', { file_path: `${home}/claude-coordinator/server.ts` }), null);
   assert.equal(t('Read', { file_path: `${data}/projects/1/shared/project/plan.md` }), null);
   assert.equal(t('Write', { file_path: `${worktree}/src/x.ts` }), null);

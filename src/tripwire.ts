@@ -1,7 +1,8 @@
 // The tripwire: a PreToolUse hook the runner adds to every turn (tripwireHooks in runner.ts), for
 // Taskmasters and minions in every scheme. It stops the known accidents (writes to the live database,
 // the live checkout, the service's config and units, other schemes' folders; restarting or stopping
-// the app's services; reading SSH keys or the Claude login; running server.ts against the live data)
+// the app's services; reading SSH keys, the Claude or GitHub login, the service's env file or any
+// process's environment; running server.ts against the live data)
 // and says why and what to do instead.
 //
 // Two tiers. Real dangers are hard blocks. Things a person may reasonably want once (deleting or
@@ -78,8 +79,18 @@ function writeReason(p: string, cfg: TripwireConfig): string | null {
 function readReason(p: string, cfg: TripwireConfig): string | null {
   if (under(p, join(cfg.home, '.ssh'))) return `${join(cfg.home, '.ssh')} holds SSH keys; nothing here needs to read them (ssh and git use them on their own).`;
   if (p === join(cfg.claudeConfig, '.credentials.json') || p === join(cfg.home, '.claude/.credentials.json')) return 'That file is the Claude login; nothing here needs to read it.';
+  if (under(p, join(cfg.home, '.config/claude-coordinator'))) return `${join(cfg.home, '.config/claude-coordinator')} holds the live service's password and session secret, which let anyone act as a person. To try the API, log in to a dev copy or a preview with its own password; ask Cara to change the env file.`;
+  if (ENVIRON.test(p)) return ENVIRON_WHY;
+  if (p === join(cfg.home, '.config/gh/hosts.yml')) return GH_TOKEN_WHY;
   return null;
 }
+
+// A process's environment holds whatever secrets it started with (the service's password and session secret).
+const ENVIRON = /^\/proc\/[^/]+(\/task\/[^/]+)?\/environ$/;
+const ENVIRON_WHY = "A process's environment can hold the live service's password and session secret. Use `env` for your own; to find your dev server, take the pid from `ss -ltnp 'sport = :<your port>'` (or `$!` when you start it) and check `readlink /proc/<pid>/cwd`.";
+const GH_TOKEN_WHY = "That is Cara's GitHub login; gh and git use it on their own.";
+// The same read with the pid in a variable, a glob or `$(…)`, which the word-by-word reading can't resolve.
+const ENVIRON_TEXT = /\/proc\/(?:\$\([^)]*\)|[^\s;&|<>()'"])*\/environ\b/;
 
 const LIVE_DB = ['coordinator.db', 'coordinator.db-wal', 'coordinator.db-shm', 'coordinator.db-journal'];
 
@@ -500,6 +511,10 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     }
   }
   if (REMOTE.has(name)) return null;
+  // `ps e`, `ps eww`, `ps auxe`: BSD-style e prints each process's environment.
+  if (name === 'ps' && /^[a-zA-Z]*e[a-zA-Z]*$/.test(args[0]?.text ?? '')) return hard(`\`ps ${args[0].text}\` prints processes' environments. ${ENVIRON_WHY}`);
+  const sub = args.filter((w) => !w.text.startsWith('-')).map((w) => w.text);
+  if (name === 'gh' && sub[0] === 'auth' && (sub[1] === 'token' || (sub[1] === 'status' && args.some((w) => /^(-t|--show-token)$/.test(w.text))))) return hard(`\`gh auth\` would print the token. ${GH_TOKEN_WHY}`);
 
   for (const w of METADATA.has(name) ? [] : args) {
     for (const p of pathsOf(w, st, cfg)) {
@@ -551,6 +566,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
 
 /** Why this Bash command is blocked, or null. One hard-blocked part makes the whole command a hard block. */
 export function commandReason(command: string, st: State, cfg: TripwireConfig): Verdict | null {
+  if (ENVIRON_TEXT.test(command)) return hard(`Reading /proc/<pid>/environ is blocked. ${ENVIRON_WHY}`);
   const stack: (string | null)[] = [];
   let seg: Segment = { words: [], redirects: [] };
   let redir: string | null = null;

@@ -252,7 +252,8 @@ function createAttachments(chatId, onChange) {
     if (blob !== file) await addFile(file, blob ? `${file.name || 'image'} (original)` : undefined);
   };
   state.add = async (files) => {
-    for (const file of files) {
+    // Copied first: the picker's FileList empties when the picker is reset, before the loop gets far.
+    for (const file of [...files]) {
       if (file.type.startsWith('image/')) await addImage(file);
       else addFile(file);
     }

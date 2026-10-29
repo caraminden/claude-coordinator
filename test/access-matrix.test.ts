@@ -77,7 +77,7 @@ const OTHER_ROUTES: Probe[] = [
   P('GET', '/api/projects/:p/schedules'), P('POST', '/api/projects/:p/schedules'), P('PATCH', '/api/schedules/:s'),
   P('DELETE', '/api/schedules/:s', 'schedule'), P('GET', '/api/projects/:p/search'), P('GET', '/api/projects/:p/search?q=one&ticket=:t'), P('GET', '/api/projects/:p/artifacts'),
   P('GET', '/api/projects/:p/shared'), P('GET', '/api/projects/:p/shared/file'), P('GET', '/api/artifacts/:a'),
-  P('GET', '/api/artifacts/:a/raw'), P('POST', '/api/artifacts/:a/pin'), P('POST', '/api/projects/:p/artifacts/pin'),
+  P('GET', '/api/artifacts/:a/raw'), P('GET', '/api/files/t1-0.zzzzzz.forged/report.md'), P('POST', '/api/artifacts/:a/pin'), P('POST', '/api/projects/:p/artifacts/pin'),
   P('GET', '/api/push/key'), P('PUT', '/api/push/subscription'), P('POST', '/api/push/subscription'),
   P('PATCH', '/api/push/subscription'), P('DELETE', '/api/push/subscription'),
   P('GET', '/api/machines'), P('POST', '/api/machines'), P('POST', '/api/machines/:m/token'), P('PATCH', '/api/machines/:m'),

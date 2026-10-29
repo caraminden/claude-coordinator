@@ -132,6 +132,27 @@ test('no login: a page goes to the login, anything else is refused; a bare path 
   assert.equal((await page(`/preview/${ticket.id}`)).headers.get('location'), `/preview/${ticket.id}/`);
 });
 
+test("an HTML page's file token gets through without a login, to the preview's own check", async () => {
+  // A page in the preview's copy of the scheme's shared folder, and a picture beside it.
+  const shared = join(data, 'previews', String(ticket.id), 'projects', String(project.id), 'shared', 'project');
+  mkdirSync(shared, { recursive: true });
+  writeFileSync(join(shared, 'gallery.html'), '<img src="pic.png">');
+  writeFileSync(join(shared, 'pic.png'), 'png');
+  const path = `/preview/${ticket.id}/api/projects/${project.id}/shared/file?path=gallery.html`;
+  const res = await fetch(base + path, { headers: { Cookie: cookie }, redirect: 'manual' });
+  assert.equal(res.status, 302);
+  const pageUrl = new URL(res.headers.get('location')!, base + path);
+  assert.match(pageUrl.pathname, new RegExp(`^/preview/${ticket.id}/api/files/p${project.id}\\.`));
+  // The sandboxed frame sends no cookie.
+  assert.equal((await fetch(pageUrl)).status, 200);
+  assert.equal((await fetch(new URL('pic.png', pageUrl))).status, 200);
+  // The preview refuses a forged token itself; the bypass is for reading files only.
+  const forged = await fetch(`${base}/preview/${ticket.id}/api/files/p${project.id}.zzzzzz.forged/pic.png`);
+  assert.equal(forged.status, 403);
+  assert.match((await forged.json()).error, /expired/);
+  assert.equal((await fetch(`${base}/preview/${ticket.id}/api/files/x`, { method: 'POST' })).status, 401);
+});
+
 test('a branch without preview mode is refused, and nothing is left running', async () => {
   const res = await startPreview(old.id);
   assert.equal(res.status, 502);

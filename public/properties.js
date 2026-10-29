@@ -1,7 +1,7 @@
 // The scheme's property registry: the Settings link's review count, the Properties tab and a minion's property chip.
 import { api, h, icon, me, view } from './core.js';
 import { settingsTabs } from './settings.js';
-import { filterChoices, valueCounts } from './propfilter.js';
+import { filterChoices, samePicks, valueCounts, viewPicks } from './propfilter.js';
 import { renderSidebar } from './sidebar.js';
 
 // ---------- properties (the scheme's property registry) ----------
@@ -89,9 +89,9 @@ export function closeOnClickAway(chip) {
 
 // ---------- the minions list's property filter ----------
 
-// The scheme's keys, the values ticked per key, and which parts of the panel are open, kept across
-// minion switches like the search.
-export const propFilter = { projectId: null, keys: null, picks: new Map(), open: false, openKeys: new Map() };
+// The scheme's keys, the values ticked per key, which parts of the panel are open, and the scheme's
+// saved views (null until loaded), kept across minion switches like the search.
+export const propFilter = { projectId: null, keys: null, picks: new Map(), open: false, openKeys: new Map(), views: null };
 
 /**
  * Under the minions search: a Filters button that opens a panel with a collapsible checklist per
@@ -101,12 +101,16 @@ export async function renderPropFilter() {
   const el = document.getElementById('prop-filter');
   if (!el) return;
   const projectId = view.projectId;
-  if (propFilter.projectId !== projectId) Object.assign(propFilter, { projectId, keys: null, picks: new Map(), open: false, openKeys: new Map() });
-  if (!propFilter.keys) {
-    const reg = await loadProperties().catch(() => null);
-    if (!reg || propFilter.projectId !== projectId) return;
-    propFilter.keys = reg.keys;
+  if (propFilter.projectId !== projectId) Object.assign(propFilter, { projectId, keys: null, picks: new Map(), open: false, openKeys: new Map(), views: null });
+  if (!propFilter.keys || !propFilter.views) {
+    const [reg, views] = await Promise.all([
+      propFilter.keys ? { keys: propFilter.keys } : loadProperties(),
+      propFilter.views ?? api(`api/projects/${projectId}/views`),
+    ]).catch(() => []);
+    if (!reg || !views || propFilter.projectId !== projectId) return;
+    Object.assign(propFilter, { keys: reg.keys, views });
   }
+  renderSavedViews();
   if (!el.isConnected) return;
   // Every list change redraws this, so put keyboard focus back where it was.
   const focused = el.contains(document.activeElement) ? document.activeElement.dataset.pf : null;
@@ -151,6 +155,57 @@ function filterSection({ key, values }, counts) {
     }));
   sec.addEventListener('toggle', () => propFilter.openKeys.set(key, sec.open));
   return sec;
+}
+
+/** The scheme's saved views as chips above the filter: a click ticks a view's values, ＋ saves the ticks as one. */
+function renderSavedViews() {
+  const el = document.getElementById('saved-views');
+  if (!el) return;
+  const { picks, keys, views } = propFilter;
+  const apply = (next) => {
+    propFilter.picks = next;
+    renderSidebar();
+  };
+  const chips = views.map((v) => {
+    const vp = viewPicks(v.picks, keys);
+    const on = picks.size > 0 && samePicks(picks, vp);
+    return h('span', { class: `tag-chip sv${on ? ' on' : ''}` },
+      h('button', { type: 'button', class: 'sv-name', 'aria-pressed': String(on), title: on ? 'Show every minion again' : `Saved by ${v.created_by}`,
+        onclick: () => apply(on ? new Map() : vp) }, v.name),
+      on ? h('button', { type: 'button', class: 'sv-del', title: `Delete the view ${v.name}`, 'aria-label': `Delete the view ${v.name}`, onclick: () => deleteView(v) }, '×') : '');
+  });
+  const unsaved = picks.size > 0 && !views.some((v) => samePicks(picks, viewPicks(v.picks, keys)));
+  el.replaceChildren(...chips, unsaved ? h('button', { type: 'button', class: 'secondary small sv-save', onclick: saveView }, '＋ Save view') : '');
+}
+
+async function saveView() {
+  const name = prompt('Name this view (everyone in the scheme sees it):')?.trim();
+  if (!name) return;
+  if (propFilter.views.some((v) => v.name === name) && !confirm(`Replace the view "${name}" with what's ticked now?`)) return;
+  const picks = Object.fromEntries([...propFilter.picks].map(([k, set]) => [k, [...set]]));
+  const projectId = propFilter.projectId;
+  const views = await api(`api/projects/${projectId}/views`, { method: 'POST', body: { name, picks } }).catch((err) => alert(`Could not save the view: ${err.message}`));
+  if (views && propFilter.projectId === projectId) {
+    propFilter.views = views;
+    renderSavedViews();
+  }
+}
+
+async function deleteView(v) {
+  if (!confirm(`Delete the view "${v.name}" for everyone in the scheme? What's ticked stays ticked.`)) return;
+  const projectId = propFilter.projectId;
+  const views = await api(`api/projects/${projectId}/views/${v.id}`, { method: 'DELETE' }).catch((err) => alert(`Could not delete the view: ${err.message}`));
+  if (views && propFilter.projectId === projectId) {
+    propFilter.views = views;
+    renderSavedViews();
+  }
+}
+
+/** Someone saved or deleted a view in this scheme. */
+export function onViewsChanged(projectId) {
+  if (view?.kind !== 'project' || projectId !== view.projectId || propFilter.projectId !== projectId) return;
+  propFilter.views = null;
+  renderPropFilter();
 }
 
 /** Whether people on this scheme's page change a key: its own keys, and global ones only on Citadel's. */

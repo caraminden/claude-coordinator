@@ -101,6 +101,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     // The coordinator sits above the search so it stays one click away while searching.
     h('div', { id: 'coordinator-row' }),
     threadSearchBox(projectId),
+    h('div', { id: 'saved-views', class: 'saved-views' }),
     h('div', { id: 'prop-filter', class: 'prop-filter' }),
     h('div', { id: 'threads' }),
     h('div', { class: 'schedules-pane' }));

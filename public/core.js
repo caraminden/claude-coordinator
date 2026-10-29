@@ -5,7 +5,7 @@ import { openStartScheme, renderSidebar } from './sidebar.js';
 import { showProject, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
 import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './thread.js';
-import { onPropertiesChanged } from './properties.js';
+import { onPropertiesChanged, onViewsChanged } from './properties.js';
 import { inboxEvent, inboxTicket } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { inAppHash, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
@@ -449,6 +449,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'project') onProjectUpdate(msg.project);
     if (msg.type === 'properties') onPropertiesChanged(msg.projectId);
     if (msg.type === 'schedules') onSchedulesChanged(msg.projectId);
+    if (msg.type === 'views') onViewsChanged(msg.projectId);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };

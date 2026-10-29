@@ -55,7 +55,7 @@ test('starting a brief creates the minion once, records it, and notes it to the 
     assert.match(second.data.error, /started already/);
     assert.equal((await s.call(`/api/projects/${p.id}`)).data.tickets.length, 1, 'no second minion');
 
-    const notes = (await s.call(`/api/tickets/${tm.id}/events`)).data.filter((e: any) => e.kind === 'note').map((e: any) => JSON.parse(e.data).text);
+    const notes = (await s.call(`/api/tickets/${tm.id}/events?after=0`)).data.filter((e: any) => e.kind === 'note').map((e: any) => JSON.parse(e.data).text);
     assert.ok(notes.includes(`Cara started #${first.data.number} from ${heading} in citadel-retro-2026-10.md`), notes.join('\n'));
 
     assert.equal((await s.call(`/api/projects/${p.id}/tickets`, { message: 'x', brief: { heading } })).status, 400, 'a brief needs its file');

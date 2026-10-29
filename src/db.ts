@@ -267,6 +267,18 @@ CREATE TABLE IF NOT EXISTS instruction_history (
   new_text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS instruction_history_project ON instruction_history(project_id, id);
+-- A brief in a file that someone started as a minion (#129), keyed by the file's display path and the brief's
+-- heading ('' for a whole handoff file). ticket_id is null while its minion is being made. No foreign key on
+-- ticket_id, so an older release's deleteTicket still works after a rollback; reads join tickets instead.
+CREATE TABLE IF NOT EXISTS brief_starts (
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  path TEXT NOT NULL,
+  heading TEXT NOT NULL,
+  ticket_id INTEGER,
+  started_by TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, path, heading)
+);
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -323,7 +335,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 2; // 2: claude_state moved to state.db
+export const SCHEMA_VERSION = 3; // 2: claude_state moved to state.db; 3: brief_starts
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -569,6 +581,7 @@ export class Store {
     this.db.prepare('DELETE FROM ticket_seen WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM github_seen WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM turns WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM brief_starts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
@@ -725,6 +738,33 @@ export class Store {
       .prepare('INSERT INTO ticket_seen (name, ticket_id, seen_at) VALUES (?, ?, ?) ON CONFLICT(name, ticket_id) DO UPDATE SET seen_at = excluded.seen_at')
       .run(name, ticketId, now);
     return now;
+  }
+
+  /** The briefs in one file that have been started as minions, with the number of each one's minion. */
+  briefStarts(projectId: number, path: string): { heading: string; number: number }[] {
+    return this.db
+      .prepare('SELECT b.heading, t.number FROM brief_starts b JOIN tickets t ON t.id = b.ticket_id WHERE b.project_id = ? AND b.path = ?')
+      .all(projectId, path) as { heading: string; number: number }[];
+  }
+
+  /**
+   * Claim a brief before its minion is made, so two taps can't start it twice: false if it was started
+   * already or is being started. A claim left by a start that never finished (a restart mid-way) lapses.
+   */
+  claimBrief(projectId: number, path: string, heading: string, by: string): boolean {
+    const now = Date.now();
+    this.db.prepare('DELETE FROM brief_starts WHERE ticket_id IS NULL AND started_at < ?').run(now - 5 * 60_000);
+    this.db.prepare('DELETE FROM brief_starts WHERE ticket_id IS NOT NULL AND ticket_id NOT IN (SELECT id FROM tickets)').run();
+    const r = this.db
+      .prepare('INSERT OR IGNORE INTO brief_starts (project_id, path, heading, ticket_id, started_by, started_at) VALUES (?, ?, ?, NULL, ?, ?)')
+      .run(projectId, path, heading, by, now);
+    return r.changes > 0;
+  }
+
+  /** Settle a claim: the minion it made (a ticket id), or null to drop it because the start failed. */
+  settleBrief(projectId: number, path: string, heading: string, ticketId: number | null) {
+    if (ticketId === null) this.db.prepare('DELETE FROM brief_starts WHERE project_id = ? AND path = ? AND heading = ? AND ticket_id IS NULL').run(projectId, path, heading);
+    else this.db.prepare('UPDATE brief_starts SET ticket_id = ? WHERE project_id = ? AND path = ? AND heading = ?').run(ticketId, projectId, path, heading);
   }
 
   /**

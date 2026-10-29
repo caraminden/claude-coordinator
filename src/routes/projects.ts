@@ -1,7 +1,7 @@
 // Schemes: their settings and instructions, new minions, the property registry, schedules, the inbox,
 // search, and one Taskmaster writing to another's.
 import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { cleanPluginDirs, cleanRules, lines } from '../approvals.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, TICKET_TAGS, type Project, type Ticket, type TicketTag } from '../db.ts';
@@ -264,7 +264,16 @@ export const projectRoutes: Route[] = [
         if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work being merged, so nothing can start after it`);
         if (f.state === 'wait') follow = { leader, when, base: f.base, since: f.since };
       }
-      const { id, notes } = await app.newMinion(project, { title, tag, props, model, effort }, session.name);
+      // Started from a brief in a file (#129): one minion per brief, so a second start is refused.
+      const brief = body.brief == null ? null : { path: str(body.brief.path, 'Brief path', 1000), heading: typeof body.brief.heading === 'string' ? body.brief.heading.trim().slice(0, 500) : '' };
+      if (brief && !store.claimBrief(project.id, brief.path, brief.heading, session.name)) throw new HttpError(409, 'That brief has been started already');
+      const { id, notes } = await app.newMinion(project, { title, tag, props, model, effort }, session.name)
+        .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
+      if (brief) {
+        store.settleBrief(project.id, brief.path, brief.heading, id);
+        const coordinator = store.getCoordinator(project.id);
+        if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} started #${store.getTicket(id)!.number} from ${brief.heading || 'the handoff'} in ${basename(brief.path)}` });
+      }
       if (follow) {
         const { leader, when } = follow;
         waiters.chain({ ticket: id, after: leader.id, when, message, from: session.name, base: follow.base, since: follow.since });
@@ -277,6 +286,12 @@ export const projectRoutes: Route[] = [
       }
       return json(res, 201, { ...ticketView(app, id), notes });
     },
+  },
+
+  // Which briefs in a file (?path=, its absolute path) have been started, and as which minion (#129).
+  {
+    method: 'GET', path: '/api/projects/:project/briefs', who: ['person'],
+    handler: ({ res, url, app, project }) => json(res, 200, app.store.briefStarts(project.id, url.searchParams.get('path') ?? '')),
   },
 
   // The property registry: everyone reads it; people and the Taskmaster change it, minions propose.

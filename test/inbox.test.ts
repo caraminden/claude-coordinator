@@ -64,3 +64,26 @@ test('a card a person handled by typing in the chat leaves the inbox; the Taskma
 
   assert.deepEqual(store.openCards(p).map((e) => JSON.parse(e.data).id), ['q-relayed', 'p-new']);
 });
+
+test('openCardAt: when a minion\'s oldest open card was posted, for the list\'s "?" badge; answered, settled, superseded and dismissed cards don\'t count', () => {
+  const store = new Store(join(root, 'card-at.sqlite'));
+  const p = store.createProject('One', null).id;
+  const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const two = minion('two'), done = minion('done'), gone = minion('gone');
+
+  store.addEvent(two, 'question', { id: 'q-answered', questions: [] });
+  store.addEvent(two, 'user_message', { author: 'Cara', text: 'answers', answer: { questionId: 'q-answered', answers: [] } });
+  const oldest = store.addEvent(two, 'plan', { id: 'p-open', summary: 's', plan: 'p', status: 'pending' });
+  store.addEvent(two, 'question', { id: 'q-open', questions: [] });
+  assert.equal(store.openCardAt(two), oldest.created_at);
+
+  store.addEvent(done, 'question', { id: 'q-settled', questions: [], settled: { at: 1 } });
+  store.addEvent(done, 'plan', { id: 'p-old', summary: 's', plan: 'p', status: 'superseded' });
+  store.addEvent(done, 'plan', { id: 'p-ok', summary: 's', plan: 'p', status: 'approved', by: 'Cara', at: 1 });
+  assert.equal(store.openCardAt(done), null);
+
+  store.addEvent(gone, 'question', { id: 'q-gone', questions: [] });
+  assert.ok(store.openCardAt(gone));
+  store.updateTicket(gone, { status: 'closed' });
+  assert.equal(store.openCardAt(gone), null);
+});

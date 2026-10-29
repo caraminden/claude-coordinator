@@ -684,10 +684,19 @@ export class Store {
    * A person writing in the minion after a card counts as handling it there: typed replies clear it, not just clicks.
    */
   openCards(projectId: number): EventRow[] {
+    return this.openCardsWhere('t.project_id = ?', projectId);
+  }
+
+  /** When the oldest of a minion's open cards (openCards) was posted, or null with none. */
+  openCardAt(ticketId: number): number | null {
+    return this.openCardsWhere('e.ticket_id = ?', ticketId)[0]?.created_at ?? null;
+  }
+
+  private openCardsWhere(scope: string, id: number): EventRow[] {
     const bots = NOT_PEOPLE.map((n) => n.toLowerCase());
     return this.db.prepare(`
       SELECT e.* FROM events e JOIN tickets t ON t.id = e.ticket_id
-      WHERE t.project_id = ? AND t.status != 'closed' AND (
+      WHERE ${scope} AND t.status != 'closed' AND (
         (e.kind = 'plan' AND json_extract(e.data, '$.status') = 'pending')
         OR (e.kind = 'question' AND json_extract(e.data, '$.settled') IS NULL))
       AND NOT EXISTS (
@@ -696,7 +705,7 @@ export class Store {
           AND coalesce(json_extract(a.data, '$.author'), '') NOT LIKE '#%'
           -- a click on another card answers that card, not this one
           AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId'), json_extract(e.data, '$.id')) = json_extract(e.data, '$.id'))
-      ORDER BY e.id`).all(projectId, ...bots) as unknown as EventRow[];
+      ORDER BY e.id`).all(id, ...bots) as unknown as EventRow[];
   }
 
   /** The text of a ticket's replies that may link files (subagents' included). */

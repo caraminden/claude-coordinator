@@ -221,9 +221,9 @@ function renderThreadResults(el, tickets) {
 
 /** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked. */
 function byUrgency(a, b) {
-  const ra = rowState(a).rank, rb = rowState(b).rank;
-  if (ra !== rb) return ra - rb;
-  return ra === 0 ? a.updated_at - b.updated_at : b.updated_at - a.updated_at;
+  const sa = rowState(a), sb = rowState(b);
+  if (sa.rank !== sb.rank) return sa.rank - sb.rank;
+  return sa.rank === 0 ? (sa.since ?? a.updated_at) - (sb.since ?? b.updated_at) : b.updated_at - a.updated_at;
 }
 
 /**
@@ -243,6 +243,8 @@ export function rowState(t) {
   if (t.state === 'parked') return { rank: 4, fam: 'idle', cell: 'parked', label: state.label };
   if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, fam: 'wait', cell: `${t.state === 'outside' ? 'waiting' : 'deploying'}${steps}`, counted: !!steps, label: state.label };
   if (t.state === 'blocked') return { rank: 2, fam: 'broken', cell: 'blocked', label: state.label };
+  // An open question or plan card is the more specific ask than ready, try it or reply; timed from when it was posted.
+  if (t.pending_card_at) return { rank: 0, fam: 'you', cell: `? ${shortAgo(t.pending_card_at)}`, label: 'Waiting for you to answer a question', since: t.pending_card_at };
   if (t.state === 'ready') return { rank: 0, fam: 'done', cell: waited('ready'), label: state.label };
   if (t.state === 'try') return { rank: 0, fam: 'you', cell: waited('try it'), label: state.label };
   return { rank: 0, fam: 'you', cell: waited('reply'), label: 'Your move' };

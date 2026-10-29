@@ -650,7 +650,10 @@ export class Runner {
       turnStartedAt: this.turns.get(ticket.id)?.startedAt ?? null,
       // When it resumes by itself after the usage limit, if it waits for that.
       limit_resume_at: this.limitWait(ticket.id)?.at ?? null,
-      approvals: this.approvals.waiting(ticket.id), properties: this.store.props.forTarget('minion', ticket.id),
+      approvals: this.approvals.waiting(ticket.id),
+      // When its oldest question or plan card still waiting on a person was posted.
+      pending_card_at: this.store.openCardAt(ticket.id),
+      properties: this.store.props.forTarget('minion', ticket.id),
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
       // What its turns have cost so far, at API prices.

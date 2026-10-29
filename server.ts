@@ -1483,6 +1483,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const questions = await cleanQuestions(ticket, (await readJson(req)).questions);
       const questionId = randomBytes(6).toString('hex');
       runner.emit(id, 'question', { id: questionId, questions });
+      runner.broadcastTicket(id);
       notify(id, { kind: 'question', questions });
       return json(res, 201, { id: questionId });
     }
@@ -1504,6 +1505,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         store.setEventData(e.id, { ...q, settled });
         runner.emit(id, 'question_result', { id: q.id, settled });
       }
+      if (open.length) runner.broadcastTicket(id);
       return json(res, 200, { settled: open.map((e) => JSON.parse(e.data).id) });
     }
     if (action === '/strike' && method === 'POST') {
@@ -1553,6 +1555,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       }
       const planId = randomBytes(6).toString('hex');
       runner.emit(id, 'plan', { id: planId, summary, plan, status: 'pending' });
+      runner.broadcastTicket(id);
       notify(id, { kind: 'plan', summary });
       return json(res, 201, { id: planId });
     }

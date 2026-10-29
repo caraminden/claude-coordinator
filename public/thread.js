@@ -301,15 +301,13 @@ export function renderTicketHead() {
     working ? h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')) : '');
   stateFit?.disconnect();
   if (working) stateFit?.observe(stateLabel);
-  // The title's line keeps who it is, its state, its buttons and the way out; a minion's line under it
-  // takes where the change is and the smaller tools (#158), so the title has room. The Taskmaster has
-  // only the find box to move, which fits up top.
+  // The title's line keeps who it is, its buttons and the way out; the line under it takes the state,
+  // where the change is and the smaller tools (#158), so the title has room.
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
-      stateLabel,
-      h('span', { class: 'spacer' }), ...actions, coord ? view.findEl ?? '' : '',
+      h('span', { class: 'spacer' }), ...actions,
       h('span', { class: 'head-nav' },
         // Through the views opened in this tab, never off the site (public/navstack.js).
         h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
@@ -317,7 +315,7 @@ export function renderTicketHead() {
         // Leaves the thread as it is and goes back to the project's coordinator.
         coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close')))),
     coord ? '' : personNoteLine(t),
-    coord ? '' : h('div', { class: 'head-sub' }, shipLine(t), personNoteButton(t), propertyChip(t), view.findEl ?? ''),
+    h('div', { class: 'head-sub' }, stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : propertyChip(t), view.findEl ?? ''),
     view.progressEl);
   renderTyping();
   // While a turn runs, a sent message waits for it; said on hover rather than in a line of its own.
@@ -387,12 +385,12 @@ function editPersonNote(t) {
   input.focus();
 }
 
-/** Where the minion's change is, branch to live, and why it is stuck when it is (src/branch.ts). */
+/** Where the minion's change is, branch to live, in a word or two; the full line and why it is stuck are on hover (src/branch.ts). */
 function shipLine(t) {
   const stage = !isCoordinator(t) && SHIP[t.ship?.stage];
   if (!stage) return '';
-  return h('div', { class: `ship f-${stage.fam}`, title: t.ship.detail ?? t.ship.text },
-    h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, t.ship.text), h('code', {}, t.ship.commit));
+  return h('span', { class: `ship f-${stage.fam}`, title: `${t.ship.detail ?? t.ship.text} · ${t.ship.commit}` },
+    h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, stage.badge || 'on branch'));
 }
 
 async function setStatus(id, status) {

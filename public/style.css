@@ -189,19 +189,16 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
   margin: -0.6rem 0 1rem;
 }
 /* Where the minion's change is: branch, on main, deploying, live (src/branch.ts) */
-.ticket-head .ship { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85em; color: var(--muted); min-width: 0; }
+.ticket-head .ship { flex: none; display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85em; color: var(--muted); white-space: nowrap; cursor: default; }
 .ticket-head .ship .ship-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
-.ticket-head .ship .text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ticket-head .ship.f-done .text, .ticket-head .ship.f-broken .text { color: var(--c); font-weight: 600; }
-.ticket-head .ship code { flex: none; font-size: 0.95em; }
-/* The line under the title (#158): the ship status, then ✎ Note, the properties chip and the find box, wrapping when narrow. */
+/* The line under the title (#158): the state, where the change is, then ✎ Note, the properties chip and the find box, wrapping when narrow. */
 .ticket-head .head-sub { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; margin-top: 0.35rem; min-width: 0; }
-/* The ship status takes the room left on its line, cut short with … before the tools wrap under it. */
-.ticket-head .head-sub > .ship { flex: 1 1 10rem; }
+/* A state too long for its line gets the line to itself, the rest wrapping under it; only then is it cut short. */
+.ticket-head .head-sub > .head-state { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
 .ticket-head .head-sub > .find-box { flex: none; margin-left: auto; }
 .ticket-head > .row > .find-box { flex: none; }
 /* With no ship status the chip sits at the line's start, so its popover opens rightwards. */
-@media (min-width: 801px) { .ticket-head .head-sub:not(:has(> .ship)) .prop-pop { left: 0; right: auto; } }
 /* People's own note (#146): a dashed amber strip, so it never reads as the minion's words. */
 .ticket-head .pnote { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.9em; line-height: 1.4;
   background: color-mix(in srgb, var(--waiting-tint) 13%, var(--panel)); border: 1px dashed color-mix(in srgb, var(--waiting-tint) 60%, transparent); min-width: 0; }
@@ -716,9 +713,9 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .find-box .find-step { padding: 0.1rem 0.45rem; font-size: 0.85em; }
 @media (max-width: 800px) { .find-box .chat-find, .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 7rem; } }
 /* Squeezed while Claude works: "." → ".." → "..." instead of "Cla…" (thread.js, stateFit). The text stays for screen readers. */
-.ticket-head > .row > .muted.squeezed > .state-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.ticket-head > .row > .muted.squeezed > .state-dots { display: inline; }
-/* Phones: the title gets the first line; the state and buttons share the second, the state giving way. */
+.ticket-head .head-state.squeezed > .state-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.ticket-head .head-state.squeezed > .state-dots { display: inline; }
+/* Phones: the title gets the first line; the buttons and ‹ › × share the second. */
 @media (max-width: 800px) {
   .ticket-head > .row { gap: 0.4rem 0.45rem; }
   .ticket-head > .row > h2 { flex: 1 0 calc(100% - 1.1rem); min-width: 0; }
@@ -734,13 +731,11 @@ mark.find.current { background: var(--waiting); color: #fff; }
   .find-box .find-count { min-width: 0; }
   .find-box .find-step { padding: 0.1rem 0.3rem; }
 }
-/* Keep the title's line on one line on wider screens: the state gives way first (down to 7rem), then a long title.
-   From a zero basis, the state only grows into room the title leaves, standing in for the spacer. */
+/* Keep the title's line on one line on wider screens: a long title gives way to the buttons. */
 @media (min-width: 801px) {
   .ticket-head > .row { flex-wrap: nowrap; }
   .ticket-head > .row > h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ticket-head > .row > .muted { white-space: nowrap; }
-  .ticket-head > .row > .head-state { flex: 1000 1 0; min-width: 7rem; overflow: hidden; text-overflow: ellipsis; }
   .ticket-head > .row > button { flex: none; white-space: nowrap; }
   .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 11rem; }
 }
@@ -777,8 +772,10 @@ mark.find.current { background: var(--waiting); color: #fff; }
   .ticket-head > .row:has(> .dot) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 3.45rem); }
   /* Pages with a close × (Settings, Artifacts…) keep it on the title's line too. */
   .ticket-head > .row:has(> .close-view) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 5.3rem); }
-  /* The ship status wraps to a second line rather than losing its words beside the tools. */
-  .ticket-head .head-sub > .ship .text { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; }
+  /* A minion's state has its own line, so where the change is and the tools share the next. */
+  .ticket-head .head-sub:has(> .prop-chip) > .head-state { flex-basis: 100%; }
+  /* With no buttons (the Taskmaster between turns), ‹ › share the title's line. */
+  .chat > .ticket-head > .row:not(:has(> button:not(.refresh-btn))) > h2:is(*, :has(+ .refresh-btn)) { flex: 1 1 0; }
   /* A minion's ✎ for a new person note (#146): just the pen on phones. */
   .ticket-head .note-btn { width: 1.9rem; height: 1.9rem; justify-content: center; padding: 0; }
 }
@@ -1028,8 +1025,10 @@ a.thread-ref:hover { text-decoration: underline; }
 .pv-add select { flex: none; width: auto; }
 .pv-add label { display: inline-flex; align-items: center; gap: 0.3rem; width: auto; margin: 0; color: var(--muted); }
 .pv-add input[type=checkbox] { width: auto; margin: 0; }
-/* On a phone the popover spans the line under the title (.head-sub) instead of hanging off the screen's left edge. */
-@media (max-width: 800px) { .ticket-head .head-sub > .prop-chip { position: static; } .ticket-head .head-sub .prop-pop { left: 0; right: 0; width: auto; } }
+/* The popover hangs from the start of the line under the title (.head-sub), so it stays on screen wherever the chip lands; on a phone it spans the line. */
+.ticket-head .head-sub > .prop-chip { position: static; }
+.ticket-head .head-sub .prop-pop { left: 0; right: auto; }
+@media (max-width: 800px) { .ticket-head .head-sub .prop-pop { right: 0; width: auto; } }
 
 /* Full-screen file viewer (#79): a file a chat linked, as big as it fits, with that chat in a
    compact column beside it (below it on phones) and nothing else on screen. */

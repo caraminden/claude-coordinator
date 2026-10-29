@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { NOT_PEOPLE } from './auth.ts';
 import { Registry } from './properties.ts';
 
 export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
@@ -639,16 +640,22 @@ export class Store {
   /**
    * A project's stored cards still waiting on a person, in threads that aren't dismissed: questions
    * nobody has answered (nor the minion settled), and plans still pending. Approval cards live in memory (Approvals.pending).
+   * A person writing in the minion after a card counts as handling it there: typed replies clear it, not just clicks.
    */
   openCards(projectId: number): EventRow[] {
+    const bots = NOT_PEOPLE.map((n) => n.toLowerCase());
     return this.db.prepare(`
       SELECT e.* FROM events e JOIN tickets t ON t.id = e.ticket_id
       WHERE t.project_id = ? AND t.status != 'closed' AND (
         (e.kind = 'plan' AND json_extract(e.data, '$.status') = 'pending')
-        OR (e.kind = 'question' AND json_extract(e.data, '$.settled') IS NULL AND NOT EXISTS (
-          SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message'
-            AND json_extract(a.data, '$.answer.questionId') = json_extract(e.data, '$.id'))))
-      ORDER BY e.id`).all(projectId) as unknown as EventRow[];
+        OR (e.kind = 'question' AND json_extract(e.data, '$.settled') IS NULL))
+      AND NOT EXISTS (
+        SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id
+          AND lower(coalesce(json_extract(a.data, '$.author'), '')) NOT IN (${bots.map(() => '?').join(', ')})
+          AND coalesce(json_extract(a.data, '$.author'), '') NOT LIKE '#%'
+          -- a click on another card answers that card, not this one
+          AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId'), json_extract(e.data, '$.id')) = json_extract(e.data, '$.id'))
+      ORDER BY e.id`).all(projectId, ...bots) as unknown as EventRow[];
   }
 
   /** The text of a ticket's replies that may link files (subagents' included). */

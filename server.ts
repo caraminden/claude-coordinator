@@ -10,7 +10,7 @@ import { gzip } from 'node:zlib';
 import { homedir } from 'node:os';
 import { commentMessage, fileType, findArtifacts, isArtifact, linkedPaths, optionImageProblem, resolveFile } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
-import { AGENT_NAME, Auth, looksLikeUrl, threadMayCall, type Session } from './src/auth.ts';
+import { AGENT_NAME, Auth, looksLikeUrl, NOT_PEOPLE, threadMayCall, type Session } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
@@ -852,7 +852,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const ip = clientIp(req);
     const body = await readJson(req);
     const name = cleanName(body.name);
-    if ([AGENT_NAME, 'Coordinator', GITHUB_NAME, APP_NAME].some((n) => n.toLowerCase() === name.toLowerCase())) throw new HttpError(400, 'That name is reserved');
+    if (NOT_PEOPLE.some((n) => n.toLowerCase() === name.toLowerCase())) throw new HttpError(400, 'That name is reserved');
     // Checked right before the password (no await in between) so parallel bursts are counted.
     if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
     if (!auth.checkPassword(ip, String(body.password ?? ''))) throw new HttpError(401, 'Wrong password');

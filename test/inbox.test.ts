@@ -44,3 +44,23 @@ test('a scheme\'s inbox: open cards and ready/try minions, approvals first, then
   for (let i = 2; i < items.length; i++) assert.ok(items[i - 1].at >= items[i].at);
   assert.equal((items[0].card as any).tool, 'Bash');
 });
+
+test('a card a person handled by typing in the chat leaves the inbox; the Taskmaster, minions and other cards\' clicks don\'t clear it', () => {
+  const store = new Store(join(root, 'typed.sqlite'));
+  const p = store.createProject('One', null).id;
+  const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const typed = minion('typed'), relayed = minion('relayed'), clicked = minion('clicked');
+
+  store.addEvent(typed, 'plan', { id: 'p-typed', summary: 's', plan: 'p', status: 'pending' });
+  store.addEvent(typed, 'question', { id: 'q-typed', questions: [] });
+  store.addEvent(typed, 'user_message', { author: 'cara', text: '1. Approve 2. Yes' });
+
+  store.addEvent(relayed, 'question', { id: 'q-relayed', questions: [] });
+  for (const author of ['Taskmaster', 'Coordinator', 'GitHub', 'Citadel', '#12 Other minion']) store.addEvent(relayed, 'user_message', { author, text: 'fyi' });
+
+  store.addEvent(clicked, 'question', { id: 'q-old', questions: [] });
+  store.addEvent(clicked, 'plan', { id: 'p-new', summary: 's', plan: 'p', status: 'pending' });
+  store.addEvent(clicked, 'user_message', { author: 'Cara', text: 'answers', answer: { questionId: 'q-old', answers: [] } });
+
+  assert.deepEqual(store.openCards(p).map((e) => JSON.parse(e.data).id), ['q-relayed', 'p-new']);
+});

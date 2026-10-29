@@ -1,6 +1,8 @@
 // Shared-password login with HMAC-signed session cookies.
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { APP_NAME } from './appname.ts';
+import { GITHUB_NAME } from './github.ts';
 
 const COOKIE = 'cc_session';
 const SESSION_DAYS = 30;
@@ -15,6 +17,9 @@ export interface Session {
 }
 
 export const AGENT_NAME = 'Taskmaster';
+
+/** Message authors that aren't people (minions write as "#N title"), so nobody may log in as one. */
+export const NOT_PEOPLE = [AGENT_NAME, 'Coordinator', GITHUB_NAME, APP_NAME];
 
 /** A phone's password manager can fill the name field with the site's address; that is never a name. */
 export function looksLikeUrl(name: string): boolean {

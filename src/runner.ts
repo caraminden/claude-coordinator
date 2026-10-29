@@ -628,9 +628,7 @@ export class Runner {
       this.emit(ticketId, 'note', { text: 'The deploy is live, but someone wrote to this minion after it deployed, so it stays open.' });
       return false;
     }
-    const events = this.store.listEvents(ticketId);
-    const answered = new Set(events.map((e) => e.kind === 'user_message' && JSON.parse(e.data).answer?.questionId).filter(Boolean));
-    if (events.some((e) => e.kind === 'question' && !answered.has(JSON.parse(e.data).id) && !JSON.parse(e.data).settled)) {
+    if (this.store.openCards(t.project_id).some((e) => e.ticket_id === ticketId && e.kind === 'question')) {
       this.emit(ticketId, 'note', { text: 'The deploy is live, but a question card is still open, so this minion stays open.' });
       return false;
     }

@@ -5,6 +5,11 @@ import { applyEvent, createProgress } from '../public/progress.js';
 export const PAGE_EVENTS = 200;
 const MAX_PAGE_EVENTS = 1000;
 
+// Plans as they stood before a page's first event, per store by "ticket:event". History is append-only,
+// so an entry never goes stale; replaying a long minion's earlier events costs ~10 ms, and opens repeat.
+const plansByStore = new WeakMap<Store, Map<string, unknown[]>>();
+const PLANS_KEPT = 200;
+
 /**
  * The newest page before `before` (see Store.eventsPage), with the task list as it stood just before
  * the page: a plan can outlive the turn that made it, and the readout replays the page on top of it.
@@ -13,7 +18,20 @@ export function historyPage(store: Store, ticketId: number, opts: { before?: num
   const before = opts.before ?? Number.MAX_SAFE_INTEGER;
   const limit = Math.min(Math.max(1, opts.limit ?? PAGE_EVENTS), MAX_PAGE_EVENTS);
   const { events, more } = store.eventsPage(ticketId, before, limit, opts.from);
-  const p = createProgress();
-  if (more) for (const row of store.planEvents(ticketId, events[0].id)) applyEvent(p, row.kind, JSON.parse(row.data));
-  return { events, more, tasks: p.tasks };
+  return { events, more, tasks: more ? planBefore(store, ticketId, events[0].id) : [] };
+}
+
+function planBefore(store: Store, ticketId: number, eventId: number) {
+  const plans = plansByStore.get(store) ?? new Map<string, unknown[]>();
+  plansByStore.set(store, plans);
+  const key = `${ticketId}:${eventId}`;
+  let tasks = plans.get(key);
+  if (!tasks) {
+    const p = createProgress();
+    for (const row of store.planEvents(ticketId, eventId)) applyEvent(p, row.kind, JSON.parse(row.data));
+    tasks = p.tasks;
+    plans.set(key, tasks);
+    if (plans.size > PLANS_KEPT) plans.delete(plans.keys().next().value!);
+  }
+  return structuredClone(tasks);
 }

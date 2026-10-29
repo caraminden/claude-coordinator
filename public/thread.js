@@ -283,13 +283,13 @@ export function renderTicketHead() {
   }
   // Waiting on the usage limit, Stop ends the wait (src/runner.ts, stop).
   if (t.status === 'running' || t.limit_resume_at) {
-    actions.push(h('button', { class: 'secondary', title: t.limit_resume_at ? 'Don\'t resume after the usage limit resets' : undefined, onclick: () => api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));
+    actions.push(h('button', { class: 'secondary act-stop', title: t.limit_resume_at ? 'Don\'t resume after the usage limit resets' : undefined, onclick: () => api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));
   } else if (coord) {
     // The coordinator stays open for the life of the project.
   } else if (t.status === 'closed') {
-    actions.push(h('button', { class: 'secondary', onclick: () => setStatus(t.id, 'idle') }, 'Reopen minion'));
+    actions.push(h('button', { class: 'secondary act-reopen', onclick: () => setStatus(t.id, 'idle') }, 'Reopen minion'));
   } else {
-    actions.push(h('button', { class: 'secondary', onclick: async () => {
+    actions.push(h('button', { class: 'secondary act-dismiss', onclick: async () => {
       if (await setStatus(t.id, 'closed')) location.hash = `#/p/${t.project_id}`;
     }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
   }

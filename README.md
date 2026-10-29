@@ -202,9 +202,12 @@ minion that made it. Restarting doesn't interrupt turns:
 
 1. It fast-forwards `~/claude-coordinator` to `main`, runs `node --test`, and
    boots the new code on a spare port against a copy of the database
-   (`tools/boot-check.ts`: the app page, `/api/health`, and the MCP server's
-   initialize and one tool call). If any of that fails it puts the checkout
-   back and exits non-zero; nothing restarts.
+   (`tools/boot-check.ts`: `node --check` on `public/*.js`, `/api/health`, the
+   app signed in and rendered in Playwright's headless Chromium with no console
+   error, the MCP server's initialize and one tool call, and a minion turn and a
+   Taskmaster turn started through the runner's real arguments with
+   `tools/boot-check-claude.ts` as claude). If any of that fails it puts the
+   checkout back and exits non-zero; nothing restarts.
 2. If everything changed since the commit the server booted from is under
    `public/`, it sends `SIGHUP`. The server re-reads `public/` and tells open
    tabs, which reload once nobody is typing. No restart, no interrupted turns.

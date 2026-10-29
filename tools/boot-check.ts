@@ -144,7 +144,7 @@ try {
       if (t.status !== 'running' && t.status !== 'new') {
         if (!existsSync(report)) fail(`A ${what} turn could not start (${t.status}): ${t.note ?? 'no reason given'}`);
         const r = JSON.parse(readFileSync(report, 'utf8'));
-        if (!r.ok) fail(`A ${what} turn started but ${r.error}`);
+        if (!r.ok) fail(`A ${what} turn started, but: ${r.error}`);
         return console.error(`boot-check: a ${what} turn started (${r.found})`);
       }
       if (Date.now() > end) fail(`A ${what} turn did not finish within 30 s`);

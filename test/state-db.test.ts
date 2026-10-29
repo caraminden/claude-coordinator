@@ -50,6 +50,13 @@ test('opening a database moves its session state into state.db, and the main fil
   assert.equal(s.listClaudeState(1, null).length, 1);
   assert.equal(s.listClaudeState(1, 1).length, 1);
   assert.equal((s.db.prepare('PRAGMA state.auto_vacuum').get() as any).auto_vacuum, 2, 'incremental, for the prune');
+  s.db.exec('PRAGMA state.wal_checkpoint(TRUNCATE)');
+  s.putClaudeState(row('projects/a/big.jsonl', 1, 20_000_000));
+  s.db.exec('PRAGMA state.wal_checkpoint(PASSIVE)');
+  s.putClaudeState(row('projects/a/small.jsonl', 1, 10)); // restarts the log, cut down to the limit
+  assert.ok(statSync(join(d, 'state.db-wal')).size <= 16_777_216, `the WAL is capped: ${statSync(join(d, 'state.db-wal')).size}`);
+  s.deleteClaudeState('projects/a/big.jsonl');
+  s.deleteClaudeState('projects/a/small.jsonl');
   s.db.close();
   assert.ok(!mainHasState(file));
   assert.ok(statSync(file).size < before - 1_500_000, `main shrank from ${before} to ${statSync(file).size}`);

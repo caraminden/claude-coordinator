@@ -373,6 +373,8 @@ export class Store {
     this.db.prepare('ATTACH DATABASE ? AS state').run(this.path === ':memory:' ? ':memory:' : join(dirname(this.path), 'state.db'));
     // auto_vacuum only takes before the file's first table, so a new state.db gets it; the prune frees space with incremental_vacuum.
     this.db.exec('PRAGMA state.auto_vacuum = INCREMENTAL; PRAGMA state.journal_mode = WAL;');
+    // A WAL file keeps its biggest size unless capped: the move alone grew state.db's to its whole size.
+    this.db.exec('PRAGMA main.journal_size_limit = 16777216; PRAGMA state.journal_size_limit = 16777216;');
     this.db.exec(STATE_SCHEMA);
     if (!this.db.prepare("SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'claude_state'").get()) return;
     const cols = 'path, project_id, ticket_id, size, mtime, data';

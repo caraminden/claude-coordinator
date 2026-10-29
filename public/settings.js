@@ -310,8 +310,7 @@ function renderAppInstructionsHead() {
       h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     h('div', { class: 'meta' },
-      'Every minion and Taskmaster in every scheme gets these in its system prompt, right before its scheme instructions, from its next turn. ',
-      'A scheme instruction overrides one of these only where it names the rule it replaces.',
+      'Every scheme\'s minions and Taskmaster get these, before their scheme\'s own.',
       a?.by ? ` Last changed by ${a.by} ${ago(a.at)}.` : ''));
 }
 
@@ -361,6 +360,9 @@ export function appInstructionsEditor() {
   };
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head', id: 'app-instructions-head' }),
+    h('p', { class: 'muted small' },
+      'Rules for how people like to work in every scheme. They reach each minion and Taskmaster from its next turn, right before its scheme instructions. ',
+      'A scheme instruction overrides one of these only where it names the rule it replaces.'),
     textarea,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
     history);

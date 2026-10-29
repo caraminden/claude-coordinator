@@ -30,3 +30,23 @@ export function valueCounts(key, tickets, picks) {
   }
   return counts;
 }
+
+/**
+ * A saved view's picks as a Map of key → Set, for the scheme's keys as they are now: keys no longer
+ * active, and archived or proposed values of a list key, drop out quietly.
+ */
+export function viewPicks(saved, keys) {
+  const picks = new Map();
+  for (const k of keys) {
+    if (k.status !== 'active' || !saved[k.key]) continue;
+    const live = k.value_kind === 'enum' ? new Set(k.values.filter((v) => v.status === 'active').map((v) => v.value)) : null;
+    const set = new Set(saved[k.key].filter((v) => !live || live.has(v)));
+    if (set.size) picks.set(k.key, set);
+  }
+  return picks;
+}
+
+/** Whether two sets of picks tick the same values. */
+export function samePicks(a, b) {
+  return a.size === b.size && [...a].every(([key, set]) => b.get(key)?.size === set.size && [...set].every((v) => b.get(key).has(v)));
+}

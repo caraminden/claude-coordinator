@@ -65,6 +65,19 @@ function provisionalTitle(message: string): string {
   return `${(space > 20 ? cut.slice(0, space) : cut).replace(/[\s,.;:-]+$/, '')}…`;
 }
 
+/** A saved view's picks from a request: key → a non-empty list of text or number values. */
+function viewPicks(v: unknown): Record<string, (string | number)[]> {
+  const bad = () => new HttpError(400, 'picks must be an object of key: [values], with at least one value');
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw bad();
+  const entries = Object.entries(v);
+  if (!entries.length || entries.length > 50) throw bad();
+  for (const [key, values] of entries) {
+    if (key.length > 60 || !Array.isArray(values) || !values.length || values.length > 200) throw bad();
+    if (!values.every((x) => (typeof x === 'string' && x.length <= 200) || Number.isFinite(x))) throw bad();
+  }
+  return v as Record<string, (string | number)[]>;
+}
+
 /** Who is changing properties: a person, a scheme's Taskmaster, or a minion. */
 function actorFor({ session, caller: t }: Ctx): Actor {
   if (!t) return { kind: 'person', name: session.name };
@@ -349,6 +362,26 @@ export const projectRoutes: Route[] = [
         app.runner.send(coordinator.id, actor.name, `Property proposal: ${what}. Reason: ${body.reason}\n\nApprove or reject it with review_property (new keys need a person: ask them).`, []);
       }
       return json(ctx.res, 200, r);
+    },
+  },
+
+  // Saved views: named property filters above the minions list, shared by everyone in the scheme.
+  { method: 'GET', path: '/api/projects/:project/views', who: ['person'], handler: ({ res, app, project }) => json(res, 200, app.store.listViews(project.id)) },
+  {
+    method: 'POST', path: '/api/projects/:project/views', who: ['person'],
+    async handler({ req, res, app, session, project }) {
+      const body = await readJson(req);
+      app.store.saveView(project.id, str(body.name, 'Name', 40), viewPicks(body.picks), session.name);
+      app.broadcast({ type: 'views', projectId: project.id });
+      return json(res, 200, app.store.listViews(project.id));
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/projects/:project/views/:view', who: ['person'],
+    handler({ res, app, project, params }) {
+      if (!app.store.deleteView(project.id, Number(params.view))) throw new HttpError(404, 'No such view');
+      app.broadcast({ type: 'views', projectId: project.id });
+      return json(res, 200, app.store.listViews(project.id));
     },
   },
 

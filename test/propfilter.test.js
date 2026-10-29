@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filterChoices, matchesPicks, valueCounts } from '../public/propfilter.js';
+import { filterChoices, matchesPicks, samePicks, valueCounts, viewPicks } from '../public/propfilter.js';
 
 const key = (key, value_kind, values = [], status = 'active') => ({ key, value_kind, status, values });
 const val = (value, status = 'active', reviewed = true) => ({ value, status, reviewed });
@@ -48,4 +48,23 @@ test('counts: a value counts the minions carrying it that every other key\'s pic
   // The key's own picks don't narrow its counts (OR within a key); other keys' do.
   assert.deepEqual(valueCounts('type', ts, picks({ type: ['bug'], stage: ['in-progress'] })), new Map([['bug', 1], ['feature', 1]]));
   assert.deepEqual(valueCounts('area', ts, picks({ type: ['bug'] })), new Map([['town', 1], ['ui', 2]]));
+});
+
+test('a saved view applies what the registry still offers: archived values and inactive keys drop quietly', () => {
+  const keys = [
+    key('type', 'enum', [val('feature'), val('bug', 'archived')]),
+    key('build', 'integer'),
+    key('area', 'enum', [val('town')], 'archived'),
+    key('stage', 'enum', [val('done'), val('idea', 'archived')]),
+  ];
+  const saved = { type: ['feature', 'bug'], build: [8], area: ['town'], stage: ['idea'], gone: ['x'] };
+  assert.deepEqual(viewPicks(saved, keys), new Map([['type', new Set(['feature'])], ['build', new Set([8])]]));
+});
+
+test('samePicks compares the ticked values, not their order', () => {
+  const a = new Map([['type', new Set(['bug', 'feature'])], ['build', new Set([8])]]);
+  assert.ok(samePicks(a, new Map([['build', new Set([8])], ['type', new Set(['feature', 'bug'])]])));
+  assert.ok(!samePicks(a, new Map([['type', new Set(['bug', 'feature'])]])));
+  assert.ok(!samePicks(a, new Map([['type', new Set(['bug'])], ['build', new Set([8])]])));
+  assert.ok(!samePicks(a, new Map([['type', new Set(['bug', 'feature'])], ['stage', new Set([8])]])));
 });

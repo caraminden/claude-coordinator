@@ -156,6 +156,16 @@ export interface TurnResult {
   usage?: any;
 }
 
+/** A named property filter, shared by everyone in its scheme: key → the values ticked for it. */
+export interface SavedView {
+  id: number;
+  project_id: number;
+  name: string;
+  picks: Record<string, (string | number)[]>;
+  created_by: string;
+  created_at: number;
+}
+
 export interface EventRow {
   id: number;
   ticket_id: number;
@@ -287,6 +297,15 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   auth TEXT NOT NULL,
   muted TEXT NOT NULL DEFAULT '[]',
   created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS saved_views (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  picks TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (project_id, name)
 );
 `;
 
@@ -1068,6 +1087,22 @@ export class Store {
 
   deleteMachine(id: number) {
     this.db.prepare('DELETE FROM machines WHERE id = ?').run(id);
+  }
+
+  listViews(projectId: number): SavedView[] {
+    const rows = this.db.prepare('SELECT * FROM saved_views WHERE project_id = ? ORDER BY name COLLATE NOCASE').all(projectId) as any[];
+    return rows.map((r) => ({ ...r, picks: JSON.parse(r.picks) }));
+  }
+
+  /** Save the picks under a name; saving under a name the scheme already has replaces that view. */
+  saveView(projectId: number, name: string, picks: SavedView['picks'], by: string) {
+    this.db
+      .prepare('INSERT INTO saved_views (project_id, name, picks, created_by, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (project_id, name) DO UPDATE SET picks = excluded.picks, created_by = excluded.created_by, created_at = excluded.created_at')
+      .run(projectId, name, JSON.stringify(picks), by, Date.now());
+  }
+
+  deleteView(projectId: number, id: number): boolean {
+    return this.db.prepare('DELETE FROM saved_views WHERE project_id = ? AND id = ?').run(projectId, id).changes > 0;
   }
 
   listPushSubscriptions(): PushSubscriptionRow[] {

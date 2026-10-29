@@ -53,8 +53,11 @@ process.stdin.resume();
     };
     await call(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake-claude', version: '1' } });
     const tools = await call(2, 'tools/list', {});
-    const called = await call(3, 'tools/call', { name: 'whoami', arguments: {} });
+    // A machine's workspace tools: list the workspaces, then copy a file over.
+    const ws = name.endsWith('-ws');
+    const called = await call(3, 'tools/call', { name: ws ? 'workspaces' : 'whoami', arguments: {} });
     results[name] = { tools: tools.result.tools.map((t) => t.name), text: called.result.content[0].text };
+    if (ws) results[name].fetched = (await call(4, 'tools/call', { name: 'fetch_file', arguments: { workspace: 'w', path: 'report.zip' } })).result.content[0].text;
     p.stdin.end();
   }
   report({ args, results, token: process.env.COORDINATOR_TOKEN });
@@ -202,4 +205,45 @@ test('an agent can run a server from Claude Code\'s config, and threads get the 
   const turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
   assert.deepEqual(turn.results.desk.tools, ['whoami']);
   assert.match(turn.args[turn.args.indexOf('--append-system-prompt') + 1], /Notes on desk from its owner:\nNever restart this PC\./);
+});
+
+test('workspace tools reach minions only once a person switches them on, and fetch_file lands in the minion\'s files', async () => {
+  const { mkdirSync } = await import('node:fs');
+  const folder = join(root, 'ws-folder');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'report.zip'), Buffer.from([0x50, 0x4b, 0, 1, 2, 3]));
+  const config = join(root, 'agent-dir', 'machine-agent.json');
+  mkdirSync(join(root, 'agent-dir'), { recursive: true });
+  writeFileSync(config, JSON.stringify({ workspaces: { w: { path: folder, tasks: { hi: { run: [process.execPath, '-e', '1'] } } } } }));
+  await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'box-ws' } }), /400/);
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'wsbox' } });
+  assert.equal(machine.workspace_tools, false);
+  startAgent(token, ['--config', config, '--', process.execPath, mcpServer]);
+  const online = await until('wsbox to report its workspace', async () => (await call('/api/machines')).find((m: any) => m.name === 'wsbox' && m.workspaces.length));
+  assert.deepEqual(online.servers, ['mcp', 'ws']);
+  assert.equal(online.workspaces[0].tasks[0].name, 'hi');
+  const [project] = await call('/api/projects');
+
+  // Off: the turn gets the machine's MCP server only, and can't open its workspace tools by hand.
+  let before = turns().length;
+  await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'off' } });
+  let turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
+  assert.deepEqual(Object.keys(turn.results).filter((n) => n.startsWith('wsbox')), ['wsbox']);
+  const refused = await fetch(`${base}/api/machines/${machine.id}/session?server=ws`, { headers: { Authorization: `Bearer ${turn.token}` } });
+  assert.equal(refused.status, 503);
+  await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: 'yes' } }), /400/);
+
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: true } });
+  before = turns().length;
+  const ticket = await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'on' } });
+  turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
+  assert.equal(turn.error, undefined);
+  const ws = turn.results['wsbox-ws'];
+  assert.ok(ws.tools.includes('git_sync') && ws.tools.includes('run_task'));
+  assert.match(ws.text, /## w\nFolder: .*ws-folder[\s\S]*- hi: /);
+  const copied = ws.fetched.match(/to (\S+) on the app/)[1];
+  assert.match(copied, new RegExp(`shared/${ticket.ticket?.id ?? ticket.id}/machine-files/wsbox/report\\.zip$`));
+  assert.deepEqual([...readFileSync(copied)], [0x50, 0x4b, 0, 1, 2, 3]);
+  assert.ok(turn.args.includes('mcp__wsbox-ws'));
+  assert.match(turn.args[turn.args.indexOf('--append-system-prompt') + 1], /wsbox \(mcp__wsbox, mcp__wsbox-ws\)[\s\S]*call its workspaces tool first/);
 });

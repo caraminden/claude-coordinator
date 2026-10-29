@@ -103,6 +103,8 @@ export interface Machine {
   last_seen_at: number | null;
   /** What threads should know when using it ("never restart it", where the clone is); '' for none. */
   notes: string;
+  /** 1 when minions get the workspace tools its agent offers (git sync, its owner's tasks); off until a person turns it on. */
+  workspace_tools: number;
 }
 
 /** One browser of one signed-in person that wants Web Push notifications (src/push.ts). */
@@ -228,7 +230,8 @@ CREATE TABLE IF NOT EXISTS machines (
   created_by TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   last_seen_at INTEGER,
-  notes TEXT NOT NULL DEFAULT ''
+  notes TEXT NOT NULL DEFAULT '',
+  workspace_tools INTEGER NOT NULL DEFAULT 0
 );
 -- Unused since #89: machines serve every scheme. Kept, rows and all, so scoping machines to schemes (#62) is cheap to bring back.
 CREATE TABLE IF NOT EXISTS machine_projects (
@@ -289,6 +292,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'plugin_dirs', "ALTER TABLE projects ADD COLUMN plugin_dirs TEXT NOT NULL DEFAULT ''"],
   ['projects', 'default_effort', "ALTER TABLE projects ADD COLUMN default_effort TEXT NOT NULL DEFAULT 'high'"],
   ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
+  ['machines', 'workspace_tools', 'ALTER TABLE machines ADD COLUMN workspace_tools INTEGER NOT NULL DEFAULT 0'],
 ];
 
 export class Store {
@@ -826,7 +830,7 @@ export class Store {
     return this.getMachine(Number(lastInsertRowid))!;
   }
 
-  updateMachine(id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'last_seen_at' | 'notes'>>) {
+  updateMachine(id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'last_seen_at' | 'notes' | 'workspace_tools'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     this.db.prepare(`UPDATE machines SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);

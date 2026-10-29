@@ -9,6 +9,8 @@ const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
 const TOKEN = process.env.COORDINATOR_TOKEN ?? '';
 const MACHINE = Number(process.argv[2]);
 const NAME = process.argv[3] ?? `machine ${MACHINE}`;
+// 'ws' for the machine agent's own workspace tools, else the MCP server it lends.
+const SERVER = process.argv[4] === 'ws' ? 'ws' : 'mcp';
 const headers = { Authorization: `Bearer ${TOKEN}` };
 
 function fail(text: string): never {
@@ -21,7 +23,7 @@ async function connect(first: boolean): Promise<Response> {
   const started = Date.now();
   for (;;) {
     try {
-      const res = await fetch(`${API}/api/machines/${MACHINE}/session`, { headers: { ...headers, Accept: 'text/event-stream' } });
+      const res = await fetch(`${API}/api/machines/${MACHINE}/session?server=${SERVER}`, { headers: { ...headers, Accept: 'text/event-stream' } });
       // The app answered: a machine that is offline stays offline, so don't keep claude waiting.
       if (!res.ok || !res.body) fail(`${NAME} is not available (${res.status}): ${await res.text().catch(() => '')}`);
       return res;

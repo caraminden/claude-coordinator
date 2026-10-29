@@ -14,11 +14,11 @@ import { AGENT_NAME, Auth, looksLikeUrl, threadMayCall, type Session } from './s
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
-import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
+import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Machine, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
 import { cleanPluginDirs, cleanRules, lines } from './src/approvals.ts';
 import { inboxItems } from './src/inbox.ts';
 import { instructionSources } from './src/instructions.ts';
-import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, hashToken, newToken } from './src/machines.ts';
+import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, WS_SUFFIX, hashToken, newToken } from './src/machines.ts';
 import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent, tripwireConfig } from './src/runner.ts';
 import { GLOBAL_OWNER, PropertyError, type Actor } from './src/properties.ts';
@@ -868,7 +868,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     return json(res, 200, { ok: true, commit: BOOT_COMMIT, version: ASSET_VERSION, reload: 'sighup', interruptible: runner.interruptible(), preview: PREVIEW });
   }
   // A machine's agent signs in with its own token, which reaches nothing else.
-  if (pathname === '/api/machines/connect' || pathname === '/api/machines/send') {
+  if (['/api/machines/connect', '/api/machines/send', '/api/machines/info', '/api/machines/upload'].includes(pathname)) {
     if (MACHINES_URL) throw new HttpError(403, `Machines connect at ${MACHINES_URL.origin}, not here`);
     if (PREVIEW) throw new HttpError(403, 'Machines connect to the live app, not a preview');
     return machineAgentApi(req, res, url);
@@ -1634,7 +1634,44 @@ async function machineAgentApi(req: IncomingMessage, res: ServerResponse, url: U
     if (!machines.fromAgent(machine, body.session, body)) throw new HttpError(410, 'No such session');
     return json(res, 202, {});
   }
+  if (url.pathname === '/api/machines/info' && req.method === 'POST') {
+    if (!machines.setInfo(machine, await readJson(req, 200_000))) throw new HttpError(409, 'Connect first');
+    return json(res, 202, {});
+  }
+  if (url.pathname === '/api/machines/upload' && req.method === 'POST') return machineUpload(req, res, machine, url);
   throw new HttpError(404, 'Not found');
+}
+
+// The agent caps fetch_file at 20 MB too.
+const MAX_MACHINE_UPLOAD = 20_000_000;
+
+/** A file a workspace session's fetch_file sends: saved in that minion's shared files, under machine-files/<machine>/. */
+async function machineUpload(req: IncomingMessage, res: ServerResponse, machine: Machine, url: URL) {
+  const ticketId = machines.workspaceTicket(machine, url.searchParams.get('session') ?? '');
+  const ticket = ticketId === null ? undefined : store.getTicket(ticketId);
+  if (!ticket) throw new HttpError(410, 'No such workspace session');
+  const name = basename((url.searchParams.get('name') ?? '').replace(/\\/g, '/')).replace(/[^\w.-]/g, '_').replace(/^\.+/, '').slice(0, 100) || 'file';
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_MACHINE_UPLOAD) throw new HttpError(413, 'Files are limited to 20 MB');
+    chunks.push(chunk);
+  }
+  const dir = join(sharedDir(ticket), 'machine-files', machine.name);
+  await mkdir(dir, { recursive: true });
+  const dot = name.lastIndexOf('.');
+  const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+  // Never overwrite: a second fetch of report.zip lands as report-2.zip.
+  for (let n = 1; ; n++) {
+    const path = join(dir, n === 1 ? name : `${stem}-${n}${ext}`);
+    try {
+      await writeFile(path, Buffer.concat(chunks), { flag: 'wx' });
+      return json(res, 201, { path });
+    } catch (err: any) {
+      if (err.code !== 'EEXIST' || n > 999) throw err;
+    }
+  }
 }
 
 // Notes go into every thread's system prompt while the machine is online, so keep them short.
@@ -1644,6 +1681,7 @@ function machineName(v: unknown): string {
   const name = typeof v === 'string' ? v.trim().toLowerCase() : '';
   if (!MACHINE_NAME.test(name)) throw new HttpError(400, 'Use 1 to 30 lowercase letters, digits and dashes, like godot-laptop');
   if (RESERVED_NAMES.has(name)) throw new HttpError(400, 'That name is taken by the app\'s own tools');
+  if (name.endsWith(WS_SUFFIX)) throw new HttpError(400, `Names can't end in ${WS_SUFFIX}: that's how a machine's workspace tools are named`);
   return name;
 }
 
@@ -1655,7 +1693,9 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
     if (ticket?.kind !== 'ticket') throw new HttpError(403, 'Only a minion\'s turn can use a machine');
     const machineId = Number(m[1]);
     if (!m[2] && method === 'GET') {
-      if (!machines.openSession(machineId, ticket.id, res)) throw new HttpError(503, 'That machine is offline');
+      const server = new URL(req.url ?? '', 'http://x').searchParams.get('server') === 'ws' ? 'ws' : 'mcp';
+      const who = `#${ticket.number} in ${store.getProject(ticket.project_id)?.name ?? 'a scheme'}`;
+      if (!machines.openSession(machineId, ticket.id, server, who, res)) throw new HttpError(503, server === 'ws' ? 'That machine is offline, or its workspace tools are off' : 'That machine is offline');
       return;
     }
     if (m[2] && method === 'POST') {
@@ -1695,9 +1735,13 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
     return json(res, 200, { machine: machines.view(store.getMachine(machine.id)!), token, agent_url: MACHINES_URL?.origin ?? null });
   }
   if (!m[2] && method === 'PATCH') {
-    // Any of name and notes.
+    // Any of name, notes and workspace_tools.
     const body = await readJson(req);
-    const fields: { name?: string; notes?: string } = {};
+    const fields: { name?: string; notes?: string; workspace_tools?: number } = {};
+    if (body.workspace_tools !== undefined) {
+      if (typeof body.workspace_tools !== 'boolean') throw new HttpError(400, 'workspace_tools must be true or false');
+      fields.workspace_tools = body.workspace_tools ? 1 : 0;
+    }
     if (body.name !== undefined) fields.name = machineName(body.name);
     if (body.notes !== undefined) {
       if (typeof body.notes !== 'string') throw new HttpError(400, 'notes must be text');
@@ -1709,6 +1753,8 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
     } catch {
       throw new HttpError(409, 'A machine with that name already exists');
     }
+    // Switched off: minions mid-turn lose the tools now, not at their next turn.
+    if (fields.workspace_tools === 0) machines.endServer(machine.id, 'ws');
     broadcast({ type: 'machines', machines: machines.list() });
     return json(res, 200, machines.view(store.getMachine(machine.id)!));
   }

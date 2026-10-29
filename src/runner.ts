@@ -9,6 +9,7 @@ import { basename, dirname, join } from 'node:path';
 import { APP_NAME } from './appname.ts';
 import { AGENT_NAME } from './auth.ts';
 import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
+import { WS_SUFFIX, type MachineServer } from './machines.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
 import type { Ship } from './branch.ts';
@@ -344,7 +345,7 @@ function projectInstructions(project: Project): string[] {
   ];
 }
 
-export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: Machine[] = []): string {
+export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = []): string {
   if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir), ...showingFiles(ticket, filesDir, sharedDir), ...projectInstructions(project)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
@@ -395,12 +396,22 @@ function approvalNote(project: Project): string[] {
   ];
 }
 
+/** A connected machine and the servers this turn gets from it; without servers, the MCP server it lends. */
+export type TurnMachine = Machine & { servers?: MachineServer[] };
+
+/** The MCP servers a turn gets from a machine: its own under its name, its workspace tools as <name>-ws. */
+function machineServers(m: TurnMachine): { name: string; server: MachineServer }[] {
+  return (m.servers ?? ['mcp']).map((server) => ({ name: server === 'ws' ? `${m.name}${WS_SUFFIX}` : m.name, server }));
+}
+
 /** Which people's computers lend this turn their MCP tools. */
-function machineTools(machines: Machine[]): string[] {
+function machineTools(machines: TurnMachine[]): string[] {
   if (!machines.length) return [];
-  const names = machines.map((m) => `${m.name} (mcp__${m.name})`).join(', ');
+  const names = machines.map((m) => `${m.name} (${machineServers(m).map((s) => `mcp__${s.name}`).join(', ')})`).join(', ');
+  const ws = machines.some((m) => m.servers?.includes('ws'));
   return [
     `Connected machines: ${names}. Their MCP tools run on people's own computers, not on this server: files and builds there are separate from your working directory, so sync code there (for example with git) before building, and expect a tool to fail if that computer goes offline mid-turn.`,
+    ...(ws ? [`A machine's workspace tools (mcp__<name>${WS_SUFFIX}) check out a pushed branch in a folder its owner chose and run only the tasks the owner listed there: call its workspaces tool first. Minions share each workspace, one job at a time, so check what is checked out before you switch it and say what you left it on. fetch_file copies a file from there into your files folder on this server.`] : []),
     ...machines.filter((m) => m.notes).map((m) => `Notes on ${m.name} from its owner:\n${m.notes}`),
   ];
 }
@@ -519,7 +530,7 @@ export class Runner {
   /** The folder that holds a project's ticket folders, which the coordinator may read. */
   ticketsDir: (project: Project) => string = (project) => join(project.repo_dir ?? '.', '..', 'tickets');
   /** Machines online now; a thread's turn, in any scheme, gets each one's MCP tools. */
-  machines: () => Machine[] = () => [];
+  machines: () => TurnMachine[] = () => [];
   /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
   onFilesMayChange: (ticketId: number) => void = () => {};
   /** Where the minion's change is, branch to live (src/branch.ts), for its bar and its row's badge. */
@@ -1010,7 +1021,9 @@ export class Runner {
     // inherits), never on the command line.
     const role = ticket.kind === 'coordinator' ? 'coordinator' : 'thread';
     const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [pinned(MCP_SERVER)] } };
-    for (const m of machines) servers[m.name] = { type: 'stdio', command: process.execPath, args: [pinned(MACHINE_MCP_SERVER), String(m.id), m.name] };
+    for (const m of machines) {
+      for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: process.execPath, args: [pinned(MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
+    }
     const allowed = Object.keys(servers).map((name) => `mcp__${name}`);
     // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
     args.push('--mcp-config', JSON.stringify({ mcpServers: servers }), '--allowedTools', ...allowed, '--disallowedTools', 'AskUserQuestion');

@@ -5,6 +5,8 @@
 // (src/machine-mcp.ts) that pipes its messages through here: claude -> proxy -> POST -> agent
 // stream -> local MCP server, and back the same way. Each proxy is one session, and the agent
 // runs one copy of the MCP server per session, so concurrent threads never share one.
+// An agent with a workspaces config also serves its own workspace tools (server "ws"), which threads
+// see as mcp__<name>-ws__…, only while a person has the machine's workspace tools switched on.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Machine, Store } from './db.ts';
@@ -13,6 +15,12 @@ import type { Machine, Store } from './db.ts';
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
 /** Names the app's own MCP servers already use. */
 export const RESERVED_NAMES = new Set(['thread', 'coordinator']);
+/** A machine's workspace tools are the MCP server <name>-ws, so no machine may be named that way. */
+export const WS_SUFFIX = '-ws';
+
+/** The servers an agent can offer: the MCP server it lends, and its built-in workspace tools. */
+export type MachineServer = 'mcp' | 'ws';
+export type OnlineMachine = Machine & { servers: MachineServer[] };
 
 // An agent that stops reading (asleep mid-stream) is dropped rather than buffered for forever.
 const MAX_BACKLOG = 64 * 1024 * 1024;
@@ -35,12 +43,31 @@ interface Agent {
   command: string;
   since: number;
   sessions: Set<string>;
+  // What the agent says it offers; an agent from before workspaces never says, and lends its MCP server.
+  servers: MachineServer[];
+  workspaces: unknown[];
+  problems: string[];
 }
 
 interface Session {
   machineId: number;
   ticketId: number;
+  server: MachineServer;
+  /** Which minion, for the agent's log and its workspace lock ("#90 in Citadel"). */
+  who: string;
   res: ServerResponse;
+}
+
+/** The workspaces an agent reports, cut down to what the Machines page shows. */
+function cleanWorkspaces(v: unknown): unknown[] {
+  const text = (x: unknown, max = 500) => (typeof x === 'string' ? x.slice(0, max) : '');
+  const list = (x: unknown) => (Array.isArray(x) ? x.slice(0, 50) : []);
+  return list(v).map((w: any) => ({
+    name: text(w?.name, 40),
+    path: text(w?.path),
+    read: list(w?.read).map((r) => text(r)),
+    tasks: list(w?.tasks).map((t: any) => ({ name: text(t?.name, 40), run: list(t?.run).map((a) => text(a)), about: text(t?.about) })),
+  }));
 }
 
 export class MachineRelay {
@@ -79,6 +106,10 @@ export class MachineRelay {
       command: agent?.command ?? null,
       connected_at: agent?.since ?? null,
       sessions: agent?.sessions.size ?? 0,
+      workspace_tools: !!machine.workspace_tools,
+      servers: agent?.servers ?? [],
+      workspaces: agent?.workspaces ?? [],
+      problems: agent?.problems ?? [],
     };
   }
 
@@ -86,9 +117,13 @@ export class MachineRelay {
     return this.store.listMachines().map((m) => this.view(m));
   }
 
-  /** Machines connected right now, whose tools a starting turn in any scheme should get. */
-  online(): Machine[] {
-    return this.store.listMachines().filter((m) => this.agents.has(m.id));
+  /** Machines connected right now, with the servers a starting turn in any scheme should get. */
+  online(): OnlineMachine[] {
+    return this.store.listMachines().flatMap((m) => {
+      const agent = this.agents.get(m.id);
+      const servers = agent?.servers.filter((s) => s === 'mcp' || m.workspace_tools) ?? [];
+      return servers.length ? [{ ...m, servers }] : [];
+    });
   }
 
   isOnline(machineId: number): boolean {
@@ -102,7 +137,7 @@ export class MachineRelay {
     if (old) this.dropAgent(machine.id, old);
     res.writeHead(200, SSE_HEADERS);
     res.write(`data: ${JSON.stringify({ hello: machine.name })}\n\n`);
-    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set() };
+    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: ['mcp'], workspaces: [], problems: [] };
     this.agents.set(machine.id, agent);
     this.store.updateMachine(machine.id, { last_seen_at: agent.since });
     this.onChange();
@@ -128,6 +163,30 @@ export class MachineRelay {
     if (agent) this.dropAgent(machineId, agent);
   }
 
+  /** The agent says what it offers: its servers, and the workspaces in its config. False if it isn't connected. */
+  setInfo(machine: Machine, body: { servers?: unknown; workspaces?: unknown; problems?: unknown }): boolean {
+    const agent = this.agents.get(machine.id);
+    if (!agent) return false;
+    agent.servers = (['mcp', 'ws'] as const).filter((s) => Array.isArray(body.servers) && body.servers.includes(s));
+    agent.workspaces = cleanWorkspaces(body.workspaces);
+    agent.problems = (Array.isArray(body.problems) ? body.problems : []).slice(0, 50).map((p) => String(p).slice(0, 500));
+    // A server it no longer offers is gone for the sessions using it.
+    for (const id of agent.sessions) if (!agent.servers.includes(this.sessions.get(id)!.server)) this.endSession(id, true);
+    this.onChange();
+    return true;
+  }
+
+  /** End a machine's sessions of one server (its workspace tools were switched off). */
+  endServer(machineId: number, server: MachineServer) {
+    for (const [id, s] of this.sessions) if (s.machineId === machineId && s.server === server) this.endSession(id, true);
+  }
+
+  /** The thread a machine's workspace session serves, for a file its agent sends; null if none. */
+  workspaceTicket(machine: Machine, sessionId: string): number | null {
+    const s = this.sessions.get(sessionId);
+    return s && s.machineId === machine.id && s.server === 'ws' ? s.ticketId : null;
+  }
+
   /** A message from a machine's MCP server, or word that it exited. False if the session is gone. */
   fromAgent(machine: Machine, sessionId: string, body: { message?: unknown; closed?: boolean }): boolean {
     const s = this.sessions.get(sessionId);
@@ -138,11 +197,11 @@ export class MachineRelay {
   }
 
   /** A thread's proxy started: give it a session whose stream carries the machine's replies. */
-  openSession(machineId: number, ticketId: number, res: ServerResponse): boolean {
+  openSession(machineId: number, ticketId: number, server: MachineServer, who: string, res: ServerResponse): boolean {
     const agent = this.agents.get(machineId);
-    if (!agent) return false;
+    if (!agent || !this.online().some((m) => m.id === machineId && m.servers.includes(server))) return false;
     const id = randomBytes(12).toString('hex');
-    this.sessions.set(id, { machineId, ticketId, res });
+    this.sessions.set(id, { machineId, ticketId, server, who, res });
     agent.sessions.add(id);
     res.writeHead(200, SSE_HEADERS);
     res.write(`data: ${JSON.stringify({ session: id })}\n\n`);
@@ -165,7 +224,8 @@ export class MachineRelay {
       this.dropAgent(s.machineId, agent);
       return false;
     }
-    agent.res.write(`data: ${JSON.stringify({ session: sessionId, message })}\n\n`);
+    // The agent starts a session's server on its first message, so each one says which.
+    agent.res.write(`data: ${JSON.stringify({ session: sessionId, server: s.server, who: s.who, message })}\n\n`);
     return true;
   }
 

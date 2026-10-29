@@ -812,6 +812,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const pinned = name === 'pin_artifact';
       const r = await call('POST', `/api/projects/${PROJECT}/artifacts/pin`, { artifact: args.artifact ?? null, path: args.path ?? null, requested_by: args.requested_by, pinned });
       if (r.removed) return 'Unpinned. Its file was gone, so it is off the Artifacts panel now.';
+      if (r.already) return `Already pinned, so left as it was. ${artifactLine(r.artifact)}`;
       return `${pinned ? 'Pinned' : 'Unpinned'}. ${artifactLine(r.artifact)}`;
     }
     case 'list_schedules': {

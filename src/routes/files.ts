@@ -205,10 +205,12 @@ export const fileRoutes: Route[] = [
       if (/[\n\r]/.test(asker)) throw new HttpError(400, 'requested_by must be a login name');
       const a = findPinTarget(app, project.id, caller!, body.artifact, body.path);
       const by = `${caller!.kind === 'coordinator' ? 'Taskmaster' : `#${caller!.number}`} for ${asker}`;
-      app.store.setArtifactPinned(a.id, body.pinned ? by : null);
+      // Pinning one already pinned keeps who pinned it first.
+      const already = !!body.pinned && a.pinned_at !== null;
+      if (!already) app.store.setArtifactPinned(a.id, body.pinned ? by : null);
       app.broadcast({ type: 'artifacts', projectId: project.id });
       const updated = app.store.getArtifact(a.id);
-      return json(res, 200, { artifact: updated ? artifactView(app, updated) : null, removed: !updated });
+      return json(res, 200, { artifact: updated ? artifactView(app, updated) : null, removed: !updated, already });
     },
   },
   { method: 'GET', path: '/api/projects/:project/shared', who: ['person'], handler: async ({ res, app, project }) => json(res, 200, await app.sharedFiles(project.id)) },

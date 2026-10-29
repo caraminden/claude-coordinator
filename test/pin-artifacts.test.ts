@@ -109,6 +109,22 @@ test('a minion pins another minion\'s artifact by its shown path, and its own by
   assert.equal(await pinnedBy(GONE.id), `#${M1.number} for Cara`);
 });
 
+test('a re-pin keeps the first pinner; a relative path names the caller\'s own file; an ambiguous one asks for the id', async () => {
+  const again = await tool(TA, 'pin_artifact', { artifact: GLOSSARY.id, requested_by: 'Cara' });
+  assert.match(again.text, /^Already pinned/);
+  assert.equal(await pinnedBy(GLOSSARY.id), `#${M2.number} for Josh`);
+  // M2 links a glossary.html of its own: its relative path now means that one, not M1's.
+  writeFileSync(join(M2.cwd, 'glossary.html'), '<title>Draft</title>');
+  const s = new Store(join(data, 'coordinator.db'));
+  s.syncArtifacts(M2, [{ path: 'glossary.html', size: 1, mtime: 1 }]);
+  const own = s.listArtifacts(A.id).find((a) => a.ticket_id === M2.id)!;
+  assert.match((await tool(M2, 'pin_artifact', { path: 'glossary.html', requested_by: 'Cara' })).text, new RegExp(`^Pinned\\. \\[${own.id}\\] glossary\\.html .*from #${M2.number}`));
+  // The Taskmaster's folder has neither, and both show as glossary.html.
+  const both = await tool(TA, 'unpin_artifact', { path: 'glossary.html', requested_by: 'Cara' });
+  assert.equal(both.error, true);
+  assert.match(both.text, new RegExp(`2 artifacts match glossary\\.html \\(ids .*${own.id}.*\\); give the id`));
+});
+
 test('a minion cannot pin in another scheme', async () => {
   const byId = await tool(M1, 'pin_artifact', { artifact: THEIRS.id, requested_by: 'Cara' });
   assert.equal(byId.error, true);

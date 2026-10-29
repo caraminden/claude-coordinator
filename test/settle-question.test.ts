@@ -99,7 +99,7 @@ test('a settled card leaves the inbox, records it on the card and refuses a late
   await assert.rejects(call(`/api/tickets/${ticket.id}/settle`, { method: 'POST', body: { questionId: id } }), /403/);
   assert.deepEqual(await settle(id), { settled: [id] });
   assert.equal((await inbox()).length, 0);
-  const events = await call(`/api/tickets/${ticket.id}/events`);
+  const events = await call(`/api/tickets/${ticket.id}/events?after=0`);
   assert.equal(JSON.parse(events.find((e: any) => e.kind === 'question').data).settled.at > 0, true);
   assert.deepEqual(events.filter((e: any) => e.kind === 'question_result').map((e: any) => JSON.parse(e.data).id), [id]);
   await assert.rejects(call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: ['A'], other: '' }] } }), /409 Claude took this as answered/);

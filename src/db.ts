@@ -871,13 +871,13 @@ export class Store {
   }
 
   /** Newest-first messages and Claude output in a project whose raw JSON contains the text (case-insensitive for ASCII). */
-  findEvents(projectId: number, text: string, limit = 3000): EventRow[] {
+  findEvents(projectId: number, text: string, limit = 3000, ticketId?: number): EventRow[] {
     const like = `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     return this.db
       .prepare(`SELECT e.* FROM events e JOIN tickets t ON t.id = e.ticket_id
-        WHERE t.project_id = ? AND e.kind IN ('user_message', 'claude') AND e.data LIKE ? ESCAPE '\\'
+        WHERE t.project_id = ? AND e.kind IN ('user_message', 'claude') AND e.data LIKE ? ESCAPE '\\' ${ticketId ? 'AND e.ticket_id = ?' : ''}
         ORDER BY e.id DESC LIMIT ?`)
-      .all(projectId, like, limit) as unknown as EventRow[];
+      .all(projectId, like, ...(ticketId ? [ticketId] : []), limit) as unknown as EventRow[];
   }
 
   /** PR events already handled for a ticket (keys starting with `prefix`, which is stripped). */

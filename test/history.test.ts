@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -109,4 +111,60 @@ test('after= is unchanged: every event after an id', () => {
   const { store, t } = setup('after');
   const ids = turn(store, t.id, 2);
   assert.deepEqual(store.listEvents(t.id, ids[2]).map((e) => e.id), ids.slice(3));
+});
+
+test('the events route pages by default, keeps after= as a plain list, and search finds the oldest hit in one minion', async () => {
+  // Seed a long minion and a second one, then boot the real server on that data.
+  const dataDir = join(root, 'route');
+  mkdirSync(dataDir);
+  const store = new Store(join(dataDir, 'coordinator.db'));
+  const p = store.createProject('Route', null);
+  const t = store.createTicket({ project_id: p.id, title: 'long', permission_mode: 'default', created_by: 'Cara' });
+  const other = store.createTicket({ project_id: p.id, title: 'other', permission_mode: 'default', created_by: 'Cara' });
+  const said = (id: number, text: string) => store.addEvent(id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text }] } }).id;
+  const firstHit = said(t.id, 'the pelican landed');
+  for (let i = 0; i < 12; i++) turn(store, t.id, 10);
+  said(t.id, 'another pelican');
+  turn(store, t.id, 1);
+  said(other.id, 'pelican elsewhere');
+
+  const srv = createServer();
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const { port } = srv.address() as any;
+  await new Promise((r) => srv.close(r));
+  const server = spawn(process.execPath, [join(import.meta.dirname, '..', 'server.ts')], {
+    env: { ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: dataDir, CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40) },
+    stdio: ['ignore', 'ignore', 'inherit'],
+  });
+  after(() => server.kill());
+  const base = `http://127.0.0.1:${port}`;
+  let login: Response | undefined;
+  for (let n = 0; !login && n < 600; n++) {
+    login = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }) }).catch(() => undefined);
+    if (!login) await new Promise((r) => setTimeout(r, 50));
+  }
+  const cookie = login!.headers.get('set-cookie')!.split(';')[0];
+  const get = async (path: string) => {
+    const res = await fetch(base + path, { headers: { Cookie: cookie } });
+    assert.equal(res.status, 200, path);
+    return res.json();
+  };
+
+  const all = store.listEvents(t.id);
+  const page = await get(`/api/tickets/${t.id}/events`);
+  assert.equal(page.more, true);
+  assert.ok(page.events.length <= 200 && page.events.length > 100, `${page.events.length} events`);
+  assert.deepEqual(page.events.map((e: any) => e.id), all.slice(-page.events.length).map((e) => e.id));
+  assert.deepEqual(page.tasks, []);
+  const earlier = await get(`/api/tickets/${t.id}/events?before=${page.events[0].id}&limit=30`);
+  assert.equal(earlier.events.at(-1).id, all[all.length - page.events.length - 1].id);
+  // after= stays a plain list of everything since.
+  assert.deepEqual((await get(`/api/tickets/${t.id}/events?after=0`)).map((e: any) => e.id), all.map((e) => e.id));
+  // Search narrowed to one minion gives its oldest hit, and from= loads back to it.
+  const hits = await get(`/api/projects/${p.id}/search?q=pelican&ticket=${t.id}`);
+  assert.deepEqual(hits.map((h: any) => [h.ticketId, h.oldestId, h.matches]), [[t.id, firstHit, 2]]);
+  const back = await get(`/api/tickets/${t.id}/events?before=${page.events[0].id}&from=${firstHit}`);
+  assert.equal(back.events[0].id, firstHit);
+  assert.equal(back.more, false);
+  assert.equal((await get(`/api/projects/${p.id}/search?q=pelican`)).length, 2);
 });

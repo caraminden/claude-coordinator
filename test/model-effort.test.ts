@@ -102,7 +102,7 @@ test('a new minion takes a model and effort; the scheme default shows when it ha
   assert.equal(cleared.data.default_effort, '');
   assert.equal((await call(`/api/tickets/${plain.data.id}`)).data.ticket.default_effort, null);
 
-  const notes = (await call(`/api/tickets/${page.coordinator.id}/events`)).data.map((e: any) => JSON.parse(e.data).text);
+  const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
   assert.ok(notes.includes("Cara set the scheme's default effort to medium. It applies from each minion's next turn."));
 });
 

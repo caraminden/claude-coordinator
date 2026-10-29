@@ -88,7 +88,7 @@ test('PATCH /api/projects/:id renames, with friendly errors', async () => {
   const { data: page } = await call(`/api/projects/${p.id}`);
   assert.equal(page.project.name, 'New name');
   assert.equal(page.project.instructions, '', 'a refused rename saves none of the other fields');
-  const notes = await call(`/api/tickets/${page.coordinator.id}/events`);
+  const notes = await call(`/api/tickets/${page.coordinator.id}/events?after=0`);
   const texts = notes.data.map((e: any) => JSON.parse(e.data).text);
   assert.ok(texts.includes('Cara renamed the scheme from "Old name" to "New name".'), 'the coordinator hears about it');
 });

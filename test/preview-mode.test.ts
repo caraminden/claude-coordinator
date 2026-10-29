@@ -92,7 +92,7 @@ test('a message is kept but starts no turn; the chat says why', async () => {
   // Through the runner as live: stop isn't possible (nothing runs), so the message goes to a new turn.
   const res = await post(`/api/tickets/${ticket.id}/messages`, { text: 'hello' });
   assert.ok(res.status < 300, `messages answered ${res.status}`);
-  const events = await (await fetch(`${base}/api/tickets/${ticket.id}/events`, { headers: { Cookie: cookie } })).json();
+  const events = await (await fetch(`${base}/api/tickets/${ticket.id}/events?after=0`, { headers: { Cookie: cookie } })).json();
   assert.ok(events.some((e: any) => e.kind === 'user_message'));
   assert.ok(events.some((e: any) => e.kind === 'note' && /preview/.test(JSON.parse(e.data).text)));
 });

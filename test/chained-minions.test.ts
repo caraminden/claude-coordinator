@@ -256,7 +256,7 @@ test('through the server: start_after parks the minion with its brief held; the 
     });
     return { status: res.status, data: await res.json() };
   };
-  const said = async (id: number) => (await call(`/api/tickets/${id}/events`)).data
+  const said = async (id: number) => (await call(`/api/tickets/${id}/events?after=0`)).data
     .filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data).text);
   const idle = async (id: number) => {
     while ((await call(`/api/tickets/${id}`)).data.ticket.status === 'running') await new Promise((r) => setTimeout(r, 20));

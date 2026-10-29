@@ -142,7 +142,7 @@ test('people attach a file: it streams into the files folder, the message names 
 
   const sent = await postJson(`/api/tickets/${minion.id}/messages`, { text: '', files: [{ name: 'page.html', type: 'text/html' }, { name: 'hero.png', type: 'evil type' }] });
   assert.equal(sent.status, 202, await sent.clone().text());
-  const events = await (await call(`/api/tickets/${minion.id}/events`)).json();
+  const events = await (await call(`/api/tickets/${minion.id}/events?after=0`)).json();
   const msg = events.map((e: any) => ({ ...e, data: typeof e.data === 'string' ? JSON.parse(e.data) : e.data })).filter((e: any) => e.kind === 'user_message').pop();
   assert.deepEqual(msg.data.files, [{ name: 'page.html', size: 25, type: 'text/html' }, { name: 'hero.png', size: 16, type: 'application/octet-stream' }]);
   assert.equal((await postJson(`/api/tickets/${minion.id}/messages`, { text: 'x', files: [{ name: 'gone.zip' }] })).status, 400);

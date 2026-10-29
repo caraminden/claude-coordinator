@@ -89,8 +89,8 @@ before(async () => {
 });
 
 const propose = (summary: string) => call(`/api/tickets/${ticket.id}/plans`, { method: 'POST', token: turn.token, body: { summary, plan: `## ${summary}\n\n- step one` } });
-const plans = async () => (await call(`/api/tickets/${ticket.id}/events`)).filter((e: any) => e.kind === 'plan').map((e: any) => JSON.parse(e.data));
-const results = async () => (await call(`/api/tickets/${ticket.id}/events`)).filter((e: any) => e.kind === 'plan_result').map((e: any) => JSON.parse(e.data));
+const plans = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'plan').map((e: any) => JSON.parse(e.data));
+const results = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'plan_result').map((e: any) => JSON.parse(e.data));
 
 test('a plan card is stored as pending, and the minion cannot approve it', async () => {
   const { id } = await propose('First plan');
@@ -129,7 +129,7 @@ test('Approve sends the go once and records who and when', async () => {
   assert.equal(approved.status, 'approved');
   assert.equal(approved.by, 'Cara');
   assert.ok(approved.at >= t0);
-  const go = (await call(`/api/tickets/${ticket.id}/events`)).filter((e: any) => e.kind === 'user_message').at(-1);
+  const go = (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'user_message').at(-1);
   assert.deepEqual(JSON.parse(go.data).plan, { planId: id, verdict: 'approve' });
   await assert.rejects(call(`/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId: id, verdict: 'approve' } }), /409 Cara already approved this plan/);
   await idle(ticket.id);

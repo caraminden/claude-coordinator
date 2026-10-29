@@ -101,7 +101,7 @@ const ask = (images: (string | undefined)[]) => call(`/api/tickets/${ticket.id}/
 
 test('a question card keeps option pictures from the thread\'s folders', async () => {
   const { id } = await ask(['takes/a.png', join(turn.cwd, 'takes/b.gif'), join(shared, 'c.mp4'), undefined]);
-  const card = (await call(`/api/tickets/${ticket.id}/events`)).find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === id);
+  const card = (await call(`/api/tickets/${ticket.id}/events?after=0`)).find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === id);
   assert.deepEqual(JSON.parse(card.data).questions[0].options.map((o: any) => o.image), ['takes/a.png', join(turn.cwd, 'takes/b.gif'), join(shared, 'c.mp4'), undefined]);
   const res = await fetch(`${base}/api/tickets/${ticket.id}/file?path=${encodeURIComponent('takes/a.png')}`, { headers: { Cookie: cookie } });
   assert.equal(res.status, 200);
@@ -125,7 +125,7 @@ test('every question on a card recommends an option', async () => {
   await askWith([{ label: 'Tabs', recommended: true }, { label: 'List', recommended: true }, { label: 'Both' }], true);
   // A label that says "(Recommended)" itself becomes the flag, so the card doesn't show the words twice.
   const { id } = await askWith([{ label: 'Tabs' }, { label: 'List (Recommended)' }]);
-  const card = (await call(`/api/tickets/${ticket.id}/events`)).find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === id);
+  const card = (await call(`/api/tickets/${ticket.id}/events?after=0`)).find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === id);
   assert.deepEqual(JSON.parse(card.data).questions[0].options, [{ label: 'Tabs' }, { label: 'List', recommended: true }]);
 });
 
@@ -134,7 +134,7 @@ test('a comment on a file is a chat message from the person that wakes the threa
   await call(`/api/tickets/${ticket.id}/comments`, { method: 'POST', body: { path: 'report.md', text: 'Shorter, please.', quote: 'The long intro' } });
   const next = (await until('the comment\'s turn', () => turns().length > before && turns())).at(-1);
   assert.deepEqual(next.prompt.message.content, [{ type: 'text', text: '[Cara on report.md]: > The long intro\n\nShorter, please.' }]);
-  const message = (await call(`/api/tickets/${ticket.id}/events`)).filter((e: any) => e.kind === 'user_message').at(-1);
+  const message = (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'user_message').at(-1);
   assert.deepEqual(JSON.parse(message.data), { author: 'Cara', text: '> The long intro\n\nShorter, please.', comment: { path: 'report.md', about: 'report.md' } });
   await idle(ticket.id);
 });

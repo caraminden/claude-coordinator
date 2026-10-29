@@ -16,6 +16,7 @@ import { prOwners } from './src/prlinks.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, Store, TICKET_STATES, TICKET_TAGS, type Artifact, type Machine, type Project, type Ticket, type TicketState, type TicketTag } from './src/db.ts';
+import { historyPage } from './src/history.ts';
 import { cleanPluginDirs, cleanRules, lines } from './src/approvals.ts';
 import { inboxItems } from './src/inbox.ts';
 import { instructionSources, lineDiff } from './src/instructions.ts';
@@ -913,12 +914,12 @@ function spokenText(kind: string, data: any): string {
   return (data.message?.content ?? []).filter((b: any) => b?.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
 }
 
-/** Threads in a project whose conversation mentions the text: the newest match per thread, with a snippet. */
-function searchProject(projectId: number, q: string) {
+/** Minions whose chat says `q`: the newest hit per minion with a snippet, and its oldest (oldestId); `ticketId` narrows it to one. */
+function searchProject(projectId: number, q: string, ticketId?: number) {
   const needle = q.toLowerCase();
-  const hits = new Map<number, { ticketId: number; eventId: number; at: number; snippet: string; matches: number }>();
+  const hits = new Map<number, { ticketId: number; eventId: number; oldestId: number; at: number; snippet: string; matches: number }>();
   // SQL narrows by the raw JSON; the check below keeps only real hits in the spoken text.
-  for (const ev of store.findEvents(projectId, q)) {
+  for (const ev of store.findEvents(projectId, q, 3000, ticketId)) {
     let text: string;
     try {
       text = spokenText(ev.kind, JSON.parse(ev.data));
@@ -930,12 +931,13 @@ function searchProject(projectId: number, q: string) {
     const hit = hits.get(ev.ticket_id);
     if (hit) {
       hit.matches++;
+      hit.oldestId = ev.id;
       continue;
     }
     const start = Math.max(0, at - 50);
     const end = Math.min(text.length, at + needle.length + 70);
     const snippet = (start ? '…' : '') + text.slice(start, end).replace(/\s+/g, ' ').trim() + (end < text.length ? '…' : '');
-    hits.set(ev.ticket_id, { ticketId: ev.ticket_id, eventId: ev.id, at: ev.created_at, snippet, matches: 1 });
+    hits.set(ev.ticket_id, { ticketId: ev.ticket_id, eventId: ev.id, oldestId: ev.id, at: ev.created_at, snippet, matches: 1 });
   }
   return [...hits.values()].slice(0, 100);
 }
@@ -1357,7 +1359,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const project = store.getProject(Number(m[1]));
     if (!project) throw new HttpError(404, 'No such scheme');
     const q = (url.searchParams.get('q') ?? '').trim().slice(0, 200);
-    return json(res, 200, q.length < 2 ? [] : searchProject(project.id, q));
+    const ticket = Number(url.searchParams.get('ticket')) || undefined;
+    return json(res, 200, q.length < 2 ? [] : searchProject(project.id, q, ticket));
   }
 
   m = pathname.match(/^\/api\/projects\/(\d+)\/artifacts$/);
@@ -1517,7 +1520,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       }
     }
     if (action === '/events' && method === 'GET') {
-      return json(res, 200, store.listEvents(id, Number(url.searchParams.get('after') ?? 0)));
+      // ?after=: everything since (catch-up). Else a page of whole turns before ?before= (history.ts).
+      const num = (k: string) => Number(url.searchParams.get(k)) || undefined;
+      if (url.searchParams.has('after')) return json(res, 200, store.listEvents(id, num('after')));
+      return json(res, 200, historyPage(store, id, { before: num('before'), limit: num('limit'), from: num('from') }));
     }
     if (action === '/messages' && method === 'POST') {
       // Room for MAX_IMAGES images at 5 MB each, base64-encoded.

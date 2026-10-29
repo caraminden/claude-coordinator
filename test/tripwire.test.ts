@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
 import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
@@ -111,6 +114,29 @@ const BLOCKED: [string, string?][] = [
   ['DATA_DIR=/tmp/x timeout 10 node server.ts'],
   [`node --experimental-strip-types -e "import('./server.ts').catch(e => console.error(e))"`],
   ['node ~/claude-coordinator/server.ts'],
+  // git habits: paths aren't checked out, restored or stashed (the words alone show it)
+  ['git stash'],
+  ['git stash pop'],
+  ['git stash push -u -m wip'],
+  ['git restore src/x.ts'],
+  ['git restore --staged --worktree src/x.ts'],
+  ['git checkout -- src/x.ts'],
+  ['git checkout HEAD src/x.ts'],
+  ['git checkout main -- .'],
+  ['bash -c "git stash && git pull"'],
+  // a minion's worktree doesn't push main or force
+  ['git push origin main'],
+  ['git push origin HEAD:main'],
+  ['git push origin ticket/9:refs/heads/main'],
+  ['git push -u origin :master'],
+  ['git push origin main:'],
+  ['git push --repo=origin main'],
+  ['git push --all origin'],
+  ['git push origin :'],
+  ["git push origin 'refs/heads/*:refs/heads/*'"],
+  ['git push --force origin ticket/9'],
+  ['git push -fu origin ticket/9'],
+  ['git push origin +ticket/9'],
 ];
 
 const ALLOWED = [
@@ -164,6 +190,16 @@ const ALLOWED = [
   // ssh and git use keys on their own
   'ssh -i ~/.ssh/id_ed25519 host uptime',
   'git push origin HEAD',
+  // git habits that stay allowed
+  'git stash list && git stash show -p stash@{0}',
+  'git restore --staged src/x.ts',
+  'git checkout -b ticket/10',
+  'git checkout -B ticket/10 main',
+  'git reset src/x.ts && git reset --soft HEAD~1',
+  'git push -u origin ticket/9',
+  'git push --force-with-lease origin ticket/9',
+  'git push -o ci.skip origin ticket/9',
+  'git push --tags',
   // paths that only look protected
   'echo "~/.ssh is off limits"',
   "cat '$HOME/.ssh/x'",
@@ -251,6 +287,49 @@ for (const command of ASKS) {
 for (const command of ALLOWED) {
   test(`allows: ${command}`, () => assert.equal(bash(command), null));
 }
+
+test('git habits: path checkouts and moves over uncommitted changes, read from the real repo', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'tripwire-git-'));
+  const c = { ...cfg, data: tmp };
+  const wt = join(tmp, 'projects/2/tickets/9');
+  const sh = (cmd: string, cwd = wt) => execSync(cmd, { cwd, stdio: 'pipe', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+  try {
+    mkdirSync(join(wt, 'sub'), { recursive: true });
+    sh('git init -q -b ticket/9 && echo a > a.txt && git add a.txt && git commit -qm a');
+    sh('git branch other');
+    const at = (command: string, cwd: string | null = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c)?.reason ?? null;
+
+    // A clean tree moves freely; a name that isn't a branch or commit is a path.
+    for (const ok of ['git checkout other', 'git merge other', 'git reset --hard', 'git rebase other']) assert.equal(at(ok), null, ok);
+    assert.match(at('git checkout a.txt')!, /names a path.*git show HEAD:path/);
+    assert.match(at('git checkout nosuch')!, /names a path/);
+
+    // Untracked files don't count; a changed tracked file does.
+    writeFileSync(join(wt, 'b.txt'), 'b');
+    assert.equal(at('git checkout other'), null);
+    writeFileSync(join(wt, 'a.txt'), 'changed');
+    for (const move of ['git checkout other', 'git switch other', 'git merge other', 'git reset --hard HEAD', 'git rebase other', 'git pull', 'git cherry-pick other', 'cd sub && git merge other']) {
+      assert.match(at(move) ?? '', /^Commit first: .* 1 uncommitted tracked file\(s\) \(a\.txt\)/, move);
+    }
+    assert.match(at(`git -C ${wt} merge other`, '/tmp')!, /Commit first/);
+    for (const ok of ['git checkout -b x', 'git reset a.txt', 'git merge --abort', 'git rebase --continue', 'git commit -am wip && git status']) assert.equal(at(ok), null, ok);
+    // An unknown folder lets it through.
+    assert.equal(at('git merge other', null), null);
+
+    // A worktree on main: a push with no branch named would push main.
+    sh('git commit -qam wip && git checkout -q -b main');
+    assert.match(at('git push')!, /current branch is main/);
+    assert.match(at('git push origin HEAD')!, /Pushing to main/);
+    assert.equal(at('git push --tags'), null);
+    // Outside a minion's worktree (a Taskmaster's folder, the scheme repo), pushes are left to the scheme.
+    const repo = join(tmp, 'projects/2/repo');
+    mkdirSync(repo);
+    assert.equal(at('git push origin main', repo), null);
+    assert.equal(at('git push --force origin x', repo), null);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
 
 test('once tools/deploy.sh exists, it is still allowed', () => {
   assert.equal(bash('~/claude-coordinator/tools/deploy.sh', worktree, { ...cfg, deployScript: true }), null);

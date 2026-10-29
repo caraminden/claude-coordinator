@@ -2,8 +2,9 @@
 // Taskmasters and minions in every scheme. It stops the known accidents (writes to the live database,
 // the live checkout, the service's config and units, other schemes' folders; restarting or stopping
 // the app's services; reading SSH keys, the Claude or GitHub login, the service's env file or any
-// process's environment; running server.ts against the live data)
-// and says why and what to do instead.
+// process's environment; running server.ts against the live data) and the git habits every scheme
+// shares (no path checkout, restore or stash; no checkout, merge or reset over uncommitted changes; no
+// push to main or plain force push from a minion's worktree), and says why and what to do instead.
 //
 // Two tiers. Real dangers are hard blocks. Things a person may reasonably want once (deleting or
 // changing files in the data dir other than the live database, installing or enabling a user unit)
@@ -18,6 +19,7 @@
 //
 // Run as a hook: node tripwire.ts '<config json>' < hook input; exits 2 with the reason on stderr, or
 // prints a PreToolUse "ask" decision for the approval card.
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -471,6 +473,113 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
       const r = writeReason(p, cfg);
       if (r) return hard(`git ${sub} would change ${p}. ${r}`);
     }
+  }
+  return gitHabitReason(sub, args.slice(j + 1), dir, cfg);
+}
+
+// CLAUDE.md's "commit before you move", ported from Delve's git guard (tools/mods/delve/hooks, judgeGit).
+const NEVER_PATH = 'Never check out, restore or stash a path to look at it: that throws away uncommitted work. Use `git show HEAD:path` or `git diff` to see the old version, and commit (a WIP commit is fine) before undoing anything.';
+const STASH_WHY = 'The stash stack is shared by every worktree of the repo, so another session can pop your entry, or you theirs. Commit work in progress instead (a WIP commit is fine), and use `git show HEAD:path` or `git diff` to see the old version.';
+const PROTECTED = /^(main|master)$/;
+const MAIN_WHY = "main changes only through the scheme's own route (tools/land.sh and tools/deploy.sh, or a merged pull request), never a push from a minion's worktree. Push your minion branch.";
+
+/** Runs git in dir: null when it can't run there (no such folder, not a repo), so the guard lets the call through. */
+function git(dir: string, ...args: string[]): { status: number; out: string } | null {
+  const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8', timeout: 3000 });
+  return r.error || r.status === null ? null : { status: r.status, out: r.stdout };
+}
+
+/** A minion's worktree: <data>/projects/<id>/tickets/<n>, in any scheme. */
+function inWorktree(dir: string, cfg: TripwireConfig): boolean {
+  const projects = join(cfg.data, 'projects');
+  return under(dir, projects) && /^\d+\/tickets\/[^/]+/.test(dir.slice(projects.length + 1));
+}
+
+/**
+ * The git habits every scheme shares: no path checkout, restore or stash; no checkout, merge, rebase or
+ * reset over uncommitted tracked changes; from a minion's worktree, no push to main and no plain force.
+ * With the folder unknown it checks only what the words alone show.
+ */
+function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: TripwireConfig): Verdict | null {
+  const words = args.map((w) => w.text);
+  const has = (...flags: string[]) => words.some((a) => flags.includes(a));
+  const plain = args.filter((w) => !w.text.startsWith('-'));
+  let move: string | null = null;
+  switch (sub) {
+    case 'stash':
+      return ['list', 'show'].includes(words[0]) ? null : hard(`\`git stash\` is blocked. ${STASH_WHY}`);
+    case 'restore':
+      return has('--staged', '-S') && !has('--worktree', '-W') ? null : hard(`\`git restore\` is blocked. ${NEVER_PATH}`);
+    case 'checkout': {
+      if (has('--')) return hard(`\`git checkout -- <path>\` is blocked. ${NEVER_PATH}`);
+      // A new branch keeps the working tree as it is.
+      if (has('-b', '-B', '--orphan') && !has('-f', '--force')) return null;
+      if (plain.length > 1) return hard(`\`git checkout <ref> <path>\` is blocked. ${NEVER_PATH}`);
+      if (plain.length === 0 || !dir) return null;
+      const target = plain[0];
+      // git exits 1 for a name that isn't a commit, here or on origin; anything else (not a repo) can't tell.
+      const isRef = (t: string) => git(dir, 'rev-parse', '--verify', '--quiet', `${t}^{commit}`)?.status !== 1;
+      if (!target.unknown && !isRef(target.text) && !isRef(`origin/${target.text}`)) return hard(`\`git checkout ${target.text}\` names a path, not a branch or commit. ${NEVER_PATH}`);
+      move = `git checkout ${target.text}`;
+      break;
+    }
+    case 'switch':
+      if (!has('-c', '-C', '--create', '--force-create')) move = 'git switch';
+      break;
+    case 'merge':
+      if (!has('--abort', '--continue', '--quit')) move = 'git merge';
+      break;
+    case 'reset':
+      if (has('--hard', '--merge', '--keep')) move = `git reset ${words.find((a) => /^--(hard|merge|keep)$/.test(a))}`;
+      break;
+    case 'rebase': case 'pull': case 'cherry-pick':
+      if (!has('--abort', '--continue', '--quit', '--skip')) move = `git ${sub}`;
+      break;
+    case 'push':
+      return dir && inWorktree(dir, cfg) ? pushReason(args, dir) : null;
+  }
+  if (!move || !dir) return null;
+  const st = git(dir, 'status', '--porcelain', '--untracked-files=no');
+  const dirty = st?.status === 0 ? st.out.split('\n').map((l) => l.slice(3)).filter(Boolean) : [];
+  if (!dirty.length) return null;
+  return hard(`Commit first: \`${move}\` with ${dirty.length} uncommitted tracked file(s) (${dirty.slice(0, 5).join(', ')}${dirty.length > 5 ? ', …' : ''}) can lose them. Commit (a WIP commit is fine) before any checkout, merge, rebase or reset; to see another version of a file, use \`git show <ref>:path\`.`);
+}
+
+/** Why a `git push` from a minion's worktree is blocked: it reaches main, or forces without a lease. */
+function pushReason(args: Word[], dir: string): Verdict | null {
+  const pos: Word[] = [];
+  let repo = false;
+  let tags = false;
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k].text;
+    if (t === '--') {
+      pos.push(...args.slice(k + 1));
+      break;
+    }
+    if (/^--(all|mirror|branches)$/.test(t)) return hard(`\`git push ${t}\` pushes main too. ${MAIN_WHY}`);
+    if (t === '--force' || (/^-[A-Za-z0-9]+$/.test(t) && t.includes('f'))) return hard('Plain force pushes are blocked: use `--force-with-lease`, and only on your own branch.');
+    if (t === '--tags') tags = true;
+    else if (t === '--repo') (repo = true), k++;
+    else if (t.startsWith('--repo=')) repo = true;
+    else if (/^(-o|--push-option|--receive-pack|--exec)$/.test(t) || /^-[A-Za-z0-9]*o$/.test(t)) k++;
+    else if (!t.startsWith('-')) pos.push(args[k]);
+  }
+  const refspecs = repo ? pos : pos.slice(1);
+  let branch: string | undefined;
+  const current = () => (branch ??= git(dir, 'symbolic-ref', '--short', '-q', 'HEAD')?.out.trim() ?? '');
+  // With no refspec git pushes the current branch (--tags alone pushes only tags).
+  if (!refspecs.length && !tags && PROTECTED.test(current())) return hard(`This push names no branch, and the current branch is ${current()}. ${MAIN_WHY}`);
+  for (const w of refspecs) {
+    if (w.unknown) continue;
+    const r = w.text;
+    if (r.startsWith('+')) return hard(`\`${r}\` is a force push: use \`--force-with-lease\`, and only on your own branch.`);
+    if (r === ':') return hard(`\`git push <remote> :\` pushes every matching branch, main included. ${MAIN_WHY}`);
+    const colon = r.indexOf(':');
+    let dst = colon < 0 ? r : r.slice(colon + 1) || r.slice(0, colon);
+    if (dst === 'HEAD' || dst === '@') dst = current();
+    dst = dst.replace(/^refs\/heads\//, '');
+    if (PROTECTED.test(dst)) return hard(`Pushing to ${dst} is blocked. ${MAIN_WHY}`);
+    if (dst.includes('*')) return hard(`The wildcard refspec \`${r}\` could push main. Push your minion branch by name.`);
   }
   return null;
 }

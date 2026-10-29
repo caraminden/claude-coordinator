@@ -81,7 +81,7 @@ report() {
   [ -f "$STATE/reporters" ] || return 0
   while read -r api token ticket; do
     post_report "$api" "$token" "$ticket" "$ok" "$text"
-  done < <(sort -u "$STATE/reporters") # one note per minion, however many deploys it queued
+  done < <(tac "$STATE/reporters" | sort -su -k3,3) # one note per minion, with the newest of its turns' tokens
   rm -f "$STATE/reporters"
 }
 

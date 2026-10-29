@@ -97,7 +97,10 @@ await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 // A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.
 const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '', {
-  get: (id) => (store.getTicket(id)?.status ?? 'closed') === 'closed' ? null : store.getSetting<Nonces>(`agent-nonce:${id}`) ?? { current: null, previous: null },
+  get: (id) => {
+    const ticket = store.getTicket(id);
+    return ticket ? { ...(store.getSetting<Nonces>(`agent-nonce:${id}`) ?? { current: null, previous: null }), closed: ticket.status === 'closed' } : null;
+  },
   set: (id, nonces) => store.setSetting(`agent-nonce:${id}`, nonces),
 });
 // Keep secrets out of the environment that claude and its tools inherit.

@@ -20,9 +20,9 @@ export const AGENT_NAME = 'Taskmaster';
 
 /** A thread's turn-token nonces: its current turn's and the one before. */
 export interface Nonces { current: string | null; previous: string | null }
-/** Where Auth keeps them. `get` returns null for a thread that is gone or closed: its tokens are dead. */
+/** Where Auth keeps them. `get` returns null for a thread that is gone; a closed one's tokens only report deploys. */
 export interface NonceStore {
-  get(ticketId: number): Nonces | null;
+  get(ticketId: number): (Nonces & { closed?: boolean }) | null;
   set(ticketId: number, nonces: Nonces): void;
 }
 const NO_NONCES: NonceStore = { get: () => ({ current: null, previous: null }), set: () => {} };
@@ -122,7 +122,10 @@ export class Auth {
     return nonce ? `${ticketId}.${nonce}.${this.sign(`agent:${ticketId}:${nonce}`)}` : `${ticketId}.${this.sign(`agent:${ticketId}`)}`;
   }
 
-  /** A token for a thread's new turn. The last turn's token stops working, except for its deploy report. */
+  /**
+   * A token for a thread's new turn. It works until the thread's next turn starts, even while the
+   * thread sits idle; after that, or once the thread is dismissed, it only posts its deploy report.
+   */
   turnToken(ticketId: number): string {
     const nonce = randomBytes(16).toString('base64url');
     this.nonces.set(ticketId, { current: nonce, previous: this.nonces.get(ticketId)?.current ?? null });
@@ -141,7 +144,8 @@ export class Auth {
     if (!known) return null;
     // tools/deploy.sh posts its report after the idle restart with the turn's token, and a new turn may have begun by then.
     const report = req.method === 'POST' && (req.url ?? '').split('?')[0] === `/api/tickets/${ticketId}/deploy`;
-    const live = nonce === undefined ? known.current === null : nonce === known.current || (report && nonce === known.previous);
+    const fresh = nonce === undefined ? known.current === null : nonce === known.current;
+    const live = report ? fresh || nonce === known.previous : fresh && !known.closed;
     return live ? { name: AGENT_NAME, exp: Infinity, agent: ticketId } : null;
   }
 

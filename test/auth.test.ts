@@ -20,8 +20,9 @@ test('a session cookie naming a site address no longer signs in', () => {
 test('an agent token lives for its turn: the next turn or closing the minion kills it', () => {
   const kept = new Map<number, Nonces>();
   const closed = new Set<number>();
+  const gone = new Set<number>();
   const auth = new Auth('a-password-long-enough', 'x'.repeat(32), {
-    get: (id) => closed.has(id) ? null : kept.get(id) ?? { current: null, previous: null },
+    get: (id) => gone.has(id) ? null : { ...kept.get(id) ?? { current: null, previous: null }, closed: closed.has(id) },
     set: (id, nonces) => void kept.set(id, nonces),
   });
   const as = (token: string, method = 'GET', url = '/api/tickets/7') => auth.session({ method, url, headers: { authorization: `Bearer ${token}` } } as any)?.agent;
@@ -51,9 +52,12 @@ test('an agent token lives for its turn: the next turn or closing the minion kil
   assert.equal(as(`7.${nonce.replace(/^./, (c) => c === 'A' ? 'B' : 'A')}.${sig}`), undefined);
   assert.equal(as(`8.${nonce}.${sig}`), undefined);
 
-  // A closed (or deleted) minion's token is dead.
+  // A dismissed minion's token only posts the deploy report it may still be waiting on; a deleted one's is dead.
   const last = auth.turnToken(7);
   closed.add(7);
   assert.equal(as(last), undefined);
+  assert.equal(report(last), 7);
+  kept.delete(7);
+  gone.add(7);
   assert.equal(report(last), undefined);
 });

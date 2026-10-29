@@ -144,9 +144,11 @@ test('Approve sends the go once and records who and when', async () => {
   assert.deepEqual((await plans()).map((p: any) => p.status), ['superseded', 'approved', 'pending']);
 });
 
-test('a dismissed minion\'s token stops working', async () => {
+test('a dismissed minion\'s token stops working, except for its deploy report', async () => {
   const token = live();
   await call(`/api/tickets/${ticket.id}`, { token });
   await call(`/api/tickets/${ticket.id}/status`, { method: 'POST', body: { status: 'closed' } });
   await assert.rejects(call(`/api/tickets/${ticket.id}`, { token }), /401/);
+  // It can still report the deploy it queued before it was dismissed.
+  await call(`/api/tickets/${ticket.id}/deploy`, { method: 'POST', token, body: { ok: true, text: 'Live.' } });
 });

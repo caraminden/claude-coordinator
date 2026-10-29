@@ -3,21 +3,24 @@
 // Citadel: the addresses visited and where in them we are. It lives in sessionStorage (one tab, kept
 // over a reload), and each history entry carries its stack's id and place in history.state, so a
 // move by any means (these buttons, Alt+←, a phone's back swipe, the viewer's ×) lands on the
-// right place. A link, the sidebar or the × adds an entry; replaceHash swaps the current one.
+// right place. A link, the sidebar or the thread bar's × adds an entry; replaceHash swaps the
+// current one (the viewer's × when the file was opened by link, the old #/t/<id> addresses).
 
 const KEY = 'cc-nav';
-const MAX = 100; // entries kept per stack
+const MAX = 50; // entries kept per stack: about what browsers keep per tab
 const KEEP = 4; // stacks kept: one per time this tab loaded the app afresh
 
 /**
  * The stack after landing on `hash`. `at` is the place the history entry carries when it is one of
  * this stack's (a move back or forward); otherwise the entry is new, and replaces the current one
- * when `replaced`, or else goes after it, dropping whatever was forward of it.
+ * when `replaced`, or else goes after it, dropping whatever was forward of it. Places count from
+ * the stack's first entry ever, so the ones in older entries' marks stay right once the oldest go.
  */
 export function step(stack, { hash, at, replaced }) {
   let entries = [...stack.entries];
   let idx = stack.idx;
-  if (at != null) idx = Math.min(Math.max(at, 0), entries.length - 1);
+  let base = stack.base ?? 0; // entries dropped off the front
+  if (at != null) idx = Math.min(Math.max(at - base, 0), entries.length - 1);
   else if (!replaced) {
     entries = [...entries.slice(0, idx + 1), hash];
     idx = entries.length - 1;
@@ -27,8 +30,9 @@ export function step(stack, { hash, at, replaced }) {
     const drop = entries.length - MAX;
     entries = entries.slice(drop);
     idx = Math.max(idx - drop, 0);
+    base += drop;
   }
-  return { ...stack, entries, idx };
+  return { ...stack, entries, idx, base };
 }
 
 export const canGoBack = (stack) => !!stack && stack.idx > 0;
@@ -55,12 +59,12 @@ function sync() {
   const mark = history.state?.ccNav;
   // This tab's own stack first: it is the newest, and the only one when sessionStorage is off.
   const known = mark && (stack?.id === mark.id ? stack : stacks[mark.id]);
-  if (known) stack = step(known, { hash, at: mark.idx });
+  if (known) stack = step(known, { hash, at: mark.pos });
   else if (stack && !mark) stack = step(stack, { hash, replaced: replacing === hash });
   // A fresh load, or an entry whose stack was dropped: start again here, with nothing to go back to.
-  else stack = { id: Math.random().toString(36).slice(2, 10), entries: [hash], idx: 0 };
+  else stack = { id: Math.random().toString(36).slice(2, 10), entries: [hash], idx: 0, base: 0 };
   replacing = null;
-  try { history.replaceState({ ...history.state, ccNav: { id: stack.id, idx: stack.idx } }, ''); } catch {}
+  try { history.replaceState({ ...history.state, ccNav: { id: stack.id, pos: stack.base + stack.idx } }, ''); } catch {}
   save(stacks);
   updateButtons();
 }

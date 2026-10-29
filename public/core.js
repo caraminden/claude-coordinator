@@ -391,7 +391,7 @@ export function scrollToUnread(el) {
   for (const target of [headEl, document.getElementById('log')]) if (target) settle.observe(target);
   setTimeout(stop, 3000);
 }
-const USER_SCROLL = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
+export const USER_SCROLL = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
 
 window.addEventListener('pagehide', saveScroll);
 

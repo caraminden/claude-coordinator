@@ -1,5 +1,5 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, isCoordinator, loadEarlier, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
+import { api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, isCoordinator, loadEarlier, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
@@ -78,6 +78,21 @@ function renderHistory() {
   renderProgress();
 }
 
+/** Keep `el` at `top` px down the screen as what's above it lays out, until you scroll yourself. */
+function holdInPlace(el, top) {
+  const scroller = chatScroller() ?? document.scrollingElement;
+  const align = () => { scroller.scrollTop += el.getBoundingClientRect().top - top; };
+  align();
+  const settle = new ResizeObserver(align);
+  const stop = () => {
+    settle.disconnect();
+    for (const type of USER_SCROLL) removeEventListener(type, stop, true);
+  };
+  for (const type of USER_SCROLL) addEventListener(type, stop, { capture: true, passive: true });
+  settle.observe(document.getElementById('log'));
+  setTimeout(stop, 3000);
+}
+
 /** Load the page before what's shown (or back to event `from`) and redraw, keeping your place. */
 export async function showEarlier(button, from) {
   const { id, page } = view;
@@ -89,11 +104,19 @@ export async function showEarlier(button, from) {
     return alertNote(`Couldn't load earlier messages: ${err.message}`);
   }
   if (view.id !== id) return;
-  // Everything below what was added draws the same, so the distance to the bottom stays put.
-  const scroller = chatScroller() ?? document.scrollingElement;
-  const fromBottom = scroller.scrollHeight - scroller.scrollTop;
+  // Everything below what was added draws the same, so the first item in sight is the same one
+  // counted from the end: keep it where it was while the older part (and its images) lays out.
+  // (Load earlier and the New divider move about, so they don't count.)
+  const items = () => [...document.querySelectorAll('#log > :not(.load-earlier, .unread-divider)')];
+  const head = document.getElementById('ticket-head')?.getBoundingClientRect().bottom ?? 0;
+  const old = items();
+  const seen = old.find((el) => el.getBoundingClientRect().bottom > head);
+  const fromEnd = old.length - old.indexOf(seen);
+  const top = seen?.getBoundingClientRect().top ?? 0;
   renderHistory();
-  scroller.scrollTop = scroller.scrollHeight - fromBottom;
+  const anchor = seen && items().at(-fromEnd);
+  // Find (from) goes on to scroll to its match, so it isn't held back here.
+  if (anchor && !from) holdInPlace(anchor, top);
   // The redraw dropped find's highlights; find again over the longer history.
   const find = view.findEl?.querySelector('input');
   if (find?.value.trim()) find.dispatchEvent(new Event('input'));

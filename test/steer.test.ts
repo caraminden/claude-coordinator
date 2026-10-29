@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { Runner } from '../src/runner.ts';
+import { Runner, unsentSteers } from '../src/runner.ts';
 
 // Mid-turn messages steer: the runner appends them to the turn's steer.jsonl and the wrapper
 // (src/turn-wrapper.ts) passes them to claude's stdin until the turn's result is out. The fake reads
@@ -188,4 +189,51 @@ test('a turn started before steering existed (no steer.jsonl) queues instead', a
   writeFileSync(join(t.dir, 'release'), '');
   await until(() => seen(t.dir).length === 2);
   await until(() => !r.isRunning(t.id));
+});
+
+test('a reader never sees steer.sent empty or half-written while steers go in', async () => {
+  const t = newTicket();
+  const r = server();
+  await started(r, t);
+  const sentFile = join(turnDir(r, t.id), 'steer.sent');
+  // A process of its own reading as fast as it can, as the runner would on a restart mid-write.
+  const reader = spawn(process.execPath, ['-e', `
+    const { readFileSync } = require('node:fs');
+    const bad = new Set();
+    let reads = 0;
+    const stop = Date.now() + 4000;
+    while (Date.now() < stop) {
+      try { const s = readFileSync(${JSON.stringify(sentFile)}, 'utf8'); reads++; if (!/^\\d+$/.test(s)) bad.add(s); } catch {}
+    }
+    console.log(JSON.stringify({ reads, bad: [...bad] }));
+  `]);
+  let out = '';
+  reader.stdout.on('data', (d) => (out += d));
+  const exited = new Promise((res) => reader.on('exit', res));
+  for (let i = 0; i < 12; i++) {
+    r.send(t.id, 'Cara', `steer ${i}`, [], {}, true);
+    await new Promise((res) => setTimeout(res, 260));
+  }
+  await exited;
+  const { reads, bad } = JSON.parse(out);
+  assert.ok(reads > 0, 'the reader saw steer.sent');
+  assert.deepEqual(bad, []);
+  await until(() => seen(t.dir).length === 13);
+  writeFileSync(join(t.dir, 'release'), '');
+  await until(() => !r.isRunning(t.id));
+});
+
+test('an unreadable steer.sent redelivers nothing; a missing one, everything', () => {
+  const dir = mkdtempSync(join(root, 'sent-'));
+  const msg = (text: string) => ({ author: 'Cara', text }) as any;
+  const turn = { dir, steered: [{ end: 10, msg: msg('a') }, { end: 20, msg: msg('b') }] };
+  assert.deepEqual(unsentSteers(turn).map((m) => m.text), ['a', 'b'], 'none passed on yet');
+  writeFileSync(join(dir, 'steer.sent'), '10');
+  assert.deepEqual(unsentSteers(turn).map((m) => m.text), ['b']);
+  writeFileSync(join(dir, 'steer.sent'), '20');
+  assert.deepEqual(unsentSteers(turn), []);
+  for (const junk of ['', '1x', ' ', '-3', '1e3']) {
+    writeFileSync(join(dir, 'steer.sent'), junk);
+    assert.deepEqual(unsentSteers(turn), [], `"${junk}" is unknown, not 0`);
+  }
 });

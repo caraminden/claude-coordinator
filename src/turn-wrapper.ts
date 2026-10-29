@@ -15,12 +15,16 @@ import { join } from 'node:path';
 
 const dir = process.argv[2];
 const file = (name: string) => join(dir, name);
+/** Write a file the runner may read at any moment: renamed into place, so it never sees it half-written. */
+function put(name: string, data: string) {
+  writeFileSync(file(`${name}.tmp`), data);
+  renameSync(file(`${name}.tmp`), file(name));
+}
 const spec = JSON.parse(readFileSync(file('spec.json'), 'utf8'));
 rmSync(file('spec.json'));
 
 function done(exit: { code: number | null; signal: string | null; error?: string }) {
-  writeFileSync(file('exit.json.tmp'), JSON.stringify(exit));
-  renameSync(file('exit.json.tmp'), file('exit.json'));
+  put('exit.json', JSON.stringify(exit));
   process.exit(0);
 }
 
@@ -45,11 +49,7 @@ try {
   failed(err);
 }
 child!.on('error', failed);
-// Renamed into place, like exit.json: the runner and tests read it as soon as it exists.
-if (child!.pid) {
-  writeFileSync(file('pid.json.tmp'), JSON.stringify({ wrapper: process.pid, claude: child.pid }));
-  renameSync(file('pid.json.tmp'), file('pid.json'));
-}
+if (child!.pid) put('pid.json', JSON.stringify({ wrapper: process.pid, claude: child.pid }));
 child!.on('exit', (code, signal) => done({ code, signal }));
 
 // Claude reads stdin line by line, mid-turn too, and waits for more until it closes. So steers go in
@@ -74,7 +74,7 @@ const tick = setInterval(() => {
   if (end <= sent) return;
   child.stdin!.write(steers.subarray(sent, end));
   sent = end;
-  writeFileSync(file('steer.sent'), String(sent));
+  put('steer.sent', String(sent));
 }, 250);
 
 /** Claude's stream has a result line past what was scanned before. */

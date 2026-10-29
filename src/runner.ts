@@ -210,14 +210,17 @@ function wrapperAlive(dir: string): boolean | null {
 }
 
 /** A turn's steers its wrapper never passed to claude (see src/turn-wrapper.ts). */
-function unsentSteers(turn: TurnState): QueuedMessage[] {
+export function unsentSteers(turn: Pick<TurnState, 'steered' | 'dir'>): QueuedMessage[] {
   if (!turn.steered?.length || !turn.dir) return [];
-  let sent = 0;
+  let text: string;
   try {
-    sent = Number(readFileSync(join(turn.dir, 'steer.sent'), 'utf8')) || 0;
+    text = readFileSync(join(turn.dir, 'steer.sent'), 'utf8');
   } catch {
-    // None passed on.
+    text = '0'; // none passed on
   }
+  const sent = /^\d+$/.test(text) ? Number(text) : NaN;
+  // Unreadable (an older wrapper killed mid-write): some were passed on, so resending risks doubles.
+  if (Number.isNaN(sent)) return [];
   return turn.steered.filter((s) => s.end > sent).map((s) => s.msg);
 }
 

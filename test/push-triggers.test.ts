@@ -35,8 +35,9 @@ let pushService: ReturnType<typeof createHttpsServer> | undefined;
 const received: { path: string; body: Buffer }[] = [];
 const cookies: Record<string, string> = {};
 
-async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}) {
-  const auth = who.startsWith('agent:') ? { Authorization: `Bearer ${agentToken(join(root, 'data'), Number(who.slice(6)))}` } : { Cookie: cookies[who] };
+async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<any> {
+  const token = who.startsWith('agent:') ? agentToken(join(root, 'data'), Number(who.slice(6))) : '';
+  const auth = token ? { Authorization: `Bearer ${token}` } : { Cookie: cookies[who] };
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
     headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },

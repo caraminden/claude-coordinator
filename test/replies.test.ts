@@ -30,6 +30,10 @@ test('a new turn clears the replies, whoever started it', async () => {
   for (const end = Date.now() + 5000; runner.isRunning(t.id) && Date.now() < end; ) await new Promise((r) => setTimeout(r, 20));
   assert.equal(store.getTicket(t.id)!.replies, null);
   assert.deepEqual(runner.view(store.getTicket(t.id)!).replies, []);
+
+  store.updateTicket(t.id, { replies: JSON.stringify(['Make it live']) });
+  runner.close(t.id, 'Dismissed.');
+  assert.equal(store.getTicket(t.id)!.replies, null, 'a reopened minion offers nothing stale');
 });
 
 let base = '';
@@ -85,6 +89,9 @@ test('replies are checked, shown as a list, and go once someone writes', async (
   assert.equal(set.status, 200);
   assert.deepEqual(set.data.replies, ['Merge it', 'Make it live']);
   assert.deepEqual((await call(`/api/projects/${p.id}`)).data.tickets.find((x: any) => x.id === t.id).replies, ['Merge it', 'Make it live']);
+  const at = (await patch(['Merge it', 'Make it live'])).data.updated_at;
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal((await patch(['Merge it', 'Make it live'])).data.updated_at, at, 'the same replies again change nothing');
   assert.deepEqual((await patch([])).data.replies, [], '[] clears');
 
   await patch(['Merge it']);

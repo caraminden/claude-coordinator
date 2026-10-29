@@ -1447,7 +1447,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (body.note !== undefined) fields.note = body.note ? str(body.note, 'Note', 60) : null;
       if (body.build !== undefined) fields.build = buildNumber(body.build);
       if (body.replies !== undefined) fields.replies = replyList(body.replies);
-      for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === ticket[k]) delete fields[k];
+      // The view's replies are a list; compare the stored JSON.
+      const stored = store.getTicket(id)!;
+      for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === stored[k]) delete fields[k];
       if (Object.keys(fields).length) {
         store.updateTicket(id, fields);
         if (fields.state === 'pending-deploy') runner.deployPending(id);
@@ -1518,11 +1520,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       }
       // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
       runner.send(id, session.name, text, await saveImages(ticket, body.images), {}, session.agent === undefined && body.after !== true, files);
-      // Anything said answers the one-tap replies, so they go (the next turn would clear them too, but a steer doesn't start one).
-      if (ticket.replies.length) {
-        store.updateTicket(id, { replies: null });
-        runner.broadcastTicket(id);
-      }
       personWrote(ticket, session);
       return json(res, 202, ticketView(id));
     }

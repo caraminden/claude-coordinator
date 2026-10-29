@@ -692,6 +692,8 @@ export class Runner {
   /** Close a ticket that is not running. Its worktree and branch are kept. */
   close(ticketId: number, text: string) {
     if (this.cancelLimitWait(ticketId)) this.queues.delete(ticketId);
+    // A reopened minion shouldn't offer the go-ahead it had when dismissed.
+    if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
     this.onClose(ticketId);
@@ -945,6 +947,11 @@ export class Runner {
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}),
     });
     const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id };
+    // Anything said answers the one-tap replies; a steer or a held message starts no turn to clear them.
+    if (this.store.getTicket(ticketId)?.replies) {
+      this.store.updateTicket(ticketId, { replies: null });
+      this.broadcastTicket(ticketId);
+    }
     if (steers) {
       const line = promptMessage([msg]);
       const file = join(live!.dir, 'steer.jsonl');

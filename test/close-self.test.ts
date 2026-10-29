@@ -98,6 +98,37 @@ test('a message queued during the turn keeps it open and runs next', async () =>
   assert.equal(store.getTicket(id)!.status, 'idle');
 });
 
+test('refuses while a question or plan card waits on people, or the state is try or ready', async () => {
+  const id = newTicket();
+  runner.send(id, 'Cara', 'ship it');
+  store.addEvent(id, 'question', { id: 'q1', questions: [] });
+  assert.match(runner.keptOpen(id)!, /card is still waiting/);
+  assert.equal(runner.closeAfterTurn(id, null), false);
+  const plan = newTicket();
+  store.addEvent(plan, 'plan', { id: 'p1', status: 'pending' });
+  assert.match(runner.keptOpen(plan)!, /card is still waiting/);
+  const t = newTicket();
+  for (const state of ['try', 'ready']) {
+    store.updateTicket(t, { state });
+    assert.match(runner.keptOpen(t)!, new RegExp(`state is ${state}`));
+  }
+  for (const state of [null, 'parked', 'pending-deploy']) {
+    store.updateTicket(t, { state });
+    assert.equal(runner.keptOpen(t), null);
+  }
+  await endTurn(id, 'ok');
+});
+
+test('a card posted or try/ready set after close_self keeps it open at the turn end', async () => {
+  const id = newTicket();
+  runner.send(id, 'Cara', 'ship it');
+  assert.equal(runner.closeAfterTurn(id, null), true);
+  store.updateTicket(id, { state: 'ready' });
+  await endTurn(id, 'ok');
+  assert.equal(store.getTicket(id)!.status, 'idle');
+  assert.deepEqual(notes(id), ['Claude asked to dismiss this minion, but its state is ready, which tells people something is waiting for them, so it stays open.']);
+});
+
 test('close() marks a ticket closed, as the coordinator does', () => {
   const id = newTicket();
   runner.close(id, 'Coordinator closed this ticket.');

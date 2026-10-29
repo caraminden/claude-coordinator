@@ -1766,6 +1766,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (session.agent !== id) throw new HttpError(403, 'A minion may only be dismissed by itself');
       const body = await readJson(req);
       const reason = typeof body.reason === 'string' && body.reason.trim() ? str(body.reason.trim(), 'Reason', 500) : null;
+      const kept = runner.keptOpen(id);
+      if (kept) throw new HttpError(409, `Not dismissed: ${kept}. Leave the minion open for them; if nothing is left for people (the card was answered in the chat, or there is nothing to try), settle the card or clear the state first`);
       if (!runner.closeAfterTurn(id, reason)) throw new HttpError(409, 'The minion is not mid-turn');
       return json(res, 202, ticketView(id));
     }

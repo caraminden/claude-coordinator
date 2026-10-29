@@ -743,11 +743,23 @@ export class Runner {
   }
 
   /**
+   * Why close_self must leave this minion open for people, or null: a question or plan card still
+   * waiting on them, or a state (try, ready) that tells them something is theirs to do. The deploy's
+   * own dismissal (deployLive) has its own checks.
+   */
+  keptOpen(ticketId: number): string | null {
+    if (this.store.openCardAt(ticketId) !== null) return 'a question or plan card is still waiting on people';
+    const state = this.store.getTicket(ticketId)?.state;
+    if (state === 'try' || state === 'ready') return `its state is ${state}, which tells people something is waiting for them`;
+    return null;
+  }
+
+  /**
    * Close a running ticket once its current turn finishes cleanly. A turn that fails or is
    * stopped, or a message that arrives during it, leaves the ticket open instead.
    */
   closeAfterTurn(ticketId: number, reason: string | null): boolean {
-    if (!this.isRunning(ticketId)) return false;
+    if (!this.isRunning(ticketId) || this.keptOpen(ticketId)) return false;
     this.closing.set(ticketId, reason);
     this.saveTurn(ticketId, { closing: reason });
     this.broadcastTicket(ticketId);
@@ -1419,12 +1431,12 @@ export class Runner {
     const closing = this.closing.has(ticketId);
     const reason = this.closing.get(ticketId);
     this.closing.delete(ticketId);
-    if (closing && status === 'idle' && !stopped && !signal && !this.queued(ticketId)) {
+    // Checked again here: the turn may have posted a card or set try/ready after close_self.
+    const keep = closing && status === 'idle' && !stopped && !signal ? (this.queued(ticketId) ? 'a new message arrived' : this.keptOpen(ticketId)) : null;
+    if (closing && status === 'idle' && !stopped && !signal && !keep) {
       this.close(ticketId, `Claude dismissed this minion${reason ? `: ${reason}` : '.'}`);
     } else {
-      if (closing && status === 'idle' && !stopped && !signal) {
-        this.emit(ticketId, 'note', { text: 'Claude asked to dismiss this minion, but a new message arrived, so it stays open.' });
-      }
+      if (keep) this.emit(ticketId, 'note', { text: `Claude asked to dismiss this minion, but ${keep}, so it stays open.` });
       this.setStatus(ticketId, status);
     }
     // A failed or stopped turn leaves it open; a queued message makes deployLive wait for that turn too.

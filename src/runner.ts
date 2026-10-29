@@ -817,7 +817,7 @@ export class Runner {
   relay(minionId: number, to: number, author: string, text: string): boolean {
     const minion = this.store.getTicket(minionId)!;
     const from = to === minionId ? this.store.getCoordinator(minion.project_id)?.id : minionId;
-    const { held } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, from);
+    const { held } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from);
     if (!held) return false;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
     const note = held === 1

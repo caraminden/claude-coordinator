@@ -92,6 +92,16 @@ test('rewriting a pinned file keeps its pin; deleting it leaves it listed as mis
   assert.equal(r.status, 200);
   assert.equal(r.data.file, null);
   assert.equal(await entry('specs/town.md'), undefined);
+  // A pinned folder swapped for a symlink out of the shared folder reads as missing, not as the outside file.
+  mkdirSync(join(dirA, 'notes'));
+  writeFileSync(join(dirA, 'notes', 'n.md'), '# N');
+  await pin('notes/n.md', true);
+  rmSync(join(dirA, 'notes'), { recursive: true });
+  mkdirSync(join(root, 'elsewhere'));
+  writeFileSync(join(root, 'elsewhere', 'n.md'), '# Elsewhere');
+  symlinkSync(join(root, 'elsewhere'), join(dirA, 'notes'));
+  assert.equal((await entry('notes/n.md')).missing, 1);
+  await pin('notes/n.md', false);
 });
 
 test('only files the Shared list shows can be pinned', async () => {

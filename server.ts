@@ -1,7 +1,7 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstat, readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath, mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { basename, extname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -280,10 +280,12 @@ async function sharedFiles(projectId: number): Promise<SharedFile[]> {
   const files: (FoundArtifact & { missing?: number })[] = await findArtifacts(dir, false);
   const pins = new Map(store.sharedPins(projectId).map((p) => [p.path, p]));
   const seen = new Set(files.map((f) => f.path));
+  const real = await realpath(dir).catch(() => dir);
   for (const p of pins.values()) {
     if (seen.has(p.path)) continue;
-    // Past the scan's file cap, or gone.
-    const st = await lstat(join(dir, p.path)).catch(() => null);
+    // Past the scan's file cap, or gone. A symlink on the way out of the folder counts as gone, as the scan skips it.
+    const inside = (await realpath(join(dir, p.path)).catch(() => null)) === join(real, p.path);
+    const st = inside ? await lstat(join(dir, p.path)).catch(() => null) : null;
     files.push(st?.isFile() ? { path: p.path, size: st.size, mtime: Math.round(st.mtimeMs) } : { path: p.path, size: 0, mtime: p.pinned_at, missing: 1 });
   }
   return files.sort((a, b) => b.mtime - a.mtime).map((f) => ({

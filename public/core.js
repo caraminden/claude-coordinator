@@ -9,6 +9,7 @@ import { onPropertiesChanged, onViewsChanged } from './properties.js';
 import { inboxEvent, inboxTicket } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { inAppHash, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
+import { uploadsRunning } from './composer.js';
 
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
@@ -480,7 +481,7 @@ document.addEventListener('keydown', () => { lastInputAt = Date.now(); }, true);
 
 function hasUnsentWork() {
   if (sending || Date.now() - lastInputAt < QUIET_MS) return true;
-  if (document.querySelector('.attachments:not([hidden])')) return true;
+  if (document.querySelector('.attachments:not([hidden])') || uploadsRunning()) return true;
   return [...app.querySelectorAll('[data-draft]')].some((el) => el.value.trim());
 }
 

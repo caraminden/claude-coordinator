@@ -83,8 +83,7 @@ export function composer(chatId, ticket) {
       moreBtn.focus();
     }
   });
-  const attachments = createAttachments(chatId, (items) => saveDraftImages(chatId, items));
-  loadDraftImages(chatId).then((items) => attachments.restore(items));
+  const attachments = chatAttachments(chatId);
   // No accept filter, so a phone offers its files as well as the photo library.
   const picker = h('input', { type: 'file', multiple: true, hidden: true });
   picker.addEventListener('change', () => {
@@ -194,6 +193,22 @@ const MAX_IMAGE_BYTES = 3.5 * 1024 * 1024; // base64 adds a third; the server ca
 const SENDABLE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const MAX_FILES = 20;
 const MAX_FILE_BYTES = 200 * 1024 * 1024; // the server's cap (src/uploads.ts)
+
+// A chat's attachments outlive its composer: switching chats and back builds a new composer, and a
+// file still uploading must stay on the message, not go with the old composer (#134).
+const attachmentsByChat = new Map();
+function chatAttachments(chatId) {
+  let attachments = attachmentsByChat.get(chatId);
+  if (!attachments) {
+    attachments = createAttachments(chatId, (items) => saveDraftImages(chatId, items));
+    attachmentsByChat.set(chatId, attachments);
+    loadDraftImages(chatId).then((items) => attachments.restore(items));
+  }
+  return attachments;
+}
+
+/** Whether any chat has a file still uploading; a reload now would lose it. */
+export const uploadsRunning = () => [...attachmentsByChat.values()].some((a) => a.items.some((i) => i.upload && !i.upload.name));
 
 /**
  * What a message will carry: images as thumbnails, read as base64 so Claude sees them, and files,

@@ -244,7 +244,7 @@ const TOOLS = [
   },
   {
     name: 'message_ticket',
-    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. After 6 messages either way with one minion in 10 minutes, the next is held until a person continues.',
+    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. After 6 messages either way with one minion in 10 minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
     inputSchema: {
       type: 'object',
       properties: { ticket_id: TICKET_ID, text: { type: 'string' } },

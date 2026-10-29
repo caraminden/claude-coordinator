@@ -529,6 +529,13 @@ button.pin.on { color: var(--accent); }
 .typing .dots i:nth-child(3) { animation-delay: 0.3s; }
 @keyframes typing-dot { 0%, 60%, 100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
 @media (prefers-reduced-motion: reduce) { .typing .dots i { animation: none; opacity: 0.7; } }
+.state-dots { display: none; font-weight: 700; letter-spacing: 0.1em; }
+.state-dots i { font-style: normal; }
+.state-dots i:nth-child(2) { animation: state-dot2 1.2s steps(1, end) infinite; }
+.state-dots i:nth-child(3) { animation: state-dot3 1.2s steps(1, end) infinite; }
+@keyframes state-dot2 { 0% { opacity: 0; } 33.33% { opacity: 1; } }
+@keyframes state-dot3 { 0% { opacity: 0; } 66.67% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .state-dots i { animation: none !important; } }
 
 /* Project pages drop the top bar; its account and usage live in the overview panel. With no bar to
    clear the notch, a strip of page colour covers the status bar area and the thread bar sticks below it. */
@@ -653,6 +660,9 @@ mark.find.current { background: var(--waiting); color: #fff; }
   .ticket-head > .row { gap: 0.4rem 0.45rem; }
   .ticket-head > .row > h2 { flex: 1 0 calc(100% - 1.1rem); min-width: 0; }
   .ticket-head > .row > .muted { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
+  /* Squeezed while Claude works: "." → ".." → "..." instead of "Cla…" (thread.js, stateFit). The text stays for screen readers. */
+  .ticket-head > .row > .muted.squeezed > .state-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .ticket-head > .row > .muted.squeezed > .state-dots { display: inline; }
   .ticket-head > .row > .spacer { display: none; }
   .ticket-head > .row > h2 { font-size: 1rem; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
   .ticket-head > .row > button, .ticket-head > .row > .find-box { flex: none; white-space: nowrap; }

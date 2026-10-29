@@ -294,8 +294,13 @@ export function renderTicketHead() {
     }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
   }
   const state = (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '');
-  // Titled too, since phones may cut it short to keep the buttons beside it.
-  const stateLabel = h('span', { class: 'muted', title: state }, state);
+  // Titled too, since phones may cut it short to keep the buttons beside it. While Claude works,
+  // a cut-short state shows dots that count up instead of "Cla…".
+  const working = t.status === 'running';
+  const stateLabel = h('span', { class: 'muted', title: state }, h('span', { class: 'state-text' }, state),
+    working ? h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')) : '');
+  stateFit?.disconnect();
+  if (working) stateFit?.observe(stateLabel);
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
@@ -316,6 +321,13 @@ export function renderTicketHead() {
   if (send) send.title = t.status === 'running' ? 'Runs after the current turn' : '';
   scheduleProgress();
 }
+
+// Squeezed is measured against the text's own width, taken while it shows: once the dots are in,
+// the label is narrower than its text for as long as the room stays short.
+const stateFit = typeof ResizeObserver === 'function' ? new ResizeObserver(([{ target: el }]) => {
+  if (!el.classList.contains('squeezed')) el.need = el.scrollWidth;
+  el.classList.toggle('squeezed', el.clientWidth < el.need);
+}) : null;
 
 /** Where the minion's change is, branch to live, and why it is stuck when it is (src/branch.ts). */
 function shipLine(t) {

@@ -889,11 +889,7 @@ export class Runner {
     if (!w || w.at > Date.now()) return this.armLimitTimer();
     this.lastLimitResume = Date.now();
     this.saveLimitResumes(list.slice(1));
-    // A turn already running (a GitHub ping, a steer) is resume enough; its held messages queue behind it.
-    if (this.isRunning(w.ticket)) {
-      if (this.queued(w.ticket)) this.saveTurn(w.ticket, { queued: this.queues.get(w.ticket) });
-      return;
-    }
+    // No turn runs while it waits: starting one ends the wait (startTurn).
     this.resume(w.ticket, 0, w.tries);
   }
 
@@ -1359,7 +1355,8 @@ export class Runner {
     }
     const code = exit?.code ?? null;
     const signal = exit ? exit.signal : 'SIGKILL';
-    if (exit?.error) this.emit(ticketId, 'error', { text: `Could not start claude: ${exit.error}` });
+    const startError = exit?.error ? `Could not start claude: ${exit.error}` : null;
+    if (startError && stopped) this.emit(ticketId, 'error', { text: startError });
     if (!exit && !stopped) this.emit(ticketId, 'note', { text: 'The turn\'s process was killed before it finished.' });
     const sawResult = !!turn?.result;
     const resultIsError = !!turn?.result?.error;
@@ -1376,7 +1373,7 @@ export class Runner {
       // Stopped by the user; leave it waiting for the next message.
     } else if (!sawResult || code !== 0 || resultIsError) {
       status = 'error';
-      this.turnFailed(ticketId, resultError?.trim() || null, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0);
+      this.turnFailed(ticketId, resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0);
     }
     const closing = this.closing.has(ticketId);
     const reason = this.closing.get(ticketId);
@@ -1428,6 +1425,7 @@ export class Runner {
       if (limitTries >= MAX_LIMIT_RESUMES) {
         this.emit(ticketId, 'note', { text: `${reason}\nIt has already resumed ${limitTries} times in a row after the usage limit, so it waits for a message now.` });
         if (!keepState) this.store.updateTicket(ticketId, { state: 'limited', note: `Usage limit: gave up after ${limitTries} tries, send a message` });
+        this.onTurnError(ticketId, `Usage limit: gave up after ${limitTries} resumes in a row`);
         return;
       }
       const usage = this.usage;

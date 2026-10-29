@@ -179,6 +179,8 @@ test(`it gives up after ${MAX_LIMIT_RESUMES} resumes in a row`, async () => {
   assert.equal(runner.view(t).limit_resume_at, null);
   await sleep(200);
   assert.equal(turnsRun() - before, 1 + MAX_LIMIT_RESUMES, 'no more turns');
+  assert.deepEqual(pushes, [{ ticket: id, text: `Usage limit: gave up after ${MAX_LIMIT_RESUMES} resumes in a row` }], 'giving up is the one push');
+  pushes.length = 0;
   runner.limitFallbackMs = 60 * 60 * 1000;
 });
 
@@ -196,4 +198,27 @@ test('the wait and its held messages outlive a restart', async () => {
   await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the resume after the restart');
   assert.match(readFileSync(prompts, 'utf8').trim().split('\n').at(-1)!, /held across the restart/);
   assert.equal(store.getSetting('limit-resumes'), null);
+});
+
+test('dismissing ends the wait; a held message can be taken back', async () => {
+  const id = minion();
+  await turn(id, "You've hit your session limit");
+  runner.send(id, 'Cara', 'never mind');
+  const held = store.listEvents(id).filter((e) => e.kind === 'user_message').at(-1)!.id;
+  assert.equal(runner.unqueue(id, held, 'Cara'), true);
+  assert.deepEqual(store.getSetting<any[]>('limit-resumes')!.find((w) => w.ticket === id).queued, []);
+  runner.close(id, 'Cara dismissed this minion.');
+  assert.equal(runner.limitWait(id), null);
+  assert.equal(store.getTicket(id)!.status, 'closed');
+});
+
+test('a turn whose claude never starts says why', async () => {
+  const r = new Runner(store, () => {}, () => ({}), join(root, 'no-such-claude'));
+  r.onTurnError = (ticket, text) => pushes.push({ ticket, text });
+  const id = minion();
+  r.send(id, 'Cara', 'go');
+  await until(() => !r.isRunning(id), 'the turn to end');
+  assert.match(store.getTicket(id)!.note!, /^Could not start claude: /);
+  assert.match(pushes.at(-1)!.text, /^Could not start claude: /);
+  pushes.length = 0;
 });

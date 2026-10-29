@@ -8,7 +8,7 @@ import { Store } from '../src/db.ts';
 import { LOOP_LIMIT, LOOP_WINDOW_MS, Runner, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS } from '../src/runner.ts';
 import { agentToken, bootServer, until } from './helpers.ts';
 
-// The loop guard: Taskmaster↔minion messages past LOOP_LIMIT an hour wait for a person. A stand-in
+// The loop guard: Taskmaster↔minion messages past LOOP_LIMIT per LOOP_WINDOW_MS (ten minutes) wait for a person. A stand-in
 // `claude -p` ends every turn at once.
 const root = mkdtempSync(join(tmpdir(), 'loop-guard-'));
 const procs: ChildProcess[] = [];
@@ -49,7 +49,7 @@ test('6 go through, the 7th is held, Continue releases it and starts the count a
   assert.ok(!said(store, minion.id).includes('seventh'));
   for (const id of [minion.id, coordinator.id]) {
     const [paused] = kinds(store, id, 'loop_paused');
-    assert.match(paused.text, /^Paused: #1 and the Taskmaster have exchanged 6 messages in the last hour, so the Taskmaster's message to #1 \("seventh"\) is held/);
+    assert.match(paused.text, /^Paused: #1 and the Taskmaster have exchanged 6 messages in the last 10 minutes, so the Taskmaster's message to #1 \("seventh"\) is held/);
     assert.equal(paused.minion, minion.id);
   }
   // Once paused, the next waits too, even the other way.
@@ -70,7 +70,7 @@ test('6 go through, the 7th is held, Continue releases it and starts the count a
   assert.equal(runner.relay(minion.id, minion.id, 'Taskmaster', 'too many'), true);
 });
 
-test('the window rolls: messages older than an hour stop counting', () => {
+test('the window rolls: messages older than the window stop counting', () => {
   const store = new Store(join(root, 'window.db'));
   const project = store.createProject('P', null);
   const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
@@ -80,12 +80,12 @@ test('the window rolls: messages older than an hour stop counting', () => {
   runner.now = () => now;
   const relay = (text: string) => runner.relay(minion.id, minion.id, 'Taskmaster', text);
 
-  // Five at the start, one ten minutes in.
+  // Five at the start, one two minutes in.
   for (let i = 0; i < LOOP_LIMIT - 1; i++) assert.equal(relay(`early ${i}`), false);
-  now += 10 * 60_000;
+  now += 2 * 60_000;
   assert.equal(relay('later'), false);
-  // An hour after the first five, they have rolled out and 'later' is still in: five more fit, not six.
-  now += LOOP_WINDOW_MS - 10 * 60_000;
+  // A window after the first five, they have rolled out and 'later' is still in: five more fit, not six.
+  now += LOOP_WINDOW_MS - 2 * 60_000;
   for (let i = 0; i < LOOP_LIMIT - 1; i++) assert.equal(relay(`next ${i}`), false);
   assert.equal(relay('one too many'), true);
 });

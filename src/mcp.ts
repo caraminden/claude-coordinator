@@ -14,7 +14,7 @@ const TICKET = Number(process.env.COORDINATOR_TICKET);
 const APPROVALS = process.env.COORDINATOR_APPROVALS === '1';
 const MAX_TEXT = 4000;
 /** What message_ticket and message_coordinator say when the loop guard holds a message. */
-const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in an hour, so it waits for a person to continue. Do not resend it; finish your turn.';
+const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
 
 const WAKE_DESCRIPTION =
   `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as merged: a rebase gives it a new hash), or after the next deploy if no commit is given. Woken once, then forgotten; a dismissed minion is skipped.`;
@@ -242,7 +242,7 @@ const TOOLS = [
   },
   {
     name: 'message_ticket',
-    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. After 6 messages either way with one minion in an hour, the next is held until a person continues.',
+    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. After 6 messages either way with one minion in 10 minutes, the next is held until a person continues.',
     inputSchema: {
       type: 'object',
       properties: { ticket_id: TICKET_ID, text: { type: 'string' } },
@@ -591,7 +591,7 @@ const THREAD_TOOLS = [
   {
     name: 'message_coordinator',
     description:
-      "Send a message to this scheme's Taskmaster, waking it: for what only it can do, such as passing information to another minion (#N), starting a new minion from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly. After 6 messages either way in an hour, the next is held until a person continues.",
+      "Send a message to this scheme's Taskmaster, waking it: for what only it can do, such as passing information to another minion (#N), starting a new minion from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly. After 6 messages either way in 10 minutes, the next is held until a person continues.",
     inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What you need, self-contained: name minions as #N and give file paths in full' } }, required: ['text'] },
   },
   {

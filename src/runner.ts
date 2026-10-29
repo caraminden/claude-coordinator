@@ -245,7 +245,7 @@ const talkedKey = (ticketId: number) => `talked-since-deploy:${ticketId}`;
 
 /** Taskmaster↔minion messages (both ways) one minion may exchange per LOOP_WINDOW_MS before the next waits for a person. */
 export const LOOP_LIMIT = 6;
-export const LOOP_WINDOW_MS = 60 * 60 * 1000;
+export const LOOP_WINDOW_MS = 10 * 60 * 1000;
 /** Messages between two schemes' Taskmasters (both ways) per TASKMASTER_LOOP_WINDOW_MS before the next waits for a person. */
 export const TASKMASTER_LOOP_LIMIT = 6;
 export const TASKMASTER_LOOP_WINDOW_MS = 10 * 60 * 1000;
@@ -1033,7 +1033,7 @@ export class Runner {
     if (!held) return false;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
     const note = held === 1
-      ? `Paused: #${minion.number} and the ${AGENT_NAME} have exchanged ${LOOP_LIMIT} messages in the last hour, so ${what} is held until a person continues.`
+      ? `Paused: #${minion.number} and the ${AGENT_NAME} have exchanged ${LOOP_LIMIT} messages in the last ${LOOP_WINDOW_MS / 60_000} minutes, so ${what} is held until a person continues.`
       : `Also held: ${what}.`;
     for (const id of this.loopChats(minion)) this.emit(id, 'loop_paused', { minion: minionId, text: note });
     return true;

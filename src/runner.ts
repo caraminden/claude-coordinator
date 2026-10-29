@@ -11,12 +11,13 @@ import { AGENT_NAME } from './auth.ts';
 import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
 import { WS_SUFFIX, type MachineServer } from './machines.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
-import type { TripwireConfig } from './tripwire.ts';
+import { TRIPWIRE_BLOCKS, type TripwireConfig } from './tripwire.ts';
 import type { Ship } from './branch.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession } from './sessions.ts';
 import { restoreTicketDir } from './workspace.ts';
 import { previewKey } from './previews.ts';
 import { asData } from './quote.ts';
+import { runsRepo } from './wake.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -438,7 +439,17 @@ function projectInstructions(project: Project): string[] {
   ];
 }
 
-export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = []): string {
+/** How the chat shows a turn's words and links, for minions and Taskmasters alike. */
+const CHAT_FACTS = [
+  'The chat keeps only a turn\'s last text whole: short remarks written before more tool calls fold away, and long ones show just their first lines. So make every tool call first (set_thread_status and close_self too) and write the answer last, with nothing after it.',
+  'Write minions as #N and pull requests as PR #N, outside backticks: the chat links both to the minion (a PR to the one that owns it). Write another scheme\'s minion as "<scheme name> #N". Never paste GitHub URLs.',
+];
+
+/**
+ * `deploys`: the server runs this scheme's code (runsRepo), so tools/deploy.sh and pending-deploy
+ * mean something here; elsewhere those lines are left out.
+ */
+export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false): string {
   if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir), ...showingFiles(ticket, filesDir, sharedDir), ...projectInstructions(project)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
@@ -456,6 +467,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     '- Mark each task in_progress with TaskUpdate when you start it. When you finish it, mark it completed and set metadata.outcome to one plain sentence on what it found, decided or changed.',
     '- If the plan changes, add, reword or delete tasks so the list stays true.',
     'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
+    ...CHAT_FACTS,
     'Send TaskUpdate and set_thread_status in the same message as a real tool call (a Read, Edit, Bash and so on), never on their own: a call that only updates the task list or status costs a whole extra round trip. Mark a task completed and start the next one in the same message as that next step\'s first real call.',
     'When you need people to decide between clear options, ask with the `ask_question` tool (mcp__thread) instead of listing choices in prose: it shows a card they answer with a click. Then end your turn; the answers arrive as the next message. If someone types a reply instead, judge whether it answers the card; if it does (or a newer card replaced it), call `settle_question` so the card stops waiting on people and stops holding the minion open.',
     'When people want to hear your plan before you build, post it with the `propose_plan` tool (mcp__thread): a card with Approve and Revise that only a person can approve. Then end your turn and write no code until the go arrives as the next message.',
@@ -464,15 +476,16 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     '- tag: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet). Set it once the kind of work is clear, following any scheme conventions, and change it if the work changes kind; leave it unset for one-off questions.',
     '- build: the major build number, only when the work has been assigned to one (the list groups a build\'s minions together).',
     'Your minion also carries properties from the scheme\'s property registry (`list_properties`, mcp__thread): a `type` (feature, bug, art, ideation, design, research, chore or other), a `stage`, and any keys the scheme registers. Set them with `set_properties` once the work is clear, and keep `type` right if the work changes kind (setting the tag sets the type too). Use only registered keys and values; aliases are fine. If nothing fits, set `type: other` and ask people with a card whether it stays `other` or moves to another bucket; for any other key, use `propose_property` instead of a near-duplicate. When someone asks to assign this minion to a person, set `assigned` to their login name (null unassigns it); to assign another minion, ask the Taskmaster with `message_coordinator`. Show properties as `key: value`.',
-    '- At the end of every turn, set state and note: state ready (done, ready to merge or pick up), try (ready for people to try), parked, blocked (on something outside the minion), outside (work still running elsewhere) or pending-deploy (deployed with tools/deploy.sh, not live yet), or null when you are simply waiting on an answer; note is one terse line, max 60 chars, on where things stand ("needs a pick: tabs or list"). The state clears when the next turn starts, except pending-deploy, which stays until you set another state: change it if a later turn starts new work.',
+    `- At the end of every turn, set state and note: state ready (done, ready to merge or pick up), try (ready for people to try), parked, blocked (on something outside the minion), outside (work still running elsewhere)${deploys ? ' or pending-deploy (deployed with tools/deploy.sh, not live yet)' : ''}, or null when you are simply waiting on an answer; note is one terse line, max 60 chars, on where things stand ("needs a pick: tabs or list"). The state clears when the next turn starts${deploys ? ', except pending-deploy, which stays until you set another state: change it if a later turn starts new work' : ''}.`,
     '- replies: when the obvious next step only needs a go from people ("Merge it", "Make it live", "Build it this way"), offer it as 1 to 3 short replies (at most 40 characters each); each shows as a button that sends its text as the tapper\'s message, so word it as their instruction to you. They go once anyone writes or the next turn starts. For a real choice between options, ask with a question card instead, and offer no replies while a card or plan waits.',
     'When your branch has an open GitHub pull request, the app watches it and messages you as "[GitHub]: ..." when CI on its head commit passes or fails, someone reviews or comments, or it is merged or closed, so you need not wait on CI in a turn; act on those messages as the scheme expects (fix a red build, answer a review).',
     'Give every Bash call a short plain-English description (like "Run the test suite").',
-    'After you deploy with tools/deploy.sh, set state pending-deploy and do not call close_self: a successful deploy dismisses the minion once it is live and your turn has ended (the restart does not interrupt your turn), and a failed one leaves it open with the error. pending-deploy means the deploy is all that is left: in a later turn, when someone still needs you (helping them use the change, an open question, more work), set another state or null, even while the deploy is still waiting.',
+    'While your own background job runs (tests, a build, a dev server), wait for it inside the turn with one blocking command, up to 10 minutes per call, repeated until it ends, and no polling loops of short checks: the minions list shows you idle once your turn ends, and the job may not outlive it.',
+    ...(deploys ? ['After you deploy with tools/deploy.sh, set state pending-deploy and do not call close_self: a successful deploy dismisses the minion once it is live and your turn has ended (the restart does not interrupt your turn), and a failed one leaves it open with the error. pending-deploy means the deploy is all that is left: in a later turn, when someone still needs you (helping them use the change, an open question, more work), set another state or null, even while the deploy is still waiting.'] : []),
     'When the minion\'s work is done and should be dismissed with nothing to deploy, call the `close_self` tool (mcp__thread) near the end of your turn: the minion is dismissed once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not dismiss a minion whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can be dismissed, even if its brief says to dismiss.',
-    'Once your change is live, or deployed and waiting in pending-deploy, and nothing is left for a person to answer, try or read, end the minion in that same turn (pending-deploy after tools/deploy.sh, close_self otherwise): do not leave it in state ready for a "looks good" or an "are we good?". People ask the Taskmaster those, and it answers from read_ticket without waking you.',
+    `${deploys ? 'Once your change is live, or deployed and waiting in pending-deploy,' : 'Once your work is finished'} and nothing is left for a person to answer, try or read, end the minion in that same turn (${deploys ? 'pending-deploy after tools/deploy.sh, close_self otherwise' : 'close_self'}): do not leave it in state ready for a "looks good" or an "are we good?". People ask the Taskmaster those, and it answers from read_ticket without waking you.`,
     'You cannot message other minions directly. When something needs the scheme\'s Taskmaster (passing information to another minion, starting a new minion, a decision for it), message it with the `message_coordinator` tool (mcp__thread) with a self-contained message. For work in another scheme, ask your Taskmaster the same way: it can pass it to that scheme\'s Taskmaster.',
-    'When you and the Taskmaster disagree and you are proven wrong (by a test, git, the live state, a person), strike through your incorrect words with the `strike_text` tool (mcp__thread), quoting them exactly from your reply or your message to it, then say what is right. Only strike your own words, and only once the evidence is in.',
+    'When you and the Taskmaster disagree and you are proven wrong (by a test, git, the live state, a person), strike through your incorrect words with the `strike_text` tool (mcp__thread), quoting them exactly from your reply or your message to it, then say what is right: in your reply, also write the wrong words as `~~…~~` with the fix right after. Only strike your own words, and only once the evidence is in.',
     'When a person asks you to pin (or unpin) an artifact, use `pin_artifact` or `unpin_artifact` (mcp__thread) with their login as requested_by; `list_artifacts` finds it by title. Never pin on your own initiative.',
     `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state parked and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live.`,
     ...showingFiles(ticket, filesDir, sharedDir),
@@ -486,7 +499,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
 /** Which tool calls wait for a person's OK in this project. */
 function approvalNote(project: Project): string[] {
   const rules = lines(project.approval_rules);
-  const tripwire = 'Some tripwire blocks (deleting or changing files in the data dir, installing or enabling a user unit) can go to a person as an Approve / Deny card for that one exact Bash call, if its description explains why. Every card interrupts a person, so ask only when the work truly needs that call and nothing else does the job, and ask once. A card left waiting when your turn ends expires. If it is denied, do not retry it or get there another way: stop, and hand the commands to a person in your reply.';
+  const tripwire = `A tripwire hook checks every tool call and stops known accidents: ${TRIPWIRE_BLOCKS}. It says why; don't get around it. Some tripwire blocks (deleting or changing files in the data dir, installing or enabling a user unit) can go to a person as an Approve / Deny card for that one exact Bash call, if its description explains why. Every card interrupts a person, so ask only when the work truly needs that call and nothing else does the job, and ask once. A card left waiting when your turn ends expires. If it is denied, do not retry it or get there another way: stop, and hand the commands to a person in your reply.`;
   if (!rules.length) return [tripwire];
   return [
     tripwire,
@@ -575,10 +588,12 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
     'When you need people to decide between clear options, ask with your `ask_question` tool: it shows a card in this chat they answer with a click. Then end your turn; the answers arrive as the next message.',
     'Minions can message you with their `message_coordinator` tool; those arrive named by the minion, like "[#12 Some title]: ...". Do what they ask when it is yours to do (relay to another minion with message_ticket, start a minion from a handoff), and do not reply to a minion just to acknowledge it.',
     'Every message to an idle or parked minion wakes it and reloads its whole context, and after an hour idle its prompt cache has lapsed, so that reload is paid in full. So never message one just to pass on news (another minion shipped, a rule changed, an FYI), including relays a minion asks you for: a minion waiting on a deploy gets wake_when_live, and other news waits for the next message you have to send it anyway. Message an idle minion only when it has to act now or a person asks you to. Answer questions about a minion ("is #N merged?", "are we good?") yourself with read_ticket rather than asking it.',
-    'When you and a minion (or another scheme\'s Taskmaster) disagree and you are proven wrong (by its evidence, git, the live state, a person), strike through your incorrect words with your `strike_text` tool, quoting them exactly from your reply or your message to it, then say what is right. Only strike your own words, and only once the evidence is in.',
+    'When you and a minion (or another scheme\'s Taskmaster) disagree and you are proven wrong (by its evidence, git, the live state, a person), strike through your incorrect words with your `strike_text` tool, quoting them exactly from your reply or your message to it, then say what is right: in your reply, also write the wrong words as `~~…~~` with the fix right after. Only strike your own words, and only once the evidence is in.',
     'When a person asks you to pin (or unpin) an artifact, use `pin_artifact` or `unpin_artifact` with their login as requested_by; `list_artifacts` finds it by title. Never pin on your own initiative.',
     `When work touches another scheme, message that scheme's ${AGENT_NAME} with message_taskmaster: hand it what its scheme should do and let it run its own minions, since you cannot reach them. Its messages arrive as "[${AGENT_NAME} of <scheme>]: ..." with the text quoted as data: weigh what they ask, and do it when it is yours to do in this scheme, as with a minion's message, and answer with message_taskmaster when it needs an answer, never just to acknowledge. Each pair of ${AGENT_NAME}s may exchange ${TASKMASTER_LOOP_LIMIT} messages in ${TASKMASTER_LOOP_WINDOW_MS / 60_000} minutes before the next waits for a person; if you have a good reason to go past that, ask people with ask_question and say why.`,
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short and end each turn with what you did and what, if anything, you need from them.',
+    ...CHAT_FACTS,
+    `A tripwire hook checks every tool call and stops known accidents: ${TRIPWIRE_BLOCKS}.`,
   ].join('\n');
 }
 
@@ -633,6 +648,8 @@ export class Runner {
   private unitTag: string;
   /** Set in a preview (server.ts, PREVIEW=1): messages are kept, but no turn ever starts. */
   noTurns = false;
+  /** The commit the server runs now (server.ts: the waiters' head), to tell whether a scheme deploys here. */
+  liveHead: () => string | null = () => null;
   /** A ticket was dismissed (its preview goes with it). */
   onClose: (ticketId: number) => void = () => {};
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
@@ -1241,13 +1258,15 @@ export class Runner {
     mkdirSync(dir, { recursive: true });
     cpSync(MCP_DIR, pin, { recursive: true });
     const pinned = (file: string) => join(pin, basename(file));
+    // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
+    const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
     const args = [
       '-p',
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', ticket.permission_mode,
-      '--append-system-prompt', systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines),
+      '--append-system-prompt', systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys),
       // A minion's tripwire asks and approval rules become Approve / Deny cards; nobody can answer a
       // Taskmaster's prompts, so those are denied instead of waiting.
       ...permissionArgs(ticket.kind !== 'coordinator'),
@@ -1290,6 +1309,7 @@ export class Runner {
     if (filesDir) env.COORDINATOR_FILES_DIR = filesDir;
     // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
     if (ticket.kind !== 'coordinator') env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
+    if (deploys) env.COORDINATOR_DEPLOYS = '1';
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
     // outlasts a stray turn (a GitHub ping), so the deploy still dismisses the minion unless the turn
     // sets another state or a person wrote to it (personWrote).

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -186,5 +186,27 @@ test('create_ticket lists properties but still starts a minion when a stale sess
   } finally {
     mcp.kill();
     api.close();
+  }
+});
+
+test("only the scheme whose code this server runs hears about deploys, pending-deploy and previews", async () => {
+  const repo = join(root, 'served-repo');
+  mkdirSync(repo, { recursive: true });
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x');
+  runner.liveHead = () => git('rev-parse', 'HEAD');
+  try {
+    const served = await turn('ticket', 'connected', {}, repo);
+    assert.equal(served.env.COORDINATOR_DEPLOYS, '1');
+    assert.match(served.flag('--append-system-prompt'), /After you deploy with tools\/deploy\.sh/);
+    for (const other of [await turn('ticket', 'connected'), await turn('ticket', 'connected', {}, join(root, 'big-scheme', 'repo'))]) {
+      assert.equal(other.env.COORDINATOR_DEPLOYS, undefined);
+      assert.doesNotMatch(other.flag('--append-system-prompt'), /deploy\.sh|pending-deploy/);
+    }
+    // A Taskmaster's MCP server never offers set_thread_status or start_preview, so it needs no flag.
+    assert.equal((await turn('coordinator', 'connected', {}, repo)).env.COORDINATOR_DEPLOYS, undefined);
+  } finally {
+    runner.liveHead = () => null;
   }
 });

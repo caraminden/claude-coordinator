@@ -37,6 +37,9 @@ export interface TripwireConfig {
   ask?: boolean;
 }
 
+/** What the tripwire stops, for the built-in prompts (runner.ts): keep it in step with the rules below. */
+export const TRIPWIRE_BLOCKS = "writes to other schemes' folders, the live checkout, the live data dir (read the database with `sqlite3 -readonly`) and systemd unit folders; systemctl enable, disable, mask or edit, and restarting or stopping the app's services; reading SSH keys, the Claude or GitHub login, the service's env file or any process's environment; and running server.ts without DATA_DIR and PORT set";
+
 /** Why a call is stopped, and whether a person may approve it once on a card instead. */
 export interface Verdict { reason: string; ask: boolean }
 const hard = (reason: string): Verdict => ({ reason, ask: false });

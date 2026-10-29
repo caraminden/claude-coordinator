@@ -12,6 +12,8 @@ const ROLE = process.env.COORDINATOR_ROLE === 'thread' ? 'thread' : 'coordinator
 const TICKET = Number(process.env.COORDINATOR_TICKET);
 // Set for minions: Claude Code asks the approve tool before tripwire asks and approval-rule calls.
 const APPROVALS = process.env.COORDINATOR_APPROVALS === '1';
+// A minion of the scheme whose code this server runs (runner.ts): only there do deploys and previews mean anything.
+const DEPLOYS = process.env.COORDINATOR_DEPLOYS === '1';
 const MAX_TEXT = 4000;
 /** What message_ticket and message_coordinator say when the loop guard holds a message. */
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
@@ -29,12 +31,13 @@ const TAG = {
   description:
     'What kind of work: feature (new or changed behaviour), bug (something broken), design (look and layout), process (how we work: tooling, prompts, docs, setup), idea (exploring or planning, no code yet). null for one-off questions and reviews.',
 };
-const STATE = {
+/** A minion or ticket state; without `deploys`, pending-deploy is left out. */
+const stateSchema = (deploys: boolean) => ({
   type: ['string', 'null'],
-  enum: ['ready', 'try', 'parked', 'blocked', 'outside', 'pending-deploy', null],
-  description:
-    'Where the turn leaves things, for the minions list: ready (done; ready to merge or pick up), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person\'s answer), outside (work still running somewhere this minion cannot wait on, like CI), pending-deploy (deployed with tools/deploy.sh, waiting to go live, and nothing else left: a successful deploy dismisses the minion, so not while someone still needs you). null when it is simply people\'s turn to answer, which the list shows by itself. Cleared automatically when the next turn starts, except pending-deploy, which stays until you set another state.',
-};
+  enum: ['ready', 'try', 'parked', 'blocked', 'outside', ...(deploys ? ['pending-deploy'] : []), null],
+  description: `Where the turn leaves things, for the minions list: ready (done; ready to merge or pick up), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person's answer), outside (work still running somewhere this minion cannot wait on, like CI)${deploys ? ', pending-deploy (deployed with tools/deploy.sh, waiting to go live, and nothing else left: a successful deploy dismisses the minion, so not while someone still needs you)' : ''}. null when it is simply people's turn to answer, which the list shows by itself. Cleared automatically when the next turn starts${deploys ? ', except pending-deploy, which stays until you set another state' : ''}.`,
+});
+const STATE = stateSchema(true);
 const NOTE = { type: ['string', 'null'], description: 'One terse line on where things stand, max 60 chars, e.g. "needs a pick: tabs or a list" or "merged, live after restart". No names or prefixes.' };
 
 const REPLIES = {
@@ -550,7 +553,7 @@ const THREAD_TOOLS = [
     name: 'set_thread_status',
     description:
       "Label this minion for the scheme's minions list: its short title, kind of work, and where things stand. Leave out what should stay. Call it when the work's kind becomes clear, and at the end of a turn whenever the state or note changes.",
-    inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: STATE, note: NOTE, replies: REPLIES, build: BUILD } },
+    inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: stateSchema(DEPLOYS), note: NOTE, replies: REPLIES, build: BUILD } },
   },
   ASK_QUESTION,
   SETTLE_QUESTION,
@@ -602,16 +605,18 @@ const THREAD_TOOLS = [
     description: `${WAKE_DESCRIPTION.replace('the minion', 'this minion')} Use it instead of asking the Taskmaster to remember, then set state parked and end your turn.`,
     inputSchema: { type: 'object', properties: WAKE_PROPS, required: ['reason'] },
   },
-  {
-    name: 'start_preview',
-    description:
-      "Start (or restart) a preview of this minion's worktree for people to try before it merges: its server.ts runs on a copy of the app's data, behind the app's login, and never runs turns. Commit first: it serves the worktree as it is now. Returns the link; post it in your reply and set state try. It stops after an hour unused (opening the link starts it again) and goes when the minion is dismissed.",
-    inputSchema: { type: 'object', properties: {} },
-  },
+  ...(DEPLOYS
+    ? [{
+      name: 'start_preview',
+      description:
+        "Start (or restart) a preview of this minion's worktree for people to try before it merges: its server.ts runs on a copy of the app's data, behind the app's login, and never runs turns. Commit first: it serves the worktree as it is now. Returns the link; post it in your reply and set state try. It stops after an hour unused (opening the link starts it again) and goes when the minion is dismissed.",
+      inputSchema: { type: 'object', properties: {} },
+    }]
+    : []),
   {
     name: 'close_self',
     description:
-      "Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live. It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled. Not for minions whose result is a report or doc for people to read: those stay open until someone has read it. It refuses while a question or plan card is open or the state is try or ready.",
+      `Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged${DEPLOYS ? ' and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live.' : '.'} It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, after your summary is settled. Not for minions whose result is a report or doc for people to read: those stay open until someone has read it. It refuses while a question or plan card is open or the state is try or ready.`,
     inputSchema: {
       type: 'object',
       properties: { reason: { type: 'string', description: 'Optional one-line summary shown in the minion with the dismissal, e.g. "Merged abc1234; live after the restart"' } },

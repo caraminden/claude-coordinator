@@ -142,6 +142,7 @@ if (runner.units && !BOOT_CHECK) {
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text) => runner.send(ticketId, APP_NAME, text));
+runner.liveHead = () => waiters.head;
 /** The server now runs `head`: wake its waiters, and dismiss pending-deploy minions it ships. */
 function liveOn(head: string | null) {
   waiters.check(head);

@@ -45,6 +45,11 @@ function git(dir: string, args: string[]): string | null {
   }
 }
 
+/** Whether the server running `head` runs this scheme's code: that commit is in the scheme's repo. */
+export function runsRepo(repo: string | null, head: string | null): boolean {
+  return !!repo && !!head && git(repo, ['cat-file', '-e', `${head}^{commit}`]) !== null;
+}
+
 export class LiveWaiters {
   private store: Store;
   /** The live checkout: the server's own code. */
@@ -110,8 +115,7 @@ export class LiveWaiters {
     const merged = this.merged(b.repo, b.tip);
     if (closed && !merged) return 'unshipped';
     if (!merged || (!closed && !this.committed(b.repo, b.branch, c.base ? (c.since ?? Infinity) : 0))) return 'wait';
-    const runsThisScheme = !!this.head && git(b.repo, ['cat-file', '-e', `${this.head}^{commit}`]) !== null;
-    if (c.when === 'merged' || !runsThisScheme) return 'go';
+    if (c.when === 'merged' || !runsRepo(b.repo, this.head)) return 'go';
     return this.live({ ticket: c.ticket, commit: b.tip, reason: '', since: null }) ? 'go' : 'wait';
   }
 

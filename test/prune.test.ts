@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -87,4 +87,25 @@ test('ad-hoc copies go only once a nightly backup restores, and the backup is pr
   assert.ok(existsSync(stale));
   run(prune, '--apply', '--stale-backups');
   assert.ok(!existsSync(stale));
+});
+
+test('the nightly backup drops hand-made before-* copies once they are 7 days old', () => {
+  const dir = join(root, 'backups');
+  const old = join(dir, 'coordinator-before-old.db');
+  const recent = join(dir, 'coordinator-before-recent.db');
+  const deploy = join(dir, 'pre-deploy-abc1234.db');
+  for (const f of [old, recent, deploy]) writeFileSync(f, 'x');
+  const days = (n: number) => (Date.now() - n * DAY) / 1000;
+  utimesSync(old, days(8), days(8));
+  utimesSync(recent, days(6), days(6));
+  utimesSync(deploy, days(30), days(30));
+  run(backup);
+  assert.ok(!existsSync(old));
+  assert.ok(existsSync(recent));
+  assert.ok(existsSync(deploy), "deploy.sh's own copies are its to rotate");
+});
+
+test('the nightly prune timer deletes stale copies too', () => {
+  const unit = readFileSync(join(import.meta.dirname, '..', 'deploy', 'claude-coordinator-prune.service'), 'utf8');
+  assert.match(unit, /^ExecStart=.*prune\.sh --apply --stale-backups$/m);
 });

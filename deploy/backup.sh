@@ -2,7 +2,9 @@
 # Nightly backup of Citadel's database (run by claude-coordinator-backup.timer).
 #
 # Takes an online `sqlite3 .backup` (safe while the server is writing), proves it restores, then
-# keeps the newest 7 dailies and 4 weeklies under $DATA_DIR/backups, all mode 600.
+# keeps the newest 7 dailies and 4 weeklies under $DATA_DIR/backups, all mode 600. Hand-made copies
+# there (coordinator-before-<what>.db, taken before a risky change) go once they are 7 days old, when
+# the dailies cover the same days. deploy.sh keeps its own pre-deploy-*.db copies.
 # A weekly is a hard link to that Sunday's daily (or the first daily of a week with no weekly yet),
 # so it costs no extra space until the daily ages out.
 set -euo pipefail
@@ -51,5 +53,6 @@ fi
 prune() { ls -1 "$DIR"/$1 2>/dev/null | sort -r | tail -n +$(($2 + 1)) | xargs -r rm -f --; }
 prune 'coordinator-[0-9]*.db' "$DAILIES"
 prune 'coordinator-weekly-*.db' "$WEEKLIES"
+find "$DIR" -maxdepth 1 -name 'coordinator-before-*' -mmin +$((DAILIES * 1440)) -delete
 
 echo "Backed up to $out ($(du -h "$out" | cut -f1); projects ${lines[1]}, minions ${lines[2]}), weekly $(basename "$weekly")"

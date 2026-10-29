@@ -1,10 +1,10 @@
 [Unit]
-Description=Citadel nightly prune of long-closed minions' session state and worktrees
+Description=Citadel nightly prune of long-closed minions' session state and worktrees, and stale database copies
 After=claude-coordinator-backup.service
 
 [Service]
 Type=oneshot
 UMask=0077
-ExecStart=%h/claude-coordinator/deploy/prune.sh --apply
+ExecStart=%h/claude-coordinator/deploy/prune.sh --apply --stale-backups
 Nice=10
 IOSchedulingClass=idle

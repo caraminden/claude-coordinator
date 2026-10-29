@@ -173,7 +173,8 @@ binds the port itself.
 
 **Backups.** `deploy/backup.sh` takes an online `sqlite3 .backup` at 04:00 into
 `$DATA_DIR/backups/`, checks the copy restores (integrity check plus the core
-tables), and keeps 7 dailies and 4 weeklies (hard links), mode 600. They live on
+tables), and keeps 7 dailies and 4 weeklies (hard links), mode 600. Hand-made
+`backups/coordinator-before-<what>.db` copies go once they are 7 days old. They live on
 the same disk, so they cover mistakes, not a dead disk. To restore, stop the
 service and copy a backup over `coordinator.db` (removing its `-wal`/`-shm`).
 
@@ -182,8 +183,8 @@ state (`claude_state`) of minions closed over 14 days ago and the worktrees of
 minions closed over 30 days ago. Branches are kept, worktrees with uncommitted
 changes are skipped, and a reopened minion gets its worktree back from its
 branch. `--stale-backups` also removes the ad-hoc `coordinator.db.backup-*` and
-`.bak-*` copies, once a nightly backup passes its check. Always read a dry run
-before the first `--apply`.
+`.bak-*` copies, once a nightly backup passes its check; the nightly timer runs
+`--apply --stale-backups`. Always read a dry run before the first `--apply`.
 
 ```sh
 for u in backup prune; do
@@ -242,8 +243,12 @@ interrupt turns:
 How a queued restart went is posted in the deploying minion's chat (a failure
 as an error, which pushes) and in the journal: `journalctl --user -u
 cc-restart-when-idle` and `-u claude-coordinator`. A rollback leaves the bad
-commit on `main`, so fix forward. Back up `coordinator.db` with `sqlite3
-.backup` before deploying a data migration.
+commit on `main`, so fix forward. Before every restart the unit copies the
+database to `backups/pre-deploy-<commit>.db` (newest 3 kept; no copy, no
+restart), and a rollback report names it. `src/db.ts` keeps a `schema_version`
+setting: bump `SCHEMA_VERSION` with any schema or data migration, and
+`test/schema-compat.test.ts` checks the last release (`last-good`, else
+`origin/main`) still reads and writes the migrated database.
 
 ## Permissions
 

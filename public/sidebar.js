@@ -283,11 +283,14 @@ export function threadRow(t, href = threadHref(t)) {
   const activity = st.counted && t.last_activity ? withoutCount(t.last_activity) : t.last_activity;
   const note = (t.status === 'running' ? activity : t.note || activity) || '';
   const share = t.cost && weekShare(t.cost);
+  // People's own note (#146), on a line of its own so the minion's note keeps its place.
+  const pnote = !coord && view.personNotes?.[t.id];
   const details = [
     threadFullName(t),
     [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, `updated ${ago(t.updated_at)}`, t.cost ? `${share ? `${share} of the weekly limit, ` : ''}${costText(t.cost)} at API prices` : ''].filter(Boolean).join(' · '),
     note,
     !coord && t.ship ? `${t.ship.text} · ${t.ship.commit}` : '',
+    pnote ? `✎ ${pnote.text} (${pnote.by})` : '',
   ].filter(Boolean).join('\n');
   const shipStage = !coord && t.status !== 'closed' && SHIP[t.ship?.stage];
   const ship = shipStage?.badge ? h('span', { class: `ship-badge f-${shipStage.fam}`, title: `${t.ship.text} · ${t.ship.commit}` }, shipStage.badge) : '';
@@ -302,7 +305,8 @@ export function threadRow(t, href = threadHref(t)) {
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     st.cell ? h('span', { class: 'state' }, st.cell) : '',
     note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
-    t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '');
+    t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
+    pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '');
 }
 
 /** "40m", "1h40", "14h", "2d": time left, for tight spaces. */

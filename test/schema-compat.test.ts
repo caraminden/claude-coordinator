@@ -41,6 +41,9 @@ test(`the last release's Store (${prev}) reads and writes a database this code h
   const ticket = now.createTicket({ project_id: project.id, title: 'Before', permission_mode: 'default', created_by: 'Cara' });
   now.addEvent(ticket.id, 'note', { text: 'written by this code' });
   now.putClaudeState({ path: 'projects/x/1.jsonl', project_id: project.id, ticket_id: ticket.id, size: 1, mtime: 1, data: new Uint8Array(1) });
+  // A person note (#146) has no foreign key, so the last release can still delete its minion.
+  const noted = now.createTicket({ project_id: project.id, title: 'Noted', permission_mode: 'default', created_by: 'Cara' });
+  now.setPersonNote(noted.id, 'a note', 'Cara');
   now.db.close();
 
   const old = new PrevStore(file);
@@ -58,6 +61,7 @@ test(`the last release's Store (${prev}) reads and writes a database this code h
   old.listPushSubscriptions();
   old.props.forTarget('minion', ticket.id);
   old.schedules.list(project.id);
+  old.deleteTicket(noted.id);
   const added = old.createTicket({ project_id: project.id, title: 'After rollback', permission_mode: 'default', created_by: 'Cara' });
   old.addEvent(added.id, 'note', { text: 'written by the last release' });
   old.db.close();

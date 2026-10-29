@@ -166,7 +166,9 @@ export const projectRoutes: Route[] = [
         .map((t) => app.runner.view(t));
       // When this person last looked at each thread, so rows they have already seen can be shown quieter.
       const seen = caller ? {} : app.store.seenTimes(session.name, project.id);
-      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, seen });
+      // People's notes (#146) are for people only: a minion or the Taskmaster gets none.
+      const person_notes = caller ? {} : app.store.personNotes(project.id);
+      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, seen, person_notes });
     },
   },
   {

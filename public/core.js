@@ -442,6 +442,7 @@ function connectStream(catchUp = false) {
     }
     if (msg.type === 'turn') renderCost();
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
+    if (msg.type === 'person_note') onPersonNote(msg);
     if (msg.type === 'event') {
       onEvent(msg.event);
       inboxEvent(msg.event);
@@ -545,7 +546,7 @@ async function resync() {
   if (view?.kind !== 'project') return route();
   // Refresh in place so a half-typed message in the composer survives.
   try {
-    const [{ coordinator, tickets, seen }, artifacts, chat] = await Promise.all([
+    const [{ coordinator, tickets, seen, person_notes }, artifacts, chat] = await Promise.all([
       api(`api/projects/${view.projectId}`),
       api(`api/projects/${view.projectId}/artifacts`),
       view.id ? api(`api/tickets/${view.id}`) : null,
@@ -553,6 +554,7 @@ async function resync() {
     view.coordinator = coordinator;
     view.tickets = new Map(tickets.map((t) => [t.id, t]));
     view.seen = seen ?? view.seen;
+    view.personNotes = person_notes ?? view.personNotes;
     if (view.id) markSeen(view.id);
     renderSidebar();
     setArtifacts(artifacts);
@@ -655,6 +657,15 @@ function onTicketUpdate(ticket) {
     // You're looking at it, so whatever it changed to is seen too.
     if (document.visibilityState === 'visible') markSeen(ticket.id);
   }
+}
+
+/** Someone set or cleared people's note on a minion (#146). */
+function onPersonNote({ projectId, ticketId, note }) {
+  if (view?.kind !== 'project' || view.projectId !== projectId || !view.personNotes) return;
+  if (note) view.personNotes[ticketId] = note;
+  else delete view.personNotes[ticketId];
+  renderSidebar();
+  if (view.id === ticketId) renderTicketHead();
 }
 
 // ---------- seen ----------

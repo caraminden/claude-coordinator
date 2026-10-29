@@ -3,8 +3,9 @@
 import { randomBytes } from 'node:crypto';
 import { isAbsolute, join, sep } from 'node:path';
 import { lines } from '../approvals.ts';
+import { AGENT_NAME } from '../auth.ts';
 import { commentMessage, optionImageProblem } from '../artifacts.ts';
-import { EFFORTS, MODELS, TICKET_STATES, TICKET_TAGS, type Ticket, type TicketState, type TicketTag } from '../db.ts';
+import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, TICKET_TAGS, type Ticket, type TicketState, type TicketTag } from '../db.ts';
 import { historyPage } from '../history.ts';
 import { previewPath } from '../previews.ts';
 import { NOTIFY_STATES } from '../push.ts';
@@ -141,6 +142,20 @@ export const ticketRoutes: Route[] = [
         }
       }
       return json(res, 200, ticketView(app, id));
+    },
+  },
+  {
+    // People's own note (#146): one plain line, shown only to people, never in a ticket's JSON or its chat.
+    method: 'PUT', path: '/api/tickets/:ticket/person-note', who: ['person'], refuse: 'Only people write person notes',
+    async handler({ req, res, app, session, ticket }) {
+      if (ticket.kind !== 'ticket') throw new HttpError(400, `The ${AGENT_NAME} has no person note`);
+      const body = await readJson(req);
+      if (typeof body.text !== 'string') throw new HttpError(400, 'Text is required');
+      const text = body.text.replace(/\s+/g, ' ').trim();
+      if (text.length > PERSON_NOTE_MAX) throw new HttpError(400, `A person note is at most ${PERSON_NOTE_MAX} characters`);
+      const note = app.store.setPersonNote(ticket.id, text, session.name);
+      app.broadcast({ type: 'person_note', projectId: ticket.project_id, ticketId: ticket.id, note });
+      return json(res, 200, { note });
     },
   },
   {

@@ -189,6 +189,16 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .ticket-head .ship .text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ticket-head .ship.f-done .text, .ticket-head .ship.f-broken .text { color: var(--c); font-weight: 600; }
 .ticket-head .ship code { flex: none; font-size: 0.95em; }
+/* People's own note (#146): a dashed amber strip, so it never reads as the minion's words. */
+.ticket-head .pnote { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.9em; line-height: 1.4;
+  background: color-mix(in srgb, var(--waiting-tint) 13%, var(--panel)); border: 1px dashed color-mix(in srgb, var(--waiting-tint) 60%, transparent); min-width: 0; }
+.ticket-head .pnote:not(.editing) { cursor: text; }
+.ticket-head .pnote .pen { flex: none; color: var(--waiting); }
+.ticket-head .pnote .text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ticket-head .pnote .who { flex: none; color: var(--muted); font-size: 0.85em; white-space: nowrap; }
+.ticket-head .pnote input { flex: 1; min-width: 0; font: inherit; padding: 0.2rem 0.45rem; }
+.ticket-head .pnote button { flex: none; }
+.ticket-head .note-btn { flex: none; }
 .thread-row .ship-badge { display: inline-block; margin-right: 0.4rem; padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.85em; font-weight: 650; line-height: 1.3;
   color: var(--c); background: color-mix(in srgb, var(--c) 13%, var(--panel)); }
 .ticket-head .meta { color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -624,6 +634,7 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 @media (prefers-reduced-motion: reduce) { .thread-row .state .pulse { animation: none; } }
 .thread-row .note { text-align: left; color: var(--ink); grid-column: 1 / -1; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-left: 12px; }
 .thread-row .note.t { color: var(--muted); }
+.thread-row .pnote { grid-column: 1 / -1; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-left: 12px; color: color-mix(in srgb, var(--waiting) 80%, var(--ink)); }
 .thread-row.s-closed .name { color: var(--muted); }
 /* The minion's cost so far shares the note's line, at its right end. */
 .thread-row .cost { grid-row: 2; grid-column: 2 / -1; text-align: right; font-size: 0.75em; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }

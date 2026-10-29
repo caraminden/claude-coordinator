@@ -1,5 +1,5 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
+import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
@@ -306,13 +306,14 @@ export function renderTicketHead() {
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       stateLabel,
-      h('span', { class: 'spacer' }), coord ? '' : propertyChip(t), ...actions, view.findEl ?? '',
+      h('span', { class: 'spacer' }), coord ? '' : propertyChip(t), coord ? '' : personNoteButton(t), ...actions, view.findEl ?? '',
       h('span', { class: 'head-nav' },
         // Through the views opened in this tab, never off the site (public/navstack.js).
         h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
         h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
         // Leaves the thread as it is and goes back to the project's coordinator.
         coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close')))),
+    coord ? '' : personNoteLine(t),
     shipLine(t),
     view.progressEl);
   renderTyping();
@@ -328,6 +329,59 @@ const stateFit = typeof ResizeObserver === 'function' ? new ResizeObserver(([{ t
   if (!el.classList.contains('squeezed')) el.need = el.scrollWidth;
   el.classList.toggle('squeezed', el.clientWidth < el.need);
 }) : null;
+
+// ---------- people's note (#146) ----------
+
+const PERSON_NOTE_MAX = 200; // the server's limit, PERSON_NOTE_MAX in src/db.ts
+// The note being edited, { id, el }: kept across the head's re-renders, which a running turn makes often.
+let noteEdit = null;
+
+/** "✎ Note" beside the properties chip, while a minion has no note and none is being written. */
+function personNoteButton(t) {
+  if (view.personNotes?.[t.id] || noteEdit?.id === t.id) return '';
+  return h('button', { type: 'button', class: 'secondary note-btn', title: 'Add a note only people see', 'aria-label': 'Add a note', onclick: () => editPersonNote(t) },
+    '✎', h('span', { class: 'wide-only' }, ' Note'));
+}
+
+/** The note under the title, a click away from editing it, or its editor while someone writes it. */
+function personNoteLine(t) {
+  if (noteEdit?.id === t.id) return noteEdit.el;
+  const note = view.personNotes?.[t.id];
+  if (!note) return '';
+  return h('div', { class: 'pnote', title: 'Only people see this note. Click to edit it.', onclick: (e) => { if (!e.target.closest('a')) editPersonNote(t); } },
+    h('span', { class: 'pen', 'aria-hidden': 'true' }, '✎'), h('span', { class: 'text' }, threadRefs(note.text)),
+    h('span', { class: 'who' }, `${note.by} · ${ago(note.at)}`));
+}
+
+function editPersonNote(t) {
+  const input = h('input', { type: 'text', maxlength: PERSON_NOTE_MAX, placeholder: 'A note only people see', 'aria-label': 'Note only people see', autocomplete: 'off' });
+  input.value = view.personNotes?.[t.id]?.text ?? '';
+  const done = () => {
+    noteEdit = null;
+    renderTicketHead();
+  };
+  const save = async () => {
+    try {
+      const { note } = await api(`api/tickets/${t.id}/person-note`, { method: 'PUT', body: { text: input.value } });
+      if (note) view.personNotes[t.id] = note;
+      else delete view.personNotes[t.id];
+      done();
+    } catch (e) {
+      alertNote(e.message);
+    }
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); save(); }
+    if (e.key === 'Escape') done();
+  });
+  const el = h('form', { class: 'pnote editing', onsubmit: (e) => { e.preventDefault(); save(); } },
+    h('span', { class: 'pen', 'aria-hidden': 'true' }, '✎'), input,
+    h('button', { type: 'submit', class: 'small' }, 'Save'),
+    h('button', { type: 'button', class: 'secondary small', onclick: done }, 'Cancel'));
+  noteEdit = { id: t.id, el };
+  renderTicketHead();
+  input.focus();
+}
 
 /** Where the minion's change is, branch to live, and why it is stuck when it is (src/branch.ts). */
 function shipLine(t) {

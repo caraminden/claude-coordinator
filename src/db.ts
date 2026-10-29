@@ -166,6 +166,14 @@ export interface SavedView {
   created_at: number;
 }
 
+/** People's own note on a minion (#146): who last wrote it and when. Never shown to agents. */
+export const PERSON_NOTE_MAX = 200; // public/thread.js keeps the same limit on its input
+export interface PersonNote {
+  text: string;
+  by: string;
+  at: number;
+}
+
 export interface EventRow {
   id: number;
   ticket_id: number;
@@ -307,6 +315,15 @@ CREATE TABLE IF NOT EXISTS saved_views (
   created_at INTEGER NOT NULL,
   UNIQUE (project_id, name)
 );
+-- People's own note on a minion (#146), kept out of the tickets row so no ticket JSON a minion or the
+-- Taskmaster can read carries it. No foreign key, like brief_starts, so an older release's deleteTicket
+-- still works after a rollback.
+CREATE TABLE IF NOT EXISTS person_notes (
+  ticket_id INTEGER PRIMARY KEY,
+  text TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `;
 
 /**
@@ -354,7 +371,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 4; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views
+export const SCHEMA_VERSION = 5; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -601,6 +618,7 @@ export class Store {
     this.db.prepare('DELETE FROM github_seen WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM turns WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM brief_starts WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
@@ -757,6 +775,27 @@ export class Store {
       .prepare('INSERT INTO ticket_seen (name, ticket_id, seen_at) VALUES (?, ?, ?) ON CONFLICT(name, ticket_id) DO UPDATE SET seen_at = excluded.seen_at')
       .run(name, ticketId, now);
     return now;
+  }
+
+  /** People's notes on a scheme's minions, by ticket id. Only people's routes may hand these out. */
+  personNotes(projectId: number): Record<number, PersonNote> {
+    const rows = this.db
+      .prepare('SELECT n.ticket_id, n.text, n.updated_by, n.updated_at FROM person_notes n JOIN tickets t ON t.id = n.ticket_id WHERE t.project_id = ?')
+      .all(projectId) as { ticket_id: number; text: string; updated_by: string; updated_at: number }[];
+    return Object.fromEntries(rows.map((r) => [r.ticket_id, { text: r.text, by: r.updated_by, at: r.updated_at }]));
+  }
+
+  /** Set a minion's person note, or clear it with an empty text. */
+  setPersonNote(ticketId: number, text: string, by: string): PersonNote | null {
+    if (!text) {
+      this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(ticketId);
+      return null;
+    }
+    const at = Date.now();
+    this.db
+      .prepare('INSERT INTO person_notes (ticket_id, text, updated_by, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET text = excluded.text, updated_by = excluded.updated_by, updated_at = excluded.updated_at')
+      .run(ticketId, text, by, at);
+    return { text, by, at };
   }
 
   /** The briefs in one file that have been started as minions, with the number of each one's minion. */

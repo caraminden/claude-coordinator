@@ -59,5 +59,5 @@ test('read_ticket shows the last entries of a paged history and counts every ear
   assert.match(text, /Long one/);
   assert.match(text, new RegExp(`\\(${MESSAGES - 5} earlier entries omitted\\)`));
   const shown = text.split('\n\n').filter((l) => l.startsWith('[Cara]'));
-  assert.deepEqual(shown, [246, 247, 248, 249, 250].map((i) => `[Cara]: message ${i}`));
+  assert.deepEqual(shown, [4, 3, 2, 1, 0].map((k) => MESSAGES - k).map((i) => `[Cara]: message ${i}`));
 });

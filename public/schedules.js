@@ -13,7 +13,7 @@ function scheduleRow(s) {
       s.paused ? h('span', { class: 'chip' }, 'paused') : h('span', { class: 'muted small', title: new Date(s.next_run_at).toString() }, 'next ', when(s.next_run_at))),
     h('div', { class: 'muted small' }, h('span', { title: `cron: ${s.cron} (server time)` }, s.when), ' · last run ', last),
     s.last_error ? h('p', { class: 'error small' }, "Last run didn't start: ", s.last_error) : '',
-    h('div', { class: 'row actions' },
+    h('div', { class: 'row schedule-actions' },
       h('button', { type: 'button', class: 'secondary small', onclick: () => change(s, 'PATCH', { paused: !s.paused }) }, s.paused ? 'Resume' : 'Pause'),
       h('button', { type: 'button', class: 'secondary small', onclick: () => confirm(`Delete the schedule "${s.name}"? Minions it already started stay.`) && change(s, 'DELETE') }, 'Delete')));
 }

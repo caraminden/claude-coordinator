@@ -984,7 +984,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
   const inScope = (projectId: number) => {
     if (scope !== null && scope !== projectId) throw new HttpError(403, 'Outside this Taskmaster\'s scheme');
   };
-  if (scope !== null && !/^\/api\/(taskmaster|projects\/\d+(\/tickets|\/properties(\/[a-z]+)?)?|tickets\/\d+(\/[a-z]+)?)$/.test(pathname)) {
+  if (scope !== null && !/^\/api\/(taskmaster|projects\/\d+(\/tickets|\/schedules|\/properties(\/[a-z]+)?)?|tickets\/\d+(\/[a-z]+)?|schedules\/\d+)$/.test(pathname)) {
     throw new HttpError(403, 'Not available to the Taskmaster');
   }
 

@@ -3,6 +3,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Store, Ticket } from './db.ts';
+import { asData } from './quote.ts';
 
 const run = promisify(execFile);
 
@@ -20,6 +21,8 @@ const TICK_MS = 15_000;
 // (GitHub's clock and ours differ a little, and the turn's last event lands after its last command).
 const TURN_MARGIN_MS = 30_000;
 const EXCERPT = 200;
+// Only people with a say in the repo are forwarded word for word; anyone can comment on a public PR.
+const INSIDERS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
 export interface Check {
   name: string;
@@ -33,6 +36,8 @@ export interface Remark {
   kind: 'comment' | 'review' | 'line';
   author: string;
   bot: boolean;
+  /** GitHub's authorAssociation: OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE, … */
+  association: string;
   body: string;
   /** Reviews only: APPROVED, CHANGES_REQUESTED, COMMENTED or DISMISSED. */
   state?: string;
@@ -88,7 +93,8 @@ export function verdict(checks: Check[]): 'pending' | 'passed' | 'failed' | null
  * first look (`baseline`) everything already there is recorded without being sent. The gh account
  * is the one the ticket's own turns use, so that account's remarks, merges and closes made during
  * one of the ticket's turns (`spans`) are its own doing and are skipped. Bots are skipped too, so a
- * bot that answers every push can't keep a ticket busy.
+ * bot that answers every push can't keep a ticket busy. Remarks from outside the repo are only a
+ * link, and what insiders wrote is quoted as data.
  */
 export function decide(pr: PrSnapshot, seen: Set<string>, opts: { baseline: boolean; self: string | null; spans: Span[] }): Decision {
   const messages: string[] = [];
@@ -120,13 +126,16 @@ export function decide(pr: PrSnapshot, seen: Set<string>, opts: { baseline: bool
   for (const r of [...pr.remarks].sort((a, b) => a.createdAt - b.createdAt)) {
     consider(r.key, () => {
       if (r.bot || own(r.author, r.createdAt)) return null;
-      const said = r.body.trim() ? `: "${excerpt(r.body)}"` : '';
-      if (r.kind === 'line') return `${r.author} commented on ${r.path ?? 'the code'} in PR #${pr.number}${said} ${r.url}`;
-      if (r.kind === 'comment') return `${r.author} commented on PR #${pr.number}${said} ${r.url}`;
       // A review with no text of its own is just the wrapper of line comments, which come separately.
-      if (r.state === 'APPROVED') return `${r.author} approved PR #${pr.number}${said} ${r.url}`;
-      if (r.state === 'CHANGES_REQUESTED') return `${r.author} requested changes on PR #${pr.number}${said} ${r.url}`;
-      return said ? `${r.author} reviewed PR #${pr.number}${said} ${r.url}` : null;
+      const silent = r.kind === 'review' && r.state !== 'APPROVED' && r.state !== 'CHANGES_REQUESTED' && !r.body.trim();
+      if (silent) return null;
+      if (!INSIDERS.has(r.association)) return `Someone outside the repo commented on PR #${pr.number}: ${r.url}`;
+      const said = r.body.trim() ? `:\n${asData('GitHub', excerpt(r.body))}` : '';
+      if (r.kind === 'line') return `${r.author} commented on ${r.path ?? 'the code'} in PR #${pr.number} ${r.url}${said}`;
+      if (r.kind === 'comment') return `${r.author} commented on PR #${pr.number} ${r.url}${said}`;
+      if (r.state === 'APPROVED') return `${r.author} approved PR #${pr.number} ${r.url}${said}`;
+      if (r.state === 'CHANGES_REQUESTED') return `${r.author} requested changes on PR #${pr.number} ${r.url}${said}`;
+      return `${r.author} reviewed PR #${pr.number} ${r.url}${said}`;
     });
   }
 
@@ -177,10 +186,10 @@ const QUERY = `query($owner: String!, $name: String!, $branch: String!) {
           ... on CheckRun { name status conclusion detailsUrl }
           ... on StatusContext { context state targetUrl }
         } } } } } }
-        comments(last: 50) { nodes { databaseId author { login __typename } body createdAt url } }
+        comments(last: 50) { nodes { databaseId author { login __typename } authorAssociation body createdAt url } }
         reviews(last: 30) { nodes {
-          databaseId author { login __typename } body state submittedAt createdAt url
-          comments(first: 30) { nodes { databaseId author { login __typename } body path createdAt url } }
+          databaseId author { login __typename } authorAssociation body state submittedAt createdAt url
+          comments(first: 30) { nodes { databaseId author { login __typename } authorAssociation body path createdAt url } }
         } }
       }
     }
@@ -204,6 +213,7 @@ function remark(kind: Remark['kind'], node: any, extra: Partial<Remark> = {}): R
     kind,
     author: node.author?.login ?? 'ghost',
     bot: node.author?.__typename === 'Bot',
+    association: node.authorAssociation ?? 'NONE',
     body: node.body ?? '',
     url: node.url,
     createdAt: ts(node.submittedAt ?? node.createdAt) ?? 0,

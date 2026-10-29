@@ -122,7 +122,7 @@ function searchRoots(args: Word[]): Word[] {
   return given ? plain : plain.slice(1);
 }
 
-const LIVE_DB = ['coordinator.db', 'coordinator.db-wal', 'coordinator.db-shm', 'coordinator.db-journal'];
+const LIVE_DB = ['coordinator.db', 'coordinator.db-wal', 'coordinator.db-shm', 'coordinator.db-journal', 'state.db', 'state.db-wal', 'state.db-shm', 'state.db-journal'];
 
 /** Whether a person may approve this write once, rather than it being a hard block. */
 function askable(p: string, cmd: string, cfg: TripwireConfig): boolean {

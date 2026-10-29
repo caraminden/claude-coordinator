@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { GLOBAL_OWNER } from '../src/properties.ts';
 
 // The runner pins its MCP servers under $DATA_DIR/run when it loads, sweeping copies of dead servers.
 const root = mkdtempSync(join(tmpdir(), 'turn-setup-'));
@@ -61,13 +62,13 @@ const errors: string[] = [];
 const runner = new Runner(store, () => {}, (t) => ({ COORDINATOR_API: 'http://127.0.0.1:8573', COORDINATOR_TOKEN: `token-${t.id}` }), fake);
 runner.onTurnError = (_id, text) => errors.push(text);
 
-async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; machine_tools?: number } = {}, repoDir?: string) {
+async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; machine_tools?: number } = {}, repoDir?: string, projectId?: number) {
   writeFileSync(join(root, 'mcp-status'), mcpStatus);
-  // A scheme has one Taskmaster, so each turn gets a scheme of its own.
-  const project = store.createProject(`P${Math.random()}`, null);
+  // A scheme has one Taskmaster, so each turn gets a scheme of its own unless it names one.
+  const project = projectId ? store.getProject(projectId)! : store.createProject(`P${Math.random()}`, null);
   if (repoDir) store.setProjectRepoDir(project.id, repoDir);
   if (set.machine_tools !== undefined) store.setProjectSettings(project.id, { machine_tools: set.machine_tools });
-  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara', kind });
+  const t = (kind === 'coordinator' && projectId && store.getCoordinator(projectId)) || store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara', kind });
   const cwd = join(root, `ticket-${t.id}`);
   mkdirSync(cwd, { recursive: true });
   store.setTicketDir(t.id, cwd, null);
@@ -224,5 +225,20 @@ test("only the scheme whose code this server runs hears about deploys, pending-d
     assert.equal((await turn('coordinator', 'connected', {}, repo)).env.COORDINATOR_DEPLOYS, undefined);
   } finally {
     runner.liveHead = () => null;
+  }
+});
+
+test("only the Citadel scheme's Taskmaster is offered the Citadel-wide instruction tools, and every turn's prompt carries the text", async () => {
+  while (!store.getProject(GLOBAL_OWNER)) store.createProject(`P${Math.random()}`, null);
+  store.setAppInstructions('Be kind everywhere.', 'Cara');
+  try {
+    const own = await turn('coordinator', 'connected', {}, undefined, GLOBAL_OWNER);
+    assert.equal(own.env.COORDINATOR_APP_INSTRUCTIONS, '1');
+    for (const other of [await turn('coordinator', 'connected'), await turn('ticket', 'connected', {}, undefined, GLOBAL_OWNER)]) {
+      assert.equal(other.env.COORDINATOR_APP_INSTRUCTIONS, undefined);
+      assert.match(other.flag('--append-system-prompt'), /# Citadel-wide instructions[^]*Be kind everywhere\./);
+    }
+  } finally {
+    store.setAppInstructions('', 'Cara');
   }
 });

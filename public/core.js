@@ -305,6 +305,7 @@ export function markdownDoc(src, opts = {}) {
     }
   }
   const div = document.createElement('div');
+  div.className = 'md';
   div.innerHTML = out.join('');
   return div;
 }

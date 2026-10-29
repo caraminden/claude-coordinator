@@ -626,9 +626,14 @@ export function appendEvent(event, scroll = true) {
       const i = Math.max(0, view.pendingMessages.findIndex((m) => m.text === (data.text ?? '')));
       view.pendingMessages.splice(i, 1)[0].el.remove();
     }
-    if (data.answer) {
-      // An answer to a question card: the card shows the picks, so the message only needs a short line.
-      view.cards.get(data.answer.questionId)?.markAnswered(data.answer.answers, data.author);
+    // An answer to a question card or a plan's go shows in the card itself; the chat only gets a
+    // line pointing back up when messages below have pushed the card out of the way.
+    const card = view.cards.get(data.answer?.questionId ?? (data.plan?.verdict === 'approve' ? data.plan.planId : null));
+    if (data.answer) card?.markAnswered(data.answer.answers, data.author);
+    if (card) {
+      if (messagesBelow(card.el)) nodes.push(stamped(answerRef(card.el, data), event));
+    } else if (data.answer) {
+      // The card is in history not loaded yet.
       nodes.push(stamped(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), answerSummary(data.answer.answers)), event));
     } else {
       const bubble = userBubble(data.author, data.text,
@@ -959,7 +964,6 @@ function planCard(ticketId, card) {
       if (view?.id === ticketId) {
         view.ticket = ticket;
         renderTicketHead();
-        scrollToBottom();
         catchUpEvents().catch(() => {});
       }
     } catch (ex) {
@@ -977,6 +981,7 @@ function planCard(ticketId, card) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && notes.value.trim()) { e.preventDefault(); decide('revise'); }
   });
   const handle = {
+    el,
     settle(r) {
       // The stored card already has its latest outcome, so replayed older results are ignored.
       if ((PLAN_RANK[r.status] ?? 0) <= rank) return;
@@ -1019,6 +1024,22 @@ function answerSummary(answers) {
     h('div', {}, '→ ', [...a.selected, ...(a.other ? [`Other: ${a.other}`] : [])].join(' · '))));
 }
 
+/** Whether any message or card sits below this card in the chat. */
+function messagesBelow(el) {
+  for (let n = el.nextElementSibling; n; n = n.nextElementSibling) if (n.matches('.msg, .qcard')) return true;
+  return false;
+}
+
+/** "Cara picked Tabs ↑" at the bottom of the chat, jumping back up to the card it answered. */
+function answerRef(cardEl, data) {
+  const picks = data.answer?.answers.map((a) => [...a.selected, ...(a.other ? [a.other] : [])].join(', ')).join(' · ');
+  const text = picks == null ? `${data.author} approved the plan` : `${data.author} picked ${picks}`;
+  return h('div', { class: 'answer-ref' }, h('button', {
+    type: 'button', title: 'Show the card',
+    onclick: () => cardEl.scrollIntoView({ block: 'center', behavior: 'smooth' }),
+  }, `${text} ↑`));
+}
+
 /**
  * A card of multiple-choice questions from Claude. Click options to pick (several when the question
  * allows), or type an answer under Other; a single one-pick question sends on the first click.
@@ -1053,7 +1074,6 @@ function questionCard(ticketId, card) {
       if (view?.id === ticketId) {
         view.ticket = ticket;
         renderTicketHead();
-        scrollToBottom();
         catchUpEvents().catch(() => {});
       }
     } catch (ex) {
@@ -1108,6 +1128,7 @@ function questionCard(ticketId, card) {
   refresh();
 
   view.cards.set(card.id, {
+    el,
     markAnswered(answers, author) {
       answered = true;
       el.classList.remove('sending');

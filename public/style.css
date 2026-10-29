@@ -1129,3 +1129,8 @@ dialog.viewer .composer .picker { display: none; }
 .cost-pop .foot { margin: 0.4rem 0 0; padding-top: 0.4rem; border-top: 1px solid var(--line); font-size: 0.9em; color: var(--muted); max-width: 22rem; }
 .cost-pop .usd { display: inline-block; min-width: 3.6rem; margin-left: 0.5rem; color: var(--muted); font-size: 0.85em; }
 .cost-pop .warn { color: var(--waiting); font-weight: 600; }
+
+/* "Cara picked Tabs ↑": an answer given in a card far above, pointing back to it */
+.answer-ref { display: flex; justify-content: flex-end; }
+.answer-ref button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: 0.85em; color: var(--muted); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 999px; padding: 0.25rem 0.75rem; cursor: pointer; }
+.answer-ref button:hover { color: var(--ink); }

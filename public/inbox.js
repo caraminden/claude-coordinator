@@ -1,6 +1,7 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, STATES, taskmasterLabel, threadHref, view } from './core.js';
+import { replyChips } from './replies.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
 const inbox = { projectId: null, items: [], timer: 0 };
@@ -9,7 +10,7 @@ const CARD_EVENTS = new Set(['question', 'question_result', 'plan', 'plan_result
 
 const ticketOf = (id) => (view?.coordinator?.id === id ? view.coordinator : view?.tickets?.get(id));
 // A ready/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
-const faded = (item) => item.kind === 'state' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 });
+const faded = (item) => (item.kind === 'state' || item.kind === 'replies') && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 });
 
 /** Fetch the scheme's items again, then redraw the strip. */
 export async function refreshInbox() {
@@ -33,13 +34,15 @@ export function inboxEvent(event) {
   if (CARD_EVENTS.has(event.kind) || (event.kind === 'user_message' && JSON.parse(event.data).answer)) refreshSoon();
 }
 
-/** A minion changed: refetch when it moved into or out of ready/try, or was dismissed or reopened. */
+/** A minion changed: refetch when it moved into or out of ready/try, offered or lost its replies, or was dismissed or reopened. */
 export function inboxTicket(before, after) {
-  if (!before || before.state !== after.state || (before.status === 'closed') !== (after.status === 'closed')) refreshSoon();
+  if (!before || before.state !== after.state || !before.replies?.length !== !after.replies?.length || (before.status === 'closed') !== (after.status === 'closed')) refreshSoon();
+  // Its row shows the replies themselves, so a change in them (or a turn starting, which hides them) redraws it.
+  else if (String(before.replies) !== String(after.replies) || (before.status === 'running') !== (after.status === 'running')) renderInbox();
 }
 
 // What each kind of item asks of you, as a chip on its minion's row.
-const ASKS = { approval: '✋ Approve', question: '❓ Question', plan: '📋 Plan', ready: '✅ Ready', try: '🧪 Try it' };
+const ASKS = { approval: '✋ Approve', question: '❓ Question', plan: '📋 Plan', ready: '✅ Ready', try: '🧪 Try it', replies: '💬 Reply' };
 const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
 
 // One strip, kept across scheme pages so it doesn't flicker as they redraw. Made on first use: a module's top-level code must not call into another while they load.
@@ -93,5 +96,6 @@ function inboxRow(items) {
   return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: threadHref(t) },
     h('span', { class: 'name' }, isCoordinator(t) ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     h('span', { class: 'asks' }, [...asks].map(([ask, n]) => h('span', { class: 'chip' }, n > 1 ? `${ask} ×${n}` : ask))),
-    h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))));
+    h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))),
+    replyChips(t));
 }

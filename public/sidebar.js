@@ -7,6 +7,7 @@ import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { renderInbox } from './inbox.js';
+import { replyChips } from './replies.js';
 
 // ---------- projects ----------
 
@@ -298,7 +299,8 @@ export function threadRow(t, href = threadHref(t)) {
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     st.cell ? h('span', { class: 'state' }, st.cell) : '',
     note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
-    t.cost ? h('span', { class: 'cost' }, costText(t.cost)) : '');
+    t.cost ? h('span', { class: 'cost' }, costText(t.cost)) : '',
+    coord ? '' : replyChips(t));
 }
 
 /** "40m", "1h40", "14h", "2d": time left, for tight spaces. */

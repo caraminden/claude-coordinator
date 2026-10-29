@@ -5,6 +5,7 @@ import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { recapEvent, showRecap } from './recap.js';
 import { struckSource } from './strike.js';
+import { replyChips } from './replies.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
@@ -79,6 +80,8 @@ export function chatSection(chatId, ticket, events) {
   const latest = h('button', { type: 'button', class: 'small secondary to-latest', hidden: true }, '↓ Latest');
   latest.addEventListener('click', scrollToBottom);
   form.append(latest);
+  // One-tap replies sit at the top of the composer, so they stay in view with it (renderTicketHead fills them).
+  form.prepend(h('div', { class: 'replies-bar', id: 'chat-replies', hidden: true }));
   return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);
 }
 
@@ -183,6 +186,14 @@ export function renderTicketHead() {
   for (const bubble of chat?.querySelectorAll('.log [data-event]') ?? []) markQueued(bubble, t);
   const box = chat?.querySelector('.composer textarea');
   if (box) box.placeholder = composerPlaceholder(t);
+  const form = chat?.querySelector('.composer');
+  const bar = chat?.querySelector('#chat-replies');
+  if (bar && form) {
+    // Above the composer, sent the way the composer sends (shown at once, "Claude is thinking…").
+    const chips = replyChips(t, form.sendText);
+    bar.hidden = !chips;
+    bar.replaceChildren(chips);
+  }
   const actions = [];
   // The minion's branch, running on a copy of the data (start_preview, src/previews.ts).
   if (t.preview && t.status !== 'closed') {

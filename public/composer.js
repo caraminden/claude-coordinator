@@ -120,7 +120,7 @@ export function composer(chatId, ticket) {
       form.requestSubmit();
     }
   });
-  form.addEventListener('submit', async (e) => {
+  form.addEventListener('submit', (e) => {
     e.preventDefault();
     const queue = after;
     after = false;
@@ -128,22 +128,32 @@ export function composer(chatId, ticket) {
     if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.');
     if (attachments.items.some((i) => i.upload && !i.upload.name)) return alertNote('Still uploading a file; send once it shows its size.');
     if (!text && !attachments.items.length) return;
+    const sent = attachments.items.slice();
+    textarea.value = '';
+    saveDraft(draftKey, '');
+    attachments.remove(sent);
+    send(text, sent, queue).catch((ex) => {
+      // Not sent: put it back in the composer.
+      textarea.value = textarea.value.trim() ? `${text}\n${textarea.value}` : text;
+      saveDraft(draftKey, textarea.value);
+      attachments.restore([...sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data })), ...sent.filter((i) => i.upload).map(({ upload }) => ({ upload }))]);
+      alertNote(ex.message);
+    });
+  });
+  /** Send a message, showing it straight away; on failure it comes back out of the chat and the promise rejects. */
+  const send = async (text, sent = [], queue = false) => {
     sendBtn.disabled = moreBtn.disabled = true;
     setSending(sending + 1);
-    const sent = attachments.items.slice();
     const images = sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data }));
     const uploads = sent.filter((i) => i.upload).map((i) => i.upload);
     const files = uploads.map(({ name, type }) => ({ name, type }));
-    // Show the message and "Claude is thinking…" straight away, and clear the composer; the
+    // Show the message and "Claude is thinking…" straight away; the
     // server's copy of the message replaces this one when it arrives.
     const pending = userBubble(me, text, images.map(({ mediaType, data }) => base64Url(mediaType, data)), null, null,
       uploads.map((u) => ({ ...u, href: uploadUrl(chatId, u.name) })));
     pending.classList.add('pending');
     view.pendingMessages.push({ el: pending, text });
     document.getElementById('log').append(pending);
-    textarea.value = '';
-    saveDraft(draftKey, '');
-    attachments.remove(sent);
     view.sendingTo = chatId;
     renderTyping();
     scrollToBottom();
@@ -158,13 +168,9 @@ export function composer(chatId, ticket) {
         catchUpEvents().catch(() => {});
       }
     } catch (ex) {
-      // Not sent: take the message back out of the chat and put it back in the composer.
       pending.remove();
       if (view?.id === chatId) view.pendingMessages = view.pendingMessages.filter((m) => m.el !== pending);
-      textarea.value = textarea.value.trim() ? `${text}\n${textarea.value}` : text;
-      saveDraft(draftKey, textarea.value);
-      attachments.restore([...images, ...uploads.map((upload) => ({ upload }))]);
-      alertNote(ex.message);
+      throw ex;
     } finally {
       if (view?.sendingTo === chatId) {
         view.sendingTo = null;
@@ -174,7 +180,9 @@ export function composer(chatId, ticket) {
       setSending(sending - 1);
       reloadWhenIdle();
     }
-  });
+  };
+  // A one-tap reply (replies.js) sends its text the same way, leaving any draft in the box alone.
+  form.sendText = (text) => send(text);
   return form;
 }
 

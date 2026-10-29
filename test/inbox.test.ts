@@ -10,7 +10,7 @@ import { inboxItems } from '../src/inbox.ts';
 const root = mkdtempSync(join(tmpdir(), 'inbox-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-test('a scheme\'s inbox: open cards and ready/try minions, approvals first, then newest first', () => {
+test('a scheme\'s inbox: open cards, ready/try minions and ones offering replies, approvals first, then newest first', () => {
   const store = new Store(join(root, 'db.sqlite'));
   const approvals = new Approvals(() => {});
   const minion = (projectId: number, title: string) =>
@@ -18,9 +18,10 @@ test('a scheme\'s inbox: open cards and ready/try minions, approvals first, then
   const p1 = store.createProject('One', null).id;
   const p2 = store.createProject('Two', null).id;
   const a = minion(p1, 'a'), b = minion(p1, 'b'), gone = minion(p1, 'gone'), elsewhere = minion(p2, 'elsewhere');
-  const ready = minion(p1, 'ready'), parked = minion(p1, 'parked');
-  store.updateTicket(ready, { state: 'ready' });
+  const ready = minion(p1, 'ready'), parked = minion(p1, 'parked'), offering = minion(p1, 'offering');
+  store.updateTicket(ready, { state: 'ready', replies: JSON.stringify(['Merge it']) });
   store.updateTicket(parked, { state: 'parked' });
+  store.updateTicket(offering, { replies: JSON.stringify(['Do it']) });
   store.addEvent(elsewhere, 'question', { id: 'q-other-scheme', questions: [] });
 
   store.addEvent(a, 'question', { id: 'q-open', questions: [] });
@@ -40,7 +41,7 @@ test('a scheme\'s inbox: open cards and ready/try minions, approvals first, then
   const items = inboxItems(store, approvals, p1);
   assert.deepEqual([items[0].kind, items[0].ticketId, (items[0].card as any).id], ['approval', a, approvalId]);
   assert.deepEqual(items.slice(1).map((i) => [i.kind, i.ticketId, (i.card as any)?.id ?? null]).sort(),
-    [['plan', b, 'p-open'], ['question', a, 'q-open'], ['state', ready, null]]);
+    [['plan', b, 'p-open'], ['question', a, 'q-open'], ['replies', offering, null], ['state', ready, null]], 'a ready minion with replies is listed once');
   for (let i = 2; i < items.length; i++) assert.ok(items[i - 1].at >= items[i].at);
   assert.equal((items[0].card as any).tool, 'Bash');
 });

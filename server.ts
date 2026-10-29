@@ -536,14 +536,16 @@ const server = createServer(async (req, res) => {
       await routes(app, req, res, url, auth.session(req));
     } else if (preview) {
       const session = auth.session(req);
+      // An HTML page's files under its file token come from a frame that sends no cookies; the preview checks the token.
+      const tokened = preview[2]?.startsWith('/api/files/') && (req.method === 'GET' || req.method === 'HEAD');
       // People only, signed in to the live app; a page load without a login goes to the login.
-      if (!session || session.agent !== undefined) {
+      if (!tokened && (!session || session.agent !== undefined)) {
         if (req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? ''))) return void res.writeHead(302, { Location: '/' }).end();
         throw new HttpError(401, 'Not logged in');
       }
       // The front end's URLs are relative, so the page itself needs the trailing slash.
       if (!preview[2]) return void res.writeHead(302, { Location: `/${previewPath(Number(preview[1]))}${url.search}` }).end();
-      await previews.proxy(req, res, Number(preview[1]), preview[2] + url.search, session);
+      await previews.proxy(req, res, Number(preview[1]), preview[2] + url.search, session?.agent === undefined ? session : null);
     } else {
       await serveStatic(req, res, url.pathname);
     }

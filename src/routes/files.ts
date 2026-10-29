@@ -6,7 +6,8 @@ import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { fileTitle, fileType, resolveFile } from '../artifacts.ts';
+import { fileTitle, fileType, resolveFile, siblingType } from '../artifacts.ts';
+import type { Session } from '../auth.ts';
 import type { Artifact, Ticket } from '../db.ts';
 import type { MessageFile } from '../runner.ts';
 import { isUploadName, MAX_UPLOADS, opensInline } from '../uploads.ts';
@@ -79,10 +80,11 @@ function findPinTarget(app: App, projectId: number, caller: Ticket, id: unknown,
 }
 
 /** Serve a file found by resolveFile, with byte ranges and a sandboxing CSP. */
-async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: Awaited<ReturnType<typeof resolveFile>>, path: string, download: boolean) {
+async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: Awaited<ReturnType<typeof resolveFile>>, path: string, download: boolean, extra: Record<string, string> = {}) {
   if (!found) throw new HttpError(404, 'That file is no longer there');
   const { file, type, size } = found;
   const headers: Record<string, string | number> = {
+    ...extra,
     'Content-Type': type.mime,
     'Content-Security-Policy': artifactCsp(type.kind),
     'X-Content-Type-Options': 'nosniff',
@@ -113,6 +115,60 @@ async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: A
   }
   if (req.method === 'HEAD' || size === 0) return res.end();
   await pipeline(createReadStream(file, { start, end }), res).catch(() => {});
+}
+
+/**
+ * The folder a file token reads: `t<minion>-<n>` is that minion's nth root (see ticketRoots),
+ * `p<scheme>` the scheme's shared folder. Null when it names nothing.
+ */
+function scopeRoot(app: App, scope: string): string | null {
+  const t = /^t(\d+)-([012])$/.exec(scope);
+  if (t) {
+    const ticket = app.store.getTicket(Number(t[1]));
+    return ticket?.cwd ? ticketRoots(app, ticket)[Number(t[2])] : null;
+  }
+  const p = /^p(\d+)$/.exec(scope);
+  return p && app.store.getProject(Number(p[1])) ? projectSharedDir(app.dataDir, Number(p[1])) : null;
+}
+
+/** Where a file sits under its token's folder: the redirect for `pathname` (relative, so it holds inside a preview). */
+function filesLocation(app: App, pathname: string, scope: string, rel: string): string {
+  return `${'../'.repeat(pathname.split('/').length - 3)}files/${app.auth.fileToken(scope)}/${rel.split(sep).map(encodeURIComponent).join('/')}`;
+}
+
+/**
+ * Serve a file found under `roots` ([scope, folder] pairs). An HTML page a person opens goes to its
+ * path under a file token instead: its sandboxed frame sends no cookies, so the token is how the
+ * files beside it (`<video src="clip.mp4">`) load.
+ */
+async function serveFound(ctx: { req: IncomingMessage; res: ServerResponse; url: URL; app: App; session: Session }, found: Awaited<ReturnType<typeof resolveFile>>, path: string, roots: [string, string][]) {
+  const { req, res, url, app, session } = ctx;
+  const download = url.searchParams.has('download');
+  if (found?.type.kind === 'html' && !download && session.agent === undefined) {
+    for (const [scope, root] of roots) {
+      const real = await realpath(root).catch(() => null);
+      if (real && found.file.startsWith(real + sep)) return void res.writeHead(302, { Location: filesLocation(app, url.pathname, scope, found.file.slice(real.length + 1)), 'Cache-Control': 'no-store' }).end();
+    }
+  }
+  return serveArtifact(req, res, found, path, download);
+}
+
+const ticketScopes = (app: App, ticket: Ticket) => ticketRoots(app, ticket).map((root, i): [string, string] => [`t${ticket.id}-${i}`, root]);
+
+/** A path under a file token, as segments decoded one by one; null if one is empty, hidden, `.`/`..` or hides a slash. */
+function tokenPath(raw: string): string | null {
+  const parts: string[] = [];
+  for (const seg of raw.split('/')) {
+    let part: string;
+    try {
+      part = decodeURIComponent(seg);
+    } catch {
+      return null;
+    }
+    if (!part || part.startsWith('.') || /[\/\\\0]/.test(part)) return null;
+    parts.push(part);
+  }
+  return parts.join('/');
 }
 
 // Images people paste into a chat. 5 MB is the API's per-image limit.
@@ -216,13 +272,14 @@ export const fileRoutes: Route[] = [
   { method: 'GET', path: '/api/projects/:project/shared', who: ['person'], handler: async ({ res, app, project }) => json(res, 200, await app.sharedFiles(project.id)) },
   {
     method: ['GET', 'HEAD'], path: '/api/projects/:project/shared/file', who: ['person'],
-    async handler({ req, res, url, app, project }) {
+    async handler(ctx) {
+      const { url, app, project } = ctx;
       // One file of the folder, by path relative to it (or ?info for its details).
       const dir = projectSharedDir(app.dataDir, project.id);
       const path = url.searchParams.get('path') ?? '';
       const found = await resolveFile(path, dir, [dir]);
       if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
-      if (!url.searchParams.has('info')) return serveArtifact(req, res, found, path, url.searchParams.has('download'));
+      if (!url.searchParams.has('info')) return serveFound(ctx, found, path, [[`p${project.id}`, dir]]);
       return json(res, 200, {
         path, name: basename(found.abs), display_path: `scheme shared/${path}`, abs: found.abs,
         kind: found.type.kind, size: found.size, mtime: found.mtime,
@@ -236,8 +293,32 @@ export const fileRoutes: Route[] = [
   },
   {
     method: ['GET', 'HEAD'], path: '/api/artifacts/:artifact/raw', who: ['person'],
-    handler: async ({ req, res, url, app, artifact: a }) =>
-      serveArtifact(req, res, await resolveTicketFile(app, app.store.getTicket(a.ticket_id)!, a.path), a.path, url.searchParams.has('download')),
+    async handler(ctx) {
+      const { app, artifact: a } = ctx;
+      const ticket = app.store.getTicket(a.ticket_id)!;
+      return serveFound(ctx, await resolveTicketFile(app, ticket, a.path), a.path, ticketScopes(app, ticket));
+    },
+  },
+  {
+    // An HTML page's file and the files beside it, for its sandboxed frame, which sends no cookies:
+    // the token (see serveFound) is the login, and the path can't leave the token's one folder.
+    method: ['GET', 'HEAD'], path: '/api/files/:token/*path', who: 'anyone',
+    async handler({ req, res, url, app, params }) {
+      const scope = app.auth.fileScope(params.token);
+      const rel = tokenPath(params.path);
+      const named = params.token.split('.')[0];
+      const root = rel === null ? null : scopeRoot(app, scope ?? named);
+      if (rel === null || root === null) throw new HttpError(404, 'Not found');
+      if (!scope) {
+        // A tab reopened from history after the token expired: a signed-in person gets a fresh one.
+        const session = app.auth.session(req);
+        if (!session || session.agent !== undefined) throw new HttpError(403, 'This link has expired; open the file from Citadel again');
+        const up = '../'.repeat(params.path.split('/').length);
+        return void res.writeHead(302, { Location: `${up}${app.auth.fileToken(named)}/${params.path}`, 'Cache-Control': 'no-store' }).end();
+      }
+      // The frame's origin is opaque, so fetch() and module scripts need CORS; no cookies are involved.
+      return serveArtifact(req, res, await resolveFile(rel, root, [root], siblingType), rel, url.searchParams.has('download'), { 'Access-Control-Allow-Origin': '*' });
+    },
   },
   {
     method: 'POST', path: '/api/artifacts/:artifact/pin', who: ['person'],
@@ -252,10 +333,11 @@ export const fileRoutes: Route[] = [
 
   {
     method: ['GET', 'HEAD'], path: '/api/tickets/:ticket/file', who: ['person', 'taskmaster'],
-    async handler({ req, res, url, app, ticket }) {
+    async handler(ctx) {
+      const { url, app, ticket } = ctx;
       // A file the ticket linked in its reply: ?path= as written there; ?info for its details.
       const path = url.searchParams.get('path') ?? '';
-      if (!url.searchParams.has('info')) return serveArtifact(req, res, await resolveTicketFile(app, ticket, path), path, url.searchParams.has('download'));
+      if (!url.searchParams.has('info')) return serveFound(ctx, await resolveTicketFile(app, ticket, path), path, ticketScopes(app, ticket));
       const found = await resolveTicketFile(app, ticket, path);
       if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
       const relPath = found.abs.startsWith(ticket.cwd + sep) ? found.abs.slice(ticket.cwd.length + 1) : found.abs;

@@ -185,19 +185,21 @@ export class Previews {
    * one whose branch moved on); anything else to a stopped one gets a 503, so a forgotten tab's
    * stream doesn't keep it alive.
    */
-  async proxy(req: IncomingMessage, res: ServerResponse, ticketId: number, rest: string, session: Session) {
+  async proxy(req: IncomingMessage, res: ServerResponse, ticketId: number, rest: string, session: Session | null) {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.status === 'closed' || !this.offered(ticketId)) throw new PreviewError(404, 'There is no preview for this minion');
     const page = req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? ''));
     let r = this.running.get(ticketId);
-    if (page && (!r || r.head !== head(ticket.cwd))) r = await this.boot(ticket);
+    // Only a person's page load starts one; a file token's request reaches a running preview only.
+    if (page && session && (!r || r.head !== head(ticket.cwd))) r = await this.boot(ticket);
     if (!r) throw new PreviewError(503, 'This preview stopped after an hour unused; reload the page to start it again');
     r.lastUsed = Date.now();
 
     const headers = { ...req.headers };
     delete headers.authorization;
-    // The live cookie means nothing to the preview; it gets its own, for the same person.
-    headers.cookie = r.auth.issueCookie(session.name, false).split(';')[0];
+    // The live cookie means nothing to the preview; it gets its own, for the same person (none for a file token's request).
+    if (session) headers.cookie = r.auth.issueCookie(session.name, false).split(';')[0];
+    else delete headers.cookie;
     const upstream = request({ host: '127.0.0.1', port: r.port, method: req.method, path: rest, headers }, (up) => {
       const out = { ...up.headers };
       // Never let the preview set or clear the live session cookie.

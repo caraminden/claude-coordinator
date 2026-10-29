@@ -180,7 +180,10 @@ export interface Ctx {
 
 export interface Route {
   method: string | readonly string[];
-  /** Segments, with `:name` for a parameter; :ticket, :project, :schedule, :artifact and :machine load that row. */
+  /**
+   * Segments, with `:name` for a parameter; :ticket, :project, :schedule, :artifact and :machine load that row.
+   * A last segment `*name` takes the rest of the path, slashes and all.
+   */
   path: string;
   /** 'anyone' needs no login; 'machine' is a machine's agent, which checks its own token. */
   who: readonly Who[] | 'anyone' | 'machine';
@@ -264,8 +267,8 @@ export function router(routes: Route[]) {
   const table = routes.map((route) => ({
     route,
     methods: typeof route.method === 'string' ? [route.method] : route.method,
-    names: route.path.split('/').filter((s) => s.startsWith(':')).map((s) => s.slice(1)),
-    re: new RegExp(`^${route.path.split('/').map((s) => (s.startsWith(':') ? (NUMERIC.has(s.slice(1)) ? '(\\d+)' : '([^/]+)') : s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('/')}$`),
+    names: route.path.split('/').filter((s) => /^[:*]/.test(s)).map((s) => s.slice(1)),
+    re: new RegExp(`^${route.path.split('/').map((s) => (s.startsWith(':') ? (NUMERIC.has(s.slice(1)) ? '(\\d+)' : '([^/]+)') : s.startsWith('*') ? '(.+)' : s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('/')}$`),
   }));
   const dispatch = async (app: App, req: IncomingMessage, res: ServerResponse, url: URL, session: Session | null) => {
     const method = req.method ?? 'GET';

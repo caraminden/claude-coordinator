@@ -8,6 +8,8 @@ const COOKIE = 'cc_session';
 const SESSION_DAYS = 30;
 const MAX_FAILURES = 10;
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+/** How long an HTML page's frame can keep loading its sibling files: through a workday. */
+const FILE_TOKEN_HOURS = 12;
 
 export interface Session {
   name: string;
@@ -114,6 +116,26 @@ export class Auth {
     const nonce = randomBytes(16).toString('base64url');
     this.nonces.set(ticketId, { current: nonce, previous: this.nonces.get(ticketId)?.current ?? null });
     return this.agentToken(ticketId, nonce);
+  }
+
+  /**
+   * A token for an HTML page's sibling files, which its sandboxed frame loads without cookies: it
+   * reads the servable files of one folder (`scope`, see routes/files.ts) until it expires.
+   */
+  fileToken(scope: string, now = Date.now()): string {
+    const exp = Math.floor((now + FILE_TOKEN_HOURS * 3600_000) / 1000).toString(36);
+    return `${scope}.${exp}.${this.sign(`files:${scope}:${exp}`)}`;
+  }
+
+  /** The scope a file token reads, or null if it is forged or has expired. */
+  fileScope(token: string, now = Date.now()): string | null {
+    const m = /^([a-z0-9-]+)\.([a-z0-9]+)\.([\w-]+)$/.exec(token);
+    if (!m) return null;
+    const [, scope, exp, sig] = m;
+    const expected = Buffer.from(this.sign(`files:${scope}:${exp}`));
+    const given = Buffer.from(sig);
+    if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+    return parseInt(exp, 36) * 1000 > now ? scope : null;
   }
 
   private agentSession(req: IncomingMessage): Session | null {

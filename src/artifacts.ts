@@ -48,6 +48,22 @@ export function fileType(path: string) {
   return FILE_TYPES[extname(path).toLowerCase()];
 }
 
+/** What an HTML page may also load from beside it (styles, scripts, data, fonts, captions), only through its file token. */
+const SIBLING_TYPES: Record<string, { kind: FileKind; mime: string }> = {
+  '.css': { kind: 'text', mime: 'text/css; charset=utf-8' },
+  '.js': { kind: 'text', mime: 'text/javascript; charset=utf-8' },
+  '.mjs': { kind: 'text', mime: 'text/javascript; charset=utf-8' },
+  '.json': { kind: 'text', mime: 'application/json' },
+  '.wasm': { kind: 'text', mime: 'application/wasm' },
+  '.woff': { kind: 'text', mime: 'font/woff' },
+  '.woff2': { kind: 'text', mime: 'font/woff2' },
+  '.ttf': { kind: 'text', mime: 'font/ttf' },
+  '.otf': { kind: 'text', mime: 'font/otf' },
+  '.vtt': { kind: 'text', mime: 'text/vtt; charset=utf-8' },
+};
+
+export const siblingType = (path: string) => fileType(path) ?? SIBLING_TYPES[extname(path).toLowerCase()];
+
 export function isArtifact(path: string): boolean {
   return !!fileType(path)?.artifact;
 }
@@ -149,8 +165,8 @@ export function linkedPaths(texts: string[], cwd: string): Set<string> {
  * must resolve (symlinks included) to a servable file type inside one of `roots` (the working
  * directory and the ticket's shared folder).
  */
-export async function resolveFile(path: string, cwd: string, roots: string[]) {
-  const type = fileType(path);
+export async function resolveFile(path: string, cwd: string, roots: string[], typeOf = fileType) {
+  const type = typeOf(path);
   if (!type || !cwd || path.includes('\0')) return null;
   try {
     const file = await realpath(isAbsolute(path) ? path : join(cwd, path));

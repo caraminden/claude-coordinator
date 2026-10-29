@@ -137,6 +137,8 @@ const BLOCKED: [string, string?][] = [
   ['git push --force origin ticket/9'],
   ['git push -fu origin ticket/9'],
   ['git push origin +ticket/9'],
+  ['git push --delete origin main'],
+  ['git push --repo origin main'],
 ];
 
 const ALLOWED = [
@@ -302,7 +304,9 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
     // A clean tree moves freely; a name that isn't a branch or commit is a path.
     for (const ok of ['git checkout other', 'git merge other', 'git reset --hard', 'git rebase other']) assert.equal(at(ok), null, ok);
     assert.match(at('git checkout a.txt')!, /names a path.*git show HEAD:path/);
-    assert.match(at('git checkout nosuch')!, /names a path/);
+    assert.match(at("git checkout 'sub/*.txt'")!, /names a path/);
+    // A name that is neither (a branch on some remote for git to set up, a typo) is left to git.
+    assert.equal(at('git checkout feature-on-upstream'), null);
 
     // Untracked files don't count; a changed tracked file does.
     writeFileSync(join(wt, 'b.txt'), 'b');
@@ -312,6 +316,9 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
       assert.match(at(move) ?? '', /^Commit first: .* 1 uncommitted tracked file\(s\) \(a\.txt\)/, move);
     }
     assert.match(at(`git -C ${wt} merge other`, '/tmp')!, /Commit first/);
+    assert.match(at('git checkout -')!, /Commit first/);
+    // Committing earlier in the same call is the normal way to move.
+    assert.equal(at('git add -A && git commit -qm wip && git checkout other'), null);
     for (const ok of ['git checkout -b x', 'git reset a.txt', 'git merge --abort', 'git rebase --continue', 'git commit -am wip && git status']) assert.equal(at(ok), null, ok);
     // An unknown folder lets it through.
     assert.equal(at('git merge other', null), null);

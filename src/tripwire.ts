@@ -346,7 +346,7 @@ export function lex(s: string, home: string): Tok[] {
 }
 
 interface Segment { words: Word[]; redirects: { op: string; target: Word }[] }
-interface State { cwd: string | null; vars: Set<string> }
+interface State { cwd: string | null; vars: Set<string>; committed?: boolean }
 
 // Only these commands count as writes. Anything else is taken as a read, so an interpreter or tool
 // that names a protected path (`node -e … coordinator.db`, `curl`) goes through: few false alarms,
@@ -474,7 +474,10 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
       if (r) return hard(`git ${sub} would change ${p}. ${r}`);
     }
   }
-  return gitHabitReason(sub, args.slice(j + 1), dir, cfg);
+  const committed = st.committed;
+  // Commit first, then move: the move's dirty check can't see what the commit will take.
+  if (sub === 'commit') st.committed = true;
+  return gitHabitReason(sub, args.slice(j + 1), dir, cfg, committed);
 }
 
 // CLAUDE.md's "commit before you move", ported from Delve's git guard (tools/mods/delve/hooks, judgeGit).
@@ -500,7 +503,7 @@ function inWorktree(dir: string, cfg: TripwireConfig): boolean {
  * reset over uncommitted tracked changes; from a minion's worktree, no push to main and no plain force.
  * With the folder unknown it checks only what the words alone show.
  */
-function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: TripwireConfig): Verdict | null {
+function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: TripwireConfig, committed = false): Verdict | null {
   const words = args.map((w) => w.text);
   const has = (...flags: string[]) => words.some((a) => flags.includes(a));
   const plain = args.filter((w) => !w.text.startsWith('-'));
@@ -515,11 +518,16 @@ function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: Trip
       // A new branch keeps the working tree as it is.
       if (has('-b', '-B', '--orphan') && !has('-f', '--force')) return null;
       if (plain.length > 1) return hard(`\`git checkout <ref> <path>\` is blocked. ${NEVER_PATH}`);
-      if (plain.length === 0 || !dir) return null;
+      if (plain.length === 0) {
+        if (has('-')) move = 'git checkout -';
+        break;
+      }
+      if (!dir) return null;
       const target = plain[0];
-      // git exits 1 for a name that isn't a commit, here or on origin; anything else (not a repo) can't tell.
-      const isRef = (t: string) => git(dir, 'rev-parse', '--verify', '--quiet', `${t}^{commit}`)?.status !== 1;
-      if (!target.unknown && !isRef(target.text) && !isRef(`origin/${target.text}`)) return hard(`\`git checkout ${target.text}\` names a path, not a branch or commit. ${NEVER_PATH}`);
+      // git takes a commit's name as a switch, and a file or glob as a path; any other name (a remote
+      // branch to set up, a typo) it sorts out itself. Exit 1 is "not a commit"; other codes can't tell.
+      const isRef = git(dir, 'rev-parse', '--verify', '--quiet', `${target.text}^{commit}`)?.status !== 1;
+      if (!target.unknown && !isRef && (/[*?[]/.test(target.text) || existsSync(resolve(dir, target.text)))) return hard(`\`git checkout ${target.text}\` names a path, not a branch or commit. ${NEVER_PATH}`);
       move = `git checkout ${target.text}`;
       break;
     }
@@ -538,7 +546,7 @@ function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: Trip
     case 'push':
       return dir && inWorktree(dir, cfg) ? pushReason(args, dir) : null;
   }
-  if (!move || !dir) return null;
+  if (!move || !dir || committed) return null;
   const st = git(dir, 'status', '--porcelain', '--untracked-files=no');
   const dirty = st?.status === 0 ? st.out.split('\n').map((l) => l.slice(3)).filter(Boolean) : [];
   if (!dirty.length) return null;

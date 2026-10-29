@@ -1,5 +1,5 @@
 // Artifacts and files: the shelf, the browser, and viewers for artifacts and linked or shared files.
-import { ago, api, baseName, fileExt, fileKind, fileUrl, followChat, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
+import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, followChat, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
 import { addBriefButtons } from './briefstart.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { showProject } from './project.js';
@@ -401,7 +401,7 @@ function commentBox(t, path, name, body) {
 export function sharedViewer(file) {
   const body = h('div', { class: 'artifact-body' });
   if (file.missing) body.append(h('p', { class: 'muted' }, `${file.missing}.`));
-  else renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name } });
+  else renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name } });
   return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body);
 }
 
@@ -427,10 +427,11 @@ export function renderSharedHead() {
 }
 
 /**
- * Show a file in `body` by its kind. Markdown's relative image links load from next to it, and its
- * briefs get Start buttons (`brief` says where the file is, see addBriefButtons).
+ * Show a file in `body` by its kind. Markdown's relative image links load from next to it, its links
+ * to files beside it open them (`hrefFor`), and its briefs get Start buttons (`brief` says where the
+ * file is, see addBriefButtons).
  */
-function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, urlFor = (p) => fileUrl(ticketId, p) }) {
+function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, urlFor = (p) => fileUrl(ticketId, p), hrefFor = (p) => fileHref(ticketId, p) }) {
   if (kind === 'image') {
     body.append(h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { class: 'artifact-media', src, alt: name })));
   } else if (kind === 'video') {
@@ -458,7 +459,8 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, ur
         // JSON Canvas files are JSON; lay them out readably.
         try { shown = JSON.stringify(JSON.parse(text), null, 2); } catch {}
       }
-      const doc = kind === 'markdown' && markdownDoc(text, imageUrl);
+      const linkHref = (href) => hrefFor(joinPath(dir, href));
+      const doc = kind === 'markdown' && markdownDoc(text, { imageUrl, linkHref });
       if (doc && brief) addBriefButtons(doc, text, brief);
       body.replaceChildren(doc ? h('div', { class: 'msg doc' }, doc) : h('pre', { class: 'artifact-text' }, shown));
     }).catch((err) => body.replaceChildren(h('p', { class: 'error' }, `Could not load: ${err.message}`)));

@@ -10,6 +10,7 @@ import { inboxEvent, inboxTicket } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { inAppHash, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { uploadsRunning } from './composer.js';
+import { renderMarkdown } from './markdown.js';
 
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
@@ -208,124 +209,44 @@ export function markdown(src, ticketId = null) {
 }
 
 /**
- * Fuller Markdown for documents threads write: headings, nested lists, tables, quotes, rules,
- * italics, and images, which `imageUrl` maps to a URL (or null to show the alt text instead).
+ * Fuller Markdown for documents threads write (see renderMarkdown): `imageUrl` maps an image's path to
+ * a URL (or null to show the alt text instead), and `linkHref` a link to another file to the route
+ * that opens it (or null to leave it inert). A link to "#a-heading" scrolls to that heading.
  */
 export function markdownDoc(src, opts = {}) {
-  const { imageUrl = () => null, ticketId = null, breaks = false } = typeof opts === 'function' ? { imageUrl: opts } : opts;
-  const inline = (t) => {
-    // Pull code spans out first so nothing inside them is treated as Markdown.
-    const codes = [];
-    let html = escapeHtml(t).replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
-    if (ticketId != null) {
-      // In a thread's messages, files in its folders become previews and cards (see filePreviewHtml).
-      html = html
-        .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (all, alt, href) => filePreviewHtml(ticketId, unescapeHtml(href), alt) ?? all)
-        .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (all, text, href) => fileCardHtml(ticketId, unescapeHtml(href), text) ?? all);
-    }
-    html = html
-      .replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (_, alt, href) => {
-        const url = imageUrl(href.replace(/&amp;/g, '&'));
-        return url
-          ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img src="${escapeHtml(url)}" alt="${alt}" title="${alt}" loading="lazy"></a>`
-          : `<span class="muted">[image: ${alt}]</span>`;
-      })
-      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, text, href) => {
-        // Links into this app (a thread, an artifact…) switch view in place; others open a new tab.
-        const route = inAppHash(unescapeHtml(href), location);
-        if (route) return `<a href="${escapeHtml(route)}">${text}</a>`;
-        const pr = prLinkOpen(href, prUrlRoute(unescapeHtml(href)));
-        if (pr) return `${pr}${text}</a>`;
-        return /^https?:\/\//.test(href)
-          ? `<a href="${href}" target="_blank" rel="noopener">${text}</a>`
-          : `<span class="link" title="${href}">${text}</span>`;
-      })
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/~~(.+?)~~/g, '<del>$1</del>')
-      .replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>');
-    html = threadRefsHtml(linkUrls(html, location, (url) => prUrlRoute(unescapeHtml(url))));
-    return html.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+  const { imageUrl = () => null, linkHref = () => null, ticketId = null, breaks = false } = typeof opts === 'function' ? { imageUrl: opts } : opts;
+  const link = (href, text) => {
+    // In a thread's messages, files in its folders become cards (see fileCardHtml).
+    const card = ticketId != null && fileCardHtml(ticketId, href, text);
+    if (card) return card;
+    // Links into this app (a thread, an artifact…) switch view in place; others open a new tab.
+    const route = inAppHash(href, location) ?? (isLocalPath(href) && fileKind(href) ? linkHref(href.split('#')[0]) : null);
+    if (route) return `<a href="${escapeHtml(route)}">${text}</a>`;
+    const pr = prLinkOpen(escapeHtml(href), prUrlRoute(href));
+    if (pr) return `${pr}${text}</a>`;
+    if (/^https?:\/\//i.test(href)) return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${text}</a>`;
+    if (/^#[^/]/.test(href)) return `<a href="${escapeHtml(href)}" class="anchor">${text}</a>`;
+    return `<span class="link" title="${escapeHtml(href)}">${text}</span>`;
   };
-  const isItem = (l) => /^\s*([-*+]|\d+\.)\s+/.test(l);
-  const startsBlock = (l) => /^(#{1,6}\s|```|>|\s*\|)/.test(l) || /^([-*+]|\d+\.)\s+/.test(l);
-
-  const list = (lines) => {
-    const root = { indent: -1, children: [] };
-    const stack = [root];
-    for (const l of lines) {
-      const m = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(l);
-      if (!m) {
-        // A wrapped line carries on the item above it.
-        stack[stack.length - 1].text += ` ${l.trim()}`;
-        continue;
-      }
-      while (stack.length > 1 && m[1].length <= stack[stack.length - 1].indent) stack.pop();
-      const item = { indent: m[1].length, ordered: /\d/.test(m[2]), text: m[3], children: [] };
-      stack[stack.length - 1].children.push(item);
-      stack.push(item);
-    }
-    const render = (items) => {
-      const tag = items[0].ordered ? 'ol' : 'ul';
-      return `<${tag}>${items.map((it) => `<li>${inline(it.text)}${it.children.length ? render(it.children) : ''}</li>`).join('')}</${tag}>`;
-    };
-    return root.children.length ? render(root.children) : '';
+  const image = (href, alt) => {
+    const preview = ticketId != null && filePreviewHtml(ticketId, href, alt);
+    if (preview) return preview;
+    const url = imageUrl(href);
+    return url
+      ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img src="${escapeHtml(url)}" alt="${alt}" title="${alt}" loading="lazy"></a>`
+      : `<span class="muted">[image: ${alt}]</span>`;
   };
-
-  const table = (rows) => {
-    const cells = (r) => r.trim().replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((c) => inline(c.trim().replace(/\\\|/g, '|')));
-    const hasHead = rows.length > 1 && /^[\s|:-]+$/.test(rows[1]);
-    const head = hasHead ? `<thead><tr>${cells(rows[0]).map((c) => `<th>${c}</th>`).join('')}</tr></thead>` : '';
-    const body = (hasHead ? rows.slice(2) : rows).map((r) => `<tr>${cells(r).map((c) => `<td>${c}</td>`).join('')}</tr>`).join('');
-    return `<div class="table-wrap"><table>${head}<tbody>${body}</tbody></table></div>`;
-  };
-
-  const lines = src.replace(/<!--[\s\S]*?-->/g, '').split('\n');
-  const out = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    let m;
-    if (!line.trim()) {
-      i++;
-    } else if (/^```/.test(line)) {
-      const code = [];
-      for (i++; i < lines.length && !/^```/.test(lines[i]); i++) code.push(lines[i]);
-      i++;
-      out.push(`<pre><code>${escapeHtml(code.join('\n'))}</code></pre>`);
-    } else if ((m = /^(#{1,6})\s+(.*?)\s*#*$/.exec(line))) {
-      out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`);
-      i++;
-    } else if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) {
-      out.push('<hr>');
-      i++;
-    } else if (/^\s*\|/.test(line)) {
-      const rows = [];
-      for (; i < lines.length && /^\s*\|/.test(lines[i]); i++) rows.push(lines[i]);
-      out.push(table(rows));
-    } else if (/^>/.test(line)) {
-      const quoted = [];
-      for (; i < lines.length && /^>/.test(lines[i]); i++) quoted.push(lines[i].replace(/^>\s?/, ''));
-      out.push(`<blockquote>${markdownDoc(quoted.join('\n'), { imageUrl, ticketId, breaks }).innerHTML}</blockquote>`);
-    } else if (isItem(line)) {
-      const items = [];
-      for (; i < lines.length; i++) {
-        const l = lines[i];
-        if (l.trim() && (isItem(l) || /^\s/.test(l))) items.push(l);
-        // One blank line inside a list is fine if the list carries on after it.
-        else if (!l.trim() && i + 1 < lines.length && (isItem(lines[i + 1]) || /^\s+\S/.test(lines[i + 1]))) continue;
-        else if (l.trim() && !startsBlock(l) && items.length && lines[i - 1].trim()) items.push(l); // lazy wrap
-        else break;
-      }
-      out.push(list(items));
-    } else {
-      const para = [];
-      for (; i < lines.length && lines[i].trim() && (!para.length || !startsBlock(lines[i])); i++) para.push(lines[i].trim());
-      out.push(`<p>${breaks ? para.map(inline).join('<br>') : inline(para.join(' '))}</p>`);
-    }
-  }
+  const text = (html) => threadRefsHtml(linkUrls(html, location, (url) => prUrlRoute(unescapeHtml(url))));
   const div = document.createElement('div');
   div.className = 'md';
-  div.innerHTML = out.join('');
+  div.innerHTML = renderMarkdown(src, { link, image, text, breaks });
+  // "#a-heading" would change the app's route, so scroll to the heading instead.
+  div.addEventListener('click', (e) => {
+    const a = e.target.closest?.('a.anchor');
+    if (!a) return;
+    e.preventDefault();
+    div.querySelector(`[data-slug="${CSS.escape(decodeURIComponent(a.getAttribute('href').slice(1)))}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
   return div;
 }
 

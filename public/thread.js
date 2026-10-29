@@ -1,5 +1,5 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, fileUrl, followChat, h, highlight, isCoordinator, markdown, markSeen, me, restoreScroll, scrollToBottom, statusLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, view } from './core.js';
+import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, fileUrl, followChat, h, highlight, isCoordinator, markdown, markSeen, me, restoreScroll, scrollToBottom, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
@@ -438,13 +438,14 @@ export function appendEvent(event, scroll = true) {
     if (data.answer) {
       // An answer to a question card: the card shows the picks, so the message only needs a short line.
       view.cards.get(data.answer.questionId)?.markAnswered(data.answer.answers, data.author);
-      nodes.push(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), answerSummary(data.answer.answers)));
+      nodes.push(stamped(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), answerSummary(data.answer.answers)), event));
     } else {
       const bubble = userBubble(data.author, data.text,
         (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
         data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null,
         { id: event.id, strikes: data.strikes });
       bubble.dataset.event = event.id;
+      stamped(bubble, event);
       if (data.steered) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'Sent into the turn that was running: Claude read it between steps' }, 'into the running turn'));
       markQueued(bubble, view.ticket);
       nodes.push(bubble);
@@ -457,11 +458,11 @@ export function appendEvent(event, scroll = true) {
       bubble.querySelector('.who').append(h('span', { class: 'msg-tag' }, `taken back by ${data.by}`));
     }
   } else if (event.kind === 'question') {
-    nodes.push(questionCard(event.ticket_id, data));
+    nodes.push(stamped(questionCard(event.ticket_id, data), event));
   } else if (event.kind === 'approval') {
-    nodes.push(approvalCard(event.ticket_id, data));
+    nodes.push(stamped(approvalCard(event.ticket_id, data), event));
   } else if (event.kind === 'plan') {
-    nodes.push(planCard(event.ticket_id, data));
+    nodes.push(stamped(planCard(event.ticket_id, data), event));
   } else if (event.kind === 'question_result') {
     view.cards.get(data.id)?.markSettled();
   } else if (event.kind === 'strike') {
@@ -494,7 +495,7 @@ export function appendEvent(event, scroll = true) {
       for (const block of data.message?.content ?? []) {
         if (block.type === 'text' && block.text.trim()) {
           const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
-          const msg = h('div', { class: 'msg' }, h('div', { class: 'who' }, 'Claude'), body);
+          const msg = stamped(h('div', { class: 'msg' }, h('div', { class: 'who' }, speaker()), body), event);
           nodes.push(msg);
           (view.turnTexts ??= []).push({ el: msg, body });
         } else if (block.type === 'tool_use') {
@@ -536,6 +537,29 @@ export function appendEvent(event, scroll = true) {
   if (fold) foldNarration(event.ticket_id);
   renderTyping();
   if (scroll && followChat) scrollToBottom();
+}
+
+/**
+ * Who Claude speaks as in this chat: the scheme's Taskmaster in its own chat ("The Delve Taskmaster
+ * asks"), else the minion ("Your Minion asks").
+ */
+function speaker(doing = '') {
+  if (!view.ticket || !isCoordinator(view.ticket)) return doing ? `Your Minion ${doing}` : 'Your Minion';
+  return doing ? ['The ', taskmasterLabel(view.ticket.project_id), ` ${doing}`] : taskmasterLabel(view.ticket.project_id);
+}
+
+/** The time a message or card was posted, after its who-line; the full date shows on hover. */
+function stamped(el, event) {
+  if (!event.created_at) return el;
+  const d = new Date(event.created_at);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  // Today: just the time. This week: the weekday too. Older: the date.
+  const text = d.toDateString() === now.toDateString() ? time
+    : now - d < 6 * 86_400_000 ? `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`
+    : `${d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' })}, ${time}`;
+  el.querySelector('.who')?.append(h('time', { class: 'stamp', datetime: d.toISOString(), title: d.toLocaleString([], { dateStyle: 'full', timeStyle: 'short' }) }, text));
+  return el;
 }
 
 /**
@@ -625,7 +649,7 @@ function approvalCard(ticketId, card) {
   const approve = h('button', { type: 'button', class: 'small' }, 'Approve');
   const deny = h('button', { type: 'button', class: 'small secondary' }, 'Deny');
   const el = h('div', { class: 'qcard acard' },
-    h('div', { class: 'who' }, 'Claude asks to run'),
+    h('div', { class: 'who' }, speaker('asks to run')),
     h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, card.tripwire ? 'Tripwire' : 'Needs approval'), toolTitle(card.tool)),
     typeof input.description === 'string' ? h('div', { class: 'desc' }, card.tripwire ? `Why: ${input.description}` : input.description) : '',
     h('pre', { class: 'acmd' }, lead ? input[lead] : JSON.stringify(input, null, 2)),
@@ -683,7 +707,7 @@ function planCard(ticketId, card) {
   const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
   const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: true }, 'Send notes');
   const el = h('div', { class: 'qcard pcard' },
-    h('div', { class: 'who' }, 'Claude proposes a plan'),
+    h('div', { class: 'who' }, speaker('proposes a plan')),
     h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Plan'), card.summary),
     h('div', { class: 'pbody' }, markdown(card.plan, ticketId)),
     notes,
@@ -812,7 +836,7 @@ function questionCard(ticketId, card) {
   sendBtn.addEventListener('click', send);
 
   el.append(
-    h('div', { class: 'who' }, 'Claude asks'),
+    h('div', { class: 'who' }, speaker('asks')),
     ...card.questions.map((q, i) => {
       const other = h('input', { type: 'text', class: 'other', placeholder: 'Other: type your own answer', maxlength: 2000, value: picks[i].other });
       other.addEventListener('input', () => {

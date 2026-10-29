@@ -1,0 +1,3 @@
+// What the tripwire (src/tripwire.ts) stops, in one line for the built-in prompts (runner.ts). Kept
+// beside it rather than in it, so the hook itself doesn't change: keep it in step with its rules.
+export const TRIPWIRE_BLOCKS = "writes to other schemes' folders, the live checkout, the live data dir (read the database with `sqlite3 -readonly`) and systemd unit folders; systemctl enable, disable, mask or edit, and restarting or stopping the app's services; reading SSH keys, the Claude or GitHub login, the service's env file or any process's environment; and running server.ts without DATA_DIR and PORT set";

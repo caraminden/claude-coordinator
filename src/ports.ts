@@ -34,19 +34,21 @@ export function listeningPort(proc: ChildProcess, ms = 20_000): Promise<number> 
  * A port nothing listens on now, for a server that has to be told its port before it starts (a
  * branch's server.ts from before PORT=0 was reported, or a test of a server that is down). It is
  * picked below 32768, outside the range Linux hands out to listen(0) and outgoing connections
- * (ip_local_port_range, 32768-60999), so only another hand-picked port can take it in the gap.
+ * (ip_local_port_range, 32768-60999 by default), so only another hand-picked port can take it in the gap.
  */
 export async function freePort(): Promise<number> {
   for (;;) {
     const port = 10_000 + Math.floor(Math.random() * 22_768);
     const srv = createServer();
-    const ok = await new Promise<boolean>((r) => {
-      srv.once('error', () => r(false));
-      srv.listen(port, '127.0.0.1', () => r(true));
+    const err = await new Promise<NodeJS.ErrnoException | null>((r) => {
+      srv.once('error', r);
+      srv.listen(port, '127.0.0.1', () => r(null));
     });
-    if (ok) {
+    if (!err) {
       await new Promise((r) => srv.close(r));
       return port;
     }
+    // Only a taken port is worth another try; anything else (out of file handles) would fail forever.
+    if (err.code !== 'EADDRINUSE') throw err;
   }
 }

@@ -337,7 +337,7 @@ export const fileRoutes: Route[] = [
   {
     method: ['GET', 'HEAD'], path: '/api/projects/:project/shared/file', who: ['person'],
     async handler(ctx) {
-      const { url, app, project } = ctx;
+      const { res, url, app, project } = ctx;
       // One file of the folder, by path relative to it (or ?info for its details).
       const dir = projectSharedDir(app.dataDir, project.id);
       const path = url.searchParams.get('path') ?? '';
@@ -400,7 +400,7 @@ export const fileRoutes: Route[] = [
   {
     method: ['GET', 'HEAD'], path: '/api/tickets/:ticket/file', who: ['person', 'taskmaster'],
     async handler(ctx) {
-      const { url, app, ticket } = ctx;
+      const { res, url, app, ticket } = ctx;
       // A file the ticket linked in its reply: ?path= as written there; ?info for its details.
       const path = url.searchParams.get('path') ?? '';
       if (!url.searchParams.has('info')) return serveFound(ctx, await resolveTicketFile(app, ticket, path), path, ticketScopes(app, ticket));

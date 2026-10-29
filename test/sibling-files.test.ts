@@ -48,9 +48,10 @@ mkdirSync(shared, { recursive: true });
 writeFileSync(join(shared, 'gallery.html'), '<img src="pic.png">');
 writeFileSync(join(shared, 'pic.png'), 'png');
 // Pinned, so the startup scan keeps them listed.
-store.syncArtifacts(M, [{ path: 'page.html', size: 1, mtime: 1 }, { path: 'notes.md', size: 1, mtime: 1 }]);
-const [PAGE, NOTES] = ['page.html', 'notes.md'].map((p) => store.listArtifacts(P.id).find((a) => a.path === p)!);
-for (const a of [PAGE, NOTES]) store.setArtifactPinned(a.id, 'Cara');
+// gone.md was shown once and has since been deleted.
+store.syncArtifacts(M, [{ path: 'page.html', size: 1, mtime: 1 }, { path: 'notes.md', size: 1, mtime: 1 }, { path: 'gone.md', size: 1, mtime: 1 }]);
+const [PAGE, NOTES, GONE] = ['page.html', 'notes.md', 'gone.md'].map((p) => store.listArtifacts(P.id).find((a) => a.path === p)!);
+for (const a of [PAGE, NOTES, GONE]) store.setArtifactPinned(a.id, 'Cara');
 
 let srv: Booted;
 before(async () => {
@@ -158,4 +159,19 @@ test('scheme shared files and reply links redirect the same way; downloads, othe
   assert.match(await hidden.text(), /hidden/);
   // Without a login the old routes still refuse.
   assert.equal((await get(`/api/artifacts/${PAGE.id}/raw`)).status, 401);
+});
+
+test("the viewer's details of a linked or shared file load, and a file that's gone is a 404 that says so (#157)", async () => {
+  const headers = { Cookie: srv.cookie };
+  const linked = await get(`/api/tickets/${M.id}/file?path=clip.mp4&info`, headers);
+  assert.equal(linked.status, 200);
+  assert.equal((await linked.json()).name, 'clip.mp4');
+  const inShared = await get('/api/projects/' + P.id + '/shared/file?path=pic.png&info', headers);
+  assert.equal(inShared.status, 200);
+  assert.equal((await inShared.json()).kind, 'image');
+  for (const path of [`/api/tickets/${M.id}/file?path=gone.md&info`, `/api/projects/${P.id}/shared/file?path=gone.md&info`, `/api/artifacts/${GONE.id}/raw`]) {
+    const res = await get(path, headers);
+    assert.equal(res.status, 404, path);
+    assert.match((await res.json()).error, /no longer there/, path);
+  }
 });

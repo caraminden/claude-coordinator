@@ -46,13 +46,16 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}) {
-  const auth = who.startsWith('agent:') ? { Authorization: `Bearer ${agentToken(join(root, 'data'), Number(who.slice(6)))}` } : { Cookie: cookies[who] };
+async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<any> {
+  const token = who.startsWith('agent:') ? agentToken(join(root, 'data'), Number(who.slice(6))) : '';
+  const auth = token ? { Authorization: `Bearer ${token}` } : { Cookie: cookies[who] };
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
     headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
+  // This stands in for whichever turn is current: if a new turn began mid-call, ask again as that one.
+  if (res.status === 401 && token && token !== agentToken(join(root, 'data'), Number(who.slice(6)))) return call(who, path, opts);
   const data = await res.json();
   if (!res.ok) throw new Error(`${res.status} ${data.error}`);
   return data;

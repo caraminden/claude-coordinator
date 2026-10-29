@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { Store } from '../src/db.ts';
+import { Store, titleWithoutBuild } from '../src/db.ts';
 import { nearDuplicate, PropertyError, type Actor } from '../src/properties.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'props-'));
@@ -115,6 +115,62 @@ test('type keeps the old tag in step, and other asks people', () => {
   assert.match(r.notes.join(), /ask people/);
   s.props.setTypeFromTag(id, 'idea', 'x');
   assert.equal(s.props.forTarget('minion', id).type, 'ideation');
+});
+
+test("build: the property and the column stay in step, in schemes that have the key", () => {
+  const s = freshStore();
+  const id = ticket(s, 1);
+  s.props.set('minion', id, 1, { build: 8 }, 'x');
+  assert.equal(s.getTicket(id)!.build, 8);
+  s.props.set('minion', id, 1, { build: null }, 'x');
+  assert.equal(s.getTicket(id)!.build, null);
+  s.props.setBuild(id, 9, 'x');
+  assert.equal(s.props.forTarget('minion', id).build, 9);
+  s.props.setBuild(id, null, 'x');
+  assert.equal(s.props.forTarget('minion', id).build, undefined);
+  const citadel = ticket(s, 2);
+  s.props.setBuild(citadel, 9, 'x'); // Citadel has no build key: nothing to mirror
+  assert.equal(s.props.forTarget('minion', citadel).build, undefined);
+});
+
+test('settling builds once: property and column agree, and titles drop a matching build', () => {
+  const path = join(root, `${Math.random()}.db`);
+  let s = new Store(path);
+  s.createProject('Delve', null);
+  s.db.close();
+  s = new Store(path); // seeds Delve's keys
+  const make = (title: string, build: number | null) => {
+    const t = s.createTicket({ project_id: 1, title, permission_mode: 'default', created_by: 'Cara' });
+    s.db.prepare('UPDATE tickets SET build = ? WHERE id = ?').run(build, t.id);
+    return t.id;
+  };
+  const lairs = make('Lairs · Build #8', 8);
+  const major = make('Major Build #7', 7);
+  const wrong = make('Workshop · Build #7', 9);
+  const fromProp = make('Tomes (Build 9)', null);
+  s.db.prepare("INSERT INTO properties (target_type, target_id, key_id, value, set_by, set_at) SELECT 'minion', ?, id, '9', 'x', 0 FROM property_keys WHERE scope = 1 AND key = 'build'").run(fromProp);
+  s.db.prepare("DELETE FROM settings WHERE key = 'builds_settled'").run();
+  s.db.close();
+  s = new Store(path);
+  assert.equal(s.getTicket(lairs)!.title, 'Lairs');
+  assert.equal(s.props.forTarget('minion', lairs).build, 8);
+  assert.equal(s.getTicket(major)!.title, 'Major Build #7');
+  assert.equal(s.getTicket(wrong)!.title, 'Workshop · Build #7');
+  assert.equal(s.props.forTarget('minion', wrong).build, 9, 'the column wins');
+  assert.deepEqual([s.getTicket(fromProp)!.title, s.getTicket(fromProp)!.build], ['Tomes', 9]);
+  assert.ok(s.listEvents(lairs).some((e) => JSON.parse(e.data).text?.startsWith('Citadel renamed this minion from "Lairs · Build #8" to "Lairs"')));
+  s.db.prepare("UPDATE tickets SET title = 'Again · Build #8' WHERE id = ?").run(lairs);
+  s.db.close();
+  s = new Store(path);
+  assert.equal(s.getTicket(lairs)!.title, 'Again · Build #8', 'only once');
+});
+
+test('titleWithoutBuild', () => {
+  assert.equal(titleWithoutBuild('Lairs · Build #8', 8), 'Lairs');
+  assert.equal(titleWithoutBuild('Lairs - build 8', 8), 'Lairs');
+  assert.equal(titleWithoutBuild('Lairs (Build #8)', 8), 'Lairs');
+  assert.equal(titleWithoutBuild('Lairs · Build #8', 7), 'Lairs · Build #8');
+  for (const t of ['Major Build #7', 'Build 7 Features', 'Move Build 7 Along', 'Rebuild 7']) assert.equal(titleWithoutBuild(t, 7), t);
 });
 
 test('stage starts, finishes on dismissal and comes back on reopening', () => {

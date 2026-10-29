@@ -1396,6 +1396,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         store.updateTicket(id, fields);
         if (fields.state === 'pending-deploy') runner.deployPending(id);
         if ('tag' in fields) store.props.setTypeFromTag(id, fields.tag ?? null, session.name);
+        if ('build' in fields) store.props.setBuild(id, fields.build ?? null, session.name);
         const who = session.agent === id ? 'Claude' : session.name;
         if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this minion from "${ticket.title}" to "${fields.title}".` });
         const next = runner.isRunning(id) ? 'from the next turn' : 'from now on';

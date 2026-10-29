@@ -17,12 +17,11 @@ test('lowest build on top as current, later builds at the bottom ascending, any 
   ]), [['build-8', true, [2, 3]], ['bug', false, [4]], ['idea', false, [5]], ['build-9', false, [1]], ['build-10', false, [6]]]);
 });
 
-test('a build named in the title counts, Delve style; the build field wins', () => {
+test('only the build field counts, not a build named in the title', () => {
   assert.deepEqual(shape([
     { n: 1, tag: 'feature', title: 'Major Build #7' }, { n: 2, tag: 'design', title: 'Lair Strip · Build #8' },
-    { n: 3, tag: 'process', title: 'Build 8 Features' }, { n: 4, tag: 'process', title: 'Move Build 7 Along' },
-    { n: 5, tag: 'feature', title: 'Rebuild 9 things' }, { n: 6, tag: 'feature', title: 'Workshop · Build #7', build: 9 },
-  ]), [['build-7', true, [1, 4]], ['feature', false, [5]], ['build-8', false, [2, 3]], ['build-9', false, [6]]]);
+    { n: 3, tag: 'feature', title: 'Workshop · Build #7', build: 9 },
+  ]), [['build-9', true, [3]], ['feature', false, [1]], ['design', false, [2]]]);
 });
 
 test('parked minions leave their build or kind for a Parked section at the bottom', () => {

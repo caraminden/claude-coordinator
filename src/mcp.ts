@@ -22,7 +22,7 @@ const WAKE_PROPS = {
   commit: { type: 'string', description: 'Optional: the commit to wait for (a hash, short or full)' },
   reason: { type: 'string', description: 'What to do once it is live; it comes back in the wake message, e.g. "#63\'s approve cards are live: retry the tripwire test"' },
 };
-const TITLE = { type: 'string', description: 'The short ask, about 30 characters, e.g. "Usage bar in the top bar". No number, tag or emoji.' };
+const TITLE = { type: 'string', description: 'The short ask, about 30 characters, e.g. "Usage bar in the top bar". No number, tag, build or emoji.' };
 const TAG = {
   type: ['string', 'null'],
   enum: ['feature', 'bug', 'design', 'process', 'idea', null],

@@ -347,6 +347,8 @@ export class Registry {
             notes.push('type is `other`: ask people with an ask_question card whether it should stay `other` or move to another type (or a new one), and change it if they say so.');
           }
         }
+        // The column the minions list groups by holds the same build.
+        if (type === 'minion' && k.key === 'build') this.db.prepare('UPDATE tickets SET build = ? WHERE id = ?').run(Number(values[0]) || null, id);
       }
       this.db.exec('COMMIT');
     } catch (err) {
@@ -363,6 +365,15 @@ export class Registry {
     if (!type || !value) return;
     this.db.prepare('DELETE FROM properties WHERE target_type = ? AND target_id = ? AND key_id = ?').run('minion', ticketId, type.id);
     this.db.prepare('INSERT INTO properties (target_type, target_id, key_id, value, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?)').run('minion', ticketId, type.id, value, by, Date.now());
+  }
+
+  /** Mirror a write to the build column onto the scheme's `build` key, when it has one. */
+  setBuild(ticketId: number, build: number | null, by: string) {
+    const row = this.db.prepare('SELECT project_id FROM tickets WHERE id = ?').get(ticketId) as { project_id: number } | undefined;
+    const k = row && (this.db.prepare("SELECT id FROM property_keys WHERE scope = ? AND key = 'build' AND status = 'active'").get(row.project_id) as { id: number } | undefined);
+    if (!k) return;
+    this.db.prepare('DELETE FROM properties WHERE target_type = ? AND target_id = ? AND key_id = ?').run('minion', ticketId, k.id);
+    if (build !== null) this.db.prepare('INSERT INTO properties (target_type, target_id, key_id, value, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?)').run('minion', ticketId, k.id, String(build), by, Date.now());
   }
 
   /** A new minion's starting stage, unless one was given: idea for ideation, otherwise in-progress. */

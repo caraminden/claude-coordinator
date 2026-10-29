@@ -297,6 +297,15 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'workspace_tools', 'ALTER TABLE machines ADD COLUMN workspace_tools INTEGER NOT NULL DEFAULT 0'],
 ];
 
+/**
+ * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
+ * The build needs a separator or brackets, so a title that names the build ("Major Build #7") stays.
+ */
+export function titleWithoutBuild(title: string, build: number): string {
+  const m = title.match(/^(.*\S)\s*(?:[·|:–—-]\s*build\s*#?(\d+)|\(\s*build\s*#?(\d+)\s*\))\s*$/i);
+  return m && Number(m[2] ?? m[3]) === build ? m[1] : title;
+}
+
 export class Store {
   db: DatabaseSync;
   /** The property registry and the properties minions and artifacts carry. */
@@ -320,6 +329,7 @@ export class Store {
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS ticket_number ON tickets(project_id, number)');
     this.props = new Registry(this.db);
     this.props.seed();
+    this.settleBuilds();
     this.schedules = new Schedules(this.db);
   }
 
@@ -346,6 +356,33 @@ export class Store {
         const coordinator = this.getCoordinator(projectId);
         if (coordinator) this.addEvent(coordinator.id, 'note', { text: `Threads are now numbered per scheme: ${moves.join(', ')}.` });
       }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /**
+   * Once (2026-10-29): the build column and the scheme's `build` property agree (the column wins
+   * where both are set), and titles stop repeating the build ("Lairs · Build #8" becomes "Lairs").
+   */
+  private settleBuilds() {
+    if (this.db.prepare("SELECT 1 FROM settings WHERE key = 'builds_settled'").get()) return;
+    this.db.exec('BEGIN');
+    try {
+      const tickets = this.db.prepare("SELECT id, title, build FROM tickets WHERE kind = 'ticket'").all() as { id: number; title: string; build: number | null }[];
+      for (const t of tickets) {
+        const build = t.build ?? (Number(this.props.forTarget('minion', t.id).build) || null);
+        if (build === null) continue;
+        if (t.build === null) this.db.prepare('UPDATE tickets SET build = ? WHERE id = ?').run(build, t.id);
+        else this.props.setBuild(t.id, build, 'migration');
+        const title = titleWithoutBuild(t.title, build);
+        if (title === t.title) continue;
+        this.db.prepare('UPDATE tickets SET title = ? WHERE id = ?').run(title, t.id);
+        this.addEvent(t.id, 'note', { text: `Citadel renamed this minion from "${t.title}" to "${title}": its build shows in the minions list, so the title no longer carries it.` });
+      }
+      this.db.prepare("INSERT INTO settings (key, value) VALUES ('builds_settled', ?)").run(JSON.stringify(Date.now()));
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');

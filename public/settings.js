@@ -446,7 +446,7 @@ function machineSetup(url, token, kind, what) {
   const run = kind === 'command' ? `-- ${what}` : `--claude-mcp ${what || DEFAULT_CLAUDE_MCP}`;
   return [
     `curl -fsSLO ${url}/machine-agent.mjs`,
-    `node machine-agent.mjs ${url} ${token} ${run}`,
+    `node machine-agent.mjs ${url} ${token} --config machine-agent.json ${run}`,
   ].join('\n');
 }
 
@@ -466,7 +466,7 @@ function machineSetupWindows(url, name, token, kind, what) {
     '$dir = "$env:USERPROFILE\\coordinator-agent"; New-Item -ItemType Directory -Force $dir | Out-Null',
     `curl.exe -fsSLo "$dir\\machine-agent.mjs" ${url}/machine-agent.mjs`,
     'if ($LASTEXITCODE) { throw "Could not download machine-agent.mjs (curl exit $LASTEXITCODE)." }',
-    `$action = New-ScheduledTaskAction -Execute $node -WorkingDirectory $dir -Argument "\`"$dir\\machine-agent.mjs\`" ${url} ${token} ${run.replace(/"/g, '`"')}"`,
+    `$action = New-ScheduledTaskAction -Execute $node -WorkingDirectory $dir -Argument "\`"$dir\\machine-agent.mjs\`" ${url} ${token} --config \`"$dir\\machine-agent.json\`" ${run.replace(/"/g, '`"')}"`,
     '$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries',
     `Register-ScheduledTask -Force -TaskName "${task}" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) -Settings $settings | Out-Null`,
     `Start-ScheduledTask -TaskName "${task}"`,
@@ -518,6 +518,7 @@ export function machinesPage() {
     h('div', { id: 'machine-list', class: 'machine-list' }),
     h('p', { class: 'muted small' },
       'Each machine runs one MCP server; add another machine for a second one. It needs Node 18 or newer. ',
+      'With workspace tools switched on, minions also get mcp__<name>-ws__…: git sync and the tasks its owner lists in machine-agent.json on that computer, nothing else. ',
       '"Claude Code MCP server" runs one already set up for Claude Code on that computer, like godot-ai after its dock\'s Configure. ',
       'A minion gets the tools of every machine online when its turn starts, named mcp__<name>__…, plus the machine\'s notes, and the tools act on that computer, ',
       'so only add servers you trust minions to run.'));
@@ -594,10 +595,61 @@ function renderMachineList() {
           h('span', { class: 'name' }, m.name),
           h('span', { class: 'meta' }, [machineStatus(m), m.command, `added by ${m.created_by}`].filter(Boolean).join(' · '))),
         newToken, remove),
+      machineWorkspaces(m),
       h('details', { class: 'machine-notes', 'data-id': m.id, open: editing },
         h('summary', {}, m.notes ? `Notes: ${m.notes.split('\n')[0]}` : 'Add notes for minions'),
         notes, h('div', { class: 'row' }, save, saved)));
   }));
+}
+
+// What a machine-agent.json looks like, for the Machines page; the owner writes it beside the agent.
+const WORKSPACE_EXAMPLE = `{
+  "workspaces": {
+    "delve": {
+      "path": "C:\\\\Users\\\\you\\\\Projects\\\\delve",
+      "read": ["%APPDATA%\\\\Godot\\\\app_userdata\\\\Delve"],
+      "tasks": {
+        "build": {
+          "run": ["dotnet", "build", "Delve.sln"],
+          "hints": [{ "match": "MSB3027|used by another process", "say": "Close the game and the editor, then retry." }]
+        },
+        "import": { "run": ["cmd.exe", "/c", "tools\\\\prepare.cmd"], "about": "imports new art" }
+      }
+    }
+  }
+}`;
+
+/** A machine's workspace tools: the switch, and the workspaces and tasks its agent reports. */
+function machineWorkspaces(m) {
+  const toggle = h('input', { type: 'checkbox', checked: m.workspace_tools });
+  const status = h('span', { class: 'muted small', role: 'status' });
+  toggle.onchange = async () => {
+    status.textContent = 'Saving…';
+    try {
+      await api(`api/machines/${m.id}`, { method: 'PATCH', body: { workspace_tools: toggle.checked } });
+      status.textContent = '';
+    } catch (err) {
+      toggle.checked = !toggle.checked;
+      status.textContent = err.message;
+    }
+  };
+  const workspaces = m.workspaces ?? [];
+  const reported = !m.online
+    ? h('p', { class: 'muted small' }, 'Shows the workspaces its agent offers once it connects.')
+    : workspaces.length
+      ? workspaces.map((w) => h('div', { class: 'machine-workspace small' },
+        h('div', {}, h('strong', {}, w.name), ' ', h('code', {}, w.path)),
+        w.read.length ? h('div', { class: 'muted' }, 'Also readable: ', w.read.join(', ')) : '',
+        h('ul', {}, w.tasks.map((t) => h('li', {}, h('code', {}, t.name), ': ', t.run.join(' '), t.about ? h('span', { class: 'muted' }, ` (${t.about})`) : '')))))
+      : h('details', { class: 'small' },
+        h('summary', {}, 'No workspaces. Its owner lists them in machine-agent.json beside the agent'),
+        h('p', { class: 'muted' }, 'Minions can check out pushed branches there and run only the tasks listed, with no shell. The agent picks up changes to the file by itself (agents set up before workspaces need setting up again with a new token).'),
+        h('pre', {}, WORKSPACE_EXAMPLE));
+  return h('div', { class: 'machine-workspaces' },
+    h('label', { class: 'row small', title: 'Lets minions in every scheme check out pushed branches and run the listed tasks on this computer' },
+      toggle, h('span', {}, 'Workspace tools for minions'), status),
+    reported,
+    ...(m.problems ?? []).map((p) => h('p', { class: 'error small' }, p)));
 }
 
 /** The import picker: this app's Claude Code instruction and memory files, to tick and add. */

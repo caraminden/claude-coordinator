@@ -841,6 +841,13 @@ a.thread-ref:hover { text-decoration: underline; }
 .machine-notes summary { cursor: pointer; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .machine-notes textarea { width: 100%; margin: 0.4rem 0; font-size: 0.95em; }
 .machine-notes .row { display: flex; gap: 0.5rem; align-items: center; }
+.machine-workspaces { margin: 0.3rem 0 0.1rem 1.1rem; font-size: 0.85em; }
+.machine-workspaces > label.row { display: flex; gap: 0.4rem; align-items: center; padding: 0.15rem 0; cursor: pointer; }
+.machine-workspaces > label.row input { width: auto; margin: 0; }
+.machine-workspace { margin: 0.3rem 0; overflow-wrap: anywhere; }
+.machine-workspace ul { margin: 0.2rem 0 0; padding-left: 1.2rem; }
+.machine-workspaces summary { cursor: pointer; color: var(--muted); }
+.machine-workspaces pre { overflow-x: auto; font-size: 0.9em; }
 
 /* Properties: the "🏷 N" chip in a minion's header, its popover, and the scheme's Properties page. */
 .prop-chip { position: relative; flex: none; }

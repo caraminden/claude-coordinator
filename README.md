@@ -69,6 +69,16 @@ Planned next: runners on other people's own Claude logins.
   restart it", where the clone is) go into minion prompts while it is online. For Windows
   the page also gives a PowerShell snippet that registers a Task Scheduler task to start the
   agent now and at every logon, in the person's own session, with no reboot.
+  **Workspace tools** (#90): an agent started with `--config machine-agent.json` (both
+  snippets pass it) reads workspaces from that file, which only the computer's owner edits:
+  a folder, extra read-only folders, and named tasks with a fixed argv (no shell, no
+  arguments from minions). With the machine's "Workspace tools" switch on (off by default),
+  turns also get `mcp__<name>-ws__…`: `workspaces`, `git_sync` (fetch origin, detached
+  checkout; stops rather than overwrite local changes), `run_task`/`job` (one job per
+  workspace, long ones return a job id), `read_file`, `list_files`, and `fetch_file`, which
+  copies a file of up to 20 MB into the minion's shared files under `machine-files/<machine>/`.
+  The agent re-reads the file when it changes. Builds still run whatever the repo's project
+  files say, so this limits what minions can ask for; it is not a sandbox.
 - **GitHub** wakes a minion about its pull request. `src/github.ts` polls each open
   minion's branch for its newest PR with one `gh api graphql` call, one minion at a time
   (every 2 minutes while a PR is open, backing off to 15 while nothing changes; 30 for

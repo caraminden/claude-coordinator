@@ -775,12 +775,11 @@ mark.find.current { background: var(--waiting); color: #fff; }
   .ticket-head > .row:has(> .close-view) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 5.3rem); }
   /* ‹ › × share the title's line. */
   .chat > .ticket-head > .row > h2:is(*, :has(+ .refresh-btn)) { flex: 1 1 0; }
-  /* A minion's state shares its line with the buttons (wrapping to two lines before it is cut short);
-     where the change is, the tools and Find take the next, after a break (::after). */
+  /* A minion's state shares its line with where the change is (wrapping to two lines before it is cut short);
+     the tools, the buttons and Find take the next, after a break (::after), so the buttons sit left of Find. */
   .ticket-head .head-sub > .head-state { flex: 1 1 0; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; }
-  .ticket-head .head-sub:has(> .prop-chip) > button { order: 1; }
-  .ticket-head .head-sub:has(> .prop-chip)::after { content: ''; order: 2; flex-basis: 100%; height: 0; margin-top: -0.35rem; }
-  .ticket-head .head-sub:has(> .prop-chip) > :not(.head-state, button) { order: 3; }
+  .ticket-head .head-sub:has(> .prop-chip)::after { content: ''; order: 1; flex-basis: 100%; height: 0; margin-top: -0.35rem; }
+  .ticket-head .head-sub:has(> .prop-chip) > :not(.head-state, .ship) { order: 2; }
   /* A minion's ✎ for a new person note (#146): just the pen on phones. */
   .ticket-head .note-btn { width: 1.9rem; height: 1.9rem; justify-content: center; padding: 0; }
 }

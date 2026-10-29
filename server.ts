@@ -166,7 +166,8 @@ pusher.subject = process.env.PUSH_SUBJECT ?? store.getSetting<string>('push_subj
 
 /** Ping everyone subscribed to the ticket's project (but `except`) if the trigger warrants it. */
 function notify(ticketId: number, trigger: PushTrigger, except: string | null = null) {
-  if (PREVIEW) return;
+  // A boot check's turns and a preview's copy are nobody's news.
+  if (BOOT_CHECK) return;
   const ticket = store.getTicket(ticketId);
   if (ticket) pusher.notify(ticket, trigger, except).catch((err) => console.error(`Push for ticket ${ticketId} failed:`, err));
 }

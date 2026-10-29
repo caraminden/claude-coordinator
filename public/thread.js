@@ -5,7 +5,7 @@ import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { recapEvent, showRecap } from './recap.js';
 import { noteStrike, struckSource } from './strike.js';
-import { CLAMP_OVER, isBookkeeping, isNarration } from './narration.js';
+import { narrationSorter } from './narration.js';
 import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
@@ -71,7 +71,7 @@ function renderHistory() {
     lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
     actions: new Map(), turnActions: [], cards: new Map(), heldCards: [],
     // The session started on an earlier page, if there is one.
-    sawInit: page.more, turnNote: null, turnInitAt: undefined, turnTexts: [], lastText: null, narrationEl: null, pendingRequest: [], turnRequest: undefined,
+    sawInit: page.more, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), lastText: null, narrationEl: null, pendingRequest: [], turnRequest: undefined,
     pendingMessages: [],
   });
   log.replaceChildren(...(page.more ? [h('div', { class: 'load-earlier' },
@@ -530,7 +530,7 @@ export function appendEvent(event, scroll = true) {
     view.turnActions = [];
     view.turnNote = null;
     view.turnInitAt = event.created_at;
-    view.turnTexts = [];
+    view.narration = narrationSorter();
     view.lastText = null;
     view.narrationEl = null;
     // Messages queued since the last turn are what this turn works on.
@@ -547,7 +547,7 @@ export function appendEvent(event, scroll = true) {
   }
   if (event.kind === 'claude') scheduleProgress();
   const nodes = [];
-  // Runs of the turn's words to sort into folded narration and kept messages once they're in the log.
+  // The turn's words the sorter has settled, to fold or keep once they're in the log.
   const settle = [];
 
   if (event.kind === 'user_message') {
@@ -623,21 +623,12 @@ export function appendEvent(event, scroll = true) {
     } else if (data.type === 'assistant') {
       for (const block of data.message?.content ?? []) {
         if (block.type === 'text' && block.text.trim()) {
-          // Words followed by nothing but bookkeeping before these weren't narrating work: they stay.
-          if (view.turnTexts?.length) settle.push({ texts: view.turnTexts.splice(0), work: false });
           const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
           const msg = stamped(h('div', { class: 'msg' }, h('div', { class: 'who' }, speaker()), body), event);
           nodes.push(msg);
-          view.lastText = { el: msg, body, text: block.text };
-          (view.turnTexts ??= []).push(view.lastText);
+          settle.push(...view.narration.text(view.lastText = { el: msg, body, text: block.text }));
         } else if (block.type === 'tool_use') {
-          // Words that lead into a question or plan card explain it, so they stay as they are.
-          if (block.name === 'mcp__thread__ask_question' || block.name === 'mcp__thread__propose_plan') {
-            view.turnTexts = [];
-            view.narrationEl = null;
-          } else if (!isBookkeeping(block.name) && view.turnTexts?.length) {
-            settle.push({ texts: view.turnTexts.splice(0), work: true });
-          }
+          settle.push(...view.narration.tool(block.name));
         }
       }
     } else if (data.type === 'user') {
@@ -678,7 +669,7 @@ export function appendEvent(event, scroll = true) {
   else log.append(...nodes);
   if (event.kind === 'question' || event.kind === 'plan') view.heldCards.push(...nodes);
   else if (event.kind === 'user_message' || (event.kind === 'claude' && data.type === 'result')) view.heldCards = [];
-  for (const { texts, work } of settle) settleTexts(texts, work);
+  for (const { text, fate } of settle) settleText(text, fate);
   renderTyping();
   if (scroll && followChat) scrollToBottom();
 }
@@ -707,31 +698,27 @@ function stamped(el, event) {
 }
 
 /**
- * Sort a run of the turn's words that more came after. Short plain remarks followed by work
- * ("Worktree is behind main; merging.") fold into an "updates along the way" row, one per stretch
- * between kept messages, where the first of them was; anything else stays a bubble, and a long one
- * shows its first lines. The turn's last words never get here, so they always stay whole. While the
- * turn runs, the newest folded remark also shows in the working line.
+ * Fold or keep one of the turn's words, as narrationSorter settled it. Folded remarks go in an
+ * "updates along the way" row, one per stretch between kept messages, where the first of them
+ * was. While the turn runs, the newest folded remark also shows in the working line.
  */
-function settleTexts(texts, work) {
-  for (const t of texts) {
-    if (!work || !isNarration(t.text)) {
-      if (t.text.length > CLAMP_OVER) clamp(t.el);
-      view.narrationEl = null;
-      continue;
-    }
-    if (!view.narrationEl?.isConnected) {
-      view.narrationEl = h('details', { class: 'narration', 'data-at': t.el.dataset.at }, h('summary', {}), h('div', { class: 'notes' }));
-      t.el.before(view.narrationEl);
-    }
-    t.el.remove();
-    t.folded = true;
-    const notes = view.narrationEl.querySelector('.notes');
-    notes.append(h('div', { class: 'note-text' }, t.body));
-    const n = notes.childElementCount;
-    view.narrationEl.querySelector('summary').replaceChildren(
-      h('span', { class: 'st' }, '⋯'), ` ${n} update${n === 1 ? '' : 's'} along the way`);
+function settleText(t, fate) {
+  if (fate !== 'fold') {
+    if (fate === 'clamp') clamp(t.el);
+    view.narrationEl = null;
+    return;
   }
+  if (!view.narrationEl?.isConnected) {
+    view.narrationEl = h('details', { class: 'narration', 'data-at': t.el.dataset.at }, h('summary', {}), h('div', { class: 'notes' }));
+    t.el.before(view.narrationEl);
+  }
+  t.el.remove();
+  t.folded = true;
+  const notes = view.narrationEl.querySelector('.notes');
+  notes.append(h('div', { class: 'note-text' }, t.body));
+  const n = notes.childElementCount;
+  view.narrationEl.querySelector('summary').replaceChildren(
+    h('span', { class: 'st' }, '⋯'), ` ${n} update${n === 1 ? '' : 's'} along the way`);
 }
 
 /** Show a long message's first lines, with a button for the rest. */

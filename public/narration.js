@@ -31,3 +31,33 @@ const BOOKKEEPING = new Set([
 export function isBookkeeping(name) {
   return BOOKKEEPING.has(name);
 }
+
+// Cards the words before them explain.
+const CARDS = new Set(['mcp__thread__ask_question', 'mcp__thread__propose_plan']);
+
+/**
+ * Sorts a turn's words as its texts and tool calls arrive, in order. Each call returns the texts it
+ * settles as `{ text, fate }`: 'fold' (narration followed by work), 'keep', or 'clamp' (kept, long).
+ * Words followed by nothing but bookkeeping before the next words, or by a card, are kept. The
+ * turn's last words are never settled, so they always stay whole.
+ */
+export function narrationSorter() {
+  let pending = null;
+  const settle = (work) => {
+    const text = pending;
+    pending = null;
+    if (!text) return [];
+    return [{ text, fate: work && isNarration(text.text) ? 'fold' : text.text.length > CLAMP_OVER ? 'clamp' : 'keep' }];
+  };
+  return {
+    /** `text` is any object with the words as its `text`. */
+    text(text) {
+      const out = settle(false);
+      pending = text;
+      return out;
+    },
+    tool(name) {
+      return isBookkeeping(name) ? [] : settle(!CARDS.has(name));
+    },
+  };
+}

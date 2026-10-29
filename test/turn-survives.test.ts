@@ -169,3 +169,20 @@ test('a command too long to start is reported at once, not as a turn killed a mi
   assert.match(readFileSync(join(dir, 'stderr.log'), 'utf8'), /Could not start true: .*E2BIG/);
   rmSync(dir, { recursive: true, force: true });
 });
+
+test('a running ticket says when its turn started, before any claude event, and keeps it across a re-attach', async () => {
+  const id = newTicket();
+  const t0 = Date.now();
+  // The fake never sends an init event, so the page has only this to time the turn by.
+  const r = await started(id);
+  const at = r.view(store.getTicket(id)!).turnStartedAt;
+  assert.ok(at >= t0 && at <= Date.now(), `turnStartedAt ${at} is this turn's start`);
+  r.detachAll();
+
+  const next = server();
+  next.recover();
+  assert.equal(next.view(store.getTicket(id)!).turnStartedAt, at);
+  writeFileSync(release, '');
+  await until(() => !next.isRunning(id));
+  assert.equal(next.view(store.getTicket(id)!).turnStartedAt, null);
+});

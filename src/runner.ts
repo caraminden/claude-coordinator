@@ -572,6 +572,8 @@ export class Runner {
     const { total, done } = stepInfo(this.progressFor(ticket.id));
     return {
       ...ticket, queued: this.queued(ticket.id), queued_ids: (this.queues.get(ticket.id) ?? []).flatMap((m) => m.id ?? []), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
+      // When the running turn started, so the page's timer needn't wait for the turn's first event.
+      turnStartedAt: this.turns.get(ticket.id)?.startedAt ?? null,
       approvals: this.approvals.waiting(ticket.id), properties: this.store.props.forTarget('minion', ticket.id),
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),

@@ -408,7 +408,7 @@ export function appendEvent(event, scroll = true) {
   if (event.kind === 'claude' && data.type === 'system' && data.subtype === 'init') {
     view.turnActions = [];
     view.turnNote = null;
-    view.turnStartedAt = event.created_at;
+    view.turnInitAt = event.created_at;
     view.turnTexts = [];
     view.narrationEl = null;
     // Messages queued since the last turn are what this turn works on.
@@ -964,20 +964,22 @@ export function renderTyping() {
   el.hidden = !show;
   if (!show) return;
   const running = t.status === 'running';
-  const last = view.turnActions.at(-1);
-  const busy = running && last && !last.result;
+  // Until this turn's init event arrives, the per-turn state is still the last turn's.
+  const current = running && view.turnInitAt >= t.turnStartedAt;
+  const last = current && view.turnActions.at(-1);
+  const busy = last && !last.result;
   const doing = busy ? actionLabel(last.block) : 'thinking…';
   const sep = () => h('span', { class: 'sep' }, '·');
   el.title = 'Show the work so far';
   // Only once folded away, so a remark that is still a bubble isn't said twice.
-  const said = running && view.turnNote && !view.turnTexts?.length ? firstSentence(view.turnNote, 200) : '';
+  const said = current && view.turnNote && !view.turnTexts?.length ? firstSentence(view.turnNote, 200) : '';
   el.replaceChildren(
     h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
     h('span', { class: 'lines' },
       h('span', { class: 'line' },
         h('span', { class: 'lead' }, t.approvals ? 'Waiting for someone to approve or deny' : running ? 'Claude is working' : 'Claude is thinking…'),
         running && !t.approvals ? [sep(), h('span', { class: 'what' }, doing)] : '',
-        running && view.turnStartedAt ? [sep(), h('span', { class: 'time', 'aria-hidden': 'true' }, elapsedText(Date.now() - view.turnStartedAt))] : '',
+        running && t.turnStartedAt ? [sep(), h('span', { class: 'time', 'aria-hidden': 'true' }, elapsedText(Date.now() - t.turnStartedAt))] : '',
         t.queued ? [sep(), h('span', { class: 'queued', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, `${t.queued} queued`)] : ''),
       said ? h('span', { class: 'said' }, said) : ''));
   if (wasHidden && followChat) scrollToBottom();
@@ -986,5 +988,6 @@ export function renderTyping() {
 /** Ticks the turn timer without rebuilding the line (and without re-announcing it to screen readers). */
 setInterval(() => {
   const time = view?.typingEl?.querySelector('.time');
-  if (time && view.turnStartedAt && !view.typingEl.hidden) time.textContent = elapsedText(Date.now() - view.turnStartedAt);
+  const at = view?.ticket?.turnStartedAt;
+  if (time && at && !view.typingEl.hidden) time.textContent = elapsedText(Date.now() - at);
 }, 1000);

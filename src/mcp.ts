@@ -199,15 +199,17 @@ const ARTIFACT_TOOLS = [
   },
 ];
 
-const TOOLS = [
-  {
-    name: 'list_tickets',
-    description: 'List the minions in this scheme with their status and latest activity.',
-    inputSchema: {
-      type: 'object',
-      properties: { include_closed: { type: 'boolean', description: 'Include dismissed minions (default false)' } },
-    },
+const LIST_TICKETS = {
+  name: 'list_tickets',
+  description: 'List the minions in this scheme with their status and latest activity.',
+  inputSchema: {
+    type: 'object',
+    properties: { include_closed: { type: 'boolean', description: 'Include dismissed minions (default false)' } },
   },
+};
+
+const TOOLS = [
+  LIST_TICKETS,
   {
     name: 'read_ticket',
     description: "Read a minion's details and the most recent messages in its conversation.",
@@ -554,6 +556,7 @@ const THREAD_TOOLS = [
   SETTLE_QUESTION,
   STRIKE_TEXT,
   PROPOSE_PLAN,
+  { ...LIST_TICKETS, description: `${LIST_TICKETS.description} Read-only: their titles, states and notes, not their conversations.` },
   LIST_PROPERTIES,
   {
     name: 'set_properties',
@@ -665,9 +668,8 @@ async function runTool(name: string, args: any): Promise<string> {
   if (!toolList().some((t) => t.name === name)) throw new Error(`Unknown tool ${name}`);
   switch (name) {
     case 'list_tickets': {
-      const { tickets } = await call('GET', `/api/projects/${PROJECT}`);
-      const shown = tickets.filter((t: any) => args.include_closed || t.status !== 'closed');
-      return shown.length ? shown.map(ticketLine).join('\n') : 'No minions.';
+      const { tickets } = await call('GET', `/api/projects/${PROJECT}/tickets${args.include_closed ? '?include_closed=1' : ''}`);
+      return tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.';
     }
     case 'read_ticket': {
       const n = await id(args);

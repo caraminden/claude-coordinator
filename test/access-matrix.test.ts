@@ -70,7 +70,7 @@ const OTHER_ROUTES: Probe[] = [
   P('GET', '/api/stream'), P('GET', '/api/costs'), P('GET', '/api/prs'), P('POST', '/api/taskmaster'),
   P('GET', '/api/projects'), P('POST', '/api/projects'), P('GET', '/api/projects/:p'), P('PATCH', '/api/projects/:p'),
   P('GET', '/api/projects/:p/instructions/history'), P('GET', '/api/projects/:p/instructions/sources'),
-  P('POST', '/api/projects/:p/tickets'), P('GET', '/api/projects/:p/briefs'), P('GET', '/api/projects/:p/properties'), P('POST', '/api/projects/:p/properties/keys'),
+  P('GET', '/api/projects/:p/tickets'), P('GET', '/api/projects/:p/tickets?include_closed=1'), P('POST', '/api/projects/:p/tickets'), P('GET', '/api/projects/:p/briefs'), P('GET', '/api/projects/:p/properties'), P('POST', '/api/projects/:p/properties/keys'),
   P('POST', '/api/projects/:p/properties/values'), P('POST', '/api/projects/:p/properties/review'),
   P('POST', '/api/projects/:p/properties/proposals'), P('GET', '/api/projects/:p/inbox'), P('GET', '/api/projects/:p/recap'),
   P('GET', '/api/projects/:p/views'), P('POST', '/api/projects/:p/views'), P('DELETE', '/api/projects/:p/views/0'),

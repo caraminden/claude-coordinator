@@ -122,6 +122,9 @@ function searchProject(app: App, projectId: number, q: string, ticketId?: number
 
 const PEOPLE_AND_TASKMASTER = ['person', 'taskmaster'] as const;
 
+// What one line of list_tickets shows (ticketLine in src/mcp.ts), and all a minion gets of another.
+const LINE_FIELDS = ['number', 'title', 'tag', 'properties', 'build', 'model', 'effort', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'last_activity'] as const;
+
 export const projectRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects', who: ['person'],
@@ -164,6 +167,22 @@ export const projectRoutes: Route[] = [
       // When this person last looked at each thread, so rows they have already seen can be shown quieter.
       const seen = caller ? {} : app.store.seenTimes(session.name, project.id);
       return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, seen });
+    },
+  },
+  {
+    // The scheme's minions as list_tickets prints them, for its minions too: read-only, and only the
+    // line's fields (no approval cards, costs or paths). checkRole keeps a minion to its own scheme.
+    method: 'GET', path: '/api/projects/:project/tickets', who: ['person', 'taskmaster', 'minion'],
+    handler({ res, url, app, project }) {
+      const closed = url.searchParams.get('include_closed') === '1';
+      const tickets = app.store
+        .listTickets(project.id)
+        .filter((t) => t.kind === 'ticket' && (closed || t.status !== 'closed'))
+        .map((t) => {
+          const v = app.runner.view(t);
+          return Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]]));
+        });
+      return json(res, 200, { tickets });
     },
   },
   {

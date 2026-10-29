@@ -34,8 +34,8 @@ flock -w 900 9 || refuse "another deploy or landing has held the lock for 15 min
 old=$(git -C "$SOURCE" rev-parse main)
 say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
 if ! git rebase -q main; then
-  git rebase --abort
-  refuse "the rebase onto main hit conflicts, so nothing landed. Run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again"
+  git rebase --abort 2>/dev/null || true # nothing to abort if it never started (an untracked file in the way)
+  refuse "the rebase onto main failed (see git's output above), so nothing landed. On conflicts: run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again"
 fi
 
 say "running the tests"
@@ -50,10 +50,10 @@ git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward mai
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
 
 if ! DEPLOY_LOCKED=1 "$here/tools/deploy.sh"; then
-  # Only when the live checkout went back (a failed check): main follows it, unless it moved on since.
+  # Only when the live checkout doesn't have it (a failed check put it back, or it never pulled): main follows, unless it moved on since.
   if ! git -C "$LIVE" merge-base --is-ancestor "$tip" HEAD 2>/dev/null && [ "$(git -C "$SOURCE" rev-parse main)" = "$tip" ]; then
     git -C "$SOURCE" reset -q --keep "$old"
-    refuse "the deploy failed before going live, so main is back at $(git log -1 --format=%h "$old"); $branch keeps the rebased work. Fix it and land again"
+    refuse "the deploy stopped before the live checkout took it, so main is back at $(git log -1 --format=%h "$old"); $branch keeps the rebased work. Fix it and land again"
   fi
   refuse "the deploy failed after main moved; main keeps $(git log -1 --format=%h "$tip"). Read the deploy's output above"
 fi

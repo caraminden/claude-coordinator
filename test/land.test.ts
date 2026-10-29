@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawnSync, execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { after, test } from 'node:test';
 
 // tools/land.sh on throwaway repos: a scheme repo on main, a minion worktree, and a live clone. The
@@ -10,8 +12,9 @@ import { after, test } from 'node:test';
 const land = join(import.meta.dirname, '..', 'tools', 'land.sh');
 const root = mkdtempSync(join(tmpdir(), 'land-'));
 after(() => rmSync(root, { recursive: true, force: true }));
-// NODE_TEST_CONTEXT would make land.sh's own `node --test` report to this runner instead of exiting red.
-const env = { ...process.env, NODE_TEST_CONTEXT: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+// NODE_TEST_CONTEXT would make land.sh's own `node --test` report to this runner instead of exiting red;
+// COORDINATOR_* would have the real deploy.sh report to the live server.
+const env = { ...process.env, NODE_TEST_CONTEXT: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
 
 let n = 0;
@@ -44,7 +47,7 @@ exit "\${FAKE_DEPLOY_EXIT:-0}"
     git(where, 'commit', '-qm', `${file}: ${text.trim()}`);
   };
   const note = () => (existsSync(join(dir, 'note')) ? readFileSync(join(dir, 'note'), 'utf8').trim() : null);
-  return { source, live, wt, run, commit, note };
+  return { dir, source, live, wt, run, commit, note };
 }
 
 test('rebases onto main, tests, fast-forwards main, and deploys holding the lock', () => {
@@ -78,7 +81,7 @@ test('a conflict aborts the rebase and lands nothing', () => {
   const main = git(r.source, 'rev-parse', 'main');
   const res = r.run();
   assert.equal(res.status, 1);
-  assert.match(res.stderr, /hit conflicts/);
+  assert.match(res.stderr, /rebase onto main failed/);
   assert.equal(git(r.wt, 'rev-parse', 'HEAD'), tip, 'the branch is as it was');
   assert.equal(git(r.wt, 'status', '--porcelain'), '');
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
@@ -103,4 +106,40 @@ test('refuses uncommitted work, main itself, and arguments', () => {
   assert.match(spawnSync('bash', [land, '--now'], { cwd: r.wt, encoding: 'utf8', env }).stderr, /takes no arguments/);
   const onMain = spawnSync('bash', [land], { cwd: r.source, encoding: 'utf8', env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source } });
   assert.match(onMain.stderr, /not main/);
+});
+
+test('the real deploy.sh takes the lock land.sh holds, and lets go of it once the restart is queued', async () => {
+  const r = setup();
+  // The real script, a boot check that passes, and stand-ins for systemd: the queued "restart" waits
+  // for the lock, then counts as live.
+  copyFileSync(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), join(r.source, 'tools', 'deploy.sh'));
+  writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'real deploy.sh');
+  git(r.live, 'pull', '-q', '--ff-only');
+  git(r.wt, 'rebase', '-q', 'main');
+  const base = git(r.source, 'rev-parse', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const bin = join(r.dir, 'bin');
+  const restarted = join(r.dir, 'restarted');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'systemctl'), '#!/bin/sh\nexit 1\n');
+  writeFileSync(join(bin, 'systemd-run'), `#!/usr/bin/env bash
+lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/lock
+(flock -w 20 "$lock" true && echo got >${JSON.stringify(restarted)}) >/dev/null 2>&1 &
+`);
+  for (const f of ['systemctl', 'systemd-run']) chmodSync(join(bin, f), 0o755);
+  const server = createServer((_, res) => res.end(JSON.stringify({ ok: true, commit: existsSync(restarted) ? git(r.source, 'rev-parse', 'main') : base })));
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  try {
+    const url = `http://127.0.0.1:${(server.address() as any).port}`;
+    const res = await promisify(execFile)('bash', [join(import.meta.dirname, '..', 'tools', 'land.sh')], {
+      cwd: r.wt, encoding: 'utf8',
+      env: { ...env, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_URL: url, DEPLOY_DB: join(r.dir, 'none.db'), DEPLOY_REMOTE: '' },
+    });
+    assert.match(res.stderr, /live now: the server restarted on/);
+    assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.wt, 'rev-parse', 'HEAD'));
+  } finally {
+    server.close();
+  }
 });

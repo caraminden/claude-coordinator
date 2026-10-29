@@ -33,10 +33,17 @@ export async function mountChat(chatId, ticket, events) {
   for (const ev of events) appendEvent(ev, false);
   if (ticket.branch) refreshBranch(chatId);
   markSeen(chatId);
-  // Open at the first thing you haven't seen; a minion you've never opened starts at the bottom.
-  const firstUnread = seenAt ? [...document.getElementById('log').children].find((el) => Number(el.dataset.at) > seenAt) : null;
-  if (firstUnread) scrollToUnread(firstUnread);
-  else restoreScroll(chatId);
+  // Open at the first thing you haven't seen, marked New; a minion you've never opened, at its start.
+  const items = [...document.getElementById('log').children];
+  const at = items.findIndex((el) => Number(el.dataset.at) > (seenAt ?? 0));
+  if (at < 0) restoreScroll(chatId);
+  else {
+    const divider = h('div', { class: 'unread-divider', role: 'separator' }, h('span', {}, 'New'));
+    items[at].before(divider);
+    // A Taskmaster's history runs long; past that much unread, its newest matters more than where you left off.
+    if (isCoordinator(ticket) && items.length - at > TASKMASTER_UNREAD_LIMIT) scrollToBottom();
+    else scrollToUnread(divider);
+  }
   try {
     if (sessionStorage.getItem('cc-refocus')) {
       sessionStorage.removeItem('cc-refocus');
@@ -47,6 +54,9 @@ export async function mountChat(chatId, ticket, events) {
   await catchUpEvents();
   if (isCoordinator(ticket)) await showRecap();
 }
+
+// Unread chat items (messages, cards, notes) past which a Taskmaster opens at the bottom.
+const TASKMASTER_UNREAD_LIMIT = 40;
 
 export function chatSection(chatId, ticket, events) {
   const form = composer(chatId, ticket);

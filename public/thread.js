@@ -872,10 +872,26 @@ function optionThumb(ticketId, o) {
 // Messages the app sends a thread about its pull request (see src/github.ts).
 const GITHUB_NAME = 'GitHub';
 const COORDINATOR_NAME = 'Coordinator';
+// APP_NAME in src/appname.ts: wake-ups and chained-minion notices.
+const APP_AUTHOR = 'Citadel';
+
+/**
+ * Who sent a message that isn't from a person (authors from server.ts), as the fold shows them:
+ * the Taskmaster, another scheme's ("Taskmaster of Delve"), a minion ("#12 Title"), the app or
+ * GitHub. null for a person.
+ */
+function machineAuthor(author) {
+  author ??= '';
+  if (author === COORDINATOR_NAME || author === 'Taskmaster') return taskmasterName();
+  const scheme = author.match(/^Taskmaster of (.+)$/)?.[1];
+  if (scheme) return `${scheme} Taskmaster`;
+  return author === APP_AUTHOR || author === GITHUB_NAME || /^#\d+ /.test(author) ? author : null;
+}
 
 /** A chat message from a person; `about`, for a comment on a file, links that file. */
 export function userBubble(author, text, imageSrcs, about = null) {
   const github = author === GITHUB_NAME;
+  const preview = (text ?? '').replace(/[#*_`>\[\]]/g, '').replace(/\s+/g, ' ').trim();
   const msg = h('div', { class: github ? 'msg user github' : 'msg user' }, h('div', { class: 'who' }, author,
     about ? [' on ', h('a', { class: 'about', href: fileHref(about.ticketId, about.path), title: about.path }, about.name)] : ''));
   // GitHub's messages end lines with bare URLs, which Markdown alone would leave as text.
@@ -885,13 +901,9 @@ export function userBubble(author, text, imageSrcs, about = null) {
     msg.append(h('div', { class: 'images' }, imageSrcs.map((src) =>
       h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
   }
-  // Hand-offs between Taskmasters and minions are rarely worth reading in full, so they start
-  // folded to one line: the Taskmaster's to a minion, and a minion's ("#12 Title") or another
-  // scheme's Taskmaster's ("Taskmaster of Delve") to this one (authors from server.ts).
-  const otherScheme = author?.match(/^Taskmaster of (.+)$/)?.[1];
-  if (author === COORDINATOR_NAME || author === 'Taskmaster' || otherScheme || /^#\d+ /.test(author ?? '')) {
-    const preview = (text ?? '').replace(/[#*_`>\[\]]/g, '').replace(/\s+/g, ' ').trim();
-    const who = otherScheme ? `${otherScheme} Taskmaster` : author.startsWith('#') ? author : taskmasterName();
+  // Messages between Claudes and from the app aren't meant for people, so they start folded to one line.
+  const who = machineAuthor(author);
+  if (who) {
     msg.querySelector('.who').remove();
     return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, who), h('span', { class: 'preview' }, preview)), msg);
   }

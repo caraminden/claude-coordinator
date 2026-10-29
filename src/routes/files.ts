@@ -4,14 +4,14 @@ import { randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { basename, isAbsolute, join, sep } from 'node:path';
+import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { fileType, resolveFile } from '../artifacts.ts';
+import { fileTitle, fileType, resolveFile } from '../artifacts.ts';
 import type { Artifact, Ticket } from '../db.ts';
 import type { MessageFile } from '../runner.ts';
 import { isUploadName, MAX_UPLOADS, opensInline } from '../uploads.ts';
 import { projectDir, projectSharedDir } from '../workspace.ts';
-import { HttpError, json, readJson, SECURITY_HEADERS, type App, type Route } from '../http.ts';
+import { HttpError, json, readJson, SECURITY_HEADERS, str, type App, type Route } from '../http.ts';
 
 export function artifactView(app: App, a: Artifact & { ticket_title?: string; ticket_kind?: string; ticket_number?: number | null }) {
   const ticket = a.ticket_title === undefined ? app.store.getTicket(a.ticket_id) : null;
@@ -54,6 +54,28 @@ export const ticketRoots = (app: App, ticket: Ticket) => [ticket.cwd, app.shared
 /** A file a ticket may show (see resolveFile), or null. */
 export function resolveTicketFile(app: App, ticket: Ticket, path: string) {
   return resolveFile(path, ticket.cwd, ticketRoots(app, ticket));
+}
+
+/**
+ * The artifact of scheme `projectId` that `caller` means: by id, or by a path as it linked it (absolute,
+ * or relative to its working directory) or as list_artifacts shows it.
+ */
+function findPinTarget(app: App, projectId: number, caller: Ticket, id: unknown, path: unknown): Artifact {
+  if (id != null) {
+    const a = Number.isInteger(id) ? app.store.getArtifact(id as number) : undefined;
+    if (!a || a.project_id !== projectId) throw new HttpError(404, `No artifact ${id} in this scheme; list_artifacts shows their ids`);
+    return a;
+  }
+  if (typeof path !== 'string' || !path.trim() || path.includes('\0')) throw new HttpError(400, 'Give the artifact (its id) or the path you linked');
+  const p = path.trim();
+  const abs = isAbsolute(p) ? normalize(p) : caller.cwd ? join(caller.cwd, p) : null;
+  const views = app.store.listArtifacts(projectId).map((a) => artifactView(app, a));
+  // The file the caller linked wins over another minion's that shows under the same path.
+  const exact = views.filter((v) => v.abs === abs);
+  const hits = exact.length ? exact : views.filter((v) => v.display_path === p);
+  if (hits.length === 1) return hits[0];
+  if (!hits.length) throw new HttpError(404, `No artifact at ${p} in this scheme. A file becomes one once a reply links it; list_artifacts shows them`);
+  throw new HttpError(409, `${hits.length} artifacts match ${p} (ids ${hits.map((a) => a.id).join(', ')}); give the id`);
 }
 
 /** Serve a file found by resolveFile, with byte ranges and a sandboxing CSP. */
@@ -165,8 +187,29 @@ export async function messageFiles(app: App, ticket: Ticket, raw: unknown): Prom
 
 export const fileRoutes: Route[] = [
   {
-    method: 'GET', path: '/api/projects/:project/artifacts', who: ['person'],
-    handler: ({ res, app, project }) => json(res, 200, app.store.listArtifacts(project.id).map((a) => artifactView(app, a))),
+    method: 'GET', path: '/api/projects/:project/artifacts', who: ['person', 'taskmaster', 'minion'],
+    async handler({ res, url, app, project }) {
+      const views = app.store.listArtifacts(project.id).map((a) => artifactView(app, a));
+      // ?titles reads each document's own title, so an agent can find one by the name people use.
+      if (!url.searchParams.has('titles')) return json(res, 200, views);
+      return json(res, 200, await Promise.all(views.map(async (v) => ({ ...v, title: v.missing ? null : await fileTitle(v.abs) }))));
+    },
+  },
+  {
+    // A Taskmaster or minion pins (or unpins) an artifact of its own scheme because a person asked;
+    // people use /api/artifacts/:artifact/pin.
+    method: 'POST', path: '/api/projects/:project/artifacts/pin', who: ['taskmaster', 'minion'],
+    async handler({ req, res, app, project, caller }) {
+      const body = await readJson(req);
+      const asker = str(body.requested_by, 'requested_by', 60);
+      if (/[\n\r]/.test(asker)) throw new HttpError(400, 'requested_by must be a login name');
+      const a = findPinTarget(app, project.id, caller!, body.artifact, body.path);
+      const by = `${caller!.kind === 'coordinator' ? 'Taskmaster' : `#${caller!.number}`} for ${asker}`;
+      app.store.setArtifactPinned(a.id, body.pinned ? by : null);
+      app.broadcast({ type: 'artifacts', projectId: project.id });
+      const updated = app.store.getArtifact(a.id);
+      return json(res, 200, { artifact: updated ? artifactView(app, updated) : null, removed: !updated });
+    },
   },
   { method: 'GET', path: '/api/projects/:project/shared', who: ['person'], handler: async ({ res, app, project }) => json(res, 200, await app.sharedFiles(project.id)) },
   {

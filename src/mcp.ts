@@ -176,6 +176,29 @@ const STRIKE_TEXT = {
   },
 };
 
+const PIN_TARGET = {
+  artifact: { type: 'integer', description: 'The artifact id, from list_artifacts' },
+  path: { type: 'string', description: 'Or the path you linked it by: absolute, or relative to your working directory (a path list_artifacts shows works too)' },
+  requested_by: { type: 'string', description: 'The login name of the person who asked, as in "[Cara]: ..."; it shows as "pinned by … for Cara"' },
+};
+const ARTIFACT_TOOLS = [
+  {
+    name: 'list_artifacts',
+    description: "List this scheme's artifacts (the files people see in the Artifacts panel): id, title, path, which minion showed it, and whether it is pinned or missing. Use it to find one a person named, e.g. \"Delve Glossary\".",
+    inputSchema: { type: 'object', properties: { pinned_only: { type: 'boolean', description: 'Only pinned ones (default false)' } } },
+  },
+  {
+    name: 'pin_artifact',
+    description: "Pin an artifact of this scheme to the top of the Artifacts panel. Only when a person asked you to pin it: never on your own initiative. Give the artifact id or the path you linked, and who asked.",
+    inputSchema: { type: 'object', properties: PIN_TARGET, required: ['requested_by'] },
+  },
+  {
+    name: 'unpin_artifact',
+    description: "Unpin an artifact of this scheme. Only when a person asked you to. Unpinning a missing one (its file is gone) removes it from the panel for good, as the panel's own unpin does.",
+    inputSchema: { type: 'object', properties: PIN_TARGET, required: ['requested_by'] },
+  },
+];
+
 const TOOLS = [
   {
     name: 'list_tickets',
@@ -404,6 +427,7 @@ const TOOLS = [
       },
     },
   },
+  ...ARTIFACT_TOOLS,
 ];
 
 /** How long a call keeps trying while the app restarts: the turn outlives the server, its calls wait for the next one. */
@@ -590,6 +614,7 @@ const THREAD_TOOLS = [
       properties: { reason: { type: 'string', description: 'Optional one-line summary shown in the minion with the dismissal, e.g. "Merged abc1234; live after the restart"' } },
     },
   },
+  ...ARTIFACT_TOOLS,
 ];
 
 // Claude Code's permission-prompt tool (--permission-prompt-tool): not one for Claude to call itself.
@@ -777,6 +802,18 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!r.waiting) return `${what} is live already (the server runs \`${String(r.head).slice(0, 7)}\`), so there is nothing to wait for.`;
       return `Waiting for ${what}: ${APP_NAME} sends ${ROLE === 'thread' ? 'you' : 'the minion'} a message once it is live.${ROLE === 'thread' ? ' Set state parked and end your turn.' : ''}`;
     }
+    case 'list_artifacts': {
+      const all = await call('GET', `/api/projects/${PROJECT}/artifacts?titles`);
+      const shown = all.filter((a: any) => !args.pinned_only || a.pinned_at);
+      return shown.length ? shown.map(artifactLine).join('\n') : args.pinned_only ? 'Nothing pinned.' : 'No artifacts in this scheme yet.';
+    }
+    case 'pin_artifact':
+    case 'unpin_artifact': {
+      const pinned = name === 'pin_artifact';
+      const r = await call('POST', `/api/projects/${PROJECT}/artifacts/pin`, { artifact: args.artifact ?? null, path: args.path ?? null, requested_by: args.requested_by, pinned });
+      if (r.removed) return 'Unpinned. Its file was gone, so it is off the Artifacts panel now.';
+      return `${pinned ? 'Pinned' : 'Unpinned'}. ${artifactLine(r.artifact)}`;
+    }
     case 'list_schedules': {
       const { schedules } = await call('GET', `/api/projects/${PROJECT}/schedules`);
       return schedules.length ? schedules.map(scheduleLine).join('\n') : 'Nothing scheduled.';
@@ -803,6 +840,16 @@ async function runTool(name: string, args: any): Promise<string> {
     default:
       throw new Error(`Unknown tool ${name}`);
   }
+}
+
+function artifactLine(a: any): string {
+  return [
+    `[${a.id}] ${a.title ?? a.name}`,
+    a.display_path,
+    a.ticket_kind === 'coordinator' ? 'from the Taskmaster' : `from #${a.ticket_number}`,
+    a.pinned_at ? `pinned by ${a.pinned_by}` : '',
+    a.missing ? 'missing (file gone)' : '',
+  ].filter(Boolean).join(' | ');
 }
 
 function scheduleLine(s: any): string {

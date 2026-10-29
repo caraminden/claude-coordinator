@@ -1,6 +1,6 @@
 // Artifacts: documents and pages that tickets create in their working directories.
 import { execFile } from 'node:child_process';
-import { lstat, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, normalize, sep } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -165,6 +165,26 @@ export async function resolveFile(path: string, cwd: string, roots: string[]) {
     }
   } catch {}
   return null;
+}
+
+/** A document's own title, from the start of the file: an HTML page's <title> or a Markdown file's first heading. */
+export async function fileTitle(abs: string): Promise<string | null> {
+  const kind = fileType(abs)?.kind;
+  if (kind !== 'html' && kind !== 'markdown') return null;
+  let head: string;
+  try {
+    const f = await open(abs);
+    try {
+      const { buffer, bytesRead } = await f.read(Buffer.alloc(8192), 0, 8192, 0);
+      head = buffer.subarray(0, bytesRead).toString('utf8');
+    } finally {
+      await f.close();
+    }
+  } catch {
+    return null;
+  }
+  const m = kind === 'html' ? head.match(/<title[^>]*>([^<]*)</i) : head.match(/^#\s+(.+)$/m);
+  return m?.[1].replace(/\s+/g, ' ').trim().slice(0, 200) || null;
 }
 
 /** Why `path` can't be a question option's picture, or null if it can: an image or video the ticket may show. */

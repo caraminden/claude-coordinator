@@ -25,6 +25,14 @@ test('a build named in the title counts, Delve style; the build field wins', () 
   ]), [['build-7', true, [1, 4]], ['feature', false, [5]], ['build-8', false, [2, 3]], ['build-9', false, [6]]]);
 });
 
+test('parked minions leave their build or kind for a Parked section at the bottom', () => {
+  assert.deepEqual(shape([
+    { n: 1, tag: 'bug', state: 'parked', status: 'idle' }, { n: 2, tag: 'bug' }, { n: 3, tag: 'feature', build: 7, state: 'parked' },
+    { n: 4, tag: 'feature', build: 8 }, { n: 5, tag: 'idea', build: 9 }, { n: 6, tag: 'idea', state: 'parked', status: 'running' },
+    { n: 7, tag: 'design', state: 'parked', approvals: 1 },
+  ]), [['build-8', true, [4]], ['bug', false, [2]], ['design', false, [7]], ['idea', false, [6]], ['build-9', false, [5]], ['parked', false, [1, 3]]]);
+});
+
 test('search matches title, exact number and property values, not anything else', async () => {
   const { threadMatches } = await import('../public/threadgroups.js');
   const t = { number: 78, title: 'Minion search', created_by: 'Cara', last_activity: 'Ran the tests', note: 'needs a pick',

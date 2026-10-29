@@ -524,6 +524,7 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .g-process > h3 { color: hsl(180 55% 36%); }
 .g-other > h3 { color: hsl(30 35% 48%); }
 .g-idea > h3 { color: hsl(45 75% 42%); }
+.g-parked > h3 { color: var(--muted); }
 .thread-row { text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 0.4rem; align-items: baseline; padding: 0.25rem 0.45rem; border-radius: 6px; text-decoration: none; color: var(--ink); font-size: 0.9em; border: 1px solid transparent; }
 .thread-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }
 .thread-row:hover { border-color: var(--line); }

@@ -161,7 +161,7 @@ export function renderSidebar() {
   const closed = tickets.filter((t) => t.status === 'closed').sort((a, b) => b.updated_at - a.updated_at);
   const sections = threadSections(open, Object.keys(TAGS)).map((s) =>
     h('section', { class: `thread-group g-${s.build ? 'build' : s.key}` },
-      h('h3', {}, s.build ? ['Build ', s.build, s.current ? h('span', { class: 'muted' }, ' current') : ''] : s.tag ? TAGS[s.tag].section : 'Other'),
+      h('h3', {}, s.build ? ['Build ', s.build, s.current ? h('span', { class: 'muted' }, ' current') : ''] : s.key === 'parked' ? 'Parked' : s.tag ? TAGS[s.tag].section : 'Other'),
       s.rows.sort(byUrgency).map((t) => threadRow(t))));
   let closedGroup = '';
   if (closed.length) {

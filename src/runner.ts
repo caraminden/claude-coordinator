@@ -442,7 +442,7 @@ function projectInstructions(project: Project): string[] {
 
 /** How the chat shows a turn's words and links, for minions and Taskmasters alike. */
 const CHAT_FACTS = [
-  'The chat keeps only a turn\'s last text whole: short remarks written before more tool calls fold away, and long ones show just their first lines. So make every tool call first (set_thread_status and close_self too) and write the answer last, with nothing after it.',
+  'The chat keeps only a turn\'s last text whole: short remarks written before more tool calls fold away, and long ones show just their first lines. So make every tool call first, status and bookkeeping calls too, and write the answer last, with nothing after it.',
   'Write minions as #N and pull requests as PR #N, outside backticks: the chat links both to the minion (a PR to the one that owns it). Write another scheme\'s minion as "<scheme name> #N". Never paste GitHub URLs.',
 ];
 

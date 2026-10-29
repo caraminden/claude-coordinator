@@ -13,7 +13,7 @@ import { WS_SUFFIX, type MachineServer } from './machines.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
 import type { Ship } from './branch.ts';
-import { claudeConfigDir, lastEffort, projectSlug, restoreSession, saveSession } from './sessions.ts';
+import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession } from './sessions.ts';
 import { restoreTicketDir } from './workspace.ts';
 import { previewKey } from './previews.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
@@ -427,11 +427,12 @@ const READ_ONLY_GIT = [
  * plain reads (grep, cat, ls, find) in added directories, and `git -C <dir> <read-only command>` is
  * allowed per folder. Each rule pins the exact folder as a prefix, since `*` in a rule would also
  * match `git -C x commit -m "fix log"`. Anything else that would ask for approval is denied.
- * Two more folders are added with no deny rule, so acceptEdits lets the coordinator read and write
- * files in them (tried with a real run, the memory folder included; other shell commands are still
- * denied): the project's shared folder and the repo's Claude Code memory.
+ * Two more folders are added with no deny rule: the project's shared folder, which acceptEdits then
+ * lets the coordinator write, and the repo's Claude Code memory. Claude Code treats files under its
+ * config dir as sensitive, so neither allow rules nor a hook's allow let it write there (tried with
+ * real runs); making that folder its auto-memory does, so its memory is the one minions load too.
  */
-export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null): { addDirs: string[]; settings: { permissions: object } } {
+export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null): { addDirs: string[]; settings: { permissions: object; autoMemoryDirectory?: string } } {
   let ticketDirs: string[] = [];
   try {
     ticketDirs = readdirSync(ticketsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(ticketsDir, d.name));
@@ -450,6 +451,7 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sh
         deny: [...roots.map((d) => `Edit(/${d}/**)`), 'Bash(git * --output*)'],
         allow: gitDirs.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`)),
       },
+      ...(memoryDir ? { autoMemoryDirectory: memoryDir } : {}),
     },
   };
 }
@@ -1021,12 +1023,12 @@ export class Runner {
     // Lets edit-only sessions write there too, not just in their working directory.
     const addDirs = [filesDir, sharedDir].filter((d): d is string => !!d);
     // One --settings per turn: the tripwire hook, plus approval rules or the Taskmaster's access rules.
-    const settings: { permissions?: object; hooks: object } = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)) };
+    const settings: { permissions?: object; autoMemoryDirectory?: string; hooks: object } = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)) };
     if (rules.length) settings.permissions = { ask: rules };
     if (ticket.kind === 'coordinator') {
       const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project), sharedDir, memoryDir);
       addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
-      settings.permissions = access.settings.permissions;
+      Object.assign(settings, access.settings);
     }
     // As a file: the Taskmaster's git rules (one per worktree) outgrew Linux's 128 KiB cap on one argument (E2BIG).
     writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings));
@@ -1069,6 +1071,14 @@ export class Runner {
       if (restored) console.log(`Ticket ${ticket.id}: restored the Claude session from the database (${restored} file${restored === 1 ? '' : 's'}).`);
     } catch (err: any) {
       this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${err.message}` });
+    }
+    // The Taskmaster's auto-memory moved to the repo memory (#98); bring its old notes along once.
+    if (memoryDir) {
+      try {
+        mergeMemory(join(configDir, 'projects', projectSlug(ticket.cwd), 'memory'), memoryDir);
+      } catch (err: any) {
+        this.emit(ticket.id, 'note', { text: `Could not move the Taskmaster's old memory into ${memoryDir}: ${err.message}` });
+      }
     }
 
     writeFileSync(join(dir, 'prompt.jsonl'), prompt);

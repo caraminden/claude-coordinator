@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { findArtifacts } from '../src/artifacts.ts';
 import { coordinatorAccess, systemPrompt } from '../src/runner.ts';
-import { projectSlug } from '../src/sessions.ts';
+import { mergeMemory, projectSlug } from '../src/sessions.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'shared-folder-'));
@@ -35,6 +35,32 @@ test('the coordinator adds the shared and memory folders without denying edits t
   assert.ok(!deny.some((r: string) => r.includes(shared) || r.includes(memory)));
   // Still no shell: the only Bash rules are the read-only ones.
   assert.ok(allow.every((r: string) => r.startsWith('Bash(') && !/\b(commit|push|checkout)\b/.test(r)));
+  // Claude Code refuses allow rules for files under ~/.claude; only its auto-memory folder is writable (#98).
+  assert.equal(settings.autoMemoryDirectory, memory);
+});
+
+test("the Taskmaster's old memory folds into the repo memory once, keeping what is there", () => {
+  const old = join(root, 'merge', 'old');
+  const repoMem = join(root, 'merge', 'repo');
+  mkdirSync(old, { recursive: true });
+  mkdirSync(repoMem, { recursive: true });
+  writeFileSync(join(old, 'MEMORY.md'), '- [Naming](naming.md) — names\n- [Shared](shared.md) — same note\n- [Clash](clash.md) — mine\n');
+  writeFileSync(join(old, 'naming.md'), 'naming');
+  writeFileSync(join(old, 'shared.md'), 'same');
+  writeFileSync(join(old, 'clash.md'), 'taskmaster version');
+  writeFileSync(join(repoMem, 'MEMORY.md'), '- [Shared](shared.md) — same note\n- [Clash](clash.md) — theirs');
+  writeFileSync(join(repoMem, 'shared.md'), 'same');
+  writeFileSync(join(repoMem, 'clash.md'), 'repo version');
+
+  assert.equal(mergeMemory(old, repoMem), 2);
+  assert.equal(readFileSync(join(repoMem, 'naming.md'), 'utf8'), 'naming');
+  assert.equal(readFileSync(join(repoMem, 'clash.md'), 'utf8'), 'repo version');
+  assert.equal(readFileSync(join(repoMem, 'taskmaster-clash.md'), 'utf8'), 'taskmaster version');
+  assert.equal(readFileSync(join(repoMem, 'MEMORY.md'), 'utf8'), '- [Shared](shared.md) — same note\n- [Clash](clash.md) — theirs\n- [Naming](naming.md) — names\n- [Clash](taskmaster-clash.md) — mine\n');
+  // The old folder is set aside, so a note deleted later doesn't come back.
+  assert.ok(!existsSync(old));
+  assert.equal(readdirSync(join(root, 'merge')).filter((n) => n.startsWith('old-merged-')).length, 1);
+  assert.equal(mergeMemory(old, repoMem), 0);
 });
 
 test('without a repo there is no memory folder to add', () => {

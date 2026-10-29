@@ -2,7 +2,7 @@
 // and the project's auto-memory) under its config dir, which belongs to one account on one machine.
 // These copy that state into the app's database after each turn and put it back before the next,
 // so a thread survives a switch of Claude account or config dir.
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
@@ -19,6 +19,43 @@ export function claudeConfigDir(env: NodeJS.ProcessEnv): string {
 /** Claude Code's folder name for a working directory under `projects/`. */
 export function projectSlug(path: string): string {
   return path.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+/**
+ * Fold a Taskmaster's old auto-memory (under its own working folder) into the scheme's repo memory,
+ * which is its auto-memory now, then rename the old folder so this runs once. A note never replaces
+ * one already there: a clashing name lands as `taskmaster-<name>`. Index lines the repo's MEMORY.md
+ * lacks are appended. Safe to run again if the old folder comes back from the database.
+ */
+export function mergeMemory(oldDir: string, memoryDir: string): number {
+  if (oldDir === memoryDir || !existsSync(oldDir)) return 0;
+  mkdirSync(memoryDir, { recursive: true });
+  let index = '';
+  let copied = 0;
+  const renamed: [string, string][] = [];
+  for (const name of readdirSync(oldDir)) {
+    const from = join(oldDir, name);
+    if (!statSync(from).isFile()) continue;
+    if (name === 'MEMORY.md') {
+      index = readFileSync(from, 'utf8');
+      continue;
+    }
+    const text = readFileSync(from, 'utf8');
+    let to = name;
+    if (existsSync(join(memoryDir, to)) && readFileSync(join(memoryDir, to), 'utf8') !== text) to = `taskmaster-${name}`;
+    if (to !== name) renamed.push([name, to]);
+    if (!existsSync(join(memoryDir, to))) {
+      writeFileSync(join(memoryDir, to), text);
+      copied++;
+    }
+  }
+  const target = join(memoryDir, 'MEMORY.md');
+  const have = existsSync(target) ? readFileSync(target, 'utf8') : '';
+  const lines = index.split('\n').filter((l) => l.trim()).map((l) => renamed.reduce((s, [a, b]) => s.replaceAll(`](${a})`, `](${b})`), l));
+  const missing = lines.filter((l) => !have.includes(l));
+  if (missing.length) writeFileSync(target, `${have}${have && !have.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
+  renameSync(oldDir, `${oldDir}-merged-${Date.now()}`);
+  return copied;
 }
 
 interface Scope {

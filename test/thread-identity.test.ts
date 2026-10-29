@@ -16,6 +16,8 @@ test('a thread token may read, relabel, ask and close only its own internal id',
   assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/questions`));
   assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/close`));
   assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/coordinator`));
+  assert.ok(threadMayCall(ID, 'POST', `/api/tickets/${ID}/strike`));
+  assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${NUMBER}/strike`));
   assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${NUMBER}/coordinator`));
   assert.ok(!threadMayCall(ID, 'POST', `/api/tickets/${NUMBER}/close`));
   assert.ok(!threadMayCall(ID, 'PATCH', `/api/tickets/${NUMBER}`));

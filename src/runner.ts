@@ -879,7 +879,8 @@ export class Runner {
       strikes.push({ text: quote, reason, at: this.now() });
       this.store.setEventData(e.id, { ...data, strikes });
       this.emit(e.ticket_id, 'strike', { event: e.id, strikes });
-      const note = `Struck through as wrong: "${clip(quote)}". ${reason}`;
+      // Notes show as plain text, so the quote loses its Markdown marks.
+      const note = `Struck through as wrong: "${clip(quote.replace(/[*`~]/g, ''))}". ${reason}`;
       for (const id of new Set([e.ticket_id, by])) this.emit(id, 'note', { text: note });
       return { ticketId: e.ticket_id };
     }

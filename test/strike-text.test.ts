@@ -45,7 +45,7 @@ test('strikes the newest reply or relayed message holding the words, with a note
   // The chat showing the message redraws it; both chats get the note.
   assert.deepEqual(store.listEvents(coordinator.id).filter((e) => e.kind === 'strike').map((e) => JSON.parse(e.data).event), [relayed.id]);
   for (const id of [coordinator.id, minion.id]) {
-    assert.ok(store.listEvents(id).some((e) => e.kind === 'note' && /Struck through as wrong: "#12 is \*\*not\*\* merged yet"\. git log main shows it\./.test(JSON.parse(e.data).text)));
+    assert.ok(store.listEvents(id).some((e) => e.kind === 'note' && /Struck through as wrong: "#12 is not merged yet"\. git log main shows it\./.test(JSON.parse(e.data).text)));
   }
 
   // Once that one is struck, the same words again are refused; words only in an older reply strike that.

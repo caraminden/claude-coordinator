@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { listeningPort } from './helpers.ts';
 
 // Saved views: named property filters, one list per scheme, shared by everyone in it.
 const repo = join(import.meta.dirname, '..');
@@ -35,23 +35,15 @@ async function login(name: string) {
 }
 
 before(async () => {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  base = `http://127.0.0.1:${port}`;
-  procs.push(spawn(process.execPath, [join(repo, 'server.ts')], {
+  const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
+      ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
     },
-    stdio: ['ignore', 'inherit', 'inherit'],
-  }));
-  for (const end = Date.now() + 10_000; ; ) {
-    if (await fetch(`${base}/api/me`).catch(() => undefined)) break;
-    if (Date.now() > end) throw new Error('Timed out waiting for the server');
-    await new Promise((r) => setTimeout(r, 50));
-  }
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  procs.push(server);
+  base = `http://127.0.0.1:${await listeningPort(server)}`;
   await login('Cara');
   await login('Josh');
 });

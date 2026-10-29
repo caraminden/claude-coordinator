@@ -8,12 +8,12 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { promisify } from 'node:util';
 import { DatabaseSync, backup } from 'node:sqlite';
+import { listeningPort } from '../src/ports.ts';
 
 const [checkout, db] = process.argv.slice(2);
 if (!checkout || !db) throw new Error('usage: boot-check.ts <checkout> <coordinator.db>');
@@ -70,18 +70,13 @@ try {
   writeFileSync(claude, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(import.meta.dirname, 'boot-check-claude.ts'))} "$@"\n`);
   chmodSync(claude, 0o755);
 
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  const base = `http://127.0.0.1:${port}`;
   const password = randomBytes(16).toString('hex');
   const secret = randomBytes(32).toString('hex');
   const server = spawn(process.execPath, [join(checkout, 'server.ts')], {
     cwd: checkout,
     env: {
       PATH: process.env.PATH, HOME: process.env.HOME, LANG: process.env.LANG,
-      HOST: '127.0.0.1', PORT: String(port), DATA_DIR: root, BOOT_CHECK: '1', CLAUDE_BIN: claude, TURN_UNITS: '0',
+      HOST: '127.0.0.1', PORT: '0', DATA_DIR: root, BOOT_CHECK: '1', CLAUDE_BIN: claude, TURN_UNITS: '0',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: password, SESSION_SECRET: secret,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -89,6 +84,8 @@ try {
   procs.push(server);
   server.stdout!.on('data', (d) => (log += d));
   server.stderr!.on('data', (d) => (log += d));
+  // The checkout's server.ts is the one being deployed, so it reports the port it bound.
+  const base = `http://127.0.0.1:${await listeningPort(server).catch((err) => fail(err.message))}`;
 
   let health: any = null;
   for (const end = Date.now() + 20_000; !health; await new Promise((r) => setTimeout(r, 100))) {

@@ -1,11 +1,13 @@
-// Shared test plumbing: boot the real server.ts on a scratch data dir and a free port.
+// Shared test plumbing: boot the real server.ts on a scratch data dir and the port it picks.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
+import { freePort, listeningPort } from '../src/ports.ts';
+
+export { freePort, listeningPort };
 
 export const REPO = join(import.meta.dirname, '..');
 export const PASSWORD = 'test-password-123';
@@ -28,15 +30,6 @@ export async function until<T>(what: string, fn: () => Promise<T | undefined | n
     if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, 50));
   }
-}
-
-/** A port nothing is listening on right now. */
-export async function freePort(): Promise<number> {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  return port;
 }
 
 export type Booted = {
@@ -62,30 +55,31 @@ export type Booted = {
 export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean; script?: string } = {}): Promise<Booted> {
   const root = opts.root ?? mkdtempSync(join(tmpdir(), 'boot-'));
   const data = join(root, 'data');
-  const port = await freePort();
-  const base = `http://127.0.0.1:${port}`;
   const proc = spawn(process.execPath, [opts.script ?? join(REPO, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: data, CLAUDE_BIN: '/bin/false',
+      ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
       ...opts.env,
     },
-    stdio: ['ignore', opts.stdout ? 'inherit' : 'ignore', 'inherit'],
+    stdio: ['ignore', 'pipe', 'inherit'],
   });
   const stop = () => {
     proc.kill();
     if (!opts.root) rmSync(root, { recursive: true, force: true });
   };
-  let cookie = '';
-  for (const end = Date.now() + 10_000; !cookie; await new Promise((r) => setTimeout(r, 50))) {
-    const res = await fetch(`${base}/api/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: opts.name ?? 'Cara', password: PASSWORD }),
-    }).catch(() => undefined);
-    if (res) cookie = res.headers.get('set-cookie')!.split(';')[0];
-    else if (Date.now() > end || proc.exitCode !== null) {
-      stop();
-      throw new Error('Timed out waiting for the server');
-    }
+  if (opts.stdout) proc.stdout!.pipe(process.stdout);
+  const port = await listeningPort(proc).catch((err) => {
+    stop();
+    throw err;
+  });
+  const base = `http://127.0.0.1:${port}`;
+  const login = await fetch(`${base}/api/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: opts.name ?? 'Cara', password: PASSWORD }),
+  });
+  const cookie = login.headers.get('set-cookie')?.split(';')[0];
+  if (!cookie) {
+    stop();
+    throw new Error(`Signing in answered ${login.status} without a cookie`);
   }
   const call = async (path: string, body?: unknown, method?: string) => {
     const res = await fetch(base + path, {

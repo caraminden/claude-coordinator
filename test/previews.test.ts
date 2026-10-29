@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Previews } from '../src/previews.ts';
-import { agentToken, freePort, PASSWORD, SECRET } from './helpers.ts';
+import { agentToken, listeningPort, PASSWORD, SECRET } from './helpers.ts';
 
 // Previews (src/previews.ts): the live server runs a minion's worktree in preview mode on a copy of
 // its database and proxies /preview/<id>/ to it, for signed-in people only.
@@ -53,28 +53,21 @@ const startPreview = (id: number) => fetch(`${base}/api/tickets/${id}/preview`, 
 const page = (path: string, headers: Record<string, string> = {}) => fetch(`${base}${path}`, { headers: { Accept: 'text/html', Cookie: cookie, ...headers }, redirect: 'manual' });
 
 before(async () => {
-  const port = await freePort();
-  base = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     cwd: repo,
     env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, PORT: String(port), DATA_DIR: data, CLAUDE_BIN: '/bin/false',
+      PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
     },
-    stdio: ['ignore', 'inherit', 'inherit'],
+    stdio: ['ignore', 'pipe', 'inherit'],
   });
   procs.push(server);
-  for (const end = Date.now() + 10_000; ; ) {
-    const res = await fetch(`${base}/api/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
-    }).catch(() => undefined);
-    if (res) {
-      cookie = res.headers.get('set-cookie')!.split(';')[0];
-      break;
-    }
-    if (Date.now() > end) throw new Error('Timed out waiting for the server');
-    await new Promise((r) => setTimeout(r, 50));
-  }
+  server.stdout!.pipe(process.stdout);
+  base = `http://127.0.0.1:${await listeningPort(server)}`;
+  const res = await fetch(`${base}/api/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
+  });
+  cookie = res.headers.get('set-cookie')!.split(';')[0];
   // What a page load through Caddy would record as the app's address.
   await fetch(`${base}/api/me`, { headers: { Cookie: cookie, 'X-Forwarded-Host': 'app.example', 'X-Forwarded-Proto': 'https' } });
 });

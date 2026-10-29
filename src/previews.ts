@@ -9,12 +9,12 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, rmSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { request, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { Auth, type Session } from './auth.ts';
 import type { Store, Ticket } from './db.ts';
 import { HttpError } from './http.ts';
+import { freePort } from './ports.ts';
 
 /** The setting that says a minion offers a preview (its view shows the Open preview button). */
 export const previewKey = (ticketId: number) => `preview:${ticketId}`;
@@ -54,14 +54,6 @@ async function end(proc: ChildProcess): Promise<void> {
   const timer = setTimeout(() => proc.kill('SIGKILL'), KILL_AFTER_MS);
   await exited;
   clearTimeout(timer);
-}
-
-async function freePort(): Promise<number> {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as { port: number };
-  await new Promise((r) => srv.close(r));
-  return port;
 }
 
 export class Previews {

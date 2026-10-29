@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer as createHttpServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -63,14 +64,13 @@ test('an MCP call made while the server is down goes through once the next one i
 });
 
 test('a write cut off mid-request is not sent again, as it may have run', async () => {
-  const port = await freePort();
   let seen = 0;
-  const api = await listen(port, (req) => {
+  const api = await listen(0, (req) => {
     seen++;
     req.socket.destroy();
   });
   try {
-    const r = await threadMcp(port)('set_thread_status', { note: 'x' });
+    const r = await threadMcp((api.address() as AddressInfo).port)('set_thread_status', { note: 'x' });
     assert.ok(r.isError);
     assert.equal(seen, 1);
   } finally {

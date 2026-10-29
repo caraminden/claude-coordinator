@@ -3,6 +3,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir, realpath, mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { basename, extname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
@@ -30,6 +31,8 @@ import { fileRoutes } from './src/routes/files.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
+// The port actually bound: PORT=0 (tests, boot checks) lets the kernel pick one, reported on stdout.
+let boundPort = PORT;
 // Where machines' agents connect, if not the app's own address: a URL on a private network (the
 // tailnet), served by a second listener that takes nothing but agents. The main listener then
 // refuses agents, so a leaked token is no use from the public internet.
@@ -117,7 +120,7 @@ const runner = new Runner(
   store,
   broadcast,
   (ticket) => ({
-    COORDINATOR_API: `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${PORT}`,
+    COORDINATOR_API: `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`,
     COORDINATOR_TOKEN: auth.turnToken(ticket.id),
     COORDINATOR_PROJECT: String(ticket.project_id),
   }),
@@ -578,13 +581,14 @@ server.requestTimeout = 30 * 60_000;
 // Once up, a stray error is logged rather than fatal. Not before: a failed start (a port in use, a
 // database that won't open) must still exit non-zero so systemd restarts it.
 server.on('listening', keepServing);
+server.on('listening', () => (boundPort = (server.address() as AddressInfo).port));
 
 // Under socket activation (deploy/claude-coordinator.socket) systemd holds the listening socket, fd 3,
 // across restarts: requests made while the server restarts wait for the next one instead of failing.
 if (process.env.LISTEN_FDS === '1' && process.env.LISTEN_PID === String(process.pid)) {
   server.listen({ fd: 3 }, () => console.log(`${APP_NAME} listening on the socket systemd holds (${HOST}:${PORT})`));
 } else {
-  server.listen(PORT, HOST, () => console.log(`${APP_NAME} listening on http://${HOST}:${PORT}`));
+  server.listen(PORT, HOST, () => console.log(`${APP_NAME} listening on http://${HOST}:${boundPort}`));
 }
 
 // A restart: running turns carry on in their units, and the next server re-attaches. Stop taking

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { freePort, PASSWORD } from './helpers.ts';
+import { listeningPort, PASSWORD } from './helpers.ts';
 
 // A preview (PREVIEW=1) serves the app on a copy of the database and must never act on it: no turns
 // (from people's messages or auto-resume), no new minions or schemes, no pushes, no machines.
@@ -55,28 +55,21 @@ before(async () => {
   store.savePushSubscription('Josh', `http://127.0.0.1:${(pushServer.address() as any).port}/push`, ecdh.getPublicKey('base64url'), randomBytes(16).toString('base64url'));
   store.db.close();
 
-  const port = await freePort();
-  base = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     cwd: repo,
     env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, PORT: String(port), DATA_DIR: data, PREVIEW: '1', CLAUDE_BIN: fakeClaude,
+      PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: data, PREVIEW: '1', CLAUDE_BIN: fakeClaude,
       CLAUDE_CONFIG_DIR: join(root, 'claude-config'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40),
     },
-    stdio: ['ignore', 'inherit', 'inherit'],
+    stdio: ['ignore', 'pipe', 'inherit'],
   });
   procs.push(server);
-  for (const end = Date.now() + 10_000; ; ) {
-    const res = await fetch(`${base}/api/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
-    }).catch(() => undefined);
-    if (res) {
-      cookie = res.headers.get('set-cookie')!.split(';')[0];
-      break;
-    }
-    if (Date.now() > end) throw new Error('Timed out waiting for the server');
-    await new Promise((r) => setTimeout(r, 50));
-  }
+  server.stdout!.pipe(process.stdout);
+  base = `http://127.0.0.1:${await listeningPort(server)}`;
+  const res = await fetch(`${base}/api/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
+  });
+  cookie = res.headers.get('set-cookie')!.split(';')[0];
 });
 
 test('health says it is a preview, and the tab title says so too', async () => {
@@ -115,15 +108,14 @@ test('nothing resumes the copied mid-turn minion, and no claude ever ran', async
 });
 
 test('a preview exits once the server that started it is gone', async () => {
-  const port = await freePort();
   const dir = mkdtempSync(join(root, 'orphan-'));
   // A stand-in for the live server: it starts the preview, then dies without cleaning up.
-  const parent = spawn(process.execPath, ['-e', `require('node:child_process').spawn(process.execPath, [${JSON.stringify(join(repo, 'server.ts'))}], { stdio: 'ignore', env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '${port}', DATA_DIR: ${JSON.stringify(dir)}, PREVIEW: '1', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: ${JSON.stringify(join(dir, 'claude'))}, COORDINATOR_PASSWORD: '${PASSWORD}', SESSION_SECRET: '${'x'.repeat(40)}' } }); setInterval(() => {}, 1000);`], { stdio: 'ignore' });
+  const parent = spawn(process.execPath, ['-e', `require('node:child_process').spawn(process.execPath, [${JSON.stringify(join(repo, 'server.ts'))}], { stdio: ['ignore', 'inherit', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', DATA_DIR: ${JSON.stringify(dir)}, PREVIEW: '1', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: ${JSON.stringify(join(dir, 'claude'))}, COORDINATOR_PASSWORD: '${PASSWORD}', SESSION_SECRET: '${'x'.repeat(40)}' } }); setInterval(() => {}, 1000);`], { stdio: ['ignore', 'pipe', 'ignore'] });
   procs.push(parent);
+  // The preview's stdout is the stand-in's, so its listening line says where it is.
+  const port = await listeningPort(parent);
   const up = () => fetch(`http://127.0.0.1:${port}/api/health`).then((r) => r.ok, () => false);
-  for (const end = Date.now() + 10_000; !(await up()); await new Promise((r) => setTimeout(r, 100))) {
-    if (Date.now() > end) throw new Error('The preview never came up');
-  }
+  assert.equal(await up(), true);
   parent.kill('SIGKILL');
   await new Promise((r) => setTimeout(r, 3500));
   assert.equal(await up(), false);

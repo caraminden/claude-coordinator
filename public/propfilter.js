@@ -38,7 +38,7 @@ export function valueCounts(key, tickets, picks) {
 export function viewPicks(saved, keys) {
   const picks = new Map();
   for (const k of keys) {
-    if (k.status !== 'active' || !saved[k.key]) continue;
+    if (k.status !== 'active' || !Object.hasOwn(saved, k.key)) continue;
     const live = k.value_kind === 'enum' ? new Set(k.values.filter((v) => v.status === 'active').map((v) => v.value)) : null;
     const set = new Set(saved[k.key].filter((v) => !live || live.has(v)));
     if (set.size) picks.set(k.key, set);

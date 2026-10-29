@@ -105,9 +105,10 @@ export async function renderPropFilter() {
   if (!propFilter.keys || !propFilter.views) {
     const [reg, views] = await Promise.all([
       propFilter.keys ? { keys: propFilter.keys } : loadProperties(),
-      propFilter.views ?? api(`api/projects/${projectId}/views`),
+      // Views that fail to load leave the filter working without chips, and load again on the next redraw.
+      propFilter.views ?? api(`api/projects/${projectId}/views`).catch(() => null),
     ]).catch(() => []);
-    if (!reg || !views || propFilter.projectId !== projectId) return;
+    if (!reg || propFilter.projectId !== projectId) return;
     Object.assign(propFilter, { keys: reg.keys, views });
   }
   renderSavedViews();
@@ -160,8 +161,8 @@ function filterSection({ key, values }, counts) {
 /** The scheme's saved views as chips above the filter: a click ticks a view's values, ＋ saves the ticks as one. */
 function renderSavedViews() {
   const el = document.getElementById('saved-views');
-  if (!el) return;
   const { picks, keys, views } = propFilter;
+  if (!el || !views) return;
   const apply = (next) => {
     propFilter.picks = next;
     renderSidebar();

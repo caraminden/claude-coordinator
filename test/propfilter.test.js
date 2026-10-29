@@ -59,6 +59,8 @@ test('a saved view applies what the registry still offers: archived values and i
   ];
   const saved = { type: ['feature', 'bug'], build: [8], area: ['town'], stage: ['idea'], gone: ['x'] };
   assert.deepEqual(viewPicks(saved, keys), new Map([['type', new Set(['feature'])], ['build', new Set([8])]]));
+  // A key named like an Object method isn't read off the prototype.
+  assert.deepEqual(viewPicks({}, [key('constructor', 'text')]), new Map());
 });
 
 test('samePicks compares the ticked values, not their order', () => {

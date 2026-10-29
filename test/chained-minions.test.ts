@@ -227,7 +227,7 @@ test('a dismissed follower is dropped; release hands back the held brief once', 
   assert.equal(started.length, 0);
 });
 
-test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or a message starts it', async () => {
+test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or a message starts it; a brief is marked as one', async () => {
   const { base, cookie, proc } = await bootServer({ root });
   procs.push(proc);
   const call = async (path: string, body?: unknown) => {

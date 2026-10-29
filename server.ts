@@ -31,9 +31,10 @@ import { catchUpTicketDir, cloneProject, createTicketDir, projectDir, projectSha
 import { costDays, dayBudget } from './src/costs.ts';
 import { describeCron, runBrief, type Schedule } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, buildNumber, clientIp, HttpError, isSecure, json, oneOf, readJson, replyList, requestUrl, router, SECURITY_HEADERS, send, str, type App } from './src/http.ts';
+import { acceptsGzip, buildNumber, clientIp, HttpError, isSecure, json, oneOf, readJson, replyList, requestUrl, router, SECURITY_HEADERS, send, str, ticketView, type App } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { pushRoutes } from './src/routes/push.ts';
+import { ensureCoordinator, projectRoutes } from './src/routes/projects.ts';
 import { fileRoutes, fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './src/routes/files.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
@@ -47,8 +48,6 @@ const PUBLIC_DIR = join(import.meta.dirname, 'public');
 // Headless turns can't ask for approval, so anything short of full access refuses most shell commands;
 // every thread gets full access.
 const THREAD_PERMISSION_MODE = 'bypassPermissions';
-// The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
-const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
 // How long one wait for an approval card's outcome holds the request open.
 const APPROVAL_POLL_MS = 25_000;
 const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
@@ -547,39 +546,6 @@ function modelName(id: string): string {
   return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id;
 }
 
-/** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
-function scheduleFields(projectId: number, body: any, all: boolean) {
-  const out: { name?: string; cron?: string; brief?: string; type?: string } = {};
-  if (all || body.name !== undefined) out.name = str(body.name, 'Name', 80);
-  if (all || body.cron !== undefined) out.cron = str(body.cron, 'cron', 100);
-  if (all || body.brief !== undefined) out.brief = str(body.brief, 'Brief', 100_000);
-  // Each run's minion gets this type; checked against the registry now so a run can't fail on it later.
-  if (all || body.type !== undefined) out.type = store.props.check(projectId, { type: body.type ?? 'chore' }).type?.[0] ?? 'chore';
-  return out;
-}
-
-/** A schedule for the API: its cron in words and its last run's minion number. */
-function scheduleView(s: Schedule) {
-  return { ...s, when: describeCron(s.cron), last_number: s.last_ticket_id ? (store.getTicket(s.last_ticket_id)?.number ?? null) : null };
-}
-
-/** A stand-in title from the start of a first message, cut at a word near 40 characters. */
-function provisionalTitle(message: string): string {
-  const line = message.split('\n').find((l) => l.trim())!.replace(/\s+/g, ' ').trim();
-  if (line.length <= 40) return line;
-  const cut = line.slice(0, 40);
-  const space = cut.lastIndexOf(' ');
-  return `${(space > 20 ? cut.slice(0, space) : cut).replace(/[\s,.;:-]+$/, '')}…`;
-}
-
-/** Who is changing properties: a person, a scheme's Taskmaster, or a minion. */
-function actorFor(session: Session): Actor {
-  if (session.agent === undefined) return { kind: 'person', name: session.name };
-  const t = store.getTicket(session.agent)!;
-  const kind = t.kind === 'coordinator' ? 'coordinator' : 'thread';
-  return { kind, name: kind === 'coordinator' ? AGENT_NAME : `#${t.number} ${t.title}`, projectId: t.project_id, ticketId: t.id };
-}
-
 /** Rewrite each scheme's property-vocabulary.md from the registry; a hand-written one is kept aside once. */
 async function writeVocabularies(projectIds = store.listProjects().map((p) => p.id)) {
   for (const id of projectIds) {
@@ -602,12 +568,6 @@ function registryChanged(projectId: number, global: boolean) {
   broadcast({ type: 'properties', projectId: global ? null : projectId });
 }
 
-function ticketView(id: number) {
-  const t = store.getTicket(id);
-  if (!t) throw new HttpError(404, 'No such minion');
-  return runner.view(t);
-}
-
 /**
  * A person wrote into a chat, which counts as continuing the loop guard there: for a minion's chat,
  * that minion; for the Taskmaster's, every minion of its scheme and its exchanges with other Taskmasters.
@@ -619,27 +579,6 @@ function personWrote(ticket: Ticket, session: Session) {
   for (const t of minions) runner.continueLoop(t.id, session.name);
 }
 
-/** The project's coordinator ticket, created the first time someone opens the project. */
-async function ensureCoordinator(project: Project): Promise<Ticket> {
-  const existing = store.getCoordinator(project.id);
-  if (existing) return existing;
-  const cwd = join(projectDir(DATA_DIR, project.id), 'coordinator');
-  await mkdir(cwd, { recursive: true });
-  try {
-    const t = store.createTicket({
-      project_id: project.id,
-      kind: 'coordinator',
-      title: 'Coordinator',
-      permission_mode: COORDINATOR_PERMISSION_MODE,
-      created_by: AGENT_NAME,
-    });
-    store.setTicketDir(t.id, cwd, null);
-  } catch {
-    // Lost a race with a concurrent request; the unique index kept a single coordinator.
-  }
-  return store.getCoordinator(project.id)!;
-}
-
 /** The project a coordinator's token may act on, or null for a signed-in person. */
 function agentProject(session: Session, method: string, pathname: string): number | null {
   if (session.agent === undefined) return null;
@@ -649,43 +588,6 @@ function agentProject(session: Session, method: string, pathname: string): numbe
   // ask a question card in its chat, and close itself.
   if (t.kind !== 'coordinator' && !threadMayCall(t.id, method, pathname, t.project_id)) throw new HttpError(403, 'A minion may only update itself');
   return t.project_id;
-}
-
-// ---------- search ----------
-
-/** What people and Claude said in an event, for searching (not tool calls or their output). */
-function spokenText(kind: string, data: any): string {
-  if (kind === 'user_message') return typeof data?.text === 'string' ? data.text : '';
-  if (data?.type !== 'assistant') return '';
-  return (data.message?.content ?? []).filter((b: any) => b?.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
-}
-
-/** Minions whose chat says `q`: the newest hit per minion with a snippet, and its oldest (oldestId); `ticketId` narrows it to one. */
-function searchProject(projectId: number, q: string, ticketId?: number) {
-  const needle = q.toLowerCase();
-  const hits = new Map<number, { ticketId: number; eventId: number; oldestId: number; at: number; snippet: string; matches: number }>();
-  // SQL narrows by the raw JSON; the check below keeps only real hits in the spoken text.
-  for (const ev of store.findEvents(projectId, q, 3000, ticketId)) {
-    let text: string;
-    try {
-      text = spokenText(ev.kind, JSON.parse(ev.data));
-    } catch {
-      continue;
-    }
-    const at = text.toLowerCase().indexOf(needle);
-    if (at < 0) continue;
-    const hit = hits.get(ev.ticket_id);
-    if (hit) {
-      hit.matches++;
-      hit.oldestId = ev.id;
-      continue;
-    }
-    const start = Math.max(0, at - 50);
-    const end = Math.min(text.length, at + needle.length + 70);
-    const snippet = (start ? '…' : '') + text.slice(start, end).replace(/\s+/g, ' ').trim() + (end < text.length ? '…' : '');
-    hits.set(ev.ticket_id, { ticketId: ev.ticket_id, eventId: ev.id, oldestId: ev.id, at: ev.created_at, snippet, matches: 1 });
-  }
-  return [...hits.values()].slice(0, 100);
 }
 
 const MIME: Record<string, string> = {
@@ -774,28 +676,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     throw new HttpError(403, 'Not available to the Taskmaster');
   }
 
-  if (pathname === '/api/taskmaster' && method === 'POST') {
-    // message_taskmaster: one scheme's Taskmaster writes to another's, the only way past inScope. It
-    // reaches that Taskmaster alone, never its minions; minions' tokens were refused above.
-    const from = session.agent === undefined ? null : store.getTicket(session.agent);
-    if (from?.kind !== 'coordinator') throw new HttpError(403, `Only a ${AGENT_NAME} can message another scheme's ${AGENT_NAME}`);
-    const body = await readJson(req);
-    const text = str(body.text, 'Message', 10_000);
-    const want = String(body.scheme ?? '').trim().toLowerCase();
-    const others = store.listProjects().filter((p) => p.id !== from.project_id);
-    const project = others.find((p) => p.name.toLowerCase() === want) ?? others.find((p) => String(p.id) === want);
-    if (!project) {
-      const own = store.getProject(from.project_id)!;
-      if (want === own.name.toLowerCase() || want === String(own.id)) throw new HttpError(400, `${own.name} is your own scheme: use message_ticket for its minions`);
-      throw new HttpError(404, `No other scheme called "${String(body.scheme ?? '')}". The other schemes: ${others.map((p) => `${p.name} (${p.id})`).join(', ') || 'none'}`);
-    }
-    const to = await ensureCoordinator(project);
-    const sender = store.getProject(from.project_id)!.name;
-    const { held, left } = runner.relayTaskmaster(from.id, to.id, `${AGENT_NAME} of ${sender}`, text);
-    if (!held) runner.emit(from.id, 'note', { text: `Sent the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
-    return json(res, 202, { scheme: project.name, held, left });
-  }
-
   if (pathname === '/api/stream') {
     if (clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
@@ -816,294 +696,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     return json(res, 200, await prOwners(projects, (id) => store.listTickets(id)));
   }
 
-  if (pathname === '/api/projects') {
-    if (method === 'GET') {
-      return json(res, 200, store.listProjects().map((p) => ({ ...p, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length })));
-    }
-    if (method === 'POST') {
-      if (PREVIEW) throw new HttpError(403, 'A preview can\'t start schemes');
-      const body = await readJson(req);
-      const name = str(body.name, 'Name', 80);
-      const repoUrl = typeof body.repoUrl === 'string' && body.repoUrl.trim() ? body.repoUrl.trim() : null;
-      if (repoUrl && !/^(https:\/\/|git@)/.test(repoUrl)) throw new HttpError(400, 'Repo URL must be https:// or git@');
-      let project;
-      try {
-        project = store.createProject(name, repoUrl);
-      } catch {
-        throw new HttpError(409, 'A scheme with that name already exists');
-      }
-      if (repoUrl) {
-        try {
-          store.setProjectRepoDir(project.id, await cloneProject(DATA_DIR, project.id, repoUrl));
-        } catch (err: any) {
-          store.deleteProject(project.id);
-          await removeProjectDir(DATA_DIR, project.id);
-          throw new HttpError(400, `Could not clone repo: ${err.stderr?.trim() || err.message}`);
-        }
-      }
-      return json(res, 201, store.getProject(project.id));
-    }
-  }
-
-  let m = pathname.match(/^\/api\/projects\/(\d+)$/);
-  if (m && method === 'GET') {
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    inScope(project.id);
-    const coordinator = await ensureCoordinator(project);
-    const tickets = store
-      .listTickets(project.id)
-      .filter((t) => t.kind === 'ticket')
-      .map((t) => runner.view(t));
-    // When this person last looked at each thread, so rows they have already seen can be shown quieter.
-    const seen = session.agent === undefined ? store.seenTimes(session.name, project.id) : {};
-    return json(res, 200, { project, coordinator: ticketView(coordinator.id), tickets, seen });
-  }
-
-  if (m && method === 'PATCH') {
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    inScope(project.id);
-    // Any of name, instructions, approval_rules, plugin_dirs and default_effort; what is left out stays.
-    const body = await readJson(req);
-    if (body.name === undefined && body.instructions === undefined && body.approval_rules === undefined && body.plugin_dirs === undefined && body.default_effort === undefined) {
-      throw new HttpError(400, 'Nothing to change');
-    }
-    const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-    const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort'>> = {};
-    // null or "" leaves effort to Claude Code's default.
-    if (body.default_effort !== undefined) settings.default_effort = oneOf(body.default_effort || null, EFFORTS, 'Default effort') ?? '';
-    try {
-      if (body.approval_rules !== undefined) settings.approval_rules = cleanRules(body.approval_rules);
-      if (body.plugin_dirs !== undefined) settings.plugin_dirs = cleanPluginDirs(body.plugin_dirs);
-    } catch (err: any) {
-      throw new HttpError(400, err.message);
-    }
-    if (body.instructions !== undefined && typeof body.instructions !== 'string') throw new HttpError(400, 'instructions must be text');
-    const instructions = body.instructions === undefined ? project.instructions : body.instructions.replace(/\r\n/g, '\n').trim();
-    if (instructions.length > MAX_INSTRUCTIONS) {
-      throw new HttpError(400, `Instructions are ${instructions.length.toLocaleString('en')} characters; the limit is ${MAX_INSTRUCTIONS.toLocaleString('en')}`);
-    }
-    // Renamed first: it is the only change that can still be refused (a taken name).
-    if (name !== project.name) {
-      try {
-        store.renameProject(project.id, name);
-      } catch (err: any) {
-        throw new HttpError(409, err.message);
-      }
-      const coordinator = store.getCoordinator(project.id);
-      if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} renamed the scheme from "${project.name}" to "${name}".` });
-    }
-    for (const k of Object.keys(settings) as (keyof typeof settings)[]) if (settings[k] === project[k]) delete settings[k];
-    if (Object.keys(settings).length) {
-      store.setProjectSettings(project.id, settings);
-      // Who changed what gets a permanent line in the coordinator's chat, since rules decide what needs a person's OK.
-      const coordinator = store.getCoordinator(project.id);
-      const shown = (text: string) => (text ? lines(text).join(', ') : 'none');
-      if (coordinator && settings.approval_rules !== undefined) {
-        runner.emit(coordinator.id, 'note', { text: `${session.name} set the approval rules to: ${shown(settings.approval_rules)}. They apply from each minion's next turn.` });
-      }
-      if (coordinator && settings.plugin_dirs !== undefined) {
-        runner.emit(coordinator.id, 'note', { text: `${session.name} set the plugin folders to: ${shown(settings.plugin_dirs)}. They apply from each minion's next turn.` });
-      }
-      if (coordinator && settings.default_effort !== undefined) {
-        runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });
-      }
-    }
-    if (instructions !== project.instructions) {
-      store.setProjectInstructions(project.id, instructions, session.name);
-      const coordinator = store.getCoordinator(project.id);
-      if (coordinator) {
-        runner.emit(coordinator.id, 'note', {
-          text: `${session.name} ${instructions ? 'updated' : 'cleared'} the scheme instructions; they apply from each minion's next turn.`,
-        });
-      }
-    }
-    const saved = store.getProject(project.id)!;
-    broadcast({ type: 'project', project: saved });
-    return json(res, 200, saved);
-  }
-
-  m = pathname.match(/^\/api\/projects\/(\d+)\/instructions\/history$/);
-  if (m && method === 'GET') {
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    inScope(project.id);
-    const history = store.instructionHistory(project.id, 5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text) }));
-    return json(res, 200, { history });
-  }
-
-  m = pathname.match(/^\/api\/projects\/(\d+)\/instructions\/sources$/);
-  if (m && method === 'GET') {
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    return json(res, 200, { sources: await instructionSources(project, claudeConfigDir(process.env), DATA_DIR), max: MAX_INSTRUCTIONS });
-  }
-
-  m = pathname.match(/^\/api\/projects\/(\d+)\/tickets$/);
-  if (m && method === 'POST') {
-    // Every new minion gets a git worktree in the scheme's real repo.
-    if (PREVIEW) throw new HttpError(403, 'A preview can\'t start minions');
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    inScope(project.id);
-    const body = await readJson(req);
-    const message = str(body.message, 'First message', 100_000);
-    // Without a title (the New thread form sends none) start from the message's opening words;
-    // the thread renames itself once it knows what the work is.
-    const title = body.title === undefined ? provisionalTitle(message) : str(body.title, 'Title', 120);
-    // Insert first so concurrent creates get distinct ids, then build the working dir.
-    const tag = oneOf(body.tag ?? null, TICKET_TAGS, 'Tag') as TicketTag | null;
-    const model = oneOf(body.model ?? null, MODELS, 'Model');
-    const effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
-    // Properties are checked before the minion exists, so a bad one doesn't leave half a minion.
-    const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
-    if (typeof props !== 'object' || Array.isArray(props)) throw new HttpError(400, 'properties must be an object of key: value');
-    const given = (key: string) => Object.keys(props).some((k) => k.toLowerCase() === key.toLowerCase());
-    if (tag && !given('type')) props.type = TAG_TO_TYPE[tag];
-    if (session.agent === undefined && !given('requestedBy')) props.requestedBy = session.name;
-    const planned = store.props.check(project.id, props);
-    if (scope !== null && !planned.type?.length) {
-      throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');
-    }
-    // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
-    let follow: { leader: Ticket; when: Chain['when']; base: string | null; since: number } | null = null;
-    if (body.start_after != null) {
-      const when = (oneOf(body.start_when ?? null, ['live', 'merged'], 'start_when') ?? 'live') as Chain['when'];
-      const leader = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.number === Number(body.start_after));
-      if (!leader) throw new HttpError(400, `No minion #${String(body.start_after).slice(0, 20)} in this scheme to start after`);
-      const f = waiters.follow(leader.id, when);
-      if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work being merged, so nothing can start after it`);
-      if (f.state === 'wait') follow = { leader, when, base: f.base, since: f.since };
-    }
-    const { id, notes } = await newMinion(project, { title, tag, props, model, effort }, session.name);
-    if (follow) {
-      const { leader, when } = follow;
-      waiters.chain({ ticket: id, after: leader.id, when, message, from: session.name, base: follow.base, since: follow.since });
-      store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} is ${when}` });
-      runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work is ${when}. A message to it starts it now.` });
-      runner.broadcastTicket(id);
-      notes.push(`Parked: it starts by itself once #${leader.number}'s work is ${when}. A message to it starts it now.`);
-    } else {
-      runner.send(id, session.name, message, [], { brief: true });
-    }
-    return json(res, 201, { ...ticketView(id), notes });
-  }
-
-  m = pathname.match(/^\/api\/projects\/(\d+)\/properties(\/[a-z]+)?$/);
-  if (m) {
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    inScope(project.id);
-    const action = m[2] ?? '';
-    if (action === '' && method === 'GET') return json(res, 200, { keys: store.props.list(project.id), globalOwner: GLOBAL_OWNER });
-    if (method !== 'POST') throw new HttpError(404, 'Not found');
-    const body = await readJson(req);
-    const actor = actorFor(session);
-    if (action === '/keys') {
-      const r = store.props.registerKey(project.id, body, actor);
-      if (r.registered) registryChanged(project.id, r.scope === 'global');
-      return json(res, r.registered ? 201 : 200, r);
-    }
-    if (action === '/values') {
-      const r = store.props.registerValues(project.id, body.key, body.values, actor, !!body.force);
-      if (r.added.length || r.updated.length) registryChanged(project.id, store.props.isGlobal(project.id, body.key));
-      if (r.unreviewed) {
-        const coordinator = store.getCoordinator(project.id);
-        if (coordinator) runner.emit(coordinator.id, 'note', { text: `${actor.name} added ${r.added.map((v) => `${body.key}: ${v}`).join(', ')} to the registry. It's live now; review it in Settings → Properties.` });
-      }
-      return json(res, 200, r);
-    }
-    if (action === '/review') {
-      const global = store.props.isGlobal(project.id, body.key);
-      const r = store.props.review(project.id, body, actor);
-      registryChanged(project.id, global);
-      return json(res, 200, r);
-    }
-    if (action === '/proposals') {
-      if (actor.kind !== 'thread') throw new HttpError(403, 'Taskmasters and people register keys and values directly; proposals are for minions');
-      const r = store.props.propose(project.id, body, actor);
-      if (r.proposed) {
-        registryChanged(project.id, false);
-        const what = body.value === undefined ? `a new key \`${body.key}\`` : `\`${body.key}: ${body.value}\``;
-        const coordinator = await ensureCoordinator(project);
-        runner.send(coordinator.id, actor.name, `Property proposal: ${what}. Reason: ${body.reason}\n\nApprove or reject it with review_property (new keys need a person: ask them).`, []);
-      }
-      return json(res, 200, r);
-    }
-    throw new HttpError(404, 'Not found');
-  }
-
-  m = pathname.match(/^\/api\/projects\/(\d+)\/inbox$/);
-  if (m && method === 'GET') {
-    // Everything in the scheme waiting on a person: open cards, and minions in state ready or try.
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    return json(res, 200, { items: inboxItems(store, runner.approvals, project.id) });
-  }
-
-  m = pathname.match(/^\/api\/projects\/(\d+)\/recap$/);
-  if (m && method === 'GET') {
-    // What happened in the scheme since this person last did something there, for the Taskmaster chat.
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    inScope(project.id);
-    return json(res, 200, session.agent === undefined ? store.recap(session.name, project.id) : { since: null, turns: {} });
-  }
-
-  m = pathname.match(/^\/api\/projects\/(\d+)\/schedules$/);
-  if (m && (method === 'GET' || method === 'POST')) {
-    // The scheme's scheduled minions, for the Schedules panel and the Taskmaster; each with the number
-    // of the minion its last run started. People and the Taskmaster add them; minions can't.
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    inScope(project.id);
-    if (method === 'POST') {
-      const body = await readJson(req);
-      const fields = scheduleFields(project.id, body, true);
-      const s = store.schedules.create({ project_id: project.id, ...(fields as Required<typeof fields>), created_by: session.name });
-      broadcast({ type: 'schedules', projectId: project.id });
-      return json(res, 201, scheduleView(s));
-    }
-    return json(res, 200, { schedules: store.schedules.list(project.id).map(scheduleView) });
-  }
-
-  m = pathname.match(/^\/api\/schedules\/(\d+)$/);
-  if (m && (method === 'PATCH' || method === 'DELETE')) {
-    // Edit, pause or resume, or delete a schedule; runs it already started stay.
-    const s = store.schedules.get(Number(m[1]));
-    if (!s) throw new HttpError(404, 'No such schedule');
-    inScope(s.project_id);
-    if (method === 'DELETE') {
-      store.schedules.remove(s.id);
-      broadcast({ type: 'schedules', projectId: s.project_id });
-      return json(res, 200, { deleted: s.id });
-    }
-    const body = await readJson(req);
-    const patch: Record<string, unknown> = scheduleFields(s.project_id, body, false);
-    if (body.paused !== undefined) {
-      if (typeof body.paused !== 'boolean') throw new HttpError(400, 'paused must be true or false');
-      patch.paused = body.paused;
-    }
-    const updated = store.schedules.update(s.id, patch);
-    broadcast({ type: 'schedules', projectId: s.project_id });
-    return json(res, 200, scheduleView(updated));
-  }
-
-  m = pathname.match(/^\/api\/projects\/(\d+)\/search$/);
-  if (m && method === 'GET') {
-    const project = store.getProject(Number(m[1]));
-    if (!project) throw new HttpError(404, 'No such scheme');
-    const q = (url.searchParams.get('q') ?? '').trim().slice(0, 200);
-    const ticket = Number(url.searchParams.get('ticket')) || undefined;
-    return json(res, 200, q.length < 2 ? [] : searchProject(project.id, q, ticket));
-  }
-
-  m = pathname.match(/^\/api\/tickets\/(\d+)(\/[a-z]+)?$/);
+  const m = pathname.match(/^\/api\/tickets\/(\d+)(\/[a-z]+)?$/);
   if (m) {
     const id = Number(m[1]);
     const action = m[2] ?? '';
-    const ticket = ticketView(id);
+    const ticket = ticketView(app, id);
     inScope(ticket.project_id);
     // (Asking people a question card in its own chat, settling one, and striking its own words are the things it may do to itself.)
     if (scope !== null && method !== 'GET' && ticket.kind === 'coordinator' && !(['/questions', '/settle', '/strike'].includes(action) && session.agent === id)) {
@@ -1144,7 +741,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
           notify(id, { kind: 'state', state: after.state, note: after.note }, session.agent === undefined ? session.name : null);
         }
       }
-      return json(res, 200, ticketView(id));
+      return json(res, 200, ticketView(app, id));
     }
     if (action === '/seen' && method === 'POST') {
       if (session.agent !== undefined) throw new HttpError(403, 'Only people mark minions seen');
@@ -1177,18 +774,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (chained) await startChained(chained, `${session.name} wrote to it before its leader's work was in`);
       // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
       if (session.agent !== undefined && ticket.kind !== 'coordinator') {
-        return json(res, 202, { ...ticketView(id), held: runner.relay(id, id, session.name, text) });
+        return json(res, 202, { ...ticketView(app, id), held: runner.relay(id, id, session.name, text) });
       }
       // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
       runner.send(id, session.name, text, await saveImages(app, ticket, body.images), {}, session.agent === undefined && body.after !== true, files);
       personWrote(ticket, session);
-      return json(res, 202, ticketView(id));
+      return json(res, 202, ticketView(app, id));
     }
     if (action === '/unqueue' && method === 'POST') {
       if (session.agent !== undefined) throw new HttpError(403, 'Only people can take back a queued message');
       const body = await readJson(req);
       if (!runner.unqueue(id, Number(body.id), session.name)) throw new HttpError(409, 'That message is no longer queued');
-      return json(res, 200, ticketView(id));
+      return json(res, 200, ticketView(app, id));
     }
     if (action === '/continue' && method === 'POST') {
       // Continue button on a loop-guard pause: the minion's held messages go through.
@@ -1207,7 +804,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const { about, text } = commentMessage(path, str(body.text, 'Comment', 10_000), quote);
       runner.send(id, session.name, text, [], { comment: { path: body.path, about } });
       personWrote(ticket, session);
-      return json(res, 202, ticketView(id));
+      return json(res, 202, ticketView(app, id));
     }
     if (action === '/questions' && method === 'POST') {
       // Claude asks people multiple-choice questions; the card shows in the chat until someone answers.
@@ -1270,7 +867,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       }).join('\n\n');
       runner.send(id, session.name, `My answers to your question card:\n\n${text}`, [], { answer: { questionId: body.questionId, answers } });
       personWrote(ticket, session);
-      return json(res, 202, ticketView(id));
+      return json(res, 202, ticketView(app, id));
     }
     if (action === '/plans' && method === 'POST') {
       // Claude proposes a plan: an Approve / Revise card that waits, across restarts, for a person.
@@ -1310,7 +907,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
         [], { plan: { planId: card.id, verdict: body.verdict } });
       personWrote(ticket, session);
-      return json(res, 202, ticketView(id));
+      return json(res, 202, ticketView(app, id));
     }
     if (action === '/approvals' && method === 'POST') {
       // Claude Code asks before a tool call (a tripwire ask or an approval rule): an Approve / Deny card, or a refusal.
@@ -1367,13 +964,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         runner.emit(id, 'note', { text: `${session.name} reopened this minion.` });
         runner.broadcastTicket(id);
       }
-      return json(res, 200, ticketView(id));
+      return json(res, 200, ticketView(app, id));
     }
     if (action === '/coordinator' && method === 'POST') {
       // A thread asks its project's coordinator for something only the coordinator can do (message_coordinator).
       if (session.agent !== id || ticket.kind === 'coordinator') throw new HttpError(403, 'Only a minion can message its Taskmaster');
       const text = str((await readJson(req)).text, 'Message', 10_000);
-      const coordinator = await ensureCoordinator(store.getProject(ticket.project_id)!);
+      const coordinator = await ensureCoordinator(app, store.getProject(ticket.project_id)!);
       if (runner.relay(id, coordinator.id, `#${ticket.number} ${ticket.title}`, text)) return json(res, 202, { sent: false, held: true });
       runner.emit(id, 'note', { text: `Sent the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
       return json(res, 202, { sent: true });
@@ -1424,7 +1021,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       const kept = runner.keptOpen(id);
       if (kept) throw new HttpError(409, `Not dismissed: ${kept}. Leave the minion open for them; if nothing is left for people (the card was answered in the chat, or there is nothing to try), settle the card or clear the state first`);
       if (!runner.closeAfterTurn(id, reason)) throw new HttpError(409, 'The minion is not mid-turn');
-      return json(res, 202, ticketView(id));
+      return json(res, 202, ticketView(app, id));
     }
   }
 
@@ -1440,7 +1037,7 @@ const app: App = {
   },
   broadcast, notify, newMinion, startChained, ticketBranch, sharedFiles, sharedDir, registryChanged,
 };
-const routes = router([...pushRoutes, ...machineRoutes, ...fileRoutes]);
+const routes = router([...pushRoutes, ...machineRoutes, ...fileRoutes, ...projectRoutes]);
 
 const server = createServer(async (req, res) => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);

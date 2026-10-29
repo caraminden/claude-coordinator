@@ -189,17 +189,22 @@ export interface Route {
   handler(ctx: Ctx): unknown;
 }
 
+/** A minion as the API shows it; 404 when it is gone. */
+export function ticketView(app: App, id: number): TicketView {
+  const t = app.store.getTicket(id);
+  if (!t) throw new HttpError(404, 'No such minion');
+  return app.runner.view(t);
+}
+
 const LOADED = ['ticket', 'project', 'schedule', 'artifact', 'machine'];
 const NUMERIC = new Set([...LOADED, 'machineId']);
 
 /** Load a row a path names, onto ctx; returns the scheme it belongs to, if any. */
 function load(ctx: Ctx, name: string, id: number): number | undefined {
-  const { store, runner } = ctx.app;
+  const { store } = ctx.app;
   if (name === 'ticket') {
-    const t = store.getTicket(id);
-    if (!t) throw new HttpError(404, 'No such minion');
-    ctx.ticket = runner.view(t);
-    return t.project_id;
+    ctx.ticket = ticketView(ctx.app, id);
+    return ctx.ticket.project_id;
   }
   if (name === 'project') {
     const p = store.getProject(id);

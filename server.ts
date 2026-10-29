@@ -1,11 +1,11 @@
 // Claude Coordinator: a shared web UI over headless Claude Code sessions.
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
+import { lstat, readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { basename, extname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
-import { fileType, findArtifacts, isArtifact, linkedPaths } from './src/artifacts.ts';
+import { fileType, findArtifacts, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { Auth, type Nonces } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
@@ -20,7 +20,7 @@ import { type Chain, LiveWaiters } from './src/wake.ts';
 import { catchUpTicketDir, createTicketDir, projectDir, projectSharedDir } from './src/workspace.ts';
 import { describeCron, runBrief, type Schedule } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, HttpError, json, requestUrl, router, SECURITY_HEADERS, send, type App } from './src/http.ts';
+import { acceptsGzip, HttpError, json, requestUrl, router, SECURITY_HEADERS, send, type App, type SharedFile } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
@@ -271,12 +271,24 @@ function scheduleScan(ticketId: number) {
   }, SCAN_DELAY_MS));
 }
 
-/** The documents and pages in a project's shared folder, newest first, paths relative to it. */
-async function sharedFiles(projectId: number) {
+/**
+ * The documents and pages in a project's shared folder, newest first, paths relative to it, with
+ * their pins. A pinned file that is gone stays listed as missing, like a pinned artifact.
+ */
+async function sharedFiles(projectId: number): Promise<SharedFile[]> {
   const dir = projectSharedDir(DATA_DIR, projectId);
-  const files = await findArtifacts(dir, false);
+  const files: (FoundArtifact & { missing?: number })[] = await findArtifacts(dir, false);
+  const pins = new Map(store.sharedPins(projectId).map((p) => [p.path, p]));
+  const seen = new Set(files.map((f) => f.path));
+  for (const p of pins.values()) {
+    if (seen.has(p.path)) continue;
+    // Past the scan's file cap, or gone.
+    const st = await lstat(join(dir, p.path)).catch(() => null);
+    files.push(st?.isFile() ? { path: p.path, size: st.size, mtime: Math.round(st.mtimeMs) } : { path: p.path, size: 0, mtime: p.pinned_at, missing: 1 });
+  }
   return files.sort((a, b) => b.mtime - a.mtime).map((f) => ({
     ...f, name: basename(f.path), kind: fileType(f.path)?.kind ?? 'text', display_path: `scheme shared/${f.path}`,
+    pinned_at: pins.get(f.path)?.pinned_at ?? null, pinned_by: pins.get(f.path)?.pinned_by ?? null, missing: f.missing ?? 0,
   }));
 }
 

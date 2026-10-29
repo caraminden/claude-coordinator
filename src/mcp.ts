@@ -183,18 +183,18 @@ const STRIKE_TEXT = {
 
 const PIN_TARGET = {
   artifact: { type: 'integer', description: 'The artifact id, from list_artifacts' },
-  path: { type: 'string', description: 'Or the path you linked it by: absolute, or relative to your working directory (a path list_artifacts shows works too)' },
+  path: { type: 'string', description: 'Or the path you linked it by: absolute, or relative to your working directory (a path list_artifacts shows works too). Shared files go by path: "scheme shared/…" as list_artifacts shows them' },
   requested_by: { type: 'string', description: 'The login name of the person who asked, as in "[Cara]: ..."; it shows as "pinned by … for Cara"' },
 };
 const ARTIFACT_TOOLS = [
   {
     name: 'list_artifacts',
-    description: "List this scheme's artifacts (the files people see in the Artifacts panel): id, title, path, which minion showed it, and whether it is pinned or missing. Use it to find one a person named, e.g. \"Delve Glossary\".",
+    description: "List this scheme's artifacts (the files people see in the Artifacts panel): id, title, path, which minion showed it, and whether it is pinned or missing. Files in the scheme's shared folder follow, marked [shared]. Use it to find one a person named, e.g. \"Delve Glossary\".",
     inputSchema: { type: 'object', properties: { pinned_only: { type: 'boolean', description: 'Only pinned ones (default false)' } } },
   },
   {
     name: 'pin_artifact',
-    description: "Pin an artifact of this scheme to the top of the Artifacts panel. Only when a person asked you to pin it: never on your own initiative. Give the artifact id or the path you linked, and who asked.",
+    description: "Pin an artifact of this scheme to the top of the Artifacts panel. Only when a person asked you to pin it: never on your own initiative. Give the artifact id or the path you linked (a shared-folder file by its path), and who asked.",
     inputSchema: { type: 'object', properties: PIN_TARGET, required: ['requested_by'] },
   },
   {
@@ -839,7 +839,8 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Waiting for ${what}: ${APP_NAME} sends ${ROLE === 'thread' ? 'you' : 'the minion'} a message once it is ${r.merged ? "on the scheme's main" : 'live'}.${ROLE === 'thread' ? ' Set state parked and end your turn.' : ''}`;
     }
     case 'list_artifacts': {
-      const all = await call('GET', `/api/projects/${PROJECT}/artifacts?titles`);
+      const [artifacts, shared] = await Promise.all([call('GET', `/api/projects/${PROJECT}/artifacts?titles`), call('GET', `/api/projects/${PROJECT}/shared?titles`)]);
+      const all = [...artifacts, ...shared];
       const shown = all.filter((a: any) => !args.pinned_only || a.pinned_at);
       return shown.length ? shown.map(artifactLine).join('\n') : args.pinned_only ? 'Nothing pinned.' : 'No artifacts in this scheme yet.';
     }
@@ -881,9 +882,9 @@ async function runTool(name: string, args: any): Promise<string> {
 
 function artifactLine(a: any): string {
   return [
-    `[${a.id}] ${a.title ?? a.name}`,
+    `[${a.shared ? 'shared' : a.id}] ${a.title ?? a.name}`,
     a.display_path,
-    a.ticket_kind === 'coordinator' ? 'from the Taskmaster' : `from #${a.ticket_number}`,
+    a.shared ? 'in the shared folder (pin it by this path)' : a.ticket_kind === 'coordinator' ? 'from the Taskmaster' : `from #${a.ticket_number}`,
     a.pinned_at ? `pinned by ${a.pinned_by}` : '',
     a.missing ? 'missing (file gone)' : '',
   ].filter(Boolean).join(' | ');

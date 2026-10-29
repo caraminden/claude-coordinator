@@ -94,6 +94,12 @@ export interface Artifact {
   missing: number;
 }
 
+export interface SharedPin {
+  path: string;
+  pinned_at: number;
+  pinned_by: string;
+}
+
 /** A file of Claude Code session state, gzipped; `path` is relative to the Claude config dir. */
 export interface ClaudeStateRow {
   path: string;
@@ -341,6 +347,13 @@ CREATE TABLE IF NOT EXISTS person_notes (
   updated_by TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS shared_pins (
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  pinned_at INTEGER NOT NULL,
+  pinned_by TEXT NOT NULL,
+  PRIMARY KEY (project_id, path)
+);
 `;
 
 /**
@@ -389,7 +402,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 7; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history
+export const SCHEMA_VERSION = 8; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -741,6 +754,16 @@ export class Store {
 
   pinnedArtifactPaths(ticketId: number): string[] {
     return (this.db.prepare('SELECT path FROM artifacts WHERE ticket_id = ? AND pinned_at IS NOT NULL').all(ticketId) as { path: string }[]).map((r) => r.path);
+  }
+
+  /** Pins on files of a project's shared folder, by path relative to it. Kept while the file is gone, like an artifact's. */
+  sharedPins(projectId: number): SharedPin[] {
+    return this.db.prepare('SELECT path, pinned_at, pinned_by FROM shared_pins WHERE project_id = ?').all(projectId) as unknown as SharedPin[];
+  }
+
+  setSharedPin(projectId: number, path: string, by: string | null) {
+    if (by) this.db.prepare('INSERT INTO shared_pins (project_id, path, pinned_at, pinned_by) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING').run(projectId, path, Date.now(), by);
+    else this.db.prepare('DELETE FROM shared_pins WHERE project_id = ? AND path = ?').run(projectId, path);
   }
 
   /** Bring a ticket's artifact rows in line with what is on disk. Returns whether anything changed. */

@@ -6,13 +6,13 @@ import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { fileTitle, fileType, resolveFile, siblingType } from '../artifacts.ts';
+import { fileTitle, fileType, listable, resolveFile, siblingType } from '../artifacts.ts';
 import type { Session } from '../auth.ts';
 import type { Artifact, Ticket } from '../db.ts';
 import type { MessageFile } from '../runner.ts';
 import { isUploadName, MAX_UPLOADS, opensInline } from '../uploads.ts';
 import { projectDir, projectSharedDir } from '../workspace.ts';
-import { HttpError, json, readJson, SECURITY_HEADERS, str, type App, type Route } from '../http.ts';
+import { HttpError, json, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
 
 export function artifactView(app: App, a: Artifact & { ticket_title?: string; ticket_kind?: string; ticket_number?: number | null }) {
   const ticket = a.ticket_title === undefined ? app.store.getTicket(a.ticket_id) : null;
@@ -78,6 +78,34 @@ function findPinTarget(app: App, projectId: number, caller: Ticket, id: unknown,
   if (!hits.length) throw new HttpError(404, `No artifact at ${p} in this scheme. A file becomes one once a reply links it; list_artifacts shows them`);
   throw new HttpError(409, `${hits.length} artifacts match ${p} (ids ${hits.map((a) => a.id).join(', ')}); give the id`);
 }
+
+/**
+ * The path, relative to scheme `projectId`'s shared folder, that `abs` names there, or null if it is
+ * outside it. Pinning needs a file the Shared list shows; unpinning also takes a pinned path whose
+ * file is gone.
+ */
+async function sharedPinPath(app: App, projectId: number, abs: string, pinning: boolean): Promise<string | null> {
+  const dir = projectSharedDir(app.dataDir, projectId);
+  if (!abs.startsWith(dir + sep)) return null;
+  const rel = abs.slice(dir.length + 1).split(sep).join('/');
+  if (!pinning && app.store.sharedPins(projectId).some((p) => p.path === rel)) return rel;
+  const found = listable(rel) ? await resolveFile(rel, dir, [dir]) : null;
+  // The scan skips symlinks, so the path must be the file itself.
+  if (!found || found.file !== join(await realpath(dir), rel)) throw new HttpError(404, `No file at scheme shared/${rel} that the Shared list shows`);
+  return rel;
+}
+
+/** Pin or unpin a shared-folder file; `already` when pinning one already pinned, which keeps who pinned it first. */
+async function pinShared(app: App, projectId: number, rel: string, by: string | null) {
+  const already = !!by && app.store.sharedPins(projectId).some((p) => p.path === rel);
+  app.store.setSharedPin(projectId, rel, by);
+  app.broadcast({ type: 'artifacts', projectId });
+  const file = (await app.sharedFiles(projectId)).find((f) => f.path === rel);
+  return { file, already };
+}
+
+/** A shared-folder file for an agent: marked as Shared, with its absolute path. */
+const sharedView = (app: App, projectId: number, f: SharedFile) => ({ ...f, shared: true, abs: join(projectSharedDir(app.dataDir, projectId), f.path) });
 
 /** Serve a file found by resolveFile, with byte ranges and a sandboxing CSP. */
 async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: Awaited<ReturnType<typeof resolveFile>>, path: string, download: boolean) {
@@ -260,8 +288,19 @@ export const fileRoutes: Route[] = [
       const body = await readJson(req);
       const asker = str(body.requested_by, 'requested_by', 60);
       if (/[\n\r]/.test(asker)) throw new HttpError(400, 'requested_by must be a login name');
-      const a = findPinTarget(app, project.id, caller!, body.artifact, body.path);
       const by = `${caller!.kind === 'coordinator' ? 'Taskmaster' : `#${caller!.number}`} for ${asker}`;
+      // A file of the shared folder, by path: absolute, relative to the caller's folder, or as list_artifacts shows it.
+      if (body.artifact == null && typeof body.path === 'string' && !body.path.includes('\0')) {
+        const p = body.path.trim();
+        const abs = p.startsWith('scheme shared/') ? join(projectSharedDir(app.dataDir, project.id), p.slice('scheme shared/'.length))
+          : isAbsolute(p) ? normalize(p) : caller!.cwd ? join(caller!.cwd, p) : '';
+        const rel = await sharedPinPath(app, project.id, abs, !!body.pinned);
+        if (rel !== null) {
+          const { file, already } = await pinShared(app, project.id, rel, body.pinned ? by : null);
+          return json(res, 200, { artifact: file ? sharedView(app, project.id, file) : null, removed: !file, already });
+        }
+      }
+      const a = findPinTarget(app, project.id, caller!, body.artifact, body.path);
       // Pinning one already pinned keeps who pinned it first.
       const already = !!body.pinned && a.pinned_at !== null;
       if (!already) app.store.setArtifactPinned(a.id, body.pinned ? by : null);
@@ -270,7 +309,31 @@ export const fileRoutes: Route[] = [
       return json(res, 200, { artifact: updated ? artifactView(app, updated) : null, removed: !updated, already });
     },
   },
-  { method: 'GET', path: '/api/projects/:project/shared', who: ['person'], handler: async ({ res, app, project }) => json(res, 200, await app.sharedFiles(project.id)) },
+  {
+    method: 'GET', path: '/api/projects/:project/shared', who: ['person', 'taskmaster', 'minion'],
+    async handler({ res, url, app, project }) {
+      const files = await app.sharedFiles(project.id);
+      // ?titles, for agents: each document's own title, and its absolute path.
+      if (!url.searchParams.has('titles')) return json(res, 200, files);
+      return json(res, 200, await Promise.all(files.map(async (f) => {
+        const v = sharedView(app, project.id, f);
+        return { ...v, title: f.missing ? null : await fileTitle(v.abs) };
+      })));
+    },
+  },
+  {
+    method: 'POST', path: '/api/projects/:project/shared/pin', who: ['person'],
+    async handler({ req, res, app, project, session }) {
+      const body = await readJson(req);
+      const path = str(body.path, 'path', 1000);
+      if (path.includes('\0') || isAbsolute(path)) throw new HttpError(400, 'path is relative to the shared folder');
+      const abs = join(projectSharedDir(app.dataDir, project.id), path);
+      const rel = await sharedPinPath(app, project.id, abs, !!body.pinned);
+      if (rel === null) throw new HttpError(400, 'That path is outside the shared folder');
+      const { file } = await pinShared(app, project.id, rel, body.pinned ? session.name : null);
+      return json(res, 200, { file: file ?? null });
+    },
+  },
   {
     method: ['GET', 'HEAD'], path: '/api/projects/:project/shared/file', who: ['person'],
     async handler(ctx) {

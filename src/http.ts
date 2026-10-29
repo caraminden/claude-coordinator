@@ -131,6 +131,19 @@ export function str(v: unknown, field: string, max = 200): string {
  */
 export type Who = 'person' | 'taskmaster' | 'minion' | 'self';
 
+/** A file in a scheme's shared folder, as the Shared list shows it; `path` is relative to the folder. */
+export interface SharedFile {
+  path: string;
+  name: string;
+  kind: string;
+  display_path: string;
+  size: number;
+  mtime: number;
+  pinned_at: number | null;
+  pinned_by: string | null;
+  missing: number;
+}
+
 /** What the routes reach of the running server (built once in server.ts). */
 export interface App {
   store: Store;
@@ -152,7 +165,7 @@ export interface App {
   newMinion(project: Project, m: { title: string; tag: TicketTag | null; props: Record<string, unknown>; model?: string | null; effort?: string | null }, by: string): Promise<{ id: number; number: number; notes: string[] }>;
   startChained(c: Chain, why: string): Promise<void>;
   ticketBranch(ticketId: number): Promise<BranchStatus | null>;
-  sharedFiles(projectId: number): Promise<unknown[]>;
+  sharedFiles(projectId: number): Promise<SharedFile[]>;
   sharedDir(ticket: Ticket): string;
   registryChanged(projectId: number, global: boolean): void;
 }

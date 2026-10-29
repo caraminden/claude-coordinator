@@ -77,6 +77,11 @@ export interface FoundArtifact {
 const MAX_FILES = 2000;
 const SKIP_DIRS = new Set(['node_modules', 'vendor', 'target', 'dist', 'build', '__pycache__']);
 
+/** Whether a found file (path relative to the folder scanned) is one people are shown: no hidden or dependency folders. */
+export function listable(path: string): boolean {
+  return isArtifact(path) && !path.split('/').some((part) => part.startsWith('.') || SKIP_DIRS.has(part));
+}
+
 async function git(args: string[], cwd: string): Promise<string[]> {
   const { stdout } = await run('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, timeout: 30_000 });
   return stdout.split('\0').filter(Boolean);
@@ -124,7 +129,7 @@ async function walk(cwd: string): Promise<string[]> {
 export async function findArtifacts(cwd: string, isGit: boolean): Promise<FoundArtifact[]> {
   if (!cwd) return [];
   const paths = (isGit ? await gitAdded(cwd) : await walk(cwd))
-    .filter((p) => isArtifact(p) && !p.split('/').some((part) => part.startsWith('.') || SKIP_DIRS.has(part)))
+    .filter(listable)
     .slice(0, MAX_FILES);
   const found: FoundArtifact[] = [];
   for (const path of paths) {

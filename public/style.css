@@ -539,12 +539,12 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .msg.user.pending { opacity: 0.7; }
 
 /* Files a thread links in its reply: a card, or the image or video itself; both open the file view. */
-.msg .file-card { display: inline-flex; align-items: center; gap: 0.6rem; max-width: 100%; margin: 0.25rem 0; padding: 0.45rem 0.7rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); text-decoration: none; vertical-align: middle; }
-.msg .file-card:hover { border-color: var(--accent); }
-.msg .file-card img { width: 2.6rem; height: 2.6rem; object-fit: cover; border-radius: 4px; flex: none; }
-.msg .file-card .text { display: flex; flex-direction: column; min-width: 0; }
-.msg .file-card .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.msg .file-card .meta { font-size: 0.78em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md .file-card { display: inline-flex; align-items: center; gap: 0.6rem; max-width: 100%; margin: 0.25rem 0; padding: 0.45rem 0.7rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); text-decoration: none; vertical-align: middle; }
+.md .file-card:hover { border-color: var(--accent); }
+.md .file-card img { width: 2.6rem; height: 2.6rem; object-fit: cover; border-radius: 4px; flex: none; }
+.md .file-card .text { display: flex; flex-direction: column; min-width: 0; }
+.md .file-card .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md .file-card .meta { font-size: 0.78em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .md .file-preview { display: inline-block; max-width: 100%; margin: 0.35rem 0; text-decoration: none; }
 .md .file-preview img, .md .file-preview video { display: block; max-width: 100%; max-height: 22rem; border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); }
 .md .file-preview:hover img, .md .file-preview:hover video { border-color: var(--accent); }

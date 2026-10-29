@@ -44,9 +44,11 @@ test('strikes the newest reply or relayed message holding the words, with a note
   assert.equal(JSON.parse(store.listEvents(minion.id).find((e) => e.id === old.id)!.data).strikes, undefined);
   // The chat showing the message redraws it; both chats get the note.
   assert.deepEqual(store.listEvents(coordinator.id).filter((e) => e.kind === 'strike').map((e) => JSON.parse(e.data).event), [relayed.id]);
-  for (const id of [coordinator.id, minion.id]) {
-    assert.ok(store.listEvents(id).some((e) => e.kind === 'note' && /Struck through as wrong: "#12 is not merged yet"\. git log main shows it\./.test(JSON.parse(e.data).text)));
-  }
+  // The note in the minion's own chat says which chat shows the message; the one beside it needn't.
+  const note = (id: number) => JSON.parse(store.listEvents(id).find((e) => e.kind === 'note')!.data);
+  assert.deepEqual(note(coordinator.id).strike, { quote: '#12 is not merged yet', reason: 'git log main shows it.', chat: null });
+  assert.deepEqual(note(minion.id).strike, { quote: '#12 is not merged yet', reason: 'git log main shows it.', chat: { project: project.id, number: null } });
+  assert.equal(note(minion.id).text, 'Struck through as wrong in the Taskmaster\'s chat: "#12 is not merged yet". git log main shows it.');
 
   // Once that one is struck, the same words again are refused; words only in an older reply strike that.
   assert.throws(() => runner.strike(minion.id, '#12 is **not** merged yet', 'again'), /already/);
@@ -55,6 +57,7 @@ test('strikes the newest reply or relayed message holding the words, with a note
   assert.throws(() => runner.strike(minion.id, 'never said this', 'x'), /Quote it exactly/);
   // The Taskmaster strikes its own message in the minion's chat.
   assert.deepEqual(runner.strike(coordinator.id, 'It is merged', 'It was reverted.'), { ticketId: minion.id });
+  assert.deepEqual(JSON.parse(store.listEvents(coordinator.id).filter((e) => e.kind === 'note').at(-1)!.data).strike.chat, { project: project.id, number: minion.number });
   runner.detachAll();
 });
 

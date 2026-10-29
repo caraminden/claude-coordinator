@@ -170,7 +170,7 @@ const STRIKE_TEXT = {
     type: 'object',
     properties: {
       text: { type: 'string', description: 'The wrong words, verbatim from one of your messages (Markdown and all), as short as still pins down the claim' },
-      reason: { type: 'string', description: 'One sentence on what proved it wrong, e.g. "git log shows abc123 is on main."' },
+      reason: { type: 'string', description: 'One sentence on what proved it wrong and what is right instead; the note shows it after the struck words, e.g. "git log shows abc123 is on main, so #12 is merged."' },
     },
     required: ['text', 'reason'],
   },

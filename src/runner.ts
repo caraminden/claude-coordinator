@@ -1077,9 +1077,14 @@ export class Runner {
       strikes.push({ text: quote, reason, at: this.now() });
       this.store.setEventData(e.id, { ...data, strikes });
       this.emit(e.ticket_id, 'strike', { event: e.id, strikes });
-      // Notes show as plain text, so the quote loses its Markdown marks.
-      const note = `Struck through as wrong: "${clip(quote.replace(/[*`~]/g, ''))}". ${reason}`;
-      for (const id of new Set([e.ticket_id, by])) this.emit(id, 'note', { text: note });
+      // `strike` lets the chat draw the quote struck through; `chat` (another chat's note only) is where the message shows.
+      const where = this.store.getTicket(e.ticket_id)!;
+      const words = clip(quote.replace(/[*`~]/g, ''));
+      for (const id of new Set([e.ticket_id, by])) {
+        const chat = id === e.ticket_id ? null : { project: where.project_id, number: where.number };
+        const place = chat ? ` in ${where.number == null ? `the ${AGENT_NAME}'s chat` : `#${where.number}`}` : '';
+        this.emit(id, 'note', { text: `Struck through as wrong${place}: "${words}". ${reason}`, strike: { quote: words, reason, chat } });
+      }
       return { ticketId: e.ticket_id };
     }
     throw new Error('None of your replies or messages contains that text. Quote it exactly as you wrote it, Markdown and all, from a single message.');

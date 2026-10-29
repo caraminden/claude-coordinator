@@ -5,6 +5,7 @@ import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { recapEvent, showRecap } from './recap.js';
 import { struckSource } from './strike.js';
+import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 
@@ -499,7 +500,10 @@ export function appendEvent(event, scroll = true) {
     view.cards.get(data.id)?.markSettled();
   } else if (event.kind === 'strike') {
     // strike_text: redraw the message it struck, wherever it shows now (a bubble or a folded update).
-    for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) el.replaceWith(messageBody(el.source, data.strikes, el.ticketId, data.event));
+    for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) {
+      el.closest('.coord')?.querySelector('summary .preview')?.replaceChildren(...previewNodes(el.source, data.strikes));
+      el.replaceWith(messageBody(el.source, data.strikes, el.ticketId, data.event));
+    }
   } else if (event.kind === 'plan_result') {
     view.cards.get(data.id)?.settle(data);
   } else if (event.kind === 'loop_paused') {
@@ -514,8 +518,10 @@ export function appendEvent(event, scroll = true) {
     // The card itself records who decided, or why it expired.
     view.cards.get(data.id)?.settle(data);
   } else if (event.kind === 'note') {
-    const short = shortNote(data.text);
-    if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
+    const struck = strikeNote(data);
+    const short = struck ? null : shortNote(data.text);
+    if (struck) nodes.push(struck);
+    else if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
   } else if (event.kind === 'error') {
     nodes.push(h('div', { class: 'note error' }, data.text));
   } else if (event.kind === 'claude') {
@@ -647,6 +653,20 @@ export function base64Url(mediaType, data) {
 }
 
 /** Short wording for the notes the server writes often (null hides one); anything else stays as it is. */
+/**
+ * A strike_text note, or null: "Struck through in #116: ~~the wrong words~~ → the reason", linking the
+ * chat that shows the message when that's another one. Older notes kept only text, read back here.
+ */
+function strikeNote(data) {
+  const old = !data.strike && data.text?.match(/^Struck through as wrong: "(.*)"\. (.*)$/s);
+  const s = data.strike ?? (old && { quote: old[1], reason: old[2] });
+  if (!s) return null;
+  const c = s.chat;
+  const where = c === null ? ' above' : c ? [' in ', h('a', { class: 'thread-ref', href: c.number == null ? `#/p/${c.project}` : threadNumberHref(c.project, c.number) },
+    c.number == null ? `the ${taskmasterName(c.project)}'s chat` : `#${c.number}`)] : '';
+  return h('div', { class: 'note strike-note' }, `✎ Struck through`, where, ': ', h('del', {}, s.quote), ' → ', threadRefs(s.reason));
+}
+
 function shortNote(text) {
   let m;
   // Older threads stored a note on every session restore; restores are silent now.
@@ -1003,7 +1023,6 @@ function markQueued(bubble, ticket) {
 
 export function userBubble(author, text, imageSrcs, about = null, event = null, files = []) {
   const github = author === GITHUB_NAME;
-  const preview = (text ?? '').replace(/[#*_`>\[\]~]/g, '').replace(/\s+/g, ' ').trim();
   const msg = h('div', { class: github ? 'msg user github' : 'msg user' }, h('div', { class: 'who' }, author,
     about ? [' on ', h('a', { class: 'about', href: fileHref(about.ticketId, about.path), title: about.path }, about.name)] : ''));
   // GitHub's messages end lines with bare URLs, which Markdown alone would leave as text.
@@ -1018,9 +1037,15 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
   const who = machineAuthor(author);
   if (who) {
     msg.querySelector('.who').remove();
-    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, who), h('span', { class: 'preview' }, preview)), msg);
+    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, who), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
   }
   return msg;
+}
+
+/** A folded message's one line: its text without Markdown marks, struck words keeping their line. */
+function previewNodes(text, strikes) {
+  const flat = (t) => t.replace(/[#*_`>\[\]~]/g, '').replace(/\s+/g, ' ');
+  return struckSource((text ?? '').trim(), strikes).split(/~~(.+?)~~/).map((part, i) => (i % 2 ? h('del', {}, flat(part)) : flat(part)));
 }
 
 /** An attached file in a message: images and PDFs open in a tab (the server says so), anything else downloads. */

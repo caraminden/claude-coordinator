@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { Auth, type Session } from './auth.ts';
 import type { Store, Ticket } from './db.ts';
+import { HttpError } from './http.ts';
 
 /** The setting that says a minion offers a preview (its view shows the Open preview button). */
 export const previewKey = (ticketId: number) => `preview:${ticketId}`;
@@ -25,14 +26,7 @@ const SWEEP_MS = 5 * 60 * 1000;
 const MAX_RUNNING = 5;
 const BOOT_TIMEOUT_MS = 30_000;
 
-export class PreviewError extends Error {
-  status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
+export class PreviewError extends HttpError {}
 
 interface Running {
   proc: ChildProcess;

@@ -6,7 +6,6 @@ import { readFile, readdir, mkdir, realpath, stat, writeFile } from 'node:fs/pro
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { basename, extname, isAbsolute, join, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { gzip } from 'node:zlib';
 import { homedir } from 'node:os';
 import { commentMessage, fileType, findArtifacts, isArtifact, linkedPaths, optionImageProblem, resolveFile } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
@@ -23,15 +22,16 @@ import { instructionSources, lineDiff } from './src/instructions.ts';
 import { MACHINE_NAME, MachineRelay, RESERVED_NAMES, WS_SUFFIX, hashToken, newToken } from './src/machines.ts';
 import { NOTIFY_STATES, Pusher, loadVapidKeys, validSubscription, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent, tripwireConfig, type MessageFile } from './src/runner.ts';
-import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, saveUpload, UploadTooLarge } from './src/uploads.ts';
-import { GLOBAL_OWNER, PropertyError, type Actor } from './src/properties.ts';
+import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, saveUpload } from './src/uploads.ts';
+import { GLOBAL_OWNER, type Actor } from './src/properties.ts';
 import { TAG_TO_TYPE } from './src/property-seed.ts';
-import { PreviewError, Previews, previewPath } from './src/previews.ts';
+import { Previews, previewPath } from './src/previews.ts';
 import { type Chain, LiveWaiters } from './src/wake.ts';
 import { catchUpTicketDir, cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
 import { costDays, dayBudget } from './src/costs.ts';
-import { describeCron, runBrief, ScheduleError, type Schedule } from './src/schedules.ts';
+import { describeCron, runBrief, type Schedule } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
+import { acceptsGzip, buildNumber, clientIp, HttpError, isSecure, json, oneOf, readJson, replyList, requestUrl, SECURITY_HEADERS, send, str } from './src/http.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -122,13 +122,6 @@ function broadcast(msg: object) {
     }
   }
 }
-
-const SECURITY_HEADERS = {
-  // blob: lets the composer preview pasted images before they are sent.
-  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
-  'X-Content-Type-Options': 'nosniff',
-  'Referrer-Policy': 'same-origin',
-};
 
 const runner = new Runner(
   store,
@@ -558,77 +551,12 @@ async function serveArtifact(req: IncomingMessage, res: ServerResponse, found: A
   await pipeline(createReadStream(file, { start, end }), res).catch(() => {});
 }
 
-class HttpError extends Error {
-  status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
-// Responses to browsers that accept gzip. Caddy passes bodies through as they are, and a long
-// thread's history is megabytes of JSON that gzips about 4x.
-const acceptsGzip = new WeakSet<ServerResponse>();
-const MIN_GZIP_BYTES = 1400;
-
-/** Send a whole body, gzipped when the browser accepts it and it is big enough to be worth it. */
-function send(res: ServerResponse, status: number, headers: Record<string, string>, body: string | Buffer) {
-  const buf = typeof body === 'string' ? Buffer.from(body) : body;
-  if (buf.length < MIN_GZIP_BYTES || !acceptsGzip.has(res)) {
-    res.writeHead(status, { Vary: 'Accept-Encoding', ...headers });
-    return res.end(buf);
-  }
-  gzip(buf, { level: 6 }, (err, zipped) => {
-    if (res.destroyed) return;
-    if (err) {
-      res.writeHead(status, { Vary: 'Accept-Encoding', ...headers });
-      return res.end(buf);
-    }
-    res.writeHead(status, { Vary: 'Accept-Encoding', ...headers, 'Content-Encoding': 'gzip' });
-    res.end(zipped);
-  });
-}
-
-function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
-  send(res, status, { ...SECURITY_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers }, JSON.stringify(body));
-}
-
-async function readJson(req: IncomingMessage, maxBytes = 1_000_000): Promise<any> {
-  if (!(req.headers['content-type'] ?? '').startsWith('application/json')) {
-    throw new HttpError(415, 'Expected application/json');
-  }
-  let size = 0;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > maxBytes) throw new HttpError(413, 'Request too large');
-    chunks.push(chunk);
-  }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString() || '{}');
-  } catch {
-    throw new HttpError(400, 'Invalid JSON');
-  }
-}
-
-function clientIp(req: IncomingMessage): string {
-  // Caddy appends the real client address, so only the right-most entry is trustworthy.
-  const fwd = req.headers['x-forwarded-for'];
-  const last = typeof fwd === 'string' ? fwd.split(',').pop()!.trim() : '';
-  return last || req.socket.remoteAddress || '?';
-}
-
 /** Display names end up in prompts as "[Name]: ...", so keep them plain. */
 function cleanName(v: unknown): string {
   const name = typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f\[\]:]/g, '').replace(/\s+/g, ' ').trim() : '';
   if (!name) throw new HttpError(400, 'Name is required');
   if (looksLikeUrl(name)) throw new HttpError(400, 'That looks like a web address. Type your name.');
   return name.slice(0, 40);
-}
-
-function isSecure(req: IncomingMessage): boolean {
-  return req.headers['x-forwarded-proto'] === 'https';
 }
 
 // A label Claude ended with "(Recommended)" itself; the card adds those words to the flagged option.
@@ -694,31 +622,6 @@ function modelName(id: string): string {
   return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id;
 }
 
-function oneOf(v: unknown, allowed: readonly string[], field: string): string | null {
-  if (v === null || v === '') return null;
-  if (typeof v !== 'string' || !allowed.includes(v)) throw new HttpError(400, `${field} must be one of: ${allowed.join(', ')}`);
-  return v;
-}
-
-function buildNumber(v: unknown): number | null {
-  if (v === null || v === '') return null;
-  if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 9999) throw new HttpError(400, 'Build must be a whole number from 1 to 9999');
-  return v as number;
-}
-
-/** One-tap replies: up to 3 short texts, stored as JSON; none (null or []) clears them. */
-function replyList(v: unknown): string | null {
-  if (v === null || (Array.isArray(v) && !v.length)) return null;
-  if (!Array.isArray(v) || v.length > 3) throw new HttpError(400, 'Replies must be a list of at most 3');
-  return JSON.stringify(v.map((r) => str(r, 'Reply', 40)));
-}
-
-function str(v: unknown, field: string, max = 200): string {
-  if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `${field} is required`);
-  if (v.length > max) throw new HttpError(400, `${field} is too long`);
-  return v.trim();
-}
-
 /** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
 function scheduleFields(projectId: number, body: any, all: boolean) {
   const out: { name?: string; cron?: string; brief?: string; type?: string } = {};
@@ -726,17 +629,8 @@ function scheduleFields(projectId: number, body: any, all: boolean) {
   if (all || body.cron !== undefined) out.cron = str(body.cron, 'cron', 100);
   if (all || body.brief !== undefined) out.brief = str(body.brief, 'Brief', 100_000);
   // Each run's minion gets this type; checked against the registry now so a run can't fail on it later.
-  if (all || body.type !== undefined) out.type = registry(() => store.props.check(projectId, { type: body.type ?? 'chore' })).type?.[0] ?? 'chore';
+  if (all || body.type !== undefined) out.type = store.props.check(projectId, { type: body.type ?? 'chore' }).type?.[0] ?? 'chore';
   return out;
-}
-
-function scheduled<T>(fn: () => T): T {
-  try {
-    return fn();
-  } catch (err) {
-    if (err instanceof ScheduleError) throw new HttpError(err.status, err.message);
-    throw err;
-  }
 }
 
 /** A schedule for the API: its cron in words and its last run's minion number. */
@@ -759,16 +653,6 @@ function actorFor(session: Session): Actor {
   const t = store.getTicket(session.agent)!;
   const kind = t.kind === 'coordinator' ? 'coordinator' : 'thread';
   return { kind, name: kind === 'coordinator' ? AGENT_NAME : `#${t.number} ${t.title}`, projectId: t.project_id, ticketId: t.id };
-}
-
-/** Run a registry call, turning its refusals into HTTP errors. */
-function registry<T>(fn: () => T): T {
-  try {
-    return fn();
-  } catch (err) {
-    if (err instanceof PropertyError) throw new HttpError(err.status, err.message);
-    throw err;
-  }
 }
 
 /** Rewrite each scheme's property-vocabulary.md from the registry; a hand-written one is kept aside once. */
@@ -1233,7 +1117,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const given = (key: string) => Object.keys(props).some((k) => k.toLowerCase() === key.toLowerCase());
     if (tag && !given('type')) props.type = TAG_TO_TYPE[tag];
     if (session.agent === undefined && !given('requestedBy')) props.requestedBy = session.name;
-    const planned = registry(() => store.props.check(project.id, props));
+    const planned = store.props.check(project.id, props);
     if (scope !== null && !planned.type?.length) {
       throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');
     }
@@ -1272,12 +1156,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     const body = await readJson(req);
     const actor = actorFor(session);
     if (action === '/keys') {
-      const r = registry(() => store.props.registerKey(project.id, body, actor));
+      const r = store.props.registerKey(project.id, body, actor);
       if (r.registered) registryChanged(project.id, r.scope === 'global');
       return json(res, r.registered ? 201 : 200, r);
     }
     if (action === '/values') {
-      const r = registry(() => store.props.registerValues(project.id, body.key, body.values, actor, !!body.force));
+      const r = store.props.registerValues(project.id, body.key, body.values, actor, !!body.force);
       if (r.added.length || r.updated.length) registryChanged(project.id, store.props.isGlobal(project.id, body.key));
       if (r.unreviewed) {
         const coordinator = store.getCoordinator(project.id);
@@ -1287,13 +1171,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     }
     if (action === '/review') {
       const global = store.props.isGlobal(project.id, body.key);
-      const r = registry(() => store.props.review(project.id, body, actor));
+      const r = store.props.review(project.id, body, actor);
       registryChanged(project.id, global);
       return json(res, 200, r);
     }
     if (action === '/proposals') {
       if (actor.kind !== 'thread') throw new HttpError(403, 'Taskmasters and people register keys and values directly; proposals are for minions');
-      const r = registry(() => store.props.propose(project.id, body, actor));
+      const r = store.props.propose(project.id, body, actor);
       if (r.proposed) {
         registryChanged(project.id, false);
         const what = body.value === undefined ? `a new key \`${body.key}\`` : `\`${body.key}: ${body.value}\``;
@@ -1332,7 +1216,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (method === 'POST') {
       const body = await readJson(req);
       const fields = scheduleFields(project.id, body, true);
-      const s = scheduled(() => store.schedules.create({ project_id: project.id, ...(fields as Required<typeof fields>), created_by: session.name }));
+      const s = store.schedules.create({ project_id: project.id, ...(fields as Required<typeof fields>), created_by: session.name });
       broadcast({ type: 'schedules', projectId: project.id });
       return json(res, 201, scheduleView(s));
     }
@@ -1356,7 +1240,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       if (typeof body.paused !== 'boolean') throw new HttpError(400, 'paused must be true or false');
       patch.paused = body.paused;
     }
-    const updated = scheduled(() => store.schedules.update(s.id, patch));
+    const updated = store.schedules.update(s.id, patch);
     broadcast({ type: 'schedules', projectId: s.project_id });
     return json(res, 200, scheduleView(updated));
   }
@@ -1518,13 +1402,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
       // A file from the composer, streamed to disk as it arrives; the message that sends it names it.
       if (session.agent !== undefined) throw new HttpError(403, 'Only people attach files');
       if (Number(req.headers['content-length'] ?? 0) > MAX_UPLOAD_BYTES) throw new HttpError(413, 'Files must be under 200 MB');
-      try {
-        const saved = await saveUpload(fileUploadsDir(ticket), url.searchParams.get('name') ?? '', req);
-        return json(res, 201, { name: saved.name, size: saved.size });
-      } catch (err) {
-        if (err instanceof UploadTooLarge) throw new HttpError(413, 'Files must be under 200 MB');
-        throw err;
-      }
+      const saved = await saveUpload(fileUploadsDir(ticket), url.searchParams.get('name') ?? '', req);
+      return json(res, 201, { name: saved.name, size: saved.size });
     }
     if (action === '/events' && method === 'GET') {
       // ?after=: everything since (catch-up). Else a page of whole turns before ?before= (history.ts).
@@ -1712,9 +1591,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
         const file = str(body.file, 'file', 4096);
         const a = store.findArtifact(id, [isAbsolute(file) ? file : join(ticket.cwd, file), join(sharedDir(ticket), file)]);
         if (!a) throw new HttpError(404, `#${ticket.number} has shown no file ${file}; link it in a reply first`);
-        return json(res, 200, registry(() => store.props.set('artifact', a.id, a.project_id, body.properties, session.name)));
+        return json(res, 200, store.props.set('artifact', a.id, a.project_id, body.properties, session.name));
       }
-      const r = registry(() => store.props.set('minion', id, ticket.project_id, body.properties, session.name));
+      const r = store.props.set('minion', id, ticket.project_id, body.properties, session.name);
       runner.broadcastTicket(id);
       return json(res, 200, r);
     }
@@ -1764,12 +1643,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     if (action === '/preview' && method === 'POST') {
       // start_preview: (re)start this minion's preview from its worktree as it is now.
       if (!previews) throw new HttpError(403, 'A preview has no previews of its own');
-      try {
-        await previews.start(ticket);
-      } catch (err) {
-        if (err instanceof PreviewError) throw new HttpError(err.status, err.message);
-        throw err;
-      }
+      await previews.start(ticket);
       const origin = store.getSetting<string>('public_origin');
       return json(res, 200, { url: `${origin ?? ''}/${previewPath(id)}` });
     }
@@ -1999,17 +1873,6 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
   throw new HttpError(405, 'Method not allowed');
 }
 
-/** A request's URL; a 400 for one that can't be parsed or decoded (`//`, `/%`) rather than a crash. */
-function requestUrl(req: IncomingMessage): URL {
-  try {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    decodeURIComponent(url.pathname);
-    return url;
-  } catch {
-    throw new HttpError(400, 'Bad request');
-  }
-}
-
 const server = createServer(async (req, res) => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   try {
@@ -2026,12 +1889,7 @@ const server = createServer(async (req, res) => {
       }
       // The front end's URLs are relative, so the page itself needs the trailing slash.
       if (!preview[2]) return void res.writeHead(302, { Location: `/${previewPath(Number(preview[1]))}${url.search}` }).end();
-      try {
-        await previews.proxy(req, res, Number(preview[1]), preview[2] + url.search, session);
-      } catch (err) {
-        if (err instanceof PreviewError) throw new HttpError(err.status, err.message);
-        throw err;
-      }
+      await previews.proxy(req, res, Number(preview[1]), preview[2] + url.search, session);
     } else {
       await serveStatic(req, res, url.pathname);
     }

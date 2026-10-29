@@ -1,6 +1,7 @@
 // Scheduled minions: a saved brief that starts on a cron schedule. The schedule lives in the app
 // (this table plus a timer in the server), since minions can't install systemd timers.
 import type { DatabaseSync } from 'node:sqlite';
+import { HttpError } from './http.ts';
 
 export interface Schedule {
   id: number;
@@ -126,8 +127,10 @@ export function describeCron(cron: string): string {
   return cron;
 }
 
-export class ScheduleError extends Error {
-  status = 400;
+export class ScheduleError extends HttpError {
+  constructor(message: string) {
+    super(400, message);
+  }
 }
 
 export class Schedules {

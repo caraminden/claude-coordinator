@@ -1,6 +1,7 @@
 // Files people attach in the composer: streamed into a thread's files folder under uploads/.
 import { mkdir, open, rm } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
+import { HttpError } from './http.ts';
 
 export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 export const MAX_UPLOADS = 20;
@@ -25,7 +26,11 @@ export const isUploadName = (name: string) => /^[\p{L}\p{N}\p{M}_()+,=@][\p{L}\p
 const INLINE = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.pdf']);
 export const opensInline = (name: string) => INLINE.has(extname(name).toLowerCase());
 
-export class UploadTooLarge extends Error {}
+export class UploadTooLarge extends HttpError {
+  constructor() {
+    super(413, 'Files must be under 200 MB');
+  }
+}
 
 /**
  * Stream `body` into `dir` under the safe form of `rawName`, never overwriting: a second

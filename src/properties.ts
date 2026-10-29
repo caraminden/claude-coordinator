@@ -4,6 +4,7 @@
 // value, and new keys and values are checked for near-duplicates first.
 import type { DatabaseSync } from 'node:sqlite';
 import { DELVE_SEED, GLOBAL_SEED, type SeedKey, TAG_TO_TYPE } from './property-seed.ts';
+import { HttpError } from './http.ts';
 
 /** The scheme whose Taskmaster owns the global keys (Citadel itself). */
 export const GLOBAL_OWNER = 2;
@@ -16,11 +17,9 @@ export type Actor =
   | { kind: 'person'; name: string }
   | { kind: 'coordinator' | 'thread'; name: string; projectId: number; ticketId: number };
 
-export class PropertyError extends Error {
-  status: number;
+export class PropertyError extends HttpError {
   constructor(message: string, status = 400) {
-    super(message);
-    this.status = status;
+    super(status, message);
   }
 }
 

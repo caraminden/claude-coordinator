@@ -62,6 +62,8 @@ async function until<T>(what: string, fn: () => Promise<T | undefined | false> |
 }
 
 const turns = () => existsSync(join(root, 'turns.jsonl')) ? readFileSync(join(root, 'turns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+// The token the minion's latest turn holds: each turn's token dies when the next turn starts.
+const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
 const idle = (id: number) => until('the turn to end', async () => (await call(`/api/tickets/${id}`)).ticket.status !== 'running');
 
 let ticket: any;
@@ -88,14 +90,14 @@ before(async () => {
   await idle(ticket.id);
 });
 
-const propose = (summary: string) => call(`/api/tickets/${ticket.id}/plans`, { method: 'POST', token: turn.token, body: { summary, plan: `## ${summary}\n\n- step one` } });
+const propose = (summary: string) => call(`/api/tickets/${ticket.id}/plans`, { method: 'POST', token: live(), body: { summary, plan: `## ${summary}\n\n- step one` } });
 const plans = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'plan').map((e: any) => JSON.parse(e.data));
 const results = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'plan_result').map((e: any) => JSON.parse(e.data));
 
 test('a plan card is stored as pending, and the minion cannot approve it', async () => {
   const { id } = await propose('First plan');
   assert.deepEqual(await plans(), [{ id, summary: 'First plan', plan: '## First plan\n\n- step one', status: 'pending' }]);
-  await assert.rejects(call(`/api/tickets/${ticket.id}/verdict`, { method: 'POST', token: turn.token, body: { planId: id, verdict: 'approve' } }), /403/);
+  await assert.rejects(call(`/api/tickets/${ticket.id}/verdict`, { method: 'POST', token: live(), body: { planId: id, verdict: 'approve' } }), /403/);
   await assert.rejects(call(`/api/tickets/${ticket.id}/plans`, { method: 'POST', body: { summary: 'x', plan: 'y' } }), /403/);
   await assert.rejects(propose(' '), /400 Summary is required/);
 });

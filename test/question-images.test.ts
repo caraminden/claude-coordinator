@@ -61,6 +61,8 @@ async function until<T>(what: string, fn: () => Promise<T | undefined | false> |
 }
 
 const turns = () => existsSync(join(root, 'turns.jsonl')) ? readFileSync(join(root, 'turns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+// The token the minion's latest turn holds: each turn's token dies when the next turn starts.
+const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
 const idle = (id: number) => until('the turn to end', async () => (await call(`/api/tickets/${id}`)).ticket.status !== 'running');
 
 let ticket: any;
@@ -95,7 +97,7 @@ before(async () => {
 });
 
 const ask = (images: (string | undefined)[]) => call(`/api/tickets/${ticket.id}/questions`, {
-  method: 'POST', token: turn.token,
+  method: 'POST', token: live(),
   body: { questions: [{ question: 'Which take?', options: images.map((image, i) => ({ label: `Take ${i + 1}`, ...(image ? { image } : {}), ...(i ? {} : { recommended: true }) })) }] },
 });
 
@@ -116,7 +118,7 @@ test('a question card refuses pictures outside those folders, missing or not pic
 });
 
 const askWith = (options: object[], multiSelect = false) => call(`/api/tickets/${ticket.id}/questions`, {
-  method: 'POST', token: turn.token, body: { questions: [{ question: 'Tabs or list?', multiSelect, options }] },
+  method: 'POST', token: live(), body: { questions: [{ question: 'Tabs or list?', multiSelect, options }] },
 });
 
 test('every question on a card recommends an option', async () => {
@@ -142,12 +144,12 @@ test('a comment on a file is a chat message from the person that wakes the threa
 test('comments only on files the thread may show, and only from people', async () => {
   await assert.rejects(call(`/api/tickets/${ticket.id}/comments`, { method: 'POST', body: { path: '../../../../secret.png', text: 'x' } }), /404/);
   await assert.rejects(call(`/api/tickets/${ticket.id}/comments`, { method: 'POST', body: { path: 'report.md', text: ' ' } }), /400/);
-  await assert.rejects(call(`/api/tickets/${ticket.id}/comments`, { method: 'POST', token: turn.token, body: { path: 'report.md', text: 'x' } }), /403/);
+  await assert.rejects(call(`/api/tickets/${ticket.id}/comments`, { method: 'POST', token: live(), body: { path: 'report.md', text: 'x' } }), /403/);
 });
 
 test('a thread can message its coordinator, which wakes with the thread named', async () => {
   const before = turns().length;
-  await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: turn.token, body: { text: 'Send #2 the handoff' } });
+  await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'Send #2 the handoff' } });
   const next = (await until('the coordinator\'s turn', () => turns().length > before && turns())).at(-1);
   assert.match(next.prompt.message.content[0].text, /^\[#1 .+\]: Send #2 the handoff$/);
   assert.notEqual(next.token, turn.token);

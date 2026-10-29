@@ -6,15 +6,14 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { Auth } from '../src/auth.ts';
 import { promptMessage } from '../src/runner.ts';
 import { isUploadName, safeFileName, saveUpload, UploadTooLarge } from '../src/uploads.ts';
+import { agentToken } from './helpers.ts';
 
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'uploads-'));
 const PASSWORD = 'test-password-123';
 const SECRET = 'x'.repeat(40);
-const agent = new Auth(PASSWORD, SECRET);
 const procs: ChildProcess[] = [];
 after(() => {
   for (const p of procs) p.kill();
@@ -92,7 +91,7 @@ before(async () => {
 });
 
 const call = (path: string, init: RequestInit & { as?: number } = {}) =>
-  fetch(base + path, { ...init, headers: { ...(init.as === undefined ? { Cookie: cookie } : { Authorization: `Bearer ${agent.agentToken(init.as)}` }), ...init.headers } });
+  fetch(base + path, { ...init, headers: { ...(init.as === undefined ? { Cookie: cookie } : { Authorization: `Bearer ${agentToken(join(root, 'data'), init.as)}` }), ...init.headers } });
 const postJson = (path: string, body: unknown) => call(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 test('people attach a file: it streams into the files folder, the message names it, and it downloads without rendering', async () => {

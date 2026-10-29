@@ -1,5 +1,5 @@
 // Shared-password login with HMAC-signed session cookies.
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { APP_NAME } from './appname.ts';
 import { GITHUB_NAME } from './github.ts';
@@ -17,6 +17,15 @@ export interface Session {
 }
 
 export const AGENT_NAME = 'Taskmaster';
+
+/** A thread's turn-token nonces: its current turn's and the one before. */
+export interface Nonces { current: string | null; previous: string | null }
+/** Where Auth keeps them. `get` returns null for a thread that is gone or closed: its tokens are dead. */
+export interface NonceStore {
+  get(ticketId: number): Nonces | null;
+  set(ticketId: number, nonces: Nonces): void;
+}
+const NO_NONCES: NonceStore = { get: () => ({ current: null, previous: null }), set: () => {} };
 
 /** Message authors that aren't people (minions write as "#N title"), so nobody may log in as one. */
 export const NOT_PEOPLE = [AGENT_NAME, 'Coordinator', GITHUB_NAME, APP_NAME];
@@ -50,12 +59,14 @@ export class Auth {
   private failures = new Map<string, { count: number; since: number }>();
   private password: string;
   private secret: string;
+  private nonces: NonceStore;
 
-  constructor(password: string, secret: string) {
+  constructor(password: string, secret: string, nonces: NonceStore = NO_NONCES) {
     if (password.length < 12) throw new Error('COORDINATOR_PASSWORD must be at least 12 characters');
     if (secret.length < 32) throw new Error('SESSION_SECRET must be at least 32 characters');
     this.password = password;
     this.secret = secret;
+    this.nonces = nonces;
   }
 
   /** Too many recent failures from this client? */
@@ -102,18 +113,36 @@ export class Auth {
     return `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
   }
 
-  /** Bearer token that lets a coordinator ticket's MCP server act on the API as that ticket. */
-  agentToken(ticketId: number): string {
-    return `${ticketId}.${this.sign(`agent:${ticketId}`)}`;
+  /**
+   * Bearer token that lets a thread's MCP servers act on the API as that thread. With a nonce it lives
+   * as long as the nonce does; without one it is the old kind, good only until the thread's first turn
+   * token (tests mint those, and turns started before the nonces still hold one).
+   */
+  agentToken(ticketId: number, nonce?: string): string {
+    return nonce ? `${ticketId}.${nonce}.${this.sign(`agent:${ticketId}:${nonce}`)}` : `${ticketId}.${this.sign(`agent:${ticketId}`)}`;
+  }
+
+  /** A token for a thread's new turn. The last turn's token stops working, except for its deploy report. */
+  turnToken(ticketId: number): string {
+    const nonce = randomBytes(16).toString('base64url');
+    this.nonces.set(ticketId, { current: nonce, previous: this.nonces.get(ticketId)?.current ?? null });
+    return this.agentToken(ticketId, nonce);
   }
 
   private agentSession(req: IncomingMessage): Session | null {
-    const m = (req.headers.authorization ?? '').match(/^Bearer (\d+)\.([\w-]+)$/);
+    const m = (req.headers.authorization ?? '').match(/^Bearer (\d+)\.(?:([\w-]+)\.)?([\w-]+)$/);
     if (!m) return null;
-    const expected = Buffer.from(this.sign(`agent:${m[1]}`));
-    const given = Buffer.from(m[2]);
+    const [, id, nonce, sig] = m;
+    const expected = Buffer.from(this.sign(nonce === undefined ? `agent:${id}` : `agent:${id}:${nonce}`));
+    const given = Buffer.from(sig);
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
-    return { name: AGENT_NAME, exp: Infinity, agent: Number(m[1]) };
+    const ticketId = Number(id);
+    const known = this.nonces.get(ticketId);
+    if (!known) return null;
+    // tools/deploy.sh posts its report after the idle restart with the turn's token, and a new turn may have begun by then.
+    const report = req.method === 'POST' && (req.url ?? '').split('?')[0] === `/api/tickets/${ticketId}/deploy`;
+    const live = nonce === undefined ? known.current === null : nonce === known.current || (report && nonce === known.previous);
+    return live ? { name: AGENT_NAME, exp: Infinity, agent: ticketId } : null;
   }
 
   session(req: IncomingMessage): Session | null {

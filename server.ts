@@ -10,7 +10,7 @@ import { gzip } from 'node:zlib';
 import { homedir } from 'node:os';
 import { commentMessage, fileType, findArtifacts, isArtifact, linkedPaths, optionImageProblem, resolveFile } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
-import { AGENT_NAME, Auth, looksLikeUrl, NOT_PEOPLE, threadMayCall, type Session } from './src/auth.ts';
+import { AGENT_NAME, Auth, looksLikeUrl, NOT_PEOPLE, threadMayCall, type Nonces, type Session } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
 import { prOwners } from './src/prlinks.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
@@ -95,7 +95,11 @@ const PARENT = process.ppid;
 if (PREVIEW) setInterval(() => process.ppid !== PARENT && process.exit(0), 2000).unref();
 await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
-const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '');
+// A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.
+const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '', {
+  get: (id) => (store.getTicket(id)?.status ?? 'closed') === 'closed' ? null : store.getSetting<Nonces>(`agent-nonce:${id}`) ?? { current: null, previous: null },
+  set: (id, nonces) => store.setSetting(`agent-nonce:${id}`, nonces),
+});
 // Keep secrets out of the environment that claude and its tools inherit.
 delete process.env.COORDINATOR_PASSWORD;
 delete process.env.SESSION_SECRET;
@@ -128,7 +132,7 @@ const runner = new Runner(
   broadcast,
   (ticket) => ({
     COORDINATOR_API: `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${PORT}`,
-    COORDINATOR_TOKEN: auth.agentToken(ticket.id),
+    COORDINATOR_TOKEN: auth.turnToken(ticket.id),
     COORDINATOR_PROJECT: String(ticket.project_id),
   }),
   process.env.CLAUDE_BIN ?? 'claude',

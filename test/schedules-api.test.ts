@@ -5,13 +5,12 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { Auth } from '../src/auth.ts';
+import { agentToken } from './helpers.ts';
 
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'schedules-api-'));
 const PASSWORD = 'test-password-123';
 const SECRET = 'x'.repeat(40);
-const agent = new Auth(PASSWORD, SECRET);
 const procs: ChildProcess[] = [];
 after(() => {
   for (const p of procs) p.kill();
@@ -23,7 +22,7 @@ let cookie = '';
 
 /** A request as Cara, or as the minion or Taskmaster `as` (a ticket id) with its token. */
 async function call(path: string, opts: { method?: string; body?: unknown; as?: number } = {}) {
-  const auth: Record<string, string> = opts.as === undefined ? { Cookie: cookie } : { Authorization: `Bearer ${agent.agentToken(opts.as)}` };
+  const auth: Record<string, string> = opts.as === undefined ? { Cookie: cookie } : { Authorization: `Bearer ${agentToken(join(root, 'data'), opts.as)}` };
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
     headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
@@ -95,7 +94,7 @@ test("the Taskmaster's schedule tools", async () => {
   const { data: page } = await call(`/api/projects/${p.id}`);
   const mcp = spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agent.agentToken(page.coordinator.id),
+      ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), page.coordinator.id),
       COORDINATOR_PROJECT: String(p.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: String(page.coordinator.id),
     },
     stdio: ['pipe', 'pipe', 'inherit'],

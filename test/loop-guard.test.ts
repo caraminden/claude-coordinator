@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createHmac } from 'node:crypto';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -8,6 +7,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { LOOP_LIMIT, LOOP_WINDOW_MS, Runner, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS } from '../src/runner.ts';
+import { agentToken } from './helpers.ts';
 
 // The loop guard: Taskmaster↔minion messages past LOOP_LIMIT an hour wait for a person. A stand-in
 // `claude -p` ends every turn at once.
@@ -139,7 +139,7 @@ let base = '';
 const cookies: Record<string, string> = {};
 
 async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}) {
-  const auth = who.startsWith('agent:') ? { Authorization: `Bearer ${who.slice(6)}.${createHmac('sha256', SECRET).update(`agent:${who.slice(6)}`).digest('base64url')}` } : { Cookie: cookies[who] };
+  const auth = who.startsWith('agent:') ? { Authorization: `Bearer ${agentToken(join(root, 'data'), Number(who.slice(6)))}` } : { Cookie: cookies[who] };
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
     headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },

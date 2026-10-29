@@ -4,10 +4,20 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { Auth } from '../src/auth.ts';
 
 export const REPO = join(import.meta.dirname, '..');
 export const PASSWORD = 'test-password-123';
 export const SECRET = 'x'.repeat(40);
+
+/** The token minion `id`'s current turn holds on the server whose DATA_DIR is `data`. */
+export function agentToken(data: string, id: number): string {
+  const db = new DatabaseSync(join(data, 'coordinator.db'), { readOnly: true });
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(`agent-nonce:${id}`) as { value: string } | undefined;
+  db.close();
+  return new Auth(PASSWORD, SECRET).agentToken(id, row ? JSON.parse(row.value).current ?? undefined : undefined);
+}
 
 /** A port nothing is listening on right now. */
 export async function freePort(): Promise<number> {

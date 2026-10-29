@@ -62,6 +62,8 @@ async function until<T>(what: string, fn: () => Promise<T | undefined | false> |
 }
 
 const turns = () => existsSync(join(root, 'turns.jsonl')) ? readFileSync(join(root, 'turns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+// The token the minion's latest turn holds: each turn's token dies when the next turn starts.
+const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
 const idle = (id: number) => until('the turn to end', async () => (await call(`/api/tickets/${id}`)).ticket.status !== 'running');
 
 let ticket: any;
@@ -89,8 +91,8 @@ before(async () => {
 });
 
 
-const ask = (q: string) => call(`/api/tickets/${ticket.id}/questions`, { method: 'POST', token: turn.token, body: { questions: [{ question: q, options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } });
-const settle = (questionId?: string) => call(`/api/tickets/${ticket.id}/settle`, { method: 'POST', token: turn.token, body: { questionId: questionId ?? null } });
+const ask = (q: string) => call(`/api/tickets/${ticket.id}/questions`, { method: 'POST', token: live(), body: { questions: [{ question: q, options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } });
+const settle = (questionId?: string) => call(`/api/tickets/${ticket.id}/settle`, { method: 'POST', token: live(), body: { questionId: questionId ?? null } });
 const inbox = async () => (await call(`/api/projects/${ticket.project_id}/inbox`)).items.filter((i: any) => i.kind === 'question');
 
 test('a settled card leaves the inbox, records it on the card and refuses a late click', async () => {

@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { createECDH, createHmac, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
+import { createECDH, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpsServer } from 'node:https';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { agentToken } from './helpers.ts';
 
 // When the real server sends pushes: a stand-in push service (https, self-signed) records what
 // arrives, and stand-in browsers decrypt it. A stand-in `claude -p` fails any turn whose message
@@ -46,7 +47,7 @@ async function freePort(): Promise<number> {
 }
 
 async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}) {
-  const auth = who.startsWith('agent:') ? { Authorization: `Bearer ${who.slice(6)}.${createHmac('sha256', SECRET).update(`agent:${who.slice(6)}`).digest('base64url')}` } : { Cookie: cookies[who] };
+  const auth = who.startsWith('agent:') ? { Authorization: `Bearer ${agentToken(join(root, 'data'), Number(who.slice(6)))}` } : { Cookie: cookies[who] };
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
     headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },

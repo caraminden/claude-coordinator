@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { bootServer, until } from './helpers.ts';
 
 // The whole path from a thread's turn to a machine and back: the real server, the real agent
 // (public/machine-agent.mjs) running a stand-in MCP server, and a stand-in `claude -p` that acts
@@ -70,14 +70,6 @@ chmodSync(fakeClaude, 0o755);
 let base = '';
 let cookie = '';
 
-async function freePort(): Promise<number> {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  return port;
-}
-
 async function call(path: string, opts: { method?: string; body?: unknown } = {}) {
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
@@ -87,16 +79,6 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
   const data = await res.json();
   if (!res.ok) throw new Error(`${res.status} ${data.error}`);
   return data;
-}
-
-async function until<T>(what: string, fn: () => Promise<T | undefined | false> | T | undefined | false, ms = 10_000): Promise<T> {
-  const end = Date.now() + ms;
-  for (;;) {
-    const v = await fn();
-    if (v) return v;
-    if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
 }
 
 const turns = () => existsSync(join(root, 'turns.jsonl')) ? readFileSync(join(root, 'turns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
@@ -111,21 +93,11 @@ function startAgent(token: string, run = ['--', process.execPath, mcpServer], en
 }
 
 before(async () => {
-  const port = await freePort();
-  base = `http://127.0.0.1:${port}`;
-  // A thread's turn inherits the live service's MACHINES_URL; this server must take agents itself.
-  const server = spawn(process.execPath, [join(repo, 'server.ts')], {
-    env: {
-      ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: fakeClaude,
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
-    },
-    stdio: ['ignore', 'inherit', 'inherit'],
-  });
-  procs.push(server);
-  const res = await until('the server', () => fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
-  }).catch(() => undefined));
-  cookie = res.headers.get('set-cookie')!.split(';')[0];
+  // bootServer clears MACHINES_URL: a thread's turn inherits the live service's, and this server must take agents itself.
+  const srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude }, stdout: true });
+  base = srv.base;
+  cookie = srv.cookie;
+  procs.push(srv.proc);
 });
 
 test('a thread uses a connected machine\'s MCP server, one copy per turn', async () => {

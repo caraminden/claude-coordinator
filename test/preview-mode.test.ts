@@ -3,18 +3,17 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createECDH, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { freePort, PASSWORD } from './helpers.ts';
 
 // A preview (PREVIEW=1) serves the app on a copy of the database and must never act on it: no turns
 // (from people's messages or auto-resume), no new minions or schemes, no pushes, no machines.
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'preview-mode-test-'));
 const procs: ChildProcess[] = [];
-const PASSWORD = 'test-password-123';
 let pushHits = 0;
 const pushServer = createHttpServer((req, res) => {
   pushHits++;
@@ -56,10 +55,7 @@ before(async () => {
   store.savePushSubscription('Josh', `http://127.0.0.1:${(pushServer.address() as any).port}/push`, ecdh.getPublicKey('base64url'), randomBytes(16).toString('base64url'));
   store.db.close();
 
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
+  const port = await freePort();
   base = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     cwd: repo,
@@ -119,10 +115,7 @@ test('nothing resumes the copied mid-turn minion, and no claude ever ran', async
 });
 
 test('a preview exits once the server that started it is gone', async () => {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
+  const port = await freePort();
   const dir = mkdtempSync(join(root, 'orphan-'));
   // A stand-in for the live server: it starts the preview, then dies without cleaning up.
   const parent = spawn(process.execPath, ['-e', `require('node:child_process').spawn(process.execPath, [${JSON.stringify(join(repo, 'server.ts'))}], { stdio: 'ignore', env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '${port}', DATA_DIR: ${JSON.stringify(dir)}, PREVIEW: '1', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: ${JSON.stringify(join(dir, 'claude'))}, COORDINATOR_PASSWORD: '${PASSWORD}', SESSION_SECRET: '${'x'.repeat(40)}' } }); setInterval(() => {}, 1000);`], { stdio: 'ignore' });

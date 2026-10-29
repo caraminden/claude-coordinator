@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { createServer } from 'node:net';
+import { execFileSync, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { type Chain, LiveWaiters } from '../src/wake.ts';
+import { bootServer } from './helpers.ts';
 
 // Chained minions: one created parked, whose brief is held until the minion it follows (its leader)
 // has its work live, or merged. A temp repo stands in for both the live checkout and the scheme's repo,
@@ -227,27 +227,9 @@ test('a dismissed follower is dropped; release hands back the held brief once', 
   assert.equal(started.length, 0);
 });
 
-test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or a message starts it; a brief is marked as one', async () => {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  const base = `http://127.0.0.1:${port}`;
-  procs.push(spawn(process.execPath, [join(import.meta.dirname, '..', 'server.ts')], {
-    env: {
-      ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
-    },
-    stdio: ['ignore', 'ignore', 'inherit'],
-  }));
-  let cookie = '';
-  for (const end = Date.now() + 10_000; !cookie; await new Promise((r) => setTimeout(r, 50))) {
-    const res = await fetch(`${base}/api/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
-    }).catch(() => undefined);
-    if (res) cookie = res.headers.get('set-cookie')!.split(';')[0];
-    else if (Date.now() > end) throw new Error('Timed out waiting for the server');
-  }
+test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or a message starts it', async () => {
+  const { base, cookie, proc } = await bootServer({ root });
+  procs.push(proc);
   const call = async (path: string, body?: unknown) => {
     const res = await fetch(base + path, {
       method: body ? 'POST' : 'GET',

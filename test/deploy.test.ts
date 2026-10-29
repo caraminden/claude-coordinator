@@ -1,21 +1,19 @@
 import assert from 'node:assert/strict';
-import { execFile, execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, spawnSync, type ChildProcess } from 'node:child_process';
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { after, before, test } from 'node:test';
-import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
+import { agentToken, bootServer } from './helpers.ts';
 
 // Safe deploys (tools/deploy.sh): the server reloads public/ on SIGHUP, answers /api/health, and takes
 // deploy reports; the script tells front-end-only changes from the rest.
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'deploy-test-'));
-const SECRET = 'x'.repeat(40);
 const procs: ChildProcess[] = [];
 after(() => {
   for (const p of procs) p.kill();
@@ -30,7 +28,7 @@ mkdirSync(data);
 const store = new Store(join(data, 'coordinator.db'));
 const project = store.createProject('Test', null);
 const ticket = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
-const token = new Auth('test-password-123', SECRET).agentToken(ticket.id);
+const token = agentToken(data, ticket.id);
 
 let base = '';
 let cookie = '';
@@ -38,30 +36,11 @@ let server: ChildProcess;
 const health = async () => (await fetch(`${base}/api/health`)).json() as Promise<{ ok: boolean; commit: string | null; version: string; reload: string }>;
 
 before(async () => {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  base = `http://127.0.0.1:${port}`;
-  server = spawn(process.execPath, [join(app, 'server.ts')], {
-    env: {
-      ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: data, CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: SECRET,
-    },
-    stdio: ['ignore', 'inherit', 'inherit'],
-  });
+  const srv = await bootServer({ root, script: join(app, 'server.ts'), stdout: true });
+  base = srv.base;
+  cookie = srv.cookie;
+  server = srv.proc;
   procs.push(server);
-  for (const end = Date.now() + 10_000; ; ) {
-    const res = await fetch(`${base}/api/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
-    }).catch(() => undefined);
-    if (res) {
-      cookie = res.headers.get('set-cookie')!.split(';')[0];
-      break;
-    }
-    if (Date.now() > end) throw new Error('Timed out waiting for the server');
-    await new Promise((r) => setTimeout(r, 50));
-  }
 });
 
 test('/api/health answers without a login and says the server reloads on SIGHUP', async () => {
@@ -141,7 +120,7 @@ test('a warning (live, but not pushed to GitHub) shows as an error and still dis
   store.updateTicket(t.id, { status: 'idle', state: 'pending-deploy' });
   const text = 'Deployed abc1234. Not pushed to GitHub: rejected. The next deploy will retry.';
   const res = await fetch(`${base}/api/tickets/${t.id}/deploy`, {
-    method: 'POST', headers: { Authorization: `Bearer ${new Auth('test-password-123', SECRET).agentToken(t.id)}`, 'Content-Type': 'application/json' },
+    method: 'POST', headers: { Authorization: `Bearer ${agentToken(data, t.id)}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ ok: true, warn: true, text }),
   });
   assert.deepEqual(await res.json(), { dismissed: true });

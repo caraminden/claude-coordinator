@@ -1,21 +1,18 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, type ChildProcess } from 'node:child_process';
 import { createECDH, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpsServer } from 'node:https';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken } from './helpers.ts';
+import { agentToken, bootServer, PASSWORD, until } from './helpers.ts';
 
 // When the real server sends pushes: a stand-in push service (https, self-signed) records what
 // arrives, and stand-in browsers decrypt it. A stand-in `claude -p` fails any turn whose message
 // says "fail".
-const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'push-triggers-'));
 const procs: ChildProcess[] = [];
-const SECRET = 'x'.repeat(40);
 after(() => {
   for (const p of procs) p.kill();
   pushService?.close();
@@ -38,17 +35,8 @@ let pushService: ReturnType<typeof createHttpsServer> | undefined;
 const received: { path: string; body: Buffer }[] = [];
 const cookies: Record<string, string> = {};
 
-async function freePort(): Promise<number> {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  return port;
-}
-
-async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<any> {
-  const token = who.startsWith('agent:') ? agentToken(join(root, 'data'), Number(who.slice(6))) : '';
-  const auth = token ? { Authorization: `Bearer ${token}` } : { Cookie: cookies[who] };
+async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}) {
+  const auth = who.startsWith('agent:') ? { Authorization: `Bearer ${agentToken(join(root, 'data'), Number(who.slice(6)))}` } : { Cookie: cookies[who] };
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
     headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
@@ -59,16 +47,6 @@ async function call(who: string, path: string, opts: { method?: string; body?: u
   const data = await res.json();
   if (!res.ok) throw new Error(`${res.status} ${data.error}`);
   return data;
-}
-
-async function until<T>(what: string, fn: () => Promise<T | undefined | false> | T | undefined | false, ms = 10_000): Promise<T> {
-  const end = Date.now() + ms;
-  for (;;) {
-    const v = await fn();
-    if (v) return v;
-    if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
 }
 
 const browsers: Record<string, { ecdh: ReturnType<typeof createECDH>; auth: string; endpoint: string }> = {};
@@ -119,24 +97,18 @@ before(async () => {
   await new Promise<void>((r) => pushService!.listen(0, '127.0.0.1', r));
   pushBase = `https://127.0.0.1:${(pushService.address() as any).port}`;
 
-  const port = await freePort();
-  base = `http://127.0.0.1:${port}`;
-  const server = spawn(process.execPath, [join(repo, 'server.ts')], {
-    env: {
-      ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: fakeClaude,
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: SECRET,
-      // Trust the stand-in push service's self-signed certificate.
-      NODE_TLS_REJECT_UNAUTHORIZED: '0', NODE_NO_WARNINGS: '1',
-    },
-    stdio: ['ignore', 'ignore', 'inherit'],
+  const srv = await bootServer({
+    root,
+    // NODE_TLS_REJECT_UNAUTHORIZED: trust the stand-in push service's self-signed certificate.
+    env: { CLAUDE_BIN: fakeClaude, NODE_TLS_REJECT_UNAUTHORIZED: '0', NODE_NO_WARNINGS: '1' },
   });
-  procs.push(server);
-  for (const name of ['Cara', 'Josh']) {
-    const res = await until('the server', () => fetch(`${base}/api/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, password: 'test-password-123' }),
-    }).catch(() => undefined));
-    cookies[name] = res.headers.get('set-cookie')!.split(';')[0];
-  }
+  base = srv.base;
+  cookies.Cara = srv.cookie;
+  procs.push(srv.proc);
+  const josh = await fetch(`${base}/api/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Josh', password: PASSWORD }),
+  });
+  cookies.Josh = josh.headers.get('set-cookie')!.split(';')[0];
 });
 
 test('pushes go out for questions, results, blockers and failed turns, to everyone but whoever caused it', async () => {

@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { bootServer } from './helpers.ts';
 
 // A project's name is display-only: renaming it changes nothing that goes by id (repo, folders, links).
-const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'rename-project-'));
 const procs: ChildProcess[] = [];
 after(() => {
@@ -44,29 +43,10 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
 }
 
 before(async () => {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  base = `http://127.0.0.1:${port}`;
-  procs.push(spawn(process.execPath, [join(repo, 'server.ts')], {
-    env: {
-      ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
-    },
-    stdio: ['ignore', 'inherit', 'inherit'],
-  }));
-  for (const end = Date.now() + 10_000; ; ) {
-    const res = await fetch(`${base}/api/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
-    }).catch(() => undefined);
-    if (res) {
-      cookie = res.headers.get('set-cookie')!.split(';')[0];
-      break;
-    }
-    if (Date.now() > end) throw new Error('Timed out waiting for the server');
-    await new Promise((r) => setTimeout(r, 50));
-  }
+  const srv = await bootServer({ root, stdout: true });
+  base = srv.base;
+  cookie = srv.cookie;
+  procs.push(srv.proc);
 });
 
 test('PATCH /api/projects/:id renames, with friendly errors', async () => {

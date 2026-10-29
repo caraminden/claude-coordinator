@@ -1,20 +1,17 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { LOOP_LIMIT, LOOP_WINDOW_MS, Runner, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS } from '../src/runner.ts';
-import { agentToken } from './helpers.ts';
+import { agentToken, bootServer, until } from './helpers.ts';
 
 // The loop guard: Taskmaster↔minion messages past LOOP_LIMIT an hour wait for a person. A stand-in
 // `claude -p` ends every turn at once.
-const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'loop-guard-'));
 const procs: ChildProcess[] = [];
-const SECRET = 'x'.repeat(40);
 after(() => {
   for (const p of procs) p.kill();
   rmSync(root, { recursive: true, force: true });
@@ -138,9 +135,8 @@ test('two Taskmasters share one burst count, both ways, and either one continuin
 let base = '';
 const cookies: Record<string, string> = {};
 
-async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}): Promise<any> {
-  const token = who.startsWith('agent:') ? agentToken(join(root, 'data'), Number(who.slice(6))) : '';
-  const auth = token ? { Authorization: `Bearer ${token}` } : { Cookie: cookies[who] };
+async function call(who: string, path: string, opts: { method?: string; body?: unknown } = {}) {
+  const auth = who.startsWith('agent:') ? { Authorization: `Bearer ${agentToken(join(root, 'data'), Number(who.slice(6)))}` } : { Cookie: cookies[who] };
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
     headers: { ...auth, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
@@ -153,34 +149,11 @@ async function call(who: string, path: string, opts: { method?: string; body?: u
   return data;
 }
 
-async function until<T>(what: string, fn: () => Promise<T | undefined | false>, ms = 10_000): Promise<T> {
-  const end = Date.now() + ms;
-  for (;;) {
-    const v = await fn();
-    if (v) return v;
-    if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
-}
-
 before(async () => {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  base = `http://127.0.0.1:${port}`;
-  const server = spawn(process.execPath, [join(repo, 'server.ts')], {
-    env: {
-      ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: fake,
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: SECRET, NODE_NO_WARNINGS: '1',
-    },
-    stdio: ['ignore', 'ignore', 'inherit'],
-  });
-  procs.push(server);
-  const res = await until('the server', () => fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
-  }).catch(() => undefined));
-  cookies.Cara = res.headers.get('set-cookie')!.split(';')[0];
+  const srv = await bootServer({ root, env: { CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1' } });
+  base = srv.base;
+  cookies.Cara = srv.cookie;
+  procs.push(srv.proc);
 });
 
 test('the routes: agents are held, people never are, and a person writing continues', async () => {

@@ -1,19 +1,15 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { promptMessage } from '../src/runner.ts';
 import { isUploadName, safeFileName, saveUpload, UploadTooLarge } from '../src/uploads.ts';
-import { agentToken } from './helpers.ts';
+import { agentToken, bootServer } from './helpers.ts';
 
-const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'uploads-'));
-const PASSWORD = 'test-password-123';
-const SECRET = 'x'.repeat(40);
 const procs: ChildProcess[] = [];
 after(() => {
   for (const p of procs) p.kill();
@@ -65,29 +61,10 @@ let base = '';
 let cookie = '';
 
 before(async () => {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  base = `http://127.0.0.1:${port}`;
-  procs.push(spawn(process.execPath, [join(repo, 'server.ts')], {
-    env: {
-      ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
-    },
-    stdio: ['ignore', 'inherit', 'inherit'],
-  }));
-  for (const end = Date.now() + 10_000; ; ) {
-    const res = await fetch(`${base}/api/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
-    }).catch(() => undefined);
-    if (res) {
-      cookie = res.headers.get('set-cookie')!.split(';')[0];
-      break;
-    }
-    if (Date.now() > end) throw new Error('Timed out waiting for the server');
-    await new Promise((r) => setTimeout(r, 50));
-  }
+  const srv = await bootServer({ root, stdout: true });
+  base = srv.base;
+  cookie = srv.cookie;
+  procs.push(srv.proc);
 });
 
 const call = (path: string, init: RequestInit & { as?: number } = {}) =>

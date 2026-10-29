@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { bootServer, freePort, until } from './helpers.ts';
 
 // With MACHINES_URL set, agents connect only there (the tailnet), and that listener serves nothing
 // but agents.
@@ -23,14 +23,6 @@ let base = '';
 let agentBase = '';
 let cookie = '';
 
-async function freePort(): Promise<number> {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  return port;
-}
-
 async function call(path: string, opts: { method?: string; body?: unknown } = {}) {
   const res = await fetch(base + path, {
     method: opts.method ?? 'GET',
@@ -40,16 +32,6 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
   const data = await res.json();
   if (!res.ok) throw new Error(`${res.status} ${data.error}`);
   return data;
-}
-
-async function until<T>(what: string, fn: () => Promise<T | undefined | false> | T | undefined | false, ms = 10_000): Promise<T> {
-  const end = Date.now() + ms;
-  for (;;) {
-    const v = await fn();
-    if (v) return v;
-    if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
 }
 
 function startAgent(url: string, token: string) {
@@ -63,21 +45,11 @@ function startAgent(url: string, token: string) {
 }
 
 before(async () => {
-  const [port, agentPort] = [await freePort(), await freePort()];
-  base = `http://127.0.0.1:${port}`;
-  agentBase = `http://127.0.0.1:${agentPort}`;
-  const server = spawn(process.execPath, [join(repo, 'server.ts')], {
-    env: {
-      ...process.env, PORT: String(port), MACHINES_URL: agentBase, DATA_DIR: join(root, 'data'), CLAUDE_BIN: 'false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
-    },
-    stdio: ['ignore', 'inherit', 'inherit'],
-  });
-  procs.push(server);
-  const res = await until('the server', () => fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
-  }).catch(() => undefined));
-  cookie = res.headers.get('set-cookie')!.split(';')[0];
+  agentBase = `http://127.0.0.1:${await freePort()}`;
+  const srv = await bootServer({ root, env: { MACHINES_URL: agentBase }, stdout: true });
+  base = srv.base;
+  cookie = srv.cookie;
+  procs.push(srv.proc);
   await until('the machines listener', () => fetch(`${agentBase}/machine-agent.mjs`).then((r) => r.ok).catch(() => false));
 });
 

@@ -1,21 +1,18 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { Previews } from '../src/previews.ts';
+import { agentToken, freePort, PASSWORD, SECRET } from './helpers.ts';
 
 // Previews (src/previews.ts): the live server runs a minion's worktree in preview mode on a copy of
 // its database and proxies /preview/<id>/ to it, for signed-in people only.
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'previews-test-'));
-const PASSWORD = 'test-password-123';
-const SECRET = 'x'.repeat(40);
 const procs: ChildProcess[] = [];
 after(() => {
   for (const p of procs) p.kill();
@@ -50,17 +47,13 @@ store.savePushSubscription('Josh', 'https://push.example/x', 'k', 'a');
 store.setSetting(`turn:${ticket.id}`, { resumes: 0, unit: 'citadel-turn-x.service' });
 store.db.close();
 
-const agent = new Auth(PASSWORD, SECRET);
 let base = '';
 let cookie = '';
-const startPreview = (id: number) => fetch(`${base}/api/tickets/${id}/preview`, { method: 'POST', headers: { Authorization: `Bearer ${agent.agentToken(id)}` } });
+const startPreview = (id: number) => fetch(`${base}/api/tickets/${id}/preview`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(data, id)}` } });
 const page = (path: string, headers: Record<string, string> = {}) => fetch(`${base}${path}`, { headers: { Accept: 'text/html', Cookie: cookie, ...headers }, redirect: 'manual' });
 
 before(async () => {
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
+  const port = await freePort();
   base = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     cwd: repo,
@@ -102,7 +95,7 @@ test('start_preview boots the worktree and returns the full link; the view offer
 });
 
 test('a minion may only start its own preview', async () => {
-  const res = await fetch(`${base}/api/tickets/${ticket.id}/preview`, { method: 'POST', headers: { Authorization: `Bearer ${agent.agentToken(old.id)}` } });
+  const res = await fetch(`${base}/api/tickets/${ticket.id}/preview`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(data, old.id)}` } });
   assert.equal(res.status, 403);
 });
 
@@ -135,7 +128,7 @@ test('the event stream passes through', async () => {
 test('no login: a page goes to the login, anything else is refused; a bare path gets its slash', async () => {
   assert.equal((await page(`/preview/${ticket.id}/`, { Cookie: '' })).headers.get('location'), '/');
   assert.equal((await fetch(`${base}/preview/${ticket.id}/api/me`)).status, 401);
-  assert.equal((await fetch(`${base}/preview/${ticket.id}/api/me`, { headers: { Authorization: `Bearer ${agent.agentToken(ticket.id)}` } })).status, 401);
+  assert.equal((await fetch(`${base}/preview/${ticket.id}/api/me`, { headers: { Authorization: `Bearer ${agentToken(data, ticket.id)}` } })).status, 401);
   assert.equal((await page(`/preview/${ticket.id}`)).headers.get('location'), `/preview/${ticket.id}/`);
 });
 

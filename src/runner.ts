@@ -220,7 +220,10 @@ export function unsentSteers(turn: Pick<TurnState, 'steered' | 'dir'>): QueuedMe
   }
   const sent = /^\d+$/.test(text) ? Number(text) : NaN;
   // Unreadable (an older wrapper killed mid-write): some were passed on, so resending risks doubles.
-  if (Number.isNaN(sent)) return [];
+  if (Number.isNaN(sent)) {
+    console.error(`${turn.dir}: steer.sent reads ${JSON.stringify(text)}, so its turn's steers are taken as sent.`);
+    return [];
+  }
   return turn.steered.filter((s) => s.end > sent).map((s) => s.msg);
 }
 

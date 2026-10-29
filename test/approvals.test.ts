@@ -248,9 +248,9 @@ test('a project without rules or plugins still sends a minion\'s prompts to card
   assert.ok(!t.args.includes('none'));
   assert.equal(t.args[t.args.indexOf('--permission-prompt-tool') + 1], APPROVAL_TOOL);
   assert.ok(!t.args.includes('--plugin-dir'));
-  // Every turn gets the tripwire hook, here able to ask, and nothing else in its settings.
+  // Every turn gets the tripwire hook, here able to ask, and the claude.ai opt-outs (#138); no rules.
   const settings = JSON.parse(readFileSync(t.args[t.args.indexOf('--settings') + 1], 'utf8'));
-  assert.deepEqual(Object.keys(settings), ['hooks']);
+  assert.deepEqual(Object.keys(settings), ['hooks', 'syncClaudeAiSkills', 'disableClaudeAiConnectors']);
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /"ask":true/);
   assert.ok(Number(t.timeout) >= 24 * 3600_000);
   assert.equal(t.approvals, '1');

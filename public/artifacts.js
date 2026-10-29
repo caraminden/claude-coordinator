@@ -152,7 +152,7 @@ export function sharedList() {
 export function renderSharedList() {
   const el = document.getElementById('shared-results');
   if (!el) return;
-  document.getElementById('shared-summary').textContent = `${view.shared.length} in the scheme's shared folder`;
+  document.getElementById('shared-summary').textContent = `${view.shared.filter((f) => !f.missing).length} in the scheme's shared folder`;
   el.replaceChildren(...(view.shared.length ? view.shared.map(sharedItem) : [h('p', { class: 'muted' }, 'Handoffs and notes minions put in the scheme\'s shared folder show up here.')]));
 }
 

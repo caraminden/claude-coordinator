@@ -779,8 +779,9 @@ export class Store {
 
   /** People's notes on a scheme's minions, by ticket id. Only people's routes may hand these out. */
   personNotes(projectId: number): Record<number, PersonNote> {
+    // A note older than its minion belongs to a deleted one whose id was reused: a rolled-back release's deleteTicket leaves it behind.
     const rows = this.db
-      .prepare('SELECT n.ticket_id, n.text, n.updated_by, n.updated_at FROM person_notes n JOIN tickets t ON t.id = n.ticket_id WHERE t.project_id = ?')
+      .prepare('SELECT n.ticket_id, n.text, n.updated_by, n.updated_at FROM person_notes n JOIN tickets t ON t.id = n.ticket_id WHERE t.project_id = ? AND n.updated_at >= t.created_at')
       .all(projectId) as { ticket_id: number; text: string; updated_by: string; updated_at: number }[];
     return Object.fromEntries(rows.map((r) => [r.ticket_id, { text: r.text, by: r.updated_by, at: r.updated_at }]));
   }

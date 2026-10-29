@@ -364,8 +364,9 @@ function editPersonNote(t) {
   const save = async () => {
     try {
       const { note } = await api(`api/tickets/${t.id}/person-note`, { method: 'PUT', body: { text: input.value } });
-      if (note) view.personNotes[t.id] = note;
-      else delete view.personNotes[t.id];
+      const notes = view.personNotes ?? {}; // none if the person left the scheme while it saved
+      if (note) notes[t.id] = note;
+      else delete notes[t.id];
       done();
     } catch (e) {
       alertNote(e.message);

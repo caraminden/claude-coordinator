@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { historyPage } from '../src/history.ts';
 import { applyEvent, createProgress } from '../public/progress.js';
+import { bootServer } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'history-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -115,8 +114,9 @@ test('after= is unchanged: every event after an id', () => {
 
 test('the events route pages by default, keeps after= as a plain list, and search finds the oldest hit in one minion', async () => {
   // Seed a long minion and a second one, then boot the real server on that data.
-  const dataDir = join(root, 'route');
-  mkdirSync(dataDir);
+  const routeRoot = join(root, 'route');
+  const dataDir = join(routeRoot, 'data');
+  mkdirSync(dataDir, { recursive: true });
   const store = new Store(join(dataDir, 'coordinator.db'));
   const p = store.createProject('Route', null);
   const t = store.createTicket({ project_id: p.id, title: 'long', permission_mode: 'default', created_by: 'Cara' });
@@ -128,26 +128,12 @@ test('the events route pages by default, keeps after= as a plain list, and searc
   turn(store, t.id, 1);
   said(other.id, 'pelican elsewhere');
 
-  const srv = createServer();
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  const { port } = srv.address() as any;
-  await new Promise((r) => srv.close(r));
-  const server = spawn(process.execPath, [join(import.meta.dirname, '..', 'server.ts')], {
-    env: { ...process.env, MACHINES_URL: undefined, PORT: String(port), DATA_DIR: dataDir, CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40) },
-    stdio: ['ignore', 'ignore', 'inherit'],
-  });
-  after(() => server.kill());
-  const base = `http://127.0.0.1:${port}`;
-  let login: Response | undefined;
-  for (let n = 0; !login && n < 600; n++) {
-    login = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }) }).catch(() => undefined);
-    if (!login) await new Promise((r) => setTimeout(r, 50));
-  }
-  const cookie = login!.headers.get('set-cookie')!.split(';')[0];
+  const srv = await bootServer({ root: routeRoot });
+  after(() => srv.proc.kill());
   const get = async (path: string) => {
-    const res = await fetch(base + path, { headers: { Cookie: cookie } });
-    assert.equal(res.status, 200, path);
-    return res.json();
+    const { status, data } = await srv.call(path);
+    assert.equal(status, 200, path);
+    return data;
   };
 
   const all = store.listEvents(t.id);

@@ -1410,20 +1410,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, session:
     } catch {}
     const found = await findUpload(ticket, name);
     if (!found) throw new HttpError(404, 'That file is no longer there');
-    // Images and PDFs open in the browser; anything else downloads and is never rendered.
-    const inline = opensInline(name);
-    const type = inline ? fileType(name)!.mime : 'application/octet-stream';
-    res.writeHead(200, {
-      'Content-Type': type,
-      'Content-Length': found.size,
-      'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`,
-      'Content-Security-Policy': artifactCsp(inline ? fileType(name)!.kind : 'download'),
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'same-origin',
-      'Cache-Control': 'private, no-cache',
-    });
-    if (method === 'HEAD') return res.end();
-    return pipeline(createReadStream(found.path), res).catch(() => {});
+    // Images and PDFs open in the browser; anything else downloads and is never rendered (see serveArtifact).
+    const type = opensInline(name) ? fileType(name)! : { kind: 'download' as const, mime: 'application/octet-stream' };
+    return serveArtifact(req, res, { file: found.path, abs: found.path, type, size: found.size, mtime: 0 }, name, false);
   }
 
   m = pathname.match(/^\/api\/tickets\/(\d+)(\/[a-z]+)?$/);

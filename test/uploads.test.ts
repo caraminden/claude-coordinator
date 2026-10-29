@@ -37,6 +37,10 @@ test('names keep their look but cannot leave the folder, hide, look like a flag 
   const long = safeFileName('x'.repeat(300) + '.kra');
   assert.equal(long.length, 150);
   assert.ok(long.endsWith('.kra'));
+  // Cut by letter, not UTF-16 unit, so a long name of rare letters still reads back as a valid name.
+  const astral = safeFileName('𠀀'.repeat(200) + '.png');
+  assert.equal(Array.from(astral).length, 150);
+  assert.ok(isUploadName(astral));
   for (const ok of ['hero.png', 'Héro sprite _v2_.aseprite', 'sprite (2).png', long.slice(0, -4) + ' (2).kra']) assert.ok(isUploadName(ok), ok);
   for (const bad of ['', '.', '..', '../x', 'a/b', '.hidden', '-x', 'a\0b', 'a[1].png']) assert.ok(!isUploadName(bad), bad);
 });
@@ -127,7 +131,9 @@ test('people attach a file: it streams into the files folder, the message names 
   assert.equal(await dl.text(), '<script>alert(1)</script>');
   const img = await get('hero.png');
   assert.equal(img.headers.get('content-type'), 'image/png');
-  assert.match(img.headers.get('content-disposition')!, /^inline/);
+  assert.equal(img.headers.get('content-disposition'), null);
+  const part = await call(`/api/tickets/${minion.id}/uploads/hero.png`, { headers: { Range: 'bytes=4-6' } });
+  assert.deepEqual([part.status, await part.text()], [206, 'rea']);
   for (const bad of ['..%2F..%2Fcoordinator.db', '.hidden', 'missing.zip']) assert.equal((await call(`/api/tickets/${minion.id}/uploads/${bad}`)).status, 404, bad);
   // Linked as a file of the thread, an uploaded page still only downloads.
   const linked = await call(`/api/tickets/${minion.id}/file?path=${encodeURIComponent(join(folder, 'page.html'))}`);

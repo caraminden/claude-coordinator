@@ -229,7 +229,8 @@ function createAttachments(chatId, onChange) {
     }
   };
   const addImage = async (file) => {
-    if (state.items.filter((i) => i.data).length + state.busy >= MAX_IMAGES) return alertNote(`At most ${MAX_IMAGES} images per message.`);
+    // Past the image limit, an image still goes, as a file Claude can open.
+    if (state.items.filter((i) => i.data).length + state.busy >= MAX_IMAGES) return addFile(file);
     state.busy++;
     let blob;
     try {

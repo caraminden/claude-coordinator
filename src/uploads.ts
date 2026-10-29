@@ -14,7 +14,8 @@ export function safeFileName(raw: string): string {
     .replace(/^[\s.-]+|\s+$/g, '');
   if (!base) return 'file';
   const ext = extname(base).slice(0, 20);
-  return base.length <= 150 ? base : base.slice(0, 150 - ext.length).trimEnd() + ext;
+  const chars = Array.from(base); // by code point, so a cut never splits a letter in two
+  return chars.length <= 150 ? base : chars.slice(0, 150 - Array.from(ext).length).join('').trimEnd() + ext;
 }
 
 /** Whether a name could have come from safeFileName (or its " (2)" de-duplicates): one plain name inside the folder. */

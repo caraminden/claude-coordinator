@@ -1014,7 +1014,7 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
 
 /** An attached file in a message: images and PDFs open in a tab (the server says so), anything else downloads. */
 export function fileChip({ name, size, href }) {
-  const opens = /\.(png|jpe?g|gif|webp|avif|pdf)$/i.test(name);
+  const opens = /\.(png|jpe?g|gif|webp|avif|pdf)$/i.test(name); // the same list as INLINE in src/uploads.ts
   return h('a', { class: 'file-chip', href, title: opens ? `Open ${name}` : `Download ${name}`, ...(opens ? { target: '_blank', rel: 'noopener' } : { download: name }) },
     h('span', { class: 'icon', 'aria-hidden': 'true' }, '📄'), h('span', { class: 'name' }, name), h('span', { class: 'size' }, formatSize(size)));
 }

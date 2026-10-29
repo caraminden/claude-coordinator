@@ -882,9 +882,9 @@ a.thread-ref:hover { text-decoration: underline; }
 @media (max-width: 800px) {
   /* Leave sideways swipes to the app rather than browser history, where the browser allows it. */
   html, body { overscroll-behavior-x: none; }
-  /* The chat behind a drawer stays put from the first pull until it goes back: no scroll from the
-     swipe's vertical drift, a fling or a drag past the list's end. On html only, so the viewport keeps
-     scrolling the sticky top bar; drawers.js's own scrollBy still works. */
+  /* The chat behind a drawer stays put from the moment it's pulled out until it goes back: a fling
+     still coasting, the swipe's vertical drift or a wheel stop there. On html only, so the viewport
+     keeps the sticky top bar in place; scripted scrolls (drawers.js's keepPlace) still work. */
   html:has(.as-drawer) { overflow: hidden; }
   /* The drawers stand in for the panels, so their folded bars don't sit above the chat. */
   .split > .panels:not(:has(> .as-drawer)) { display: none; }

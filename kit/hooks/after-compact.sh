@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# SessionStart hook, matcher "compact" (.claude/settings.json): after a compaction, puts back what a
+# SessionStart hook, matcher "compact" (kit/hooks/hooks.json): after a compaction, puts back what a
 # summary blurs, the branch, head and uncommitted files, and points the session at the record (the
 # requester's words, the checklist, handoff files) instead of the summary's paraphrase. Its output
 # joins the compacted context. Turns compact at about 250k (autoCompactWindow in the runner's per-turn settings).
-cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/..}" 2>/dev/null || exit 0
+# Hooks run in the session's folder; CLAUDE_PROJECT_DIR is that folder when Claude Code sets it.
+cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
 echo "[after-compact] This conversation was just compacted. Before acting on anything the summary"
 echo "paraphrases (someone's ask, an open question, a go-ahead), re-read it at the source: their"
 echo "latest messages, your checklist, the PR, the handoff file. Don't redo work the summary"

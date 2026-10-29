@@ -26,7 +26,10 @@ Create either file when it is first needed.
 
 1. **Gather evidence.** Collect the PR diff and the spec's open Proposals, the
    conversation (what was asked, corrected or complained about), every subagent report,
-   every hook failure, and the steps that took longest. Each finding cites one of these,
+   every hook failure, and the steps that took longest. The kit's hooks log each tripwire or
+   guard.sh refusal, red test, failed push and refused stop to the scheme's shared folder:
+   `grep -l '<your branch>' "$COORDINATOR_SHARED_DIR"/retro-log/*/*.md` finds your sessions'
+   logs. Each finding cites one of these,
    so it reads "the citadel:check-runner was briefed without the test filter and ran the slow
    suite three times", never "checks felt slow". In the gathering, use a subagent and keep
    only what it concludes.

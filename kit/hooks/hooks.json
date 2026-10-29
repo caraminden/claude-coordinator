@@ -1,0 +1,23 @@
+{
+  "description": "Citadel kit hooks: the job check, the retro log and the after-compact reminder (kit/README.md).",
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "compact", "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/after-compact.sh\"", "timeout": 30 }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/retro-log.ts\"", "timeout": 10 }] }
+    ],
+    "PostToolUseFailure": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/retro-log.ts\"", "timeout": 10 }] }
+    ],
+    "Stop": [
+      { "hooks": [
+        { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/job-check.ts\"", "timeout": 10 },
+        { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/retro-log.ts\"", "timeout": 10 }
+      ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/retro-log.ts\"", "timeout": 10 }] }
+    ]
+  }
+}

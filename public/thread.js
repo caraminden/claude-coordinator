@@ -24,7 +24,7 @@ export function chatView(chatId, ticket) {
     typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite', role: 'button', tabindex: '0' }), // below the chat log
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
     pendingMessages: [], // { el, text } shown on send, replaced by the server's copy
-    cards: new Map(), // question card id -> { markAnswered }; approval card id -> { settle }
+    cards: new Map(), // question card id -> { el, markAnswered }; plan card id -> { el, settle }; approval card id -> { settle }
     heldCards: [], // this turn's question and plan cards, kept below the words that explain them
     branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
   };
@@ -632,6 +632,8 @@ export function appendEvent(event, scroll = true) {
     if (data.answer) card?.markAnswered(data.answer.answers, data.author);
     if (card) {
       if (messagesBelow(card.el)) nodes.push(stamped(answerRef(card.el, data), event));
+      // Someone else's answer counts as new, so the unread divider can still land on the card.
+      else if (data.author !== me) card.el.dataset.at = event.created_at;
     } else if (data.answer) {
       // The card is in history not loaded yet.
       nodes.push(stamped(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), answerSummary(data.answer.answers)), event));

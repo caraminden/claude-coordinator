@@ -685,6 +685,19 @@ async function approve(args: any): Promise<string> {
   return JSON.stringify({ behavior: 'deny', message });
 }
 
+/** The text of a replace-it-all tool. Only an explicit string counts: a missing or misnamed argument must never mean "clear". */
+function wholeText(args: any, what: string): string {
+  if (typeof args.instructions !== 'string') {
+    throw new Error(`instructions is required and must be text: send the whole new ${what}. Nothing was changed. To clear it on purpose, pass instructions: "" (an empty string).`);
+  }
+  return args.instructions;
+}
+
+/** A set/update tool that was given nothing to set did nothing; say so rather than "Updated". */
+function needOne(args: any, fields: string[], tool: string): void {
+  if (!fields.some((k) => args[k] !== undefined)) throw new Error(`${tool}: pass at least one of ${fields.join(', ')}. Nothing was changed.`);
+}
+
 async function runTool(name: string, args: any): Promise<string> {
   // Each role may only call its own tools.
   if (!toolList().some((t) => t.name === name)) throw new Error(`Unknown tool ${name}`);
@@ -726,6 +739,9 @@ async function runTool(name: string, args: any): Promise<string> {
       return registryText(keys);
     }
     case 'set_properties': {
+      if (!args.properties || typeof args.properties !== 'object' || Array.isArray(args.properties) || !Object.keys(args.properties).length) {
+        throw new Error('properties is required: an object of key: value (null clears a key). Nothing was changed.');
+      }
       const target = ROLE === 'thread' ? TICKET : await id(args);
       const r = await call('PUT', `/api/tickets/${target}/properties`, { properties: args.properties, file: args.file ?? null });
       return registryReply(r, `Set. ${propertyText(r.properties) || '(no properties)'}`);
@@ -777,11 +793,11 @@ async function runTool(name: string, args: any): Promise<string> {
       return `${APP_NAME}-wide instructions${app.by ? ` (last changed by ${app.by})` : ''}:\n\n${app.text}`;
     }
     case 'set_app_instructions': {
-      const app = await call('PUT', '/api/app/instructions', { text: String(args.instructions ?? '') });
+      const app = await call('PUT', '/api/app/instructions', { text: wholeText(args, 'text') });
       return app.text ? `Saved (${app.text.length} characters).` : `Cleared the ${APP_NAME}-wide instructions.`;
     }
     case 'set_project_instructions': {
-      const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: String(args.instructions ?? '') });
+      const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: wholeText(args, 'text') });
       return project.instructions ? `Saved (${project.instructions.length} characters).` : 'Cleared the scheme instructions.';
     }
     case 'message_ticket': {
@@ -795,6 +811,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':
+      needOne(args, ['title', 'tag', 'state', 'note', 'replies', 'build', 'model', 'effort'], 'update_ticket');
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort }))}`;
     case 'ask_question': {
       const { id: questionId } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
@@ -811,6 +828,7 @@ async function runTool(name: string, args: any): Promise<string> {
       await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan });
       return 'The plan card is in the chat. End your turn now with a short reply and write no code; the go or the notes to revise it will come as the next message.';
     case 'set_thread_status':
+      needOne(args, ['title', 'tag', 'state', 'note', 'replies', 'build'], 'set_thread_status');
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}`;
     case 'message_coordinator':
       if ((await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text })).held) return `Held, not delivered: ${HELD}`;
@@ -862,6 +880,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'update_schedule': {
       const { schedule_id, ...patch } = args;
+      needOne(patch, ['name', 'cron', 'brief', 'type', 'paused'], 'update_schedule');
       return `Updated. ${scheduleLine(await call('PATCH', `/api/schedules/${Number(schedule_id)}`, patch))}`;
     }
     case 'delete_schedule':

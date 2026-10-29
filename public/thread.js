@@ -1,5 +1,5 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, fileUrl, followChat, h, highlight, isCoordinator, markdown, markSeen, me, restoreScroll, scrollToBottom, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, view } from './core.js';
+import { api, baseName, catchUpEvents, clearHighlights, fileHref, fileKind, fileUrl, followChat, h, highlight, isCoordinator, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
@@ -21,6 +21,7 @@ export function chatView(chatId, ticket) {
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
     pendingMessages: [], // { el, text } shown on send, replaced by the server's copy
     cards: new Map(), // question card id -> { markAnswered }; approval card id -> { settle }
+    heldCards: [], // this turn's question and plan cards, kept below the words that explain them
     branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
   };
 }
@@ -28,10 +29,14 @@ export function chatView(chatId, ticket) {
 /** Fill in a chat section just put on the page: its head, its history, and where you were in it. */
 export async function mountChat(chatId, ticket, events) {
   renderTicketHead();
+  const seenAt = view.seen?.[chatId];
   for (const ev of events) appendEvent(ev, false);
   if (ticket.branch) refreshBranch(chatId);
   markSeen(chatId);
-  restoreScroll(chatId);
+  // Open at the first thing you haven't seen; a minion you've never opened starts at the bottom.
+  const firstUnread = seenAt ? [...document.getElementById('log').children].find((el) => Number(el.dataset.at) > seenAt) : null;
+  if (firstUnread) scrollToUnread(firstUnread);
+  else restoreScroll(chatId);
   try {
     if (sessionStorage.getItem('cc-refocus')) {
       sessionStorage.removeItem('cc-refocus');
@@ -60,8 +65,18 @@ export function chatSection(chatId, ticket, events) {
   view.typingEl.onkeydown = (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReadout(); }
   };
+  // Opening at the first unread message leaves the newest out of sight; this takes you there.
+  const latest = h('button', { type: 'button', class: 'small secondary to-latest', hidden: true }, '↓ Latest');
+  latest.addEventListener('click', scrollToBottom);
+  form.append(latest);
   return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);
 }
+
+// After core.js's own listener has decided whether you're at the bottom.
+document.addEventListener('scroll', () => {
+  const latest = document.querySelector('.to-latest');
+  if (latest) latest.hidden = followChat;
+}, { passive: true, capture: true });
 
 /** Find in the open conversation: highlights every match, Enter / ↓ for the next, Shift+Enter / ↑ for the previous. */
 function chatFindBox() {
@@ -533,7 +548,15 @@ export function appendEvent(event, scroll = true) {
     }
   }
 
-  log.append(...nodes);
+  // Unread starts at the first thing someone else added; your own messages don't count.
+  if (!(event.kind === 'user_message' && data.author === me)) for (const n of nodes) n.dataset.at = event.created_at;
+  // A minion explains its card in the reply it writes after asking, so the card stays below that
+  // turn's words until someone answers or the turn ends.
+  const held = view.heldCards.find((el) => el.isConnected);
+  if (held && event.kind === 'claude' && data.type === 'assistant') held.before(...nodes);
+  else log.append(...nodes);
+  if (event.kind === 'question' || event.kind === 'plan') view.heldCards.push(...nodes);
+  else if (event.kind === 'user_message' || (event.kind === 'claude' && data.type === 'result')) view.heldCards = [];
   if (fold) foldNarration(event.ticket_id);
   renderTyping();
   if (scroll && followChat) scrollToBottom();
@@ -571,7 +594,7 @@ function foldNarration(ticketId) {
   const texts = view.turnTexts?.splice(0) ?? [];
   if (!texts.length) return;
   if (!view.narrationEl?.isConnected) {
-    view.narrationEl = h('details', { class: 'narration' }, h('summary', {}), h('div', { class: 'notes' }));
+    view.narrationEl = h('details', { class: 'narration', 'data-at': texts[0].el.dataset.at }, h('summary', {}), h('div', { class: 'notes' }));
     texts[0].el.before(view.narrationEl);
   }
   const notes = view.narrationEl.querySelector('.notes');

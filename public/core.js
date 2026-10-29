@@ -350,6 +350,34 @@ export function restoreScroll(ticketId) {
   else window.scrollTo(0, saved);
 }
 
+/**
+ * Open a chat at its first unread message, just under the thread bar, unless all that's new fits at
+ * the bottom. The thread bar fills in (readout, branch) and images load just after opening, so it
+ * keeps the message there for a moment, until you scroll yourself.
+ */
+export function scrollToUnread(el) {
+  scrollToBottom();
+  const headEl = document.getElementById('ticket-head');
+  const align = () => {
+    const head = headEl?.getBoundingClientRect().bottom ?? 0;
+    const top = el.getBoundingClientRect().top;
+    if (top < head || !followChat) window.scrollTo(0, top + window.scrollY - head - 8);
+    // Set now, not on the scroll event, so events caught up right after don't pull you back down.
+    if (top < head) followChat = false;
+  };
+  align();
+  if (followChat) return;
+  const settle = new ResizeObserver(align);
+  const stop = () => {
+    settle.disconnect();
+    for (const type of USER_SCROLL) removeEventListener(type, stop, true);
+  };
+  for (const type of USER_SCROLL) addEventListener(type, stop, { capture: true, passive: true });
+  for (const target of [headEl, document.getElementById('log')]) if (target) settle.observe(target);
+  setTimeout(stop, 3000);
+}
+const USER_SCROLL = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
+
 window.addEventListener('pagehide', saveScroll);
 
 // ---------- live updates ----------

@@ -8,7 +8,7 @@ import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './th
 import { onPropertiesChanged } from './properties.js';
 import { inboxEvent, inboxTicket } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
-import { inAppHash, linkPrUrls, linkThreadRefs, prOwnerRoute } from './threadrefs.js';
+import { inAppHash, linkThreadRefs, linkUrls, prOwnerRoute } from './threadrefs.js';
 
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
@@ -217,7 +217,7 @@ export function markdownDoc(src, opts = {}) {
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/~~(.+?)~~/g, '<del>$1</del>')
       .replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>');
-    html = threadRefsHtml(linkPrUrls(html));
+    html = threadRefsHtml(linkUrls(html, location));
     return html.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
   };
   const isItem = (l) => /^\s*([-*+]|\d+\.)\s+/.test(l);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { linkPrUrls, linkThreadRefs, prOwnerRoute, prUrlParts } from '../public/threadrefs.js';
+import { linkThreadRefs, linkUrls, prOwnerRoute, prUrlParts } from '../public/threadrefs.js';
 
 const link = (html, titleOf) => linkThreadRefs(html, 2, titleOf);
 const a = (n, text = `#${n}`) => `<a class="thread-ref" href="#/p/2/t/${n}">${text}</a>`;
@@ -79,11 +79,40 @@ test('PR URLs: only a PR\'s own page counts', () => {
   }
 });
 
-test('bare PR URLs become links, other text and existing links stay', () => {
+const tab = (url) => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`;
+
+test('bare PR URLs become links, existing links and code stay', () => {
   const url = 'https://github.com/o/r/pull/186';
-  assert.equal(linkPrUrls(`draft PR ${url}.`), `draft PR <a href="${url}" target="_blank" rel="noopener">${url}</a>.`);
-  for (const s of [`<a href="${url}">${url}</a>`, `<code>${url}</code>`, `${url}/files`, `${url}#issuecomment-1`, 'no links here']) {
-    assert.equal(linkPrUrls(s), s, s);
+  assert.equal(linkUrls(`draft PR ${url}.`), `draft PR ${tab(url)}.`);
+  // A PR's other pages link whole, never cut down to the PR.
+  assert.equal(linkUrls(`${url}/files`), tab(`${url}/files`));
+  assert.equal(linkUrls(`${url}#issuecomment-1`), tab(`${url}#issuecomment-1`));
+  for (const s of [`<a href="${url}">${url}</a>`, `<code>${url}</code>`, `<pre>see ${url}</pre>`, 'no links here', 'xhttps://a.b', 'https://']) {
+    assert.equal(linkUrls(s), s, s);
+  }
+});
+
+test('bare URLs link without the punctuation around them', () => {
+  const url = 'https://cara.apps.webplatformisbestplatform.net/preview/183/';
+  assert.equal(linkUrls(`<strong>${url}</strong>`), `<strong>${tab(url)}</strong>`);
+  for (const p of ['.', ',', ')', ':', ';', '!', '?', '),', '.)']) {
+    assert.equal(linkUrls(`at ${url}${p}`), `at ${tab(url)}${p}`, p);
+  }
+  assert.equal(linkUrls(`(see ${url})`), `(see ${tab(url)})`);
+  const wiki = 'https://en.wikipedia.org/wiki/Foo_(bar)';
+  assert.equal(linkUrls(`${wiki}.`), `${tab(wiki)}.`);
+  const query = 'https://x.io/a?b=1&amp;c=2';
+  assert.equal(linkUrls(`${query} and &quot;${query}&quot;`), `${tab(query)} and &quot;${tab(query)}&quot;`);
+  // A code span's placeholder (core.js inline()) is not part of the URL.
+  assert.equal(linkUrls('http://a.io\u00000\u0000'), `${tab('http://a.io')}\u00000\u0000`);
+  assert.equal(linkUrls('<img src="https://a.io/x.png">'), '<img src="https://a.io/x.png">');
+});
+
+test('bare URLs into this app switch view in place; previews and the API open a new tab', () => {
+  const here = new URL('https://cara.apps.webplatformisbestplatform.net/#/p/2');
+  assert.equal(linkUrls('go to https://cara.apps.webplatformisbestplatform.net/#/p/2/t/11.', here), 'go to <a href="#/p/2/t/11">https://cara.apps.webplatformisbestplatform.net/#/p/2/t/11</a>.');
+  for (const url of ['https://cara.apps.webplatformisbestplatform.net/preview/183/', 'https://cara.apps.webplatformisbestplatform.net/preview/183/#/p/2/t/11', 'https://cara.apps.webplatformisbestplatform.net/api/x']) {
+    assert.equal(linkUrls(url, here), tab(url), url);
   }
 });
 

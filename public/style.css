@@ -445,6 +445,7 @@ a.file-chip:hover { border-color: var(--muted); }
 .artifact-card .name { font-weight: 600; font-size: 0.92em; overflow-wrap: anywhere; }
 .artifact-card .meta { color: var(--muted); font-size: 0.78em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .artifact-card .pin { position: absolute; top: 0.8rem; right: 0.9rem; }
+.shared-list .artifact-item .pin { margin-left: auto; flex: none; }
 button.pin { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; width: 1.9rem; height: 1.9rem; padding: 0; line-height: 1; font-size: 1rem; }
 button.pin:hover { color: var(--accent); border-color: var(--accent); }
 button.pin.on { color: var(--accent); }

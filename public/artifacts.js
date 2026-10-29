@@ -85,11 +85,14 @@ export function setArtifacts(artifacts, shared = view.shared) {
   if (view.main === 'artifact') renderArtifactHead();
   renderViewerBar();
   if (view.main === 'sharedList') renderSharedList();
+  if (view.main === 'shared') renderSharedHead();
 }
 
+/** Pin or unpin an artifact, or a shared-folder file (which has no id, only its path). */
 async function setPinned(a, pinned) {
   try {
-    await api(`api/artifacts/${a.id}/pin`, { method: 'POST', body: { pinned } });
+    if (a.id) await api(`api/artifacts/${a.id}/pin`, { method: 'POST', body: { pinned } });
+    else await api(`api/projects/${view.projectId}/shared/pin`, { method: 'POST', body: { path: a.path, pinned } });
     await refreshArtifacts();
   } catch (e) {
     alert(`Could not ${pinned ? 'pin' : 'unpin'}: ${e.message}`);
@@ -116,13 +119,17 @@ export function renderShelf() {
   const el = document.getElementById('artifact-shelf');
   if (!el) return;
   const all = view.artifacts;
-  const pinned = all.filter((a) => a.pinned_at).sort((a, b) => b.pinned_at - a.pinned_at);
+  // Pinned shared-folder files sit with pinned artifacts; they have no id.
+  const pinned = [...all, ...(view.shared ?? [])].filter((a) => a.pinned_at).sort((a, b) => b.pinned_at - a.pinned_at);
   const recent = all.filter((a) => !a.pinned_at && !a.missing).slice(0, RECENT_ARTIFACTS);
-  const item = (a) => h('a', { class: `artifact-item${view.artifactId === a.id ? ' active' : ''}${a.missing ? ' missing' : ''}`, href: `#/a/${a.id}`, title: a.display_path ?? a.path },
+  const item = (a) => h('a', {
+    class: `artifact-item${(a.id ? view.artifactId === a.id : view.main === 'shared' && view.file?.path === a.path) ? ' active' : ''}${a.missing ? ' missing' : ''}`,
+    href: a.id ? `#/a/${a.id}` : sharedHref(view.projectId, a.path), title: a.display_path ?? a.path,
+  },
     h('span', { class: `badge k-${a.kind}` }, extOf(a)),
     h('span', { class: 'text' },
       h('span', { class: 'name' }, a.name),
-      h('span', { class: 'meta' }, `${a.ticket_kind === 'coordinator' ? taskmasterName() : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
+      h('span', { class: 'meta' }, `${!a.id ? 'Shared' : a.ticket_kind === 'coordinator' ? taskmasterName() : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
   const sub = (title, count, items, empty, render = item) => h('div', { class: 'sub' },
     h('h4', {}, title, count ? h('span', { class: 'count' }, count) : ''),
     items.length ? items.map(render) : h('p', { class: 'muted small' }, empty));
@@ -151,11 +158,13 @@ export function renderSharedList() {
 
 /** A document or page in the project's shared folder, as a row of the Shared files list. */
 function sharedItem(f) {
-  return h('a', { class: `artifact-item${view.main === 'shared' && view.file?.path === f.path ? ' active' : ''}`, href: sharedHref(view.projectId, f.path), title: f.display_path },
+  const when = f.missing ? 'missing' : ago(f.mtime);
+  return h('a', { class: `artifact-item${view.main === 'shared' && view.file?.path === f.path ? ' active' : ''}${f.missing ? ' missing' : ''}`, href: sharedHref(view.projectId, f.path), title: f.display_path },
     h('span', { class: `badge k-${f.kind}` }, extOf(f)),
     h('span', { class: 'text' },
       h('span', { class: 'name' }, f.name),
-      h('span', { class: 'meta' }, f.path.includes('/') ? `${f.path.slice(0, f.path.lastIndexOf('/'))} · ${ago(f.mtime)}` : ago(f.mtime))));
+      h('span', { class: 'meta' }, f.path.includes('/') ? `${f.path.slice(0, f.path.lastIndexOf('/'))} · ${when}` : when)),
+    pinButton(f));
 }
 
 /** Main panel: every artifact in the project, searchable, with pin toggles. */
@@ -400,17 +409,21 @@ export function renderSharedHead() {
   const el = document.getElementById('shared-head');
   if (!el) return;
   const { file } = view;
+  // Its entry in the Shared list carries the pin, kept live as it changes.
+  const listed = view.shared.find((f) => f.path === file.path);
   const src = `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`;
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `badge k-${file.kind}` }, fileExt(file.name)),
       h('h2', {}, file.name),
       h('span', { class: 'spacer' }),
+      listed ? pinButton(listed) : '',
       file.missing ? '' : h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open'),
       file.missing ? '' : h('a', { class: 'button secondary', href: `${src}&download` }, 'Download')),
     h('div', { class: 'meta' },
       file.display_path, ' · in the folder every minion and the Taskmaster share',
-      file.missing ? ' · not found' : ` · ${formatSize(file.size)} · updated ${ago(file.mtime)}`));
+      file.missing ? ' · not found' : ` · ${formatSize(file.size)} · updated ${ago(file.mtime)}`,
+      listed?.pinned_at ? ` · pinned by ${listed.pinned_by}` : ''));
 }
 
 /**

@@ -1,5 +1,6 @@
-// The Start button on a brief in the file viewer (#129): a tap opens a sheet filled in from the brief,
-// a second starts the minion, and the button then reads "Started as #N" for everyone.
+// The Start button on a brief in the file viewer (#129): a tap arms it, a second tap starts the minion
+// with the title and type guessed from the brief, and the button then reads "Started as #N" for everyone.
+// Options… opens a sheet for changing those or chaining the minion after another.
 import { api, h } from './core.js';
 import { briefMessage, findBriefs, matchType } from './briefs.js';
 
@@ -27,11 +28,62 @@ export function addBriefButtons(doc, text, file) {
   }).catch(() => {});
 }
 
+const ARM_MS = 4000;
+
 function show(slot, brief, file, number) {
-  slot.replaceChildren(number
-    ? h('a', { class: 'button secondary started', href: `#/p/${file.projectId}/t/${number}` }, `Started as #${number}`)
-    : h('button', { type: 'button', class: 'secondary', title: 'Start this brief as a new minion', onclick: () => openSheet(slot, brief, file) },
-      brief.heading ? 'Start as a minion' : 'Start this handoff as a minion'));
+  if (number) return slot.replaceChildren(h('a', { class: 'button secondary started', href: `#/p/${file.projectId}/t/${number}` }, `Started as #${number}`));
+  const label = brief.heading ? 'Start as a minion' : 'Start this handoff as a minion';
+  const status = h('span', { class: 'error small', 'aria-live': 'polite' });
+  let armed = null;
+  const disarm = () => {
+    clearTimeout(armed);
+    armed = null;
+    btn.textContent = label;
+    btn.classList.remove('armed');
+  };
+  // Two taps, so a brush while scrolling on a phone doesn't start a minion.
+  const btn = h('button', { type: 'button', class: 'secondary', title: 'Start this brief as a new minion', onclick: async () => {
+    status.textContent = '';
+    if (!armed) {
+      btn.textContent = 'Tap again to start';
+      btn.classList.add('armed');
+      armed = setTimeout(disarm, ARM_MS);
+      return;
+    }
+    disarm();
+    btn.disabled = true;
+    btn.textContent = 'Starting…';
+    try {
+      const type = matchType(brief.typeHint, await typeValues(file.projectId));
+      show(slot, brief, file, await start(brief, file, { title: brief.title, type }));
+    } catch (ex) {
+      status.textContent = ex.message;
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  } }, label);
+  const options = h('button', { type: 'button', class: 'options', title: 'Change the title or type, or start it after another minion', onclick: () => {
+    disarm();
+    openSheet(slot, brief, file);
+  } }, 'Options…');
+  slot.replaceChildren(btn, options, status);
+}
+
+/** Start the brief as a minion: its number, or the number of the one someone else started meanwhile. */
+async function start(brief, file, { title, type, after = '', when = 'live' }) {
+  try {
+    const t = await api(`api/projects/${file.projectId}/tickets`, { method: 'POST', body: {
+      title, message: briefMessage(brief, file.path), brief: { path: file.path, heading: brief.heading },
+      ...(type ? { properties: { type } } : {}),
+      ...(after ? { start_after: Number(after), start_when: when } : {}),
+    } });
+    return t.number;
+  } catch (ex) {
+    const theirs = await api(`api/projects/${file.projectId}/briefs?path=${encodeURIComponent(file.path)}`).catch(() => []);
+    const number = theirs.find((s) => s.heading === brief.heading)?.number;
+    if (number) return number;
+    throw ex;
+  }
 }
 
 let types = null; // the scheme's registered types, fetched once per scheme
@@ -76,23 +128,11 @@ async function openSheet(slot, brief, file) {
     btn.disabled = true;
     btn.textContent = 'Starting…';
     err.hidden = true;
-    const n = after.value.replace('#', '').trim();
     try {
-      const t = await api(`api/projects/${file.projectId}/tickets`, { method: 'POST', body: {
-        title: title.value, message, brief: { path: file.path, heading: brief.heading },
-        ...(type.value ? { properties: { type: type.value } } : {}),
-        ...(n ? { start_after: Number(n), start_when: when.value } : {}),
-      } });
+      const number = await start(brief, file, { title: title.value, type: type.value, after: after.value.replace('#', '').trim(), when: when.value });
       dialog.close();
-      show(slot, brief, file, t.number);
+      show(slot, brief, file, number);
     } catch (ex) {
-      // Someone else started it meanwhile: show theirs instead of a second minion.
-      const theirs = await api(`api/projects/${file.projectId}/briefs?path=${encodeURIComponent(file.path)}`).catch(() => []);
-      const number = theirs.find((s) => s.heading === brief.heading)?.number;
-      if (number) {
-        dialog.close();
-        return show(slot, brief, file, number);
-      }
       err.textContent = ex.message;
       err.hidden = false;
       btn.disabled = false;

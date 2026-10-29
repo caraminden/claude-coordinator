@@ -130,9 +130,12 @@ dialog.new-scheme form > :last-child { margin-bottom: 0; }
   dialog.new-scheme { width: 100%; max-width: none; margin: auto 0 0; border-radius: 12px 12px 0 0; border-bottom: 0; padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
 }
 /* A brief's Start button in the file viewer, and the sheet it opens (#129); the sheet is a new-scheme dialog. */
-.brief-start { margin: 0.4rem 0 0.9rem; }
+.brief-start { margin: 0.4rem 0 0.9rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; }
 .brief-start > :is(button, a.button) { min-height: 44px; display: inline-flex; align-items: center; padding: 0 1rem; font-size: 0.95rem; font-weight: 600; line-height: 1.2; }
-.brief-start > button { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent); }
+.brief-start > button.secondary { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent); }
+.brief-start > button.secondary.armed { background: var(--accent); border-color: var(--accent); color: #fff; }
+.brief-start > button.options { background: none; border: 0; color: var(--muted); font-weight: normal; padding: 0 0.6rem; }
+.brief-start > button.options:hover { color: var(--ink); }
 dialog.start-brief { width: min(560px, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow-y: auto; }
 dialog.start-brief .from { margin: -0.4rem 0 0.9rem; }
 .start-brief-form .label { margin-bottom: 0.75rem; color: var(--muted); font-size: 0.9em; }

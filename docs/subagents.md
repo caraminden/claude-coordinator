@@ -11,8 +11,9 @@ whether a step should leave the session at all.
   summarises (code, transcripts, usage data, docs lookups). Building and general-purpose workers
   inherit high. Never put `effort` on a skill: it would hold for the rest of a long turn, and a
   switch mid-session may restart the prompt cache.
-- Models: Agent calls set `model` too: `haiku` for bulk reads, `sonnet` for mechanical runs (the
-  `check-runner` agent, regeneration, reviewer passes), the session's own model for judgment.
+- Models: Agent calls set `model` too: `haiku` for bulk reads, `sonnet` for mechanical runs
+  (regeneration, reviewer passes), and the `check-runner` agent runs on `haiku` at `low` effort
+  (its answer is a verdict), the session's own model for judgment.
 
 ## How the cost works
 

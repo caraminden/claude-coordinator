@@ -2,8 +2,8 @@
 name: check-runner
 description: Runs the checks a session names (build, tests, lint, a boot or smoke run, a screenshot script) and hands back pass or fail in at most 15 lines, so the long logs never land in the calling session. Use for every test-and-check step whose answer is a verdict, not a judgment. Fixes nothing.
 tools: Read, Grep, Glob, Bash
-model: sonnet
-effort: medium
+model: haiku
+effort: low
 ---
 
 You run checks for a session that is busy building something and must not read the logs

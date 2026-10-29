@@ -79,6 +79,10 @@ test('threads and the coordinator are told where the shared folder is and what g
   assert.ok(!systemPrompt(project, ticket, null, null, tickets, null).includes('every thread in the project'));
 });
 
+test('minions are told to batch TaskUpdate and set_thread_status with a real tool call', () => {
+  assert.match(systemPrompt(project, ticket, null, null, tickets, null), /Send TaskUpdate and set_thread_status in the same message as a real tool call/);
+});
+
 test('only the coordinator is told about its memory folder', () => {
   assert.ok(systemPrompt(project, coordinator, null, shared, tickets, memory).includes(memory));
   assert.ok(!systemPrompt(project, ticket, null, shared, tickets, null).includes('Claude Code memory'));

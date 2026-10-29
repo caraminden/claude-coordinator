@@ -316,7 +316,9 @@ const atBottom = () => {
 export let followChat = true;
 // Captured, so the viewer's chat column (whose scroll events don't bubble) counts too.
 document.addEventListener('scroll', (e) => {
-  if (e.target === document || e.target === chatScroller()) followChat = atBottom();
+  if (e.target !== document && e.target !== chatScroller()) return;
+  followChat = atBottom();
+  document.querySelector('.to-latest')?.toggleAttribute('hidden', followChat);
 }, { passive: true, capture: true });
 export function scrollToBottom() {
   const el = chatScroller();

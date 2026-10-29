@@ -82,11 +82,6 @@ export function chatSection(chatId, ticket, events) {
   return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);
 }
 
-// After core.js's own listener has decided whether you're at the bottom.
-document.addEventListener('scroll', () => {
-  const latest = document.querySelector('.to-latest');
-  if (latest) latest.hidden = followChat;
-}, { passive: true, capture: true });
 
 /** Find in the open conversation: highlights every match, Enter / ↓ for the next, Shift+Enter / ↑ for the previous. */
 function chatFindBox() {

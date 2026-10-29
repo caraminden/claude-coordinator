@@ -79,6 +79,6 @@ Check these, and the repo's own classes from Project facts, before anything exot
   rule change: say so, change the rule on purpose (and log it in the decisions log Project
   facts names, if any), and rewrite the test to the new rule in the same turn. Never end a
   turn on a red test.
-- For a broad hunt ("something is off with hiring"), hand the sweep of the classes above to
+- For a broad hunt ("something is off with checkout"), hand the sweep of the classes above to
   a Grunt that writes the edge-case tests and reports which fail; you put them in the
   suite and fix the code.

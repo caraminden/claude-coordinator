@@ -27,7 +27,7 @@ directly; there are no dependencies and no build step.
 - After a second permission denial for the same kind of action, stop and say what you need
   instead of trying another route.
 - Subagents (Grunts): whether a step should leave the session, and which `effort` and `model` each job
-  gets: the `citadel:subagents` skill (it was `docs/subagents.md`). Never put `effort` on a skill.
+  gets: the `citadel:subagents` skill. Never put `effort` on a skill.
 
 ## Compact instructions
 

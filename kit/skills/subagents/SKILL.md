@@ -18,7 +18,7 @@ so their `subagent_type` is `citadel:<name>` (`citadel:check-runner`, `citadel:f
   inherit high. Never put `effort` on a skill: it would hold for the rest of a long turn, and a
   switch mid-session may restart the prompt cache.
 - Models: Agent calls set `model` too: `haiku` for bulk reads, `sonnet` for mechanical runs
-  (regeneration, reviewer passes), and the `check-runner` agent runs on `haiku` at `low` effort
+  (regeneration, reviewer passes), and the `citadel:check-runner` agent runs on `haiku` at `low` effort
   (its answer is a verdict), the session's own model for judgment.
 
 ## How the cost works
@@ -45,13 +45,13 @@ Ask one question: will the session need what this step reads, or only what it co
 ## Use a subagent when
 
 - **The step is noisy.** Test logs, searches across many files and data pulls often come to 20k
-  tokens or more. The session would re-read all of that on every later call. The `check-runner`
+  tokens or more. The session would re-read all of that on every later call. The `citadel:check-runner`
   agent exists for exactly this.
 - **The session is already big.** Past about 150k context, the savings grow quickly. Off a 90k
   session they are small.
 - **Your own read needs to stay clear.** A lean session keeps the requester's actual words in
   view and compacts less often. Instructions buried under logs are where misreadings come from.
-- **The read must be independent.** Reviews and `fresh-eyes` are useful because they don't share
+- **The read must be independent.** Reviews and `citadel:fresh-eyes` are useful because they don't share
   the session's beliefs. Hand them the code and the requester's words, not your conclusion.
 - **The jobs are parallel and alike.** Several takes, several reviewers, a check per module: one
   session with subagents costs far less than one session per item, because each of those
@@ -100,5 +100,5 @@ that helped nobody. Three of them a session controls:
 ## The model is the smaller lever
 
 Downgrade a model only where a miss is cheap. A missed edge case in a test sweep or a misread
-intent in `fresh-eyes` costs a rebuild, which is far more than the model saves. Those keep the
+intent in `citadel:fresh-eyes` costs a rebuild, which is far more than the model saves. Those keep the
 strongest model.

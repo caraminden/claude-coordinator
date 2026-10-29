@@ -27,7 +27,7 @@ Create either file when it is first needed.
 1. **Gather evidence.** Collect the PR diff and the spec's open Proposals, the
    conversation (what was asked, corrected or complained about), every subagent report,
    every hook failure, and the steps that took longest. Each finding cites one of these,
-   so it reads "the check-runner was briefed without the test filter and ran the slow
+   so it reads "the citadel:check-runner was briefed without the test filter and ran the slow
    suite three times", never "checks felt slow". In the gathering, use a subagent and keep
    only what it concludes.
 2. **Spec gaps.** List every Proposal the spec forced: it names a feature but not its
@@ -53,7 +53,7 @@ Create either file when it is first needed.
    saved. Each is an edit to a named file: a skill, an agent, CLAUDE.md, a script or a
    test. Prefer an edit that removes a cache of the environment (a copied name, a restated
    table, a number that lives in code) over one that adds prose, and write by the
-   writing-for-agents skill. A finding that matches a ledger row is a repeat. Its fix must
+   citadel:writing-for-agents skill. A finding that matches a ledger row is a repeat. Its fix must
    be something a session meets at the moment the mistake happens: a tool, test or hook
    that fails or prints; a skill edit at the step where the mistake is made; or a doc line
    only where a check or a skill step reads it, never a note left to rot. A retro note is

@@ -21,8 +21,8 @@ Commit first, then `git diff --stat main...HEAD` (three dots: only what this bra
 
 - **Skip** when under about 20 changed lines and every change is docs (`docs/`, `README.md`) or
   user-visible text in the front end with no logic touched. Label it `low: docs/copy only` and go
-  to 5. Never skip `CLAUDE.md`, `.claude/` or the Citadel kit (`kit/` in Citadel's repo): a few
-  lines there change how every minion works, and the kit's reach every scheme.
+  to 5. Never skip `CLAUDE.md`, `.claude/` or the Citadel kit: a few lines there change how every
+  minion works, and a kit change reaches every scheme.
 - **Deep** when the change is high in 4, or the diff is over about 300 lines.
 - **Light** for everything else.
 

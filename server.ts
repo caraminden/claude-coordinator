@@ -30,6 +30,7 @@ import { type Chain, LiveWaiters } from './src/wake.ts';
 import { catchUpTicketDir, cloneProject, createTicketDir, projectDir, projectSharedDir, removeProjectDir } from './src/workspace.ts';
 import { costDays, dayBudget } from './src/costs.ts';
 import { describeCron, runBrief, ScheduleError, type Schedule } from './src/schedules.ts';
+import { keepServing, safely } from './src/safely.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -79,6 +80,7 @@ function checkoutHead(): string | null {
   }
 }
 const BOOT_COMMIT = checkoutHead();
+keepServing();
 // Set by tools/deploy.sh when it boots new code on a copy of the database: serve and answer, but
 // don't resume interrupted turns or watch GitHub, which would act on the copy's minions for real.
 // A preview (src/previews.ts): a minion's branch served on a copy of the database for people to try.
@@ -260,7 +262,7 @@ async function runDueSchedules() {
     scheduling = false;
   }
 }
-if (!BOOT_CHECK) setInterval(() => void runDueSchedules(), 30_000).unref();
+if (!BOOT_CHECK) setInterval(() => void safely('schedules', runDueSchedules), 30_000).unref();
 
 // ---------- artifacts ----------
 
@@ -353,7 +355,7 @@ store.pruneArtifacts(isArtifact);
 // A preview's copy already holds what these sweeps would find, and they read the live folders.
 // The vocabulary docs follow the registry; the first run replaces the hand-written ones (kept aside).
 if (!PREVIEW) writeVocabularies().catch((err) => console.error('Could not write the property vocabularies:', err));
-if (!PREVIEW) (async () => {
+if (!PREVIEW) void safely('startup sweep', async () => {
   for (const p of store.listProjects()) {
     for (const t of store.listTickets(p.id)) {
       await scanArtifacts(t.id).catch((err) => console.error(`Artifact scan of ticket ${t.id} failed:`, err));
@@ -375,7 +377,7 @@ if (!PREVIEW) (async () => {
       await saveSession(store, t, p, configDir, false).catch((err) => console.error(`Saving the session of ticket ${t.id} failed:`, err));
     }
   }
-})();
+});
 
 // ---------- branch and pull request ----------
 
@@ -428,24 +430,27 @@ function shipChanged(ticketId: number) {
 const SHIP_POLL_MS = 15_000;
 // Only git reads, so a preview shows the badges too.
 if (!BOOT_CHECK || PREVIEW) {
-  (async () => {
+  void safely('branch sweep', async () => {
     for (const p of store.listProjects()) {
       for (const t of store.listTickets(p.id)) {
         if (t.kind === 'ticket' && t.branch && t.status !== 'closed') await ticketBranch(t.id).catch(() => {});
       }
     }
-  })();
+  });
   let polling = false; // a slow git can't stack up rounds
-  setInterval(async () => {
+  setInterval(() => void safely('ship poll', async () => {
     if (polling) return;
     polling = true;
-    for (const [id, { status }] of branchCache) {
-      if (store.getTicket(id)?.status === 'closed') continue;
-      if (status?.deploy && !status.deploy.live) await ticketBranch(id).catch(() => {});
-      else shipChanged(id);
+    try {
+      for (const [id, { status }] of branchCache) {
+        if (store.getTicket(id)?.status === 'closed') continue;
+        if (status?.deploy && !status.deploy.live) await ticketBranch(id).catch(() => {});
+        else shipChanged(id);
+      }
+    } finally {
+      polling = false;
     }
-    polling = false;
-  }, SHIP_POLL_MS).unref();
+  }), SHIP_POLL_MS).unref();
 }
 
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
@@ -1982,10 +1987,21 @@ async function machinesApi(req: IncomingMessage, res: ServerResponse, pathname: 
   throw new HttpError(405, 'Method not allowed');
 }
 
+/** A request's URL; a 400 for one that can't be parsed or decoded (`//`, `/%`) rather than a crash. */
+function requestUrl(req: IncomingMessage): URL {
+  try {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    decodeURIComponent(url.pathname);
+    return url;
+  } catch {
+    throw new HttpError(400, 'Bad request');
+  }
+}
+
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url ?? '/', 'http://localhost');
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   try {
+    const url = requestUrl(req);
     const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
     if (url.pathname.startsWith('/api/')) {
       await api(req, res, url, auth.session(req));
@@ -2058,8 +2074,8 @@ process.on('SIGHUP', () => {
 // The machines-only listener: the agent's two endpoints and the agent script, nothing else.
 if (MACHINES_URL) {
   const agents = createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://localhost');
     try {
+      const url = requestUrl(req);
       if (url.pathname === '/api/machines/connect' || url.pathname === '/api/machines/send') await machineAgentApi(req, res, url);
       else if (url.pathname === '/machine-agent.mjs' && req.method === 'GET') await serveStatic(req, res, url.pathname);
       else throw new HttpError(404, 'Not found');

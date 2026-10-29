@@ -305,8 +305,9 @@ export function renderTicketHead() {
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
+      coord ? '' : personNoteButton(t),
       stateLabel,
-      h('span', { class: 'spacer' }), coord ? '' : propertyChip(t), coord ? '' : personNoteButton(t), ...actions, view.findEl ?? '',
+      h('span', { class: 'spacer' }), coord ? '' : propertyChip(t), ...actions, view.findEl ?? '',
       h('span', { class: 'head-nav' },
         // Through the views opened in this tab, never off the site (public/navstack.js).
         h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
@@ -336,11 +337,11 @@ const PERSON_NOTE_MAX = 200; // the server's limit, PERSON_NOTE_MAX in src/db.ts
 // The note being edited, { id, el }: kept across the head's re-renders, which a running turn makes often.
 let noteEdit = null;
 
-/** "✎ Note" beside the properties chip, while a minion has no note and none is being written. */
+/** "✎ Note" just after the title (on phones, on the title's line), while a minion has no note and none is being written. */
 function personNoteButton(t) {
   if (view.personNotes?.[t.id] || noteEdit?.id === t.id) return '';
-  return h('button', { type: 'button', class: 'secondary note-btn', title: 'Add a note only people see', 'aria-label': 'Add a note', onclick: () => editPersonNote(t) },
-    '✎', h('span', { class: 'wide-only' }, ' Note'));
+  return h('button', { type: 'button', class: 'note-btn', title: 'Add a note only people see', 'aria-label': 'Add a note', onclick: () => editPersonNote(t) },
+    '✎', h('span', { class: 'wide-only' }, 'Note'));
 }
 
 /** The note under the title, a click away from editing it, or its editor while someone writes it. */

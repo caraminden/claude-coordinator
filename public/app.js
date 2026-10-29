@@ -25,7 +25,8 @@ new MutationObserver(() => {
   const row = app.querySelector('.ticket-head > .row');
   if (!row || row.querySelector(':scope > .refresh-btn')) return;
   const btn = h('button', { type: 'button', class: 'refresh-btn', title: 'Refresh', 'aria-label': 'Refresh', onclick: reloadNow }, '↻');
-  row.insertBefore(btn, row.querySelector(':scope > h2')?.nextSibling ?? row.firstChild);
+  // After the title's ✎ (a minion with no person note yet), which shares the title's line too.
+  row.insertBefore(btn, (row.querySelector(':scope > h2 + .note-btn') ?? row.querySelector(':scope > h2'))?.nextSibling ?? row.firstChild);
 }).observe(app, { childList: true, subtree: true });
 // Keep relative times honest: the usage readout, and the minions list's waits and usage-reset countdowns.
 setInterval(() => {

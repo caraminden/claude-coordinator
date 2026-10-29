@@ -310,6 +310,13 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
 ];
 
 /**
+ * The database's shape, kept in the `schema_version` setting. Bump it with any change to SCHEMA or
+ * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
+ * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
+ */
+export const SCHEMA_VERSION = 1;
+
+/**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
  * The build needs a separator or brackets, so a title that names the build ("Major Build #7") stays.
  */
@@ -343,6 +350,15 @@ export class Store {
     this.props.seed();
     this.settleBuilds();
     this.schedules = new Schedules(this.db);
+    this.noteSchemaVersion();
+  }
+
+  /** Records SCHEMA_VERSION, never lowering it: after a rollback, the newer number says what migrated it. */
+  private noteSchemaVersion() {
+    const stored = this.getSetting<number>('schema_version') ?? 0;
+    if (stored > SCHEMA_VERSION) {
+      console.warn(`The database is at schema version ${stored}, newer than this code's ${SCHEMA_VERSION}: a newer release migrated it. If something fails to read, backups/pre-deploy-*.db holds it from before that deploy.`);
+    } else if (stored < SCHEMA_VERSION) this.setSetting('schema_version', SCHEMA_VERSION);
   }
 
   /**

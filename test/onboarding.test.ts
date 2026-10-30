@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -8,7 +8,7 @@ import { after, before, test } from 'node:test';
 import { catalogue, frontmatter } from '../src/catalogue.ts';
 import { ONBOARDING, ONBOARDING_MODES, Store, type Project } from '../src/db.ts';
 import { onboardingPrompt } from '../src/runner.ts';
-import { bootServer, REPO, until } from './helpers.ts';
+import { bootServer, jsonLines, REPO, until } from './helpers.ts';
 
 // New scheme onboarding (#172): the kickoff from the form, the Taskmaster's onboarding section while
 // setup runs, its plan card and catalogue, and the catalogue never handing out a file's body.
@@ -30,7 +30,7 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
 });
 `);
 chmodSync(fakeClaude, 0o755);
-const turns = () => (existsSync(join(root, 'turns.jsonl')) ? readFileSync(join(root, 'turns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
+const turns = () => jsonLines(join(root, 'turns.jsonl'));
 
 let base = '';
 let cookie = '';

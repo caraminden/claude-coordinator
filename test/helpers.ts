@@ -1,6 +1,6 @@
 // Shared test plumbing: boot the real server.ts on a scratch data dir and the port it picks.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -10,6 +10,12 @@ import { freePort, listeningPort } from '../src/ports.ts';
 export { freePort, listeningPort };
 
 export const REPO = join(import.meta.dirname, '..');
+
+/** The JSON lines a fake's log file holds, leaving out a last line it is still writing. */
+export function jsonLines(path: string): any[] {
+  const text = existsSync(path) ? readFileSync(path, 'utf8') : '';
+  return text.slice(0, text.lastIndexOf('\n') + 1).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
 export const PASSWORD = 'test-password-123';
 export const SECRET = 'x'.repeat(40);
 

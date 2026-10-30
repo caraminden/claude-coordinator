@@ -8,6 +8,7 @@ import { Store } from '../src/db.ts';
 import { GithubLink, personGithub } from '../src/github-link.ts';
 import { asEnv } from '../src/scheme-repo.ts';
 import { hideTokens, pushKind, Runner, slimEvent } from '../src/runner.ts';
+import { jsonLines } from './helpers.ts';
 
 // People link their own GitHub (#182): the token is kept encrypted, and each turn gets the token of the
 // person it runs for, or none, so an unlinked person's turn can't push as anyone else.
@@ -210,7 +211,7 @@ async function until(check: () => boolean) {
   for (let i = 0; i < 500 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
   assert.ok(check(), 'timed out');
 }
-const seen = (dir: string): string[] => (existsSync(join(dir, 'seen.txt')) ? readFileSync(join(dir, 'seen.txt'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
+const seen = (dir: string): string[] => jsonLines(join(dir, 'seen.txt'));
 const env = (dir: string) => JSON.parse(readFileSync(join(dir, 'env.json'), 'utf8'));
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 async function finish(r: Runner, t: { id: number; dir: string }) {

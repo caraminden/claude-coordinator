@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, until } from './helpers.ts';
+import { bootServer, jsonLines, until } from './helpers.ts';
 
 // The whole path from a thread's turn to a machine and back: the real server, the real agent
 // (public/machine-agent.mjs) running a stand-in MCP server, and a stand-in `claude -p` that acts
@@ -83,7 +83,7 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
   return data;
 }
 
-const turns = () => existsSync(join(root, 'turns.jsonl')) ? readFileSync(join(root, 'turns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+const turns = () => jsonLines(join(root, 'turns.jsonl'));
 
 function startAgent(token: string, run = ['--', process.execPath, mcpServer], env: NodeJS.ProcessEnv = {}) {
   const agent = spawn(process.execPath, [join(repo, 'public/machine-agent.mjs'), base, token, ...run], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MACHINES_URL: undefined, ...env } });

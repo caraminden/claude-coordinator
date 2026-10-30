@@ -1,5 +1,5 @@
 // Per-person logins and who sees what: signing in, invites, scheme owners and members, the live stream
-// and push filtered by membership, and turns only for the owner of the server's Claude login.
+// and push filtered by membership, and turns only for people allowed on the server's Claude login.
 import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -96,7 +96,7 @@ test("the stream carries a scheme's news to its people, and admin-only news to a
   assert.ok(!mayReceive(store, joshS, citadel.id) && !mayReceive(store, joshS, 'admin') && mayReceive(store, oliveS, null));
 });
 
-test("turns run only for the server login's owner; anyone else's message waits (#185)", () => {
+test("turns run for people allowed on the server's login; anyone else's message waits", () => {
   const { store, josh, citadel, games } = world();
   const mine = store.createTicket({ project_id: citadel.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   const his = store.createTicket({ project_id: games.id, title: 'T', permission_mode: 'default', created_by: 'Josh' });
@@ -105,9 +105,8 @@ test("turns run only for the server login's owner; anyone else's message waits (
   // No person (GitHub, a wake, another thread): the scheme owner's call.
   assert.equal(turnRefusal(store, mine, 'GitHub'), null);
   assert.match(turnRefusal(store, his, 'GitHub')!, /its owner, Josh,/);
-  // The old per-person switch no longer lets anyone else onto the server's login.
   store.updateUser(josh.id, { server_login: 1 });
-  assert.match(turnRefusal(store, his, 'Josh')!, /Turns for Josh start once/);
+  assert.equal(turnRefusal(store, his, 'Josh'), null);
   // The connected machines are the admin's: only their schemes' minions get them.
   assert.ok(lendsMachines(store, citadel) && !lendsMachines(store, games));
 });
@@ -178,28 +177,16 @@ test('people make their own schemes, add others to them, and see nothing else', 
   assert.equal((await as('Josh', '/api/app/instructions')).status, 403);
 });
 
-test("Josh's message waits, and Cara can't hand Josh the server's login (#185)", async () => {
+test("Josh's message waits until Cara allows Josh the server's login; then Josh's turns run", async () => {
   const p = (await as('Josh', '/api/projects')).data.find((x: any) => x.name === 'Joshs');
   const t = (await as('Josh', `/api/projects/${p.id}/tickets`, { message: 'build it', title: 'Build it' })).data;
   const notes = async () => (await as('Josh', `/api/tickets/${t.id}/events`)).data.events.filter((e: any) => e.kind === 'note').map((e: any) => JSON.parse(e.data).text);
   await until('the waiting note', async () => (await notes()).some((n: string) => /Turns for Josh start once/.test(n)));
   assert.notEqual((await as('Josh', `/api/tickets/${t.id}`)).data.ticket.status, 'running');
 
-  assert.equal((await as('Cara', `/api/people/${people.Josh.id}`, { server_login: true }, 'PATCH')).data.server_login, false);
+  assert.equal((await as('Cara', `/api/people/${people.Josh.id}`, { server_login: true }, 'PATCH')).data.server_login, true);
   await as('Josh', `/api/tickets/${t.id}/messages`, { text: 'now?' });
-  await until('a second waiting note', async () => (await notes()).filter((n: string) => /Turns for Josh start once/.test(n)).length >= 2);
-  assert.notEqual((await as('Josh', `/api/tickets/${t.id}`)).data.ticket.status, 'running');
-});
-
-test("reopening the store takes the server's login off everyone but the first admin (#185)", () => {
-  const file = join(root, 'owner.db');
-  const store = new Store(file);
-  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
-  const josh = store.createUser({ name: 'Josh', login: 'josh', admin: true, server_login: true });
-  const again = new Store(file);
-  assert.equal(again.serverLoginOwner()?.id, cara.id);
-  assert.equal(again.getUser(cara.id)?.server_login, 1);
-  assert.equal(again.getUser(josh.id)?.server_login, 0);
+  await until('the turn to run and end', async () => (await as('Josh', `/api/tickets/${t.id}`)).data.ticket.status === 'idle');
 });
 
 test("the stream doesn't carry other schemes' news; disabling someone ends theirs", async () => {

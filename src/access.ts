@@ -27,14 +27,14 @@ export function mayReceive(store: Store, who: Session, scope: number | 'admin' |
 
 /**
  * Why a message can't start or steer a turn yet, or null when it can. Until people link their own
- * Claude accounts, turns run on the server's login, which only its owner may use (Pro and Max plans
- * are per person). A message from no person (GitHub, a wake, another thread) counts as the scheme
- * owner's.
+ * Claude accounts, turns run on the server's login, which only people an admin allowed may use (Pro
+ * and Max plans are per person). A message from no person (GitHub, a wake, another thread) counts
+ * as the scheme owner's.
  */
 export function turnRefusal(store: Store, ticket: Ticket, author: string): string | null {
   const person = store.findUser('name', author);
   const who = person ?? store.getUser(store.getProject(ticket.project_id)?.owner_id ?? -1);
-  if (who && who.id === store.serverLoginOwner()?.id && !who.disabled_at) return null;
+  if (who?.server_login && !who.disabled_at) return null;
   return person
     ? `Turns for ${person.name} start once they link their Claude account, so this message waits here and Claude hasn't seen it.`
     : `Turns in this scheme start once its owner${who ? `, ${who.name},` : ''} links their Claude account, so this message waits here and Claude hasn't seen it.`;

@@ -5,9 +5,9 @@ import { clientIp, HttpError, json, readJson, type App, type Route } from '../ht
 import { cleanLogin, cleanName, newPasswordHash } from './app.ts';
 
 /** A person as Settings → People shows them: never a hash. */
-function personView(u: User, owner: User | undefined) {
+function personView(u: User) {
   return {
-    id: u.id, name: u.name, login: u.login, admin: !!u.admin, server_login: u.id === owner?.id,
+    id: u.id, name: u.name, login: u.login, admin: !!u.admin, server_login: !!u.server_login,
     disabled: !!u.disabled_at, has_password: !!u.password_hash, invite_open: (u.invite_expires ?? 0) > Date.now(),
   };
 }
@@ -30,7 +30,7 @@ export const peopleRoutes: Route[] = [
     // Everyone sees names and logins, to add people to their schemes; admins see the rest.
     method: 'GET', path: '/api/people', who: ['person'],
     handler: ({ res, app, session }) => json(res, 200, app.store.listUsers().filter((u) => session.admin || !u.disabled_at)
-      .map((u) => (session.admin ? personView(u, app.store.serverLoginOwner()) : { id: u.id, name: u.name, login: u.login }))),
+      .map((u) => (session.admin ? personView(u) : { id: u.id, name: u.name, login: u.login }))),
   },
   {
     // A new person and their invite link's token (shown once; only its hash is kept).
@@ -42,7 +42,7 @@ export const peopleRoutes: Route[] = [
       if (app.store.findUser('name', name)) throw new HttpError(409, `There is already someone called ${name}`);
       if (app.store.findUser('login', login)) throw new HttpError(409, `The login ${login} is taken`);
       const user = app.store.createUser({ name, login });
-      return json(res, 201, { person: personView(app.store.getUser(user.id)!, app.store.serverLoginOwner()), token: app.auth.newInvite(user.id) });
+      return json(res, 201, { person: personView(app.store.getUser(user.id)!), token: app.auth.newInvite(user.id) });
     },
   },
   {
@@ -50,7 +50,7 @@ export const peopleRoutes: Route[] = [
     method: 'POST', path: '/api/people/:person/invite', ...admin,
     handler({ res, app, params }) {
       const user = person(app, params.person);
-      return json(res, 200, { person: personView(user, app.store.serverLoginOwner()), token: app.auth.newInvite(user.id) });
+      return json(res, 200, { person: personView(user), token: app.auth.newInvite(user.id) });
     },
   },
   {
@@ -63,7 +63,8 @@ export const peopleRoutes: Route[] = [
         app.store.updateUser(user.id, { disabled_at: body.disabled ? Date.now() : null });
         if (body.disabled) dropStreams(app, user.id);
       }
-      return json(res, 200, personView(app.store.getUser(user.id)!, app.store.serverLoginOwner()));
+      if (body.server_login !== undefined) app.store.updateUser(user.id, { server_login: body.server_login ? 1 : 0 });
+      return json(res, 200, personView(app.store.getUser(user.id)!));
     },
   },
   {

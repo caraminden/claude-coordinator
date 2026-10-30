@@ -766,6 +766,8 @@ export class Runner {
   /** Minions whose deploy went live mid-turn: dismissed when that turn ends, if still pending-deploy. */
   private deployedMidTurn = new Set<number>();
   private progress = new Map<number, ReturnType<typeof createProgress>>();
+  /** The minion whose relayed message started each ticket's current turn, when a relay came before any person's message. */
+  private turnFrom = new Map<number, number>();
   private store: Store;
   private broadcast: Broadcast;
   private claudeBin: string;
@@ -1380,6 +1382,11 @@ export class Runner {
     this.startTurn(project, ticket, batch, this.turnPerson(ticket, project, batch));
   }
 
+  /** The minion that relayed the message the ticket's current (or last) turn answers, if a relay came before any person's message: whose minion a Taskmaster's new minion belongs to. */
+  relayedBy(ticketId: number): number | null {
+    return this.turnFrom.get(ticketId) ?? null;
+  }
+
   /**
    * Who a turn runs for (its GitHub login, and #177's Claude plan): the first person in its messages
    * (a relay counts as its sender's), else the minion's last person, else the scheme's owner.
@@ -1500,6 +1507,9 @@ export class Runner {
     if (github) env = { ...env, ...github.env };
     const prompt = promptMessage(github ? [{ author: 'System', text: github.line, images: [] }, ...batch] : batch);
     if (person !== ticket.person_id) this.store.updateTicket(ticket.id, { person_id: person });
+    const from = batch.find((m) => m.from || this.personOf?.(m.author))?.from;
+    if (from) this.turnFrom.set(ticket.id, from);
+    else this.turnFrom.delete(ticket.id);
     // Only the Citadel scheme's Taskmaster is offered get_app_instructions and set_app_instructions (the API checks too).
     if (ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER) env.COORDINATOR_APP_INSTRUCTIONS = '1';
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy

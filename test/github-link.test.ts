@@ -252,6 +252,7 @@ test('a message from someone else waits for its own turn instead of steering; a 
   // Cara's waited, and starts a turn of her own.
   await until(() => seen(t.dir).some((l) => l.includes('also this')));
   assert.equal(store.getTicket(t.id)!.person_id, cara.id);
+  assert.equal(r.relayedBy(t.id), null, 'a person\'s turn was relayed by no one');
   await finish(r, t);
 
   // The Taskmaster's message speaks for the person its own turn ran for.
@@ -261,6 +262,7 @@ test('a message from someone else waits for its own turn instead of steering; a 
   await until(() => seen(t.dir).some((l) => l.includes('over to you')));
   assert.equal(store.getTicket(t.id)!.person_id, josh.id);
   assert.equal(env(t.dir).token, 'gho_new');
+  assert.equal(r.relayedBy(t.id), tm.id, 'a new minion it starts this turn is the relayer\'s (#197)');
   await finish(r, t);
 });
 

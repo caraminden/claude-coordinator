@@ -74,6 +74,7 @@ test('a new minion takes a model and effort; the scheme default shows when it ha
   const plain = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Plain', message: 'hi' } });
   assert.equal(plain.data.effort, null);
   assert.equal(plain.data.default_effort, 'high');
+  assert.equal(plain.data.properties.assigned, 'Cara', 'a new minion is its starter\'s (#197)');
 
   const changed = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { default_effort: 'medium' } });
   assert.equal(changed.data.default_effort, 'medium');

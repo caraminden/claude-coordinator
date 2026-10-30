@@ -55,7 +55,7 @@ export const GLOBAL_SEED: SeedKey[] = [
   {
     key: 'assigned',
     label: 'Assigned to',
-    description: "Who the minion is assigned to: a person's login name (e.g. Cara). Set when a person asks to assign it (\"assign this to Josh\"); null unassigns it.",
+    description: "Who the minion is assigned to: a person's login name (e.g. Cara). Starts as whoever started it (a minion the Taskmaster starts for another minion takes that one's); set when a person asks to assign it (\"assign this to Josh\"); null unassigns it.",
     multi: false,
     value_kind: 'user',
   },

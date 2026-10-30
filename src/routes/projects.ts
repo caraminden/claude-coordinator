@@ -528,6 +528,12 @@ export const projectRoutes: Route[] = [
       const given = (key: string) => Object.keys(props).some((k) => k.toLowerCase() === key.toLowerCase());
       if (tag && !given('type')) props.type = TAG_TO_TYPE[tag];
       if (!caller && !given('requestedBy')) props.requestedBy = session.name;
+      // A new minion is its starter's: the person, or for the Taskmaster the minion that asked for it, else the person of its turn.
+      if (!given('assigned')) {
+        const parent = caller && runner.relayedBy(caller.id);
+        const assigned = !caller ? session.name : (parent && store.props.forTarget('minion', parent).assigned) || (caller.person_id && store.getUser(caller.person_id)?.name);
+        if (assigned) props.assigned = assigned;
+      }
       const planned = store.props.check(project.id, props);
       if (caller && !planned.type?.length) {
         throw new HttpError(400, 'Every new minion needs a type in properties (e.g. properties: { type: "feature" }). If none fits, use "other" and ask people where it belongs.');

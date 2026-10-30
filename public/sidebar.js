@@ -1,6 +1,6 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
 import { weekShare } from './cost.js';
-import { ago, api, app, costText, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, usage, view } from './core.js';
+import { account, ago, api, app, costText, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, usage, view } from './core.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -30,7 +30,7 @@ export async function openStartScheme() {
 const SOURCES = [
   { value: 'new', label: 'New repo (private, on GitHub too)' },
   { value: 'url', label: 'Clone from a URL', field: 'repoUrl', placeholder: 'https://github.com/caraminden/gamedevtest.git' },
-  { value: 'folder', label: 'Clone a folder on perigee', field: 'folder', placeholder: '~/projects/…' },
+  { value: 'folder', label: 'Clone a folder on perigee', field: 'folder', placeholder: '~/projects/…', admin: true },
   { value: 'none', label: 'No code (docs, research, art)' },
 ];
 
@@ -39,7 +39,7 @@ const DEFAULT_SOURCE = 'new';
 
 /** Name, code source and what it's about for a new scheme; on success it opens the scheme. */
 function newSchemeForm() {
-  const sources = SOURCES.map((s) => h('label', { class: 'source' },
+  const sources = SOURCES.filter((s) => !s.admin || account?.admin).map((s) => h('label', { class: 'source' },
     h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === DEFAULT_SOURCE }),
     h('span', {}, s.label),
     s.field ? h('input', { name: s.field, 'data-draft': true, placeholder: s.placeholder }) : ''));

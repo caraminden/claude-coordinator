@@ -1,6 +1,6 @@
 // Front end: hash-routed views over the JSON API, live via SSE. This entry starts the app;
 // each view lives in its own module (see core.js for what they share).
-import { api, app, h, reloadNow, renderUsage, start, usage, view } from './core.js';
+import { api, app, h, reloadNow, renderInvite, renderUsage, start, usage, view } from './core.js';
 import { renderSidebar } from './sidebar.js';
 import { initDrawers } from './drawers.js';
 
@@ -36,7 +36,9 @@ setInterval(() => {
   if (view?.kind === 'project') renderSidebar();
 }, 30_000);
 
-api('api/me').then((r) => start(r.name)).catch(() => {});
+const invite = location.hash.match(/^#\/invite\/([\w-]+)$/);
+if (invite) renderInvite(invite[1]);
+else api('api/me').then(start).catch(() => {});
 // The service worker makes the app installable (home screen, full screen) and shows push notifications; it caches nothing.
 // Absolute on purpose: a preview (/preview/N/) shares the live app's one worker instead of registering its own.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

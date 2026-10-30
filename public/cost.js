@@ -1,5 +1,5 @@
 // Today's use beside the weekly meter, as a share of an even day (a seventh of the week), opening to the last 7 days.
-import { api, costText, h, view } from './core.js';
+import { account, api, costText, h, view } from './core.js';
 import { closeOnClickAway } from './properties.js';
 import { renderSidebar } from './sidebar.js';
 
@@ -29,6 +29,7 @@ export function costChip() {
 
 /** Fetch the daily totals again (a turn just ended) and redraw. */
 export async function renderCost() {
+  if (!account?.admin) return; // costs are Citadel-wide, so only admins see them
   const before = budget;
   try {
     ({ days, dayBudget: budget } = await api('api/costs'));

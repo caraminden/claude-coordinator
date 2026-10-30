@@ -1,5 +1,5 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
-import { ago, api, h, icon, view } from './core.js';
+import { account, ago, api, h, icon, view } from './core.js';
 import { openNewScheme, toggleSchemeMenu } from './sidebar.js';
 
 // ---------- push notifications ----------
@@ -234,7 +234,8 @@ const splitLines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filte
 /** The Settings page's tabs; each is its own route, so old links to them still work. */
 export function settingsTabs() {
   return h('nav', { class: 'settings-tabs' },
-    [['instructions', 'Instructions'], ['app-instructions', 'Citadel-wide'], ['approvals', 'Needs approval'], ['properties', 'Properties']].map(([kind, label]) =>
+    [['instructions', 'Instructions'], account?.admin && ['app-instructions', 'Citadel-wide'], ['approvals', 'Needs approval'], ['properties', 'Properties'],
+      ['members', 'Members'], account?.admin && ['people', 'People'], ['account', 'Your account']].filter(Boolean).map(([kind, label]) =>
       h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label)));
 }
 
@@ -595,7 +596,7 @@ function machineStatus(m) {
 /** Overview panel: people's computers lending threads their MCP tools, with live status. */
 export function renderMachinesShelf() {
   const el = document.getElementById('machines-shelf');
-  if (!el) return;
+  if (!el || !account?.admin) return;
   const href = `#/p/${view.projectId}/machines`;
   el.replaceChildren(h('section', { class: 'column' },
     h('h3', {}, 'Machines', h('span', { class: 'spacer' }),

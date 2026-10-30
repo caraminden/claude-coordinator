@@ -1,5 +1,5 @@
 // The message box under a chat: drafts, pasted images, attached files, model and effort.
-import { api, catchUpEvents, formatSize, h, isCoordinator, me, reloadWhenIdle, scrollToBottom, sending, setSending, uploadUrl, view } from './core.js';
+import { account, api, catchUpEvents, formatSize, h, isCoordinator, me, reloadWhenIdle, scrollToBottom, sending, setSending, uploadUrl, view } from './core.js';
 import { base64Url, renderTicketHead, renderTyping, userBubble } from './thread.js';
 
 // ---------- drafts ----------
@@ -90,7 +90,10 @@ export function composer(chatId, ticket) {
     attachments.add(picker.files);
     picker.value = '';
   });
-  const form = h('form', { class: 'composer' }, attachments.el, textarea, picker,
+  const form = h('form', { class: 'composer' }, attachments.el,
+    account && !account.turns && h('p', { class: 'muted small composer-note' },
+      'Your messages don\'t start or steer turns yet: they wait here, unseen by Claude, until you can link your own Claude account.'),
+    textarea, picker,
     h('div', { class: 'row' },
       h('button', { type: 'button', class: 'secondary small add-image', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() },
         h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach')),

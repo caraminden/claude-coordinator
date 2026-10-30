@@ -38,6 +38,8 @@ export const STATES = {
 };
 
 export let me = null;
+/** The signed-in person as api/me gives it: { name, login, admin, turns }. */
+export let account = null;
 export let view = null; // { kind, id, ... } for the current screen
 let stream = null;
 let assetVersion = null;
@@ -654,6 +656,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/app-instructions$/))) await showProject(Number(m[1]), { kind: 'app-instructions' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/approvals$/))) await showProject(Number(m[1]), { kind: 'approvals' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/properties$/))) await showProject(Number(m[1]), { kind: 'properties' });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/(members|people|account)$/))) await showProject(Number(m[1]), { kind: m[2] });
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines$/))) await showProject(Number(m[1]), { kind: 'machines' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'sharedList' });
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
@@ -738,15 +741,15 @@ function renderLogin() {
   meEl.replaceChildren();
   app.replaceChildren(document.getElementById('login-tpl').content.cloneNode(true));
   const form = document.getElementById('login-form');
-  // A saved name that is really the site's address (filled in by a phone's password manager) is dropped.
-  try { const saved = localStorage.getItem('cc-name') || ''; form.name.value = /^https?\W|\//i.test(saved) ? '' : saved; } catch {}
+  // A saved login that is really the site's address (filled in by a phone's password manager) is dropped.
+  try { const saved = localStorage.getItem('cc-login') || ''; form.login.value = /^https?\W|\//i.test(saved) ? '' : saved; } catch {}
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const err = document.getElementById('login-error');
     try {
-      const res = await api('api/login', { method: 'POST', body: { name: form.name.value, password: form.password.value } });
-      try { localStorage.setItem('cc-name', res.name); } catch {}
-      start(res.name);
+      await api('api/login', { method: 'POST', body: { login: form.login.value, password: form.password.value } });
+      try { localStorage.setItem('cc-login', form.login.value.trim()); } catch {}
+      start(await api('api/me'));
     } catch (ex) {
       err.textContent = ex.message;
       err.hidden = false;
@@ -754,9 +757,45 @@ function renderLogin() {
   });
 }
 
-export function start(name) {
-  me = name;
-  meEl.replaceChildren(name, h('button', { class: 'secondary', onclick: logout }, 'Sign out'));
+/** The page an invite or reset link opens: it names who the link is for and sets their password. */
+export function renderInvite(token) {
+  view = null;
+  crumbs.replaceChildren();
+  meEl.replaceChildren();
+  app.replaceChildren(document.getElementById('invite-tpl').content.cloneNode(true));
+  const form = document.getElementById('invite-form');
+  const who = document.getElementById('invite-who');
+  const err = document.getElementById('invite-error');
+  const path = `api/invite/${encodeURIComponent(token)}`;
+  api(path).then((r) => {
+    who.replaceChildren('This sets the password for ', h('strong', {}, r.name), ', who signs in as ', h('strong', {}, r.login), '.');
+    form.login.value = r.login;
+    form.querySelector('button').disabled = false;
+  }).catch((ex) => { who.textContent = ex.message; who.className = 'error'; });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    err.hidden = true;
+    if (form.password.value !== form.again.value) {
+      err.textContent = 'The two passwords differ.';
+      err.hidden = false;
+      return;
+    }
+    try {
+      await api(path, { method: 'POST', body: { password: form.password.value } });
+      try { localStorage.setItem('cc-login', form.login.value); } catch {}
+      history.replaceState(null, '', location.pathname);
+      start(await api('api/me'));
+    } catch (ex) {
+      err.textContent = ex.message;
+      err.hidden = false;
+    }
+  });
+}
+
+export function start(who) {
+  account = who;
+  me = who.name;
+  meEl.replaceChildren(me, h('button', { class: 'secondary', onclick: logout }, 'Sign out'));
   connectStream();
   loadPrs();
   route();
@@ -771,6 +810,7 @@ export async function logout() {
   stream?.close();
   stream = null;
   me = null;
+  account = null;
   renderLogin();
 }
 

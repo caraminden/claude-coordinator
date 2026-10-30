@@ -26,10 +26,22 @@
   <template id="login-tpl">
     <form class="card login" id="login-form">
       <h1>Sign in</h1>
-      <label>Your name <input name="name" autocomplete="username" required maxlength="40"></label>
+      <label>Login <input name="login" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="64"></label>
       <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
       <p class="error" id="login-error" hidden></p>
       <button type="submit">Sign in</button>
+    </form>
+  </template>
+
+  <template id="invite-tpl">
+    <form class="card login" id="invite-form">
+      <h1>Welcome to Citadel</h1>
+      <p class="muted" id="invite-who">Checking your link…</p>
+      <input name="login" autocomplete="username" hidden>
+      <label>Choose a password <input name="password" type="password" autocomplete="new-password" required minlength="10" maxlength="200"></label>
+      <label>Type it again <input name="again" type="password" autocomplete="new-password" required minlength="10" maxlength="200"></label>
+      <p class="error" id="invite-error" hidden></p>
+      <button type="submit" disabled>Set password and sign in</button>
     </form>
   </template>
 

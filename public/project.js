@@ -1,5 +1,5 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
-import { api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, setView, threadHref, usageMeter, view } from './core.js';
+import { account, api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, setView, threadHref, usageMeter, view } from './core.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachinesShelf } from './settings.js';
 import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
@@ -9,6 +9,7 @@ import { renderCost } from './cost.js';
 import { inboxStrip, refreshInbox } from './inbox.js';
 import { schedulesButton, showSchedules } from './schedules.js';
 import { replaceHash } from './navstack.js';
+import { accountPage, membersPage, peoplePage } from './people.js';
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 export async function showTicket(ticketId) {
@@ -28,6 +29,9 @@ function renderCrumbs(main) {
       : main.kind === 'app-instructions' ? [projectLink, ' / ', settingsLink, ' / ', 'Citadel-wide instructions']
       : main.kind === 'approvals' ? [projectLink, ' / ', settingsLink, ' / ', 'Needs approval']
       : main.kind === 'properties' ? [projectLink, ' / ', settingsLink, ' / ', 'Properties']
+      : main.kind === 'members' ? [projectLink, ' / ', settingsLink, ' / ', 'Members']
+      : main.kind === 'people' ? [projectLink, ' / ', settingsLink, ' / ', 'People']
+      : main.kind === 'account' ? [projectLink, ' / ', settingsLink, ' / ', 'Your account']
       : main.kind === 'machines' ? [projectLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
@@ -52,7 +56,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     api(`api/projects/${projectId}/artifacts`).catch(() => []),
     api(`api/projects/${projectId}/shared`).catch(() => []),
     api('api/projects').catch(() => []),
-    api('api/machines').catch(() => []),
+    account?.admin ? api('api/machines').catch(() => []) : [],
   ]);
   let chatId = null;
   if (main.kind === 'chat') {
@@ -127,6 +131,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'app-instructions' ? appInstructionsEditor()
     : main.kind === 'approvals' ? approvalsEditor()
     : main.kind === 'properties' ? propertiesPage()
+    : main.kind === 'members' ? membersPage()
+    : main.kind === 'people' ? peoplePage()
+    : main.kind === 'account' ? accountPage()
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'sharedList' ? sharedList()
     : main.kind === 'artifact' ? artifactViewer(main.artifact)

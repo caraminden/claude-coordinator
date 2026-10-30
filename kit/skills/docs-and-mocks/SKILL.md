@@ -58,10 +58,14 @@ Each kind's full shape is in [`kinds.md`](kinds.md): read it before filling the 
 4. **Make live what the feel decides:** hover details, folds, filters, toggles, a state switch, and
    always a pick bar where a choice is asked. Keep still what only needs looking at: art as images,
    long motion as a clip beside the page. The kit's API is in [`mockkit.md`](mockkit.md).
-5. **Check it in Citadel's viewer** at desktop and phone widths: screenshot both, open the browser
-   console for errors, confirm nothing scrolls sideways, and hold every box to even room above and
-   below. Click every control once.
-6. **Show it:** link the page as a card and the two screenshots inline, say in one line what to
+5. **Check it in Citadel's viewer.** A page that mocks a scheme's own app or game screen is judged
+   at that screen's real size and scale, by the scheme's own rules (size, scale, padding: its
+   CLAUDE.md or Project facts): screenshot at that size. Phone width is the judging size only for
+   Citadel-facing pages and docs people read on a phone. Every page gets one light phone look, since
+   Cara often reviews on her phone: it opens, and mocks scale down to fit instead of scrolling
+   sideways. Open the browser console for errors, hold every box to even room above and below, and
+   click every control once.
+6. **Show it:** link the page as a card and the screenshots inline, say in one line what to
    pick, and end the turn waiting on the picks.
 7. **Read the picks** with the `artifact_data` tool on the page's path: `db/<collection>/<id>` =
    `{ v, note, by, at }`. Picks sent with Send also arrive as a comment message.
@@ -70,5 +74,5 @@ Each kind's full shape is in [`kinds.md`](kinds.md): read it before filling the 
    status `superseded` and a banner linking it. Where pages live and how a living home stays true:
    [`homes.md`](homes.md).
 
-Done when the page is linked with screenshots at both widths, every control was clicked once in
+Done when the page is linked with screenshots at the mocked screen's real size (plus the light phone look), every control was clicked once in
 the viewer, and its picks read back through `artifact_data`.

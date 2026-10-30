@@ -68,7 +68,7 @@ const OTHER_ROUTES: Probe[] = [
   P('POST', '/api/login'), P('POST', '/api/logout'), P('GET', '/api/health'), P('GET', '/api/me'),
   P('GET', '/api/machines/connect'), P('POST', '/api/machines/send'), P('POST', '/api/machines/info'), P('POST', '/api/machines/upload'),
   P('GET', '/api/stream'), P('GET', '/api/costs'), P('GET', '/api/prs'), P('POST', '/api/taskmaster'),
-  P('GET', '/api/projects'), P('POST', '/api/projects'), P('GET', '/api/projects/:p'), P('PATCH', '/api/projects/:p'),
+  P('GET', '/api/projects'), P('POST', '/api/projects'), P('GET', '/api/catalogue'), P('GET', '/api/projects/:p'), P('PATCH', '/api/projects/:p'),
   P('GET', '/api/projects/:p/instructions/history'), P('GET', '/api/projects/:p/instructions/sources'),
   // Scheme B is id 2, so tmB stands in for the Citadel scheme's Taskmaster (GLOBAL_OWNER).
   P('GET', '/api/app/instructions'), P('PUT', '/api/app/instructions'), P('GET', '/api/app/instructions/history'),

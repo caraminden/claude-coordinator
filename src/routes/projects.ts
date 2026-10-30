@@ -4,13 +4,15 @@ import { mkdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { cleanPluginDirs, cleanRules, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
+import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { EFFORTS, MAX_INSTRUCTIONS, MODELS, TICKET_TAGS, type Project, type Ticket, type TicketTag } from '../db.ts';
+import { EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, TICKET_TAGS, type Project, type Ticket, type TicketTag } from '../db.ts';
 import { inboxItems } from '../inbox.ts';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { TAG_TO_TYPE } from '../property-seed.ts';
 import { describeCron, type Schedule } from '../schedules.ts';
+import { KIT } from '../runner.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import type { Chain } from '../wake.ts';
 import { cloneProject, projectDir, removeProjectDir } from '../workspace.ts';
@@ -39,6 +41,14 @@ export async function ensureCoordinator(app: App, project: Project): Promise<Tic
     // Lost a race with a concurrent request; the unique index kept a single coordinator.
   }
   return store.getCoordinator(project.id)!;
+}
+
+const SOURCES = ['new', 'url', 'folder', 'none'] as const;
+
+/** The first message a new scheme's Taskmaster gets from "Create and set up": the form, quoted. */
+export function kickoff(name: string, code: string, by: string, about: string): string {
+  const said = about ? `${by} wrote: "${about}"` : `${by} left "What's it about?" empty, so start by asking.`;
+  return `New scheme "${name}" (code: ${code}), created by ${by}. ${said}\n\nSet it up: onboarding has started.`;
 }
 
 /** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
@@ -132,27 +142,44 @@ export const projectRoutes: Route[] = [
     handler: ({ res, app: { store } }) => json(res, 200, store.listProjects().map((p) => ({ ...p, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length }))),
   },
   {
+    // What a scheme being set up can adapt (#172): names and descriptions from every scheme's .claude/ and the kit, never file bodies.
+    method: 'GET', path: '/api/catalogue', who: PEOPLE_AND_TASKMASTER,
+    handler: ({ res, app }) => json(res, 200, { items: catalogue(app.store.listProjects(), KIT) }),
+  },
+  {
     method: 'POST', path: '/api/projects', who: ['person'],
-    async handler({ req, res, app }) {
+    async handler({ req, res, app, session }) {
       if (app.preview) throw new HttpError(403, 'A preview can\'t start schemes');
       const body = await readJson(req);
       const name = str(body.name, 'Name', 80);
       const repoUrl = typeof body.repoUrl === 'string' && body.repoUrl.trim() ? body.repoUrl.trim() : null;
+      // Where the code comes from (the contract with #173): left out, it follows repoUrl as before.
+      const source = oneOf(body.source ?? null, SOURCES, 'source') ?? (repoUrl ? 'url' : 'none');
+      if (source === 'new' || source === 'folder') throw new HttpError(400, `Schemes from a ${source === 'new' ? 'new repo' : 'folder'} aren't built yet`);
+      if (source === 'url' && !repoUrl) throw new HttpError(400, 'Give the repo URL to clone');
       if (repoUrl && !/^(https:\/\/|git@)/.test(repoUrl)) throw new HttpError(400, 'Repo URL must be https:// or git@');
+      const about = body.about == null || body.about === '' ? '' : str(body.about, 'About', 4000);
+      // "Create and set up" starts the Taskmaster's onboarding; "Create only" (and older callers) skip it.
+      const setup = body.setup === true;
       let project;
       try {
-        project = app.store.createProject(name, repoUrl);
+        project = app.store.createProject(name, source === 'url' ? repoUrl : null);
       } catch {
         throw new HttpError(409, 'A scheme with that name already exists');
       }
-      if (repoUrl) {
+      if (source === 'url') {
         try {
-          app.store.setProjectRepoDir(project.id, await cloneProject(app.dataDir, project.id, repoUrl));
+          app.store.setProjectRepoDir(project.id, await cloneProject(app.dataDir, project.id, repoUrl!));
         } catch (err: any) {
           app.store.deleteProject(project.id);
           await removeProjectDir(app.dataDir, project.id);
           throw new HttpError(400, `Could not clone repo: ${err.stderr?.trim() || err.message}`);
         }
+      }
+      app.store.setProjectSettings(project.id, { onboarding: setup ? 'interview' : 'skipped' });
+      if (setup) {
+        const coordinator = await ensureCoordinator(app, app.store.getProject(project.id)!);
+        app.runner.send(coordinator.id, APP_NAME, kickoff(name, source === 'url' ? `cloned from ${repoUrl}` : 'no code', session.name, about));
       }
       return json(res, 201, app.store.getProject(project.id));
     },
@@ -192,13 +219,19 @@ export const projectRoutes: Route[] = [
     method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, project }) {
       const { store, runner } = app;
-      // Any of name, instructions, approval_rules, plugin_dirs, default_effort and machine_tools; what is left out stays.
+      // Any of name, instructions, approval_rules, plugin_dirs, default_effort, machine_tools, onboarding and onboarding_mode; what is left out stays.
       const body = await readJson(req);
-      if (body.name === undefined && body.instructions === undefined && body.approval_rules === undefined && body.plugin_dirs === undefined && body.default_effort === undefined && body.machine_tools === undefined) {
-        throw new HttpError(400, 'Nothing to change');
-      }
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'default_effort', 'machine_tools', 'onboarding', 'onboarding_mode'];
+      if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort' | 'machine_tools'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort' | 'machine_tools' | 'onboarding' | 'onboarding_mode'>> = {};
+      // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
+      const required = (v: unknown, all: readonly string[], field: string) => {
+        if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
+        return v;
+      };
+      if (body.onboarding !== undefined) settings.onboarding = required(body.onboarding, ONBOARDING, 'onboarding') as Project['onboarding'];
+      if (body.onboarding_mode !== undefined) settings.onboarding_mode = required(body.onboarding_mode, ONBOARDING_MODES, 'onboarding_mode') as Project['onboarding_mode'];
       // null or "" leaves effort to Claude Code's default.
       if (body.default_effort !== undefined) settings.default_effort = oneOf(body.default_effort || null, EFFORTS, 'Default effort') ?? '';
       if (body.machine_tools !== undefined) {
@@ -243,6 +276,9 @@ export const projectRoutes: Route[] = [
         }
         if (coordinator && settings.machine_tools !== undefined) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} ${settings.machine_tools ? 'gave' : 'took'} the connected machines' tools ${settings.machine_tools ? 'to' : 'from'} this scheme's minions. It applies from each minion's next turn.` });
+        }
+        if (coordinator && settings.onboarding === 'skipped') {
+          runner.emit(coordinator.id, 'note', { text: `${session.name} skipped the scheme's setup. Tell the ${AGENT_NAME} to pick it up again any time.` });
         }
       }
       if (instructions !== project.instructions) {

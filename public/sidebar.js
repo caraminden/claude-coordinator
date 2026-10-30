@@ -26,29 +26,57 @@ export async function openStartScheme() {
   app.replaceChildren(h('div', { class: 'card new-scheme' }, h('h2', {}, 'New scheme'), newSchemeForm()));
 }
 
-/** Name and repo for a new scheme; on success it opens the scheme. */
+/** Where a new scheme's code comes from; `soon` ones wait for #173's server side. */
+const SOURCES = [
+  { value: 'new', label: 'New repo (private, on GitHub too)', soon: true },
+  { value: 'url', label: 'Clone from a URL', field: 'repoUrl', placeholder: 'https://github.com/caraminden/gamedevtest.git' },
+  { value: 'folder', label: 'Clone a folder on perigee', field: 'folder', placeholder: '~/projects/…', soon: true },
+  { value: 'none', label: 'No code (docs, research, art)' },
+];
+
+/** Name, code source and what it's about for a new scheme; on success it opens the scheme. */
 function newSchemeForm() {
+  const sources = SOURCES.map((s) => h('label', { class: 'source' },
+    h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === 'url', disabled: !!s.soon }),
+    h('span', {}, s.label, s.soon ? h('span', { class: 'muted' }, ' (soon)') : ''),
+    s.field ? h('input', { name: s.field, 'data-draft': true, placeholder: s.placeholder, disabled: !!s.soon }) : ''));
   const form = h('form', {},
     h('label', {}, 'Name', h('input', { name: 'name', required: true, maxlength: 80, 'data-draft': true })),
-    h('label', {}, 'Git repo URL (optional; each minion gets its own worktree)',
-      h('input', { name: 'repoUrl', 'data-draft': true, placeholder: 'https://github.com/caraminden/gamedevtest.git' })),
+    h('fieldset', { class: 'sources' }, h('legend', {}, 'Code'), ...sources),
+    h('label', {}, "What's it about? (the Taskmaster starts from this)",
+      h('textarea', { name: 'about', rows: 3, maxlength: 4000, 'data-draft': true, placeholder: 'What it is, who it is for, the first milestone' })),
     h('p', { class: 'error', hidden: true }),
-    h('button', { type: 'submit' }, 'Create scheme'));
+    h('div', { class: 'row actions' },
+      h('button', { type: 'submit', value: 'setup' }, 'Create and set up'),
+      h('button', { type: 'submit', value: 'only', class: 'secondary' }, 'Create only')));
+  // Only the picked source's field shows.
+  const showField = () => {
+    for (const l of form.querySelectorAll('label.source')) {
+      const field = l.querySelector('input:not([type=radio])');
+      if (field) field.hidden = !l.querySelector('input[type=radio]').checked;
+    }
+  };
+  form.addEventListener('change', showField);
+  showField();
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const btn = form.querySelector('button[type=submit]');
+    const btn = e.submitter ?? form.querySelector('button[type=submit]');
+    const label = btn.textContent;
     const err = form.querySelector('.error');
-    btn.disabled = true;
-    btn.textContent = form.repoUrl.value ? 'Cloning…' : 'Creating…';
+    const source = form.source.value;
+    for (const b of form.querySelectorAll('button[type=submit]')) b.disabled = true;
+    btn.textContent = source === 'url' ? 'Cloning…' : 'Creating…';
     try {
-      const p = await api('api/projects', { method: 'POST', body: { name: form.name.value, repoUrl: form.repoUrl.value } });
+      const p = await api('api/projects', { method: 'POST', body: {
+        name: form.name.value, source, repoUrl: form.repoUrl.value, folder: form.folder.value, about: form.about.value, setup: btn.value === 'setup',
+      } });
       form.closest('dialog')?.close();
       location.hash = `#/p/${p.id}`;
     } catch (ex) {
       err.textContent = ex.message;
       err.hidden = false;
-      btn.disabled = false;
-      btn.textContent = 'Create scheme';
+      for (const b of form.querySelectorAll('button[type=submit]')) b.disabled = false;
+      btn.textContent = label;
     }
   });
   return form;

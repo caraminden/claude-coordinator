@@ -123,6 +123,30 @@ export function onProjectUpdate(project) {
   // Someone else saved: show their text unless this tab has edits of its own.
   if (text && !text.hasAttribute('data-draft')) text.value = project.instructions;
   renderInstructionsHead();
+  document.getElementById('onboarding-strip')?.replaceWith(onboardingStrip(project));
+}
+
+/** Each onboarding step's place in the four (1, creating the scheme, is done by the time this shows). */
+const ONBOARDING_STEPS = { interview: [2, 'interview'], planned: [3, 'plan'], 'setting-up': [4, 'setup'] };
+
+/**
+ * "Setting up · interview (2 of 4) · Skip" on the Taskmaster's chat head while the scheme is being
+ * set up (#172); an empty placeholder once it's done or skipped, so a live update can swap it in.
+ */
+export function onboardingStrip(project) {
+  const step = ONBOARDING_STEPS[project.onboarding];
+  if (!step) return h('span', { id: 'onboarding-strip', hidden: true });
+  const skip = h('button', { type: 'button', class: 'link', title: 'Stop the guided setup; the Taskmaster carries on as usual' }, 'Skip');
+  skip.onclick = () => {
+    skip.disabled = true;
+    api(`api/projects/${project.id}`, { method: 'PATCH', body: { onboarding: 'skipped' } }).catch((e) => {
+      skip.disabled = false;
+      alert(e.message);
+    });
+  };
+  return h('div', { id: 'onboarding-strip', class: 'onboarding-strip' },
+    h('span', {}, project.onboarding_mode === 'tune-up' ? 'Tuning up' : 'Setting up'), ' · ',
+    h('span', {}, `${step[1]} (${step[0]} of 4)`), ' · ', skip);
 }
 
 /**

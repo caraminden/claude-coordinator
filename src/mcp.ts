@@ -353,6 +353,13 @@ const TOOLS = [
   },
   ASK_QUESTION,
   SETTLE_QUESTION,
+  PROPOSE_PLAN,
+  {
+    name: 'list_catalogue',
+    description:
+      "List every skill, agent and rule in every scheme's repo (.claude/skills, .claude/agents, .claude/rules) and in the Citadel kit, for picking what a scheme should adapt: name, kind, source (kit, or scheme and path), a one-line description, and whether the kit has one of the same name. Descriptions only, never the files themselves; a setup minion reads the ones it adapts.",
+    inputSchema: { type: 'object', properties: {} },
+  },
   STRIKE_TEXT,
   LIST_PROPERTIES,
   {
@@ -428,7 +435,7 @@ const TOOLS = [
   {
     name: 'set_project_settings',
     description:
-      'Replace the approval rules, plugin folders, default effort and/or machine tools switch; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask.',
+      'Replace the approval rules, plugin folders, default effort, machine tools switch and/or onboarding step; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -444,6 +451,7 @@ const TOOLS = [
         },
         default_effort: { ...EFFORT, description: "Effort for every minion's turns that has none of its own. null leaves it to Claude Code's default." },
         machine_tools: { type: 'boolean', description: "Whether this scheme's minions get the connected machines' MCP tools (Godot editors and the like). Off saves ~1.1k tokens a call in schemes that never use them." },
+        onboarding: { type: 'string', enum: ['interview', 'planned', 'setting-up', 'done', 'skipped'], description: "Where the scheme's setup stands; the scheme header shows it until done or skipped." },
       },
     },
   },
@@ -792,10 +800,11 @@ async function runTool(name: string, args: any): Promise<string> {
       if (args.plugin_folders !== undefined) body.plugin_dirs = args.plugin_folders;
       if (args.default_effort !== undefined) body.default_effort = args.default_effort;
       if (args.machine_tools !== undefined) body.machine_tools = args.machine_tools;
-      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, default_effort, machine_tools or a mix');
+      if (args.onboarding !== undefined) body.onboarding = args.onboarding;
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, default_effort, machine_tools, onboarding or a mix');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), default effort ${project.default_effort || "Claude Code's default"}, machine tools ${project.machine_tools ? 'on' : 'off'}. They apply from each minion's next turn.`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), default effort ${project.default_effort || "Claude Code's default"}, machine tools ${project.machine_tools ? 'on' : 'off'}, onboarding ${project.onboarding}. They apply from each minion's next turn.`;
     }
     case 'approve':
       return approve(args);
@@ -836,6 +845,11 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'strike_text':
       await call('POST', `/api/tickets/${TICKET}/strike`, { text: args.text, reason: args.reason });
       return 'Struck through in the chat, with your reason in a note.';
+    case 'list_catalogue': {
+      const { items } = await call('GET', '/api/catalogue');
+      if (!items.length) return 'Nothing in the catalogue.';
+      return items.map((c: any) => `${c.kind} ${c.name} (${c.source})${c.in_kit && c.source !== 'kit' ? ' [kit has one]' : ''}: ${c.description || 'no description'}`).join('\n');
+    }
     case 'propose_plan':
       await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan });
       return 'The plan card is in the chat. End your turn now with a short reply and write no code; the go or the notes to revise it will come as the next message.';

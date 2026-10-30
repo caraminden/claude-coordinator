@@ -345,7 +345,7 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/plans', who: ['minion'], refuse: 'Only the minion itself can propose a plan in its chat',
+    method: 'POST', path: '/api/tickets/:ticket/plans', who: ['self'], refuse: 'Only the minion or Taskmaster itself can propose a plan in its chat',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const { id } = ticket;

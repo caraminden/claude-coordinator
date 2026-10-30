@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { APP_NAME } from './appname.ts';
 import { AGENT_NAME } from './auth.ts';
-import type { EventRow, Machine, Project, Store, Ticket } from './db.ts';
+import { onboardingOpen, type EventRow, type Machine, type Project, type Store, type Ticket } from './db.ts';
 import { WS_SUFFIX, type MachineServer } from './machines.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
@@ -484,7 +484,7 @@ const CHAT_FACTS = [
  * mean something here; elsewhere those lines are left out.
  */
 export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = ''): string {
-  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
+  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir), onboardingPrompt(project, sharedDir), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this minion.';
@@ -624,6 +624,7 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
       ? `You can read and write files (Read, Write, Edit) in the scheme's shared folder, described below, and in ${memoryDir}, the scheme's Claude Code memory that its minions load too. Keep what is worth remembering across conversations in the memory as short topic files with an index in MEMORY.md. You still cannot run shell commands.`
       : '',
     'When you need people to decide between clear options, ask with your `ask_question` tool: it shows a card in this chat, below your reply, they answer with a click. Then end your turn; the answers arrive as the next message.',
+    'When a plan needs a person\'s go before you act on it (a setup, a batch of minions), post it with your `propose_plan` tool: a card with Approve and Revise that only a person can approve, below your reply. Then end your turn and act on none of it until the go arrives as the next message.',
     'Minions can message you with their `message_coordinator` tool; those arrive named by the minion, like "[#12 Some title]: ...". Do what they ask when it is yours to do (relay to another minion with message_ticket, start a minion from a handoff), and do not reply to a minion just to acknowledge it.',
     'Every message to an idle or parked minion wakes it and reloads its whole context, and after an hour idle its prompt cache has lapsed, so that reload is paid in full. So never message one just to pass on news (another minion shipped, a rule changed, an FYI), including relays a minion asks you for: a minion waiting on a deploy gets wake_when_live, and other news waits for the next message you have to send it anyway. Message an idle minion only when it has to act now or a person asks you to. Answer questions about a minion ("is #N merged?", "are we good?") yourself with read_ticket rather than asking it.',
     'When you and a minion (or another scheme\'s Taskmaster) disagree and you are proven wrong (by its evidence, git, the live state, a person), strike through your incorrect words with your `strike_text` tool, quoting them exactly from your reply or your message to it, then say what is right: in your reply, also write the wrong words as `~~…~~` with the fix right after. Only strike your own words, and only once the evidence is in.',
@@ -633,6 +634,46 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...". People read your replies in a web UI, often later, so keep them short and end each turn with what you did and what, if anything, you need from them.',
     ...CHAT_FACTS,
     `A tripwire hook checks every tool call and stops known accidents: ${TRIPWIRE_BLOCKS}.`,
+  ].join('\n');
+}
+
+/**
+ * While a scheme is being set up (#172), how its Taskmaster runs it: interview, one plan card, then its own
+ * part, one setup minion and the first minions. '' once onboarding is done or skipped.
+ */
+export function onboardingPrompt(project: Project, sharedDir: string | null): string {
+  if (!onboardingOpen(project)) return '';
+  const record = sharedDir ? join(sharedDir, 'onboarding.md') : 'onboarding.md in the scheme\'s shared folder';
+  return [
+    `## Setting up this scheme (onboarding: ${project.onboarding}, ${project.onboarding_mode})`,
+    `This scheme is new and you are setting it up, so its minions start with what this scheme needs on top of the ${APP_NAME}-wide layer and the ${APP_NAME} kit (the citadel:* skills and agents every turn already loads). Move \`onboarding\` along with set_project_settings as you go: \`planned\` once the plan card is posted, \`setting-up\` once a person approves it, \`done\` once the setup minion has merged and the first minions are chained (for a scheme with no repo, once your own part is applied). If people say to skip setup, set \`skipped\`. The scheme header shows people which step it is on.`,
+    '',
+    '**1. Interview.** Before the first card, read what you can: the kickoff message (name, code source, what it\'s about), the repo when there is one (README, build and lock files, CI, an existing `.claude/`), and `list_catalogue` (every scheme\'s repo skills, agents and rules, and the kit\'s). Then ask only what that leaves open, one choice per question, all of them in one or two `ask_question` calls (up to 4 questions each), with what you inferred marked recommended:',
+    '- What kind of project: web app · game · library/CLI · content (docs, research, art) · other. Drives which other scheme\'s specialised skills to adapt.',
+    '- Stack: 2 or 3 likely ones. Drives check commands and rules.',
+    '- Who works on it: just the person who created it · them and named people. Drives the requestedBy and assigned values.',
+    '- How changes land: PR per change merged on a person\'s Allow · auto-merge after self-review · straight to main.',
+    '- Does it run anywhere: nothing to run · on perigee as a service · its own CI/CD · someone\'s own machines. For perigee, a first minion writes a deploy script and a unit in `deploy/` for a person to install by hand.',
+    '- How do we know it works: tests exist (show the command) · set up tests as a first minion · no tests.',
+    '- Group work into numbered builds: no · yes.',
+    `Don't ask, but name in the plan so people can veto them: default effort high, machine tools on only for game and Godot schemes, memory starts empty; ports, tone, cards, run-backs and git habits come from the ${APP_NAME}-wide layer and are not repeated. Write the answers, in people's own words where they typed them and with the date, to ${record}; a later tune-up starts from it.`,
+    '',
+    '**2. One plan card.** Post the whole setup with `propose_plan` and write nothing before a person approves it: no instructions, settings, property keys or values, files or minions. Shape:',
+    '- **From the kit (already loaded, nothing to copy):** the kit skills and agents that matter here; they read the Project facts below.',
+    '- **Adapt from <scheme>:** each skill, agent or rule to copy from another scheme and specialise: name, kind, its source path as `list_catalogue` gives it, a new name if it changes, and why. Never anything the kit already carries (`in_kit`).',
+    '- **Write new:** each new skill, agent or rule, with a one-line job.',
+    '- **Not pulled:** what you considered and left out, and why.',
+    '- **Instructions:** the full draft of the scheme instructions, scheme-specific only.',
+    '- **Settings:** default effort, machine tools, approval rules, plugin folders.',
+    '- **Properties:** new keys and values.',
+    '- **Shipping:** the answer to how changes land. For auto-merge or straight to main, also who pushes main to GitHub: the recommended route is a scheme-local `tools/land.sh` the setup minion writes (rebase onto local main, run the check command, fast-forward main, push it to origin, never forced); without one named, main stays local.',
+    '- **Repo:** CLAUDE.md with its **Project facts** section drafted (check commands, front end, high-risk files, how a change ships, UI rules, glossary, decisions log, retros), `.claude/settings.json`, guard and pre-push hooks, rules to copy.',
+    '- **First minions:** their titles and kinds, started once setup merges.',
+    '- **Done by:** you (instructions, settings, properties, onboarding.md); one setup minion (repo files, skills); the first minions after it merges.',
+    'On Revise, post the whole revised plan again.',
+    '',
+    `**3. After Approve.** Apply your own part: the scheme instructions, settings, property values, and onboarding.md. Property keys still wait for a person in Settings → Properties: name them in your done message. Then start **one** setup minion (feature, at the scheme's default effort, never Sonnet) whose brief is "Follow citadel:scheme-setup." followed by the approved plan text, verbatim. It writes the repo files and merges; it records the files it copied under "## Copies" in onboarding.md, and you own the rest of that file. Chain the first minions on it with create_ticket's start_after and start_when: merged. A scheme with no repo gets no setup minion: you apply your part and that is all.`,
+    'Throughout: other schemes are read only through `list_catalogue` and the setup minion\'s reads of the files it adapts; never read their memory, and never write outside this scheme.',
   ].join('\n');
 }
 

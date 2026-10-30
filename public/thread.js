@@ -3,6 +3,7 @@ import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileH
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
+import { onboardingStrip } from './settings.js';
 import { recapEvent, showRecap } from './recap.js';
 import { noteStrike, struckSource } from './strike.js';
 import { narrationSorter } from './narration.js';
@@ -316,7 +317,7 @@ export function renderTicketHead() {
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       h('span', { class: 'spacer' }),
       phone ? '' : nav),
-    coord ? '' : personNoteLine(t),
+    coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
     h('div', { class: 'head-sub' }, stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : propertyChip(t),
       h('span', { class: 'spacer' }), ...actions, view.findEl ?? '', phone ? nav : ''),
     view.progressEl);

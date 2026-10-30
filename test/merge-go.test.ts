@@ -38,7 +38,9 @@ test('a go is a whole message that only says merge, with at most one PR number',
 
 test('only a lone plain gh pr merge, or the MCP merge tools, can be let through', () => {
   for (const cmd of ['gh pr merge 191 --repo o/r --squash', 'gh pr merge https://github.com/o/r/pull/5 -s', 'gh pr merge 5 --auto -sd -R o/r', 'gh pr merge -R o/r 5',
-    'gh pr merge --repo=o/r ticket/74-x --delete-branch', 'gh pr merge 5 -R o/r --match-head-commit abc123']) {
+    'gh pr merge --repo=o/r ticket/74-x --delete-branch', 'gh pr merge 5 -R o/r --match-head-commit abc123',
+    // A merge commit, as Delve's builds land (PR #111).
+    'gh pr merge 111 --repo o/r --merge', 'gh pr merge 111 -R o/r -m', 'gh pr merge 111 -R o/r -md']) {
     assert.ok(plainMerge(cmd, parseMerge(cmd)), cmd);
   }
   for (const cmd of [
@@ -50,8 +52,15 @@ test('only a lone plain gh pr merge, or the MCP merge tools, can be let through'
     // Free text or a file would ride along into the merge commit.
     'gh pr merge 5 -R o/r -F /home/u/.ssh/id_ed25519', 'gh pr merge 5 -R o/r --body-file=notes', 'gh pr merge 5 -R o/r -b hi', 'gh pr merge 5 -R o/r --subject x',
     'gh pr merge 5 -R o/r --author-email a@b', 'gh pr merge 5 -R o/r --squash=yes', 'gh pr merge 5 -R', 'gh pr merge 5 -R o/r -sF x',
+    'gh pr merge 111 -R o/r --merge --body x', 'gh pr merge 111 -R o/r --merge -F notes', 'gh pr merge 111 -R o/r --merge --admin', 'gh pr merge 111 --merge',
+    'gh pr merge 111 -R o/r --merge --subject x', 'gh pr merge 111 -R o/r -mF notes',
+    // Rebase was never asked for.
+    'gh pr merge 5 -R o/r --rebase', 'gh pr merge 5 -R o/r -r', 'gh pr merge 5 -R o/r -dr',
   ]) assert.equal(plainMerge(cmd, parseMerge(cmd)), false, cmd);
   assert.equal(mcpMerge('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 5, pull_number: 6 }), null, 'two numbers');
+  for (const method of ['merge', 'squash', 'MERGE']) assert.ok(mcpMerge('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 5, merge_method: method }), method);
+  assert.ok(mcpMerge('mcp__github__enable_pr_auto_merge', { owner: 'o', repo: 'r', pullNumber: 5, mergeMethod: 'SQUASH' }));
+  for (const method of ['rebase', 'REBASE', 5, '']) assert.equal(mcpMerge('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 5, merge_method: method }), null, String(method));
   assert.deepEqual(mcpMerge('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 5 }), { target: '5', repo: 'o/r', method: null, auto: false, admin: false, moved: false });
   assert.equal(mcpMerge('mcp__github__enable_pr_auto_merge', { owner: 'o', repo: 'r', pull_number: 5 })?.auto, true);
   assert.equal(mcpMerge('mcp__github__get_pull_request', { owner: 'o', repo: 'r', pullNumber: 5 }), null);
@@ -306,8 +315,14 @@ console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.c
     await steered('merge PR #188');
     assert.equal(await merge('gh pr merge 191 -R cara/delve --squash'), 'pending', 'she named #188, not its own');
     assert.equal(await merge('gh pr merge https://github.com/cara/delve/pull/188 --squash'), 'allowed');
+
+    // A merge commit, as Delve's builds land; with a body it rides along, so it gets the card.
+    await say('fold it');
+    await steered('fold it');
+    assert.equal(await merge('gh pr merge 191 -R cara/delve --merge --body done'), 'pending', 'a body');
+    assert.equal(await merge('gh pr merge 191 -R cara/delve --merge'), 'allowed');
     const results = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.filter((e: any) => e.kind === 'approval_result').map((e: any) => JSON.parse(e.data));
-    assert.deepEqual(results.map((r: any) => [r.by, r.via?.text]), [['Cara', 'merge it'], ['Cara', 'merge PR #188']]);
+    assert.deepEqual(results.map((r: any) => [r.by, r.via?.text]), [['Cara', 'merge it'], ['Cara', 'merge PR #188'], ['Cara', 'fold it']]);
   } finally {
     srv.stop();
   }

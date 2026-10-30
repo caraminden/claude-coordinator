@@ -109,8 +109,9 @@ export interface MergeTarget {
   own: boolean;
 }
 
-// The gh pr merge switches a go lets through; any flag with free text or a file (--body-file) gets the card.
-const GO_SWITCH = /^(?:--(?:squash|merge|rebase|delete-branch|auto)|-[smrd]+)$/;
+// The gh pr merge switches a go lets through: squash or a merge commit, not rebase (nobody asked for it).
+// Any flag with free text or a file (--body-file) gets the card.
+const GO_SWITCH = /^(?:--(?:squash|merge|delete-branch|auto)|-[smd]+)$/;
 const GO_VALUED = new Set(['--repo', '-R', '--match-head-commit']);
 
 /**
@@ -139,6 +140,9 @@ export function mcpMerge(tool: string, input: any): MergeCall | null {
   // Both spellings with different numbers: which one the server merges isn't ours to guess.
   if (input?.pullNumber !== undefined && input?.pull_number !== undefined && input.pullNumber !== input.pull_number) return null;
   if (!m || !Number.isInteger(n) || n < 1 || typeof input.owner !== 'string' || typeof input.repo !== 'string') return null;
+  // The same methods as gh: squash or a merge commit, or the repo's default when none is given.
+  const method = input.merge_method ?? input.mergeMethod;
+  if (method !== undefined && !(typeof method === 'string' && ['squash', 'merge'].includes(method.toLowerCase()))) return null;
   if (!/^[\w.-]+$/.test(input.owner) || !/^[\w.-]+$/.test(input.repo)) return null;
   return { target: String(n), repo: `${input.owner}/${input.repo}`, method: null, auto: m[1] === 'enable_pr_auto_merge', admin: false, moved: false };
 }

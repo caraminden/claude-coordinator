@@ -807,6 +807,7 @@ function addGruntText(log, id, text, data, event) {
   line.end = event.created_at;
   line.querySelector('.preview').textContent = gist(text);
   line.querySelector('.dur').textContent = line.end > line.start ? shortDuration(line.end - line.start) : '';
+  if (line === prev) return;
   if (!lines.length) return held ? held.before(line) : log.append(line);
   let group = prev;
   if (!group.matches('.grunts')) {

@@ -21,6 +21,7 @@ test("a report's line is its verdict, else its first line, without Markdown", ()
   assert.equal(gist('Emberknight has five takes in `classes/emberknight.py`.\n\n**A** reads well.'), 'Emberknight has five takes in classes/emberknight.py.');
   assert.equal(gist('## Review\n\n- one finding\n\n**Verdict:** ship it'), 'Verdict: ship it');
   assert.equal(gist('\n\n- **first** bullet\n'), 'first bullet');
+  assert.equal(gist('Fixed test_foo.py and a_b | c'), 'Fixed test_foo.py and a_b | c');
   assert.equal(gist(''), '');
   assert.equal(gist('x'.repeat(300)).length, 160);
 });

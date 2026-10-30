@@ -30,7 +30,7 @@ for (let i = 1; i <= MESSAGES; i++) {
 
 // A minion whose Grunt reported a long wall, then replied itself (#205).
 const G = store.createTicket({ project_id: P.id, kind: 'ticket', title: 'Fan-out', permission_mode: 'default', created_by: 'Cara' });
-store.addEvent(G.id, 'claude', { type: 'assistant', parent_tool_use_id: 'toolu_1', message: { content: [{ type: 'text', text: 'Emberknight has five takes.\n\n**A** reads well.\n**B** clips.' }] } });
+store.addEvent(G.id, 'claude', { type: 'assistant', parent_tool_use_id: 'toolu_1', message: { content: [{ type: 'text', text: '## Emberknight has five takes.\n\n**A** reads well.\n**B** clips.' }] } });
 store.addEvent(G.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'All takes are drawn.' }] } });
 
 const tokens = new Auth(PASSWORD, SECRET);

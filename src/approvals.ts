@@ -109,18 +109,35 @@ export interface MergeTarget {
   own: boolean;
 }
 
+// The gh pr merge switches a go lets through; any flag with free text or a file (--body-file) gets the card.
+const GO_SWITCH = /^(?:--(?:squash|merge|rebase|delete-branch|auto)|-[smrd]+)$/;
+const GO_VALUED = new Set(['--repo', '-R', '--match-head-commit']);
+
 /**
  * Whether a Bash call is a go may let through: one `gh pr merge` of plain words and nothing else (no
- * chain, pipe, redirect, quote, variable or `cd`, since Approve lets the whole input run), and no --admin.
+ * chain, pipe, redirect, quote, variable, comment or `cd`, since Approve lets the whole input run), no
+ * --admin, and the PR and its repo named outright: the server looks the PR up in the worktree, but the
+ * shell may have moved on in an earlier call, and only --repo or a URL pins what gh merges.
  */
 export function plainMerge(command: string, call: MergeCall | null): boolean {
-  return !!call && !call.admin && !call.moved && /^gh[ \t]+pr[ \t]+merge(?:[ \t]+[\w#:/.=+-]+)*[ \t]*$/.test(command.trim());
+  if (!call || call.admin || call.moved || !call.repo || !call.target) return false;
+  const words = command.trim().split(/[ \t]+/);
+  if (words.slice(0, 3).join(' ') !== 'gh pr merge') return false;
+  for (let i = 3; i < words.length; i++) {
+    const [flag, value] = words[i].startsWith('--') && words[i].includes('=') ? words[i].split(/=(.*)/s) : [words[i], undefined];
+    if (GO_VALUED.has(flag)) {
+      if (!/^[\w./-]+$/.test(value ?? words[++i] ?? '')) return false;
+    } else if (flag.startsWith('-') ? !GO_SWITCH.test(flag) || value !== undefined : !/^[\w:/.-]+$/.test(flag)) return false;
+  }
+  return true;
 }
 
 /** The GitHub MCP's merge tools: the PR their input names, as `gh pr merge` would, or null. */
 export function mcpMerge(tool: string, input: any): MergeCall | null {
   const m = tool.match(/^mcp__[^_].*__(merge_pull_request|enable_pr_auto_merge)$/);
   const n = input?.pullNumber ?? input?.pull_number;
+  // Both spellings with different numbers: which one the server merges isn't ours to guess.
+  if (input?.pullNumber !== undefined && input?.pull_number !== undefined && input.pullNumber !== input.pull_number) return null;
   if (!m || !Number.isInteger(n) || n < 1 || typeof input.owner !== 'string' || typeof input.repo !== 'string') return null;
   if (!/^[\w.-]+$/.test(input.owner) || !/^[\w.-]+$/.test(input.repo)) return null;
   return { target: String(n), repo: `${input.owner}/${input.repo}`, method: null, auto: m[1] === 'enable_pr_auto_merge', admin: false, moved: false };

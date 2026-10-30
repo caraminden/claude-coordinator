@@ -37,14 +37,21 @@ test('a go is a whole message that only says merge, with at most one PR number',
 });
 
 test('only a lone plain gh pr merge, or the MCP merge tools, can be let through', () => {
-  for (const cmd of ['gh pr merge 191 --squash', 'gh pr merge --squash --delete-branch', 'gh pr merge https://github.com/o/r/pull/5 -s', 'gh pr merge 5 --auto -s', 'gh pr merge -R o/r 5']) {
+  for (const cmd of ['gh pr merge 191 --repo o/r --squash', 'gh pr merge https://github.com/o/r/pull/5 -s', 'gh pr merge 5 --auto -sd -R o/r', 'gh pr merge -R o/r 5',
+    'gh pr merge --repo=o/r ticket/74-x --delete-branch', 'gh pr merge 5 -R o/r --match-head-commit abc123']) {
     assert.ok(plainMerge(cmd, parseMerge(cmd)), cmd);
   }
   for (const cmd of [
     'gh pr merge 5 && rm -rf x', 'cd /x && gh pr merge 5', 'gh pr merge 5 --admin', 'gh pr merge 5 | tee log', 'gh pr merge 5 > out',
     'gh pr merge $N', 'gh pr merge 5 --body "x y"', 'GH_REPO=a/b gh pr merge 5', 'gh pr merge 5\nrm x', 'gh pr merge 5; true',
     'echo $(gh pr merge 5)', 'gh pr merge `cat n`', 'git push && gh pr merge 5', 'gh pr view 5',
+    // The shell may sit in another repo by now: the PR and its repo must be named outright.
+    'gh pr merge 191 --squash', 'gh pr merge --squash -R o/r', 'gh pr merge #191 -R o/r',
+    // Free text or a file would ride along into the merge commit.
+    'gh pr merge 5 -R o/r -F /home/u/.ssh/id_ed25519', 'gh pr merge 5 -R o/r --body-file=notes', 'gh pr merge 5 -R o/r -b hi', 'gh pr merge 5 -R o/r --subject x',
+    'gh pr merge 5 -R o/r --author-email a@b', 'gh pr merge 5 -R o/r --squash=yes', 'gh pr merge 5 -R', 'gh pr merge 5 -R o/r -sF x',
   ]) assert.equal(plainMerge(cmd, parseMerge(cmd)), false, cmd);
+  assert.equal(mcpMerge('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 5, pull_number: 6 }), null, 'two numbers');
   assert.deepEqual(mcpMerge('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 5 }), { target: '5', repo: 'o/r', method: null, auto: false, admin: false, moved: false });
   assert.equal(mcpMerge('mcp__github__enable_pr_auto_merge', { owner: 'o', repo: 'r', pull_number: 5 })?.auto, true);
   assert.equal(mcpMerge('mcp__github__get_pull_request', { owner: 'o', repo: 'r', pullNumber: 5 }), null);
@@ -283,20 +290,22 @@ console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.c
 
     // The Taskmaster relaying her words is not a go.
     await fetch(`${srv.base}/api/tickets/${t.id}/messages`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(srv.data, coordinator.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'merge it' }) });
-    assert.equal(await merge('gh pr merge --squash'), 'pending', 'a relay');
+    assert.equal(await merge('gh pr merge 191 -R cara/delve --squash'), 'pending', 'a relay');
 
     await say('merge it');
     await steered('merge it');
-    assert.equal(await merge('cd .. && gh pr merge --squash'), 'pending', 'not a lone plain merge');
-    assert.equal(await merge('gh pr merge 188 --squash'), 'pending', "no number named: not another branch's PR");
+    assert.equal(await merge('cd .. && gh pr merge 191 -R cara/delve --squash'), 'pending', 'not a lone plain merge');
+    assert.equal(await merge('gh pr merge 191 --squash'), 'pending', 'no repo named: the shell may be in another one');
+    assert.equal(await merge('gh pr merge 188 -R cara/delve --squash'), 'pending', "no number named: not another branch's PR");
     assert.equal(await merge('gh pr merge -R someone/else 191'), 'pending', 'another repo');
-    assert.equal(await merge('gh pr merge --squash'), 'allowed', 'its own PR');
-    assert.equal(await merge('gh pr merge --squash'), 'pending', 'once');
+    assert.equal(await merge('gh pr merge 191 -R cara/delve -F README.md'), 'pending', 'a file in the merge commit');
+    assert.equal(await merge('gh pr merge 191 -R cara/delve --squash'), 'allowed', 'its own PR');
+    assert.equal(await merge('gh pr merge 191 -R cara/delve --squash'), 'pending', 'once');
 
     await say('merge PR #188');
     await steered('merge PR #188');
-    assert.equal(await merge('gh pr merge --squash'), 'pending', 'she named #188, not its own');
-    assert.equal(await merge('gh pr merge 188 --squash'), 'allowed');
+    assert.equal(await merge('gh pr merge 191 -R cara/delve --squash'), 'pending', 'she named #188, not its own');
+    assert.equal(await merge('gh pr merge https://github.com/cara/delve/pull/188 --squash'), 'allowed');
     const results = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.filter((e: any) => e.kind === 'approval_result').map((e: any) => JSON.parse(e.data));
     assert.deepEqual(results.map((r: any) => [r.by, r.via?.text]), [['Cara', 'merge it'], ['Cara', 'merge PR #188']]);
   } finally {

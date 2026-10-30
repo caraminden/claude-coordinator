@@ -5,6 +5,7 @@ import { attachBridge } from './bridge-host.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { showProject } from './project.js';
 import { replaceHash } from './navstack.js';
+import { continueList } from './lists.js';
 
 /** A file a thread linked in its reply, shown full screen over its chat, which stays beside it. */
 export async function showFile(ticketId, path) {
@@ -375,6 +376,7 @@ function commentBox(t, path, name, body) {
   const form = h('form', { class: 'file-comment' }, quoteEl, textarea,
     h('div', { class: 'row' }, quoteBtn, status, h('span', { class: 'spacer' }), sendBtn));
   textarea.addEventListener('keydown', (e) => {
+    if (continueList(textarea, e)) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(max-width: 800px)').matches) {
       e.preventDefault();
       form.requestSubmit();

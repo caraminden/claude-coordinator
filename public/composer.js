@@ -1,6 +1,7 @@
 // The message box under a chat: drafts, pasted images, attached files, model and effort.
 import { account, api, catchUpEvents, formatSize, h, isCoordinator, me, reloadWhenIdle, scrollToBottom, sending, setSending, uploadUrl, view } from './core.js';
 import { base64Url, renderTicketHead, renderTyping, userBubble } from './thread.js';
+import { continueList } from './lists.js';
 
 // ---------- drafts ----------
 
@@ -115,6 +116,7 @@ export function composer(chatId, ticket) {
     attachments.add(files);
   });
   textarea.addEventListener('keydown', (e) => {
+    if (continueList(textarea, e)) return;
     // Leave Enter alone while an IME is composing text, or it would send half a word.
     // On a phone Enter adds a line; the Send button sends.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(max-width: 800px)').matches) {

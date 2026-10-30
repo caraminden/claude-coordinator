@@ -9,6 +9,7 @@ import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { renderInbox, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
+import { continueList } from './lists.js';
 
 // ---------- projects ----------
 
@@ -153,6 +154,7 @@ export function newTicketForm(projectId) {
     saveDraft(draftKey, box.value ? { message: box.value } : null);
   });
   box.addEventListener('keydown', (e) => {
+    if (continueList(box, e)) return;
     // Enter sends (on phones too, unlike the chat composer), Shift+Enter adds a line, IME composition is left alone.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();

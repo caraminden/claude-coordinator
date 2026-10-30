@@ -76,8 +76,10 @@ function newSchemeForm() {
     for (const b of form.querySelectorAll('button[type=submit]')) b.disabled = true;
     btn.textContent = source === 'url' || source === 'folder' ? 'Cloning…' : 'Creating…';
     try {
+      // Only the picked source's own field: a non-admin's form has no folder field at all.
+      const field = SOURCES.find((s) => s.value === source)?.field;
       const p = await api('api/projects', { method: 'POST', body: {
-        name: form.name.value, source, repoUrl: form.repoUrl.value, folder: form.folder.value, about: form.about.value, setup: btn.value === 'setup',
+        name: form.name.value, source, ...(field && { [field]: form.elements[field].value }), about: form.about.value, setup: btn.value === 'setup',
       } });
       form.closest('dialog')?.close();
       location.hash = `#/p/${p.id}`;

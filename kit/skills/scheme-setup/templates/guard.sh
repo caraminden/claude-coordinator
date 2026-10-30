@@ -61,6 +61,9 @@ json_field() {
 # with a \034 line wherever a new command starts (; & | ( ) newline, and backticks in bash).
 # A word holding $, a backtick, ( or a {a,b} brace list outside single quotes gets a \035 in
 # it: the shell fills it in at run time, so the guard cannot know what it names.
+# A bash heredoc's body comes out after its line as one \036 word (newlines as \037) between
+# \034 lines, for check_command to check as a command of its own: read inline, an apostrophe
+# in a commit message opened a quote that hid every later command, a push included.
 # ps=1 switches to PowerShell rules: backtick escapes, backslash is literal, <# #> comments.
 # ps=2 is cmd.exe: ^ escapes, and no single quotes, comments or backtick substitution.
 tokenize() {
@@ -68,7 +71,7 @@ tokenize() {
     function flush() { if (intok) { gsub(/\n/, " ", tok); print tok; tok = ""; intok = 0 } }
     { s = s (NR > 1 ? "\n" : "") $0 }
     END {
-      n = length(s); q = ""; tok = ""; intok = 0
+      n = length(s); q = ""; tok = ""; intok = 0; nh = 0
       esc = (ps == "1") ? "`" : (ps == "2") ? "^" : "\\"
       for (i = 1; i <= n; i++) {
         c = substr(s, i, 1)
@@ -87,9 +90,40 @@ tokenize() {
         if (ps == "1" && c == "<" && !intok && substr(s, i + 1, 1) == "#") {
           j = index(substr(s, i + 2), "#>"); i = j ? i + j + 2 : n; continue
         }
+        # <<WORD, <<-WORD or <<'WORD' (not <<<): note the delimiter; the body starts on the next line.
+        if (ps == "0" && c == "<" && substr(s, i + 1, 1) == "<" && substr(s, i + 2, 1) != "<" && (i == 1 || substr(s, i - 1, 1) != "<")) {
+          j = i + 2; strip = 0; d = ""; dq = ""
+          if (substr(s, j, 1) == "-") { strip = 1; j++ }
+          while (substr(s, j, 1) == " " || substr(s, j, 1) == "\t") j++
+          for (; j <= n; j++) {
+            ch = substr(s, j, 1)
+            if (dq != "") { if (ch == dq) dq = ""; else d = d ch; continue }
+            if (ch == "\047" || ch == "\"") { dq = ch; continue }
+            if (ch == "\\") { j++; d = d substr(s, j, 1); continue }
+            if (index(" \t\r\n;&|()<>", ch)) break
+            d = d ch
+          }
+          if (d != "") { nh++; hd[nh] = d; hs[nh] = strip }
+        }
         if (c == "(" || (c == "`" && ps == "0")) { tok = tok "\035"; intok = 1 }
         if (c == "\n" || c == ";" || c == "&" || c == "|" || c == "(" || c == ")" || (c == "`" && ps == "0")) {
-          flush(); print "\034"; continue
+          flush(); print "\034"
+          if (c == "\n") {
+            for (h = 1; h <= nh; h++) {
+              body = ""
+              while (i < n) {
+                e = index(substr(s, i + 1), "\n")
+                line = e ? substr(s, i + 1, e - 1) : substr(s, i + 1)
+                i = e ? i + e : n
+                cmp = line; sub(/\r$/, "", cmp); if (hs[h]) sub(/^\t+/, "", cmp)
+                if (cmp == hd[h]) break
+                body = body line "\n"
+              }
+              gsub(/\n/, "\037", body); print "\036" body; print "\034"
+            }
+            nh = 0
+          }
+          continue
         }
         if (c == "$") tok = tok "\035"
         if (c == "{" && ps == "0" && match(substr(s, i), /^\{[^ \t\r\n;&|()<>]*\}/) && substr(s, i + 1, RLENGTH - 2) ~ /,|\.\./) tok = tok "\035"
@@ -207,6 +241,7 @@ check_command() { # command line, ps flag
   local word
   local -a seg=()
   while IFS= read -r word; do
+    case "$word" in $'\036'*) word="${word#?}"; check_command "${word//$'\037'/$'\n'}" 0; continue ;; esac
     if [ "$word" != $'\034' ]; then seg+=("$word"); continue; fi
     check_words "$2" ${seg[@]+"${seg[@]}"}
     seg=()
@@ -284,6 +319,18 @@ self_test() {
   t 0 Bash topic 'git push origin "topic#main"'
   t 0 Bash topic 'B=main; git push origin topic'
   t 0 Bash topic '(git push origin topic) && echo {a,b} $((1 + 2))'
+  # Heredocs: the body is a command of its own, so an apostrophe in it hides nothing after it.
+  t 2 Bash topic $'git commit -F - <<\'EOF\'\nthe kit\'s line\nEOF\ngit push origin main'
+  t 0 Bash topic $'git commit -F - <<\'EOF\'\nthe kit\'s line\nEOF\ngit push origin topic'
+  t 2 Bash topic $'git commit -F - <<"EOF"\nthe kit\'s line\nEOF\ngit push origin main'
+  t 2 Bash topic $'git commit -F - <<-EOF\n\tit\'s\n\tEOF\ngit push origin main'
+  t 0 Bash topic $'git push origin topic && git commit -F - <<\'EOF\'\nDon\'t push to main yet\nEOF'
+  t 0 Bash topic $'cat <<EOF\nbranch $B isn\'t main\nEOF\ngit push origin topic'
+  t 2 Bash topic $'bash <<EOF\ngit push origin $B\nEOF'
+  t 2 Bash topic $'bash <<EOF\ngit push origin main\nEOF'
+  t 2 Bash topic $'cat <<A; bash <<\'B\'\nit\'s\nA\ngit push origin main\nB'
+  t 2 Bash topic $'cat <<A; git commit -F - <<B\nit\'s\nA\nso\'s this\nB\ngit push origin main'
+  t 0 Bash topic 'git push origin topic && echo $((1 << 2))'
   t 0 Bash topic 'bash -c "git push origin topic"'
   t 0 PowerShell topic 'git push origin topic'
   t 0 PowerShell topic 'git push origin topic <# main #>'

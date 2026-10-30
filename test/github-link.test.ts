@@ -6,7 +6,7 @@ import { after, test } from 'node:test';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { GithubLink } from '../src/github-link.ts';
-import { pushKind, Runner } from '../src/runner.ts';
+import { hideTokens, pushKind, Runner, slimEvent } from '../src/runner.ts';
 
 // People link their own GitHub (#182): the token is kept encrypted, and each turn gets the token of the
 // person it runs for, or none, so an unlinked person's turn can't push as anyone else.
@@ -111,6 +111,8 @@ test('a turn gets its person\'s token and name; unlinked, none and a line saying
   assert.match(unlinked.line, /Cara hasn't linked GitHub.*can't push/);
 
   assert.equal(new GithubLink(store, creds, '', '').forTurn(josh, dir), null);
+  // Disabled: their link stays, but no turn uses it.
+  assert.equal(link.forTurn({ ...josh, disabled_at: Date.now() }, dir)!.env.GH_TOKEN, undefined);
 });
 
 test('pushKind spots pushes and new pull requests, not the word in passing', () => {
@@ -119,6 +121,18 @@ test('pushKind spots pushes and new pull requests, not the word in passing', () 
   assert.equal(pushKind('gh pr create --fill'), 'pr');
   assert.equal(pushKind('git commit -m "push it"'), null);
   assert.equal(pushKind('echo push'), null);
+  assert.equal(pushKind('git commit -m "then git push later"'), null);
+  assert.equal(pushKind("git commit -m 'gh pr create next'"), null);
+  assert.equal(pushKind('git commit -m "x" && git push'), 'push');
+});
+
+test('GitHub tokens are hidden in what the chat stores: tool output and replies', () => {
+  const token = 'gho_' + 'a'.repeat(36);
+  const ev = slimEvent({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: `GH_TOKEN=${token}\nPORT=1` }] } });
+  assert.equal(ev.message.content[0].content, 'GH_TOKEN=[GitHub token hidden]\nPORT=1');
+  const reply = slimEvent({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `it is ${token}` }] } });
+  assert.equal(reply.message.content[0].text, 'it is [GitHub token hidden]');
+  assert.equal(hideTokens('ghost_town and gho_short stay'), 'ghost_town and gho_short stay');
 });
 
 // Through the runner: a fake claude that writes its GitHub env, and, asked to, "runs" a push.

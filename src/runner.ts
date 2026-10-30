@@ -391,6 +391,11 @@ export function byteSize(n: number): string {
   return `${n < 10 ? n.toFixed(1) : Math.round(n)} ${units[i]}`;
 }
 
+// A turn's GitHub token is in its env (#182), so `env` or `echo $GH_TOKEN` would print it into the
+// chat, which everyone in the scheme reads; GitHub's token formats are distinctive enough to hide.
+const GITHUB_TOKEN = /\b(gh[opsur]_[A-Za-z0-9]{30,}|github_pat_\w{40,})\b/g;
+export const hideTokens = (s: string) => s.replace(GITHUB_TOKEN, '[GitHub token hidden]');
+
 function truncate(s: string): string {
   return s.length > MAX_TOOL_OUTPUT ? s.slice(0, MAX_TOOL_OUTPUT) + `\n… [truncated ${s.length - MAX_TOOL_OUTPUT} chars]` : s;
 }
@@ -410,12 +415,13 @@ export function slimEvent(ev: any, stored = false): any {
   if ((ev.type === 'assistant' || ev.type === 'user') && Array.isArray(ev.message?.content)) {
     const content = ev.message.content.flatMap((block: any) => {
       if (block?.type === 'thinking' || block?.type === 'redacted_thinking') return [];
+      if (block?.type === 'text' && typeof block.text === 'string') return [{ ...block, text: hideTokens(block.text) }];
       if (block?.type !== 'tool_result' || stored) return [block];
       let content = block.content;
       if (Array.isArray(content)) {
         content = content.map((c: any) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
       }
-      return [{ ...block, content: truncate(String(content ?? '')) }];
+      return [{ ...block, content: truncate(hideTokens(String(content ?? ''))) }];
     });
     if (!content.length) return null;
     const slim: any = { type: ev.type, message: { role: ev.message.role, content } };
@@ -432,6 +438,8 @@ export function slimEvent(ev: any, stored = false): any {
 
 /** Whether a shell command pushes to GitHub or opens a pull request (for the chat note), by its words. */
 export function pushKind(command: string): 'push' | 'pr' | null {
+  // Quoted words are messages and arguments (git commit -m "then git push"), not commands.
+  command = command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''");
   if (/\bgh\s+pr\s+create\b/.test(command)) return 'pr';
   return /\bgit\b(?:\s+-[cC]\s+\S+|\s+--?[\w-]+(?:=\S+)?)*\s+push\b/.test(command) ? 'push' : null;
 }

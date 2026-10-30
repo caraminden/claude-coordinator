@@ -160,7 +160,8 @@ export class GithubLink {
     mkdirSync(ghDir, { recursive: true, mode: 0o700 });
     const env: Record<string, string> = { GH_CONFIG_DIR: ghDir, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' };
     const who = person?.name ?? 'Nobody';
-    const c = person ? this.creds.get<GithubMeta>(person.id, 'github') : null;
+    // A disabled person's link isn't used: their minions' turns can't push until someone else's message runs one.
+    const c = person && !person.disabled_at ? this.creds.get<GithubMeta>(person.id, 'github') : null;
     if (c?.secret && !c.failed) {
       const name = c.meta.name || c.meta.login;
       Object.assign(env, { GH_TOKEN: c.secret, ...gitIdentity(name, noreplyEmail(c.meta)) });

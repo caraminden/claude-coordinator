@@ -158,7 +158,7 @@ function filterSection({ key, values }, counts) {
   return sec;
 }
 
-/** The scheme's saved views as chips above the filter: a click ticks a view's values, ＋ saves the ticks as one. */
+/** This person's saved views in the scheme as chips above the filter: a click ticks a view's values, ＋ saves the ticks as one. */
 function renderSavedViews() {
   const el = document.getElementById('saved-views');
   const { picks, keys, views } = propFilter;
@@ -171,7 +171,7 @@ function renderSavedViews() {
     const vp = viewPicks(v.picks, keys);
     const on = picks.size > 0 && samePicks(picks, vp);
     return h('span', { class: `tag-chip sv${on ? ' on' : ''}` },
-      h('button', { type: 'button', class: 'sv-name', 'aria-pressed': String(on), title: on ? 'Show every minion again' : `Saved by ${v.created_by}`,
+      h('button', { type: 'button', class: 'sv-name', 'aria-pressed': String(on), title: on ? 'Show every minion again' : 'Show only these minions',
         onclick: () => apply(on ? new Map() : vp) }, v.name),
       on ? h('button', { type: 'button', class: 'sv-del', title: `Delete the view ${v.name}`, 'aria-label': `Delete the view ${v.name}`, onclick: () => deleteView(v) }, '🗑') : '');
   });
@@ -180,7 +180,7 @@ function renderSavedViews() {
 }
 
 async function saveView() {
-  const name = prompt('Name this view (everyone in the scheme sees it):')?.trim();
+  const name = prompt('Name this view (only you see it):')?.trim();
   if (!name) return;
   if (propFilter.views.some((v) => v.name === name) && !confirm(`Replace the view "${name}" with what's ticked now?`)) return;
   const picks = Object.fromEntries([...propFilter.picks].map(([k, set]) => [k, [...set]]));
@@ -193,7 +193,7 @@ async function saveView() {
 }
 
 async function deleteView(v) {
-  if (!confirm(`Delete the view "${v.name}" for everyone in the scheme? What's ticked stays ticked.`)) return;
+  if (!confirm(`Delete the view "${v.name}"? What's ticked stays ticked.`)) return;
   const projectId = propFilter.projectId;
   const views = await api(`api/projects/${projectId}/views/${v.id}`, { method: 'DELETE' }).catch((err) => alert(`Could not delete the view: ${err.message}`));
   if (views && propFilter.projectId === projectId) {
@@ -202,9 +202,9 @@ async function deleteView(v) {
   }
 }
 
-/** Someone saved or deleted a view in this scheme. */
-export function onViewsChanged(projectId) {
-  if (view?.kind !== 'project' || projectId !== view.projectId || propFilter.projectId !== projectId) return;
+/** This person saved or deleted a view in this scheme, maybe in another tab. */
+export function onViewsChanged(projectId, name) {
+  if (name !== me?.name || view?.kind !== 'project' || projectId !== view.projectId || propFilter.projectId !== projectId) return;
   propFilter.views = null;
   renderPropFilter();
 }

@@ -603,23 +603,24 @@ export const projectRoutes: Route[] = [
     },
   },
 
-  // Saved views: named property filters above the minions list, shared by everyone in the scheme.
-  { method: 'GET', path: '/api/projects/:project/views', who: ['person'], handler: ({ res, app, project }) => json(res, 200, app.store.listViews(project.id)) },
+  // Saved views: each person's own named property filters above the minions list (#194).
+  { method: 'GET', path: '/api/projects/:project/views', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, app.store.listViews(project.id, session.name)) },
   {
     method: 'POST', path: '/api/projects/:project/views', who: ['person'],
     async handler({ req, res, app, session, project }) {
       const body = await readJson(req);
-      app.store.saveView(project.id, str(body.name, 'Name', 40), viewPicks(body.picks), session.name);
-      app.broadcast({ type: 'views', projectId: project.id });
-      return json(res, 200, app.store.listViews(project.id));
+      app.store.saveView(project.id, session.name, str(body.name, 'Name', 40), viewPicks(body.picks));
+      // Every stream gets it; each tab refreshes only for its own person, like ticket_pin.
+      app.broadcast({ type: 'views', name: session.name, projectId: project.id });
+      return json(res, 200, app.store.listViews(project.id, session.name));
     },
   },
   {
     method: 'DELETE', path: '/api/projects/:project/views/:view', who: ['person'],
-    handler({ res, app, project, params }) {
-      if (!app.store.deleteView(project.id, Number(params.view))) throw new HttpError(404, 'No such view');
-      app.broadcast({ type: 'views', projectId: project.id });
-      return json(res, 200, app.store.listViews(project.id));
+    handler({ res, app, session, project, params }) {
+      if (!app.store.deleteView(project.id, session.name, Number(params.view))) throw new HttpError(404, 'No such view');
+      app.broadcast({ type: 'views', name: session.name, projectId: project.id });
+      return json(res, 200, app.store.listViews(project.id, session.name));
     },
   },
 

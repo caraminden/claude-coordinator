@@ -226,13 +226,13 @@ export interface TurnResult {
   usage?: any;
 }
 
-/** A named property filter, shared by everyone in its scheme: key → the values ticked for it. */
+/** A person's own named property filter in a scheme (#194): key → the values ticked for it. */
 export interface SavedView {
   id: number;
   project_id: number;
+  owner: string;
   name: string;
   picks: Record<string, (string | number)[]>;
-  created_by: string;
   created_at: number;
 }
 
@@ -402,14 +402,16 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   muted TEXT NOT NULL DEFAULT '[]',
   created_at INTEGER NOT NULL
 );
-CREATE TABLE IF NOT EXISTS saved_views (
+-- Each person's own saved views (#194), keyed by name like ticket_pins. saved_views, the shared ones
+-- before it, moves in at start: see Store.moveSharedViews.
+CREATE TABLE IF NOT EXISTS person_views (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  owner TEXT NOT NULL,
   name TEXT NOT NULL,
   picks TEXT NOT NULL,
-  created_by TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  UNIQUE (project_id, name)
+  UNIQUE (project_id, owner, name)
 );
 -- People's own note on a minion (#146), kept out of the tickets row so no ticket JSON a minion or the
 -- Taskmaster can read carries it. No foreign key, like brief_starts, so an older release's deleteTicket
@@ -512,7 +514,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 14; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id
+export const SCHEMA_VERSION = 15; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -538,6 +540,7 @@ export class Store {
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.db.exec(SCHEMA);
     this.attachState();
+    this.moveSharedViews();
     for (const [table, column, ddl] of MIGRATIONS) {
       const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
       if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
@@ -575,6 +578,18 @@ export class Store {
     // Minions an older release deleted meanwhile cleared only its own table.
     this.db.exec('DELETE FROM state.claude_state WHERE ticket_id IS NOT NULL AND ticket_id NOT IN (SELECT id FROM main.tickets)');
     this.db.exec('VACUUM main'); // hand the freed pages back, so the main file shrinks
+  }
+
+  /**
+   * Saved views were shared by the scheme until #194: each becomes its saver's own. An older release
+   * after a rollback makes saved_views again, so this runs whenever it's there; a name its saver
+   * already has keeps theirs.
+   */
+  private moveSharedViews() {
+    if (!this.db.prepare("SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'saved_views'").get()) return;
+    this.db.exec(`BEGIN; INSERT INTO person_views (project_id, owner, name, picks, created_at)
+      SELECT project_id, created_by, name, picks, created_at FROM saved_views WHERE true ON CONFLICT DO NOTHING;
+      DROP TABLE saved_views; COMMIT;`);
   }
 
   /** Records SCHEMA_VERSION, never lowering it: after a rollback, the newer number says what migrated it. */
@@ -1460,20 +1475,20 @@ export class Store {
     this.db.prepare('DELETE FROM machines WHERE id = ?').run(id);
   }
 
-  listViews(projectId: number): SavedView[] {
-    const rows = this.db.prepare('SELECT * FROM saved_views WHERE project_id = ? ORDER BY name COLLATE NOCASE').all(projectId) as any[];
+  listViews(projectId: number, owner: string): SavedView[] {
+    const rows = this.db.prepare('SELECT * FROM person_views WHERE project_id = ? AND owner = ? ORDER BY name COLLATE NOCASE').all(projectId, owner) as any[];
     return rows.map((r) => ({ ...r, picks: JSON.parse(r.picks) }));
   }
 
-  /** Save the picks under a name; saving under a name the scheme already has replaces that view. */
-  saveView(projectId: number, name: string, picks: SavedView['picks'], by: string) {
+  /** Save the picks under a name; saving under a name this person already has replaces that view. */
+  saveView(projectId: number, owner: string, name: string, picks: SavedView['picks']) {
     this.db
-      .prepare('INSERT INTO saved_views (project_id, name, picks, created_by, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (project_id, name) DO UPDATE SET picks = excluded.picks, created_by = excluded.created_by, created_at = excluded.created_at')
-      .run(projectId, name, JSON.stringify(picks), by, Date.now());
+      .prepare('INSERT INTO person_views (project_id, owner, name, picks, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (project_id, owner, name) DO UPDATE SET picks = excluded.picks, created_at = excluded.created_at')
+      .run(projectId, owner, name, JSON.stringify(picks), Date.now());
   }
 
-  deleteView(projectId: number, id: number): boolean {
-    return this.db.prepare('DELETE FROM saved_views WHERE project_id = ? AND id = ?').run(projectId, id).changes > 0;
+  deleteView(projectId: number, owner: string, id: number): boolean {
+    return this.db.prepare('DELETE FROM person_views WHERE project_id = ? AND owner = ? AND id = ?').run(projectId, owner, id).changes > 0;
   }
 
   listPushSubscriptions(): PushSubscriptionRow[] {

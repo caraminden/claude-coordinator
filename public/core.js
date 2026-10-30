@@ -380,7 +380,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'app-instructions') onAppInstructionsUpdate(msg.instructions);
     if (msg.type === 'properties') onPropertiesChanged(msg.projectId);
     if (msg.type === 'schedules') onSchedulesChanged(msg.projectId);
-    if (msg.type === 'views') onViewsChanged(msg.projectId);
+    if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };

@@ -4,9 +4,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
+import { Store } from '../src/db.ts';
 import { listeningPort } from './helpers.ts';
 
-// Saved views: named property filters, one list per scheme, shared by everyone in it.
+// Saved views: named property filters, each person's own list per scheme (#194).
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'saved-views-'));
 const procs: ChildProcess[] = [];
@@ -53,7 +55,7 @@ before(async () => {
   cookies.Josh = res.headers.get('set-cookie')!.split(';')[0];
 });
 
-test('views are saved per scheme, replaced by name, deletable by anyone, and validated', async () => {
+test("views are each person's own per scheme, replaced by name, deletable only by their owner, and validated", async () => {
   const { data: p } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Views' } });
   const { data: other } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Elsewhere' } });
   await call('Cara', `/api/projects/${p.id}/members`, { method: 'POST', body: { person: joshId } });
@@ -62,13 +64,19 @@ test('views are saved per scheme, replaced by name, deletable by anyone, and val
 
   const saved = await call('Cara', url, { method: 'POST', body: { name: ' Build 8 art ', picks: { type: ['art'], build: [8] } } });
   assert.equal(saved.status, 200);
-  assert.deepEqual(saved.data.map((v: any) => [v.name, v.picks, v.created_by]), [['Build 8 art', { type: ['art'], build: [8] }, 'Cara']]);
+  assert.deepEqual(saved.data.map((v: any) => [v.name, v.picks, v.owner]), [['Build 8 art', { type: ['art'], build: [8] }, 'Cara']]);
   await call('Cara', url, { method: 'POST', body: { name: 'Bugs', picks: { type: ['bug'] } } });
-  assert.deepEqual((await call('Josh', url)).data.map((v: any) => v.name), ['Bugs', 'Build 8 art'], 'everyone sees them');
+  assert.deepEqual((await call('Cara', url)).data.map((v: any) => v.name), ['Bugs', 'Build 8 art']);
+  assert.deepEqual((await call('Josh', url)).data, [], "Josh doesn't see Cara's");
   assert.deepEqual((await call('Cara', `/api/projects/${other.id}/views`)).data, [], 'another scheme has its own');
 
-  const replaced = await call('Josh', url, { method: 'POST', body: { name: 'Bugs', picks: { type: ['bug', 'feature'] } } });
-  assert.deepEqual(replaced.data.find((v: any) => v.name === 'Bugs').picks, { type: ['bug', 'feature'] });
+  const josh = await call('Josh', url, { method: 'POST', body: { name: 'Bugs', picks: { type: ['bug', 'feature'] } } });
+  assert.deepEqual(josh.data.map((v: any) => [v.name, v.picks, v.owner]), [['Bugs', { type: ['bug', 'feature'] }, 'Josh']], 'the same name is his own view');
+  const caras = (await call('Cara', url)).data;
+  assert.deepEqual(caras.find((v: any) => v.name === 'Bugs').picks, { type: ['bug'] }, "and leaves Cara's alone");
+
+  const replaced = await call('Cara', url, { method: 'POST', body: { name: 'Bugs', picks: { type: ['bug', 'idea'] } } });
+  assert.deepEqual(replaced.data.find((v: any) => v.name === 'Bugs').picks, { type: ['bug', 'idea'] });
   assert.equal(replaced.data.length, 2);
 
   for (const picks of [undefined, {}, [], { type: [] }, { type: 'bug' }, { type: [{}] }, { type: [null] }]) {
@@ -78,7 +86,31 @@ test('views are saved per scheme, replaced by name, deletable by anyone, and val
 
   const art = replaced.data.find((v: any) => v.name === 'Build 8 art');
   assert.equal((await call('Cara', `/api/projects/${other.id}/views/${art.id}`, { method: 'DELETE' })).status, 404, 'not through another scheme');
-  const left = await call('Josh', `${url}/${art.id}`, { method: 'DELETE' });
-  assert.deepEqual(left.data.map((v: any) => v.name), ['Bugs'], 'anyone can delete');
-  assert.equal((await call('Josh', `${url}/${art.id}`, { method: 'DELETE' })).status, 404);
+  assert.equal((await call('Josh', `${url}/${art.id}`, { method: 'DELETE' })).status, 404, "not someone else's");
+  const left = await call('Cara', `${url}/${art.id}`, { method: 'DELETE' });
+  assert.deepEqual(left.data.map((v: any) => v.name), ['Bugs']);
+  assert.equal((await call('Cara', `${url}/${art.id}`, { method: 'DELETE' })).status, 404);
+});
+
+test("the scheme's shared views become their saver's own, also after a rollback made the old table again", () => {
+  const file = join(root, 'move.db');
+  const store = new Store(file);
+  const p = store.createProject('Moved', null);
+  store.saveView(p.id, 'Josh', 'Mine', { type: ['bug'] });
+  store.db.close();
+  // What the last release reads and writes (schema version 14).
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE saved_views (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL, picks TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE (project_id, name))`);
+  const add = old.prepare('INSERT INTO saved_views (project_id, name, picks, created_by, created_at) VALUES (?, ?, ?, ?, 1)');
+  add.run(p.id, 'Josh Test', '{"type":["art"]}', 'Josh');
+  add.run(p.id, 'Mine', '{"type":["idea"]}', 'Josh');
+  add.run(p.id, 'Cara bugs', '{"type":["bug"]}', 'Cara');
+  old.close();
+
+  const again = new Store(file);
+  assert.deepEqual(again.listViews(p.id, 'Josh').map((v) => [v.name, v.picks]), [['Josh Test', { type: ['art'] }], ['Mine', { type: ['bug'] }]], 'a name he already had keeps his');
+  assert.deepEqual(again.listViews(p.id, 'Cara').map((v) => v.name), ['Cara bugs']);
+  assert.equal(again.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'saved_views'").get(), undefined, 'the shared table is gone');
+  again.db.close();
 });

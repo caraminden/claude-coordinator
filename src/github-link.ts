@@ -14,6 +14,8 @@ export const SCOPES = 'repo workflow';
 const STATE_MS = 10 * 60_000;
 // How often Settings asks GitHub whether a link still works (revoked on GitHub shows as needing linking again).
 const CHECK_MS = 10 * 60_000;
+// A slow GitHub fails the call rather than holding the account page or the link open.
+const GITHUB_WAIT_MS = 10_000;
 
 export interface GithubMeta {
   login: string;
@@ -79,7 +81,7 @@ export class GithubLink {
     try {
       if (params.get('error')) throw new Error(params.get('error') === 'access_denied' ? 'You cancelled on GitHub.' : `GitHub said: ${params.get('error_description') ?? params.get('error')}`);
       const r = await this.fetch('https://github.com/login/oauth/access_token', {
-        method: 'POST',
+        method: 'POST', signal: AbortSignal.timeout(GITHUB_WAIT_MS),
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ client_id: this.clientId, client_secret: this.clientSecret, code: params.get('code') ?? '', redirect_uri: redirectUri }),
       });
@@ -100,7 +102,7 @@ export class GithubLink {
 
   /** The token's own account, or null when GitHub refuses it (401: revoked). Throws when GitHub can't be reached. */
   private async user(token: string): Promise<GithubMeta | null> {
-    const r = await this.fetch('https://api.github.com/user', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' } });
+    const r = await this.fetch('https://api.github.com/user', { signal: AbortSignal.timeout(GITHUB_WAIT_MS), headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' } });
     if (r.status === 401) return null;
     if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
     const u = (await r.json()) as { login: string; id: number; name: string | null };
@@ -133,7 +135,7 @@ export class GithubLink {
     const c = this.creds.get<GithubMeta>(uid, 'github');
     if (c?.secret && this.configured) {
       await this.fetch(`https://api.github.com/applications/${this.clientId}/grant`, {
-        method: 'DELETE',
+        method: 'DELETE', signal: AbortSignal.timeout(GITHUB_WAIT_MS),
         headers: { Authorization: `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' },
         body: JSON.stringify({ access_token: c.secret }),
       }).catch(() => {});

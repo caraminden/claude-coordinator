@@ -356,12 +356,13 @@ self_test() {
   # The self-test itself, as a git hook runs it: it must pass and leave that hook's repo alone.
   if [ -z "${GUARD_SELF_TEST_NESTED:-}" ]; then
     git init -q "$tmp/real" && git -C "$tmp/real" symbolic-ref HEAD refs/heads/mine
-    if GUARD_SELF_TEST_NESTED=1 GIT_DIR="$tmp/real/.git" GIT_WORK_TREE="$tmp/real" bash "$0" --self-test >/dev/null &&
+    local out
+    if out="$(GUARD_SELF_TEST_NESTED=1 GIT_DIR="$tmp/real/.git" GIT_WORK_TREE="$tmp/real" bash "$0" --self-test)" &&
       [ "$(git -C "$tmp/real" symbolic-ref HEAD)" = refs/heads/mine ] &&
       [ "$(git -C "$tmp/real" config --get core.bare)" = false ]; then
       pass=$((pass + 1))
     else
-      fail=$((fail + 1)); echo "FAIL: --self-test under GIT_DIR failed or changed that repo's HEAD or core.bare"
+      fail=$((fail + 1)); printf '%s\nFAIL: --self-test under GIT_DIR failed or changed that repo'\''s HEAD or core.bare\n' "$out"
     fi
   fi
   echo "[guard] self-test: $pass passed, $fail failed"

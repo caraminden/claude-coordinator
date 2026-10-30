@@ -22,7 +22,8 @@ for (const file of ['tools/guard.sh', 'kit/skills/scheme-setup/templates/guard.s
     try {
       execFileSync('git', ['init', '-q', '-b', 'mine', real]);
       const before = { config: readFileSync(join(real, '.git', 'config'), 'utf8'), head: readFileSync(join(real, '.git', 'HEAD'), 'utf8') };
-      const env = { ...process.env, GIT_DIR: join(real, '.git'), GIT_WORK_TREE: real, GIT_INDEX_FILE: join(real, '.git', 'index') };
+      // NESTED skips the self-test's own copy of this check, which would only run it a third time.
+      const env = { ...process.env, GIT_DIR: join(real, '.git'), GIT_WORK_TREE: real, GIT_INDEX_FILE: join(real, '.git', 'index'), GUARD_SELF_TEST_NESTED: '1' };
       const r = spawnSync('bash', [join(root, file), '--self-test'], { encoding: 'utf8', env });
       assert.equal(r.status, 0, r.stdout + r.stderr);
       assert.equal(readFileSync(join(real, '.git', 'HEAD'), 'utf8'), before.head);

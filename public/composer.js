@@ -116,7 +116,7 @@ export function composer(chatId, ticket) {
     attachments.add(files);
   });
   textarea.addEventListener('keydown', (e) => {
-    if (continueList(textarea, e)) return;
+    if (continueList(textarea, e, matchMedia('(max-width: 800px)').matches)) return;
     // Leave Enter alone while an IME is composing text, or it would send half a word.
     // On a phone Enter adds a line; the Send button sends.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(max-width: 800px)').matches) {

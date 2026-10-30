@@ -376,7 +376,7 @@ function commentBox(t, path, name, body) {
   const form = h('form', { class: 'file-comment' }, quoteEl, textarea,
     h('div', { class: 'row' }, quoteBtn, status, h('span', { class: 'spacer' }), sendBtn));
   textarea.addEventListener('keydown', (e) => {
-    if (continueList(textarea, e)) return;
+    if (continueList(textarea, e, matchMedia('(max-width: 800px)').matches)) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(max-width: 800px)').matches) {
       e.preventDefault();
       form.requestSubmit();

@@ -1058,6 +1058,11 @@ body:has(dialog.viewer[open]) { overflow: hidden; }
 .viewer-stage > a { display: contents; }
 .viewer-stage .artifact-media { width: 100%; height: 100%; max-height: none; object-fit: contain; border: 0; border-radius: 0; background: none; }
 .viewer-stage .artifact-frame { width: 100%; height: 100%; }
+/* Full screen for HTML pages: sized like the Open link beside it. Where a frame can't go full screen
+   (iPhone), it fills the window with a close button over it. */
+button.full-screen { padding: 0.2rem 0.65rem; font-size: 0.85em; }
+.artifact-frame.frame-fill { position: fixed; inset: 0; z-index: 1000; width: 100%; height: 100dvh; border: 0; border-radius: 0; }
+.frame-fill-close { position: fixed; z-index: 1001; top: max(0.5rem, env(safe-area-inset-top, 0px)); right: max(0.5rem, env(safe-area-inset-right, 0px)); display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; padding: 0; border-radius: 999px; background: rgb(0 0 0 / 0.65); color: #fff; font-size: 1.3rem; }
 .viewer-stage.k-markdown, .viewer-stage.k-text, .viewer-stage.k-canvas { display: block; }
 .viewer-stage > .msg.doc, .viewer-stage > .artifact-text { max-width: 52rem; margin: 0 auto; }
 /* The chat, compact: smaller type, and no properties, find, dismiss or × in its bar. */

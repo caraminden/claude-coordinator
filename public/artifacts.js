@@ -319,6 +319,7 @@ function renderViewerBar() {
     h('div', { class: 'name' }, h('h2', { title: file.display_path }, file.name),
       h('span', { class: 'meta' }, file.missing ? 'not found' : `${formatSize(file.size)} · updated ${ago(file.mtime)}`)),
     a ? pinButton(a) : '',
+    file.missing || file.kind !== 'html' ? '' : fullScreenButton(() => viewer?.stage),
     file.missing ? '' : h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open'),
     file.missing ? '' : h('a', { class: 'button secondary wide-only', href: `${src}&download` }, 'Download'),
     h('button', { type: 'button', class: 'close-view', title: 'Back to the chat', 'aria-label': 'Back to the chat', onclick: leaveViewer }, icon('close')));
@@ -457,12 +458,53 @@ export function renderSharedHead() {
       h('h2', {}, file.name),
       h('span', { class: 'spacer' }),
       listed ? pinButton(listed) : '',
+      file.missing || file.kind !== 'html' ? '' : fullScreenButton(() => el.closest('.artifacts-main')),
       file.missing ? '' : h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open'),
       file.missing ? '' : h('a', { class: 'button secondary', href: `${src}&download` }, 'Download')),
     h('div', { class: 'meta' },
       file.display_path, ' · in the folder every minion and the Taskmaster share',
       file.missing ? ' · not found' : ` · ${formatSize(file.size)} · updated ${ago(file.mtime)}`,
       listed?.pinned_at ? ` · pinned by ${listed.pinned_by}` : ''));
+}
+
+/**
+ * Full screen for the HTML page framed in `scope()`, in this tab so its bridge keeps saving (Open's new
+ * tab has no viewer behind it). Where a frame can't go full screen (iPhone), it fills the window instead.
+ */
+function fullScreenButton(scope) {
+  return h('button', { type: 'button', class: 'secondary full-screen', onclick: () => {
+    const frame = scope()?.querySelector('iframe.artifact-frame');
+    if (!frame) return;
+    if (document.fullscreenEnabled && frame.requestFullscreen) frame.requestFullscreen().catch(() => fillWindow(frame));
+    else fillWindow(frame);
+  } }, 'Full screen');
+}
+
+function fillWindow(frame) {
+  const close = h('button', { type: 'button', class: 'frame-fill-close', title: 'Leave full screen', 'aria-label': 'Leave full screen', onclick: () => leave() }, icon('close'));
+  // Esc leaves the fill, not the viewer under it.
+  const onKey = (e) => {
+    if (e.key !== 'Escape') return;
+    if (frame.isConnected) e.preventDefault(), e.stopPropagation();
+    leave();
+  };
+  const leave = () => {
+    frame.classList.remove('frame-fill');
+    close.remove();
+    removeEventListener('keydown', onKey, true);
+    delete frame.leaveFill;
+  };
+  frame.classList.add('frame-fill');
+  frame.after(close);
+  addEventListener('keydown', onKey, true);
+  frame.leaveFill = leave;
+}
+
+const isFullScreen = (frame) => document.fullscreenElement === frame || !!frame.leaveFill;
+
+async function leaveFullScreen(frame) {
+  if (document.fullscreenElement === frame) await document.exitFullscreen().catch(() => {});
+  frame.leaveFill?.();
 }
 
 /**
@@ -481,7 +523,8 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
     // Sandboxed (here and by the server's CSP) so a page a thread wrote can't act as the app.
     // Its page reaches the app only through the artifact bridge (bridge-host.js), as the person viewing it.
     const frame = h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals allow-downloads', allow: 'clipboard-write *', title: name });
-    if (bridge) attachBridge(frame, { ...bridge, name, api });
+    // A page's send fills a box outside the frame: leave full screen first so it's in view.
+    if (bridge) attachBridge(frame, { ...bridge, name, api, onSend: bridge.onSend && ((text) => (isFullScreen(frame) ? leaveFullScreen(frame).then(() => bridge.onSend(text)) : bridge.onSend(text))) });
     body.append(frame);
   } else if (kind === 'pdf') {
     body.append(h('iframe', { class: 'artifact-frame', src, title: name }));
@@ -524,6 +567,7 @@ export function renderArtifactHead() {
       h('h2', {}, a.name),
       h('span', { class: 'spacer' }),
       pinButton(a),
+      a.missing || a.kind !== 'html' ? '' : fullScreenButton(() => el.closest('.artifacts-main')),
       a.missing ? '' : h('a', { class: 'button secondary', href: rawUrl(a), target: '_blank', rel: 'noopener' }, 'Open'),
       a.missing ? '' : h('a', { class: 'button secondary', href: `${rawUrl(a)}&download` }, 'Download')),
     h('div', { class: 'meta' },

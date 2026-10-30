@@ -131,7 +131,9 @@ test('server work for a person (#195): their token, or no login at all, and neve
     const none = asEnv(personGithub(link, cara, dir).env)!;
     assert.equal(none.GH_TOKEN, undefined);
     assert.equal(none.GITHUB_TOKEN, undefined);
-    assert.equal(asEnv(personGithub(link, josh, dir).env)!.GH_TOKEN, 'gho_new');
+    const mine = asEnv(personGithub(link, josh, dir).env)!;
+    assert.equal(mine.GH_TOKEN, 'gho_new');
+    assert.equal(mine.GITHUB_TOKEN, undefined);
     assert.equal(asEnv(undefined), undefined, 'an admin\'s runs as the server does');
   } finally {
     for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;

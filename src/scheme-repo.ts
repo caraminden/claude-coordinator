@@ -20,15 +20,11 @@ export const GITHUB_OWNER = 'github_owner';
 /** Extra env a person's GitHub work runs with (src/github-link.ts personGithub); undefined runs as the box's login. */
 export type GithubEnv = Record<string, string> | undefined;
 
-/** The server's env plus `as`; with `as` and no token in it, the server's own GH_TOKEN can't leak in either. */
+/** The server's env with its own tokens taken out, plus `as`: only the person's token (if any) is left. */
 export function asEnv(as: GithubEnv): NodeJS.ProcessEnv | undefined {
   if (!as) return undefined;
-  const env = { ...process.env, ...as };
-  if (!as.GH_TOKEN) {
-    delete env.GH_TOKEN;
-    delete env.GITHUB_TOKEN;
-  }
-  return env;
+  const { GH_TOKEN, GITHUB_TOKEN, ...env } = process.env;
+  return { ...env, ...as };
 }
 
 async function git(args: string[], cwd?: string, as?: GithubEnv): Promise<string> {

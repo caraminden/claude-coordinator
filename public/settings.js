@@ -234,7 +234,28 @@ const splitLines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filte
 export function settingsTabs() {
   return h('nav', { class: 'settings-tabs' },
     [['instructions', 'Instructions'], ['app-instructions', 'Citadel-wide'], ['approvals', 'Needs approval'], ['properties', 'Properties']].map(([kind, label]) =>
-      h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label)));
+      h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label)),
+    h('span', { class: 'spacer' }), tuneUpButton());
+}
+
+/** "Tune up" (#175): the Taskmaster runs setup again as a diff on what the scheme has, then the chat opens on it. */
+function tuneUpButton() {
+  const p = view.project;
+  const open = p.onboarding !== 'done' && p.onboarding !== 'skipped';
+  const b = h('button', { type: 'button', class: 'secondary', disabled: open,
+    title: open ? 'Setup is under way: see the Taskmaster\'s chat' : 'The Taskmaster asks what changed and posts a plan of edits for you to approve' }, 'Tune up');
+  b.onclick = async () => {
+    if (!confirm(`Tune up ${p.name}? The Taskmaster starts a turn, asks what changed, and posts a plan of edits; nothing changes until someone approves it.`)) return;
+    b.disabled = true;
+    try {
+      onProjectUpdate(await api(`api/projects/${p.id}/tune-up`, { method: 'POST' }));
+      location.hash = `#/p/${p.id}`;
+    } catch (err) {
+      b.disabled = false;
+      alert(err.message);
+    }
+  };
+  return b;
 }
 
 /** Main panel: the project's approval rules and plugin folders. */

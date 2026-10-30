@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { catalogue, frontmatter } from '../src/catalogue.ts';
-import { ONBOARDING, Store, type Project } from '../src/db.ts';
+import { ONBOARDING, ONBOARDING_MODES, Store, type Project } from '../src/db.ts';
 import { onboardingPrompt } from '../src/runner.ts';
 import { bootServer, REPO, until } from './helpers.ts';
 
@@ -24,7 +24,7 @@ writeFileSync(fakeClaude, `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), token: process.env.COORDINATOR_TOKEN }) + '\\n');
+  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), system: process.argv[process.argv.indexOf('--append-system-prompt') + 1], token: process.env.COORDINATOR_TOKEN }) + '\\n');
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
@@ -50,7 +50,7 @@ before(async () => {
   procs.push(srv.proc);
 });
 
-const project = (onboarding: Project['onboarding']) => ({ name: 'Lanternfall', onboarding, onboarding_mode: 'first-run' }) as Project;
+const project = (onboarding: Project['onboarding'], onboarding_mode: Project['onboarding_mode'] = 'first-run') => ({ name: 'Lanternfall', onboarding, onboarding_mode }) as Project;
 
 test('the onboarding section is in the prompt only while setup is under way', () => {
   for (const step of ONBOARDING) {
@@ -64,6 +64,26 @@ test('the onboarding section is in the prompt only while setup is under way', ()
       assert.match(text, /\/shared\/onboarding\.md/);
       assert.match(text, /who pushes main/);
     }
+  }
+});
+
+test('a tune-up gets its own section: start from onboarding.md or the current state, plan as a diff, the setup minion only edits', () => {
+  for (const step of ONBOARDING) {
+    const text = onboardingPrompt(project(step, 'tune-up'), '/shared');
+    if (step === 'done' || step === 'skipped') {
+      assert.equal(text, '', step);
+      continue;
+    }
+    assert.match(text, /## Tuning up this scheme \(onboarding: [a-z-]+, tune-up\)/, step);
+    assert.doesNotMatch(text, /## Setting up this scheme|What kind of project|First minions/, 'none of the first-run interview or plan');
+    assert.match(text, /Start from \/shared\/onboarding\.md/);
+    assert.match(text, /When there is none \(schemes from before onboarding\), start from the scheme's current state/);
+    assert.match(text, /ask only what that leaves missing or may have changed/);
+    for (const part of ['Add', 'Update', 'Retire', 'Instructions']) assert.match(text, new RegExp(`\\*\\*${part}:\\*\\*`), part);
+    assert.match(text, /every repo copy the kit now covers \(`in_kit`\)/);
+    assert.match(text, /as a line diff/);
+    assert.match(text, /This is a tune-up: edit only, and delete only what the plan lists under Retire\./);
+    assert.match(text, /propose_plan/);
   }
 });
 
@@ -114,6 +134,7 @@ test('"Create and set up" sends the Taskmaster one kickoff from Citadel; "Create
   // Its first turn gets the onboarding section.
   const turn = await until('the Taskmaster turn', () => turns().find((t) => t.token?.startsWith(`${page.coordinator.id}.`)));
   assert.match(JSON.stringify(turn.prompt), /New scheme \\"Lanternfall\\"/);
+  assert.match(turn.system, /## Setting up this scheme \(onboarding: interview, first-run\)/);
 
   const only = await call('/api/projects', { method: 'POST', body: { name: 'Scratch', setup: false } });
   assert.equal(only.data.onboarding, 'skipped');
@@ -136,6 +157,33 @@ test('"Create and set up" sends the Taskmaster one kickoff from Citadel; "Create
   assert.equal((await call(`/api/tickets/${page.coordinator.id}/verdict`, { method: 'POST', body: { planId: plan.data.id, verdict: 'approve' } })).status, 202);
 });
 
+test('Tune up turns onboarding back on in tune-up mode and messages the Taskmaster, once at a time', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Tuned', setup: false } });
+  assert.equal(p.onboarding, 'skipped');
+  const { status, data: tuned } = await call(`/api/projects/${p.id}/tune-up`, { method: 'POST' });
+  assert.equal(status, 200);
+  assert.equal(tuned.onboarding, 'interview');
+  assert.equal(tuned.onboarding_mode, 'tune-up');
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  const events = await until('the tune-up message', async () => {
+    const { data } = await call(`/api/tickets/${page.coordinator.id}/events?after=0`);
+    return data.some((e: any) => e.kind === 'user_message') && data;
+  });
+  const sent = events.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
+  assert.equal(sent.length, 1);
+  assert.notEqual(sent[0].author, 'Citadel', 'from the person who clicked');
+  assert.match(sent[0].text, /Tune up this scheme/);
+  // Its turn gets the tune-up section, and a second click while it runs is refused.
+  const turn = await until('the Taskmaster turn', () => turns().find((t) => t.token?.startsWith(`${page.coordinator.id}.`)));
+  assert.match(turn.system, /## Tuning up this scheme/);
+  assert.equal((await call(`/api/projects/${p.id}/tune-up`, { method: 'POST' })).status, 409);
+  // A person's button: the Taskmaster sets it with set_project_settings instead.
+  assert.equal((await call(`/api/projects/${p.id}/tune-up`, { method: 'POST', token: turn.token })).status, 403);
+  const done = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { onboarding: 'done' }, token: turn.token });
+  assert.equal(done.data.onboarding, 'done');
+  assert.equal((await call(`/api/projects/${p.id}/tune-up`, { method: 'POST' })).status, 200, 'and again once it is done');
+});
+
 test('Taskmasters get propose_plan and list_catalogue, and set_project_settings takes onboarding', async () => {
   const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_ROLE: 'coordinator' }, stdio: ['pipe', 'pipe', 'inherit'] });
   const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
@@ -145,5 +193,7 @@ test('Taskmasters get propose_plan and list_catalogue, and set_project_settings 
   const names = tools.map((t: any) => t.name);
   assert.ok(names.includes('propose_plan'));
   assert.ok(names.includes('list_catalogue'));
-  assert.deepEqual(tools.find((t: any) => t.name === 'set_project_settings').inputSchema.properties.onboarding.enum, [...ONBOARDING]);
+  const settings = tools.find((t: any) => t.name === 'set_project_settings').inputSchema.properties;
+  assert.deepEqual(settings.onboarding.enum, [...ONBOARDING]);
+  assert.deepEqual(settings.onboarding_mode.enum, [...ONBOARDING_MODES]);
 });

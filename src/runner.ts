@@ -639,14 +639,36 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
 
 /**
  * While a scheme is being set up (#172), how its Taskmaster runs it: interview, one plan card, then its own
- * part, one setup minion and the first minions. '' once onboarding is done or skipped.
+ * part, one setup minion and the first minions. A tune-up (#175) runs the same steps as a diff on what the
+ * scheme already has. '' once onboarding is done or skipped.
  */
 export function onboardingPrompt(project: Project, sharedDir: string | null): string {
   if (!onboardingOpen(project)) return '';
   const record = sharedDir ? join(sharedDir, 'onboarding.md') : 'onboarding.md in the scheme\'s shared folder';
+  const steps = `Move \`onboarding\` along with set_project_settings as you go: \`planned\` once the plan card is posted, \`setting-up\` once a person approves it, \`done\` once`;
+  const scope = 'Throughout: other schemes are read only through `list_catalogue` and the setup minion\'s reads of the files it adapts; never read their memory, and never write outside this scheme.';
+  if (project.onboarding_mode === 'tune-up') return [
+    `## Tuning up this scheme (onboarding: ${project.onboarding}, tune-up)`,
+    `People asked you to tune up this scheme. It is set up already, so this pass changes only what no longer fits: what changed since setup, and what the ${APP_NAME} kit (the citadel:* skills and agents every turn already loads) now covers. ${steps} the setup minion has merged (when the plan touches no repo files, once your own part is applied). If people say to stop, set \`skipped\`. The scheme header shows people which step it is on.`,
+    '',
+    `**1. What changed.** Start from ${record}: its answers and its "## Copies" table. When there is none (schemes from before onboarding), start from the scheme's current state instead: its instructions, get_project_settings, its properties, the repo's CLAUDE.md (and its Project facts section) and \`.claude/\` (skills, agents, rules, settings), and \`list_catalogue\`, whose \`in_kit\` marks a repo copy of something the kit carries. Then ask only what that leaves missing or may have changed, usually zero to two questions ("anything changed about how you ship?"), one choice per question in one \`ask_question\` call, with what you found marked recommended. Ask nothing when nothing is open. Write the answers, in people's own words with the date, to ${record}, creating it when there is none.`,
+    '',
+    '**2. One plan card, as a diff.** Post it with `propose_plan` and write nothing before a person approves it. Only what changes goes in; leave out an empty section:',
+    '- **Add:** new skills, agents and rules: name, kind, a one-line job, and its `list_catalogue` source when it is adapted from another scheme.',
+    '- **Update:** copied rules to refresh from their source (the "## Copies" table), and each Project facts line in CLAUDE.md that no longer matches the repo, old → new.',
+    '- **Retire:** every repo copy the kit now covers (`in_kit`), and skills nobody used, each with why. Nothing is deleted that isn\'t listed here.',
+    '- **Instructions:** the edits to the scheme instructions as a line diff, in a ```diff block: `-` and `+` lines with two unchanged lines around each change, never the whole text.',
+    '- **Settings and properties:** each change, old → new.',
+    '- **Left as is:** one line on what you checked and are keeping.',
+    '- **Done by:** you (instructions, settings, properties, onboarding.md); one setup minion (repo edits), only when the plan touches repo files.',
+    'On Revise, post the whole revised plan again.',
+    '',
+    `**3. After Approve.** Apply your own part: the instruction edits (read the current text and send it whole with the edits made), settings, property values, and onboarding.md. Property keys still wait for a person in Settings → Properties: name them in your done message. When the plan touches repo files, start **one** setup minion (feature, at the scheme's default effort, never Sonnet) whose brief is "Follow citadel:scheme-setup. This is a tune-up: edit only, and delete only what the plan lists under Retire." followed by the approved plan text, verbatim. It refreshes the "## Copies" rows it touches; you own the rest of onboarding.md. Start no other minions unless the plan names them. If citadel:scheme-setup is not among your skills yet, say so in the plan and hold the setup minion until a person says go.`,
+    scope,
+  ].join('\n');
   return [
     `## Setting up this scheme (onboarding: ${project.onboarding}, ${project.onboarding_mode})`,
-    `This scheme is new and you are setting it up, so its minions start with what this scheme needs on top of the ${APP_NAME}-wide layer and the ${APP_NAME} kit (the citadel:* skills and agents every turn already loads). Move \`onboarding\` along with set_project_settings as you go: \`planned\` once the plan card is posted, \`setting-up\` once a person approves it, \`done\` once the setup minion has merged and the first minions are chained (for a scheme with no repo, once your own part is applied). If people say to skip setup, set \`skipped\`. The scheme header shows people which step it is on.`,
+    `This scheme is new and you are setting it up, so its minions start with what this scheme needs on top of the ${APP_NAME}-wide layer and the ${APP_NAME} kit (the citadel:* skills and agents every turn already loads). ${steps} the setup minion has merged and the first minions are chained (for a scheme with no repo, once your own part is applied). If people say to skip setup, set \`skipped\`. The scheme header shows people which step it is on.`,
     '',
     '**1. Interview.** Before the first card, read what you can: the kickoff message (name, code source, what it\'s about), the repo when there is one (README, build and lock files, CI, an existing `.claude/`), and `list_catalogue` (every scheme\'s repo skills, agents and rules, and the kit\'s). Then ask only what that leaves open, one choice per question, all of them in one or two `ask_question` calls (up to 4 questions each), with what you inferred marked recommended:',
     '- What kind of project: web app · game · library/CLI · content (docs, research, art) · other. Drives which other scheme\'s specialised skills to adapt.',
@@ -673,7 +695,7 @@ export function onboardingPrompt(project: Project, sharedDir: string | null): st
     'On Revise, post the whole revised plan again.',
     '',
     `**3. After Approve.** Apply your own part: the scheme instructions, settings, property values, and onboarding.md. Property keys still wait for a person in Settings → Properties: name them in your done message. Then start **one** setup minion (feature, at the scheme's default effort, never Sonnet) whose brief is "Follow citadel:scheme-setup." followed by the approved plan text, verbatim. It writes the repo files and merges; it records the files it copied under "## Copies" in onboarding.md, and you own the rest of that file. Chain the first minions on it with create_ticket's start_after and start_when: merged. A scheme with no repo gets no setup minion: you apply your part and that is all. If citadel:scheme-setup is not among your skills yet, say so in the plan and hold the setup minion until a person says go.`,
-    'Throughout: other schemes are read only through `list_catalogue` and the setup minion\'s reads of the files it adapts; never read their memory, and never write outside this scheme.',
+    scope,
   ].join('\n');
 }
 

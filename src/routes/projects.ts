@@ -6,7 +6,7 @@ import { cleanPluginDirs, cleanRules, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, TICKET_TAGS, type Project, type Ticket, type TicketTag } from '../db.ts';
+import { EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, TICKET_TAGS, type Project, type Ticket, type TicketTag } from '../db.ts';
 import { inboxItems } from '../inbox.ts';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
@@ -374,6 +374,19 @@ export const projectRoutes: Route[] = [
         }
       }
       const saved = store.getProject(project.id)!;
+      app.broadcast({ type: 'project', project: saved });
+      return json(res, 200, saved);
+    },
+  },
+  {
+    // Settings' "Tune up" (#175): onboarding again in tune-up mode, and a message that starts the Taskmaster on it.
+    method: 'POST', path: '/api/projects/:project/tune-up', who: ['person'],
+    async handler({ res, app, session, project }) {
+      if (onboardingOpen(project)) throw new HttpError(409, `${project.onboarding_mode === 'tune-up' ? 'A tune-up' : 'Setup'} is under way already`);
+      app.store.setProjectSettings(project.id, { onboarding: 'interview', onboarding_mode: 'tune-up' });
+      const coordinator = await ensureCoordinator(app, project);
+      app.runner.send(coordinator.id, session.name, 'Tune up this scheme: onboarding is on again, in tune-up mode.');
+      const saved = app.store.getProject(project.id)!;
       app.broadcast({ type: 'project', project: saved });
       return json(res, 200, saved);
     },

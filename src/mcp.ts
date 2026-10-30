@@ -452,6 +452,7 @@ const TOOLS = [
         default_effort: { ...EFFORT, description: "Effort for every minion's turns that has none of its own. null leaves it to Claude Code's default." },
         machine_tools: { type: 'boolean', description: "Whether this scheme's minions get the connected machines' MCP tools (Godot editors and the like). Off saves ~1.1k tokens a call in schemes that never use them." },
         onboarding: { type: 'string', enum: ['interview', 'planned', 'setting-up', 'done', 'skipped'], description: "Where the scheme's setup stands; the scheme header shows it until done or skipped." },
+        onboarding_mode: { type: 'string', enum: ['first-run', 'tune-up'], description: 'tune-up, with onboarding interview, when people ask you to tune up this scheme: it brings back your onboarding section, for a scheme that is set up already.' },
       },
     },
   },
@@ -801,10 +802,11 @@ async function runTool(name: string, args: any): Promise<string> {
       if (args.default_effort !== undefined) body.default_effort = args.default_effort;
       if (args.machine_tools !== undefined) body.machine_tools = args.machine_tools;
       if (args.onboarding !== undefined) body.onboarding = args.onboarding;
-      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, default_effort, machine_tools, onboarding or a mix');
+      if (args.onboarding_mode !== undefined) body.onboarding_mode = args.onboarding_mode;
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, default_effort, machine_tools, onboarding, onboarding_mode or a mix');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), default effort ${project.default_effort || "Claude Code's default"}, machine tools ${project.machine_tools ? 'on' : 'off'}, onboarding ${project.onboarding}. They apply from each minion's next turn.`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), default effort ${project.default_effort || "Claude Code's default"}, machine tools ${project.machine_tools ? 'on' : 'off'}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.`;
     }
     case 'approve':
       return approve(args);

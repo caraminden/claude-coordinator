@@ -1267,9 +1267,9 @@ function elapsedText(ms) {
 }
 
 /**
- * The working line under the chat while a turn runs: who's working, how long the turn has gone and
- * what's queued, on one line. What it's doing is the thread bar's readout just above; clicking the
- * line opens it.
+ * The working line under the chat while a turn runs, on one line: what's running right now, how
+ * long the turn has gone and what's queued. The plan step sits in the thread bar's readout just
+ * above, so it isn't repeated here; clicking the line opens that readout.
  */
 export function renderTyping() {
   const el = view?.typingEl;
@@ -1280,13 +1280,17 @@ export function renderTyping() {
   el.hidden = !show;
   if (!show) return;
   const running = t.status === 'running';
+  const last = running && initSeen() && view.turnActions.at(-1);
+  const doing = last && !last.result ? actionLabel(last.block) : 'thinking…';
   const sep = () => h('span', { class: 'sep' }, '·');
   el.title = 'Show the work so far';
   el.replaceChildren(
     h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
-    h('span', { class: 'lead' }, t.approvals ? 'Waiting for someone to approve or deny' : running ? 'Claude is working' : 'Claude is thinking…'),
-    running && t.turnStartedAt ? [sep(), h('span', { class: 'time', 'aria-hidden': 'true' }, elapsedText(Date.now() - t.turnStartedAt))] : '',
-    t.queued ? [sep(), h('span', { class: 'queued', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, `${t.queued} queued`)] : '');
+    h('span', { class: 'line' },
+      h('span', { class: 'lead' }, t.approvals ? 'Waiting for someone to approve or deny' : running ? 'Claude is working' : 'Claude is thinking…'),
+      running && !t.approvals ? [sep(), h('span', { class: 'what' }, doing)] : '',
+      running && t.turnStartedAt ? [sep(), h('span', { class: 'time', 'aria-hidden': 'true' }, elapsedText(Date.now() - t.turnStartedAt))] : '',
+      t.queued ? [sep(), h('span', { class: 'queued', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, `${t.queued} queued`)] : ''));
   if (wasHidden && followChat) scrollToBottom();
 }
 

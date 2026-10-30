@@ -554,10 +554,14 @@ button.pin.on { color: var(--accent); }
 .usage[hidden] { display: none; }
 @media (max-width: 600px) { .usage .track { width: 3rem; } }
 
-/* The working line under the chat while a turn runs, one line: who's working · time · queued */
+/* The working line under the chat while a turn runs, one line: who's working · what's running · time · queued */
 .typing { display: flex; align-items: center; gap: 0.4rem; margin: 0.25rem 0 0.75rem; color: var(--muted); font-size: 0.9em; white-space: nowrap; cursor: pointer; }
-.typing:hover .lead, .typing:focus-visible .lead { text-decoration: underline; }
-.typing .lead { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.typing:hover .what, .typing:focus-visible .what { text-decoration: underline; }
+.typing .line { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.typing .lead { flex: none; }
+.typing .what { min-width: 3em; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+/* With no action beside it, a long lead ("Waiting for someone to approve or deny") truncates on a phone. */
+.typing .line:not(:has(.what)) .lead { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .typing .time, .typing .queued { flex: none; font-variant-numeric: tabular-nums; }
 .typing .sep { flex: none; opacity: 0.6; }
 .typing[hidden] { display: none; }

@@ -245,6 +245,9 @@ check_words() { # ps flag, words...
 # Add a line here for every gap you close or false block you fix.
 self_test() {
   local b pass=0 fail=0 # tmp stays global for the EXIT trap
+  # Run from a git hook, git exports GIT_DIR and friends, which would point the scratch repos
+  # below (and their HEAD and config) at the repo being pushed.
+  unset $(git rev-parse --local-env-vars)
   tmp="$(mktemp -d)" || exit 1
   trap 'rm -rf "$tmp"' EXIT
   for b in main topic; do
@@ -349,6 +352,17 @@ self_test() {
   run 2 github '{"tool_name":"mcp__github__push_files","tool_input":{"branch":"main"}}'
   run 2 github '{"tool_name":"mcp__github__create_or_update_file","tool_input":{"branch":"refs/heads/master"}}'
   run 2 github '{"tool_name":"mcp__github__delete_file","tool_input":{"path":"x"}}'
+  # The self-test itself, as a git hook runs it: it must pass and leave that hook's repo alone.
+  if [ -z "${GUARD_SELF_TEST_NESTED:-}" ]; then
+    git init -q "$tmp/real" && git -C "$tmp/real" symbolic-ref HEAD refs/heads/mine
+    if GUARD_SELF_TEST_NESTED=1 GIT_DIR="$tmp/real/.git" GIT_WORK_TREE="$tmp/real" bash "$0" --self-test >/dev/null &&
+      [ "$(git -C "$tmp/real" symbolic-ref HEAD)" = refs/heads/mine ] &&
+      [ "$(git -C "$tmp/real" config --get core.bare)" = false ]; then
+      pass=$((pass + 1))
+    else
+      fail=$((fail + 1)); echo "FAIL: --self-test under GIT_DIR failed or changed that repo's HEAD or core.bare"
+    fi
+  fi
   echo "[guard] self-test: $pass passed, $fail failed"
   [ "$fail" = 0 ]
 }

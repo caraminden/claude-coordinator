@@ -151,7 +151,7 @@ export function newTicketForm(projectId) {
   });
   box.addEventListener('keydown', (e) => {
     if (continueList(box, e)) return;
-    // Enter sends (on phones too, unlike the chat composer), Shift+Enter adds a line, IME composition is left alone.
+    // Enter sends (on phones too, unlike the chat composer), Shift+Enter adds a line (or the next item in a numbered list), IME composition is left alone.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       form.requestSubmit();

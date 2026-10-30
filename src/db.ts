@@ -29,6 +29,8 @@ export interface Project {
   onboarding: Onboarding;
   /** first-run for a new scheme, tune-up for a re-run on an existing one. */
   onboarding_mode: OnboardingMode;
+  /** Why a new scheme's GitHub repo wasn't created (#173), for the Retry strip; null when it was, or for other sources. */
+  github_error: string | null;
   created_at: number;
 }
 
@@ -427,6 +429,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   // Schemes from before onboarding (#172) are set up already.
   ['projects', 'onboarding', "ALTER TABLE projects ADD COLUMN onboarding TEXT NOT NULL DEFAULT 'done'"],
   ['projects', 'onboarding_mode', "ALTER TABLE projects ADD COLUMN onboarding_mode TEXT NOT NULL DEFAULT 'first-run'"],
+  ['projects', 'github_error', 'ALTER TABLE projects ADD COLUMN github_error TEXT'],
   ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
   ['machines', 'workspace_tools', 'ALTER TABLE machines ADD COLUMN workspace_tools INTEGER NOT NULL DEFAULT 0'],
 ];
@@ -436,7 +439,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 10; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding
+export const SCHEMA_VERSION = 11; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -592,6 +595,11 @@ export class Store {
 
   setProjectRepoDir(id: number, dir: string) {
     this.db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(dir, id);
+  }
+
+  /** Where a scheme's repo lives upstream, and why putting it on GitHub failed (null once it worked). */
+  setProjectUpstream(id: number, repoUrl: string | null, githubError: string | null) {
+    this.db.prepare('UPDATE projects SET repo_url = ?, github_error = ? WHERE id = ?').run(repoUrl, githubError, id);
   }
 
   /** Saves a scheme's instructions, with a history row of who changed them from what. */

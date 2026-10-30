@@ -124,6 +124,7 @@ export function onProjectUpdate(project) {
   if (text && !text.hasAttribute('data-draft')) text.value = project.instructions;
   renderInstructionsHead();
   document.getElementById('onboarding-strip')?.replaceWith(onboardingStrip(project));
+  renderGithubStrip();
 }
 
 /** Each onboarding step's place in the four (1, creating the scheme, is done by the time this shows). */
@@ -147,6 +148,27 @@ export function onboardingStrip(project) {
   return h('div', { id: 'onboarding-strip', class: 'onboarding-strip' },
     h('span', {}, project.onboarding_mode === 'tune-up' ? 'Tuning up' : 'Setting up'), ' · ',
     h('span', {}, `${step[1]} (${step[0]} of 4)`), ' · ', skip);
+}
+
+/** "GitHub repo not created: <error> · Retry" in the minions panel while a new scheme's repo isn't on GitHub (#173). */
+export function renderGithubStrip() {
+  const el = document.getElementById('github-strip');
+  if (!el) return;
+  const p = view.project;
+  el.hidden = !p.github_error;
+  if (!p.github_error) return el.replaceChildren();
+  const retry = h('button', { type: 'button', class: 'secondary small' }, 'Retry');
+  retry.onclick = async () => {
+    retry.disabled = true;
+    retry.textContent = 'Retrying…';
+    try {
+      onProjectUpdate(await api(`api/projects/${p.id}/github`, { method: 'POST' }));
+    } catch (err) {
+      // The server saved the new error and broadcast it; show it now in case the stream is slow.
+      onProjectUpdate({ ...view.project, github_error: err.message.replace(/^GitHub repo not created: /, '') });
+    }
+  };
+  el.replaceChildren(h('span', { class: 'error' }, `GitHub repo not created: ${p.github_error}`), retry);
 }
 
 /**
@@ -389,7 +411,8 @@ export function appInstructionsEditor() {
       'A scheme instruction overrides one of these only where it names the rule it replaces.'),
     textarea,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
-    history);
+    history,
+    githubOwnerField());
   (async () => {
     try {
       appInstructions = await api('api/app/instructions');
@@ -407,6 +430,33 @@ export function appInstructionsEditor() {
   loadHistory();
   setTimeout(renderAppInstructionsHead);
   return section;
+}
+
+/** The GitHub account new schemes' repos are made under; blank uses the owner of Citadel's own repo. */
+function githubOwnerField() {
+  const input = h('input', { id: 'github-owner', spellcheck: 'false', autocomplete: 'off', disabled: true });
+  const status = h('span', { class: 'muted', role: 'status' });
+  const save = h('button', { type: 'button', class: 'secondary' }, 'Save');
+  const show = (s) => {
+    input.value = s.github_owner ?? '';
+    input.placeholder = s.github_owner_default ?? 'caraminden';
+    input.disabled = false;
+  };
+  save.onclick = async () => {
+    save.disabled = true;
+    try {
+      show(await api('api/app/settings', { method: 'PUT', body: { github_owner: input.value } }));
+      status.textContent = 'Saved.';
+    } catch (err) {
+      status.textContent = err.message;
+    }
+    save.disabled = false;
+  };
+  api('api/app/settings').then(show, (err) => { status.textContent = `Could not load it: ${err.message}`; });
+  return h('div', { class: 'github-owner' },
+    h('h3', { class: 'settings-label' }, 'GitHub owner for new schemes'),
+    h('p', { class: 'muted small' }, 'A scheme started with a new repo gets a private GitHub repo under this account or organisation. Blank uses the owner of Citadel\'s own repo.'),
+    h('div', { class: 'row' }, input, save, status));
 }
 
 /** Main panel: edit the project's instructions, or import them from Claude Code. */

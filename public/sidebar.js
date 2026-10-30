@@ -26,23 +26,23 @@ export async function openStartScheme() {
   app.replaceChildren(h('div', { class: 'card new-scheme' }, h('h2', {}, 'New scheme'), newSchemeForm()));
 }
 
-/** Where a new scheme's code comes from; `soon` ones wait for #173's server side. */
+/** Where a new scheme's code comes from. */
 const SOURCES = [
-  { value: 'new', label: 'New repo (private, on GitHub too)', soon: true },
+  { value: 'new', label: 'New repo (private, on GitHub too)' },
   { value: 'url', label: 'Clone from a URL', field: 'repoUrl', placeholder: 'https://github.com/caraminden/gamedevtest.git' },
-  { value: 'folder', label: 'Clone a folder on perigee', field: 'folder', placeholder: '~/projects/…', soon: true },
+  { value: 'folder', label: 'Clone a folder on perigee', field: 'folder', placeholder: '~/projects/…' },
   { value: 'none', label: 'No code (docs, research, art)' },
 ];
 
-/** Picked at first: no code, so a scheme with just a name still creates (#173 makes it 'new', as the mockup has). */
-const DEFAULT_SOURCE = 'none';
+/** Picked at first, as the mockup has. */
+const DEFAULT_SOURCE = 'new';
 
 /** Name, code source and what it's about for a new scheme; on success it opens the scheme. */
 function newSchemeForm() {
   const sources = SOURCES.map((s) => h('label', { class: 'source' },
-    h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === DEFAULT_SOURCE, disabled: !!s.soon }),
-    h('span', {}, s.label, s.soon ? h('span', { class: 'muted' }, ' (soon)') : ''),
-    s.field ? h('input', { name: s.field, 'data-draft': true, placeholder: s.placeholder, disabled: !!s.soon }) : ''));
+    h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === DEFAULT_SOURCE }),
+    h('span', {}, s.label),
+    s.field ? h('input', { name: s.field, 'data-draft': true, placeholder: s.placeholder }) : ''));
   const form = h('form', {},
     h('label', {}, 'Name', h('input', { name: 'name', required: true, maxlength: 80, 'data-draft': true })),
     h('fieldset', { class: 'sources' }, h('legend', {}, 'Code'), ...sources),
@@ -68,7 +68,7 @@ function newSchemeForm() {
     const err = form.querySelector('.error');
     const source = form.source.value;
     for (const b of form.querySelectorAll('button[type=submit]')) b.disabled = true;
-    btn.textContent = source === 'url' ? 'Cloning…' : 'Creating…';
+    btn.textContent = source === 'url' || source === 'folder' ? 'Cloning…' : 'Creating…';
     try {
       const p = await api('api/projects', { method: 'POST', body: {
         name: form.name.value, source, repoUrl: form.repoUrl.value, folder: form.folder.value, about: form.about.value, setup: btn.value === 'setup',

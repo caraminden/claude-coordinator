@@ -1,6 +1,6 @@
 // Schemes: their settings and instructions, new minions, the property registry, schedules, the inbox,
 // search, and one Taskmaster writing to another's.
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { cleanPluginDirs, cleanRules, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
@@ -11,6 +11,7 @@ import { inboxItems } from '../inbox.ts';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { TAG_TO_TYPE } from '../property-seed.ts';
+import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type Source } from '../scheme-repo.ts';
 import { describeCron, type Schedule } from '../schedules.ts';
 import { KIT } from '../runner.ts';
 import { claudeConfigDir } from '../sessions.ts';
@@ -20,6 +21,28 @@ import { HttpError, json, oneOf, readJson, str, ticketView, type App, type Ctx, 
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
+
+/** `owner/name` of the GitHub repo a new scheme called `name` gets. */
+async function newRepoSlug(app: App, name: string): Promise<string> {
+  const owner = app.store.getSetting<string>(GITHUB_OWNER) ?? await citadelOwner();
+  if (!owner) throw new HttpError(400, `Set the GitHub owner for new schemes in Settings → ${APP_NAME}-wide first`);
+  const repo = repoName(name);
+  if (!repo) throw new HttpError(400, 'The scheme name needs a letter or digit to name its GitHub repo');
+  return `${owner}/${repo}`;
+}
+
+/** Put a new scheme's repo on GitHub, recording the outcome on the scheme for its strip. */
+async function putOnGithub(app: App, projectId: number, dir: string, slug: string, checked: boolean): Promise<Project> {
+  try {
+    await pushToGithub(dir, slug, checked);
+    app.store.setProjectUpstream(projectId, githubUrl(slug), null);
+  } catch (err) {
+    app.store.setProjectUpstream(projectId, null, errorText(err));
+  }
+  const saved = app.store.getProject(projectId)!;
+  app.broadcast({ type: 'project', project: saved });
+  return saved;
+}
 
 /** The project's coordinator ticket, created the first time someone opens the project. */
 export async function ensureCoordinator(app: App, project: Project): Promise<Ticket> {
@@ -43,7 +66,13 @@ export async function ensureCoordinator(app: App, project: Project): Promise<Tic
   return store.getCoordinator(project.id)!;
 }
 
-const SOURCES = ['new', 'url', 'folder', 'none'] as const;
+/** Where a new scheme's code came from, for the kickoff message. */
+function codeLine(p: Project, source: Source, folder: string | null): string {
+  if (source === 'none') return 'no code';
+  if (source === 'url') return `cloned from ${p.repo_url}`;
+  if (source === 'folder') return `cloned from the folder ${folder}${p.repo_url !== folder ? `, origin ${p.repo_url}` : ''}`;
+  return p.github_error ? `a new repo; its GitHub repo wasn't created yet (${p.github_error})` : `a new repo, on GitHub at ${p.repo_url}`;
+}
 
 /** The first message a new scheme's Taskmaster gets from "Create and set up": the form, quoted. */
 export function kickoff(name: string, code: string, by: string, about: string): string {
@@ -152,36 +181,89 @@ export const projectRoutes: Route[] = [
       if (app.preview) throw new HttpError(403, 'A preview can\'t start schemes');
       const body = await readJson(req);
       const name = str(body.name, 'Name', 80);
+      // Checked first too, so a taken name doesn't cost a GitHub lookup; the unique index still decides.
+      if (app.store.listProjects().some((p) => p.name === name)) throw new HttpError(409, 'A scheme with that name already exists');
       const repoUrl = typeof body.repoUrl === 'string' && body.repoUrl.trim() ? body.repoUrl.trim() : null;
-      // Where the code comes from (the contract with #173): left out, it follows repoUrl as before.
-      const source = oneOf(body.source ?? null, SOURCES, 'source') ?? (repoUrl ? 'url' : 'none');
-      if (source === 'new' || source === 'folder') throw new HttpError(400, `Schemes from a ${source === 'new' ? 'new repo' : 'folder'} aren't built yet`);
-      if (source === 'url' && !repoUrl) throw new HttpError(400, 'Give the repo URL to clone');
-      if (repoUrl && !/^(https:\/\/|git@)/.test(repoUrl)) throw new HttpError(400, 'Repo URL must be https:// or git@');
+      // Without a source (older forms), a URL means clone it and none means no repo.
+      const source = (oneOf(body.source ?? null, SOURCES, 'Source') ?? (repoUrl ? 'url' : 'none')) as Source;
+      let upstream: string | null = null;
+      let folder: string | null = null;
+      let slug: string | null = null;
       const about = body.about == null || body.about === '' ? '' : str(body.about, 'About', 4000);
       // "Create and set up" starts the Taskmaster's onboarding; "Create only" (and older callers) skip it.
       const setup = body.setup === true;
+      if (source === 'url') {
+        if (!repoUrl) throw new HttpError(400, 'Repo URL is required');
+        if (!/^(https:\/\/|git@)/.test(repoUrl)) throw new HttpError(400, 'Repo URL must be https:// or git@');
+        upstream = repoUrl;
+      } else if (source === 'folder') {
+        const checked = await checkFolder(str(body.folder, 'Folder', 4096), app.dataDir);
+        if ('error' in checked) throw new HttpError(400, checked.error);
+        folder = checked.path;
+      } else if (source === 'new') {
+        slug = await newRepoSlug(app, name);
+        // Refused before anything exists, with the name shown so the person can pick another.
+        if (await githubRepoExists(slug) === true) throw new HttpError(409, `GitHub repo ${slug} already exists; pick another scheme name`);
+      }
       let project;
       try {
-        project = app.store.createProject(name, source === 'url' ? repoUrl : null);
+        project = app.store.createProject(name, upstream);
       } catch {
         throw new HttpError(409, 'A scheme with that name already exists');
       }
-      if (source === 'url') {
+      if (source !== 'none') {
+        const dir = join(projectDir(app.dataDir, project.id), 'repo');
         try {
-          app.store.setProjectRepoDir(project.id, await cloneProject(app.dataDir, project.id, repoUrl!));
+          if (source === 'url') await cloneProject(app.dataDir, project.id, repoUrl!);
+          else {
+            // Project ids can be reused after a failed create; clear any leftover partial repo.
+            await rm(dir, { recursive: true, force: true });
+            await mkdir(dir, { recursive: true });
+            if (source === 'folder') app.store.setProjectUpstream(project.id, await cloneFolder(folder!, dir), null);
+            else await initRepo(dir, name, about);
+          }
+          app.store.setProjectRepoDir(project.id, dir);
         } catch (err: any) {
           app.store.deleteProject(project.id);
           await removeProjectDir(app.dataDir, project.id);
-          throw new HttpError(400, `Could not clone repo: ${err.stderr?.trim() || err.message}`);
+          throw new HttpError(400, `${source === 'new' ? 'Could not make the repo' : 'Could not clone repo'}: ${errorText(err)}`);
         }
+        // A GitHub failure keeps the scheme: the strip on it offers Retry, so a blip doesn't lose the form.
+        if (source === 'new') await putOnGithub(app, project.id, dir, slug!, true);
       }
       app.store.setProjectSettings(project.id, { onboarding: setup ? 'interview' : 'skipped' });
       if (setup) {
         const coordinator = await ensureCoordinator(app, app.store.getProject(project.id)!);
-        app.runner.send(coordinator.id, APP_NAME, kickoff(name, source === 'url' ? `cloned from ${repoUrl}` : 'no code', session.name, about));
+        app.runner.send(coordinator.id, APP_NAME, kickoff(name, codeLine(app.store.getProject(project.id)!, source, folder), session.name, about));
       }
       return json(res, 201, app.store.getProject(project.id));
+    },
+  },
+  {
+    // Try again to put a new scheme's repo on GitHub after it failed at creation.
+    method: 'POST', path: '/api/projects/:project/github', who: ['person'],
+    async handler({ res, app, project }) {
+      if (app.preview) throw new HttpError(403, 'A preview can\'t make GitHub repos');
+      if (!project.github_error || !project.repo_dir) throw new HttpError(409, 'This scheme has no GitHub repo waiting to be made');
+      const saved = await putOnGithub(app, project.id, project.repo_dir, await newRepoSlug(app, project.name), false);
+      if (saved.github_error) throw new HttpError(502, `GitHub repo not created: ${saved.github_error}`);
+      return json(res, 200, saved);
+    },
+  },
+  {
+    // Citadel-wide settings: the GitHub owner new schemes' repos are made under.
+    method: ['GET', 'PUT'], path: '/api/app/settings', who: ['person'],
+    async handler({ req, res, app }) {
+      if (req.method === 'PUT') {
+        const body = await readJson(req);
+        if (body.github_owner !== undefined) {
+          const owner = typeof body.github_owner === 'string' ? body.github_owner.trim() : '';
+          if (owner && !validOwner(owner)) throw new HttpError(400, 'GitHub owner must be an account or organisation name, like caraminden');
+          if (owner) app.store.setSetting(GITHUB_OWNER, owner);
+          else app.store.deleteSetting(GITHUB_OWNER);
+        }
+      }
+      return json(res, 200, { github_owner: app.store.getSetting<string>(GITHUB_OWNER), github_owner_default: await citadelOwner() });
     },
   },
   {

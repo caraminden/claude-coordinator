@@ -1,6 +1,6 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, setView, threadHref, usageMeter, view } from './core.js';
-import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderMachinesShelf } from './settings.js';
+import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachinesShelf } from './settings.js';
 import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
 import { chatSection, chatView, mountChat } from './thread.js';
@@ -99,6 +99,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label' }, 'Minions'), schedulesButton()),
     newTicketForm(projectId),
+    h('div', { id: 'github-strip', class: 'github-strip', hidden: true }),
     inboxStrip(),
     // The coordinator sits above the search so it stays one click away while searching.
     h('div', { id: 'coordinator-row' }),
@@ -140,6 +141,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderMachinesShelf();
   renderShelf();
   renderSidebar();
+  renderGithubStrip();
   refreshInbox();
   prefetchTopRows();
   if (main.kind === 'artifacts') renderArtifactResults();

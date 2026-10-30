@@ -1100,6 +1100,12 @@ dialog.viewer .composer .picker { display: none; }
 /* Needs-you inbox (#74): a strip at the top of the minions list, minimized to a count until opened. */
 .inbox-strip { margin: 0 0 0.5rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .inbox-strip[hidden] { display: none; }
+.github-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; margin: 0 0 0.5rem; padding: 0.4rem 0.7rem; border: 1px solid var(--error); border-radius: 8px; background: var(--panel); font-size: 0.9em; }
+.github-strip[hidden] { display: none; }
+.github-strip .error { flex: 1 1 12rem; overflow-wrap: anywhere; }
+.github-strip button.small { padding: 0.2rem 0.65rem; font-size: 0.9em; }
+.github-owner .row { gap: 0.5rem; }
+.github-owner input { max-width: 16rem; }
 .inbox-toggle { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.35rem 0.7rem; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 0.9em; text-align: left; cursor: pointer; }
 .inbox-toggle:hover { color: var(--accent); }
 .inbox-toggle .label { font-weight: 600; }

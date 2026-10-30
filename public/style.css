@@ -220,6 +220,8 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .ticket-head .pnote button { flex: none; }
 .ticket-head .note-btn { flex: none; display: inline-flex; align-items: center; gap: 0.3rem; height: var(--head-btn); padding: 0 0.45rem; border: 0; border-radius: 6px; background: none; color: var(--muted); }
 .ticket-head .note-btn:is(:hover, :focus-visible) { background: var(--line); color: var(--ink); }
+.ticket-head .pin-btn.on { color: var(--accent); }
+.ticket-head .pin-btn.on .icon { fill: currentColor; }
 .thread-row .ship-badge { display: inline-block; margin-right: 0.4rem; padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.85em; font-weight: 650; line-height: 1.3;
   color: var(--c); background: color-mix(in srgb, var(--c) 13%, var(--panel)); }
 .ticket-head .meta { color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -632,6 +634,7 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .g-other > h3 { color: hsl(30 35% 48%); }
 .g-idea > h3 { color: hsl(45 75% 42%); }
 .g-parked > h3 { color: var(--muted); }
+.g-pinned > h3 { color: var(--accent); }
 .thread-row { text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 0.4rem; align-items: baseline; padding: 0.25rem 0.45rem; border-radius: 6px; text-decoration: none; color: var(--ink); font-size: 0.9em; border: 1px solid transparent; }
 .thread-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }
 .thread-row:hover { border-color: var(--line); }

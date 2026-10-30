@@ -76,7 +76,7 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-const ICONS = { back: 'M10.25 3.5 5.75 8l4.5 4.5', forward: 'M5.75 3.5 10.25 8l-4.5 4.5', close: 'M4 4l8 8M12 4l-8 8' };
+const ICONS = { back: 'M10.25 3.5 5.75 8l4.5 4.5', forward: 'M5.75 3.5 10.25 8l-4.5 4.5', close: 'M4 4l8 8M12 4l-8 8', pin: 'M5.5 2.5h5M6.5 2.5v4l-2 3h7l-2-3v-4M8 9.5V14' };
 /** A line icon in the text colour. Drawn on its own centre, so it sits dead centre in its button, as a font's glyph doesn't. */
 export function icon(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -367,6 +367,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'turn') renderCost();
     if (msg.type === 'ticket') onTicketUpdate(msg.ticket);
     if (msg.type === 'person_note') onPersonNote(msg);
+    if (msg.type === 'ticket_pin') onTicketPin(msg);
     if (msg.type === 'event') {
       onEvent(msg.event);
       inboxEvent(msg.event);
@@ -472,7 +473,7 @@ async function resync() {
   if (view?.kind !== 'project') return route();
   // Refresh in place so a half-typed message in the composer survives.
   try {
-    const [{ coordinator, tickets, seen, person_notes }, artifacts, chat] = await Promise.all([
+    const [{ coordinator, tickets, seen, person_notes, pins }, artifacts, chat] = await Promise.all([
       api(`api/projects/${view.projectId}`),
       api(`api/projects/${view.projectId}/artifacts`),
       view.id ? api(`api/tickets/${view.id}`) : null,
@@ -481,6 +482,7 @@ async function resync() {
     view.tickets = new Map(tickets.map((t) => [t.id, t]));
     view.seen = seen ?? view.seen;
     view.personNotes = person_notes ?? view.personNotes;
+    view.pins = pins ?? view.pins;
     if (view.id) markSeen(view.id);
     renderSidebar();
     setArtifacts(artifacts);
@@ -583,6 +585,15 @@ function onTicketUpdate(ticket) {
     // You're looking at it, so whatever it changed to is seen too.
     if (document.visibilityState === 'visible') markSeen(ticket.id);
   }
+}
+
+/** You pinned or unpinned a minion, maybe in another tab (#179); others' pins aren't yours to show. */
+export function onTicketPin({ name, projectId, ticketId, pinned }) {
+  if (name !== me || view?.kind !== 'project' || view.projectId !== projectId || !view.pins) return;
+  view.pins = view.pins.filter((id) => id !== ticketId);
+  if (pinned) view.pins.push(ticketId);
+  renderSidebar();
+  if (view.id === ticketId) renderTicketHead();
 }
 
 /** Someone set or cleared people's note on a minion (#146). */

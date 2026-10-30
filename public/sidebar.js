@@ -196,6 +196,10 @@ export function renderSidebar() {
     h('section', { class: `thread-group g-${s.build ? 'build' : s.key}` },
       h('h3', {}, s.build ? ['Build ', s.build, s.current ? h('span', { class: 'muted' }, ' current') : ''] : s.key === 'parked' ? 'Parked' : s.tag ? TAGS[s.tag].section : 'Other'),
       s.rows.sort(byUrgency).map((t) => threadRow(t))));
+  // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
+  const byId = new Map(open.map((t) => [t.id, t]));
+  const pinned = (view.pins ?? []).map((id) => byId.get(id)).filter(Boolean);
+  const pinnedGroup = pinned.length ? h('section', { class: 'thread-group g-pinned' }, h('h3', {}, 'Pinned'), pinned.map((t) => threadRow(t))) : '';
   let closedGroup = '';
   if (closed.length) {
     // Closed threads stay out of the way but can still be opened and reopened.
@@ -203,7 +207,7 @@ export function renderSidebar() {
     closedGroup.addEventListener('toggle', () => { view.showClosed = closedGroup.open; });
   }
   el.replaceChildren(
-    ...sections, closedGroup,
+    pinnedGroup, ...sections, closedGroup,
     !all.length ? h('p', { class: 'muted' }, 'No minions yet. Ask the Taskmaster to start one, or type in the box above.')
       : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : '');
 }

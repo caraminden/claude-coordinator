@@ -1,5 +1,5 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
+import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
@@ -318,7 +318,7 @@ export function renderTicketHead() {
       h('span', { class: 'spacer' }),
       phone ? '' : nav),
     coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
-    h('div', { class: 'head-sub' }, stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : propertyChip(t),
+    h('div', { class: 'head-sub' }, stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
       h('span', { class: 'spacer' }), ...actions, view.findEl ?? '', phone ? nav : ''),
     view.progressEl);
   renderTyping();
@@ -391,6 +391,23 @@ function editPersonNote(t) {
   noteEdit = { id: t.id, el };
   renderTicketHead();
   input.focus();
+}
+
+// ---------- your pins (#179) ----------
+
+/** Pin or unpin the minion to the Pinned section atop your own list. */
+function pinButton(t) {
+  const pinned = view.pins?.includes(t.id);
+  const toggle = async () => {
+    try {
+      await api(`api/tickets/${t.id}/pin`, { method: 'PUT', body: { pinned: !pinned } });
+      onTicketPin({ name: me, projectId: t.project_id, ticketId: t.id, pinned: !pinned }); // the stream says so too, maybe later
+    } catch (e) {
+      alertNote(e.message);
+    }
+  };
+  return h('button', { type: 'button', class: `note-btn pin-btn${pinned ? ' on' : ''}`, title: pinned ? 'Unpin from the top of your list' : 'Pin to the top of your list (only you see your pins)', 'aria-label': pinned ? 'Unpin' : 'Pin', 'aria-pressed': String(!!pinned), onclick: toggle },
+    icon('pin'), h('span', { class: 'wide-only' }, pinned ? 'Pinned' : 'Pin'));
 }
 
 /** Where the minion's change is, branch to live, in a word or two; the full line and why it is stuck are on hover (src/branch.ts). */

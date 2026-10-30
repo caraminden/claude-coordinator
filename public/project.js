@@ -46,7 +46,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   if (main.kind === 'chat' && view?.kind === 'project' && view.projectId === projectId && document.getElementById('threads')) {
     if (await switchChat(main, seq)) return;
   }
-  const [{ project, coordinator, tickets, seen, person_notes }, artifacts, shared, projects, machines] = await Promise.all([
+  const [{ project, coordinator, tickets, seen, person_notes, pins }, artifacts, shared, projects, machines] = await Promise.all([
     api(`api/projects/${projectId}`),
     // An empty shelf beats a broken page if the server is older than this front end.
     api(`api/projects/${projectId}/artifacts`).catch(() => []),
@@ -67,6 +67,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
     personNotes: person_notes ?? {}, // ticket id -> people's note on it { text, by, at } (#146)
+    pins: pins ?? [], // ticket ids you pinned, oldest pin first (#179)
     artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects,
     file: main.file ?? null,
     ...chatView(chatId, ticket),
@@ -162,9 +163,9 @@ async function switchChat(main, seq) {
   if (!chatId) return false;
   const [{ ticket }, page] = await Promise.all([api(`api/tickets/${chatId}`), loadEvents(chatId)]);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
-  const { kind, projectId, project, coordinator, tickets, seen, personNotes, artifacts, shared, showClosed } = view;
+  const { kind, projectId, project, coordinator, tickets, seen, personNotes, pins, artifacts, shared, showClosed } = view;
   setView({
-    kind, main: 'chat', projectId, project, coordinator, tickets, seen, personNotes, artifacts, shared, showClosed,
+    kind, main: 'chat', projectId, project, coordinator, tickets, seen, personNotes, pins, artifacts, shared, showClosed,
     artifactId: null, file: null,
     ...chatView(chatId, ticket),
   });

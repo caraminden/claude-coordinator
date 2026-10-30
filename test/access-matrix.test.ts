@@ -49,7 +49,7 @@ const bearer = (id: number) => ({ Authorization: `Bearer ${tokens.agentToken(id)
 type Probe = { method: string; path: string; fresh?: 'schedule' | 'machine' };
 const P = (method: string, path: string, fresh?: Probe['fresh']): Probe => ({ method, path, fresh });
 const TICKET_ROUTES: Probe[] = [
-  P('GET', '/api/tickets/:t'), P('PATCH', '/api/tickets/:t'), P('PUT', '/api/tickets/:t/person-note'), P('POST', '/api/tickets/:t/seen'),
+  P('GET', '/api/tickets/:t'), P('PATCH', '/api/tickets/:t'), P('PUT', '/api/tickets/:t/person-note'), P('PUT', '/api/tickets/:t/pin'), P('POST', '/api/tickets/:t/seen'),
   P('GET', '/api/tickets/:t/branch'), P('GET', '/api/tickets/:t/file'), P('PUT', '/api/tickets/:t/uploads'),
   P('GET', '/api/tickets/:t/events'), P('GET', '/api/tickets/:t/events?after=0'),
   P('GET', '/api/tickets/:t/events?before=1000&limit=5&from=1'), P('POST', '/api/tickets/:t/messages'), P('POST', '/api/tickets/:t/unqueue'),

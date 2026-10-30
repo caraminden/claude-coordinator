@@ -279,7 +279,9 @@ export const projectRoutes: Route[] = [
       const seen = caller ? {} : app.store.seenTimes(session.name, project.id);
       // People's notes (#146) are for people only: a minion or the Taskmaster gets none.
       const person_notes = caller ? {} : app.store.personNotes(project.id);
-      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, seen, person_notes });
+      // This person's pinned minions (#179), oldest pin first.
+      const pins = caller ? [] : app.store.pinnedTickets(session.name, project.id);
+      return json(res, 200, { project, coordinator: ticketView(app, coordinator.id), tickets, seen, person_notes, pins });
     },
   },
   {

@@ -369,6 +369,14 @@ CREATE TABLE IF NOT EXISTS person_notes (
   updated_by TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
+-- Minions a person pinned to the top of their list (#179): per login name, like ticket_seen. No foreign key,
+-- like person_notes, so an older release's deleteTicket still works after a rollback.
+CREATE TABLE IF NOT EXISTS ticket_pins (
+  name TEXT NOT NULL,
+  ticket_id INTEGER NOT NULL,
+  pinned_at INTEGER NOT NULL,
+  PRIMARY KEY (name, ticket_id)
+);
 CREATE TABLE IF NOT EXISTS shared_pins (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
@@ -439,7 +447,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 11; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error
+export const SCHEMA_VERSION = 12; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -717,6 +725,7 @@ export class Store {
     this.db.prepare('DELETE FROM turns WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM brief_starts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
@@ -906,6 +915,20 @@ export class Store {
       .prepare('INSERT INTO ticket_seen (name, ticket_id, seen_at) VALUES (?, ?, ?) ON CONFLICT(name, ticket_id) DO UPDATE SET seen_at = excluded.seen_at')
       .run(name, ticketId, now);
     return now;
+  }
+
+  /** The minions `name` pinned in a project, oldest pin first (#179). */
+  pinnedTickets(name: string, projectId: number): number[] {
+    // A pin older than its minion belongs to a deleted one whose id was reused: a rolled-back release's deleteTicket leaves it behind.
+    const rows = this.db
+      .prepare('SELECT p.ticket_id FROM ticket_pins p JOIN tickets t ON t.id = p.ticket_id WHERE p.name = ? AND t.project_id = ? AND p.pinned_at >= t.created_at ORDER BY p.pinned_at, p.ticket_id')
+      .all(name, projectId) as { ticket_id: number }[];
+    return rows.map((r) => r.ticket_id);
+  }
+
+  setTicketPinned(name: string, ticketId: number, pinned: boolean) {
+    if (pinned) this.db.prepare('INSERT INTO ticket_pins (name, ticket_id, pinned_at) VALUES (?, ?, ?) ON CONFLICT(name, ticket_id) DO NOTHING').run(name, ticketId, Date.now());
+    else this.db.prepare('DELETE FROM ticket_pins WHERE name = ? AND ticket_id = ?').run(name, ticketId);
   }
 
   /** People's notes on a scheme's minions, by ticket id. Only people's routes may hand these out. */

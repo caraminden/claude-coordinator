@@ -159,6 +159,19 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    // A person's own pin (#179): the minion shows in a Pinned section atop their list, for them only.
+    method: 'PUT', path: '/api/tickets/:ticket/pin', who: ['person'], refuse: 'Only people pin minions',
+    async handler({ req, res, app, session, ticket }) {
+      if (ticket.kind !== 'ticket') throw new HttpError(400, `The ${AGENT_NAME} can't be pinned`);
+      const body = await readJson(req);
+      if (typeof body.pinned !== 'boolean') throw new HttpError(400, 'pinned must be true or false');
+      app.store.setTicketPinned(session.name, ticket.id, body.pinned);
+      // Every stream gets it; each tab keeps only its own person's pins.
+      app.broadcast({ type: 'ticket_pin', name: session.name, projectId: ticket.project_id, ticketId: ticket.id, pinned: body.pinned });
+      return json(res, 200, { pinned: body.pinned });
+    },
+  },
+  {
     method: 'POST', path: '/api/tickets/:ticket/seen', who: ['person'], refuse: 'Only people mark minions seen',
     async handler(ctx) {
       const { res, session, app, ticket } = ctx;

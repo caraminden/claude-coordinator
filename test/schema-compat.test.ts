@@ -45,6 +45,9 @@ test(`the last release's Store (${prev}) reads and writes a database this code h
   const noted = now.createTicket({ project_id: project.id, title: 'Noted', permission_mode: 'default', created_by: 'Cara' });
   now.setPersonNote(noted.id, 'a note', 'Cara');
   now.db.prepare('UPDATE person_notes SET updated_at = 1 WHERE ticket_id = ?').run(noted.id); // well before the minion that reuses its id
+  // So has a pin (#179).
+  now.setTicketPinned('Cara', noted.id, true);
+  now.db.prepare('UPDATE ticket_pins SET pinned_at = 1 WHERE ticket_id = ?').run(noted.id);
   now.db.close();
 
   const old = new PrevStore(file);
@@ -71,6 +74,7 @@ test(`the last release's Store (${prev}) reads and writes a database this code h
   assert.equal(again.getTicket(added.id)!.title, 'After rollback');
   assert.equal(added.id, noted.id, 'the newest id is reused');
   assert.equal(again.personNotes(project.id)[added.id], undefined, "the deleted minion's note left behind doesn't show on the new one");
+  assert.deepEqual(again.pinnedTickets('Cara', project.id), [], "nor does its pin");
   assert.equal(again.getSetting('schema_version'), SCHEMA_VERSION);
   assert.deepEqual(again.listClaudeState(project.id, ticket.id).map((r) => r.path).sort(), ['projects/x/1.jsonl', 'projects/x/2.jsonl'], "sessions from both releases");
   again.db.close();

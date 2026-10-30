@@ -99,6 +99,7 @@ tokenize() {
             ch = substr(s, j, 1)
             if (dq != "") { if (ch == dq) dq = ""; else d = d ch; continue }
             if (ch == "\047" || ch == "\"") { dq = ch; continue }
+            if (ch == "$" && index("\047\"", substr(s, j + 1, 1))) continue # <<$'EOF' ends at EOF
             if (ch == "\\") { j++; d = d substr(s, j, 1); continue }
             if (index(" \t\r\n;&|()<>", ch)) break
             d = d ch
@@ -330,7 +331,11 @@ self_test() {
   t 2 Bash topic $'bash <<EOF\ngit push origin main\nEOF'
   t 2 Bash topic $'cat <<A; bash <<\'B\'\nit\'s\nA\ngit push origin main\nB'
   t 2 Bash topic $'cat <<A; git commit -F - <<B\nit\'s\nA\nso\'s this\nB\ngit push origin main'
+  t 2 Bash topic $'git commit -F - <<$\'EOF\'\nit\'s\nEOF\ngit push origin main'
+  t 2 Bash topic $'git commit -F - <<\\EOF\nit\'s\nEOF\ngit push origin main'
+  t 2 Bash topic $'git commit -F - <<\'EOF\'\r\nit\'s\r\nEOF\r\ngit push origin main'
   t 0 Bash topic 'git push origin topic && echo $((1 << 2))'
+  t 2 Bash topic $'echo $((1 << 2))\ngit push origin main'
   t 0 Bash topic 'bash -c "git push origin topic"'
   t 0 PowerShell topic 'git push origin topic'
   t 0 PowerShell topic 'git push origin topic <# main #>'

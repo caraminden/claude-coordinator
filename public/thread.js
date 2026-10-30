@@ -301,22 +301,24 @@ export function renderTicketHead() {
     working ? h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')) : '');
   stateFit?.disconnect();
   if (working) stateFit?.observe(stateLabel);
-  // The title's line keeps who it is and the way out; the line under it takes the state, where the
-  // change is, the tools and the buttons (#158), so the title has room.
+  const nav = h('span', { class: 'head-nav' },
+    // Through the views opened in this tab, never off the site (public/navstack.js).
+    h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
+    h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
+    // Leaves the thread as it is and goes back to the project's coordinator.
+    coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close')));
+  // The title's line keeps who it is (and on wider screens the way out); the line under it takes the
+  // state, where the change is, the tools and the buttons, and on phones ‹ › × after Find (#158), so the title has room.
+  const phone = narrow.matches;
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       h('span', { class: 'spacer' }),
-      h('span', { class: 'head-nav' },
-        // Through the views opened in this tab, never off the site (public/navstack.js).
-        h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
-        h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
-        // Leaves the thread as it is and goes back to the project's coordinator.
-        coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close')))),
+      phone ? '' : nav),
     coord ? '' : personNoteLine(t),
     h('div', { class: 'head-sub' }, stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : propertyChip(t),
-      h('span', { class: 'spacer' }), ...actions, view.findEl ?? ''),
+      h('span', { class: 'spacer' }), ...actions, view.findEl ?? '', phone ? nav : ''),
     view.progressEl);
   renderTyping();
   // While a turn runs, a sent message waits for it; said on hover rather than in a line of its own.
@@ -324,6 +326,10 @@ export function renderTicketHead() {
   if (send) send.title = t.status === 'running' ? 'Runs after the current turn' : '';
   scheduleProgress();
 }
+
+// Phones put ‹ › × on the line under the title, so turning a tablet across the breakpoint redraws the bar.
+const narrow = matchMedia('(max-width: 800px)');
+narrow.addEventListener('change', () => { if (view.ticket) renderTicketHead(); });
 
 // Squeezed is measured against the text's own width, taken while it shows (the label itself may have
 // grown into spare room): once the dots are in, the label is narrower than its text for as long as the room stays short.

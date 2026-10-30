@@ -18,14 +18,17 @@ new ResizeObserver(() => {
 // Phones: edge swipes pull out the overview (left) and threads (right) panels as drawers.
 initDrawers();
 // Phones: a refresh button at the top of the screen, since an installed app has no browser reload.
-// It lives in the top bar and, on pages that hide the top bar, at the right end of the first thread
-// bar's title line. Thread bars are rebuilt often, so it is put back after each change.
+// It lives in the top bar and, on pages that hide the top bar, in the first thread bar: just before
+// ‹ › × where it has them, else after the title. Thread bars are rebuilt often, so it is put back after each change.
 document.querySelector('.topbar .refresh-btn').addEventListener('click', reloadNow);
 new MutationObserver(() => {
   const row = app.querySelector('.ticket-head > .row');
-  if (!row || row.querySelector(':scope > .refresh-btn')) return;
+  const head = row?.parentElement;
+  if (!row || head.querySelector('.refresh-btn')) return;
   const btn = h('button', { type: 'button', class: 'refresh-btn', title: 'Refresh', 'aria-label': 'Refresh', onclick: reloadNow }, '↻');
-  row.insertBefore(btn, row.querySelector(':scope > h2')?.nextSibling ?? row.firstChild);
+  const nav = head.querySelector('.head-nav');
+  if (nav) nav.prepend(btn);
+  else row.insertBefore(btn, row.querySelector(':scope > h2')?.nextSibling ?? row.firstChild);
 }).observe(app, { childList: true, subtree: true });
 // Keep relative times honest: the usage readout, and the minions list's waits and usage-reset countdowns.
 setInterval(() => {

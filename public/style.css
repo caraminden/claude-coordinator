@@ -763,7 +763,7 @@ mark.find.current { background: var(--waiting); color: #fff; }
 /* Refresh button at the top of the screen, phones only (desktop browsers have their own). */
 .refresh-btn { display: none; }
 @media (max-width: 800px) {
-  .topbar .refresh-btn, .ticket-head > .row > .refresh-btn {
+  .topbar .refresh-btn, .ticket-head > .row > .refresh-btn, .ticket-head .head-nav > .refresh-btn {
     display: inline-flex; flex: none; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; padding: 0;
     border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 1.2rem; line-height: 1; cursor: pointer;
   }
@@ -773,15 +773,18 @@ mark.find.current { background: var(--waiting); color: #fff; }
   .ticket-head > .row:has(> .dot) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 3.45rem); }
   /* Pages with a close × (Settings, Artifacts…) keep it on the title's line too. */
   .ticket-head > .row:has(> .close-view) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 5.3rem); }
-  /* ‹ › × share the title's line. */
-  .chat > .ticket-head > .row > h2:is(*, :has(+ .refresh-btn)) { flex: 1 1 0; }
   /* A minion's state shares its line with where the change is (wrapping to two lines before it is cut short);
-     the tools, the buttons and Find take the next, after a break (::after), so the buttons sit left of Find. */
+     the tools, the buttons, Find and ↻ ‹ › × take the next, after a break (::after). */
   .ticket-head .head-sub > .head-state { flex: 1 1 0; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; }
   .ticket-head .head-sub:has(> .prop-chip)::after { content: ''; order: 1; flex-basis: 100%; height: 0; margin-top: -0.35rem; }
   .ticket-head .head-sub:has(> .prop-chip) > :not(.head-state, .ship) { order: 2; }
   /* A minion's ✎ for a new person note (#146): just the pen on phones. */
   .ticket-head .note-btn { width: 1.9rem; height: 1.9rem; justify-content: center; padding: 0; }
+  /* To share that line, ↻ ‹ › × are narrower than tall, and Find is just its 🔍 until tapped. */
+  .ticket-head .head-sub .head-nav { margin-left: auto; }
+  .ticket-head .head-sub .head-nav > :is(.nav-btn, .close-view) { width: 2rem; }
+  .ticket-head .head-sub .head-nav > .refresh-btn { width: 1.7rem; height: var(--head-btn); }
+  .ticket-head .head-sub .chat-find:placeholder-shown:not(:focus) { width: 2.4rem; padding-right: 0; }
 }
 .composer .add-image { line-height: 1.4; }
 /* Attach, the pickers and Send (with its ▾) share one height, content centred; taller on phones to stay tappable. */
@@ -1061,7 +1064,7 @@ body:has(dialog.viewer[open]) { overflow: hidden; }
 dialog.viewer > .chat { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid var(--line); padding: 0 0.75rem; font-size: 0.88rem; }
 dialog.viewer .ticket-head { top: 0; margin: 0 0 0.75rem; }
 dialog.viewer .ticket-head > .row > h2 { font-size: 0.95rem; }
-dialog.viewer .ticket-head :is(.prop-chip, .find-box, .head-nav, .close-view, button[title='Dismiss minion']) { display: none; }
+dialog.viewer .ticket-head :is(.prop-chip, .find-box, .head-nav > :not(.refresh-btn), .close-view, button[title='Dismiss minion']) { display: none; }
 dialog.viewer .msg .file-preview img, dialog.viewer .msg .file-preview video { max-height: 10rem; }
 dialog.viewer .composer textarea { min-height: 2.6rem; height: 2.6rem; }
 dialog.viewer .composer .picker { display: none; }
@@ -1071,9 +1074,9 @@ dialog.viewer .composer .picker { display: none; }
   dialog.viewer > .chat { border-left: 0; border-top: 1px solid var(--line); }
   .viewer-bar .meta, .viewer-bar a.wide-only { display: none; }
   .viewer-stage { padding: 0.4rem; }
-  /* The chat gets little height here: title and Stop share one line, the state and where the change is the next, and the readout waits for the full chat. */
-  dialog.viewer .ticket-head > .row > h2:is(*, :has(+ .refresh-btn)) { flex: 1 1 0; -webkit-line-clamp: 1; line-clamp: 1; }
-  dialog.viewer .ticket-head .head-sub::after { display: none; }
+  /* The chat gets little height here: the title takes one line, the state, where the change is, Stop and ↻ the next, and the readout waits for the full chat. */
+  dialog.viewer .ticket-head > .row > h2 { -webkit-line-clamp: 1; line-clamp: 1; }
+  dialog.viewer .ticket-head .head-sub::after, dialog.viewer .ticket-head .head-sub > .spacer { display: none; }
   dialog.viewer .ticket-head .progress { display: none; }
   dialog.viewer .ticket-head { margin-bottom: 0.5rem; }
 }

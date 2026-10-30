@@ -62,14 +62,38 @@ json_field() {
 # with a \034 line wherever a new command starts (; & | ( ) newline, and backticks in bash).
 # A word holding $, a backtick, ( or a {a,b} brace list outside single quotes gets a \035 in
 # it: the shell fills it in at run time, so the guard cannot know what it names.
-# A bash heredoc's body comes out after its line as one \036 word (newlines as \037) between
-# \034 lines, for check_command to check as a command of its own: read inline, an apostrophe
-# in a commit message opened a quote that hid every later command, a push included.
+# A bash heredoc's body is cut out of the line, so an apostrophe in a commit message can't
+# open a quote that hides the commands after it. What in it runs comes out after its line as a
+# \036 word (newlines as \037) between \034 lines, for check_command to check on its own: the
+# whole body when its line runs a shell (bash <<EOF, cat <<EOF | sh), else only the $(...) and
+# backtick substitutions of an unquoted <<EOF. The rest is data (gh pr create --body-file -).
 # ps=1 switches to PowerShell rules: backtick escapes, backslash is literal, <# #> comments.
 # ps=2 is cmd.exe: ^ escapes, and no single quotes, comments or backtick substitution.
 tokenize() {
   printf '%s' "$1" | awk -v ps="$2" '
-    function flush() { if (intok) { gsub(/\n/, " ", tok); print tok; tok = ""; intok = 0 } }
+    function flush(   b) {
+      if (!intok) return
+      gsub(/\n/, " ", tok)
+      # shortcut: any shell word on the line counts, not just the heredoc'\''s own pipeline.
+      b = tolower(tok); sub(/[<>].*$/, "", b); sub(/.*[\/\\]/, "", b); sub(/\.exe$/, "", b)
+      if (b ~ /^(sh|bash|zsh|dash|ksh|fish|pwsh|powershell|cmd|source)$/) shellline = 1
+      print tok; tok = ""; intok = 0
+    }
+    function emit(t) { gsub(/\n/, "\037", t); print "\036" t; print "\034" }
+    # The $(...) and `...` substitutions of an unquoted heredoc body: they run even when it is data.
+    function substitutions(b,   k, m, c2, e2, depth, start) {
+      m = length(b)
+      for (k = 1; k <= m; k++) {
+        c2 = substr(b, k, 1)
+        if (c2 == "\\") { k++; continue }
+        if (c2 == "`") { e2 = index(substr(b, k + 1), "`"); if (!e2) e2 = m - k + 1; emit(substr(b, k + 1, e2 - 1)); k += e2; continue }
+        if (c2 == "$" && substr(b, k + 1, 1) == "(") {
+          start = k + 2; depth = 1
+          for (k = start; k <= m; k++) { c2 = substr(b, k, 1); if (c2 == "(") depth++; else if (c2 == ")" && !--depth) break }
+          emit(substr(b, start, k - start))
+        }
+      }
+    }
     { s = s (NR > 1 ? "\n" : "") $0 }
     END {
       n = length(s); q = ""; tok = ""; intok = 0; nh = 0
@@ -93,37 +117,38 @@ tokenize() {
         }
         # <<WORD, <<-WORD or <<'WORD' (not <<<): note the delimiter; the body starts on the next line.
         if (ps == "0" && c == "<" && substr(s, i + 1, 1) == "<" && substr(s, i + 2, 1) != "<" && (i == 1 || substr(s, i - 1, 1) != "<")) {
-          j = i + 2; strip = 0; d = ""; dq = ""
+          j = i + 2; strip = 0; d = ""; dq = ""; quoted = 0
           if (substr(s, j, 1) == "-") { strip = 1; j++ }
           while (substr(s, j, 1) == " " || substr(s, j, 1) == "\t") j++
           for (; j <= n; j++) {
             ch = substr(s, j, 1)
             if (dq != "") { if (ch == dq) dq = ""; else d = d ch; continue }
-            if (ch == "\047" || ch == "\"") { dq = ch; continue }
+            if (ch == "\047" || ch == "\"") { dq = ch; quoted = 1; continue }
             if (ch == "$" && index("\047\"", substr(s, j + 1, 1))) continue # <<$'EOF' ends at EOF
-            if (ch == "\\") { j++; d = d substr(s, j, 1); continue }
+            if (ch == "\\") { j++; d = d substr(s, j, 1); quoted = 1; continue }
             if (index(" \t\r\n;&|()<>", ch)) break
             d = d ch
           }
-          if (d != "") { nh++; hd[nh] = d; hs[nh] = strip }
+          if (d != "") { nh++; hd[nh] = d; hs[nh] = strip; hq[nh] = quoted }
         }
         if (c == "(" || (c == "`" && ps == "0")) { tok = tok "\035"; intok = 1 }
         if (c == "\n" || c == ";" || c == "&" || c == "|" || c == "(" || c == ")" || (c == "`" && ps == "0")) {
           flush(); print "\034"
           if (c == "\n") {
             for (h = 1; h <= nh; h++) {
-              body = ""
+              body = ""; ended = 0
               while (i < n) {
                 e = index(substr(s, i + 1), "\n")
                 line = e ? substr(s, i + 1, e - 1) : substr(s, i + 1)
                 i = e ? i + e : n
                 cmp = line; sub(/\r$/, "", cmp); if (hs[h]) sub(/^\t+/, "", cmp)
-                if (cmp == hd[h]) break
+                if (cmp == hd[h]) { ended = 1; break }
                 body = body line "\n"
               }
-              gsub(/\n/, "\037", body); print "\036" body; print "\034"
+              # No end line: likely no heredoc at all ($((1 << 2))), so check the rest as commands.
+              if (shellline || !ended) emit(body); else if (!hq[h]) substitutions(body)
             }
-            nh = 0
+            nh = 0; shellline = 0
           }
           continue
         }
@@ -337,6 +362,18 @@ self_test() {
   t 2 Bash topic $'git commit -F - <<\'EOF\'\r\nit\'s\r\nEOF\r\ngit push origin main'
   t 0 Bash topic 'git push origin topic && echo $((1 << 2))'
   t 2 Bash topic $'echo $((1 << 2))\ngit push origin main'
+  # A heredoc body is data unless its line runs a shell; an unquoted one's substitutions still run.
+  t 0 Bash topic $'gh pr create --title T --body-file - <<\'EOF\'\nRun `git push origin main` to ship.\nEOF'
+  t 0 Bash topic $'gh pr create --body-file - <<\'EOF\'\ngit push origin main\nEOF'
+  t 0 Bash topic $'gh pr create --body-file - <<EOF\ngit push origin main\nEOF'
+  t 0 Bash topic $'git commit -F - <<\'EOF\'\nsee `git push origin main`\nEOF'
+  t 0 Bash topic $'git commit -F - <<EOF\nDon\'t git push origin main\nEOF'
+  t 2 Bash topic $'gh pr create --body-file - <<EOF\nRun `git push origin main` to ship.\nEOF'
+  t 2 Bash topic $'cat <<EOF\n$(git push origin main)\nEOF'
+  t 2 Bash topic $'bash <<\'EOF\'\ngit push origin main\nEOF'
+  t 2 Bash topic $'sh -s <<\'EOF\'\ngit push origin main\nEOF'
+  t 2 Bash topic $'cat <<\'EOF\' | bash\ngit push origin main\nEOF'
+  t 2 Bash topic $'gh pr create --body-file - <<\'EOF\'\nit\'s data\nEOF\ngit push origin main'
   t 0 Bash topic 'bash -c "git push origin topic"'
   t 0 PowerShell topic 'git push origin topic'
   t 0 PowerShell topic 'git push origin topic <# main #>'

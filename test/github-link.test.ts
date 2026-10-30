@@ -224,3 +224,30 @@ test('a message from someone else waits for its own turn instead of steering; a 
   assert.equal(env(t.dir).token, 'gho_new');
   await finish(r, t);
 });
+
+test('through the server: Link GitHub goes to GitHub for a scheme you can see; a stray callback links nothing and says so', async () => {
+  const { bootServer } = await import('./helpers.ts');
+  const bootRoot = join(root, 'boot');
+  mkdirSync(join(bootRoot, 'data'), { recursive: true });
+  const scheme = new Store(join(bootRoot, 'data', 'coordinator.db')).createProject('Linked', null);
+  const s = await bootServer({ root: bootRoot, env: { GITHUB_CLIENT_ID: 'cid', GITHUB_CLIENT_SECRET: 'csecret' } });
+  try {
+    const get = (path: string) => fetch(s.base + path, { headers: { Cookie: s.cookie }, redirect: 'manual' });
+    const go = await get(`/api/github/link?project=${scheme.id}`);
+    assert.equal(go.status, 302);
+    const to = new URL(go.headers.get('location')!);
+    assert.equal(to.origin + to.pathname, 'https://github.com/login/oauth/authorize');
+    assert.equal(to.searchParams.get('redirect_uri'), `${s.base}/api/github/callback`);
+    assert.equal(to.searchParams.get('client_id'), 'cid');
+    assert.equal((await get('/api/github/link?project=99999')).status, 400);
+    const back = await get('/api/github/callback?state=forged&code=c');
+    assert.equal(back.status, 302);
+    assert.equal(back.headers.get('location'), '../../');
+    const status = (await s.call('/api/me/github')).data;
+    assert.equal(status.configured, true);
+    assert.equal(status.link, null);
+    assert.match(status.error, /expired or was for someone else/);
+  } finally {
+    s.stop();
+  }
+});

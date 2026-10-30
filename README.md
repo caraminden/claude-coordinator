@@ -144,7 +144,8 @@ Configuration comes from the environment:
 | --- | --- | --- |
 | `COORDINATOR_PASSWORD` | (required, 12+ chars) | The admin's master password: it signs in as the admin whose login is typed (or the first admin for any other login). Never hand it out; invite people instead |
 | `COORDINATOR_ADMIN` | `Cara` | Name of the admin made on first start, when the database has no people yet; their login is the name in lower case |
-| `SESSION_SECRET` | (required, 32+ chars) | Signs session cookies |
+| `SESSION_SECRET` | (required, 32+ chars) | Signs session cookies, and encrypts people's linked accounts: changing it unlinks everyone's GitHub |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | (unset: turns use the box's gh login) | The OAuth App people link their own GitHub through (below) |
 | `HOST` / `PORT` | `127.0.0.1` / `8573` | Listen address |
 | `DATA_DIR` | `~/.local/share/claude-coordinator` | Database, clones, worktrees |
 | `CLAUDE_BIN` | `claude` | Claude Code executable |
@@ -213,6 +214,25 @@ systemctl --user enable --now claude-coordinator-backup.timer claude-coordinator
 
 Turns run as the service's user with that user's Claude Code login, so every
 minion currently uses Cara's account.
+
+**People's own GitHub.** With an OAuth App set up, each person links their GitHub
+in Settings → Your account, and a turn pushes and opens pull requests as the
+person it runs for (who sent its messages; a relay counts as its sender's
+person). A turn for someone who hasn't linked gets no GitHub login at all, so it
+commits but can't push, and says so. Without the OAuth App, turns use the box's
+own `gh` login as before. To set it up, once:
+
+1. On github.com: Settings → Developer settings → OAuth Apps → New OAuth App.
+   Homepage `https://cara.apps.webplatformisbestplatform.net`, callback
+   `https://cara.apps.webplatformisbestplatform.net/api/github/callback`.
+2. Generate a client secret, and add both to `~/.config/claude-coordinator/env`
+   as `GITHUB_CLIENT_ID=…` and `GITHUB_CLIENT_SECRET=…`, then restart.
+3. Link your own GitHub too: from then on an unlinked person's turns, the
+   admin's included, can't push.
+
+Tokens are kept encrypted with a key from `SESSION_SECRET`; changing that secret
+leaves every link needing linking again. Deploys still push `main` with the box's
+`gh` login, and the pull-request watcher reads with it.
 
 ### Deploying
 

@@ -112,7 +112,7 @@ export const peopleRoutes: Route[] = [
     handler({ req, res, app, url, session }) {
       if (!app.github.configured) throw new HttpError(503, 'GitHub linking isn\'t set up on this server yet: an admin adds the OAuth App (see the README).');
       const project = Number(url.searchParams.get('project'));
-      if (!Number.isSafeInteger(project) || !app.store.canSee(session, project)) throw new HttpError(400, 'Which scheme\'s Settings to come back to?');
+      if (!Number.isSafeInteger(project) || !app.store.getProject(project) || !app.store.canSee(session, project)) throw new HttpError(400, 'Which scheme\'s Settings to come back to?');
       res.writeHead(302, { Location: app.github.authorizeUrl(uidOf(session), project, callbackUrl(req)), 'Cache-Control': 'no-store' }).end();
     },
   },

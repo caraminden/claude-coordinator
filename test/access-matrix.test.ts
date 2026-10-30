@@ -66,7 +66,7 @@ const TICKET_ROUTES: Probe[] = [
 ];
 const OTHER_ROUTES: Probe[] = [
   P('POST', '/api/login'), P('POST', '/api/logout'), P('GET', '/api/health'), P('GET', '/api/me'),
-  P('GET', '/api/invite/not-a-token'), P('POST', '/api/invite/not-a-token'), P('PUT', '/api/me/password'),
+  P('GET', '/api/invite/not-a-token'), P('POST', '/api/invite/not-a-token'), P('PUT', '/api/me/password'), P('GET', '/api/me/github'), P('DELETE', '/api/me/github'), P('GET', '/api/github/link?project=:p'), P('GET', '/api/github/callback?state=x&code=y'),
   P('GET', '/api/people'), P('POST', '/api/people'), P('POST', '/api/people/999/invite'), P('PATCH', '/api/people/999'),
   P('DELETE', '/api/people/999'), P('GET', '/api/projects/:p/members'), P('POST', '/api/projects/:p/members'),
   P('DELETE', '/api/projects/:p/members/999'),

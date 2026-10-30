@@ -56,7 +56,8 @@ Ask one question: will the session need what this step reads, or only what it co
 - **The jobs are parallel and alike.** Several takes, several reviewers, a check per module: one
   session with subagents costs far less than one session per item, because each of those
   sessions gets woken at its own large context for every feedback round. Use a session per item
-  only when a person asks for one.
+  only when a person asks for one. More than four similar jobs run as one session with Sonnet
+  Grunts and one collated page (see "Fan-outs" below).
 
 ## Keep the step in the session when
 
@@ -78,11 +79,28 @@ that ever filled its context; code reads for review fixes were 34%.
 
 The brief is the worker's only context, so it names: the branch and its head, the step's own
 text in the skill (point at it, don't retype it), the repo's merge rules, and what to return in
-at most 15 lines: the pushed sha, tests green or red with counts, each conflict and how it was
+at most 15 lines (3 lines in a fan-out, see below): the pushed sha, tests green or red with counts, each conflict and how it was
 resolved, files touched, and anything left undone. A conflict that needs a judgment call is not
 the worker's to settle: it stops at its last green commit and returns the question. One worker
 writes the branch at a time; the session commits before starting it and leaves the tree alone
 while it runs. The session trusts the summary and CI; it does not re-run what the worker ran.
+
+## Fan-outs: one page, not a stream
+
+A turn that starts more than 2 Grunts, or loops one Grunt more than once, is a fan-out. Added on
+Delve #55 (Cara, 2026-10-30): 8 drawers and 8 critics over 3 rounds put about 16 reports of 20 to
+40 lines each into the chat per round. Every Grunt's report lands in the chat as well as in your
+context, so a fan-out must not return prose.
+
+- Each Grunt writes its full report to a file, in the worktree or in scratch outside the shared
+  folder, and returns at most 3 lines: verdict, path, one headline. Put that in every brief.
+- You read the files, or hand them to one Sonnet Grunt to collate, and write ONE page. Link it
+  once. Picks go on a `citadel:docs-and-mocks` review page; findings go in a doc. Either lands
+  in the shared folder by kind (`reports/`, `mockups/`; read its README).
+- Once the page is written, delete the per-Grunt files. Rounds after the first update the same
+  page rather than starting another.
+- The 3-line return still has to carry anything that blocks you, such as "failed, no file
+  written". Don't ask a Grunt to hide a failure to keep the return short.
 
 ## What else fills a session
 

@@ -701,7 +701,17 @@ export class Store {
   setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort' | 'machine_tools' | 'onboarding' | 'onboarding_mode'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
+    // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).
+    const was = this.getProject(id);
+    if (fields.onboarding && onboardingOpen(fields as Pick<Project, 'onboarding'>) && (fields.onboarding === 'interview' || (was && !onboardingOpen(was)))) {
+      this.setSetting(`onboarding_opened:${id}`, Date.now());
+    }
     this.db.prepare(`UPDATE projects SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? ''), id);
+  }
+
+  /** When this scheme's current setup or tune-up round opened, or 0 for one opened before that was recorded. */
+  onboardingOpenedAt(id: number): number {
+    return this.getSetting<number>(`onboarding_opened:${id}`) ?? 0;
   }
 
   /** Change a project's display name; its repo, folders and links go by id and stay put. */

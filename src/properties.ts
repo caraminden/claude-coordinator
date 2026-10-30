@@ -585,8 +585,15 @@ export class Registry {
       if (actor.kind !== 'person') throw new PropertyError('New and archived keys need a person; ask Cara or Josh', 403);
       if (action === 'approve' && k.status === 'proposed') {
         // One click settles the key and everything listed under it (#180); single values can be archived or merged after.
-        this.db.prepare("UPDATE property_keys SET status = 'active' WHERE id = ?").run(k.id);
-        this.db.prepare("UPDATE property_values SET status = 'active', reviewed = 1 WHERE key_id = ? AND status != 'archived'").run(k.id);
+        this.db.exec('BEGIN');
+        try {
+          this.db.prepare("UPDATE property_keys SET status = 'active' WHERE id = ?").run(k.id);
+          this.db.prepare("UPDATE property_values SET status = 'active', reviewed = 1 WHERE key_id = ? AND status != 'archived'").run(k.id);
+          this.db.exec('COMMIT');
+        } catch (err) {
+          this.db.exec('ROLLBACK');
+          throw err;
+        }
       } else if (action === 'reject' && k.status === 'proposed') {
         this.db.prepare('DELETE FROM property_values WHERE key_id = ?').run(k.id);
         this.db.prepare('DELETE FROM property_keys WHERE id = ?').run(k.id);

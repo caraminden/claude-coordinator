@@ -225,14 +225,20 @@ test('keys and values an approved setup plan names go in approved, only while th
   assert.equal((await register('zone', [], t)).data.status, 'proposed', 'a key the plan never names');
 
   // A newer plan card, even one naming the key, takes the approval away until a person approves it.
-  const next = await call(`/api/tickets/${tm}/plans`, { method: 'POST', body: { summary: 'More', plan: '`mode`, `extra`' }, token: t });
+  const next = await call(`/api/tickets/${tm}/plans`, { method: 'POST', body: { summary: 'More', plan: '`mode`, `extra`, `quarry`, `lantern`' }, token: t });
   assert.equal((await register('mode', [], t)).data.status, 'proposed');
   await call(`/api/tickets/${tm}/verdict`, { method: 'POST', body: { planId: next.data.id, verdict: 'approve' } });
   t = await token(3);
 
-  // Once setup is done, an old approved plan counts for nothing, even if the Taskmaster names the key.
+  // Once setup is done, an old approved plan counts for nothing, even if the Taskmaster names the key...
   await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { onboarding: 'done' }, token: t });
   assert.equal((await register('extra', [], t)).data.status, 'proposed');
+  // ...nor after the Taskmaster reopens onboarding by itself, at any step: it needs a newly approved plan.
+  for (const step of ['setting-up', 'interview'] as const) {
+    await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { onboarding: 'done' }, token: t });
+    await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { onboarding: step }, token: t });
+    assert.equal((await register(step === 'interview' ? 'lantern' : 'quarry', [], t)).data.status, 'proposed', step);
+  }
   // A person's key is live as always.
   assert.equal((await call(`/api/projects/${p.id}/properties/keys`, { method: 'POST', body: { key: 'personal', description: 'x' } })).data.status, 'active');
 });

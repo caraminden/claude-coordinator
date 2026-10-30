@@ -129,14 +129,14 @@ function actorFor({ session, caller: t, app, project }: Ctx): Actor {
 
 /**
  * While this scheme's setup or tune-up is open, the text of the plan a person approved in its
- * Taskmaster's chat (#180). The newest plan card must be approved: only a person can do that, so a
- * Taskmaster that reopens onboarding by itself still has nothing to register under.
+ * Taskmaster's chat (#180). The newest plan card must be approved, by a person (only they can), after
+ * this round opened: a Taskmaster that reopens onboarding by itself has no plan to register under.
  */
 function approvedSetupPlan(app: App, project: Project, t: Ticket): string | undefined {
   if (!onboardingOpen(project) || t.project_id !== project.id) return undefined;
   const card = app.store.latestPlan(t.id);
   const plan = card && JSON.parse(card.data);
-  return plan?.status === 'approved' ? `${plan.summary}\n${plan.plan}` : undefined;
+  return plan?.status === 'approved' && plan.at > app.store.onboardingOpenedAt(project.id) ? `${plan.summary}\n${plan.plan}` : undefined;
 }
 
 /** What people and Claude said in an event, for searching (not tool calls or their output). */

@@ -7,6 +7,7 @@ import { AGENT_NAME } from '../auth.ts';
 import { commentMessage, optionImageProblem } from '../artifacts.ts';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, TICKET_TAGS, type Ticket, type TicketState, type TicketTag } from '../db.ts';
 import { historyPage } from '../history.ts';
+import { parseMerge, prInfo } from '../merge-card.ts';
 import { previewPath } from '../previews.ts';
 import { NOTIFY_STATES } from '../push.ts';
 import { tripwireConfig } from '../runner.ts';
@@ -419,7 +420,13 @@ export const ticketRoutes: Route[] = [
       const tool = str(body.tool_name, 'Tool name', 300);
       const input = body.input && typeof body.input === 'object' ? body.input : {};
       const project = store.getProject(ticket.project_id)!;
-      const r = runner.approvals.ask(id, tool, input, ticket.cwd, tripwireConfig(project.id, claudeConfigDir(process.env), true), lines(project.approval_rules).length > 0);
+      const rules = lines(project.approval_rules).length > 0;
+      // A merge's card shows the PR, looked up once now as the turn's own GitHub login.
+      const merge = rules && tool === 'Bash' && typeof input.command === 'string' ? parseMerge(input.command) : null;
+      const env = merge && runner.turnGithubEnv(id);
+      const pr = merge && env ? await prInfo(merge, ticket.cwd, env) : null;
+      if (merge && !runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
+      const r = runner.approvals.ask(id, tool, input, ticket.cwd, tripwireConfig(project.id, claudeConfigDir(process.env), true), rules, merge ? { ...merge, pr } : undefined);
       return json(res, 'id' in r ? 201 : 200, r);
     },
   },

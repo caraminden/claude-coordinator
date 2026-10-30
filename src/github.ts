@@ -200,7 +200,7 @@ const QUERY = `query($owner: String!, $name: String!, $branch: String!) {
 
 const PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED', 'STALE']);
 
-function check(node: any): Check {
+export function check(node: any): Check {
   if (node.__typename === 'StatusContext') {
     const s = node.state;
     return { name: node.context, url: node.targetUrl ?? null, status: s === 'SUCCESS' ? 'passed' : s === 'PENDING' || s === 'EXPECTED' ? 'pending' : 'failed' };

@@ -76,6 +76,17 @@ test('the end of a turn expires what still waits', async () => {
   assert.deepEqual(unsettledCards([{ kind: 'approval', data: '{"id":"a"}' }, { kind: 'approval', data: '{"id":"b"}' }, { kind: 'approval_result', data: '{"id":"a"}' }]), ['b']);
 });
 
+test('a merge card carries the PR it names; a refused call posts nothing', () => {
+  const posted: any[] = [];
+  const a = new Approvals((_t, kind, data) => kind === 'approval' && posted.push(data));
+  const cfg = { home: '/home/u', data: '/home/u/data', checkout: '/home/u/app', project: 1, claudeConfig: '/home/u/.claude', deployScript: true };
+  const merge = { target: '192', method: 'squash', pr: { number: 192, title: 'Port the guard' } };
+  assert.ok('id' in a.ask(1, 'Bash', { command: 'gh pr merge 192 --squash' }, '/w', cfg, true, merge));
+  assert.deepEqual(posted[0].merge, merge);
+  assert.ok('refused' in a.ask(2, 'Bash', { command: 'gh pr merge 192 --squash' }, '/w', cfg, false, merge));
+  assert.equal(posted.length, 1);
+});
+
 // ---------- the round trip through the thread's MCP server ----------
 
 // A stand-in for the app's two approval routes, backed by a real Approvals.

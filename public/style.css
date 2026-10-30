@@ -840,6 +840,25 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .acard .acmd.extra { font-size: 0.78em; color: var(--muted); }
 .acard .anote { font-size: 0.85em; color: var(--muted); }
 .acard.answered { border-color: var(--line); }
+/* A gh pr merge card (#200): the PR in place of the command, which sits behind Show command. */
+.mcard .qtitle { margin-bottom: 0; }
+.mcard .mnum { color: var(--muted); font-weight: 500; text-decoration: none; }
+.mcard a.mnum:hover { text-decoration: underline; }
+.mcard .mbranch { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-top: -0.4rem; font-size: 0.85em; color: var(--muted); }
+.mcard .mbranch code { padding: 0.1rem 0.35rem; background: var(--code-bg); border: 1px solid var(--line); border-radius: 4px; color: var(--ink); overflow-wrap: anywhere; }
+.mcard .mmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.8rem; font-size: 0.85em; color: var(--muted); }
+.mcard .mmethod { padding: 0.1rem 0.5rem; border: 1px solid color-mix(in srgb, var(--held) 40%, var(--line)); border-radius: 999px; color: var(--held); font-weight: 600; }
+.mcard .ok { color: var(--done); font-weight: 600; }
+.mcard .bad { color: var(--error); font-weight: 600; }
+.mcard .mwarn { margin-top: -0.4rem; font-size: 0.85em; color: var(--waiting); }
+.mcard .mtoggle { align-self: flex-start; margin: -0.4rem 0; padding: 0.2rem 0; background: none; border: 0; color: var(--muted); font-size: 0.82em; }
+.mcard .mtoggle:hover { color: var(--ink); }
+.mcard .mcall { display: flex; flex-direction: column; gap: 0.75rem; }
+.mcard .mcall .desc { margin-top: 0; }
+.mcard .mcall[hidden] { display: none; }
+.mcard button.go { background: var(--done); color: #fff; font-weight: 600; font-size: 0.85em; padding: 0.3rem 0.8rem; }
+.mcard.answered .anote { display: none; }
+@media (prefers-color-scheme: dark) { .mcard button.go { color: #0b1f12; } }
 .acard.answered > .who, .acard.answered .chip { color: var(--muted); border-color: var(--line); }
 /* Options with pictures: a gallery of tiles, each a thumbnail (opens full size) over its pick button. */
 .pcard .pbody { border-left: 3px solid color-mix(in srgb, var(--running) 35%, var(--line)); padding-left: 0.75rem; overflow-wrap: anywhere; }

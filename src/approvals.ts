@@ -110,12 +110,12 @@ export class Approvals {
     this.emit = emit;
   }
 
-  /** Post a card in the thread's chat for one tool call; returns its id. */
-  request(ticketId: number, tool: string, input: unknown, tripwire?: { reason: string; explanation: string }): string {
+  /** Post a card in the thread's chat for one tool call; returns its id. `merge` is the PR a `gh pr merge` names (src/merge-card.ts). */
+  request(ticketId: number, tool: string, input: unknown, tripwire?: { reason: string; explanation: string }, merge?: object): string {
     const id = randomBytes(8).toString('hex');
     let shown = JSON.stringify(input ?? {});
     if (shown.length > MAX_INPUT) shown = JSON.stringify({ truncated: shown.slice(0, MAX_INPUT) });
-    const card = { id, tool, input: JSON.parse(shown), ...(tripwire ? { tripwire } : {}) };
+    const card = { id, tool, input: JSON.parse(shown), ...(tripwire ? { tripwire } : {}), ...(merge ? { merge } : {}) };
     this.requests.set(id, { ticketId, tripwire: !!tripwire, decision: { state: 'pending' }, wake: new Set(), card, at: Date.now() });
     this.emit(ticketId, 'approval', card);
     return id;
@@ -128,11 +128,11 @@ export class Approvals {
    * tripwire card needs an explanation, shows the whole call, and is one at a time; after a deny, the
    * turn gets no more. Anything else gets a card only in a project with approval rules, as before.
    */
-  ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean): { id: string } | { refused: string } {
+  ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean, merge?: object): { id: string } | { refused: string } {
     const verdict = tripwire({ tool_name: tool, tool_input: input, cwd }, { ...cfg, ask: true });
     if (verdict && !verdict.ask) return { refused: `The tripwire blocks this. ${verdict.reason}` };
     if (!verdict) {
-      return rules ? { id: this.request(ticketId, tool, input) } : { refused: 'Nobody can answer a permission prompt in this turn, so this was not run.' };
+      return rules ? { id: this.request(ticketId, tool, input, undefined, merge) } : { refused: 'Nobody can answer a permission prompt in this turn, so this was not run.' };
     }
     const why = explanation(input);
     if (!why) return { refused: `${verdict.reason} An approval card needs a Bash description of why; it had none, so this was not run.` };

@@ -905,14 +905,20 @@ function approvalCard(ticketId, card) {
   const lead = typeof input.command === 'string' ? 'command' : typeof input.file_path === 'string' ? 'file_path' : null;
   const rest = lead ? Object.fromEntries(Object.entries(input).filter(([k]) => k !== lead && k !== 'description')) : {};
   const status = h('span', { class: 'muted', role: 'status' });
-  const approve = h('button', { type: 'button', class: 'small' }, 'Approve');
+  const m = card.merge;
+  const approve = h('button', { type: 'button', class: m ? 'go' : 'small' }, m ? MERGE_GO[m.method] ?? 'Approve merge' : 'Approve');
   const deny = h('button', { type: 'button', class: 'small secondary' }, 'Deny');
-  const el = h('div', { class: 'qcard acard' },
-    h('div', { class: 'who' }, speaker('asks to run')),
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, card.tripwire ? 'Tripwire' : 'Needs approval'), toolTitle(card.tool)),
-    typeof input.description === 'string' ? h('div', { class: 'desc' }, card.tripwire ? `Why: ${input.description}` : input.description) : '',
+  const desc = typeof input.description === 'string' ? h('div', { class: 'desc' }, card.tripwire ? `Why: ${input.description}` : input.description) : '';
+  const call = [
     h('pre', { class: 'acmd' }, lead ? input[lead] : JSON.stringify(input, null, 2)),
     Object.keys(rest).length ? h('pre', { class: 'acmd extra' }, JSON.stringify(rest, null, 2)) : '',
+  ];
+  const el = h('div', { class: `qcard acard${m ? ' mcard' : ''}` },
+    ...(m ? mergeHead(m, desc, call) : [
+      h('div', { class: 'who' }, speaker('asks to run')),
+      h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, card.tripwire ? 'Tripwire' : 'Needs approval'), toolTitle(card.tool)),
+      desc, ...call,
+    ]),
     card.tripwire ? h('div', { class: 'anote' }, `Blocked because: ${card.tripwire.reason}`) : '',
     h('div', { class: 'anote' }, `Approve runs this one call once. If the turn ends first, it expires and doesn't run.`),
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), deny, approve));
@@ -941,6 +947,51 @@ function approvalCard(ticketId, card) {
     },
   });
   return el;
+}
+
+const MERGE_METHOD = { squash: 'Squash', merge: 'Merge commit', rebase: 'Rebase' };
+const MERGE_GO = { squash: 'Squash and merge', merge: 'Merge', rebase: 'Rebase and merge' };
+
+/**
+ * The top of a `gh pr merge` card (#200, src/merge-card.ts): the PR's title, branches, method, size and
+ * checks as GitHub gave them when the card was posted, or what the command says if GitHub couldn't
+ * be asked. The minion's description and the full command sit behind Show command.
+ */
+function mergeHead(m, desc, call) {
+  const pr = m.pr;
+  const name = pr ? `#${pr.number}` : m.target == null ? "this branch's PR" : /^\d+$/.test(m.target) ? `PR #${m.target}` : m.target;
+  const shown = h('div', { class: 'mcall', hidden: true }, desc, call);
+  const toggle = h('button', { type: 'button', class: 'mtoggle', 'aria-expanded': 'false' }, '▸ Show command');
+  toggle.addEventListener('click', () => {
+    shown.hidden = !shown.hidden;
+    toggle.setAttribute('aria-expanded', String(!shown.hidden));
+    toggle.textContent = shown.hidden ? '▸ Show command' : '▾ Hide command';
+  });
+  const checks = { passed: ['ok', '✓ checks passed'], failed: ['bad', '✗ checks failed'], pending: ['', '○ checks running'] }[pr?.checks];
+  const warn = [
+    m.auto && '--auto: GitHub merges it by itself once its checks pass, not straight away.',
+    m.admin && "--admin: skips the branch's protection rules.",
+    pr && pr.state && pr.state !== 'OPEN' && `This PR is already ${pr.state.toLowerCase()}.`,
+    pr?.draft && 'This PR is still a draft.',
+    !pr && (m.moved && !m.repo ? "The command changes folder first, so the PR wasn't looked up." : "Couldn't look the PR up on GitHub; this is what the command says."),
+  ].filter(Boolean);
+  return [
+    h('div', { class: 'who' }, speaker('asks to merge')),
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Merge'),
+      pr?.url ? h('a', { class: 'mnum', href: pr.url, target: '_blank', rel: 'noopener' }, name) : h('span', { class: 'mnum' }, name),
+      pr ? ` ${pr.title}` : m.repo ? h('span', { class: 'muted' }, ` in ${m.repo}`) : ''),
+    pr?.head ? h('div', { class: 'mbranch' }, h('code', {}, pr.head), ' → ', h('code', {}, pr.base)) : '',
+    h('div', { class: 'mmeta' },
+      h('span', { class: 'mmethod' }, MERGE_METHOD[m.method] ?? 'Merge method not set'),
+      pr ? [
+        h('span', {}, h('span', { class: 'ok' }, `+${pr.additions}`), ' ', h('span', { class: 'bad' }, `−${pr.deletions}`)),
+        h('span', {}, `${pr.files} ${pr.files === 1 ? 'file' : 'files'}`),
+        h('span', {}, `${pr.commits} ${pr.commits === 1 ? 'commit' : 'commits'}`),
+        checks ? h('span', { class: checks[0] }, checks[1]) : '',
+      ] : ''),
+    ...warn.map((w) => h('div', { class: 'mwarn' }, w)),
+    toggle, shown,
+  ];
 }
 
 // A plan only moves forward: pending, then sent back, then superseded; approved is final.

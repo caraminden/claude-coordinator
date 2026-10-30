@@ -844,6 +844,14 @@ export class Runner {
     return this.turns.has(ticketId);
   }
 
+  /** gh's env for a lookup the server makes for a running turn (#200): the GitHub login that turn runs as; null with no turn. */
+  turnGithubEnv(ticketId: number): Record<string, string> | null {
+    const live = this.turns.get(ticketId);
+    if (!live) return null;
+    const person = this.store.getSetting<TurnState>(turnKey(ticketId))?.person ?? null;
+    return { ...turnEnv(process.env), ...this.githubFor?.(person, live.dir)?.env };
+  }
+
   /** Running turns a restart of this server would kill: those not in a unit of their own. */
   interruptible(): number {
     return [...this.turns.values()].filter((t) => !t.unit).length;

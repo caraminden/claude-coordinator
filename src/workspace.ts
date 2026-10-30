@@ -79,7 +79,9 @@ async function bornBase(repoDir: string, base: string): Promise<string> {
   const tree = await git(['hash-object', '-t', 'tree', '-w', '/dev/null'], repoDir);
   const commit = await git([...await identity(repoDir), 'commit-tree', tree, '-m', 'Start'], repoDir);
   // The empty old value: only if main is still unborn, so two minions created at once agree on one commit.
-  await git(['update-ref', `refs/heads/${branch}`, commit, ''], repoDir).catch(() => {});
+  await git(['update-ref', `refs/heads/${branch}`, commit, ''], repoDir).catch(async (err) => {
+    if (!await ok(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`])) throw err;
+  });
   return branch;
 }
 

@@ -234,15 +234,14 @@ const splitLines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filte
 export function settingsTabs() {
   return h('nav', { class: 'settings-tabs' },
     [['instructions', 'Instructions'], ['app-instructions', 'Citadel-wide'], ['approvals', 'Needs approval'], ['properties', 'Properties']].map(([kind, label]) =>
-      h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label)),
-    h('span', { class: 'spacer' }), tuneUpButton());
+      h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label)));
 }
 
 /** "Tune up" (#175): the Taskmaster runs setup again as a diff on what the scheme has, then the chat opens on it. */
-function tuneUpButton() {
+export function tuneUpButton() {
   const p = view.project;
   const open = p.onboarding !== 'done' && p.onboarding !== 'skipped';
-  const b = h('button', { type: 'button', class: 'secondary', disabled: open,
+  const b = h('button', { type: 'button', class: 'secondary tune-up', disabled: open,
     title: open ? 'Setup is under way: see the Taskmaster\'s chat' : 'The Taskmaster asks what changed and posts a plan of edits for you to approve' }, 'Tune up');
   b.onclick = async () => {
     if (!confirm(`Tune up ${p.name}? The Taskmaster starts a turn, asks what changed, and posts a plan of edits; nothing changes until someone approves it.`)) return;
@@ -307,7 +306,7 @@ export function approvalsEditor() {
   };
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
+      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster is not affected.')),
@@ -332,7 +331,7 @@ function renderInstructionsHead() {
   if (!el) return;
   const p = view.project;
   el.replaceChildren(
-    h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
+    h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
       h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     h('div', { class: 'meta' },
@@ -373,7 +372,7 @@ function renderAppInstructionsHead() {
   if (!el) return;
   const a = appInstructions;
   el.replaceChildren(
-    h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
+    h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
       h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
     h('div', { class: 'meta' },

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Starter design doc (docs-and-mocks skill). Copy beside mockkit.js and mockkit.css, rename, and
+     replace every REPLACE. For a design-system home: status living, and swap the middle sections for
+     tokens (mk-swatches), components (mk-specimen) and rules, each with mk-lives saying where it lives. -->
+<title>REPLACE: the thing being designed</title>
+<link rel="stylesheet" href="mockkit.css">
+<!-- <link rel="stylesheet" href="theme.css"> the scheme's theme, if it has one -->
+<script src="mockkit.js"></script>
+</head>
+<body class="mk">
+<main class="mk-page">
+  <!-- When replaced: <p class="mk-banner">Superseded by <a href="newer.html">the newer page</a> (date).</p> -->
+  <header class="mk-head">
+    <div class="mk-kicker">REPLACE scheme · design doc · #N</div>
+    <h1>REPLACE: the thing being designed</h1>
+    <div class="mk-meta"><span class="mk-status" data-status="review">In review</span><span>REPLACE date</span><span>REPLACE what it builds on</span></div>
+    <p class="mk-lede">REPLACE: one or two sentences on what this decides.</p>
+    <nav class="mk-toc" aria-label="Contents"></nav>
+  </header>
+
+  <section>
+    <h2>The problem</h2>
+    <p>REPLACE: what is wrong or missing, with the real numbers and where they came from.</p>
+  </section>
+
+  <section>
+    <h2>What it touches</h2>
+    <div class="mk-table-wrap"><table class="mk-table">
+      <thead><tr><th>Part</th><th>Change</th><th>Where</th></tr></thead>
+      <tbody><tr><td>REPLACE</td><td>REPLACE</td><td><code>REPLACE/path</code></td></tr></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Options</h2>
+    <div class="mk-options">
+      <div class="mk-option rec mk-item" data-pick="a" data-title="REPLACE option A">
+        <figure class="mk-figure"><img src="REPLACE-a.png" alt="REPLACE"></figure>
+        <h3>REPLACE option A <span class="mk-tag rec">Recommended</span></h3>
+        <ul><li>REPLACE: the idea in a line</li><li>REPLACE: what it costs</li></ul>
+      </div>
+      <div class="mk-option mk-item" data-pick="b" data-title="REPLACE option B">
+        <figure class="mk-figure"><img src="REPLACE-b.png" alt="REPLACE"></figure>
+        <h3>REPLACE option B</h3>
+        <ul><li>REPLACE</li><li>REPLACE</li></ul>
+      </div>
+    </div>
+    <div class="mk-callout rec" data-label="Recommendation"><p>REPLACE: which option and why, in three sentences or fewer.</p></div>
+  </section>
+
+  <section id="questions">
+    <h2>Open questions</h2>
+    <div class="mk-callout question mk-item" data-label="Question 1" data-pick="q1" data-title="Q1 REPLACE short form">
+      <p>REPLACE: the question, phrased so yes or no answers it. Your lean: REPLACE.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Decisions log</h2>
+    <ol class="mk-log">
+      <li><time>REPLACE date</time> · REPLACE who: <q>REPLACE their own words</q></li>
+    </ol>
+  </section>
+</main>
+<script>
+mock.toc();
+mock.picks({ collection: 'options', one: true, root: document.getElementById('options').parentElement });
+mock.picks({ collection: 'questions', options: ['yes', 'no'], root: document.getElementById('questions') });
+</script>
+</body>
+</html>

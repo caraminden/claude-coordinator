@@ -298,8 +298,9 @@ export function applyEvent(p, kind, data) {
   } else if (data.type === 'assistant') {
     for (const block of data.message?.content ?? []) {
       if (block.type === 'text' && block.text?.trim()) {
-        // What Claude said while a step was underway is the best plain summary of that step.
-        const task = p.tasks.find((t) => t.status === 'in_progress');
+        // What Claude said while a step was underway is the best plain summary of that step; a
+        // Grunt's report (a subagent's words) is not.
+        const task = !data.parent_tool_use_id && p.tasks.find((t) => t.status === 'in_progress');
         if (task) task.note = block.text.trim();
         continue;
       }

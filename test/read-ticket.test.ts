@@ -28,6 +28,11 @@ for (let i = 1; i <= MESSAGES; i++) {
   store.addEvent(M.id, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } });
 }
 
+// A minion whose Grunt reported a long wall, then replied itself (#205).
+const G = store.createTicket({ project_id: P.id, kind: 'ticket', title: 'Fan-out', permission_mode: 'default', created_by: 'Cara' });
+store.addEvent(G.id, 'claude', { type: 'assistant', parent_tool_use_id: 'toolu_1', message: { content: [{ type: 'text', text: 'Emberknight has five takes.\n\n**A** reads well.\n**B** clips.' }] } });
+store.addEvent(G.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'All takes are drawn.' }] } });
+
 const tokens = new Auth(PASSWORD, SECRET);
 let srv: Booted;
 before(async () => {
@@ -60,4 +65,11 @@ test('read_ticket shows the last entries of a paged history and counts every ear
   assert.match(text, new RegExp(`\\(${MESSAGES - 5} earlier entries omitted\\)`));
   const shown = text.split('\n\n').filter((l) => l.startsWith('[Cara]'));
   assert.deepEqual(shown, [4, 3, 2, 1, 0].map((k) => MESSAGES - k).map((i) => `[Cara]: message ${i}`));
+});
+
+test("read_ticket folds a Grunt's report to its first line and keeps the minion's reply whole", async () => {
+  const { text } = await readTicket({ ticket_id: store.getTicket(G.id)!.number });
+  assert.match(text, /\(Grunt reported\) Emberknight has five takes\./);
+  assert.doesNotMatch(text, /reads well/);
+  assert.match(text, /\[Claude\]: All takes are drawn\./);
 });

@@ -7,6 +7,7 @@ import { onboardingStrip } from './settings.js';
 import { recapEvent, showRecap } from './recap.js';
 import { noteStrike, struckSource } from './strike.js';
 import { narrationSorter } from './narration.js';
+import { gist, groupTitle, gruntName, gruntOf } from './grunts.js';
 import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
@@ -70,7 +71,7 @@ function renderHistory() {
   const keep = [...pending.map((m) => m.el), document.getElementById('recap')].filter(Boolean);
   Object.assign(view, {
     lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
-    actions: new Map(), turnActions: [], cards: new Map(), heldCards: [],
+    actions: new Map(), turnActions: [], cards: new Map(), heldCards: [], gruntStarts: new Map(),
     // The session started on an earlier page, if there is one.
     sawInit: page.more, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, pendingRequest: [], turnRequest: undefined,
     pendingMessages: [],
@@ -629,7 +630,10 @@ export function appendEvent(event, scroll = true) {
     if (view.pendingRequest?.length) view.turnRequest = view.pendingRequest;
     view.pendingRequest = [];
   }
-  if (event.kind === 'claude' && data.type === 'assistant') {
+  // A Grunt's words fold into its own line, so they aren't the minion's reply or its working line.
+  const grunt = gruntOf(event.kind, data);
+  if (grunt && !view.gruntStarts.has(grunt)) view.gruntStarts.set(grunt, event.created_at);
+  if (event.kind === 'claude' && data.type === 'assistant' && !grunt) {
     for (const b of data.message?.content ?? []) if (b.type === 'text' && b.text.trim()) view.turnNote = b.text.trim();
   }
   for (const { block, taskId } of applyEvent(view.progress, event.kind, data)) {
@@ -714,6 +718,8 @@ export function appendEvent(event, scroll = true) {
     else if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
   } else if (event.kind === 'error') {
     nodes.push(h('div', { class: 'note error' }, data.text));
+  } else if (grunt && data.type === 'assistant') {
+    for (const block of data.message?.content ?? []) if (block.type === 'text' && block.text.trim()) addGruntText(log, grunt, block.text, data, event);
   } else if (event.kind === 'claude') {
     if (data.type === 'system' && data.subtype === 'init') {
       // Every turn re-inits the same session; only announce the first.
@@ -771,6 +777,48 @@ export function appendEvent(event, scroll = true) {
   for (const { text, fate } of settle) settleText(text, fate);
   renderTyping();
   if (scroll && followChat) scrollToBottom();
+}
+
+/**
+ * A Grunt's report as one folded line (its name, gist and how long it ran), merged with the lines just
+ * above it into one "8 Grunts finished" block when several report in a row (a fan-out). More words
+ * from a Grunt whose line is in that block go into the same line.
+ */
+function addGruntText(log, id, text, data, event) {
+  const held = view.heldCards.find((el) => el.isConnected);
+  const prev = held ? held.previousElementSibling : log.lastElementChild;
+  const body = messageBody(text, data.strikes, event.ticket_id, event.id);
+  const start = view.gruntStarts.get(id) ?? event.created_at;
+  view.gruntStarts.delete(id);
+  let lines = prev?.matches('.grunts') ? [...prev.querySelectorAll('.grunt')] : prev?.matches('.grunt') ? [prev] : [];
+  let line = lines.find((l) => l.dataset.grunt === id);
+  // A fan-out is Grunts that ran alongside each other: one started after the block's last report
+  // (the critics after the drawers) starts a block of its own.
+  if (!line && !(start <= Math.max(...lines.map((l) => l.end)))) lines = [];
+  if (line) {
+    line.querySelector('.grunt-body').append(body);
+  } else {
+    const name = gruntName(view.actions.get(id)?.block.input);
+    line = h('details', { class: 'msg coord grunt', 'data-grunt': id, 'data-at': event.created_at },
+      h('summary', {}, h('span', { class: 'who' }, `Grunt · ${name}`), h('span', { class: 'preview' }), h('span', { class: 'dur' })),
+      h('div', { class: 'msg grunt-body' }, body));
+    Object.assign(line, { start, name });
+  }
+  line.end = event.created_at;
+  line.querySelector('.preview').textContent = gist(text);
+  line.querySelector('.dur').textContent = line.end > line.start ? shortDuration(line.end - line.start) : '';
+  if (!lines.length) return held ? held.before(line) : log.append(line);
+  let group = prev;
+  if (!group.matches('.grunts')) {
+    group = h('details', { class: 'msg coord grunts', 'data-at': prev.dataset.at }, h('summary', {}), h('div', { class: 'grunt-list' }));
+    prev.replaceWith(group);
+    group.lastChild.append(prev);
+  }
+  if (!line.isConnected) group.lastChild.append(line);
+  const all = [...group.lastChild.children];
+  group.firstChild.replaceChildren(
+    h('span', { class: 'who' }, groupTitle(all.length, Math.max(...all.map((l) => l.end)) - Math.min(...all.map((l) => l.start)), shortDuration)),
+    h('span', { class: 'preview' }, all.map((l) => l.name).join(', ')));
 }
 
 /**

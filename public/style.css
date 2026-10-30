@@ -252,6 +252,11 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .msg.coord > summary .preview { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .msg.coord[open] > summary .preview { display: none; }
 .msg.coord > .msg { border: 0; background: none; padding: 0 0.85rem 0.6rem; }
+/* Grunt reports fold to a line each (thread.js addGruntText); a fan-out's lines share one block. */
+.msg.grunt > summary .dur { flex: none; font-variant-numeric: tabular-nums; }
+.grunts > .grunt-list { padding: 0 0.6rem 0.5rem; }
+.grunts .grunt { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; }
+.grunts .grunt > summary { padding-left: 0.25rem; padding-right: 0.25rem; }
 .msg p { margin: 0.35rem 0; }
 /* Rendered Markdown (core.js markdownDoc), in messages, plan cards and narration alike: long words and
    paths wrap, and code blocks and tables scroll in their own box, so nothing widens the page. */

@@ -561,7 +561,9 @@ function transcript(events: any[]): string[] {
         .filter((b: any) => b.type === 'text' && b.text.trim())
         .map((b: any) => b.text.trim())
         .join('\n');
-      if (text) out.push(`[Claude]: ${clip(text)}`);
+      // A Grunt's report (a subagent's words) folds to its first line, as it does in the chat.
+      if (text && data.parent_tool_use_id) out.push(`(Grunt reported) ${clip(text.split('\n')[0])}`);
+      else if (text) out.push(`[Claude]: ${clip(text)}`);
     } else if (ev.kind === 'claude' && data.type === 'result') {
       out.push(data.is_error ? '(turn failed)' : '(turn finished)');
     }

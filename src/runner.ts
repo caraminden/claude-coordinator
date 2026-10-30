@@ -461,7 +461,8 @@ function describeActivity(ev: any): string | null {
   const blocks: any[] = ev.message?.content ?? [];
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
-    if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) return b.text.trim().split('\n')[0].replace(/\*\*|`/g, '').slice(0, 160);
+    // A Grunt's report (a subagent's words) isn't what the minion is doing; its tool calls are.
+    if (b?.type === 'text' && !ev.parent_tool_use_id && typeof b.text === 'string' && b.text.trim()) return b.text.trim().split('\n')[0].replace(/\*\*|`/g, '').slice(0, 160);
     // The same plain words as the readout ("Ran the tests", "Edited app.js"), not "Using Bash".
     if (b.type === 'tool_use' && isWorkTool(b.name)) return activityLabel(b);
   }

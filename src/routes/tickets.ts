@@ -2,10 +2,11 @@
 // may do to it. Who may call each route is its `who` (src/http.ts).
 import { randomBytes } from 'node:crypto';
 import { isAbsolute, join, sep } from 'node:path';
-import { lines } from '../approvals.ts';
+import { lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { commentMessage, optionImageProblem } from '../artifacts.ts';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, TICKET_TAGS, type Ticket, type TicketState, type TicketTag } from '../db.ts';
+import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { previewPath } from '../previews.ts';
@@ -230,7 +231,8 @@ export const ticketRoutes: Route[] = [
         return json(res, 202, { ...ticketView(app, id), held: runner.relay(id, id, session.name, text) });
       }
       // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
-      runner.send(id, session.name, text, await saveImages(app, ticket, body.images), {}, !caller && body.after !== true, files);
+      // Only here is a message a person's own typed words, the one kind that can be a go to merge (#201).
+      runner.send(id, session.name, text, await saveImages(app, ticket, body.images), caller ? {} : { typed: true }, !caller && body.after !== true, files);
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },
@@ -425,8 +427,13 @@ export const ticketRoutes: Route[] = [
       const merge = rules && tool === 'Bash' && typeof input.command === 'string' ? parseMerge(input.command) : null;
       const env = merge && runner.turnGithubEnv(id);
       const pr = merge && env ? await prInfo(merge, ticket.cwd, env) : null;
-      if (merge && !runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
-      const r = runner.approvals.ask(id, tool, input, ticket.cwd, tripwireConfig(project.id, claudeConfigDir(process.env), true), rules, merge ? { ...merge, pr } : undefined);
+      // With a person's typed go standing (#201), a plain merge's PR decides whether it skips the card.
+      const goCall = rules && runner.approvals.hasGo(id) ? (tool === 'Bash' ? (plainMerge(String(input.command), merge) ? merge : null) : mcpMerge(tool, input)) : null;
+      const goEnv = goCall && goCall !== merge ? runner.turnGithubEnv(id) : null;
+      const goPr = goCall === merge ? pr : goCall && goEnv ? await prInfo(goCall, ticket.cwd, goEnv) : null;
+      const target = goCall ? mergeTarget(goPr, project.repo_dir ? await originRepo(project.repo_dir) : null, ticket.branch) : null;
+      if ((merge || goCall) && !runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
+      const r = runner.approvals.ask(id, tool, input, ticket.cwd, tripwireConfig(project.id, claudeConfigDir(process.env), true), rules, merge ? { ...merge, pr } : undefined, target);
       return json(res, 'id' in r ? 201 : 200, r);
     },
   },

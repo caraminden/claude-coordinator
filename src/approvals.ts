@@ -3,6 +3,7 @@
 import { randomBytes } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import type { MergeCall, PrInfo } from './merge-card.ts';
 import { explanation, tripwire, type TripwireConfig } from './tripwire.ts';
 
 /** The thread MCP server's tool that Claude Code calls instead of showing a permission prompt. */
@@ -80,8 +81,57 @@ export function pluginDirArgs(dirs: string[], cwd: string): string[] {
 
 export type Decision =
   | { state: 'pending' }
-  | { state: 'allowed' | 'denied'; by: string }
+  | { state: 'allowed' | 'denied'; by: string; via?: { message?: number; text: string } }
   | { state: 'expired'; reason: string };
+
+// A message that is only a go to merge (#201): "merge it", "ok, fold it", "yes merge PR #191", "ship it".
+const GO = /^(?:(?:ok|okay|yes|yep|great|lgtm|looks good|go ahead|go|please),? )?(?:and )?(?:merge|fold|land|squash|ship)(?: (?:it|this|the pr|pr #?(\d{1,7})|#(\d{1,7})|(\d{1,7})))?(?: in)?(?: (?:please|now))?$/;
+
+/** The PR a message that says nothing but "merge it" means: its number, or null for the minion's own; null if it isn't one. */
+export function mergeGo(text: string): { pr: number | null } | null {
+  const m = GO.exec(text.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[.!]+$/, '').trimEnd());
+  if (!m) return null;
+  const n = m[1] ?? m[2] ?? m[3];
+  return { pr: n ? Number(n) : null };
+}
+
+/** A person's go a turn read: who typed it, the PR it names (null: the minion's own) and the message. */
+interface Go {
+  by: string;
+  pr: number | null;
+  message?: number;
+  text: string;
+}
+
+/** A merge call's PR as a go is checked against: its number, and whether it is the minion's own branch's PR. */
+export interface MergeTarget {
+  number: number;
+  own: boolean;
+}
+
+/**
+ * Whether a Bash call is a go may let through: one `gh pr merge` of plain words and nothing else (no
+ * chain, pipe, redirect, quote, variable or `cd`, since Approve lets the whole input run), and no --admin.
+ */
+export function plainMerge(command: string, call: MergeCall | null): boolean {
+  return !!call && !call.admin && !call.moved && /^gh[ \t]+pr[ \t]+merge(?:[ \t]+[\w#:/.=+-]+)*[ \t]*$/.test(command.trim());
+}
+
+/** The GitHub MCP's merge tools: the PR their input names, as `gh pr merge` would, or null. */
+export function mcpMerge(tool: string, input: any): MergeCall | null {
+  const m = tool.match(/^mcp__[^_].*__(merge_pull_request|enable_pr_auto_merge)$/);
+  const n = input?.pullNumber ?? input?.pull_number;
+  if (!m || !Number.isInteger(n) || n < 1 || typeof input.owner !== 'string' || typeof input.repo !== 'string') return null;
+  if (!/^[\w.-]+$/.test(input.owner) || !/^[\w.-]+$/.test(input.repo)) return null;
+  return { target: String(n), repo: `${input.owner}/${input.repo}`, method: null, auto: m[1] === 'enable_pr_auto_merge', admin: false, moved: false };
+}
+
+/** The target of a merge call whose looked-up PR is in the scheme's repo; null otherwise. */
+export function mergeTarget(pr: PrInfo | null, schemeRepo: string | null, branch: string | null): MergeTarget | null {
+  const repo = pr?.url.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/\d+/)?.[1];
+  if (!pr || !repo || !schemeRepo || repo.toLowerCase() !== schemeRepo.toLowerCase()) return null;
+  return { number: pr.number, own: !!branch && pr.head === branch };
+}
 
 interface Request {
   ticketId: number;
@@ -104,6 +154,8 @@ export class Approvals {
   private requests = new Map<string, Request>();
   /** Outcomes of cards forgotten when their turn ended, for an asker that was between two polls then. */
   private ended = new Map<string, { ticketId: number; decision: Decision }>();
+  /** Each running turn's standing go to merge, from a message a person typed into that minion's chat (#201). */
+  private goes = new Map<number, Go>();
   private emit: Emit;
 
   constructor(emit: Emit) {
@@ -128,11 +180,19 @@ export class Approvals {
    * tripwire card needs an explanation, shows the whole call, and is one at a time; after a deny, the
    * turn gets no more. Anything else gets a card only in a project with approval rules, as before.
    */
-  ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean, merge?: object): { id: string } | { refused: string } {
+  ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean, merge?: object, target?: MergeTarget | null): { id: string } | { refused: string } {
     const verdict = tripwire({ tool_name: tool, tool_input: input, cwd }, { ...cfg, ask: true });
     if (verdict && !verdict.ask) return { refused: `The tripwire blocks this. ${verdict.reason}` };
     if (!verdict) {
-      return rules ? { id: this.request(ticketId, tool, input, undefined, merge) } : { refused: 'Nobody can answer a permission prompt in this turn, so this was not run.' };
+      if (!rules) return { refused: 'Nobody can answer a permission prompt in this turn, so this was not run.' };
+      const id = this.request(ticketId, tool, input, undefined, merge);
+      // A person's go covers one merge: of the PR they named, or with none named, of this minion's own.
+      const go = target && this.goes.get(ticketId);
+      if (go && (go.pr === null ? target.own : target.number === go.pr)) {
+        this.goes.delete(ticketId);
+        this.settle(id, this.requests.get(id)!, { state: 'allowed', by: go.by, via: { message: go.message, text: go.text } });
+      }
+      return { id };
     }
     const why = explanation(input);
     if (!why) return { refused: `${verdict.reason} An approval card needs a Bash description of why; it had none, so this was not run.` };
@@ -141,6 +201,27 @@ export class Approvals {
     if (mine.some((r) => r.decision.state === 'pending')) return { refused: 'An approval card for a tripwire block is already waiting in this chat; only one at a time. This was not run.' };
     if (mine.some((r) => r.decision.state === 'denied')) return { refused: 'A person denied a tripwire card earlier this turn, so no more are shown. This was not run: stop, and hand the commands to a person in your reply.' };
     return { id: this.request(ticketId, tool, input, { reason: verdict.reason, explanation: why }) };
+  }
+
+  /**
+   * Messages a minion's turn read, in order (at its start or steered in). Only `typed` ones count: what a
+   * signed-in person sent from the chat, as the messages route marks it. A go stands until that turn's
+   * next typed message that isn't one, its one merge, or the turn's end. A turn's start (`start`) drops
+   * any go left from before, so a go never outlives the turn that read it.
+   */
+  heard(ticketId: number, msgs: { author: string; text: string; id?: number; typed?: boolean }[], start = false) {
+    if (start) this.goes.delete(ticketId);
+    for (const m of msgs) {
+      if (!m.typed) continue;
+      const go = mergeGo(m.text);
+      if (go) this.goes.set(ticketId, { by: m.author, pr: go.pr, message: m.id, text: m.text.trim().slice(0, 200) });
+      else this.goes.delete(ticketId);
+    }
+  }
+
+  /** Whether a turn holds a go to merge, so a merge call is worth looking up. */
+  hasGo(ticketId: number): boolean {
+    return this.goes.has(ticketId);
   }
 
   /** How many of a thread's cards are waiting on a person. */
@@ -196,6 +277,7 @@ export class Approvals {
 
   /** The thread's turn ended: expire its undecided cards and forget them all. */
   endTurn(ticketId: number, reason: string) {
+    this.goes.delete(ticketId);
     for (const [id, r] of this.requests) {
       if (r.ticketId !== ticketId) continue;
       if (r.decision.state === 'pending') this.settle(id, r, { state: 'expired', reason });

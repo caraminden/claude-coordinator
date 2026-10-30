@@ -259,7 +259,8 @@ async function fetchSnapshot(repoDir: string, repo: string, branch: string) {
   return parseSnapshot(JSON.parse(stdout).data);
 }
 
-async function originRepo(repoDir: string): Promise<string | null> {
+/** "owner/name" of a checkout's GitHub origin, or null. */
+export async function originRepo(repoDir: string): Promise<string | null> {
   try {
     const { stdout } = await run('git', ['remote', 'get-url', 'origin'], { cwd: repoDir, timeout: 15_000 });
     return githubRepo(stdout);

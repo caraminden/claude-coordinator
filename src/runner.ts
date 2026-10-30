@@ -200,6 +200,7 @@ interface QueuedMessage {
   about?: string; // the file a comment is on
   id?: number; // its user_message event, for taking it back while queued
   from?: number; // the minion or Taskmaster that relayed it, whose turn's person it carries
+  typed?: boolean; // a signed-in person sent it from the chat; only these can be a go to merge (#201)
 }
 
 /**
@@ -582,6 +583,7 @@ function approvalNote(project: Project): string[] {
   return [
     tripwire,
     `In this scheme, tool calls matching these rules wait for a person to approve them in the chat before they run: ${rules.join(', ')}. Make such a call when the work is ready for it; the turn pauses until someone clicks Approve or Deny. If it is denied or expires, do not retry it or reach the same result another way; say what you needed it for.`,
+    'When a person\'s own message in this chat says only "merge it", "fold it" or the like, the turn that reads it may merge once with no card: your own PR, or the PR number they named. Run that merge on its own, as a plain `gh pr merge <number> --squash` (or the MCP merge tool), with nothing chained, no `cd` and no --admin; anything else still shows the card. A Taskmaster\'s relay of their words is not a go.',
   ];
 }
 
@@ -1153,7 +1155,7 @@ export class Runner {
    * to Claude; a comment's file (`extra.comment.about`) is, in its "[Name on file]:" prefix.
    * `extra.from` is the thread that sent a relayed message, so it can strike_text it later.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number } & object = {}, steer = false, files: MessageFile[] = []) {
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean } & object = {}, steer = false, files: MessageFile[] = []) {
     const ticket = this.store.getTicket(ticketId);
     const refused = ticket && this.refuseTurn?.(ticket, author);
     if (refused) {
@@ -1172,7 +1174,7 @@ export class Runner {
       author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}),
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}),
     });
-    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}) };
+    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}) };
     // Anything said answers the one-tap replies; a steer or a held message starts no turn to clear them.
     if (this.store.getTicket(ticketId)?.replies) {
       this.store.updateTicket(ticketId, { replies: null });
@@ -1183,6 +1185,7 @@ export class Runner {
       const file = join(live!.dir, 'steer.jsonl');
       appendFileSync(file, line);
       this.saveTurn(ticketId, { steered: [...(turn!.steered ?? []), { end: statSync(file).size, msg }] });
+      this.approvals.heard(ticketId, [msg]);
       // A person steering in speaks after the relay, so what the turn starts now is theirs.
       if (person && !extra.from) this.turnFrom.delete(ticketId);
       return;
@@ -1415,6 +1418,7 @@ export class Runner {
       this.emit(ticket.id, 'note', { text: 'This is a preview: it shows the app on a copy of the data, but it never runs turns.' });
       return this.broadcastTicket(ticket.id);
     }
+    this.approvals.heard(ticket.id, batch, true);
     // deploy/prune.sh removes worktrees of long-closed minions; a reopened one gets its back.
     try {
       if (restoreTicketDir(ticket.cwd, project.repo_dir, ticket.branch)) this.emit(ticket.id, 'note', { text: `Recreated this minion's worktree from its branch ${ticket.branch}.` });

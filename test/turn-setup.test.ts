@@ -58,7 +58,8 @@ const { readFileSync, writeFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 const settings = args.includes('--settings') ? JSON.parse(readFileSync(args[args.indexOf('--settings') + 1], 'utf8')) : null;
 const system = args.includes('--append-system-prompt-file') ? readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8') : null;
-writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system }));
+const mcp = JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8'));
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, mcp }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
 console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', cwd: process.cwd(), mcp_servers: status ? [{ name: role, status }] : [] }));
@@ -171,9 +172,12 @@ test("minion and Taskmaster turns both keep the Read tool out of the logins, key
 test("a scheme with machine tools off gives its minions no machine servers or notes", async () => {
   runner.machines = () => [{ id: 1, name: 'perigee-godot', token_hash: '', created_by: 'Cara', created_at: 0, last_seen_at: 0, notes: 'Never restart it.', workspace_tools: 0 }];
   try {
-    const servers = (t: any) => Object.keys(JSON.parse(t.flag('--mcp-config')).mcpServers);
+    const servers = (t: any) => Object.keys(t.mcp.mcpServers);
     const on = await turn('ticket', 'connected');
     assert.deepEqual(servers(on), ['thread', 'perigee-godot'], 'on by default');
+    assert.ok(on.settings.permissions.allow.includes('mcp__perigee-godot'), "the machine's tools are allowed");
+    // In claude's argv, the machine's name would let a turn's `pkill -f godot` hit claude itself.
+    assert.ok(!on.args.some((a: string) => a.includes('godot')), 'no argument names the machine');
     assert.match(on.system, /Never restart it/);
     const off = await turn('ticket', 'connected', { machine_tools: 0 });
     assert.deepEqual(servers(off), ['thread']);

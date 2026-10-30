@@ -39,7 +39,8 @@ const { createInterface } = require('node:readline');
 const { appendFileSync, readFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 const system = readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8');
-const config = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+const config = JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8'));
+const allow = JSON.parse(readFileSync(args[args.indexOf('--settings') + 1], 'utf8')).permissions.allow;
 const report = (r) => appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify(r) + '\\n');
 process.stdin.resume();
 (async () => {
@@ -61,7 +62,7 @@ process.stdin.resume();
     if (ws) results[name].fetched = (await call(4, 'tools/call', { name: 'fetch_file', arguments: { workspace: 'w', path: 'report.zip' } })).result.content[0].text;
     p.stdin.end();
   }
-  report({ args, system, results, token: process.env.COORDINATOR_TOKEN });
+  report({ args, system, allow, results, token: process.env.COORDINATOR_TOKEN });
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 })().catch((err) => { report({ args, error: String(err) }); process.exit(1); });
@@ -113,7 +114,7 @@ test('a thread uses a connected machine\'s MCP server, one copy per turn', async
   const [turn] = await until('the first turn', () => turns().length >= 1 && turns());
   assert.equal(turn.error, undefined);
   assert.deepEqual(turn.results['test-box'].tools, ['whoami']);
-  assert.ok(turn.args.includes('mcp__test-box'), 'the machine\'s tools are allowed');
+  assert.ok(turn.allow.includes('mcp__test-box'), 'the machine\'s tools are allowed');
   assert.match(turn.system, /Connected machines: test-box/);
 
   // A second turn starts a fresh copy of the machine's server.
@@ -156,7 +157,7 @@ test('threads skip offline machines, and only people manage machines', async () 
   await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'hi' } });
   const turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
   assert.deepEqual(Object.keys(turn.results), []);
-  assert.ok(!turn.args.includes('mcp__sleepy'));
+  assert.ok(!turn.allow.includes('mcp__sleepy'));
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'thread' } }), /400/);
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'Bad Name!' } }), /400/);
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'sleepy' } }), /409/);
@@ -217,6 +218,6 @@ test('workspace tools reach minions only once a person switches them on, and fet
   const copied = ws.fetched.match(/to (\S+) on the app/)[1];
   assert.match(copied, new RegExp(`shared/${ticket.ticket?.id ?? ticket.id}/machine-files/wsbox/report\\.zip$`));
   assert.deepEqual([...readFileSync(copied)], [0x50, 0x4b, 0, 1, 2, 3]);
-  assert.ok(turn.args.includes('mcp__wsbox-ws'));
+  assert.ok(turn.allow.includes('mcp__wsbox-ws'));
   assert.match(turn.system, /wsbox \(mcp__wsbox, mcp__wsbox-ws\)[\s\S]*call its workspaces tool first/);
 });

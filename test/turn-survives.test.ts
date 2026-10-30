@@ -140,7 +140,7 @@ test('the turn keeps its own tripwire and MCP copies, the env allowlist, and no 
   const hook = settings.hooks.PreToolUse[0].hooks[0].command.split(' ')[1].slice(1, -1);
   assert.equal(hook, join(dir, 'pin', 'tripwire.ts'));
   assert.ok(existsSync(hook));
-  const mcp = JSON.parse(run.argv[run.argv.indexOf('--mcp-config') + 1]).mcpServers.thread.args[0];
+  const mcp = JSON.parse(readFileSync(run.argv[run.argv.indexOf('--mcp-config') + 1], 'utf8')).mcpServers.thread.args[0];
   assert.equal(mcp, join(dir, 'pin', 'mcp.ts'));
   assert.ok(run.env.includes('COORDINATOR_TOKEN'));
   assert.ok(!run.env.includes('DBUS_SESSION_BUS_ADDRESS'));

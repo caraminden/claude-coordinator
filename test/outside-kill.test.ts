@@ -21,6 +21,7 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   // As claude does on SIGTERM: exits 143. Or dies of the signal outright.
   if (input.includes('exit 143')) process.exit(143);
   if (input.includes('signal')) process.kill(process.pid, 'SIGTERM');
+  process.on('SIGTERM', () => process.exit(143));
   setInterval(() => {}, 1000);
 });
 `,

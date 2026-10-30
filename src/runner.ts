@@ -1478,6 +1478,16 @@ export class Runner {
     const deny = credentialDenies(homedir(), claudeConfigDir(process.env), dirname(this.store.path));
     // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
     const linkCheck = ticket.cwd ? linkCheckHooks([ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d), pinned(LINK_CHECK)) : {};
+    // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
+    // title, tag, state and note. The token travels in the environment (which the MCP server
+    // inherits), never on the command line.
+    const role = ticket.kind === 'coordinator' ? 'coordinator' : 'thread';
+    const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [pinned(MCP_SERVER)] } };
+    for (const m of machines) {
+      for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: process.execPath, args: [pinned(MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
+    }
+    // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
     const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
       hooks: { ...tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)), ...linkCheck }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
     };
@@ -1489,6 +1499,7 @@ export class Runner {
       Object.assign(settings, rest);
       settings.permissions = { ...permissions, deny: [...permissions.deny, ...deny] };
     }
+    settings.permissions.allow = [...(settings.permissions.allow ?? []), ...Object.keys(servers).map((name) => `mcp__${name}`)];
     // As a file: the Taskmaster's git rules (one per worktree) outgrew Linux's 128 KiB cap on one argument (E2BIG).
     writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings));
     args.push('--settings', join(dir, 'settings.json'));
@@ -1501,17 +1512,8 @@ export class Runner {
     if (effort) args.push('--effort', effort);
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
     let env: Record<string, string> = { ...turnEnv(process.env), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
-    // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
-    // title, tag, state and note. The token travels in the environment (which the MCP server
-    // inherits), never on the command line.
-    const role = ticket.kind === 'coordinator' ? 'coordinator' : 'thread';
-    const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [pinned(MCP_SERVER)] } };
-    for (const m of machines) {
-      for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: process.execPath, args: [pinned(MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
-    }
-    const allowed = Object.keys(servers).map((name) => `mcp__${name}`);
     // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
-    args.push('--mcp-config', JSON.stringify({ mcpServers: servers }), '--allowedTools', ...allowed, '--disallowedTools', 'AskUserQuestion', ...UNUSED_TOOLS);
+    args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', 'AskUserQuestion', ...UNUSED_TOOLS);
     env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
     // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
     if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;
@@ -1691,7 +1693,7 @@ export class Runner {
     let status: 'idle' | 'error' = 'idle';
     // Citadel only signals claude on a stop, so any other signal (143 is claude's own exit on SIGTERM) came from outside.
     const killed = !stopped && exit && (exit.signal || code === 143)
-      ? `Killed by ${exit.signal ?? 'SIGTERM (exit 143)'} from outside Citadel.\nNobody pressed Stop and turns have no time limit${live.unit ? ' and outlive restarts' : ''}, so most likely one of the turn's own commands (a kill or pkill) hit claude's process.`
+      ? `Killed by ${exit.signal ?? 'SIGTERM (exit 143)'} from outside Citadel.\nNobody pressed Stop and turns have no time limit, so most likely ${live.unit ? '' : 'the server restarted (this turn ran without a unit of its own) or '}one of the turn's own commands (a kill or pkill) hit claude's process.`
       : null;
     if (stopped || (signal && !killed)) {
       // Stopped by the user; leave it waiting for the next message.

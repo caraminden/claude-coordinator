@@ -60,6 +60,9 @@ test('only a lone plain gh pr merge, or the MCP merge tools, can be let through'
   assert.equal(mcpMerge('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 5, pull_number: 6 }), null, 'two numbers');
   for (const method of ['merge', 'squash', 'MERGE']) assert.ok(mcpMerge('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 5, merge_method: method }), method);
   assert.ok(mcpMerge('mcp__github__enable_pr_auto_merge', { owner: 'o', repo: 'r', pullNumber: 5, mergeMethod: 'SQUASH' }));
+  for (const extra of [{ commit_message: 'x' }, { commit_title: 'x' }, { commitMessage: 'x' }, { merge_method: 'squash', mergeMethod: 'rebase' }]) {
+    assert.equal(mcpMerge('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 5, ...extra }), null, JSON.stringify(extra));
+  }
   for (const method of ['rebase', 'REBASE', 5, '']) assert.equal(mcpMerge('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 5, merge_method: method }), null, String(method));
   assert.deepEqual(mcpMerge('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 5 }), { target: '5', repo: 'o/r', method: null, auto: false, admin: false, moved: false });
   assert.equal(mcpMerge('mcp__github__enable_pr_auto_merge', { owner: 'o', repo: 'r', pull_number: 5 })?.auto, true);

@@ -133,6 +133,8 @@ export function plainMerge(command: string, call: MergeCall | null): boolean {
   return true;
 }
 
+const MCP_GO_KEYS = new Set(['owner', 'repo', 'pullNumber', 'pull_number', 'merge_method', 'mergeMethod', 'sha']);
+
 /** The GitHub MCP's merge tools: the PR their input names, as `gh pr merge` would, or null. */
 export function mcpMerge(tool: string, input: any): MergeCall | null {
   const m = tool.match(/^mcp__[^_].*__(merge_pull_request|enable_pr_auto_merge)$/);
@@ -140,9 +142,11 @@ export function mcpMerge(tool: string, input: any): MergeCall | null {
   // Both spellings with different numbers: which one the server merges isn't ours to guess.
   if (input?.pullNumber !== undefined && input?.pull_number !== undefined && input.pullNumber !== input.pull_number) return null;
   if (!m || !Number.isInteger(n) || n < 1 || typeof input.owner !== 'string' || typeof input.repo !== 'string') return null;
-  // The same methods as gh: squash or a merge commit, or the repo's default when none is given.
-  const method = input.merge_method ?? input.mergeMethod;
-  if (method !== undefined && !(typeof method === 'string' && ['squash', 'merge'].includes(method.toLowerCase()))) return null;
+  // As with gh: no commit title or message riding along, and squash or a merge commit (or the repo's default).
+  if (Object.keys(input).some((k) => !MCP_GO_KEYS.has(k))) return null;
+  for (const method of [input.merge_method, input.mergeMethod]) {
+    if (method !== undefined && !(typeof method === 'string' && ['squash', 'merge'].includes(method.toLowerCase()))) return null;
+  }
   if (!/^[\w.-]+$/.test(input.owner) || !/^[\w.-]+$/.test(input.repo)) return null;
   return { target: String(n), repo: `${input.owner}/${input.repo}`, method: null, auto: m[1] === 'enable_pr_auto_merge', admin: false, moved: false };
 }

@@ -105,6 +105,9 @@ const NETWORK = new Set(['curl', 'wget', 'http', 'https', 'xh', 'websocat', 'soc
 const ENVIRON = /^\/proc\/[^/]+(\/task\/[^/]+)?\/environ$/;
 const ENVIRON_WHY = "A process's environment can hold the live service's password and session secret. To find your dev server, take the pid from `ss -ltnp 'sport = :<your port>'` (or `$!` when you start it) and check `readlink /proc/<pid>/cwd`.";
 const GH_TOKEN_WHY = "That is Cara's GitHub login; gh and git use it on their own.";
+// Each turn gets its person's GitHub token, or none (#182); these would reach another account's login.
+const GH_VARS = /^(GH_TOKEN|GITHUB_TOKEN|GH_CONFIG_DIR|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|GH_HOST)$/;
+const GH_ENV_WHY = "Each turn's GitHub login is set for the person it runs for (GH_TOKEN, with an empty GH_CONFIG_DIR so no other login is in reach), so pushes and pull requests go out under their name. Leave it as it is: if this turn's person hasn't linked GitHub, commit on your branch and tell them they can link it in Settings → Your account.";
 // The same read with the pid in a variable, where the lexer leaves an unknown `/proc//environ`, or in
 // `$(…)`, where it splits the path into `/proc/`, the ( … ) and the rest (see commandReason).
 const ENVIRON_HIDDEN = /^\/proc\/[^/]*(\/task\/[^/]*)?\/environ$/;
@@ -653,6 +656,8 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     while (i < words.length && (/^[A-Za-z_]\w*=/.test(words[i].text) || (orUnknown && words[i].unknown))) assigned.add(words[i++].text.split('=')[0]);
   };
   takeAssignments();
+  const ghSet = () => [...assigned].find((v) => GH_VARS.test(v));
+  if (ghSet()) return hard(`Setting ${ghSet()} is blocked. ${GH_ENV_WHY}`);
   if (i === words.length) {
     for (const v of assigned) st.vars.add(v);
     return null;
@@ -665,9 +670,11 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
       i++;
       while (i < words.length && words[i].text.startsWith('-')) {
         const opt = words[i++].text;
+        if (name === 'env' && (/^(-u|--unset)$/.test(opt) ? GH_VARS.test(words[i]?.text ?? '') : GH_VARS.test(opt.replace(/^(-u|--unset=)/, '')))) return hard(`Unsetting ${opt.replace(/^(-u|--unset=?)/, '') || words[i].text} is blocked. ${GH_ENV_WHY}`);
         if (/^-(u|C|n|I|P|d|L|s|E|k)$|^--(unset|chdir|adjustment|signal|kill-after)$/.test(opt)) i++;
       }
       takeAssignments(name === 'env');
+      if (ghSet()) return hard(`Setting ${ghSet()} is blocked. ${GH_ENV_WHY}`);
       if (name === 'env' && i >= words.length) return hard(`\`env\` with no command prints the whole environment. ${ENV_WHY}`);
       if (/^(timeout|nice|ionice|chrt)$/.test(name) && /^[\d.]+[smhd]?$/.test(words[i]?.text ?? '')) i++;
     } else break;
@@ -678,6 +685,10 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const args = words.slice(i + 1);
   const vars = new Set([...st.vars, ...assigned]);
 
+  if (/^(export|declare|local|readonly|typeset|unset)$/.test(name)) {
+    const gh = args.map((w) => w.text.split('=')[0]).find((v) => GH_VARS.test(v));
+    if (gh) return hard(`${name === 'unset' ? 'Unsetting' : 'Setting'} ${gh} is blocked. ${GH_ENV_WHY}`);
+  }
   if (name === 'export' || name === 'declare' || name === 'local' || name === 'readonly' || name === 'typeset') {
     for (const w of args) if (/^[A-Za-z_]\w*=/.test(w.text)) st.vars.add(w.text.split('=')[0]);
     return null;
@@ -707,6 +718,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const bsdE = (w: Word, k: number) => /^[a-zA-Z]*e[a-zA-Z]*$/.test(w.text) && !/^-[a-zA-Z]*[oOpCuUgGtq]$|^--\w+$|^[a-zA-Z]*[oOpUt]$/.test(args[k - 1]?.text ?? '');
   if (name === 'ps' && args.some(bsdE)) return hard(`This \`ps\` prints processes' environments. ${ENVIRON_WHY}`);
   const sub = args.filter((w) => !w.text.startsWith('-')).map((w) => w.text);
+  if (name === 'gh' && sub[0] === 'auth' && /^(login|logout|refresh|switch)$/.test(sub[1] ?? '')) return hard(`\`gh auth ${sub[1]}\` would change which GitHub login gh uses. ${GH_ENV_WHY}`);
   if (name === 'printenv') return hard(`\`printenv\` prints the environment. ${ENV_WHY}`);
   // Anywhere among the plain words: an option's value (`--model haiku`) comes before the subcommand.
   const print = args.some((w) => w.text === '-p' || w.text === '--print');

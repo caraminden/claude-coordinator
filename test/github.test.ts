@@ -112,6 +112,13 @@ test('without knowing the account, every remark during a turn is skipped', () =>
   assert.deepEqual(d.messages, []);
 });
 
+test("with a linked person, their account's remarks during a turn are the minion's own too; anyone else's still go through", () => {
+  const remarks = [remark(14, { author: 'JoshDev', createdAt: T }), remark(15, { author: 'rachel', createdAt: T })];
+  const d = decide(pr({ remarks }), new Set(['baseline']), opts({ self: ['cara', 'joshdev'], spans: [[T - 1000, T + 1000]] }));
+  assert.equal(d.messages.length, 1);
+  assert.match(d.messages[0], /rachel/);
+});
+
 test('bots are skipped', () => {
   const d = decide(pr({ remarks: [remark(13, { author: 'copilot-pull-request-reviewer', bot: true })] }), new Set(['baseline']), opts());
   assert.deepEqual(d.messages, []);

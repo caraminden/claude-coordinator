@@ -92,7 +92,8 @@ report() {
 push_github() {
   [ -n "$REMOTE" ] || return 0
   local out why fix=""
-  if out=$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$LIVE" push -q "$REMOTE" "$1:refs/heads/main" 2>&1); then
+  # Main goes out as the box's own gh login, not the GitHub account of the turn that ran the deploy (#182).
+  if out=$(env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$LIVE" push -q "$REMOTE" "$1:refs/heads/main" 2>&1); then
     say "pushed $(git_live rev-parse --short "$1") to $REMOTE main"
     echo " Pushed to GitHub."
     return 0

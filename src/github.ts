@@ -90,17 +90,19 @@ export function verdict(checks: Check[]): 'pending' | 'passed' | 'failed' | null
 
 /**
  * What to tell a ticket about its PR. `seen` holds the keys already handled for this PR; on the
- * first look (`baseline`) everything already there is recorded without being sent. The gh account
- * is the one the ticket's own turns use, so that account's remarks, merges and closes made during
- * one of the ticket's turns (`spans`) are its own doing and are skipped. Bots are skipped too, so a
+ * first look (`baseline`) everything already there is recorded without being sent. The accounts in
+ * `self` are the ones the ticket's own turns push as (the box's gh login, and its person's linked
+ * GitHub), so their remarks, merges and closes made during one of the ticket's turns (`spans`) are its
+ * own doing and are skipped. Bots are skipped too, so a
  * bot that answers every push can't keep a ticket busy. Remarks from outside the repo are only a
  * link, and what insiders wrote is quoted as data.
  */
-export function decide(pr: PrSnapshot, seen: Set<string>, opts: { baseline: boolean; self: string | null; spans: Span[] }): Decision {
+export function decide(pr: PrSnapshot, seen: Set<string>, opts: { baseline: boolean; self: string | string[] | null; spans: Span[] }): Decision {
+  const selves = opts.self === null ? null : [opts.self].flat().map((s) => s.toLowerCase());
   const messages: string[] = [];
   const handled: string[] = [];
   const own = (login: string | null, at: number | null) =>
-    at !== null && (opts.self === null || login?.toLowerCase() === opts.self.toLowerCase()) && during(opts.spans, at);
+    at !== null && (selves === null || selves.includes(login?.toLowerCase() ?? '')) && during(opts.spans, at);
   const consider = (key: string, message: () => string | null) => {
     if (seen.has(key)) return;
     handled.push(key);
@@ -372,7 +374,11 @@ export class GithubWatcher {
         spans = turnSpans(this.store.turnMarks(ticket.id, Math.min(...times) - 24 * 3600_000), Infinity);
       }
     }
-    const { messages, handled } = decide(pr, seen, { baseline, self, spans });
+    // With GitHub linking, the minion's turns push as its person's own account too.
+    // shortcut: only the person of its latest turn, not each turn's; fine while a minion's people rarely change.
+    const linked = ticket.person_id ? this.store.getCredential(ticket.person_id, 'github') : null;
+    const selves = linked ? [...(self ? [self] : []), (JSON.parse(linked.meta) as { login: string }).login] : self;
+    const { messages, handled } = decide(pr, seen, { baseline, self: selves, spans });
     // Recorded before sending, so a crash in between drops a message rather than repeating it forever.
     if (handled.length) this.store.addGithubSeen(ticket.id, handled.map((k) => prefix + k), messages.length > 0);
     if (messages.length) this.send(ticket.id, messages.join('\n\n'));

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { listEnter } from '../public/lists.js';
+import { continueList, listEnter } from '../public/lists.js';
 
 // Applies Enter with the caret at `|`, the way continueList does.
 const enter = (s: string) => {
@@ -33,4 +33,17 @@ test('Enter elsewhere is left alone', () => {
   assert.equal(enter('- bullet|'), null);
   assert.equal(enter('|1. before the marker'), null);
   assert.equal(listEnter('1. a', 0, 4), null);
+});
+
+test('Only the key that adds a line continues a list; plain Enter still sends', () => {
+  (globalThis as any).document = { execCommand: () => true };
+  const key = (e: object, enterAddsLine?: boolean) => {
+    const box = { value: '1. a', selectionStart: 4, selectionEnd: 4, setSelectionRange() {} };
+    return continueList(box, { key: 'Enter', preventDefault() {}, ...e }, enterAddsLine);
+  };
+  assert.equal(key({}), false);
+  assert.equal(key({ shiftKey: true }), true);
+  assert.equal(key({}, true), true);
+  assert.equal(key({ shiftKey: true, ctrlKey: true }), false);
+  delete (globalThis as any).document;
 });

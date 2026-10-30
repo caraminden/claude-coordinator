@@ -57,7 +57,8 @@ writeFileSync(
 const { readFileSync, writeFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 const settings = args.includes('--settings') ? JSON.parse(readFileSync(args[args.indexOf('--settings') + 1], 'utf8')) : null;
-writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings }));
+const system = args.includes('--append-system-prompt-file') ? readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8') : null;
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
 console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', cwd: process.cwd(), mcp_servers: status ? [{ name: role, status }] : [] }));
@@ -173,10 +174,10 @@ test("a scheme with machine tools off gives its minions no machine servers or no
     const servers = (t: any) => Object.keys(JSON.parse(t.flag('--mcp-config')).mcpServers);
     const on = await turn('ticket', 'connected');
     assert.deepEqual(servers(on), ['thread', 'perigee-godot'], 'on by default');
-    assert.match(on.flag('--append-system-prompt'), /Never restart it/);
+    assert.match(on.system, /Never restart it/);
     const off = await turn('ticket', 'connected', { machine_tools: 0 });
     assert.deepEqual(servers(off), ['thread']);
-    assert.doesNotMatch(off.flag('--append-system-prompt'), /perigee-godot|Never restart it/);
+    assert.doesNotMatch(off.system, /perigee-godot|Never restart it/);
   } finally {
     runner.machines = () => [];
   }
@@ -191,6 +192,15 @@ test("a Taskmaster's settings travel as a file, so hundreds of worktrees stay un
   for (const arg of t.args) assert.ok(Buffer.byteLength(arg) < 32 * 1024, `argument of ${Buffer.byteLength(arg)} bytes`);
   assert.ok(t.settings.permissions.allow.includes(`Bash(git -C ${join(scheme, 'tickets', '300')} log:*)`));
   assert.ok(t.settings.hooks.PreToolUse);
+});
+
+test("the system prompt travels as a file, so a `pkill -f` for a word in it can't match claude itself", async () => {
+  // Delve #14 SIGTERMed its own claude: `pgrep -f dotnet` matched the prompt's "dotnet build" in claude's argv.
+  const project = store.createProject(`P${Math.random()}`, null);
+  store.setProjectInstructions(project.id, 'Build with dotnet build Delve.sln.', 'Cara');
+  const t = await turn('ticket', 'connected', {}, undefined, project.id);
+  assert.match(t.system, /dotnet build Delve\.sln/);
+  assert.ok(!t.args.some((a: string) => a.includes('dotnet')), 'no argument carries the prompt text');
 });
 
 test('a turn whose own MCP server failed or is missing says so as an error', async () => {
@@ -262,10 +272,10 @@ test("only the scheme whose code this server runs hears about deploys, pending-d
   try {
     const served = await turn('ticket', 'connected', {}, repo);
     assert.equal(served.env.COORDINATOR_DEPLOYS, '1');
-    assert.match(served.flag('--append-system-prompt'), /After you deploy with tools\/deploy\.sh/);
+    assert.match(served.system, /After you deploy with tools\/deploy\.sh/);
     for (const other of [await turn('ticket', 'connected'), await turn('ticket', 'connected', {}, join(root, 'big-scheme', 'repo'))]) {
       assert.equal(other.env.COORDINATOR_DEPLOYS, undefined);
-      assert.doesNotMatch(other.flag('--append-system-prompt'), /deploy\.sh|pending-deploy/);
+      assert.doesNotMatch(other.system, /deploy\.sh|pending-deploy/);
     }
     // A Taskmaster's MCP server never offers set_thread_status or start_preview, so it needs no flag.
     assert.equal((await turn('coordinator', 'connected', {}, repo)).env.COORDINATOR_DEPLOYS, undefined);
@@ -282,7 +292,7 @@ test("only the Citadel scheme's Taskmaster is offered the Citadel-wide instructi
     assert.equal(own.env.COORDINATOR_APP_INSTRUCTIONS, '1');
     for (const other of [await turn('coordinator', 'connected'), await turn('ticket', 'connected', {}, undefined, GLOBAL_OWNER)]) {
       assert.equal(other.env.COORDINATOR_APP_INSTRUCTIONS, undefined);
-      assert.match(other.flag('--append-system-prompt'), /# Citadel-wide instructions[^]*Be kind everywhere\./);
+      assert.match(other.system, /# Citadel-wide instructions[^]*Be kind everywhere\./);
     }
   } finally {
     store.setAppInstructions('', 'Cara');

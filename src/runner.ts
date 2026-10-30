@@ -1459,13 +1459,15 @@ export class Runner {
     const pinned = (file: string) => join(pin, basename(file));
     // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
     const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
+    // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
+    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text));
     const args = [
       '-p',
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', ticket.permission_mode,
-      '--append-system-prompt', systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text),
+      '--append-system-prompt-file', join(dir, 'system-prompt.md'),
       // A minion's tripwire asks and approval rules become Approve / Deny cards; nobody can answer a
       // Taskmaster's prompts, so those are denied instead of waiting.
       ...permissionArgs(ticket.kind !== 'coordinator'),
@@ -1687,11 +1689,15 @@ export class Runner {
     }
     this.approvals.endTurn(ticketId, stopped ? 'The turn was stopped while this waited.' : 'The turn ended while this waited.');
     let status: 'idle' | 'error' = 'idle';
-    if (stopped || signal) {
+    // Citadel only signals claude on a stop, so any other signal (143 is claude's own exit on SIGTERM) came from outside.
+    const killed = !stopped && exit && (exit.signal || code === 143)
+      ? `Killed by ${exit.signal ?? 'SIGTERM (exit 143)'} from outside Citadel.\nNobody pressed Stop and turns have no time limit${live.unit ? ' and outlive restarts' : ''}, so most likely one of the turn's own commands (a kill or pkill) hit claude's process.`
+      : null;
+    if (stopped || (signal && !killed)) {
       // Stopped by the user; leave it waiting for the next message.
-    } else if (!sawResult || code !== 0 || resultIsError) {
+    } else if (killed || !sawResult || code !== 0 || resultIsError) {
       status = 'error';
-      this.turnFailed(ticketId, resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0);
+      this.turnFailed(ticketId, killed || resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0);
     }
     const closing = this.closing.has(ticketId);
     const reason = this.closing.get(ticketId);

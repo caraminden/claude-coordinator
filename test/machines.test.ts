@@ -36,8 +36,9 @@ const fakeClaude = join(root, 'claude-fake');
 writeFileSync(fakeClaude, `#!${process.execPath}
 const { spawn } = require('node:child_process');
 const { createInterface } = require('node:readline');
-const { appendFileSync } = require('node:fs');
+const { appendFileSync, readFileSync } = require('node:fs');
 const args = process.argv.slice(2);
+const system = readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8');
 const config = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
 const report = (r) => appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify(r) + '\\n');
 process.stdin.resume();
@@ -60,7 +61,7 @@ process.stdin.resume();
     if (ws) results[name].fetched = (await call(4, 'tools/call', { name: 'fetch_file', arguments: { workspace: 'w', path: 'report.zip' } })).result.content[0].text;
     p.stdin.end();
   }
-  report({ args, results, token: process.env.COORDINATOR_TOKEN });
+  report({ args, system, results, token: process.env.COORDINATOR_TOKEN });
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 })().catch((err) => { report({ args, error: String(err) }); process.exit(1); });
@@ -113,7 +114,7 @@ test('a thread uses a connected machine\'s MCP server, one copy per turn', async
   assert.equal(turn.error, undefined);
   assert.deepEqual(turn.results['test-box'].tools, ['whoami']);
   assert.ok(turn.args.includes('mcp__test-box'), 'the machine\'s tools are allowed');
-  assert.match(turn.args[turn.args.indexOf('--append-system-prompt') + 1], /Connected machines: test-box/);
+  assert.match(turn.system, /Connected machines: test-box/);
 
   // A second turn starts a fresh copy of the machine's server.
   await until('the turn to end', async () => (await call(`/api/tickets/${ticket.id}`)).ticket.status !== 'running');
@@ -132,7 +133,7 @@ test('an online machine reaches every scheme, and a minion in any scheme can ope
   await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'peek' } });
   const turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
   assert.deepEqual(turn.results['test-box'].tools, ['whoami']);
-  assert.match(turn.args[turn.args.indexOf('--append-system-prompt') + 1], /Connected machines: test-box/);
+  assert.match(turn.system, /Connected machines: test-box/);
   const opened = await fetch(`${base}/api/machines/${box.id}/session`, { headers: { Authorization: `Bearer ${turn.token}` } });
   assert.equal(opened.status, 200);
   await opened.body!.cancel();
@@ -176,7 +177,7 @@ test('an agent can run a server from Claude Code\'s config, and threads get the 
   await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'play' } });
   const turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
   assert.deepEqual(turn.results.desk.tools, ['whoami']);
-  assert.match(turn.args[turn.args.indexOf('--append-system-prompt') + 1], /Notes on desk from its owner:\nNever restart this PC\./);
+  assert.match(turn.system, /Notes on desk from its owner:\nNever restart this PC\./);
 });
 
 test('workspace tools reach minions only once a person switches them on, and fetch_file lands in the minion\'s files', async () => {
@@ -217,5 +218,5 @@ test('workspace tools reach minions only once a person switches them on, and fet
   assert.match(copied, new RegExp(`shared/${ticket.ticket?.id ?? ticket.id}/machine-files/wsbox/report\\.zip$`));
   assert.deepEqual([...readFileSync(copied)], [0x50, 0x4b, 0, 1, 2, 3]);
   assert.ok(turn.args.includes('mcp__wsbox-ws'));
-  assert.match(turn.args[turn.args.indexOf('--append-system-prompt') + 1], /wsbox \(mcp__wsbox, mcp__wsbox-ws\)[\s\S]*call its workspaces tool first/);
+  assert.match(turn.system, /wsbox \(mcp__wsbox, mcp__wsbox-ws\)[\s\S]*call its workspaces tool first/);
 });

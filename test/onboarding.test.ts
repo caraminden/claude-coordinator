@@ -21,10 +21,10 @@ after(() => {
 
 const fakeClaude = join(root, 'claude-fake');
 writeFileSync(fakeClaude, `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
+const { appendFileSync, readFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), system: process.argv[process.argv.indexOf('--append-system-prompt') + 1], token: process.env.COORDINATOR_TOKEN }) + '\\n');
+  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ prompt: JSON.parse(prompt), system: readFileSync(process.argv[process.argv.indexOf('--append-system-prompt-file') + 1], 'utf8'), token: process.env.COORDINATOR_TOKEN }) + '\\n');
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });

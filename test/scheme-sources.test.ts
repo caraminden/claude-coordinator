@@ -18,11 +18,14 @@ const ghCalls = () => (existsSync(join(stub, 'calls')) ? readFileSync(join(stub,
 
 // `gh repo view` finds a repo when stub/taken/<owner>_<name> exists; `gh repo create` fails with
 // stub/fail's text when that exists, and otherwise makes a bare repo standing in for GitHub's (and
-// sets origin to it, failing the push when stub/fail-push exists).
+// sets origin to it, failing the push when stub/fail-push exists). `calls` logs those; `gh pr list`
+// isn't logged: it is the server's background look at a minion's branch (it comes 2 s after each
+// minion's turn ends, so lands in whichever test is running by then) and no test here is about it.
 mkdirSync(join(stub, 'bin'), { recursive: true });
 mkdirSync(join(stub, 'taken'));
 writeFileSync(join(stub, 'bin', 'gh'), `#!/bin/sh
 S=${JSON.stringify(stub)}
+[ "$1 $2" = "pr list" ] && exit 0
 echo "$*" >> "$S/calls"
 [ "$1 $2" = "repo view" ] && { [ -e "$S/taken/$(echo "$3" | tr / _)" ] && { echo '{"name":"x"}'; exit 0; }; echo "GraphQL: Could not resolve to a Repository with the name '$3'. (repository)" >&2; exit 1; }
 if [ "$1 $2" = "repo create" ]; then

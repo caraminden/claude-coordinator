@@ -100,6 +100,29 @@ test('inboxCount: the Needs-you badge\'s number for one person; a ready or repli
   store.addEvent(asking, 'question', { id: 'q', questions: [] });
   const at = (id: number) => store.getTicket(id)!.updated_at;
 
-  assert.equal(inboxCount(store, approvals, p, {}), 3);
-  assert.equal(inboxCount(store, approvals, p, { [ready]: at(ready), [offering]: at(offering) - 1, [asking]: at(asking) + 1 }), 2, 'only the opened ready minion fades');
+  assert.equal(inboxCount(store, approvals, p, 'Cara', {}), 3);
+  assert.equal(inboxCount(store, approvals, p, 'Cara', { [ready]: at(ready), [offering]: at(offering) - 1, [asking]: at(asking) + 1 }), 2, 'only the opened ready minion fades');
+});
+
+test('each person\'s inbox holds only their own minions and unassigned ones, cards and approvals too (#197)', () => {
+  const store = new Store(join(root, 'mine.sqlite'));
+  const approvals = new Approvals(() => {});
+  const p = store.createProject('One', null).id;
+  const minion = (title: string, assigned?: string) => {
+    const id = store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+    if (assigned) store.props.set('minion', id, p, { assigned }, 'Cara');
+    store.updateTicket(id, { state: 'ready' });
+    return id;
+  };
+  const cara = minion('cara', 'Cara'), josh = minion('josh', 'Josh'), nobody = minion('nobody');
+  const tm = store.createTicket({ project_id: p, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' }).id;
+  store.addEvent(josh, 'question', { id: 'q-josh', questions: [] });
+  store.addEvent(tm, 'question', { id: 'q-tm', questions: [] });
+  approvals.request(josh, 'Bash', { command: 'ls' });
+
+  const ids = (person?: string) => [...new Set(inboxItems(store, approvals, p, person).map((i) => i.ticketId))].sort();
+  assert.deepEqual(ids('cara'), [cara, nobody, tm].sort(), 'names match in any case');
+  assert.deepEqual(ids('Josh'), [josh, nobody, tm].sort());
+  assert.deepEqual(ids(), [cara, josh, nobody, tm].sort(), 'no person: everyone\'s');
+  assert.equal(inboxCount(store, approvals, p, 'Josh', {}), 5, 'their ready minion, its question and approval, the unassigned one and the Taskmaster\'s question');
 });

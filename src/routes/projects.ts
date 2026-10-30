@@ -209,7 +209,7 @@ export const projectRoutes: Route[] = [
     // inbox: the count on the scheme's Needs-you badge, for the scheme switcher.
     handler: ({ res, app: { store, runner }, session }) => json(res, 200, visibleSchemes(store, session).map((p) => ({
       ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length,
-      inbox: inboxCount(store, runner.approvals, p.id, store.seenTimes(session.name, p.id)),
+      inbox: inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id)),
     }))),
   },
   {
@@ -660,7 +660,7 @@ export const projectRoutes: Route[] = [
   },
 
   // Everything in the scheme waiting on a person: open cards, and minions in state ready or try.
-  { method: 'GET', path: '/api/projects/:project/inbox', who: ['person'], handler: ({ res, app, project }) => json(res, 200, { items: inboxItems(app.store, app.runner.approvals, project.id) }) },
+  { method: 'GET', path: '/api/projects/:project/inbox', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, { items: inboxItems(app.store, app.runner.approvals, project.id, session.name) }) },
   // What happened in the scheme since this person last did something there, for the Taskmaster chat.
   { method: 'GET', path: '/api/projects/:project/recap', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, app.store.recap(session.name, project.id)) },
   {

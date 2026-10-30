@@ -33,6 +33,7 @@ test('cardEvent and countMoved, as the open scheme\'s badge uses them too', () =
   assert.equal(countMoved(undefined, minion()), true);
   assert.equal(countMoved(minion(), minion({ activity: 'x' })), false);
   assert.equal(countMoved(minion({ state: 'try' }), minion({ state: 'ready' })), true);
+  assert.equal(countMoved(minion({ properties: { assigned: 'Cara' } }), minion({ properties: { assigned: 'Josh' } })), true, 'it changed hands (#197)');
 });
 
 test('forget: after the counts are fetched afresh, a minion the watcher last saw before then refetches on its next change', () => {

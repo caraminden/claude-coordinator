@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { Auth } from '../src/auth.ts';
+import { Auth, hashPassword } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
 
@@ -18,6 +18,10 @@ const P = store.createProject('A', null);
 const TM = store.createTicket({ project_id: P.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Cara' });
 const M1 = store.createTicket({ project_id: P.id, kind: 'ticket', title: 'One', permission_mode: 'default', created_by: 'Cara' });
 const M2 = store.createTicket({ project_id: P.id, kind: 'ticket', title: 'Two', permission_mode: 'default', created_by: 'Cara' });
+// Josh signs in with a password of their own (the shared one signs in only an admin) and is in the scheme.
+const J = store.createUser({ name: 'Josh', login: 'josh' });
+store.updateUser(J.id, { password_hash: await hashPassword('josh-password-1') });
+store.addMember(P.id, J.id);
 store.db.close();
 
 const tokens = new Auth(PASSWORD, SECRET);
@@ -25,7 +29,7 @@ let srv: Booted;
 let josh: string;
 before(async () => {
   srv = await bootServer({ root });
-  const login = await fetch(`${srv.base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Josh', password: PASSWORD }) });
+  const login = await fetch(`${srv.base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'josh', password: 'josh-password-1' }) });
   josh = login.headers.get('set-cookie')!.split(';')[0];
 });
 after(() => srv?.proc.kill());

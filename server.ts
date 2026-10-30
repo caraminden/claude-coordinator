@@ -99,9 +99,9 @@ const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSIO
   },
   set: (id, nonces) => store.setSetting(`agent-nonce:${id}`, nonces),
 }, store);
-// The first start with per-person logins makes the admin (COORDINATOR_PASSWORD signs them in until they
-// set a password), and every scheme from before owners becomes theirs.
-if (!store.listUsers().length) {
+// The first start with per-person logins (or any with no admin) makes the admin, whom COORDINATOR_PASSWORD
+// signs in until they set a password, and every scheme from before owners becomes theirs.
+if (!store.listUsers().some((u) => u.admin)) {
   const name = process.env.COORDINATOR_ADMIN?.trim() || 'Cara';
   store.createUser({ name, login: name.toLowerCase().replace(/[^a-z0-9._-]/g, ''), admin: true, server_login: true });
 }

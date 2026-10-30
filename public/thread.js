@@ -72,7 +72,7 @@ function renderHistory() {
     lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
     actions: new Map(), turnActions: [], cards: new Map(), heldCards: [],
     // The session started on an earlier page, if there is one.
-    sawInit: page.more, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), lastText: null, narrationEl: null, pendingRequest: [], turnRequest: undefined,
+    sawInit: page.more, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, pendingRequest: [], turnRequest: undefined,
     pendingMessages: [],
   });
   log.replaceChildren(...(page.more ? [h('div', { class: 'load-earlier' },
@@ -607,7 +607,6 @@ export function appendEvent(event, scroll = true) {
     view.turnNote = null;
     view.turnInitAt = event.created_at;
     view.narration = narrationSorter();
-    view.lastText = null;
     view.narrationEl = null;
     // Messages queued since the last turn are what this turn works on.
     if (view.pendingRequest?.length) view.turnRequest = view.pendingRequest;
@@ -709,7 +708,7 @@ export function appendEvent(event, scroll = true) {
           const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
           const msg = stamped(h('div', { class: 'msg' }, h('div', { class: 'who' }, speaker()), body), event);
           nodes.push(msg);
-          settle.push(...view.narration.text(view.lastText = { el: msg, body, text: block.text }));
+          settle.push(...view.narration.text({ el: msg, body, text: block.text }));
         } else if (block.type === 'tool_use') {
           settle.push(...view.narration.tool(block.name));
         }
@@ -783,7 +782,7 @@ function stamped(el, event) {
 /**
  * Fold or keep one of the turn's words, as narrationSorter settled it. Folded remarks go in an
  * "updates along the way" row, one per stretch between kept messages, where the first of them
- * was. While the turn runs, the newest folded remark also shows in the working line.
+ * was.
  */
 function settleText(t, fate) {
   if (fate !== 'fold') {
@@ -796,7 +795,6 @@ function settleText(t, fate) {
     t.el.before(view.narrationEl);
   }
   t.el.remove();
-  t.folded = true;
   const notes = view.narrationEl.querySelector('.notes');
   notes.append(h('div', { class: 'note-text' }, t.body));
   const n = notes.childElementCount;
@@ -1269,9 +1267,9 @@ function elapsedText(ms) {
 }
 
 /**
- * The working line under the chat while a turn runs: what's running right now, how long the turn
- * has gone, and Claude's newest remark below. The plan step sits in the thread bar's readout just
- * above, so it isn't repeated here; clicking the line opens that readout.
+ * The working line under the chat while a turn runs: who's working, how long the turn has gone and
+ * what's queued, on one line. What it's doing is the thread bar's readout just above; clicking the
+ * line opens it.
  */
 export function renderTyping() {
   const el = view?.typingEl;
@@ -1282,23 +1280,13 @@ export function renderTyping() {
   el.hidden = !show;
   if (!show) return;
   const running = t.status === 'running';
-  const current = running && initSeen();
-  const last = current && view.turnActions.at(-1);
-  const busy = last && !last.result;
-  const doing = busy ? actionLabel(last.block) : 'thinking…';
   const sep = () => h('span', { class: 'sep' }, '·');
   el.title = 'Show the work so far';
-  // Only once folded away, so a remark that is still a bubble isn't said twice.
-  const said = current && view.lastText?.folded ? firstSentence(view.lastText.text.trim(), 200) : '';
   el.replaceChildren(
     h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
-    h('span', { class: 'lines' },
-      h('span', { class: 'line' },
-        h('span', { class: 'lead' }, t.approvals ? 'Waiting for someone to approve or deny' : running ? 'Claude is working' : 'Claude is thinking…'),
-        running && !t.approvals ? [sep(), h('span', { class: 'what' }, doing)] : '',
-        running && t.turnStartedAt ? [sep(), h('span', { class: 'time', 'aria-hidden': 'true' }, elapsedText(Date.now() - t.turnStartedAt))] : '',
-        t.queued ? [sep(), h('span', { class: 'queued', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, `${t.queued} queued`)] : ''),
-      said ? h('span', { class: 'said' }, said) : ''));
+    h('span', { class: 'lead' }, t.approvals ? 'Waiting for someone to approve or deny' : running ? 'Claude is working' : 'Claude is thinking…'),
+    running && t.turnStartedAt ? [sep(), h('span', { class: 'time', 'aria-hidden': 'true' }, elapsedText(Date.now() - t.turnStartedAt))] : '',
+    t.queued ? [sep(), h('span', { class: 'queued', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, `${t.queued} queued`)] : '');
   if (wasHidden && followChat) scrollToBottom();
 }
 

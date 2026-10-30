@@ -28,7 +28,7 @@ export async function openStartScheme() {
 
 /** Where a new scheme's code comes from. */
 const SOURCES = [
-  { value: 'new', label: 'New repo (private, on GitHub too)' },
+  { value: 'new', label: 'New repo (private, on GitHub too)', admin: true },
   { value: 'url', label: 'Clone from a URL', field: 'repoUrl', placeholder: 'https://github.com/caraminden/gamedevtest.git' },
   { value: 'folder', label: 'Clone a folder on perigee', field: 'folder', placeholder: '~/projects/…', admin: true },
   { value: 'none', label: 'No code (docs, research, art)' },
@@ -40,7 +40,7 @@ const DEFAULT_SOURCE = 'new';
 /** Name, code source and what it's about for a new scheme; on success it opens the scheme. */
 function newSchemeForm() {
   const sources = SOURCES.filter((s) => !s.admin || account?.admin).map((s) => h('label', { class: 'source' },
-    h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === DEFAULT_SOURCE }),
+    h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === (account?.admin ? DEFAULT_SOURCE : 'none') }),
     h('span', {}, s.label),
     s.field ? h('input', { name: s.field, 'data-draft': true, placeholder: s.placeholder }) : ''));
   const form = h('form', {},

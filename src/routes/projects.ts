@@ -7,6 +7,7 @@ import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, TICKET_TAGS, type Project, type Ticket, type TicketTag } from '../db.ts';
+import { lendsMachines } from '../access.ts';
 import { inboxItems } from '../inbox.ts';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
@@ -203,6 +204,8 @@ export const projectRoutes: Route[] = [
       let slug: string | null = null;
       // A folder on this machine could be anyone's, another scheme's included.
       if (source === 'folder' && !session.admin) throw new HttpError(403, 'Only an admin can start a scheme from a folder on the server');
+      // A new repo goes on the admin's GitHub account.
+      if (source === 'new' && !session.admin) throw new HttpError(403, 'Only an admin can make a new GitHub repo; clone one from a URL instead');
       const about = body.about == null || body.about === '' ? '' : str(body.about, 'About', 4000);
       // "Create and set up" starts the Taskmaster's onboarding; "Create only" (and older callers) skip it.
       const setup = body.setup === true;
@@ -255,7 +258,7 @@ export const projectRoutes: Route[] = [
   },
   {
     // Try again to put a new scheme's repo on GitHub after it failed at creation.
-    method: 'POST', path: '/api/projects/:project/github', who: ['person'], access: 'owner',
+    method: 'POST', path: '/api/projects/:project/github', who: ['person'], access: 'admin',
     async handler({ res, app, project }) {
       if (app.preview) throw new HttpError(403, 'A preview can\'t make GitHub repos');
       if (!project.github_error || !project.repo_dir) throw new HttpError(409, 'This scheme has no GitHub repo waiting to be made');
@@ -316,7 +319,7 @@ export const projectRoutes: Route[] = [
   },
   {
     method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER, access: 'owner',
-    async handler({ req, res, app, session, project }) {
+    async handler({ req, res, app, session, caller, project }) {
       const { store, runner } = app;
       // Any of name, instructions, approval_rules, plugin_dirs, default_effort, machine_tools, onboarding and onboarding_mode; what is left out stays.
       const body = await readJson(req);
@@ -342,6 +345,10 @@ export const projectRoutes: Route[] = [
         if (body.plugin_dirs !== undefined) settings.plugin_dirs = cleanPluginDirs(body.plugin_dirs);
       } catch (err: any) {
         throw new HttpError(400, err.message);
+      }
+      // Plugins load code from any folder on the server: an admin's, or an admin's scheme's Taskmaster's.
+      if (settings.plugin_dirs !== undefined && settings.plugin_dirs !== (project.plugin_dirs ?? '') && !(session.admin || (caller && lendsMachines(store, project)))) {
+        throw new HttpError(403, 'Only an admin can change plugin folders');
       }
       if (body.instructions !== undefined && typeof body.instructions !== 'string') throw new HttpError(400, 'instructions must be text');
       const instructions = body.instructions === undefined ? project.instructions : body.instructions.replace(/\r\n/g, '\n').trim();

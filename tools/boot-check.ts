@@ -65,6 +65,9 @@ try {
   } else {
     console.error('boot-check: no Taskmaster in the database, so no turn was started');
   }
+  // The shared password signs in only an admin, by login: the copy's first one, or the one the server
+  // makes from COORDINATOR_ADMIN below when the copy has no people yet.
+  const adminLogin = turnStore.listUsers().find((u) => u.admin && !u.disabled_at)?.login ?? 'boot-check';
   turnStore.db.close();
   const claude = join(root, 'claude');
   writeFileSync(claude, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(import.meta.dirname, 'boot-check-claude.ts'))} "$@"\n`);
@@ -77,7 +80,7 @@ try {
     env: {
       PATH: process.env.PATH, HOME: process.env.HOME, LANG: process.env.LANG,
       HOST: '127.0.0.1', PORT: '0', DATA_DIR: root, BOOT_CHECK: '1', CLAUDE_BIN: claude, TURN_UNITS: '0',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: password, SESSION_SECRET: secret,
+      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: password, COORDINATOR_ADMIN: 'boot-check', SESSION_SECRET: secret,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -95,7 +98,7 @@ try {
   }
   const page = await fetch(`${base}/`);
   if (page.status !== 200 || !/<html/i.test(await page.text())) fail(`The app page answered ${page.status}`);
-  const login = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'boot-check', password }) });
+  const login = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: adminLogin, password }) });
   const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
   if (!login.ok || !cookie) fail(`Signing in answered ${login.status}`);
   await pageCheck(`${base}/`, cookie);

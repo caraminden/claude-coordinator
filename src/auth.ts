@@ -110,15 +110,15 @@ export class Auth {
   }
 
   /**
-   * The person a login and password sign in, or null. COORDINATOR_PASSWORD signs in an admin: the one
-   * the login names, or the first admin when it names nobody (tools/boot-check.ts signs in that way).
+   * The person a login and password sign in, or null. COORDINATOR_PASSWORD signs in only the admin
+   * the login names: it was once everyone's shared password, so an unknown login with it gets nothing.
    */
   async signIn(client: string, login: string, password: string): Promise<User | null> {
     const store = this.users!;
     const user = store.findUser('login', login.trim());
     const own = await verifyPassword(user?.password_hash ?? DUMMY_HASH, password);
     const shared = timingSafeEqual(sha256(password), sha256(this.password));
-    const admin = shared && (user ? (user.admin ? user : null) : (store.listUsers().find((u) => u.admin && !u.disabled_at) ?? null));
+    const admin = shared && user?.admin ? user : null;
     const who = user && own ? user : admin;
     return this.counted(client, !!who && !who.disabled_at) ? who : null;
   }

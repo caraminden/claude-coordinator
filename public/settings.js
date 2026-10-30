@@ -269,6 +269,8 @@ export function approvalsEditor() {
   };
   const rules = field('approval-rules', 'approval_rules', 'Bash(gh pr merge:*)\nmcp__*__merge_pull_request');
   const dirs = field('plugin-dirs', 'plugin_dirs', 'tools/mods/delve');
+  // Plugins load code from any folder on the server, so only an admin changes them.
+  dirs.readOnly = !account?.admin;
   const status = h('span', { class: 'muted', role: 'status' });
   const save = h('button', { type: 'button' }, 'Save');
   const discard = h('button', { type: 'button', class: 'secondary' }, 'Discard');
@@ -321,7 +323,7 @@ export function approvalsEditor() {
     h('h3', { class: 'settings-label' }, 'Plugin folders'),
     h('p', { class: 'muted small' },
       'Folders relative to the repo root, one per line, like ', h('code', {}, 'tools/mods/delve'),
-      ', or absolute paths. Each minion loads the ones that exist (relative ones in its worktree) as Claude Code plugins (', h('code', {}, '--plugin-dir'), ').'),
+      ', or absolute paths. Each minion loads the ones that exist (relative ones in its worktree) as Claude Code plugins (', h('code', {}, '--plugin-dir'), ').', account?.admin ? '' : ' Only an admin changes these.'),
     dirs,
     h('div', { class: 'row instructions-actions' }, save, discard, status));
   sync();

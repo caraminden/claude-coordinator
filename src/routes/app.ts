@@ -55,7 +55,7 @@ export const appRoutes: Route[] = [
     async handler({ req, res, params, app: { auth, store } }) {
       const ip = clientIp(req);
       if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
-      const user = auth.inviteUser(ip, decodeURIComponent(params.token));
+      const user = auth.inviteUser(ip, params.token);
       if (!user) throw new HttpError(404, 'This link has expired or was already used. Ask for a new one.');
       if (req.method === 'GET') return json(res, 200, { name: user.name, login: user.login });
       const hash = await newPasswordHash((await readJson(req)).password);

@@ -30,10 +30,10 @@ test('people sign in with their own password; the shared one signs in an admin o
   store.updateUser(josh.id, { password_hash: await hashPassword('joshs-password') });
   assert.equal((await auth.signIn('ip', 'JOSH', 'joshs-password'))?.name, 'Josh');
   assert.equal(await auth.signIn('ip', 'josh', 'wrong-password'), null);
-  // The shared password never signs in as Josh, but as the admin a login names, or the first admin.
+  // The shared password signs in only an admin, by their own login: never Josh, nor an unknown login.
   assert.equal((await auth.signIn('ip', 'josh', PASSWORD))?.name, undefined);
   assert.equal((await auth.signIn('ip', 'cara', PASSWORD))?.name, 'Cara');
-  assert.equal((await auth.signIn('ip', 'boot-check', PASSWORD))?.name, 'Cara');
+  assert.equal(await auth.signIn('ip', 'boot-check', PASSWORD), null);
   // Disabled: no sign-in, and their cookie stops working at once.
   const before = cookie(auth, josh);
   store.updateUser(josh.id, { disabled_at: Date.now() });
@@ -157,8 +157,13 @@ test('people make their own schemes, add others to them, and see nothing else', 
   assert.deepEqual((await as('Olive', '/api/projects')).data, []);
   assert.equal((await as('Olive', `/api/projects/${josh.data.id}`)).status, 404);
   assert.equal((await as('Josh', `/api/projects/${cara.id}`)).status, 404);
-  // Only an admin starts a scheme from a folder on the server.
+  // Only an admin starts a scheme from a folder on the server, or makes a repo on their GitHub account.
   assert.equal((await as('Josh', '/api/projects', { name: 'Peek', source: 'folder', folder: '/' })).status, 403);
+  assert.equal((await as('Josh', '/api/projects', { name: 'Repo', source: 'new' })).status, 403);
+  // Plugins load code from any folder on the server: an owner who isn't an admin can't set them.
+  assert.equal((await as('Josh', `/api/projects/${josh.data.id}`, { plugin_dirs: '/home' }, 'PATCH')).status, 403);
+  assert.equal((await as('Josh', `/api/projects/${josh.data.id}`, { plugin_dirs: '', approval_rules: 'Bash(rm:*)' }, 'PATCH')).status, 200);
+  assert.equal((await as('Cara', `/api/projects/${josh.data.id}`, { plugin_dirs: 'tools/mods' }, 'PATCH')).status, 200);
 
   // Josh adds Olive: she sees it, but only its owner changes its settings or members.
   assert.equal((await as('Olive', `/api/projects/${josh.data.id}/members`, { person: people.Josh.id })).status, 404);

@@ -27,6 +27,7 @@ async function call(who: string, path: string, opts: { method?: string; body?: u
   return { status: res.status, data: await res.json() };
 }
 
+let joshId = 0;
 async function login(name: string) {
   const res = await fetch(`${base}/api/login`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, password: 'test-password-123' }),
@@ -45,12 +46,17 @@ before(async () => {
   procs.push(server);
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   await login('Cara');
-  await login('Josh');
+  // Josh signs in through an invite: the shared password signs in only an admin.
+  const { data: made } = await call('Cara', '/api/people', { method: 'POST', body: { name: 'Josh' } });
+  joshId = made.person.id;
+  const res = await fetch(`${base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'josh-password-1' }) });
+  cookies.Josh = res.headers.get('set-cookie')!.split(';')[0];
 });
 
 test('views are saved per scheme, replaced by name, deletable by anyone, and validated', async () => {
   const { data: p } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Views' } });
   const { data: other } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Elsewhere' } });
+  await call('Cara', `/api/projects/${p.id}/members`, { method: 'POST', body: { person: joshId } });
   const url = `/api/projects/${p.id}/views`;
   assert.deepEqual((await call('Cara', url)).data, []);
 

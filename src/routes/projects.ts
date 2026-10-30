@@ -37,7 +37,8 @@ async function putOnGithub(app: App, projectId: number, dir: string, slug: strin
     await pushToGithub(dir, slug, checked);
     app.store.setProjectUpstream(projectId, githubUrl(slug), null);
   } catch (err) {
-    app.store.setProjectUpstream(projectId, null, errorText(err));
+    // Keeps any repo_url: a Retry racing one that just worked mustn't drop its URL.
+    app.store.setProjectUpstream(projectId, app.store.getProject(projectId)!.repo_url, errorText(err));
   }
   const saved = app.store.getProject(projectId)!;
   app.broadcast({ type: 'project', project: saved });

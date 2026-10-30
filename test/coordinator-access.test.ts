@@ -36,6 +36,16 @@ test('without a repo, only the tickets folder is added and no git is allowed, on
   assert.deepEqual(settings.permissions.allow, ['WebSearch', 'WebFetch']);
 });
 
+test('a live checkout is added read-only, with read-only git, and only when given', () => {
+  const live = join(root, 'live');
+  const { addDirs, settings } = coordinatorAccess(repo, tickets, null, null, live) as any;
+  assert.deepEqual(addDirs, [repo, tickets, live]);
+  assert.ok(settings.permissions.deny.includes(`Edit(/${live}/**)`));
+  assert.ok(settings.permissions.allow.includes(`Bash(git -C ${live} log:*)`));
+  assert.ok(!settings.permissions.allow.some((r: string) => r.includes(live) && !r.startsWith(`Bash(git -C ${live} `)));
+  assert.ok(!JSON.stringify(coordinatorAccess(repo, tickets)).includes(live));
+});
+
 test('a project with no tickets folder yet still works', () => {
   const { addDirs } = coordinatorAccess(repo, join(root, 'missing'));
   assert.equal(addDirs.length, 2);

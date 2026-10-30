@@ -68,13 +68,15 @@ export const TURN_WRAPPER = pinnedCopy('turn-wrapper.ts');
  */
 export const KIT = join(MCP_DIR, 'kit');
 const KIT_SOURCE = join(import.meta.dirname, '..', 'kit');
+/** The live checkout: the code this server runs, which Citadel's own Taskmaster may read. */
+export const CHECKOUT = join(import.meta.dirname, '..');
 if (existsSync(KIT_SOURCE)) cpSync(KIT_SOURCE, KIT, { recursive: true });
 /** The slice turn units run in; its name puts it under citadel.slice, which deploy/citadel.slice caps. */
 export const TURN_SLICE = 'citadel-turns.slice';
 
 /** The tripwire's view of this server, for a turn in this project; `ask` when the turn can show approval cards. */
 export function tripwireConfig(projectId: number, claudeConfig: string, ask: boolean): TripwireConfig {
-  return { home: homedir(), data: DATA_DIR, checkout: join(import.meta.dirname, '..'), project: projectId, claudeConfig, ask };
+  return { home: homedir(), data: DATA_DIR, checkout: CHECKOUT, project: projectId, claudeConfig, ask };
 }
 
 /**
@@ -626,15 +628,15 @@ const READ_ONLY_GIT = [
  * config dir as sensitive, so neither allow rules nor a hook's allow let it write there (tried with
  * real runs); making that folder its auto-memory does, so its memory is the one minions load too.
  */
-export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
+export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null, liveDir: string | null = null): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
   let ticketDirs: string[] = [];
   try {
     ticketDirs = readdirSync(ticketsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(ticketsDir, d.name));
   } catch {
     // No tickets yet.
   }
-  const roots = repoDir ? [repoDir, ticketsDir] : [ticketsDir];
-  const gitDirs = repoDir ? [repoDir, ...ticketDirs] : [];
+  const roots = [repoDir, ticketsDir, liveDir].filter((d): d is string => !!d);
+  const gitDirs = [repoDir, ...(repoDir ? ticketDirs : []), liveDir].filter((d): d is string => !!d);
   const writable = [sharedDir, memoryDir].filter((d): d is string => !!d);
   return {
     // Adding the parent tickets/ folder also covers worktrees made after the turn starts.
@@ -665,8 +667,10 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
     'Minion titles are the short ask, about 30 characters ("Usage bar in the top bar"), with no number, tag, build or emoji ("Lairs", not "Lairs · Build #8"); the app shows the number and build, and the minions label themselves as they work. Give each new minion a tag too when one fits: feature, bug, design, process (tooling, prompts, docs, setup) or idea (exploring, no code yet). You can fix a minion\'s title, tag, state or note with update_ticket, and assign it to a major build with its build field (the minions list groups each build\'s minions together; null takes it out).',
     'Minions run in the background. To see progress, read them; do not wait or poll in a loop. Dismiss minions when people agree they are done.',
     project.repo_dir
-      ? `The scheme's main checkout is at ${project.repo_dir} and minion worktrees are under ${ticketsDir} (one folder per minion). You may read them for context, but do not edit, commit or switch branches there: edits there are denied. Search and read them with Read and with read-only Bash such as \`grep -rn … | head\`; for git, use \`git -C <folder> log\` (or status, diff, show, blame, branch -a), since \`cd <folder> && git …\` is denied.`
+      ? `The scheme's main checkout is at ${project.repo_dir} and minion worktrees are under ${ticketsDir} (one folder per minion). You may read them for context, but do not edit, commit or switch branches there: edits there are denied. Search and read them with Read and with read-only Bash such as \`grep -rn … | head\`.`
       : `This scheme has no git repo; each minion gets a plain folder under ${ticketsDir}. You may read them for context, but do not edit them: edits there are denied.`,
+    project.id === GLOBAL_OWNER ? `The live checkout, the code this server runs right now, is at ${CHECKOUT}: read it the same way (Read, ls, grep, git -C), never edit it.` : '',
+    'For git, always run `git -C <folder> <command>` (log, status, diff, show, blame, branch -a), never `cd <folder> && git …`: a cd before git is denied.',
     memoryDir
       ? `You can read and write files (Read, Write, Edit) in the scheme's shared folder, described below, and in ${memoryDir}, the scheme's Claude Code memory that its minions load too. Keep what is worth remembering across conversations in the memory as short topic files with an index in MEMORY.md. You still cannot run shell commands.`
       : '',
@@ -1494,7 +1498,7 @@ export class Runner {
     };
     if (rules.length) settings.permissions.ask = rules;
     if (ticket.kind === 'coordinator') {
-      const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project), sharedDir, memoryDir);
+      const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project), sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null);
       addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
       const { permissions, ...rest } = access.settings;
       Object.assign(settings, rest);

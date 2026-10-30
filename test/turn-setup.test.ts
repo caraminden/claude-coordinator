@@ -167,6 +167,23 @@ test("a Taskmaster may search and fetch the web without a prompt nobody can answ
   assert.ok(!minion.args.includes('--allowedTools'));
 });
 
+test("only Citadel's own Taskmaster may read the live checkout, never write it, and every Taskmaster is told git -C, never cd", async () => {
+  while (!store.getProject(GLOBAL_OWNER)) store.createProject(`P${Math.random()}`, null);
+  const checkout = join(import.meta.dirname, '..');
+  const own = await turn('coordinator', 'connected', {}, undefined, GLOBAL_OWNER);
+  const addDirs = own.args.slice(own.args.indexOf('--add-dir') + 1);
+  assert.ok(addDirs.includes(checkout));
+  assert.ok(own.settings.permissions.deny.includes(`Edit(/${checkout}/**)`));
+  assert.ok(own.settings.permissions.allow.includes(`Bash(git -C ${checkout} log:*)`));
+  assert.ok(own.system.includes(`The live checkout, the code this server runs right now, is at ${checkout}`));
+  for (const other of [await turn('coordinator', 'connected'), await turn('ticket', 'connected', {}, undefined, GLOBAL_OWNER)]) {
+    assert.ok(!other.args.includes(checkout));
+    assert.ok(!JSON.stringify(other.settings.permissions).includes(checkout));
+    assert.doesNotMatch(other.system, /The live checkout, the code this server runs/);
+  }
+  for (const tm of [own, await turn('coordinator', 'connected')]) assert.match(tm.system, /always run `git -C <folder> <command>`[^\n]*never `cd <folder> && git …`/);
+});
+
 test("minion and Taskmaster turns both keep the Read tool out of the logins, keys, env file and state.db (#185)", async () => {
   for (const kind of ['ticket', 'coordinator'] as const) {
     const { deny } = (await turn(kind, 'connected')).settings.permissions;

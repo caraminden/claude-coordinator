@@ -643,7 +643,8 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sh
       permissions: {
         // `//` makes the path absolute. Edit rules also cover Write, NotebookEdit and Bash commands that write there.
         deny: [...roots.map((d) => `Edit(/${d}/**)`), 'Bash(git * --output*)'],
-        allow: gitDirs.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`)),
+        // Minions run in bypassPermissions; a Taskmaster's web tools would ask a prompt nobody can answer (#210).
+        allow: ['WebSearch', 'WebFetch', ...gitDirs.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`))],
       },
       ...(memoryDir ? { autoMemoryDirectory: memoryDir } : {}),
     },

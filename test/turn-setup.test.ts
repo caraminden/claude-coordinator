@@ -159,6 +159,14 @@ test("minion and Taskmaster turns both leave out unused built-in tools and the a
   }
 });
 
+test("a Taskmaster may search and fetch the web without a prompt nobody can answer; a minion's rules are unchanged (#210)", async () => {
+  const tm = await turn('coordinator', 'connected');
+  for (const tool of ['WebSearch', 'WebFetch']) assert.ok(tm.settings.permissions.allow.includes(tool), tool);
+  const minion = await turn('ticket', 'connected');
+  assert.deepEqual(minion.settings.permissions.allow, ['mcp__thread']);
+  assert.ok(!minion.args.includes('--allowedTools'));
+});
+
 test("minion and Taskmaster turns both keep the Read tool out of the logins, keys, env file and state.db (#185)", async () => {
   for (const kind of ['ticket', 'coordinator'] as const) {
     const { deny } = (await turn(kind, 'connected')).settings.permissions;

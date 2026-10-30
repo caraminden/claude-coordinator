@@ -30,10 +30,10 @@ test('allows read-only git -C with the exact folder as prefix', () => {
   }
 });
 
-test('without a repo, only the tickets folder is added and no git is allowed', () => {
+test('without a repo, only the tickets folder is added and no git is allowed, only the web tools', () => {
   const { addDirs, settings } = coordinatorAccess(null, tickets) as any;
   assert.deepEqual(addDirs, [tickets]);
-  assert.deepEqual(settings.permissions.allow, []);
+  assert.deepEqual(settings.permissions.allow, ['WebSearch', 'WebFetch']);
 });
 
 test('a project with no tickets folder yet still works', () => {

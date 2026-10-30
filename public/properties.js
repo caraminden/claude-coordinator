@@ -204,7 +204,7 @@ async function deleteView(v) {
 
 /** This person saved or deleted a view in this scheme, maybe in another tab. */
 export function onViewsChanged(projectId, name) {
-  if (name !== me?.name || view?.kind !== 'project' || projectId !== view.projectId || propFilter.projectId !== projectId) return;
+  if (name !== me || view?.kind !== 'project' || projectId !== view.projectId || propFilter.projectId !== projectId) return;
   propFilter.views = null;
   renderPropFilter();
 }

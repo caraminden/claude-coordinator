@@ -464,6 +464,7 @@ function sqliteReason(args: Word[], st: State, cfg: TripwireConfig): string | nu
   if (!p || !under(p, cfg.data)) return null;
   const readonly = a.some((t) => t === '-readonly' || t === '--readonly' || t.includes('mode=ro'));
   if (/^state\b/.test(basename(p)) && !readonly) return `${basename(p)} holds every minion's Claude session. Open it with \`sqlite3 -readonly\`.`;
+  if (!sqlShown(args)) return "SQL piped in or read from a file can't be checked for the credentials table. Put it in the command: `sqlite3 -readonly <db> 'select …'`.";
   const shown = [...sql, ...args.filter((_, k) => /^--?cmd$/.test(a[k - 1] ?? ''))].map((w) => w.text);
   if (shown.some((t) => /\bcredentials\b/i.test(t) || /^\s*\.dump\s*$/m.test(t))) return "The credentials table holds people's linked accounts; nothing here needs to read it. Name the tables you need (`.dump tickets`).";
   return null;
@@ -707,7 +708,9 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   if (name === 'ps' && args.some(bsdE)) return hard(`This \`ps\` prints processes' environments. ${ENVIRON_WHY}`);
   const sub = args.filter((w) => !w.text.startsWith('-')).map((w) => w.text);
   if (name === 'printenv') return hard(`\`printenv\` prints the environment. ${ENV_WHY}`);
-  if (name === 'claude' && (sub[0] === 'setup-token' || sub[0] === '/login' || sub[0] === 'login' || (sub[0] === 'auth' && sub[1] === 'login'))) {
+  // Anywhere among the plain words: an option's value (`--model haiku`) comes before the subcommand.
+  const print = args.some((w) => w.text === '-p' || w.text === '--print');
+  if (name === 'claude' && (sub.includes('setup-token') || sub.includes('/login') || sub.some((t, k) => t === 'auth' && sub[k + 1] === 'login') || (sub[0] === 'login' && !print))) {
     return hard('Signing Claude in from a turn would make or replace a login token. People sign in themselves, in their own terminal.');
   }
   if (NETWORK.has(name) && args.some((w) => RUNNER_API.test(w.text) || /(citadel|claude)-runner[^/\s]*\.sock/.test(w.text))) return hard("A runner's socket and its endpoints in Citadel's API are for the runner and Citadel; a turn never pairs, connects or sends as one.");

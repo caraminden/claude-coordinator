@@ -10,53 +10,56 @@
 #    stays moved; the next landing pushes it again.
 set -euo pipefail
 
-# The check command, exactly as Project facts names it under "Check commands".
+# The check command, exactly as Project facts names it under "Check commands" ('true' while it has none).
 CHECK='npm test'
+# The scheme's main branch.
+BRANCH=main
 
 say() { echo "land: $*" >&2; }
 refuse() { say "$*"; exit 1; }
 
 [ $# -eq 0 ] || refuse "takes no arguments"
 here=$(git rev-parse --show-toplevel)
+cd "$here"
 branch=$(git branch --show-current)
-{ [ -n "$branch" ] && [ "$branch" != main ]; } || refuse "run it from a minion's branch, not main or a detached HEAD"
+{ [ -n "$branch" ] && [ "$branch" != "$BRANCH" ]; } || refuse "run it from a minion's branch, not $BRANCH or a detached HEAD"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || refuse "$here has uncommitted changes: commit them first"
 # The main checkout is the first entry of the worktree list.
 MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-[ "$(git -C "$MAIN" branch --show-current)" = main ] || refuse "$MAIN is not on main; a person needs to look"
+[ "$(git -C "$MAIN" branch --show-current)" = "$BRANCH" ] || refuse "$MAIN is not on $BRANCH; a person needs to look"
 [ -z "$(git -C "$MAIN" status --porcelain --untracked-files=no)" ] || refuse "$MAIN has uncommitted changes; a person needs to look"
 
 state=$(git -C "$MAIN" rev-parse --absolute-git-dir)
 exec 9>"$state/land.lock"
 flock -w 900 9 || refuse "another landing has held the lock for 15 min; try again later"
 
-say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
-if ! git rebase -q main; then
+say "rebasing $branch onto $BRANCH ($(git log -1 --format='%h "%s"' "$BRANCH"))"
+if ! git rebase -q "$BRANCH"; then
   git rebase --abort 2>/dev/null || true # nothing to abort if it never started
-  refuse "the rebase onto main failed (see git's output above), so nothing landed. On conflicts: run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again"
+  refuse "the rebase onto $BRANCH failed (see git's output above), so nothing landed. On conflicts: run git rebase $BRANCH, resolve them keeping the other minions' changes, re-test, commit, then run this again"
 fi
 
 say "running $CHECK"
 log="$state/land-check.log"
 if ! bash -c "$CHECK" >"$log" 2>&1; then
   tail -n 40 "$log" >&2
-  refuse "the check failed on the rebased branch (full log: $log), so main is untouched"
+  refuse "the check failed on the rebased branch (full log: $log), so $BRANCH is untouched"
 fi
 
 tip=$(git rev-parse HEAD)
-git -C "$MAIN" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
-say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
+git -C "$MAIN" merge -q --ff-only "$tip" || refuse "could not fast-forward $BRANCH to $branch; nothing landed"
+say "$BRANCH is now at $(git log -1 --format='%h "%s"' "$tip")"
 
 if ! git -C "$MAIN" remote get-url origin >/dev/null 2>&1; then
-  say "no origin remote, so main stays local"
+  say "no origin remote, so $BRANCH stays local"
   exit 0
 fi
 # --no-verify: .githooks/pre-push refuses every push to main on purpose; this script is the one
 # route that may make it.
-if out=$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$MAIN" push -q --no-verify origin main 2>&1); then
-  say "pushed main to origin"
+if out=$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$MAIN" push -q --no-verify origin "$BRANCH" 2>&1); then
+  say "pushed $BRANCH to origin"
 else
-  say "main moved, but the push to origin failed: $out"
-  say "the next landing pushes it again"
+  say "$BRANCH moved, but the push to origin failed: $out"
+  say "the next landing retries it; if origin's $BRANCH moved on its own (rejected as non-fast-forward), a person merges it into $MAIN first"
   exit 1
 fi

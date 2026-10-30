@@ -116,11 +116,12 @@ Copy from this skill's `templates/` folder: `guard.sh` to `tools/guard.sh` and `
 `.githooks/pre-push` (both executable), and `settings.json` to `.claude/settings.json`. When the
 repo already has a `.claude/settings.json`, add the template's hooks to it and keep the rest.
 If the scheme's main branch has a name other than `main` or `master`, add it to `is_protected`
-in `guard.sh` and to the `case` in `pre-push`.
+in `guard.sh`, to the `case` in `pre-push`, and to `BRANCH` in `land.sh`.
 
 When the plan names `tools/land.sh` as the pusher, copy `land.sh` there too (executable) and
-set its `CHECK` line to the check command from Project facts. It rebases, runs the check,
-fast-forwards the main checkout and pushes main; read its header.
+set its `CHECK` line to the check command from Project facts, or `true` while there is none
+(your done note says so). It rebases, runs the check, fast-forwards the main checkout and
+pushes main; read its header.
 
 `--install` sets `core.hooksPath` in the repo's shared config, so the main checkout gets the
 hook once your merge brings `.githooks/` there. Then prove it:
@@ -185,8 +186,10 @@ rest of that file to the Taskmaster. *Done when* every copied file has its row.
 ### 8. Commit and merge
 
 Commit with each file named in the message. Run `citadel:self-review`: it never skips
-`CLAUDE.md` or `.claude/`. On a high label, stop and ask with a card. Then merge by the
-plan's shipping answer:
+`CLAUDE.md` or `.claude/`. The guard files you just listed as high risk by file make a setup
+rate high by themselves; the approved plan already listed them, so that alone is no reason to
+stop. A high label for any other reason: stop and ask with a card. Then merge by the plan's
+shipping answer:
 
 - **PR per change:** push your branch, `gh pr create`, and merge it with `gh pr merge` (the
   scheme's approval rules turn that into a card for a person). Wait for the merge.

@@ -18,7 +18,8 @@ async function check(): Promise<string> {
   const parsed = JSON.parse(settings.trimStart().startsWith('{') ? settings : readFileSync(settings, 'utf8'));
   if (!parsed.hooks) throw new Error('--settings has no hooks (the tripwire)');
 
-  const server = JSON.parse(flag('--mcp-config') ?? '{}').mcpServers?.[role];
+  const config = flag('--mcp-config') ?? '{}';
+  const server = JSON.parse(config.trimStart().startsWith('{') ? config : readFileSync(config, 'utf8')).mcpServers?.[role];
   if (!server) throw new Error(`--mcp-config has no ${role || '(no role)'} server`);
   const mcp = spawn(server.command, server.args ?? [], { env: { ...process.env, ...server.env }, stdio: ['pipe', 'pipe', 'pipe'] });
   let stderr = '';

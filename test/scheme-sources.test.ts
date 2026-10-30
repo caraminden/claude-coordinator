@@ -137,6 +137,19 @@ test('a minion whose worktree can\'t be made says what git said', async () => {
   assert.match(t.data.error, /^Could not create working directory: .*not a git repository/);
 });
 
+test('a locked repo config says so, not just git\'s hint', async () => {
+  const r = await create({ name: 'Locked config', source: 'url', repoUrl: 'https://example.test/remote.git' });
+  const lock = join(r.data.repo_dir, '.git', 'config.lock');
+  writeFileSync(lock, '');
+  chmodSync(lock, 0o444);
+  const t = await s.call(`/api/projects/${r.data.id}/tickets`, { message: 'try the repo' });
+  assert.equal(t.status, 500);
+  assert.match(t.data.error, /could not lock config file/);
+  assert.doesNotMatch(t.data.error, /hint:/);
+  rmSync(lock);
+  await minionStartsOnMain(r.data.id);
+});
+
 test('a failed clone leaves no scheme and no folder behind', async () => {
   const before = (await s.call('/api/projects')).data.length;
   const r = await create({ name: 'Broken', source: 'url', repoUrl: 'https://example.test/missing.git' });

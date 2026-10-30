@@ -23,9 +23,10 @@ async function git(args: string[], cwd?: string): Promise<string> {
 }
 const gitOk = (args: string[], cwd?: string) => git(args, cwd).then(() => true, () => false);
 
-/** A failed command's own words: git and gh put them on stderr. */
+/** A failed command's own words: git and gh put them on stderr. git's hints follow its error, so they go. */
 export function errorText(err: any): string {
-  return (err?.stderr?.toString().trim() || err?.message || String(err)).split('\n').filter(Boolean).slice(-3).join(' ');
+  const lines = (err?.stderr?.toString().trim() || err?.message || String(err)).split('\n').filter((l: string) => l.trim() && !/^hint:/.test(l));
+  return lines.slice(-3).join(' ') || String(err?.message ?? err);
 }
 
 /** A GitHub account or organisation name. */

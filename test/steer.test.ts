@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, unsentSteers } from '../src/runner.ts';
+import { lines } from './helpers.ts';
 
 // Mid-turn messages steer: the runner appends them to the turn's steer.jsonl and the wrapper
 // (src/turn-wrapper.ts) passes them to claude's stdin until the turn's result is out. The fake reads
@@ -63,7 +64,7 @@ async function until(check: () => boolean) {
   assert.ok(check(), 'timed out');
 }
 
-const seen = (dir: string) => (existsSync(join(dir, 'seen.txt')) ? readFileSync(join(dir, 'seen.txt'), 'utf8').trim().split('\n') : []);
+const seen = (dir: string) => lines(join(dir, 'seen.txt'));
 const events = (id: number, kind: string) => store.listEvents(id).filter((e) => e.kind === kind).map((e) => ({ id: e.id, ...JSON.parse(e.data) }));
 const turnDir = (r: Runner, id: number): string => (r as any).turns.get(id).dir;
 

@@ -60,6 +60,7 @@ export const MCP_SERVER = pinnedCopy('mcp.ts');
 export const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
 // Pinned too, so a deploy can't change the rules under a running turn.
 export const TRIPWIRE = pinnedCopy('tripwire.ts');
+export const LINK_CHECK = pinnedCopy('link-check.ts');
 export const TURN_WRAPPER = pinnedCopy('turn-wrapper.ts');
 /**
  * The Citadel kit (kit/), the plugin every turn of every scheme loads; pinned like the tripwire, so a
@@ -85,6 +86,16 @@ export function tripwireHooks(projectId: number, claudeConfig: string, ask = fal
   const config = tripwireConfig(projectId, claudeConfig, ask);
   const command = [process.execPath, script, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
   return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob)$', hooks: [{ type: 'command', command, timeout: 10 }] }] };
+}
+
+/**
+ * The Stop hook every turn gets (src/link-check.ts): it sends a reply back once if a file it links
+ * wouldn't open in the chat. `roots` are the folders the server shows the turn's files from
+ * (ticketRoots in routes/files.ts), its working directory first.
+ */
+export function linkCheckHooks(roots: string[], script = LINK_CHECK) {
+  const command = [process.execPath, script, JSON.stringify({ cwd: roots[0], roots })].map((s) => `'${s}'`).join(' ');
+  return { Stop: [{ hooks: [{ type: 'command', command, timeout: 10 }] }] };
 }
 
 /**
@@ -1441,8 +1452,10 @@ export class Runner {
     const addDirs = [filesDir, sharedDir].filter((d): d is string => !!d);
     // One --settings per turn: the tripwire hook and the shared settings, plus approval rules or the Taskmaster's access rules.
     const deny = credentialDenies(homedir(), claudeConfigDir(process.env), dirname(this.store.path));
+    // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
+    const linkCheck = ticket.cwd ? linkCheckHooks([ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d), pinned(LINK_CHECK)) : {};
     const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
-      hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)), ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
+      hooks: { ...tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)), ...linkCheck }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
     };
     if (rules.length) settings.permissions.ask = rules;
     if (ticket.kind === 'coordinator') {

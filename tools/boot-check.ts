@@ -25,13 +25,14 @@ let log = '';
 const fail = (why: string): never => {
   throw new Error(`${why}${log ? `\n--- server output ---\n${log.slice(-3000)}` : ''}`);
 };
-// Whatever hangs (a browser call, a turn), deploy.sh gets an answer.
+// Whatever hangs (a browser call, a turn), deploy.sh gets an answer. Each step has its own shorter
+// limit; on a loaded box the steps together can take two minutes.
 setTimeout(() => {
-  console.error(`The boot check did not finish within 2 minutes${log ? `\n--- server output ---\n${log.slice(-3000)}` : ''}`);
+  console.error(`The boot check did not finish within 3 minutes${log ? `\n--- server output ---\n${log.slice(-3000)}` : ''}`);
   for (const p of procs) p.kill('SIGKILL');
   rmSync(root, { recursive: true, force: true });
   process.exit(1);
-}, 120_000).unref();
+}, 180_000).unref();
 
 try {
   // A syntax error in any front-end file blanks the app; node --check finds it without a browser.
@@ -153,6 +154,8 @@ async function pageCheck(url: string, cookie: string) {
   let next = 0;
   const pending = new Map<number, { ok: (v: any) => void; no: (e: Error) => void }>();
   const errors: string[] = [];
+  const loading = new Set<string>();
+  let lastLoad = Date.now();
   let gone: Error | null = null;
   chrome.once('exit', (code) => {
     gone = new Error(`Chromium exited (code ${code}):\n${chromeLog.slice(-2000)}`);
@@ -164,6 +167,12 @@ async function pageCheck(url: string, cookie: string) {
       pending.delete(m.id);
       return m.error ? p?.no(new Error(`DevTools ${m.error.message}`)) : p?.ok(m.result);
     }
+    // What the page still loads, for the render wait; the event stream stays open by design.
+    if (m.method === 'Network.requestWillBeSent' && m.params.type !== 'EventSource') {
+      loading.add(m.params.requestId);
+      lastLoad = Date.now();
+    }
+    if ((m.method === 'Network.loadingFinished' || m.method === 'Network.loadingFailed') && loading.delete(m.params.requestId)) lastLoad = Date.now();
     if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text);
     if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(`console.error: ${m.params.args.map((a: any) => a.value ?? a.description).join(' ')}`);
     // The copy has the database but not the data folder's files (chat images): an API 404 is that.
@@ -188,9 +197,12 @@ async function pageCheck(url: string, cookie: string) {
   await send('Network.setCookie', { name, value: value.join('='), url }, sessionId);
   await send('Page.navigate', { url }, sessionId);
   const app = `(() => { const a = document.querySelector('#app'); return a && !a.querySelector('#login-form') ? a.innerText.trim().length : 0; })()`;
-  for (const end = Date.now() + 15_000; !(await send('Runtime.evaluate', { expression: app, returnByValue: true }, sessionId)).result.value; await new Promise((r) => setTimeout(r, 100))) {
+  // The first render waits on several rounds of API calls, each seconds long when the box is loaded, so
+  // wait while the page is still loading and fail once it has gone quiet with #app still empty.
+  for (const end = Date.now() + 60_000; !(await send('Runtime.evaluate', { expression: app, returnByValue: true }, sessionId)).result.value; await new Promise((r) => setTimeout(r, 100))) {
     if (errors.length) break;
-    if (Date.now() > end) fail('The app page loaded but rendered nothing in #app within 15 s');
+    if (!loading.size && Date.now() - lastLoad > 10_000) fail('The app page finished loading but rendered nothing in #app (nothing loading for 10 s)');
+    if (Date.now() > end) fail(`The app page rendered nothing in #app within 60 s (still loading: ${loading.size} requests)`);
   }
   // Room for errors that come just after the first render (a view's own imports, its first fetches).
   await new Promise((r) => setTimeout(r, 1000));

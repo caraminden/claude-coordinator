@@ -7,7 +7,7 @@ import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
-import { renderInbox, schemeCount } from './inbox.js';
+import { refreshSchemeCounts, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './lists.js';
 
@@ -125,11 +125,7 @@ export function toggleSchemeMenu(button) {
   menu.style.top = `${r.bottom + 4}px`;
   menu.style.left = `${Math.max(8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8))}px`;
   // The counts came with the page; other schemes' minions have moved since, so fetch them again.
-  api('api/projects').then((projects) => {
-    if (view.kind === 'project') view.projects = projects;
-    for (const p of projects) for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
-    renderInbox(); // the open scheme's count stays the badge's own
-  }, () => {});
+  refreshSchemeCounts();
 }
 
 export function newTicketForm(projectId) {

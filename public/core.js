@@ -7,7 +7,7 @@ import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, 
 import { onArtifactData } from './bridge-host.js';
 import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './thread.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
-import { inboxEvent, inboxTicket } from './inbox.js';
+import { inboxEvent, inboxOtherTicket, inboxTicket } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { inAppHash, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { uploadsRunning } from './composer.js';
@@ -575,7 +575,8 @@ export async function catchUpEvents() {
 }
 
 function onTicketUpdate(ticket) {
-  if (view?.kind !== 'project' || view.projectId !== ticket.project_id) return;
+  if (view?.kind !== 'project') return;
+  if (view.projectId !== ticket.project_id) return inboxOtherTicket(ticket);
   const before = ticket.kind === 'coordinator' ? view.coordinator : view.tickets.get(ticket.id);
   if (ticket.kind === 'coordinator') view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);

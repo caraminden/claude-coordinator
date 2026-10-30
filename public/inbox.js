@@ -1,11 +1,10 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, STATES, taskmasterLabel, threadHref, view } from './core.js';
+import { cardEvent, countMoved, otherSchemes } from './schemecounts.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
-const inbox = { projectId: null, items: [], timer: 0 };
-// Chat events that open or settle a card.
-const CARD_EVENTS = new Set(['question', 'question_result', 'plan', 'plan_result', 'approval', 'approval_result']);
+const inbox = { projectId: null, items: [], timer: 0, countsTimer: 0 };
 
 const ticketOf = (id) => (view?.coordinator?.id === id ? view.coordinator : view?.tickets?.get(id));
 // A ready/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
@@ -27,15 +26,36 @@ function refreshSoon() {
   inbox.timer = setTimeout(refreshInbox, 300);
 }
 
-/** A chat event from the stream: refetch when it opens or settles a card in this scheme. */
-export function inboxEvent(event) {
-  if (view?.kind !== 'project' || !ticketOf(event.ticket_id)) return;
-  if (CARD_EVENTS.has(event.kind) || (event.kind === 'user_message' && JSON.parse(event.data).answer)) refreshSoon();
+/** Fetch every scheme's count again and redraw their pills; the open scheme's pill stays the badge's own. */
+export function refreshSchemeCounts() {
+  return api('api/projects').then((projects) => {
+    if (view?.kind === 'project') view.projects = projects;
+    for (const p of projects) for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
+    renderInbox();
+  }, () => {});
 }
 
-/** A minion changed: refetch when it moved into or out of ready/try, offered or lost its replies, or was dismissed or reopened. */
+// Other schemes' news, refetching their counts at most once a second.
+const others = otherSchemes(() => {
+  clearTimeout(inbox.countsTimer);
+  inbox.countsTimer = setTimeout(refreshSchemeCounts, 1000);
+});
+
+/** A chat event from the stream: refetch when it opens or settles a card, in this scheme or another. */
+export function inboxEvent(event) {
+  if (view?.kind !== 'project') return;
+  if (!ticketOf(event.ticket_id)) others.event(event);
+  else if (cardEvent(event)) refreshSoon();
+}
+
+/** One of this scheme's minions changed: refetch when that can move the count. */
 export function inboxTicket(before, after) {
-  if (!before || before.state !== after.state || !before.replies?.length !== !after.replies?.length || (before.status === 'closed') !== (after.status === 'closed')) refreshSoon();
+  if (countMoved(before, after)) refreshSoon();
+}
+
+/** Another scheme's minion changed (#188). */
+export function inboxOtherTicket(ticket) {
+  if (view?.kind === 'project') others.ticket(ticket);
 }
 
 // What each kind of item asks of you, as a chip on its minion's row.

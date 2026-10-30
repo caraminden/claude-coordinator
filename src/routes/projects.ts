@@ -518,6 +518,8 @@ export const projectRoutes: Route[] = [
       if (brief && !store.claimBrief(project.id, brief.path, brief.heading, session.name)) throw new HttpError(409, 'That brief has been started already');
       const { id, notes } = await app.newMinion(project, { title, tag, props, model, effort }, session.name)
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
+      // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
+      store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null });
       if (brief) {
         store.settleBrief(project.id, brief.path, brief.heading, id);
         const coordinator = store.getCoordinator(project.id);

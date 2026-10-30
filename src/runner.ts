@@ -12,6 +12,7 @@ import { onboardingOpen, type EventRow, type Machine, type Project, type Store, 
 import { WS_SUFFIX, type MachineServer } from './machines.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
+import type { TurnGithub } from './github-link.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import type { Ship } from './branch.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession } from './sessions.ts';
@@ -187,6 +188,7 @@ interface QueuedMessage {
   files?: MessageFile[];
   about?: string; // the file a comment is on
   id?: number; // its user_message event, for taking it back while queued
+  from?: number; // the minion or Taskmaster that relayed it, whose turn's person it carries
 }
 
 /**
@@ -219,6 +221,10 @@ interface TurnState {
   deployed?: true;
   /** Usage-limit resumes in a row that led to this turn. */
   limitTries?: number;
+  /** The person it runs for (turnPerson). */
+  person?: number | null;
+  /** Their GitHub login it pushes as; null when they haven't linked, absent with GitHub linking not set up. */
+  github?: string | null;
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
@@ -422,6 +428,12 @@ export function slimEvent(ev: any, stored = false): any {
     return { type: 'result', subtype, is_error, duration_ms, num_turns, total_cost_usd, ...(ev.is_error ? { result: ev.result } : {}) };
   }
   return null;
+}
+
+/** Whether a shell command pushes to GitHub or opens a pull request (for the chat note), by its words. */
+export function pushKind(command: string): 'push' | 'pr' | null {
+  if (/\bgh\s+pr\s+create\b/.test(command)) return 'pr';
+  return /\bgit\b(?:\s+-[cC]\s+\S+|\s+--?[\w-]+(?:=\S+)?)*\s+push\b/.test(command) ? 'push' : null;
 }
 
 function describeActivity(ev: any): string | null {
@@ -786,6 +798,10 @@ export class Runner {
   lendsMachines?: (project: Project) => boolean;
   /** Why a message can't start or steer a turn (src/access.ts turnRefusal), or null when it can. */
   refuseTurn?: (ticket: Ticket, author: string) => string | null;
+  /** The person a message speaks for: its author, or for a relay (`from`), the sending turn's person. */
+  personOf?: (author: string, from?: number) => number | null;
+  /** A turn's GitHub env and prompt line for its person (src/github-link.ts forTurn); null with linking not set up. */
+  githubFor?: (person: number | null, turnDir: string) => TurnGithub | null;
   /** Called when a turn fails (not when someone stops it), with the error shown in the chat. */
   onTurnError: (ticketId: number, text: string) => void = () => {};
 
@@ -1026,7 +1042,8 @@ export class Runner {
     if (!ticket || !project || ticket.status === 'closed') return;
     this.emit(ticketId, 'note', { text: limitTries ? 'Resumed after the usage limit reset' : 'Resumed after a server restart' });
     const batch = this.queues.get(ticketId)?.splice(0) ?? [];
-    this.startTurn(project, ticket, promptMessage([{ author: 'System', text: limitTries ? RESUME_LIMIT_PROMPT : RESUME_PROMPT, images: [] }, ...batch]), resumes, limitTries);
+    // It carries on the interrupted turn, so it runs for that turn's person.
+    this.startTurn(project, ticket, [{ author: 'System', text: limitTries ? RESUME_LIMIT_PROMPT : RESUME_PROMPT, images: [] }, ...batch], ticket.person_id ?? this.turnPerson(ticket, project, batch), resumes, limitTries);
   }
 
   private limitResumes(): LimitResume[] {
@@ -1117,13 +1134,16 @@ export class Runner {
     }
     const live = this.turns.get(ticketId);
     const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
-    // A turn from before steering (no steer.jsonl) can't take one; nor can one whose reply is already out.
-    const steers = !!(steer && live && turn && !turn.result && existsSync(join(live.dir, 'steer.jsonl')));
+    // A turn from before steering (no steer.jsonl) can't take one; nor can one whose reply is already out,
+    // nor one run for someone else: that message waits for a turn of its own, as its sender.
+    const person = this.personOf?.(author, extra.from) ?? null;
+    const otherPerson = !!(person && turn && turn.person !== undefined && turn.person !== person);
+    const steers = !!(steer && live && turn && !turn.result && !otherPerson && existsSync(join(live.dir, 'steer.jsonl')));
     const row = this.emit(ticketId, 'user_message', {
       author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}),
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}),
     });
-    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id };
+    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}) };
     // Anything said answers the one-tap replies; a steer or a held message starts no turn to clear them.
     if (this.store.getTicket(ticketId)?.replies) {
       this.store.updateTicket(ticketId, { replies: null });
@@ -1338,10 +1358,22 @@ export class Runner {
     const ticket = this.store.getTicket(ticketId);
     const project = ticket && this.store.getProject(ticket.project_id);
     if (!ticket || !project) return;
-    this.startTurn(project, ticket, promptMessage(batch));
+    this.startTurn(project, ticket, batch, this.turnPerson(ticket, project, batch));
   }
 
-  private startTurn(project: Project, ticket: Ticket, prompt: string, resumes = 0, limitTries = 0) {
+  /**
+   * Who a turn runs for (its GitHub login, and #177's Claude plan): the first person in its messages
+   * (a relay counts as its sender's), else the minion's last person, else the scheme's owner.
+   */
+  private turnPerson(ticket: Ticket, project: Project, batch: QueuedMessage[]): number | null {
+    for (const m of batch) {
+      const p = this.personOf?.(m.author, m.from);
+      if (p) return p;
+    }
+    return ticket.person_id ?? project.owner_id;
+  }
+
+  private startTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0) {
     // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
     if (this.noTurns) {
       this.emit(ticket.id, 'note', { text: 'This is a preview: it shows the app on a copy of the data, but it never runs turns.' });
@@ -1442,6 +1474,11 @@ export class Runner {
     // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
     if (ticket.kind !== 'coordinator') env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
     if (deploys) env.COORDINATOR_DEPLOYS = '1';
+    // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
+    const github = this.githubFor?.(person, dir) ?? null;
+    if (github) env = { ...env, ...github.env };
+    const prompt = promptMessage(github ? [{ author: 'System', text: github.line, images: [] }, ...batch] : batch);
+    if (person !== ticket.person_id) this.store.updateTicket(ticket.id, { person_id: person });
     // Only the Citadel scheme's Taskmaster is offered get_app_instructions and set_app_instructions (the API checks too).
     if (ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER) env.COORDINATOR_APP_INSTRUCTIONS = '1';
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
@@ -1476,7 +1513,7 @@ export class Runner {
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: this.claudeBin, args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}) };
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, ...(github ? { github: github.login } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     this.setStatus(ticket.id, 'running');
@@ -1729,6 +1766,30 @@ export class Runner {
     }
     if (ev.type === 'user' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'tool_result')) {
       this.onFilesMayChange(ticketId);
+    }
+    this.notePushes(ticketId, ev);
+  }
+
+  /** Bash calls that push or open a pull request, by tool_use id, until their result comes back. */
+  private pushCalls = new Map<string, 'push' | 'pr'>();
+
+  /** A note in the chat for each push or pull request, saying whose GitHub it went out as (Cara's pick: "only a chat note"). */
+  private notePushes(ticketId: number, ev: any) {
+    const blocks: any[] = Array.isArray(ev.message?.content) ? ev.message.content : [];
+    for (const b of blocks) {
+      if (ev.type === 'assistant' && b?.type === 'tool_use' && b.name === 'Bash' && typeof b.input?.command === 'string' && typeof b.id === 'string') {
+        const kind = pushKind(b.input.command);
+        if (kind) this.pushCalls.set(b.id, kind);
+      }
+      if (ev.type !== 'user' || b?.type !== 'tool_result' || !this.pushCalls.has(b.tool_use_id)) continue;
+      const kind = this.pushCalls.get(b.tool_use_id)!;
+      this.pushCalls.delete(b.tool_use_id);
+      const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
+      // Absent: GitHub linking isn't set up, and the box's own login pushes as before.
+      if (turn?.github === undefined) continue;
+      const who = turn.person ? this.store.getUser(turn.person)?.name ?? 'Its person' : 'Nobody';
+      if (turn.github && !b.is_error) this.emit(ticketId, 'note', { text: kind === 'pr' ? `Opened a pull request as @${turn.github} (${who}'s GitHub)` : `Pushed as @${turn.github} (${who}'s GitHub)` });
+      else if (!turn.github && b.is_error) this.emit(ticketId, 'note', { text: `Couldn't ${kind === 'pr' ? 'open a pull request' : 'push'}: this turn runs for ${who}, who hasn't linked GitHub. Link it in Settings → Your account.` });
     }
   }
 

@@ -170,6 +170,13 @@ const machines = new MachineRelay(store, () => broadcast({ type: 'machines', mac
 runner.machines = () => machines.online();
 runner.lendsMachines = (project) => lendsMachines(store, project);
 runner.refuseTurn = (ticket, author) => turnRefusal(store, ticket, author);
+// Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
+runner.personOf = (author, from) => {
+  if (from) return store.getTicket(from)?.person_id ?? null;
+  const u = store.findUser('name', author);
+  return u && !u.disabled_at ? u.id : null;
+};
+runner.githubFor = (person, dir) => githubLink.forTurn(person ? store.getUser(person) ?? null : null, dir);
 
 // ---------- push notifications ----------
 
@@ -255,6 +262,8 @@ async function startScheduled(s: Schedule, now: number) {
   if (last?.status === 'running') return store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
   try {
     const { id, number } = await newMinion(project, { title: s.name, tag: null, props: { type: s.type } }, APP_NAME);
+    // Its turns run for whoever made the schedule (their GitHub), or the scheme's owner once they're gone.
+    store.updateTicket(id, { person_id: store.findUser('name', s.created_by)?.id ?? null });
     store.schedules.ran(s.id, { ticketId: id }, now);
     runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });
     runner.send(id, APP_NAME, runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })), [], { brief: true });

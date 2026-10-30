@@ -1,5 +1,5 @@
-// Numbered lists in the message boxes: Enter on a "1. …" line starts "2. ", and Enter on an empty
-// item after the first ends the list.
+// Numbered lists in the message boxes: Enter or Shift+Enter on a "1. …" line starts "2. ", and the
+// same on an empty item after the first ends the list.
 
 const ITEM = /^( *)(\d{1,9})([.)])(?:[ \t]+(.*)|$)/;
 
@@ -21,9 +21,9 @@ export function listEnter(value, start, end) {
   return { from: start, to: start, text: `\n${indent}${Number(num) + 1}${delim} ` };
 }
 
-/** Handles Enter on a numbered item in `textarea`; true when it did, so the caller doesn't send. */
+/** Handles Enter or Shift+Enter on a numbered item in `textarea`; true when it did, so the caller doesn't send. */
 export function continueList(textarea, e) {
-  if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return false;
+  if (e.key !== 'Enter' || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return false;
   const edit = listEnter(textarea.value, textarea.selectionStart, textarea.selectionEnd);
   if (!edit) return false;
   e.preventDefault();

@@ -114,10 +114,13 @@ test('subscriptions must be https with well-formed keys', () => {
   assert.ok(!validSubscription({ endpoint: b.endpoint, keys: { p256dh: b.p256dh } }));
 });
 
-test('notify skips whoever caused it and muted devices, and drops gone subscriptions', async () => {
+test('notify skips whoever caused it, muted devices and people outside the scheme, and drops gone subscriptions', async () => {
   const store = new Store(join(root, 'notify.db'));
-  const project = store.createProject('P', null);
-  const other = store.createProject('Q', null);
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const project = store.createProject('P', null, cara.id);
+  const other = store.createProject('Q', null, cara.id);
+  for (const name of ['Josh', 'Cody']) store.addMember(project.id, store.createUser({ name, login: name.toLowerCase() }).id);
+  store.createUser({ name: 'Olive', login: 'olive' }); // in no scheme
   const t = store.createTicket({ project_id: project.id, title: 'Fix it', permission_mode: 'default', created_by: 'Cara' });
   const browsers = {
     cara: browser('https://push.example/cara'),
@@ -126,8 +129,10 @@ test('notify skips whoever caused it and muted devices, and drops gone subscript
     joshGone: browser('https://push.example/josh-gone'),
     cody: browser('https://push.example/cody'),
     flaky: browser('https://push.example/flaky'),
+    olive: browser('https://push.example/olive'),
+    stranger: browser('https://push.example/stranger'),
   };
-  const owner: Record<string, string> = { cara: 'Cara', josh: 'Josh', joshOld: 'Josh', joshGone: 'Josh', cody: 'Cody', flaky: 'Cody' };
+  const owner: Record<string, string> = { cara: 'Cara', josh: 'Josh', joshOld: 'Josh', joshGone: 'Josh', cody: 'Cody', flaky: 'Cody', olive: 'Olive', stranger: 'Someone' };
   for (const [k, b] of Object.entries(browsers)) store.savePushSubscription(owner[k], b.endpoint, b.p256dh, b.auth);
   store.setPushMuted(browsers.cody.endpoint, [project.id]);
   store.setPushMuted(browsers.flaky.endpoint, [other.id]);
@@ -157,9 +162,9 @@ test('notify skips whoever caused it and muted devices, and drops gone subscript
   const msg = JSON.parse(decrypt(toJosh.body, browsers.josh.ecdh.getPrivateKey(), browsers.josh.auth).toString());
   assert.deepEqual(msg, { title: `#${t.number} Fix it`, body: 'Merged', tag: `thread-${t.id}`, url: `/#/p/${project.id}/t/${t.number}` });
 
-  // 404 and 410 mean the browser unsubscribed; anything else may be temporary.
+  // 404 and 410 mean the browser unsubscribed; anything else may be temporary. Outsiders' browsers stay, unsent.
   assert.deepEqual(store.listPushSubscriptions().map((s) => s.endpoint).sort(),
-    [browsers.cara, browsers.cody, browsers.flaky, browsers.josh].map((b) => b.endpoint).sort());
+    [browsers.cara, browsers.cody, browsers.flaky, browsers.josh, browsers.olive, browsers.stranger].map((b) => b.endpoint).sort());
 
   // Nothing at all for a reply-like state.
   sent.length = 0;

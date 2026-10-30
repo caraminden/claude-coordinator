@@ -97,7 +97,7 @@ test('the proxy serves the preview to a signed-in person, as that person, withou
   assert.equal(res.status, 200);
   assert.match(await res.text(), /<title>Citadel preview<\/title>/);
   const me = await fetch(`${base}/preview/${ticket.id}/api/me`, { headers: { Cookie: cookie } });
-  assert.deepEqual(await me.json(), { name: 'Cara' });
+  assert.deepEqual(await me.json(), { name: 'Cara', login: 'cara', admin: true, turns: true });
   // The preview's logout clears its cookie; that header must not reach the browser.
   const logout = await fetch(`${base}/preview/${ticket.id}/api/logout`, { method: 'POST', headers: { Cookie: cookie } });
   assert.equal(logout.status, 200);

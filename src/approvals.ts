@@ -161,6 +161,11 @@ export class Approvals {
     return r && r.ticketId === ticketId ? r.decision : { state: 'expired', reason: 'This request is no longer waiting.' };
   }
 
+  /** Whether a waiting card is the tripwire's (those guard the server itself, so only admins settle them). */
+  isTripwire(id: string): boolean {
+    return !!this.requests.get(id)?.tripwire;
+  }
+
   /** A person's click. Returns the card's outcome, which is the earlier one if it was already settled. */
   decide(ticketId: number, id: string, allow: boolean, by: string): Decision {
     const r = this.requests.get(id);

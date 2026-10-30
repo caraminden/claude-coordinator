@@ -66,6 +66,10 @@ const TICKET_ROUTES: Probe[] = [
 ];
 const OTHER_ROUTES: Probe[] = [
   P('POST', '/api/login'), P('POST', '/api/logout'), P('GET', '/api/health'), P('GET', '/api/me'),
+  P('GET', '/api/invite/not-a-token'), P('POST', '/api/invite/not-a-token'), P('PUT', '/api/me/password'),
+  P('GET', '/api/people'), P('POST', '/api/people'), P('POST', '/api/people/999/invite'), P('PATCH', '/api/people/999'),
+  P('DELETE', '/api/people/999'), P('GET', '/api/projects/:p/members'), P('POST', '/api/projects/:p/members'),
+  P('DELETE', '/api/projects/:p/members/999'),
   P('GET', '/api/machines/connect'), P('POST', '/api/machines/send'), P('POST', '/api/machines/info'), P('POST', '/api/machines/upload'),
   P('GET', '/api/stream'), P('GET', '/api/costs'), P('GET', '/api/prs'), P('POST', '/api/taskmaster'),
   P('GET', '/api/projects'), P('POST', '/api/projects'), P('GET', '/api/catalogue'), P('GET', '/api/projects/:p'), P('PATCH', '/api/projects/:p'),
@@ -95,8 +99,17 @@ const OTHER_ROUTES: Probe[] = [
 test('every route answers each kind of caller as recorded', { timeout: 120_000 }, async () => {
   const srv = await bootServer({ root });
   after(() => srv.proc.kill());
+  // Besides the admin (person): a member of scheme A who doesn't own it, and someone in no scheme.
+  const invited = async (name: string) => {
+    const made = await fetch(`${srv.base}/api/people`, { method: 'POST', headers: { Cookie: srv.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => r.json());
+    const res = await fetch(`${srv.base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
+    return { id: made.person.id as number, cookie: res.headers.get('set-cookie')!.split(';')[0] };
+  };
+  const [member, outsider] = [await invited('Max'), await invited('Olive')];
+  store.addMember(A.id, member.id);
   const callers: Record<string, Record<string, string>> = {
-    anon: {}, person: { Cookie: srv.cookie }, tmA: bearer(TA.id), tmB: bearer(TB.id), m1: bearer(M1.id), m2: bearer(M2.id),
+    anon: {}, person: { Cookie: srv.cookie }, member: { Cookie: member.cookie }, outsider: { Cookie: outsider.cookie },
+    tmA: bearer(TA.id), tmB: bearer(TB.id), m1: bearer(M1.id), m2: bearer(M2.id),
   };
   let n = 0;
   const probe = async (who: string, p: Probe, t: number) => {

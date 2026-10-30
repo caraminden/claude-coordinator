@@ -6,7 +6,7 @@ import { createServer as createHttpsServer } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, PASSWORD, until } from './helpers.ts';
+import { agentToken, bootServer, until } from './helpers.ts';
 
 // When the real server sends pushes: a stand-in push service (https, self-signed) records what
 // arrives, and stand-in browsers decrypt it. A stand-in `claude -p` fails any turn whose message
@@ -31,6 +31,7 @@ chmodSync(fakeClaude, 0o755);
 
 let base = '';
 let pushBase = '';
+let joshId = 0;
 let pushService: ReturnType<typeof createHttpsServer> | undefined;
 const received: { path: string; body: Buffer }[] = [];
 const cookies: Record<string, string> = {};
@@ -106,14 +107,18 @@ before(async () => {
   base = srv.base;
   cookies.Cara = srv.cookie;
   procs.push(srv.proc);
-  const josh = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Josh', password: PASSWORD }),
+  // Josh signs up through an invite Cara makes, and is added to the scheme below.
+  const invite = await call('Cara', '/api/people', { method: 'POST', body: { name: 'Josh' } });
+  joshId = invite.person.id;
+  const josh = await fetch(`${base}/api/invite/${invite.token}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'joshs-own-password' }),
   });
   cookies.Josh = josh.headers.get('set-cookie')!.split(';')[0];
 });
 
 test('pushes go out for questions, results, blockers and failed turns, to everyone but whoever caused it', async () => {
   const project = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'P' } });
+  await call('Cara', `/api/projects/${project.id}/members`, { method: 'POST', body: { person: joshId } });
   const { coordinator } = await call('Cara', `/api/projects/${project.id}`);
   const t = await call('Cara', `/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'build it', title: 'Build it' } });
   await until('the first turn to end', async () => (await call('Cara', `/api/tickets/${t.id}`)).ticket.status === 'idle');

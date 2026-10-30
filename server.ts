@@ -8,7 +8,8 @@ import { basename, extname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
-import { Auth, type Nonces } from './src/auth.ts';
+import { lendsMachines, mayReceive, messageScope, turnRefusal } from './src/access.ts';
+import { Auth, type Nonces, type Session } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
@@ -25,6 +26,7 @@ import { acceptsGzip, HttpError, json, requestUrl, router, SECURITY_HEADERS, sen
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
+import { peopleRoutes } from './src/routes/people.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
 import { fileRoutes } from './src/routes/files.ts';
@@ -96,21 +98,29 @@ const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSIO
     return ticket ? { ...(store.getSetting<Nonces>(`agent-nonce:${id}`) ?? { current: null, previous: null }), closed: ticket.status === 'closed' } : null;
   },
   set: (id, nonces) => store.setSetting(`agent-nonce:${id}`, nonces),
-});
+}, store);
+// The first start with per-person logins makes the admin (COORDINATOR_PASSWORD signs them in until they
+// set a password), and every scheme from before owners becomes theirs.
+if (!store.listUsers().length) {
+  const name = process.env.COORDINATOR_ADMIN?.trim() || 'Cara';
+  store.createUser({ name, login: name.toLowerCase().replace(/[^a-z0-9._-]/g, ''), admin: true, server_login: true });
+}
+store.adoptOwnerless(store.listUsers().find((u) => u.admin)!.id);
 // Keep secrets out of the environment that claude and its tools inherit.
 delete process.env.COORDINATOR_PASSWORD;
 delete process.env.SESSION_SECRET;
 
 const MAX_CLIENT_BACKLOG = 4 * 1024 * 1024;
-const clients = new Set<ServerResponse>();
+const clients = new Map<ServerResponse, Session>();
 function broadcast(msg: object) {
   const data = `data: ${JSON.stringify(msg)}\n\n`;
-  for (const res of clients) {
+  const scope = messageScope(store, msg);
+  for (const [res, who] of clients) {
     // Drop clients that stopped reading rather than buffering for them forever.
     if (res.writableLength > MAX_CLIENT_BACKLOG) {
       clients.delete(res);
       res.destroy();
-    } else {
+    } else if (mayReceive(store, who, scope)) {
       res.write(data);
     }
   }
@@ -153,6 +163,8 @@ function liveOn(head: string | null) {
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 runner.machines = () => machines.online();
+runner.lendsMachines = (project) => lendsMachines(store, project);
+runner.refuseTurn = (ticket, author) => turnRefusal(store, ticket, author);
 
 // ---------- push notifications ----------
 
@@ -543,7 +555,7 @@ const app: App = {
   },
   broadcast, notify, newMinion, startChained, ticketBranch, sharedFiles, sharedDir, registryChanged,
 };
-const routes = router([...appRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes]);
+const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes]);
 
 const server = createServer(async (req, res) => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
@@ -561,6 +573,9 @@ const server = createServer(async (req, res) => {
         if (req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? ''))) return void res.writeHead(302, { Location: '/' }).end();
         throw new HttpError(401, 'Not logged in');
       }
+      // Only for people in the minion's scheme.
+      const shown = store.getTicket(Number(preview[1]));
+      if (session && session.agent === undefined && (!shown || !store.canSee(session, shown.project_id))) throw new HttpError(404, 'There is no preview for this minion');
       // The front end's URLs are relative, so the page itself needs the trailing slash.
       if (!preview[2]) return void res.writeHead(302, { Location: `/${previewPath(Number(preview[1]))}${url.search}` }).end();
       await previews.proxy(req, res, Number(preview[1]), preview[2] + url.search, session?.agent === undefined ? session : null);
@@ -599,7 +614,7 @@ process.on('SIGTERM', () => {
   console.log('SIGTERM: finishing requests, then exiting; running turns carry on.');
   runner.detachAll();
   server.close(() => process.exit(0));
-  for (const c of clients) c.end();
+  for (const c of clients.keys()) c.end();
   runner.approvals.wakeAll();
   server.closeIdleConnections();
   setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();

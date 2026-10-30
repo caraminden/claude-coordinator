@@ -1,0 +1,112 @@
+// People: an admin invites them and manages them; anyone signed in changes their own password; a
+// scheme's owner picks who else is in it.
+import type { User } from '../db.ts';
+import { clientIp, HttpError, json, readJson, type App, type Route } from '../http.ts';
+import { cleanLogin, cleanName, newPasswordHash } from './app.ts';
+
+/** A person as Settings → People shows them: never a hash. */
+function personView(u: User) {
+  return {
+    id: u.id, name: u.name, login: u.login, admin: !!u.admin, server_login: !!u.server_login,
+    disabled: !!u.disabled_at, has_password: !!u.password_hash, invite_open: (u.invite_expires ?? 0) > Date.now(),
+  };
+}
+
+function person(app: App, id: string): User {
+  const user = app.store.getUser(Number(id));
+  if (!user) throw new HttpError(404, 'No such person');
+  return user;
+}
+
+/** End a person's open streams, so a disabled or removed person stops getting news at once. */
+function dropStreams(app: App, userId: number) {
+  for (const [res, who] of app.clients) if (who.uid === userId) res.end();
+}
+
+const admin = { who: ['person'], access: 'admin' } as const;
+
+export const peopleRoutes: Route[] = [
+  {
+    // Everyone sees names and logins, to add people to their schemes; admins see the rest.
+    method: 'GET', path: '/api/people', who: ['person'],
+    handler: ({ res, app, session }) => json(res, 200, app.store.listUsers().filter((u) => session.admin || !u.disabled_at)
+      .map((u) => (session.admin ? personView(u) : { id: u.id, name: u.name, login: u.login }))),
+  },
+  {
+    // A new person and their invite link's token (shown once; only its hash is kept).
+    method: 'POST', path: '/api/people', ...admin,
+    async handler({ req, res, app }) {
+      const body = await readJson(req);
+      const name = cleanName(body.name);
+      const login = cleanLogin(body.login ?? name);
+      if (app.store.findUser('name', name)) throw new HttpError(409, `There is already someone called ${name}`);
+      if (app.store.findUser('login', login)) throw new HttpError(409, `The login ${login} is taken`);
+      const user = app.store.createUser({ name, login });
+      return json(res, 201, { person: personView(app.store.getUser(user.id)!), token: app.auth.newInvite(user.id) });
+    },
+  },
+  {
+    // A fresh link that sets their password: an invite again, or a reset for someone who forgot theirs.
+    method: 'POST', path: '/api/people/:person/invite', ...admin,
+    handler({ res, app, params }) {
+      const user = person(app, params.person);
+      return json(res, 200, { person: personView(user), token: app.auth.newInvite(user.id) });
+    },
+  },
+  {
+    method: 'PATCH', path: '/api/people/:person', ...admin,
+    async handler({ req, res, app, params, session }) {
+      const user = person(app, params.person);
+      const body = await readJson(req);
+      if (body.disabled !== undefined) {
+        if (user.id === session.uid) throw new HttpError(400, 'You can\'t disable yourself');
+        app.store.updateUser(user.id, { disabled_at: body.disabled ? Date.now() : null });
+        if (body.disabled) dropStreams(app, user.id);
+      }
+      if (body.server_login !== undefined) app.store.updateUser(user.id, { server_login: body.server_login ? 1 : 0 });
+      return json(res, 200, personView(app.store.getUser(user.id)!));
+    },
+  },
+  {
+    // Their schemes become yours; their messages keep their name.
+    method: 'DELETE', path: '/api/people/:person', ...admin,
+    handler({ res, app, params, session }) {
+      const user = person(app, params.person);
+      if (user.id === session.uid) throw new HttpError(400, 'You can\'t remove yourself');
+      app.store.deleteUser(user.id, session.uid!);
+      dropStreams(app, user.id);
+      return json(res, 200, {});
+    },
+  },
+  {
+    method: 'PUT', path: '/api/me/password', who: ['person'],
+    async handler({ req, res, app: { auth, store }, session }) {
+      const body = await readJson(req);
+      const ip = clientIp(req);
+      const me = session.uid ? store.getUser(session.uid) : undefined;
+      if (!me) throw new HttpError(400, 'Sign in again first');
+      if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
+      if ((await auth.signIn(ip, me.login, String(body.current ?? '').slice(0, 1000)))?.id !== me.id) throw new HttpError(403, 'Your current password is wrong');
+      store.updateUser(me.id, { password_hash: await newPasswordHash(body.password) });
+      return json(res, 200, {});
+    },
+  },
+  { method: 'GET', path: '/api/projects/:project/members', who: ['person'], handler: ({ res, app, project }) => json(res, 200, app.store.listMembers(project.id)) },
+  {
+    method: 'POST', path: '/api/projects/:project/members', who: ['person'], access: 'owner',
+    async handler({ req, res, app, project }) {
+      const user = person(app, String((await readJson(req)).person));
+      if (user.disabled_at) throw new HttpError(400, `${user.name} is disabled`);
+      app.store.addMember(project.id, user.id);
+      app.broadcast({ type: 'project', project: app.store.getProject(project.id) });
+      return json(res, 200, app.store.listMembers(project.id));
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/projects/:project/members/:person', who: ['person'], access: 'owner',
+    handler({ res, app, project, params }) {
+      app.store.removeMember(project.id, Number(params.person));
+      return json(res, 200, app.store.listMembers(project.id));
+    },
+  },
+];

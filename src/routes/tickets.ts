@@ -446,6 +446,7 @@ export const ticketRoutes: Route[] = [
       const before = runner.approvals.get(id, approvalId);
       if (before.state === 'expired') throw new HttpError(409, 'This request expired; the turn that asked has ended');
       if (before.state !== 'pending') throw new HttpError(409, `${before.by} already ${before.state === 'allowed' ? 'approved' : 'denied'} this`);
+      if (runner.approvals.isTripwire(approvalId) && !session.admin) throw new HttpError(403, 'Only an admin can approve a tripwire card');
       return json(res, 200, runner.approvals.decide(id, approvalId, body.allow, session.name));
     },
   },

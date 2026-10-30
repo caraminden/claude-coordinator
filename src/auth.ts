@@ -1,8 +1,14 @@
-// Shared-password login with HMAC-signed session cookies.
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+// Per-person logins (scrypt password hashes, one-time invite links) with HMAC-signed session
+// cookies. COORDINATOR_PASSWORD still signs in an admin, as a fallback and for tools/boot-check.ts.
+import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { promisify } from 'node:util';
 import { APP_NAME } from './appname.ts';
+import type { Store, User } from './db.ts';
 import { GITHUB_NAME } from './github.ts';
+
+const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
+const INVITE_DAYS = 7;
 
 const COOKIE = 'cc_session';
 const SESSION_DAYS = 30;
@@ -14,6 +20,9 @@ const FILE_TOKEN_HOURS = 12;
 export interface Session {
   name: string;
   exp: number;
+  /** The signed-in person's user id; cookies from the shared-password days carry only the name. */
+  uid?: number;
+  admin?: boolean;
   /** Set for a coordinator ticket calling the API through its MCP tools: that ticket's id. */
   agent?: number;
 }
@@ -41,18 +50,40 @@ function sha256(s: string): Buffer {
   return createHash('sha256').update(s).digest();
 }
 
+export async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16);
+  return `scrypt$${salt.toString('base64url')}$${(await scryptAsync(password, salt, 32)).toString('base64url')}`;
+}
+
+export async function verifyPassword(stored: string, password: string): Promise<boolean> {
+  const [kind, salt, hash] = stored.split('$');
+  if (kind !== 'scrypt' || !salt || !hash) return false;
+  const expected = Buffer.from(hash, 'base64url');
+  return timingSafeEqual(expected, await scryptAsync(password, Buffer.from(salt, 'base64url'), expected.length));
+}
+
+// Checked for unknown logins too, so a wrong login takes as long as a wrong password.
+const DUMMY_HASH = `scrypt$${'A'.repeat(22)}$${'A'.repeat(43)}`;
+
+export function inviteHash(token: string): string {
+  return sha256(token).toString('base64url');
+}
+
 export class Auth {
   private failures = new Map<string, { count: number; since: number }>();
   private password: string;
   private secret: string;
   private nonces: NonceStore;
+  /** Where people are; without it (a preview's signer) a cookie is taken at its word. */
+  private users?: Store;
 
-  constructor(password: string, secret: string, nonces: NonceStore = NO_NONCES) {
+  constructor(password: string, secret: string, nonces: NonceStore = NO_NONCES, users?: Store) {
     if (password.length < 12) throw new Error('COORDINATOR_PASSWORD must be at least 12 characters');
     if (secret.length < 32) throw new Error('SESSION_SECRET must be at least 32 characters');
     this.password = password;
     this.secret = secret;
     this.nonces = nonces;
+    this.users = users;
   }
 
   /** Too many recent failures from this client? */
@@ -66,8 +97,7 @@ export class Auth {
     return f.count >= MAX_FAILURES;
   }
 
-  checkPassword(client: string, attempt: string): boolean {
-    const ok = timingSafeEqual(sha256(attempt), sha256(this.password));
+  private counted(client: string, ok: boolean): boolean {
     if (ok) {
       this.failures.delete(client);
     } else {
@@ -79,6 +109,34 @@ export class Auth {
     return ok;
   }
 
+  /**
+   * The person a login and password sign in, or null. COORDINATOR_PASSWORD signs in an admin: the one
+   * the login names, or the first admin when it names nobody (tools/boot-check.ts signs in that way).
+   */
+  async signIn(client: string, login: string, password: string): Promise<User | null> {
+    const store = this.users!;
+    const user = store.findUser('login', login.trim());
+    const own = await verifyPassword(user?.password_hash ?? DUMMY_HASH, password);
+    const shared = timingSafeEqual(sha256(password), sha256(this.password));
+    const admin = shared && (user ? (user.admin ? user : null) : (store.listUsers().find((u) => u.admin && !u.disabled_at) ?? null));
+    const who = user && own ? user : admin;
+    return this.counted(client, !!who && !who.disabled_at) ? who : null;
+  }
+
+  /** Open a fresh one-time set-password link for a person, replacing any earlier one. Returns its token. */
+  newInvite(userId: number): string {
+    const token = randomBytes(24).toString('base64url');
+    this.users!.updateUser(userId, { invite_hash: inviteHash(token), invite_expires: Date.now() + INVITE_DAYS * 86400_000 });
+    return token;
+  }
+
+  /** The person an open, unexpired invite token belongs to, or null (counted as a failure). */
+  inviteUser(client: string, token: string): User | null {
+    if (!/^[\w-]{32}$/.test(token)) return null; // not one of ours: no lookup, and not worth counting
+    const user = this.users!.findUser('invite_hash', inviteHash(token));
+    return this.counted(client, !!user && !user.disabled_at && (user.invite_expires ?? 0) > Date.now()) ? user! : null;
+  }
+
   private prune() {
     const cutoff = Date.now() - FAILURE_WINDOW_MS;
     for (const [client, f] of this.failures) if (f.since < cutoff) this.failures.delete(client);
@@ -88,8 +146,8 @@ export class Auth {
     return createHmac('sha256', this.secret).update(payload).digest('base64url');
   }
 
-  issueCookie(name: string, secure: boolean): string {
-    const session: Session = { name, exp: Date.now() + SESSION_DAYS * 86400_000 };
+  issueCookie(user: { id: number; name: string }, secure: boolean): string {
+    const session: Session = { name: user.name, uid: user.id, exp: Date.now() + SESSION_DAYS * 86400_000 };
     const payload = Buffer.from(JSON.stringify(session)).toString('base64url');
     const value = `${payload}.${this.sign(payload)}`;
     return `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure ? '; Secure' : ''}`;
@@ -165,11 +223,17 @@ export class Auth {
     const expected = Buffer.from(this.sign(payload));
     const given = Buffer.from(sig);
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+    let s: Session;
     try {
-      const s = JSON.parse(Buffer.from(payload, 'base64url').toString()) as Session;
-      return s.exp > Date.now() && typeof s.name === 'string' && !looksLikeUrl(s.name) ? s : null;
+      s = JSON.parse(Buffer.from(payload, 'base64url').toString()) as Session;
     } catch {
       return null;
     }
+    if (!(s.exp > Date.now()) || typeof s.name !== 'string' || looksLikeUrl(s.name)) return null;
+    if (!this.users) return { name: s.name, uid: s.uid, exp: s.exp };
+    // Name and rights come from the person's row, so a rename, a demotion or disabling them takes at once;
+    // a cookie from the shared-password days names its person.
+    const user = typeof s.uid === 'number' ? this.users.getUser(s.uid) : this.users.findUser('name', s.name);
+    return user && !user.disabled_at ? { name: user.name, uid: user.id, admin: !!user.admin, exp: s.exp } : null;
   }
 }

@@ -31,6 +31,26 @@ export interface Project {
   onboarding_mode: OnboardingMode;
   /** Why a new scheme's GitHub repo wasn't created (#173), for the Retry strip; null when it was, or for other sources. */
   github_error: string | null;
+  /** The person who owns it (users.id): they add members and change its settings. Null only before the first start migrates it. */
+  owner_id: number | null;
+  created_at: number;
+}
+
+/** A person who signs in. `name` is what their messages are signed with. */
+export interface User {
+  id: number;
+  name: string;
+  login: string;
+  /** scrypt hash (see auth.ts); null until they set a password through an invite link. */
+  password_hash: string | null;
+  admin: number;
+  /** 1 when their turns may run on the server's own Claude login (Cara's own logins only: plans are per person). */
+  server_login: number;
+  /** sha256 of the one-time set-password link's token, while one is open. */
+  invite_hash: string | null;
+  invite_expires: number | null;
+  /** Set when an admin disabled them: no sign-in, and their cookies stop working. */
+  disabled_at: number | null;
   created_at: number;
 }
 
@@ -220,6 +240,24 @@ export interface EventRow {
 }
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  login TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT,
+  admin INTEGER NOT NULL DEFAULT 0,
+  server_login INTEGER NOT NULL DEFAULT 0,
+  invite_hash TEXT UNIQUE,
+  invite_expires INTEGER,
+  disabled_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_members (
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  added_at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS projects (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
@@ -438,6 +476,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'onboarding', "ALTER TABLE projects ADD COLUMN onboarding TEXT NOT NULL DEFAULT 'done'"],
   ['projects', 'onboarding_mode', "ALTER TABLE projects ADD COLUMN onboarding_mode TEXT NOT NULL DEFAULT 'first-run'"],
   ['projects', 'github_error', 'ALTER TABLE projects ADD COLUMN github_error TEXT'],
+  ['projects', 'owner_id', 'ALTER TABLE projects ADD COLUMN owner_id INTEGER REFERENCES users(id)'],
   ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
   ['machines', 'workspace_tools', 'ALTER TABLE machines ADD COLUMN workspace_tools INTEGER NOT NULL DEFAULT 0'],
 ];
@@ -447,7 +486,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 12; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins
+export const SCHEMA_VERSION = 13; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -594,10 +633,10 @@ export class Store {
     return this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as Project | undefined;
   }
 
-  createProject(name: string, repoUrl: string | null): Project {
+  createProject(name: string, repoUrl: string | null, ownerId: number | null = null): Project {
     const r = this.db
-      .prepare('INSERT INTO projects (name, repo_url, created_at) VALUES (?, ?, ?)')
-      .run(name, repoUrl, Date.now());
+      .prepare('INSERT INTO projects (name, repo_url, owner_id, created_at) VALUES (?, ?, ?, ?)')
+      .run(name, repoUrl, ownerId, Date.now());
     return this.getProject(Number(r.lastInsertRowid))!;
   }
 
@@ -676,6 +715,79 @@ export class Store {
       throw err;
     }
     return this.getProject(id)!;
+  }
+
+  listUsers(): User[] {
+    return this.db.prepare('SELECT * FROM users ORDER BY id').all() as unknown as User[];
+  }
+
+  getUser(id: number): User | undefined {
+    return this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as unknown as User | undefined;
+  }
+
+  /** By login, name or open invite, either case: cookies from the shared-password days carry only the name. */
+  findUser(field: 'login' | 'name' | 'invite_hash', value: string): User | undefined {
+    return this.db.prepare(`SELECT * FROM users WHERE ${field} = ?`).get(value) as unknown as User | undefined;
+  }
+
+  createUser(u: Pick<User, 'name' | 'login'> & { admin?: boolean; server_login?: boolean }): User {
+    const { lastInsertRowid } = this.db
+      .prepare('INSERT INTO users (name, login, admin, server_login, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(u.name, u.login, u.admin ? 1 : 0, u.server_login ? 1 : 0, Date.now());
+    return this.getUser(Number(lastInsertRowid))!;
+  }
+
+  updateUser(id: number, fields: Partial<Omit<User, 'id' | 'login' | 'admin' | 'created_at'>>) {
+    const keys = Object.keys(fields) as (keyof typeof fields)[];
+    if (!keys.length) return;
+    this.db.prepare(`UPDATE users SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
+  }
+
+  /** Remove a person: their schemes go to `heir`, their memberships with them. Their messages keep their name. */
+  deleteUser(id: number, heir: number) {
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id = ?').run(heir, id);
+      this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /** Schemes from before owners (and any whose owner is gone) become this admin's. */
+  adoptOwnerless(adminId: number) {
+    this.db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id IS NULL OR owner_id NOT IN (SELECT id FROM users)').run(adminId);
+  }
+
+  /** A scheme's people: the owner first, then members in the order they were added. */
+  listMembers(projectId: number): (Pick<User, 'id' | 'name' | 'login'> & { owner: boolean })[] {
+    return (this.db.prepare(`SELECT u.id, u.name, u.login, u.id = p.owner_id AS owner FROM users u JOIN projects p ON p.id = ?
+      LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = u.id
+      WHERE u.id = p.owner_id OR m.user_id IS NOT NULL ORDER BY owner DESC, m.added_at`).all(projectId) as any[]).map((r) => ({ ...r, owner: !!r.owner }));
+  }
+
+  addMember(projectId: number, userId: number) {
+    this.db.prepare('INSERT OR IGNORE INTO project_members (project_id, user_id, added_at) VALUES (?, ?, ?)').run(projectId, userId, Date.now());
+  }
+
+  removeMember(projectId: number, userId: number) {
+    this.db.prepare('DELETE FROM project_members WHERE project_id = ? AND user_id = ?').run(projectId, userId);
+  }
+
+  /** The schemes a person is in, as owner or member; null for an admin, who is in all of them. */
+  visibleProjects(who: { uid?: number; admin?: boolean }): Set<number> | null {
+    if (who.admin) return null;
+    const rows = this.db.prepare(`SELECT id FROM projects WHERE owner_id = ?1
+      UNION SELECT project_id FROM project_members WHERE user_id = ?1`).all(who.uid ?? -1) as { id: number }[];
+    return new Set(rows.map((r) => r.id));
+  }
+
+  /** Whether a person may see a scheme: an admin, its owner, or a member. */
+  canSee(who: { uid?: number; admin?: boolean }, projectId: number): boolean {
+    return !!who.admin || !!this.db.prepare(`SELECT 1 FROM projects WHERE id = ?1 AND owner_id = ?2
+      UNION SELECT 1 FROM project_members WHERE project_id = ?1 AND user_id = ?2`).get(projectId, who.uid ?? -1);
   }
 
   deleteProject(id: number) {

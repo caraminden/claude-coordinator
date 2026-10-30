@@ -211,7 +211,7 @@ export class Previews {
     const headers = { ...req.headers };
     delete headers.authorization;
     // The live cookie means nothing to the preview; it gets its own, for the same person (none for a file token's request).
-    if (session) headers.cookie = r.auth.issueCookie(session.name, false).split(';')[0];
+    if (session) headers.cookie = r.auth.issueCookie({ id: session.uid ?? -1, name: session.name }, false).split(';')[0];
     else delete headers.cookie;
     const upstream = request({ host: '127.0.0.1', port: r.port, method: req.method, path: rest, headers }, (up) => {
       const out = { ...up.headers };

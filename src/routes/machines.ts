@@ -79,7 +79,7 @@ export const agentRoutes: Route[] = [
   agent('POST', '/api/machines/upload', machineUpload),
 ];
 
-const people = { who: ['person'], refuse: 'Only people manage machines' } as const;
+const people = { who: ['person'], refuse: 'Only people manage machines', access: 'admin' } as const;
 const turns = { who: ['minion'], refuse: 'Only a minion\'s turn can use a machine' } as const;
 
 export const machineRoutes: Route[] = [

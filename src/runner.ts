@@ -770,6 +770,10 @@ export class Runner {
   onTurnEnd: (ticketId: number) => void = () => {};
   /** Approve / Deny cards waiting on people, for projects with approval rules. */
   approvals: Approvals;
+  /** Whether a scheme's minions may use the connected machines (an admin's schemes only: they are the admin's). */
+  lendsMachines?: (project: Project) => boolean;
+  /** Why a message can't start or steer a turn (src/access.ts turnRefusal), or null when it can. */
+  refuseTurn?: (ticket: Ticket, author: string) => string | null;
   /** Called when a turn fails (not when someone stops it), with the error shown in the chat. */
   onTurnError: (ticketId: number, text: string) => void = () => {};
 
@@ -1092,6 +1096,13 @@ export class Runner {
    * `extra.from` is the thread that sent a relayed message, so it can strike_text it later.
    */
   send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number } & object = {}, steer = false, files: MessageFile[] = []) {
+    const ticket = this.store.getTicket(ticketId);
+    const refused = ticket && this.refuseTurn?.(ticket, author);
+    if (refused) {
+      this.emit(ticketId, 'user_message', { author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra });
+      this.emit(ticketId, 'note', { text: refused });
+      return;
+    }
     const live = this.turns.get(ticketId);
     const turn = live && this.store.getSetting<TurnState>(turnKey(ticketId));
     // A turn from before steering (no steer.jsonl) can't take one; nor can one whose reply is already out.
@@ -1350,7 +1361,7 @@ export class Runner {
       memoryDir = null;
     }
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now.
-    const machines = ticket.kind === 'coordinator' || !project.machine_tools ? [] : this.machines();
+    const machines = ticket.kind === 'coordinator' || !project.machine_tools || this.lendsMachines?.(project) === false ? [] : this.machines();
     // Tool calls matching the merge asks or the project's approval rules wait for a person (threads only:
     // a Taskmaster can't show cards, so an ask would be a silent deny there).
     const rules = ticket.kind === 'coordinator' ? [] : [...new Set([...MERGE_ASKS, ...lines(project.approval_rules)])];

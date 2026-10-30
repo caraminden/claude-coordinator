@@ -177,15 +177,21 @@ export class Pusher {
   }
 
   /**
-   * Tell everyone subscribed to the ticket's project, except `except` (the person who caused it)
+   * Tell everyone in the ticket's project who subscribed, except `except` (the person who caused it)
    * and devices that muted the project. Resolves once every push service has answered.
    */
   async notify(ticket: Ticket, trigger: PushTrigger, except: string | null = null): Promise<void> {
     const project = this.store.getProject(ticket.project_id);
     const msg = notificationFor(ticket, trigger, project?.name);
     if (!msg) return;
-    const subs = this.store.listPushSubscriptions().filter((s) => s.name !== except && !JSON.parse(s.muted).includes(ticket.project_id));
+    const subs = this.store.listPushSubscriptions().filter((s) => s.name !== except && !JSON.parse(s.muted).includes(ticket.project_id) && this.inScheme(s.name, ticket.project_id));
     await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
+  }
+
+  /** Whether the person a device belongs to (by name) is still here and in the scheme. */
+  private inScheme(name: string, projectId: number): boolean {
+    const user = this.store.findUser('name', name);
+    return !!user && !user.disabled_at && this.store.canSee({ uid: user.id, admin: !!user.admin }, projectId);
   }
 
   /** Send one message; a subscription the push service says is gone (404, 410) is deleted. */

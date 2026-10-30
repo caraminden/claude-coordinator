@@ -153,8 +153,8 @@ export interface App {
   previews: Previews | null;
   machines: MachineRelay;
   pusher: Pusher;
-  /** Open event streams (GET /api/stream). */
-  clients: Set<ServerResponse>;
+  /** Open event streams (GET /api/stream), with whose they are. */
+  clients: Map<ServerResponse, Session>;
   dataDir: string;
   preview: boolean;
   machinesUrl: URL | null;
@@ -202,6 +202,11 @@ export interface Route {
   who: readonly Who[] | 'anyone' | 'machine';
   /** The 403 for a caller `who` leaves out (a minion always gets "A minion may only update itself"). */
   refuse?: string;
+  /**
+   * For a person, beyond seeing the scheme the path names: 'admin' for admins only, 'owner' for the
+   * scheme's owner (and admins). Threads keep to `who`.
+   */
+  access?: 'admin' | 'owner';
   handler(ctx: Ctx): unknown;
 }
 
@@ -213,6 +218,7 @@ export function ticketView(app: App, id: number): TicketView {
 }
 
 const LOADED = ['ticket', 'project', 'schedule', 'artifact', 'machine'];
+const GONE: Record<string, string> = { ticket: 'No such minion', project: 'No such scheme', schedule: 'No such schedule', artifact: 'No such artifact' };
 const NUMERIC = new Set([...LOADED, 'machineId']);
 
 /** Load a row a path names, onto ctx; returns the scheme it belongs to, if any. */
@@ -312,9 +318,16 @@ export function router(routes: Route[]) {
       if (!ctx.caller) throw new HttpError(403, 'No such minion');
     }
     checkRole(route, ctx.caller, ctx.params);
+    if (!ctx.caller && route.access === 'admin' && !session.admin) throw new HttpError(403, 'Only an admin can do that');
     let project: number | undefined;
-    for (const name of hit!.names) if (LOADED.includes(name)) project = load(ctx, name, Number(ctx.params[name])) ?? project;
+    for (const name of hit!.names) {
+      if (!LOADED.includes(name)) continue;
+      project = load(ctx, name, Number(ctx.params[name])) ?? project;
+      // A scheme someone isn't in answers as if it didn't exist.
+      if (!ctx.caller && project !== undefined && !app.store.canSee(session, project)) throw new HttpError(404, GONE[name]);
+    }
     if (ctx.caller) checkScope(route, ctx.caller, method, project, ctx.ticket?.id);
+    else if (route.access === 'owner' && !session.admin && app.store.getProject(project!)?.owner_id !== session.uid) throw new HttpError(403, 'Only the scheme\'s owner can do that');
     return route.handler(ctx);
   };
   // Whether the table has a path at all, for a listener that serves more than its table.

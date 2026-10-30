@@ -163,18 +163,29 @@ function searchProject(app: App, projectId: number, q: string, ticketId?: number
 
 const PEOPLE_AND_TASKMASTER = ['person', 'taskmaster'] as const;
 
+/** The schemes a person is in (all of them for an admin). */
+function visibleSchemes(store: App['store'], who: { uid?: number; admin?: boolean }): Project[] {
+  const seen = store.visibleProjects(who);
+  return store.listProjects().filter((p) => !seen || seen.has(p.id));
+}
+
 // What one line of list_tickets shows (ticketLine in src/mcp.ts), and all a minion gets of another.
 const LINE_FIELDS = ['number', 'title', 'tag', 'properties', 'build', 'model', 'effort', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'last_activity'] as const;
 
 export const projectRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects', who: ['person'],
-    handler: ({ res, app: { store } }) => json(res, 200, store.listProjects().map((p) => ({ ...p, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length }))),
+    handler: ({ res, app: { store }, session }) => json(res, 200, visibleSchemes(store, session).map((p) => ({ ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length }))),
   },
   {
     // What a scheme being set up can adapt (#172): names and descriptions from every scheme's .claude/ and the kit, never file bodies.
     method: 'GET', path: '/api/catalogue', who: PEOPLE_AND_TASKMASTER,
-    handler: ({ res, app }) => json(res, 200, { items: catalogue(app.store.listProjects(), KIT) }),
+    handler: ({ res, app, session, caller }) => {
+      // A Taskmaster sees what its scheme's owner sees.
+      const owner = caller ? app.store.getUser(app.store.getProject(caller.project_id)?.owner_id ?? -1) : null;
+      const who = caller ? { uid: owner?.id, admin: !!owner?.admin } : session;
+      return json(res, 200, { items: catalogue(visibleSchemes(app.store, who), KIT) });
+    },
   },
   {
     method: 'POST', path: '/api/projects', who: ['person'],
@@ -190,6 +201,8 @@ export const projectRoutes: Route[] = [
       let upstream: string | null = null;
       let folder: string | null = null;
       let slug: string | null = null;
+      // A folder on this machine could be anyone's, another scheme's included.
+      if (source === 'folder' && !session.admin) throw new HttpError(403, 'Only an admin can start a scheme from a folder on the server');
       const about = body.about == null || body.about === '' ? '' : str(body.about, 'About', 4000);
       // "Create and set up" starts the Taskmaster's onboarding; "Create only" (and older callers) skip it.
       const setup = body.setup === true;
@@ -208,7 +221,7 @@ export const projectRoutes: Route[] = [
       }
       let project;
       try {
-        project = app.store.createProject(name, upstream);
+        project = app.store.createProject(name, upstream, session.uid ?? null);
       } catch {
         throw new HttpError(409, 'A scheme with that name already exists');
       }
@@ -242,7 +255,7 @@ export const projectRoutes: Route[] = [
   },
   {
     // Try again to put a new scheme's repo on GitHub after it failed at creation.
-    method: 'POST', path: '/api/projects/:project/github', who: ['person'],
+    method: 'POST', path: '/api/projects/:project/github', who: ['person'], access: 'owner',
     async handler({ res, app, project }) {
       if (app.preview) throw new HttpError(403, 'A preview can\'t make GitHub repos');
       if (!project.github_error || !project.repo_dir) throw new HttpError(409, 'This scheme has no GitHub repo waiting to be made');
@@ -254,8 +267,9 @@ export const projectRoutes: Route[] = [
   {
     // Citadel-wide settings: the GitHub owner new schemes' repos are made under.
     method: ['GET', 'PUT'], path: '/api/app/settings', who: ['person'],
-    async handler({ req, res, app }) {
+    async handler({ req, res, app, session }) {
       if (req.method === 'PUT') {
+        if (!session.admin) throw new HttpError(403, 'Only an admin can do that');
         const body = await readJson(req);
         if (body.github_owner !== undefined) {
           const owner = typeof body.github_owner === 'string' ? body.github_owner.trim() : '';
@@ -301,7 +315,7 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
+    method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER, access: 'owner',
     async handler({ req, res, app, session, project }) {
       const { store, runner } = app;
       // Any of name, instructions, approval_rules, plugin_dirs, default_effort, machine_tools, onboarding and onboarding_mode; what is left out stays.
@@ -404,7 +418,7 @@ export const projectRoutes: Route[] = [
   },
   {
     // The Citadel-wide instructions: people, and the Citadel scheme's Taskmaster only (checked below).
-    method: ['GET', 'PUT'], path: '/api/app/instructions', who: PEOPLE_AND_TASKMASTER,
+    method: ['GET', 'PUT'], path: '/api/app/instructions', who: PEOPLE_AND_TASKMASTER, access: 'admin',
     async handler({ req, res, app, session, caller }) {
       const { store, runner } = app;
       if (caller && caller.project_id !== GLOBAL_OWNER) {
@@ -430,7 +444,7 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/app/instructions/history', who: ['person'],
+    method: 'GET', path: '/api/app/instructions/history', who: ['person'], access: 'admin',
     handler({ res, app }) {
       const history = app.store.appInstructionHistory(5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text) }));
       return json(res, 200, { history });
@@ -646,7 +660,9 @@ export const projectRoutes: Route[] = [
       const body = await readJson(req);
       const text = str(body.text, 'Message', 10_000);
       const want = String(body.scheme ?? '').trim().toLowerCase();
-      const others = store.listProjects().filter((p) => p.id !== from.project_id);
+      // Only schemes with the same owner: a Taskmaster never reaches into someone else's.
+      const ownerId = store.getProject(from.project_id)!.owner_id;
+      const others = store.listProjects().filter((p) => p.id !== from.project_id && p.owner_id === ownerId);
       const project = others.find((p) => p.name.toLowerCase() === want) ?? others.find((p) => String(p.id) === want);
       if (!project) {
         const own = store.getProject(from.project_id)!;

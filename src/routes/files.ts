@@ -475,6 +475,7 @@ export const fileRoutes: Route[] = [
     async handler({ req, res, app, session }) {
       const body = await readJson(req, 4 * 1024 * 1024);
       const { project, file } = await openedPage(app, body.open);
+      if (!app.store.canSee(session, project.id)) throw new HttpError(404, 'That page is no longer there');
       if (await bridgedPage(app, body.page) !== file) throw new HttpError(409, 'The frame shows a different page from the one this viewer opened; reopen it');
       if (body.op === 'write') {
         writeStore(app.store, project.id, file, cleanEntries(body.entries), session.name);

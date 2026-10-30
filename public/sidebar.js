@@ -46,7 +46,7 @@ function newSchemeForm() {
     h('label', {}, "What's it about? (the Taskmaster starts from this)",
       h('textarea', { name: 'about', rows: 3, maxlength: 4000, 'data-draft': true, placeholder: 'What it is, who it is for, the first milestone' })),
     h('p', { class: 'error', hidden: true }),
-    h('div', { class: 'row actions' },
+    h('div', { class: 'row create-buttons' },
       h('button', { type: 'submit', value: 'setup' }, 'Create and set up'),
       h('button', { type: 'submit', value: 'only', class: 'secondary' }, 'Create only')));
   // Only the picked source's field shows.

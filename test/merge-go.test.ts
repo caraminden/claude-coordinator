@@ -162,6 +162,28 @@ test("a go is this minion's and this turn's only, and never passes a tripwire ca
   assert.ok(a.hasGo(1), 'and leaves the go for the merge');
 });
 
+test('a merge the go covers, run chained or without --repo, is sent back once with the plain command to run instead (#209)', () => {
+  const { a, merge } = gate();
+  // Delve #80's real call after Cara's typed "Merge it": the PR is right, the shape isn't.
+  const chained = { command: 'gh pr merge 199 --squash --match-head-commit 7ff3d3e693550d12e4dabcdacc5db281fe382b7b 2>&1 | tail -3; gh pr view 199 --json state', description: 'Squash-merge PR #199' };
+  const retry = (target: { number: number; own: boolean }) => ({ target, command: `gh pr merge ${target.number} --repo cara/delve --squash` });
+  const ask = (target: { number: number; own: boolean }) => a.ask(1, 'Bash', chained, '/w', CFG, true, undefined, null, retry(target));
+  a.heard(1, [typed('Merge it')], true);
+  assert.equal(merge(1, own, true), 'allowed', 'sanity: a plain merge is let through');
+  a.heard(1, [typed('Merge it')], true);
+  const first = ask({ number: 199, own: true });
+  assert.ok('refused' in first && first.refused.includes('`gh pr merge 199 --repo cara/delve --squash`'), JSON.stringify(first));
+  assert.ok(a.hasGo(1), 'the go still stands for the plain run');
+  const again = ask({ number: 199, own: true });
+  assert.ok('id' in again && a.get(1, again.id).state === 'pending', 'asked twice: the card, so a minion that needs its extra flags is never stuck');
+  assert.equal(merge(1, { number: 199, own: true }), 'allowed', 'the plain run still counts');
+  a.heard(1, [typed('Merge it')], true);
+  const other = ask({ number: 188, own: false });
+  assert.ok('id' in other, 'a PR the go does not cover gets the card, not a hint');
+  a.heard(1, [{ author: 'Taskmaster', text: 'merge it' }], true);
+  assert.ok('id' in ask({ number: 199, own: true }), 'no typed go: the card');
+});
+
 // ---------- the runner hands a turn what it read ----------
 
 const fake = join(root, 'claude-fake');
@@ -290,8 +312,9 @@ console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.c
     git(['remote', 'set-url', 'origin', 'https://github.com/cara/delve.git'], project.repo_dir);
     const minion = () => ({ Authorization: `Bearer ${agentToken(srv.data, t.id)}`, 'Content-Type': 'application/json' });
     await until('the turn', async () => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion() })).ok);
+    const ask = async (command: string) => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Merge the PR' } }) })).json();
     const merge = async (command: string) => {
-      const r = await (await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Merge the PR' } }) })).json();
+      const r = await ask(command);
       assert.ok(r.id, JSON.stringify(r));
       // A go settles the card before the POST answers; a long-poll on a waiting one would hold for 25 s.
       const settled = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.find((e: any) => e.kind === 'approval_result' && JSON.parse(e.data).id === r.id);
@@ -306,7 +329,10 @@ console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.c
 
     await say('merge it');
     await steered('merge it');
-    assert.equal(await merge('cd .. && gh pr merge 191 -R cara/delve --squash'), 'pending', 'not a lone plain merge');
+    // Delve #80's real call (#209): its PR, but chained and with no --repo: sent back once with the plain command.
+    const hint = await ask('gh pr merge 191 --squash --match-head-commit 7ff3d3e693550d12e4dabcdacc5db281fe382b7b 2>&1 | tail -3; gh pr view 191 --json state');
+    assert.match(hint.refused ?? '', /Run exactly `gh pr merge 191 --repo cara\/delve --squash`/, JSON.stringify(hint));
+    assert.equal(await merge('cd .. && gh pr merge 191 -R cara/delve --squash'), 'pending', 'not a lone plain merge, and already sent back once');
     assert.equal(await merge('gh pr merge 191 --squash'), 'pending', 'no repo named: the shell may be in another one');
     assert.equal(await merge('gh pr merge 188 -R cara/delve --squash'), 'pending', "no number named: not another branch's PR");
     assert.equal(await merge('gh pr merge -R someone/else 191'), 'pending', 'another repo');
@@ -322,6 +348,8 @@ console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.c
     // A merge commit, as Delve's builds land; with a body it rides along, so it gets the card.
     await say('fold it');
     await steered('fold it');
+    // A cd hides the PR from the card's lookup; the worktree's answer still finds the go's own PR.
+    assert.match((await ask('cd .. && gh pr merge --merge 2>&1')).refused ?? '', /`gh pr merge 191 --repo cara\/delve --merge`/);
     assert.equal(await merge('gh pr merge 191 -R cara/delve --merge --body done'), 'pending', 'a body');
     assert.equal(await merge('gh pr merge 191 -R cara/delve --merge'), 'allowed');
     const results = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.filter((e: any) => e.kind === 'approval_result').map((e: any) => JSON.parse(e.data));

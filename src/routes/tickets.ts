@@ -431,9 +431,16 @@ export const ticketRoutes: Route[] = [
       const goCall = rules && runner.approvals.hasGo(id) ? (tool === 'Bash' ? (plainMerge(String(input.command), merge) ? merge : null) : mcpMerge(tool, input)) : null;
       const goEnv = goCall && goCall !== merge ? runner.turnGithubEnv(id) : null;
       const goPr = goCall === merge ? pr : goCall && goEnv ? await prInfo(goCall, ticket.cwd, goEnv) : null;
-      const target = goCall ? mergeTarget(goPr, project.repo_dir ? await originRepo(project.repo_dir) : null, ticket.branch) : null;
+      // A merge in another shape (chained, a cd, no --repo) may be its PR's: then it's sent back once with the plain command (#209).
+      const near = rules && !goCall && merge && env && !merge.admin && merge.method !== 'rebase' && runner.approvals.hasGo(id) ? merge : null;
+      const schemeRepo = (goCall || near) && project.repo_dir ? await originRepo(project.repo_dir) : null;
+      const target = goCall ? mergeTarget(goPr, schemeRepo, ticket.branch) : null;
+      // The card's lookup skips a moved shell's PR; a refusal runs nothing, so the worktree's answer does here.
+      const nearPr = near ? pr ?? (near.moved && !near.repo ? await prInfo({ ...near, moved: false }, ticket.cwd, env) : null) : null;
+      const nearTarget = near ? mergeTarget(nearPr, schemeRepo, ticket.branch) : null;
+      const retry = nearTarget && { target: nearTarget, command: `gh pr merge ${nearTarget.number} --repo ${schemeRepo} ${near!.method === 'merge' ? '--merge' : '--squash'}${near!.auto ? ' --auto' : ''}` };
       if ((merge || goCall) && !runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
-      const r = runner.approvals.ask(id, tool, input, ticket.cwd, tripwireConfig(project.id, claudeConfigDir(process.env), true), rules, merge ? { ...merge, pr } : undefined, target);
+      const r = runner.approvals.ask(id, tool, input, ticket.cwd, tripwireConfig(project.id, claudeConfigDir(process.env), true), rules, merge ? { ...merge, pr } : undefined, target, retry);
       return json(res, 'id' in r ? 201 : 200, r);
     },
   },

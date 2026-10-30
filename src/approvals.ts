@@ -101,7 +101,12 @@ interface Go {
   pr: number | null;
   message?: number;
   text: string;
+  /** A merge it covers was sent back once with the plain command to run (#209). */
+  hinted?: boolean;
 }
+
+/** Whether a go covers a merge's PR: the one they named or, with none named, the minion's own. */
+const covers = (go: Go, target: MergeTarget) => (go.pr === null ? target.own : target.number === go.pr);
 
 /** A merge call's PR as a go is checked against: its number, and whether it is the minion's own branch's PR. */
 export interface MergeTarget {
@@ -205,15 +210,22 @@ export class Approvals {
    * tripwire card needs an explanation, shows the whole call, and is one at a time; after a deny, the
    * turn gets no more. Anything else gets a card only in a project with approval rules, as before.
    */
-  ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean, merge?: object, target?: MergeTarget | null): { id: string } | { refused: string } {
+  ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean, merge?: object, target?: MergeTarget | null, retry?: { target: MergeTarget; command: string } | null): { id: string } | { refused: string } {
     const verdict = tripwire({ tool_name: tool, tool_input: input, cwd }, { ...cfg, ask: true });
     if (verdict && !verdict.ask) return { refused: `The tripwire blocks this. ${verdict.reason}` };
     if (!verdict) {
       if (!rules) return { refused: 'Nobody can answer a permission prompt in this turn, so this was not run.' };
+      // A go's PR merged in another shape (chained, a cd, no --repo): send it back once with the plain
+      // command, which nothing rides along with; asked again, it gets the card (#209).
+      const near = retry && this.goes.get(ticketId);
+      if (near && !near.hinted && covers(near, retry.target)) {
+        near.hinted = true;
+        return { refused: `${near.by}'s go to merge covers PR #${retry.target.number}, but only as a lone plain merge, so this was not run. Run exactly \`${retry.command}\` as its own Bash call, with nothing before or after it (no cd, 2>&1, pipe, $( ) or chained check); --match-head-commit with the full SHA written out, and --delete-branch, may go on it. Check the result in a separate call. If you need what this call added, run it again unchanged and it gets the approval card.` };
+      }
       const id = this.request(ticketId, tool, input, undefined, merge);
       // A person's go covers one merge: of the PR they named, or with none named, of this minion's own.
       const go = target && this.goes.get(ticketId);
-      if (go && (go.pr === null ? target.own : target.number === go.pr)) {
+      if (go && covers(go, target)) {
         this.goes.delete(ticketId);
         this.settle(id, this.requests.get(id)!, { state: 'allowed', by: go.by, via: { message: go.message, text: go.text } });
       }

@@ -19,6 +19,7 @@ import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { Previews, previewPath } from './src/previews.ts';
 import { type Chain, LiveWaiters } from './src/wake.ts';
+import { errorText } from './src/scheme-repo.ts';
 import { catchUpTicketDir, createTicketDir, projectDir, projectSharedDir } from './src/workspace.ts';
 import { describeCron, runBrief, type Schedule } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
@@ -231,7 +232,7 @@ async function newMinion(project: Project, m: { title: string; tag: TicketTag | 
     store.setTicketDir(id, dir.cwd, dir.branch);
   } catch (err: any) {
     store.deleteTicket(id);
-    throw new HttpError(500, `Could not create working directory: ${err.stderr?.trim() || err.message}`);
+    throw new HttpError(500, `Could not create working directory: ${errorText(err)}`);
   }
   return { id, number: number!, notes };
 }
@@ -585,7 +586,8 @@ const server = createServer(async (req, res) => {
   } catch (err: any) {
     const status = err instanceof HttpError ? err.status : 500;
     if (status === 500) console.error(err);
-    if (!res.headersSent) json(res, status, { error: status === 500 ? 'Internal error' : err.message });
+    // An HttpError's words were written for the caller, a 500 too; only an unexpected throw stays vague.
+    if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
     else res.end();
   }
 });
@@ -646,7 +648,8 @@ if (MACHINES_URL) {
     } catch (err: any) {
       const status = err instanceof HttpError ? err.status : 500;
       if (status === 500) console.error(err);
-      if (!res.headersSent) json(res, status, { error: status === 500 ? 'Internal error' : err.message });
+      // An HttpError's words were written for the caller, a 500 too; only an unexpected throw stays vague.
+    if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
       else res.end();
     }
   });

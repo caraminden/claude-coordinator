@@ -43,8 +43,10 @@ const seed = join(root, 'seed');
 git(['init', '--quiet', '-b', 'main', seed]);
 commit(seed, 'seed');
 git(['clone', '--quiet', '--bare', seed, join(root, 'remote.git')]);
+// An empty GitHub repo, as a scheme cloned before anyone pushed to it (#181).
+git(['init', '--quiet', '--bare', '-b', 'main', join(root, 'empty.git')]);
 // The folder test's GitHub origin goes there too, so ticketBase's fetch stays offline.
-writeFileSync(join(root, '.gitconfig'), `[url "${join(root, 'remote.git')}"]\n\tinsteadOf = https://example.test/remote.git\n\tinsteadOf = git@github.com:someone/hub.git\n[url "${join(root, 'nowhere.git')}"]\n\tinsteadOf = https://example.test/missing.git\n`);
+writeFileSync(join(root, '.gitconfig'), `[url "${join(root, 'remote.git')}"]\n\tinsteadOf = https://example.test/remote.git\n\tinsteadOf = git@github.com:someone/hub.git\n[url "${join(root, 'empty.git')}"]\n\tinsteadOf = https://example.test/empty.git\n[url "${join(root, 'nowhere.git')}"]\n\tinsteadOf = https://example.test/missing.git\n`);
 
 let s: Booted;
 before(async () => {
@@ -102,6 +104,37 @@ test('url clones as before, with or without source', async () => {
   assert.match((await create({ name: 'Bad URL', source: 'url', repoUrl: 'file:///tmp/x' })).data.error, /https:\/\/ or git@/);
   assert.match((await create({ name: 'No URL', source: 'url' })).data.error, /Repo URL is required/);
   assert.match((await create({ name: 'Odd', source: 'zip' })).data.error, /Source must be one of/);
+});
+
+test('a scheme cloned from an empty repo starts minions from a local first commit, never pushed', async () => {
+  const r = await create({ name: 'Empty', source: 'url', repoUrl: 'https://example.test/empty.git' });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  // The state such a scheme is left in: main has no commits.
+  assert.throws(() => git(['rev-parse', '--verify', 'HEAD'], r.data.repo_dir));
+  await minionStartsOnMain(r.data.id);
+  assert.equal(git(['log', '--format=%s', 'main'], r.data.repo_dir), 'Start');
+  assert.equal(git(['ls-tree', 'main'], r.data.repo_dir), '');
+  assert.equal(git(['for-each-ref'], join(root, 'empty.git')), '', 'the first commit stays local');
+  await minionStartsOnMain(r.data.id);
+});
+
+test('a scheme cloned empty whose GitHub repo got commits since starts minions from those', async () => {
+  const pushed = join(root, 'pushed.git');
+  git(['init', '--quiet', '--bare', '-b', 'main', pushed]);
+  const r = await create({ name: 'Empty then pushed', source: 'url', repoUrl: 'https://example.test/empty.git' });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  git(['remote', 'set-url', 'origin', pushed], r.data.repo_dir);
+  git(['push', '--quiet', pushed, 'main'], seed);
+  const t = (await s.call(`/api/projects/${r.data.id}/tickets`, { message: 'try the repo' })).data;
+  assert.equal(git(['rev-parse', 'HEAD'], t.ticket?.cwd ?? t.cwd), git(['rev-parse', 'main'], seed));
+});
+
+test('a minion whose worktree can\'t be made says what git said', async () => {
+  const r = await create({ name: 'No git', source: 'url', repoUrl: 'https://example.test/remote.git' });
+  rmSync(join(r.data.repo_dir, '.git'), { recursive: true, force: true });
+  const t = await s.call(`/api/projects/${r.data.id}/tickets`, { message: 'try the repo' });
+  assert.equal(t.status, 500);
+  assert.match(t.data.error, /^Could not create working directory: .*not a git repository/);
 });
 
 test('a failed clone leaves no scheme and no folder behind', async () => {

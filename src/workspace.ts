@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { identity } from './scheme-repo.ts';
 
 const run = promisify(execFile);
 const GIT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -65,6 +66,24 @@ export async function ticketBase(repoDir: string): Promise<string> {
 }
 
 /**
+ * A scheme cloned from an empty repo has a main with no commits, and a worktree needs one to branch
+ * from (#181). If a push has since given origin that branch, that's the base; otherwise main gets an
+ * empty "Start" commit, made locally only and without touching the index or the files. Returns the
+ * base to use.
+ */
+async function bornBase(repoDir: string, base: string): Promise<string> {
+  const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
+  if (await ok(['rev-parse', '--verify', '--quiet', `${base}^{commit}`])) return base;
+  const branch = await git(['symbolic-ref', '--short', 'HEAD'], repoDir);
+  if (await ok(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`])) return `origin/${branch}`;
+  const tree = await git(['hash-object', '-t', 'tree', '-w', '/dev/null'], repoDir);
+  const commit = await git([...await identity(repoDir), 'commit-tree', tree, '-m', 'Start'], repoDir);
+  // The empty old value: only if main is still unborn, so two minions created at once agree on one commit.
+  await git(['update-ref', `refs/heads/${branch}`, commit, ''], repoDir).catch(() => {});
+  return branch;
+}
+
+/**
  * A chained minion starts later than it was created: fast-forward its branch to what a new minion
  * would branch from now, so it builds on the work it waited for. Only a fast-forward: a branch with
  * commits of its own, or a dirty worktree, is left as it is. Returns whether it moved.
@@ -99,7 +118,7 @@ export async function createTicketDir(
     await mkdir(cwd, { recursive: true });
     return { cwd, branch: null };
   }
-  const base = await ticketBase(repoDir);
+  const base = await bornBase(repoDir, await ticketBase(repoDir));
   const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
   // Branches are named by the per-project number; a branch left over from before
   // per-project numbering may already have the name, so add a suffix then.

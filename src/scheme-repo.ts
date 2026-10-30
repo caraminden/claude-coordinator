@@ -45,7 +45,7 @@ export function repoName(name: string): string {
 }
 
 /** git commits as the machine's configured user, or as Citadel where none is set. */
-async function identity(cwd: string): Promise<string[]> {
+export async function identity(cwd: string): Promise<string[]> {
   return await gitOk(['config', 'user.email'], cwd) ? [] : ['-c', `user.name=${APP_NAME}`, '-c', 'user.email=citadel@localhost'];
 }
 

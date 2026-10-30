@@ -16,7 +16,7 @@ export interface LinkCheckConfig {
 }
 
 /** Text the chat renders as code, where a "[x](y)" is not a link. */
-const CODE = /^ {0,3}(```|~~~)[^\n]*\n[\s\S]*?(?:\n {0,3}\1[^\n]*|$)|(`+)(?!`)[\s\S]*?[^`]\2(?!`)/gm;
+const CODE = /^ {0,3}(```|~~~)[\s\S]*?(?:^ {0,3}\1|(?![\s\S]))|(`+)(?!`)[\s\S]*?[^`]\2(?!`)/gm;
 
 /** The files `text` links that the chat would show as a card or preview but can't open, as absolute paths. */
 export async function brokenLinks(text: string, cfg: LinkCheckConfig): Promise<string[]> {

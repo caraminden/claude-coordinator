@@ -39,6 +39,9 @@ test('a file outside the folders the chat can show blocks too', async () => {
 test('web links, in-app routes, code and non-file links are left alone', async () => {
   assert.equal(await reply('[a](https://x.dev/missing.png) [b](#/p/2/t/3) [src](src/runner.ts) [dir](docs/)'), null);
   assert.equal(await reply('Write `![caption](../shared/1/x.png)` like this:\n```md\n[t](nope/gone.html)\n```\nand stop.'), null);
+  assert.equal(await reply('```md\n\nfirst\n[u](b.md)\n```\n~~~\n![i](a.png)\n~~~\nand an unclosed one:\n```\nx\n[v](c.md)'), null);
+  // Only code is skipped: a link after a fence, or after an empty one, is still checked.
+  assert.equal((await reply('```\n```\n```md\n[t](x.md)\n```\n![x](../shared/268/people-desktop.png)'))?.decision, 'block');
 });
 
 test('stop_hook_active lets the turn end, and so does a reply with no text', async () => {

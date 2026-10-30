@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
@@ -154,6 +154,16 @@ test("minion and Taskmaster turns both leave out unused built-in tools and the a
     assert.equal(t.settings.syncClaudeAiSkills, false, kind);
     assert.equal(t.settings.disableClaudeAiConnectors, true, kind);
     assert.ok(t.settings.hooks.PreToolUse, `${kind}: the tripwire hook is still there`);
+  }
+});
+
+test("minion and Taskmaster turns both keep the Read tool out of the logins, keys, env file and state.db (#185)", async () => {
+  for (const kind of ['ticket', 'coordinator'] as const) {
+    const { deny } = (await turn(kind, 'connected')).settings.permissions;
+    for (const rule of [`Read(/${homedir()}/.claude/.credentials.json)`, `Read(/${homedir()}/.ssh/**)`, `Read(/${homedir()}/.config/claude-coordinator/**)`, `Read(/${homedir()}/.config/gh/hosts.yml)`, `Read(/${dirname(store.path)}/state.db*)`]) {
+      assert.ok(deny.includes(rule), `${kind}: ${rule}`);
+    }
+    if (kind === 'coordinator') assert.ok(deny.some((r: string) => r.startsWith('Edit(')), 'the Taskmaster keeps its own Edit denies');
   }
 });
 

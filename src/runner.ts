@@ -124,6 +124,18 @@ export const LEAN_CONTEXT = { syncClaudeAiSkills: false, disableClaudeAiConnecto
  * command's output it keeps.
  */
 export const TURN_SETTINGS = { autoCompactWindow: 250_000, bashOutputMaxChars: 12_000 };
+/**
+ * Read rules every turn gets, so the Read, Grep and Glob tools can't open a login or a transcript
+ * (#185): the Claude login, SSH keys, the service's env file, the GitHub login, a runner's sign-in,
+ * and state.db with its backups (every minion's session). Claude Code enforces these, unlike the
+ * tripwire's pattern match; Bash is the tripwire's.
+ */
+export function credentialDenies(home: string, claudeConfig: string, dataDir: string): string[] {
+  const files = [join(home, '.claude/.credentials.json'), join(claudeConfig, '.credentials.json'), join(home, '.ssh/**'), join(home, '.config/claude-coordinator/**'),
+    join(home, '.config/gh/hosts.yml'), join(home, '.config/citadel-claude/**'), join(dataDir, 'state.db*'), join(dataDir, 'backups/state-*')];
+  // `//` makes the path absolute.
+  return [...new Set(files)].map((f) => `Read(/${f})`);
+}
 /** Merging a pull request through a GitHub MCP server waits for a person, in every scheme's minions. */
 export const MERGE_ASKS = ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge'];
 
@@ -580,7 +592,7 @@ const READ_ONLY_GIT = [
  * config dir as sensitive, so neither allow rules nor a hook's allow let it write there (tried with
  * real runs); making that folder its auto-memory does, so its memory is the one minions load too.
  */
-export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null): { addDirs: string[]; settings: { permissions: object; autoMemoryDirectory?: string } } {
+export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
   let ticketDirs: string[] = [];
   try {
     ticketDirs = readdirSync(ticketsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(ticketsDir, d.name));
@@ -1388,12 +1400,17 @@ export class Runner {
     // Lets edit-only sessions write there too, not just in their working directory.
     const addDirs = [filesDir, sharedDir].filter((d): d is string => !!d);
     // One --settings per turn: the tripwire hook and the shared settings, plus approval rules or the Taskmaster's access rules.
-    const settings: { permissions?: object; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = { hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)), ...LEAN_CONTEXT, ...TURN_SETTINGS };
-    if (rules.length) settings.permissions = { ask: rules };
+    const deny = credentialDenies(homedir(), claudeConfigDir(process.env), dirname(this.store.path));
+    const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
+      hooks: tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)), ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
+    };
+    if (rules.length) settings.permissions.ask = rules;
     if (ticket.kind === 'coordinator') {
       const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project), sharedDir, memoryDir);
       addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
-      Object.assign(settings, access.settings);
+      const { permissions, ...rest } = access.settings;
+      Object.assign(settings, rest);
+      settings.permissions = { ...permissions, deny: [...permissions.deny, ...deny] };
     }
     // As a file: the Taskmaster's git rules (one per worktree) outgrew Linux's 128 KiB cap on one argument (E2BIG).
     writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings));

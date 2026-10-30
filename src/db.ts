@@ -516,6 +516,9 @@ export class Store {
       const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
       if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
     }
+    // Only the server login's owner runs turns on it (Cara, 2026-10-29: "Remove it for others"): every start
+    // clears the flag for anyone else, so no switch flipped by an older release outlives the deploy.
+    this.db.exec('UPDATE users SET server_login = COALESCE(id = (SELECT MIN(id) FROM users WHERE admin = 1), 0)');
     this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS one_coordinator ON tickets(project_id) WHERE kind = 'coordinator'");
     this.numberTickets();
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS ticket_number ON tickets(project_id, number)');
@@ -733,6 +736,11 @@ export class Store {
 
   getUser(id: number): User | undefined {
     return this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as unknown as User | undefined;
+  }
+
+  /** Whose Claude login the server's turns run on: the first admin, whom the first start made. */
+  serverLoginOwner(): User | undefined {
+    return this.db.prepare('SELECT * FROM users WHERE admin = 1 ORDER BY id LIMIT 1').get() as unknown as User | undefined;
   }
 
   /** By login, name or open invite, either case: cookies from the shared-password days carry only the name. */

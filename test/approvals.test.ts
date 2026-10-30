@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
@@ -257,7 +257,8 @@ test('a project without rules or plugins still sends a minion\'s prompts to card
   // settings and the merge asks; no rules of the scheme's.
   const settings = JSON.parse(readFileSync(t.args[t.args.indexOf('--settings') + 1], 'utf8'));
   assert.deepEqual(Object.keys(settings), ['hooks', 'syncClaudeAiSkills', 'disableClaudeAiConnectors', 'autoCompactWindow', 'bashOutputMaxChars', 'permissions']);
-  assert.deepEqual(settings.permissions, { ask: ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge'] });
+  assert.deepEqual(settings.permissions.ask, ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge']);
+  assert.ok(settings.permissions.deny.includes(`Read(/${join(homedir(), '.ssh/**')})`), 'the logins stay out of reach (#185)');
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /"ask":true/);
   assert.ok(Number(t.timeout) >= 24 * 3600_000);
   assert.equal(t.approvals, '1');
@@ -272,7 +273,7 @@ test('rules and plugin folders reach the turn, and Stop expires a waiting card',
   assert.equal(t.args[t.args.indexOf('--permission-prompt-tool') + 1], APPROVAL_TOOL);
   assert.equal(t.args.filter((a: string) => a === '--settings').length, 1);
   const settings = JSON.parse(readFileSync(t.args[t.args.indexOf('--settings') + 1], 'utf8'));
-  assert.deepEqual(settings.permissions, { ask: ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge', 'Bash(gh pr merge:*)'] });
+  assert.deepEqual(settings.permissions.ask, ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge', 'Bash(gh pr merge:*)']);
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /tripwire\.ts/);
   const plugins = t.args.filter((_: string, i: number) => t.args[i - 1] === '--plugin-dir');
   assert.deepEqual(plugins.slice(1), [join(t.cwd, 'tools/mods/delve')], 'after the kit');

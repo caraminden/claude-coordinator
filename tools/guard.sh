@@ -60,38 +60,40 @@ json_field() {
 
 # Splits a shell command into words, one per line, honouring quotes, escapes and comments,
 # with a \034 line wherever a new command starts (; & | ( ) newline, and backticks in bash).
-# A word holding $ or a backtick outside single quotes gets a \035 in it: the shell fills it
-# in at run time, so the guard cannot know what it names.
+# A word holding $, a backtick, ( or a {a,b} brace list outside single quotes gets a \035 in
+# it: the shell fills it in at run time, so the guard cannot know what it names.
 # ps=1 switches to PowerShell rules: backtick escapes, backslash is literal, <# #> comments.
+# ps=2 is cmd.exe: ^ escapes, and no single quotes, comments or backtick substitution.
 tokenize() {
   printf '%s' "$1" | awk -v ps="$2" '
     function flush() { if (intok) { gsub(/\n/, " ", tok); print tok; tok = ""; intok = 0 } }
     { s = s (NR > 1 ? "\n" : "") $0 }
     END {
       n = length(s); q = ""; tok = ""; intok = 0
-      esc = (ps == "1") ? "`" : "\\"
+      esc = (ps == "1") ? "`" : (ps == "2") ? "^" : "\\"
       for (i = 1; i <= n; i++) {
         c = substr(s, i, 1)
         if (q == "\047") { if (c == "\047") q = ""; else tok = tok c; continue }
         if (q == "\"") {
           if (c == esc && i < n) { i++; tok = tok substr(s, i, 1); continue }
-          if (c == "$" || (c == "`" && ps != "1")) tok = tok "\035"
+          if (c == "$" || (c == "`" && ps == "0")) tok = tok "\035"
           if (c == "\"") q = ""; else tok = tok c
           continue
         }
         if (c == esc && i < n) { i++; c = substr(s, i, 1); if (c != "\n") { tok = tok c; intok = 1 }; continue }
-        if (c == "\047" || c == "\"") { q = c; intok = 1; continue }
+        if ((c == "\047" && ps != "2") || c == "\"") { q = c; intok = 1; continue }
         if (c == " " || c == "\t" || c == "\r") { flush(); continue }
         # A # that starts a word opens a comment up to the end of the line; main#x is a word.
-        if (c == "#" && !intok) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
+        if (c == "#" && !intok && ps != "2") { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
         if (ps == "1" && c == "<" && !intok && substr(s, i + 1, 1) == "#") {
           j = index(substr(s, i + 2), "#>"); i = j ? i + j + 2 : n; continue
         }
-        if (c == "`" && ps != "1") { tok = tok "\035"; intok = 1 }
-        if (c == "\n" || c == ";" || c == "&" || c == "|" || c == "(" || c == ")" || (c == "`" && ps != "1")) {
+        if (c == "(" || (c == "`" && ps == "0")) { tok = tok "\035"; intok = 1 }
+        if (c == "\n" || c == ";" || c == "&" || c == "|" || c == "(" || c == ")" || (c == "`" && ps == "0")) {
           flush(); print "\034"; continue
         }
         if (c == "$") tok = tok "\035"
+        if (c == "{" && ps == "0" && match(substr(s, i), /^\{[^ \t\r\n;&|()<>]*\}/) && substr(s, i + 1, RLENGTH - 2) ~ /,|\.\./) tok = tok "\035"
         tok = tok c; intok = 1
       }
       flush()
@@ -124,13 +126,13 @@ check_segment() {
         *) break ;;
       esac
     done
-    [ "${w[i]:-}" = push ] || continue
-
     for c in ${cfg[@]+"${cfg[@]}"}; do
       case "$(printf '%s' "$c" | tr '[:upper:]' '[:lower:]')" in
-        core.hookspath*) block "git -c core.hooksPath=... on a push would skip .githooks/pre-push; push without it." ;;
+        alias.*) block "git -c alias.* can hide a push from this guard; run the git command itself." ;;
+        core.hookspath*) [ "${w[i]:-}" = push ] && block "git -c core.hooksPath=... on a push would skip .githooks/pre-push; push without it." ;;
       esac
     done
+    [ "${w[i]:-}" = push ] || continue
 
     local -a pos=()
     local force=0 noverify=0 all=0 tags=0 endopts=0
@@ -173,10 +175,14 @@ check_segment() {
       refspecs=("${pos[@]:1}")
     fi
 
-    branch="$(git -C "${dir:-.}" symbolic-ref --short -q HEAD 2>/dev/null)"
+    case "$dir" in
+      *$'\035'*) branch=$'\035' ;; # git -C "$X": which repo, and so which branch, is unknown
+      *) branch="$(git -C "${dir:-.}" symbolic-ref --short -q HEAD 2>/dev/null)" ;;
+    esac
     # With no refspec git pushes the current branch, except that --tags alone pushes tags.
-    if [ "${#refspecs[@]}" -eq 0 ] && [ "$tags" = 0 ] && is_protected "$branch"; then
-      block "this push has no branch named and the current branch is $branch. Work on a feature branch and push that."
+    if [ "${#refspecs[@]}" -eq 0 ] && [ "$tags" = 0 ]; then
+      [ "$branch" = $'\035' ] && block "git -C names its repo with \$VAR or \$(...), so the guard cannot see which branch this push sends. Write the path or the branch out."
+      is_protected "$branch" && block "this push has no branch named and the current branch is $branch. Work on a feature branch and push that."
     fi
     for r in ${pos[@]+"${pos[@]}"}; do
       case "$r" in *$'\035'*) block "this push names its remote or branch with \$VAR, \$(...) or backticks, which only resolve when it runs. Write the names out (git push origin HEAD pushes the current branch)." ;; esac
@@ -187,6 +193,7 @@ check_segment() {
       if [[ "$r" == *:* ]]; then src="${r%%:*}"; dst="${r#*:}"; else src="$r"; dst="$r"; fi
       [ -n "$dst" ] || dst="$src"
       case "$dst" in HEAD|@) dst="$branch" ;; esac
+      [ "$dst" = $'\035' ] && block "git -C names its repo with \$VAR or \$(...), so the guard cannot see which branch HEAD is. Write the path or the branch out."
       dst="${dst#refs/heads/}"
       is_protected "$dst" && block "pushing to $dst is blocked. Push a feature branch and open a pull request."
       case "$dst" in *'*'*) block "wildcard refspec ($r) could push main; push your branch by name." ;; esac
@@ -228,7 +235,7 @@ check_words() { # ps flag, words...
         done ;;
       # pwsh -Command joins all its remaining words into one command, wherever it comes.
       pwsh|powershell|pwsh.exe|powershell.exe|*\\pwsh.exe|*\\powershell.exe|*/pwsh) nested="${w[*]:k+1}"; nps=1 ;;
-      cmd|cmd.exe|*\\cmd.exe|*/cmd.exe) nested="${w[*]:k+1}"; nps=0 ;;
+      cmd|cmd.exe|*\\cmd.exe|*/cmd.exe) nested="${w[*]:k+1}"; nps=2 ;;
     esac
     case "$nested" in *push*) check_command "$nested" "$nps" ;; esac
   done
@@ -274,6 +281,7 @@ self_test() {
   t 0 Bash topic 'git push origin main#x'
   t 0 Bash topic 'git push origin "topic#main"'
   t 0 Bash topic 'B=main; git push origin topic'
+  t 0 Bash topic '(git push origin topic) && echo {a,b} $((1 + 2))'
   t 0 Bash topic 'bash -c "git push origin topic"'
   t 0 PowerShell topic 'git push origin topic'
   t 0 PowerShell topic 'git push origin topic <# main #>'
@@ -313,6 +321,8 @@ self_test() {
   t 2 Bash topic 'pwsh -NoProfile -NonInteractive -Command "git push origin main"'
   t 2 Bash topic 'powershell.exe -ExecutionPolicy Bypass -c "git push origin main"'
   t 2 Bash topic 'cmd //c git push origin main'
+  t 2 Bash topic 'cmd /c "echo # & git push origin main"'
+  t 2 Bash topic "cmd /c \"echo ' & git push origin main\""
   t 2 PowerShell topic 'git push origin main'
   t 2 PowerShell topic 'git push origin topic; git push origin main'
   t 2 PowerShell topic 'git push origin topic <# x #> main'
@@ -326,6 +336,15 @@ self_test() {
   t 2 Bash topic 'git push $REMOTE topic'
   t 2 Bash topic "bash -c 'git push origin \$B'"
   t 2 PowerShell topic 'git push origin $branch'
+  t 2 PowerShell topic 'git push origin ($b)'
+  t 2 PowerShell topic 'git push origin (git branch --show-current)'
+  t 2 Bash topic 'git push origin {topic,main}'
+  t 2 Bash topic 'git push origin topic:{main,x}'
+  t 0 Bash topic 'git push origin "{topic,main}"'
+  t 2 Bash topic 'git -C "$R" push origin HEAD'
+  t 2 Bash topic 'git -C "$R" push'
+  t 0 Bash topic 'git -C "$R" push origin topic'
+  t 2 Bash topic 'git -c alias.p=push p origin main'
   # GitHub MCP file writes.
   run 0 github '{"tool_name":"mcp__github__push_files","tool_input":{"branch":"topic"}}'
   run 2 github '{"tool_name":"mcp__github__push_files","tool_input":{"branch":"main"}}'

@@ -535,7 +535,7 @@ const prefetching = new Map(); // ticket id -> its download in flight
 const PREFETCH_ROWS = 2;
 
 function prefetchEvents(ticketId) {
-  if (eventCache.has(ticketId) || prefetching.has(ticketId) || eventCache.size >= EVENT_CACHE_THREADS) return prefetching.get(ticketId);
+  if (eventCache.has(ticketId) || prefetching.has(ticketId) || eventCache.size >= EVENT_CACHE_THREADS) return prefetching.get(ticketId) ?? Promise.resolve(); // always a promise: prefetchTopRows chains on it
   const p = api(`api/tickets/${ticketId}/events`)
     .then((page) => { if (!eventCache.has(ticketId) && eventCache.size < EVENT_CACHE_THREADS) eventCache.set(ticketId, page); })
     .catch(() => {})

@@ -53,6 +53,9 @@ export function inboxTicket(before, after) {
   if (countMoved(before, after)) refreshSoon();
 }
 
+/** The counts came afresh with the page (or after the stream dropped): news the watcher missed meanwhile mustn't hide the next change. */
+export const forgetOtherSchemes = () => others.forget();
+
 /** Another scheme's minion changed (#188). */
 export function inboxOtherTicket(ticket) {
   if (view?.kind === 'project') others.ticket(ticket);

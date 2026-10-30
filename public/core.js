@@ -7,7 +7,7 @@ import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, 
 import { onArtifactData } from './bridge-host.js';
 import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './thread.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
-import { inboxEvent, inboxOtherTicket, inboxTicket } from './inbox.js';
+import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, refreshInbox, refreshSchemeCounts } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { inAppHash, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { uploadsRunning } from './composer.js';
@@ -487,6 +487,10 @@ async function resync() {
     view.pins = pins ?? view.pins;
     if (view.id) markSeen(view.id);
     renderSidebar();
+    // Cards raised or settled while the stream was down, here or in other schemes.
+    forgetOtherSchemes();
+    refreshInbox();
+    refreshSchemeCounts();
     setArtifacts(artifacts);
     if (!chat) return;
     view.ticket = chat.ticket;

@@ -34,3 +34,12 @@ test('cardEvent and countMoved, as the open scheme\'s badge uses them too', () =
   assert.equal(countMoved(minion(), minion({ activity: 'x' })), false);
   assert.equal(countMoved(minion({ state: 'try' }), minion({ state: 'ready' })), true);
 });
+
+test('forget: after the counts are fetched afresh, a minion the watcher last saw before then refetches on its next change', () => {
+  let fetches = 0;
+  const watch = otherSchemes(() => fetches++);
+  watch.ticket(minion());
+  watch.forget(); // it went ready while you were in its scheme, then you came back
+  watch.ticket(minion());
+  assert.equal(fetches, 2, 'its state before may not be what the fresh counts saw');
+});

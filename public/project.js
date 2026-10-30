@@ -6,7 +6,7 @@ import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResu
 import { chatSection, chatView, mountChat } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
-import { inboxStrip, refreshInbox, schemeCount } from './inbox.js';
+import { forgetOtherSchemes, inboxStrip, refreshInbox, schemeCount } from './inbox.js';
 import { schedulesButton, showSchedules } from './schedules.js';
 import { replaceHash } from './navstack.js';
 import { accountPage, membersPage, peoplePage } from './people.js';
@@ -67,6 +67,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     ? await Promise.all([api(`api/tickets/${chatId}`), loadEvents(chatId)])
     : [{ ticket: null }, null];
   if (seq !== routeSeq) return; // overtaken by another click while loading
+  forgetOtherSchemes();
   setView({
     kind: 'project', main: main.kind, projectId, project, coordinator, tickets: new Map(tickets.map((t) => [t.id, t])),
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)

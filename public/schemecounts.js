@@ -11,7 +11,8 @@ export const countMoved = (before, after) => !before || before.state !== after.s
 
 /**
  * Other schemes' minions as the stream last showed them: `ticket` and `event` call `refetch` when
- * news may have moved those schemes' counts, so a scheme you aren't in still lights up.
+ * news may have moved those schemes' counts, so a scheme you aren't in still lights up. `forget`
+ * when the counts are fetched afresh: what was last seen before then may be out of date.
  */
 export function otherSchemes(refetch) {
   const last = new Map(); // ticket id -> the minion as last seen
@@ -24,5 +25,6 @@ export function otherSchemes(refetch) {
     event(event) {
       if (cardEvent(event)) refetch();
     },
+    forget: () => last.clear(),
   };
 }

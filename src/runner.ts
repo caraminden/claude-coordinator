@@ -656,7 +656,7 @@ export function onboardingPrompt(project: Project, sharedDir: string | null): st
     '**2. One plan card, as a diff.** Post it with `propose_plan` and write nothing before a person approves it. Only what changes goes in; leave out an empty section:',
     '- **Add:** new skills, agents and rules: name, kind, a one-line job, and its `list_catalogue` source when it is adapted from another scheme.',
     '- **Update:** copied rules to refresh from their source (the "## Copies" table), and each Project facts line in CLAUDE.md that no longer matches the repo, old → new.',
-    '- **Retire:** every repo copy the kit now covers (`in_kit`), and skills nobody used, each with why. Nothing is deleted that isn\'t listed here.',
+    '- **Retire:** every repo copy the kit now covers (`in_kit`), and skills people say they no longer use, each with why. Nothing is deleted that isn\'t listed here.',
     '- **Instructions:** the edits to the scheme instructions as a line diff, in a ```diff block: `-` and `+` lines with two unchanged lines around each change, never the whole text.',
     '- **Settings and properties:** each change, old → new.',
     '- **Left as is:** one line on what you checked and are keeping.',

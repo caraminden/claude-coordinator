@@ -383,8 +383,10 @@ export const projectRoutes: Route[] = [
     method: 'POST', path: '/api/projects/:project/tune-up', who: ['person'],
     async handler({ res, app, session, project }) {
       if (onboardingOpen(project)) throw new HttpError(409, `${project.onboarding_mode === 'tune-up' ? 'A tune-up' : 'Setup'} is under way already`);
-      app.store.setProjectSettings(project.id, { onboarding: 'interview', onboarding_mode: 'tune-up' });
+      // The Taskmaster first, so a failure there can't leave onboarding open with nobody told.
       const coordinator = await ensureCoordinator(app, project);
+      if (onboardingOpen(app.store.getProject(project.id)!)) throw new HttpError(409, 'A tune-up is under way already');
+      app.store.setProjectSettings(project.id, { onboarding: 'interview', onboarding_mode: 'tune-up' });
       app.runner.send(coordinator.id, session.name, 'Tune up this scheme: onboarding is on again, in tune-up mode.');
       const saved = app.store.getProject(project.id)!;
       app.broadcast({ type: 'project', project: saved });

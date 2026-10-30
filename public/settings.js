@@ -125,6 +125,7 @@ export function onProjectUpdate(project) {
   renderInstructionsHead();
   document.getElementById('onboarding-strip')?.replaceWith(onboardingStrip(project));
   renderGithubStrip();
+  for (const b of document.querySelectorAll('.ticket-head button.tune-up')) b.replaceWith(tuneUpButton());
 }
 
 /** Each onboarding step's place in the four (1, creating the scheme, is done by the time this shows). */

@@ -1118,6 +1118,11 @@ export class Store {
       .all(ticketId, ticketId) as unknown as EventRow[];
   }
 
+  /** A chat's newest plan card, or undefined. */
+  latestPlan(ticketId: number): EventRow | undefined {
+    return this.db.prepare("SELECT * FROM events WHERE ticket_id = ? AND kind = 'plan' ORDER BY id DESC LIMIT 1").get(ticketId) as unknown as EventRow | undefined;
+  }
+
   listEvents(ticketId: number, afterId = 0): EventRow[] {
     return this.db
       .prepare('SELECT * FROM events WHERE ticket_id = ? AND id > ? ORDER BY id')

@@ -190,7 +190,7 @@ test('who may register what', () => {
   // Delve's Taskmaster adds a Delve value at once, unreviewed.
   const r = s.props.registerValues(1, 'area', [{ value: 'weather' }], tm(1));
   assert.deepEqual(r.added, ['weather']);
-  assert.equal(r.unreviewed, true);
+  assert.deepEqual(r.unreviewed, ['weather']);
   assert.equal(s.props.list(1).find((k) => k.key === 'area')!.values.find((v) => v.value === 'weather')!.reviewed, false);
   // ...but not to a global key, nor another scheme's.
   assert.throws(() => s.props.registerValues(1, 'type', [{ value: 'music' }], tm(1)), err(403, /Citadel/));
@@ -279,4 +279,27 @@ test('the generated doc shows keys and values as key: value material', () => {
 test('nearDuplicate', () => {
   for (const [a, b] of [['art', 'artwork'], ['area', 'areas'], ['story', 'stories'], ['feature', 'featur'], ['playerClass', 'player-class'], ['dungeon', 'dungeons']]) assert.ok(nearDuplicate(a, b), `${a} ~ ${b}`);
   for (const [a, b] of [['art', 'bug'], ['ui', 'vfx'], ['town', 'tome'], ['heroes', 'herbs']]) assert.ok(!nearDuplicate(a, b), `${a} !~ ${b}`);
+});
+
+test('approving a proposed key approves every value under it, and a setup plan counts as review (#180)', () => {
+  const s = freshStore();
+  const values = (key: string) => s.props.list(1).find((k) => k.key === key)!.values.map((v) => [v.value, v.status, v.reviewed]);
+  // A Taskmaster's key with values (live, unreviewed), plus a minion's proposed value and an archived one.
+  s.props.registerKey(1, { key: 'game', description: 'x', values: [{ value: 'wow' }, { value: 'poe' }] }, tm(1));
+  s.db.prepare("INSERT INTO property_values (key_id, value, status, reviewed, created_by, created_at) SELECT id, 'lol', 'proposed', 0, 'x', 0 FROM property_keys WHERE key = 'game'").run();
+  s.db.prepare("INSERT INTO property_values (key_id, value, status, reviewed, created_by, created_at) SELECT id, 'old', 'archived', 0, 'x', 0 FROM property_keys WHERE key = 'game'").run();
+  s.props.review(1, { key: 'game', action: 'approve' }, cara);
+  assert.deepEqual(values('game'), [['wow', 'active', true], ['poe', 'active', true], ['lol', 'active', true], ['old', 'archived', false]]);
+  // Single values can still be archived after.
+  s.props.review(1, { key: 'game', value: 'lol', action: 'archive' }, cara);
+
+  // Under an approved setup plan, what it names (whole words, any case) goes in approved.
+  const planned: Actor = { ...tm(1), setupPlan: '## Properties\n- `Zone`: north, south-east' } as Actor;
+  assert.equal(s.props.registerKey(1, { key: 'zone', description: 'x', values: [{ value: 'north' }, { value: 'south' }] }, planned).status, 'active');
+  assert.deepEqual(values('zone'), [['north', 'active', true], ['south', 'active', false]], '"south" is only part of "south-east"');
+  assert.deepEqual(s.props.registerValues(1, 'zone', [{ value: 'south-east' }, { value: 'west' }], planned, true).unreviewed, ['west']);
+  assert.equal(s.props.registerKey(1, { key: 'region', description: 'x' }, planned).status, 'proposed');
+  // A minion's proposal never counts, plan or not.
+  assert.equal(s.props.propose(1, { key: 'north', reason: 'x' }, { ...minion(1), setupPlan: 'north' } as Actor).proposed, true);
+  assert.equal(s.props.list(1).find((k) => k.key === 'north')!.status, 'proposed');
 });

@@ -378,13 +378,13 @@ const TOOLS = [
   {
     name: 'register_property_values',
     description:
-      "Add values to one of this scheme's enum keys (or, from the Citadel scheme only, a global key), or add aliases to values it has. New values are live at once but marked unreviewed: say in your reply which you added, so people can approve or correct them. Near-duplicates come back as a warning and nothing is added.",
+      "Add values to one of this scheme's enum keys (or, from the Citadel scheme only, a global key), or add aliases to values it has. New values are live at once but marked unreviewed (unless an open setup's approved plan card names them): say in your reply which you added, so people can approve or correct them. Near-duplicates come back as a warning and nothing is added.",
     inputSchema: { type: 'object', properties: { key: { type: 'string' }, values: VALUES, force: FORCE }, required: ['key', 'values'] },
   },
   {
     name: 'register_property_key',
     description:
-      "Propose a new key for this scheme (or, from the Citadel scheme only, a global key with global: true). New keys wait for a person to approve them in Settings → Properties, so ask people first. Keys are camelCase.",
+      "Propose a new key for this scheme (or, from the Citadel scheme only, a global key with global: true). New keys wait for a person to approve them in Settings → Properties, so ask people first; while setup or a tune-up is open, keys and values the approved plan card names go in approved. Keys are camelCase.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -770,11 +770,11 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'register_property_values': {
       const r = await call('POST', `/api/projects/${PROJECT}/properties/values`, { key: args.key, values: args.values, force: !!args.force });
       const parts = [r.added.length ? `Added ${r.added.map((v: string) => `${args.key}: ${v}`).join(', ')}` : '', r.updated.length ? `updated ${r.updated.join(', ')}` : ''].filter(Boolean).join('; ');
-      return registryReply(r, `${parts || 'No change'}.${r.unreviewed ? ' These are live but unreviewed: tell people in your reply what you added, so they can approve or correct it.' : ''}`);
+      return registryReply(r, `${parts || 'No change'}.${r.unreviewed?.length ? ` ${r.unreviewed.join(', ')} ${r.unreviewed.length === 1 ? 'is' : 'are'} live but unreviewed: tell people in your reply what you added, so they can approve or correct it.` : ''}`);
     }
     case 'register_property_key': {
       const r = await call('POST', `/api/projects/${PROJECT}/properties/keys`, args);
-      return registryReply(r, r.status === 'active' ? `Registered ${args.key}.` : `Proposed ${args.key}; it waits for a person to approve it in Settings → Properties. Tell people in your reply.`);
+      return registryReply(r, r.status === 'active' ? `Registered ${args.key}: your approved setup plan lists it, so it is live with no further approval.` : `Proposed ${args.key}; it waits for a person to approve it in Settings → Properties. Tell people in your reply.`);
     }
     case 'review_property': {
       const r = await call('POST', `/api/projects/${PROJECT}/properties/review`, args);

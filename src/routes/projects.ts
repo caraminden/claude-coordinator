@@ -121,10 +121,22 @@ function viewPicks(v: unknown): Record<string, (string | number)[]> {
 }
 
 /** Who is changing properties: a person, a scheme's Taskmaster, or a minion. */
-function actorFor({ session, caller: t }: Ctx): Actor {
+function actorFor({ session, caller: t, app, project }: Ctx): Actor {
   if (!t) return { kind: 'person', name: session.name };
-  const kind = t.kind === 'coordinator' ? 'coordinator' : 'thread';
-  return { kind, name: kind === 'coordinator' ? AGENT_NAME : `#${t.number} ${t.title}`, projectId: t.project_id, ticketId: t.id };
+  if (t.kind !== 'coordinator') return { kind: 'thread', name: `#${t.number} ${t.title}`, projectId: t.project_id, ticketId: t.id };
+  return { kind: 'coordinator', name: AGENT_NAME, projectId: t.project_id, ticketId: t.id, setupPlan: project && approvedSetupPlan(app, project, t) };
+}
+
+/**
+ * While this scheme's setup or tune-up is open, the text of the plan a person approved in its
+ * Taskmaster's chat (#180). The newest plan card must be approved: only a person can do that, so a
+ * Taskmaster that reopens onboarding by itself still has nothing to register under.
+ */
+function approvedSetupPlan(app: App, project: Project, t: Ticket): string | undefined {
+  if (!onboardingOpen(project) || t.project_id !== project.id) return undefined;
+  const card = app.store.latestPlan(t.id);
+  const plan = card && JSON.parse(card.data);
+  return plan?.status === 'approved' ? `${plan.summary}\n${plan.plan}` : undefined;
 }
 
 /** What people and Claude said in an event, for searching (not tool calls or their output). */
@@ -549,9 +561,9 @@ export const projectRoutes: Route[] = [
       const actor = actorFor(ctx);
       const r = app.store.props.registerValues(project.id, body.key, body.values, actor, !!body.force);
       if (r.added.length || r.updated.length) app.registryChanged(project.id, app.store.props.isGlobal(project.id, body.key));
-      if (r.unreviewed) {
+      if (r.unreviewed.length) {
         const coordinator = app.store.getCoordinator(project.id);
-        if (coordinator) app.runner.emit(coordinator.id, 'note', { text: `${actor.name} added ${r.added.map((v) => `${body.key}: ${v}`).join(', ')} to the registry. It's live now; review it in Settings → Properties.` });
+        if (coordinator) app.runner.emit(coordinator.id, 'note', { text: `${actor.name} added ${r.unreviewed.map((v) => `${body.key}: ${v}`).join(', ')} to the registry. It's live now; review it in Settings → Properties.` });
       }
       return json(ctx.res, 200, r);
     },

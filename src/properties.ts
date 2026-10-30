@@ -15,7 +15,13 @@ export type TargetType = 'minion' | 'artifact';
 
 export type Actor =
   | { kind: 'person'; name: string }
-  | { kind: 'coordinator' | 'thread'; name: string; projectId: number; ticketId: number };
+  | { kind: 'thread'; name: string; projectId: number; ticketId: number }
+  /** setupPlan: the setup or tune-up plan a person approved, while that onboarding is open (#180). */
+  | { kind: 'coordinator'; name: string; projectId: number; ticketId: number; setupPlan?: string };
+
+/** Whether a Taskmaster registers a name its approved setup plan lists: that plan was the person's review (#180). */
+const inSetupPlan = (actor: Actor, name: string) =>
+  actor.kind === 'coordinator' && !!actor.setupPlan && new RegExp(`(?<![\\w-])${name}(?![\\w-])`, 'i').test(actor.setupPlan);
 
 export class PropertyError extends HttpError {
   constructor(message: string, status = 400) {
@@ -418,7 +424,7 @@ export class Registry {
 
   /**
    * Register a key, in the scheme or (global: true) for every scheme. A person's key is live at
-   * once; a Taskmaster's waits for a person. Near-duplicates come back as warnings and nothing is
+   * once, and so is one a Taskmaster's approved setup plan lists; any other Taskmaster key waits for a person. Near-duplicates come back as warnings and nothing is
    * registered unless `force` is set.
    */
   registerKey(projectId: number, input: any, actor: Actor, proposal = false) {
@@ -450,7 +456,7 @@ export class Registry {
       }
     }
     this.checkValues(values, []);
-    const status = actor.kind === 'person' && !proposal ? 'active' : 'proposed';
+    const status = !proposal && (actor.kind === 'person' || inSetupPlan(actor, name)) ? 'active' : 'proposed';
     const now = Date.now();
     this.db.exec('BEGIN');
     try {
@@ -490,12 +496,12 @@ export class Registry {
     const aliases = [...new Set((v.aliases ?? []).map((a) => a.trim()))];
     this.db
       .prepare('INSERT INTO property_values (key_id, value, label, description, aliases, status, reviewed, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(keyId, v.value.trim(), (v.label ?? '').trim().slice(0, 60), (v.description ?? '').trim().slice(0, 1000), JSON.stringify(aliases), status, actor.kind === 'person' ? 1 : 0, actor.name, Date.now());
+      .run(keyId, v.value.trim(), (v.label ?? '').trim().slice(0, 60), (v.description ?? '').trim().slice(0, 1000), JSON.stringify(aliases), status, actor.kind === 'person' || inSetupPlan(actor, v.value.trim()) ? 1 : 0, actor.name, Date.now());
   }
 
   /**
    * Add values to an enum key, or aliases and labels to values it has. A Taskmaster's new values
-   * are live at once but marked unreviewed until a person approves them.
+   * are live at once but marked unreviewed until a person approves them, unless its approved setup plan lists them.
    */
   registerValues(projectId: number, keyName: unknown, values: unknown, actor: Actor, force = false) {
     const k = this.findKey(projectId, keyName);
@@ -513,7 +519,7 @@ export class Registry {
           .filter((e) => e.status !== 'archived' && [e.value, ...aliasesOf(e)].some((s) => nearDuplicate(s, v.value)))
           .map((e) => `${code(v.value)} is close to ${code(`${k.key}: ${e.value}`)}. Use ${code(e.value)}, add ${code(v.value)} to its aliases, or register again with force: true if it really is different.`),
       );
-      if (warnings.length) return { added: [] as string[], updated: [] as string[], unreviewed: false, warnings };
+      if (warnings.length) return { added: [] as string[], updated: [] as string[], unreviewed: [] as string[], warnings };
     }
     const added: string[] = [];
     const updated: string[] = [];
@@ -537,7 +543,7 @@ export class Registry {
       this.db.exec('ROLLBACK');
       throw err;
     }
-    return { added, updated, unreviewed: actor.kind !== 'person' && added.length > 0, warnings: [] as string[] };
+    return { added, updated, unreviewed: actor.kind === 'person' ? [] : added.filter((v) => !inSetupPlan(actor, v)), warnings: [] as string[] };
   }
 
   /** A minion suggests a new scheme key, or a new value for a key; it waits as `proposed`. */
@@ -577,8 +583,11 @@ export class Registry {
     if (input.value === undefined || input.value === null) {
       // Keys: only people approve, reject or archive them.
       if (actor.kind !== 'person') throw new PropertyError('New and archived keys need a person; ask Cara or Josh', 403);
-      if (action === 'approve' && k.status === 'proposed') this.db.prepare("UPDATE property_keys SET status = 'active' WHERE id = ?").run(k.id);
-      else if (action === 'reject' && k.status === 'proposed') {
+      if (action === 'approve' && k.status === 'proposed') {
+        // One click settles the key and everything listed under it (#180); single values can be archived or merged after.
+        this.db.prepare("UPDATE property_keys SET status = 'active' WHERE id = ?").run(k.id);
+        this.db.prepare("UPDATE property_values SET status = 'active', reviewed = 1 WHERE key_id = ? AND status != 'archived'").run(k.id);
+      } else if (action === 'reject' && k.status === 'proposed') {
         this.db.prepare('DELETE FROM property_values WHERE key_id = ?').run(k.id);
         this.db.prepare('DELETE FROM property_keys WHERE id = ?').run(k.id);
       } else if (action === 'archive' && k.status === 'active') this.db.prepare("UPDATE property_keys SET status = 'archived' WHERE id = ?").run(k.id);

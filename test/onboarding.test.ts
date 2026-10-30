@@ -197,3 +197,42 @@ test('Taskmasters get propose_plan and list_catalogue, and set_project_settings 
   assert.deepEqual(settings.onboarding.enum, [...ONBOARDING]);
   assert.deepEqual(settings.onboarding_mode.enum, [...ONBOARDING_MODES]);
 });
+
+test('keys and values an approved setup plan names go in approved, only while that plan is the newest and setup is open (#180)', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Peek', source: 'none', setup: true } });
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  const tm = page.coordinator.id;
+  const mine = () => turns().filter((t) => t.token?.startsWith(`${tm}.`));
+  const token = async (n: number) => (await until(`Taskmaster turn ${n}`, () => mine().length >= n && mine()))[n - 1].token;
+  const props = async () => (await call(`/api/projects/${p.id}/properties`)).data.keys.filter((k: any) => k.scope === 'scheme');
+  const register = async (key: string, values: string[], t: string) => call(`/api/projects/${p.id}/properties/keys`, { method: 'POST', body: { key, description: 'x', values: values.map((value) => ({ value })) }, token: t });
+  let t = await token(1);
+
+  // Before any plan, a Taskmaster's key waits for a person.
+  assert.equal((await register('early', [], t)).data.status, 'proposed');
+  // A plan card still pending doesn't count either.
+  const plan = await call(`/api/tickets/${tm}/plans`, { method: 'POST', body: { summary: 'Peek setup', plan: '## Properties\n- `game`: wow, poe\n- `area`: capture, overlay' }, token: t });
+  assert.equal((await register('area', ['capture'], t)).data.status, 'proposed');
+  await call(`/api/tickets/${tm}/verdict`, { method: 'POST', body: { planId: plan.data.id, verdict: 'approve' } });
+  t = await token(2);
+
+  // Approved: what the plan names is live and reviewed; what it doesn't name still waits.
+  assert.equal((await register('game', ['wow', 'poe', 'all'], t)).data.status, 'active');
+  const game = (await props()).find((k: any) => k.key === 'game');
+  assert.deepEqual(game.values.map((v: any) => [v.value, v.reviewed]), [['wow', true], ['poe', true], ['all', false]]);
+  const added = await call(`/api/projects/${p.id}/properties/values`, { method: 'POST', body: { key: 'game', values: [{ value: 'lol' }] }, token: t });
+  assert.deepEqual(added.data.unreviewed, ['lol']);
+  assert.equal((await register('zone', [], t)).data.status, 'proposed', 'a key the plan never names');
+
+  // A newer plan card, even one naming the key, takes the approval away until a person approves it.
+  const next = await call(`/api/tickets/${tm}/plans`, { method: 'POST', body: { summary: 'More', plan: '`mode`, `extra`' }, token: t });
+  assert.equal((await register('mode', [], t)).data.status, 'proposed');
+  await call(`/api/tickets/${tm}/verdict`, { method: 'POST', body: { planId: next.data.id, verdict: 'approve' } });
+  t = await token(3);
+
+  // Once setup is done, an old approved plan counts for nothing, even if the Taskmaster names the key.
+  await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { onboarding: 'done' }, token: t });
+  assert.equal((await register('extra', [], t)).data.status, 'proposed');
+  // A person's key is live as always.
+  assert.equal((await call(`/api/projects/${p.id}/properties/keys`, { method: 'POST', body: { key: 'personal', description: 'x' } })).data.status, 'active');
+});

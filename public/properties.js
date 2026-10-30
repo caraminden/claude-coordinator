@@ -324,12 +324,15 @@ async function renderPropertiesPage() {
       return h('form', { class: 'row pv-add', onsubmit: (e) => { e.preventDefault(); if (value.value.trim()) add(false); } },
         value, aliases, h('button', { type: 'submit', class: 'small' }, 'Add'), warn);
     };
+    // Approving a key approves every value listed under it too.
+    const waiting = values.filter((v) => v.status === 'proposed' || !v.reviewed).length;
+    const approveKey = waiting ? `Approve key + ${waiting} value${waiting === 1 ? '' : 's'}` : 'Approve key';
     return h('div', { class: `prop-key${k.status === 'proposed' ? ' proposed' : ''}` },
       h('div', { class: 'row' },
         h('code', { class: 'prop-key-name' }, k.key), h('span', {}, k.label),
         h('span', { class: 'muted small' }, `${kind}${k.status === 'proposed' ? ` · proposed by ${k.created_by}` : ''}`),
         h('span', { class: 'spacer' }),
-        edit && k.status === 'proposed' ? [btn('Approve key', 'Make it usable', () => review(k, null, 'approve')), btn('Reject', 'Drop the proposal', () => review(k, null, 'reject'))] : ''),
+        edit && k.status === 'proposed' ? [btn(approveKey, waiting ? 'Make it and its values usable; archive or merge single values after' : 'Make it usable', () => review(k, null, 'approve')), btn('Reject', 'Drop the proposal', () => review(k, null, 'reject'))] : ''),
       k.description ? h('p', { class: 'muted small prop-desc' }, k.description) : '',
       values.length ? h('div', { class: 'pv-list' }, values.map(valueChip)) : '',
       archived.length ? h('p', { class: 'muted small' }, 'Archived: ', archived.map((v) => [v.value, ' ', edit ? btn('Restore', `Offer ${v.value} again`, () => review(k, v, 'restore')) : '', ' '])) : '',

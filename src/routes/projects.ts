@@ -6,13 +6,14 @@ import { cleanPluginDirs, cleanRules, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, TICKET_TAGS, type Project, type Ticket, type TicketTag } from '../db.ts';
+import { EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, TICKET_TAGS, type Project, type Ticket, type TicketTag, type User } from '../db.ts';
 import { lendsMachines } from '../access.ts';
 import { inboxCount, inboxItems } from '../inbox.ts';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { TAG_TO_TYPE } from '../property-seed.ts';
-import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type Source } from '../scheme-repo.ts';
+import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
+import { personGithub } from '../github-link.ts';
 import { describeCron, type Schedule } from '../schedules.ts';
 import { KIT } from '../runner.ts';
 import { claudeConfigDir } from '../sessions.ts';
@@ -23,19 +24,36 @@ import { HttpError, json, oneOf, readJson, str, ticketView, type App, type Ctx, 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
 
-/** `owner/name` of the GitHub repo a new scheme called `name` gets. */
-async function newRepoSlug(app: App, name: string): Promise<string> {
-  const owner = app.store.getSetting<string>(GITHUB_OWNER) ?? await citadelOwner();
-  if (!owner) throw new HttpError(400, `Set the GitHub owner for new schemes in Settings → ${APP_NAME}-wide first`);
+/** A non-admin's GitHub for work the server does for them (#195): their linked token, or no login, never the box's. */
+const githubOf = (app: App, user: User) => personGithub(app.github, user, join(app.dataDir, 'people', String(user.id)));
+
+const LINK_FIRST = 'Link GitHub in Settings → Your account first: a new repo goes on your own GitHub account';
+
+/**
+ * `owner/name` of the GitHub repo a new scheme called `name` gets, and whose login makes it. An
+ * admin's goes under the Citadel-wide owner with the box's login; anyone else's under their own
+ * linked account with their token (#195).
+ */
+async function newRepoSlug(app: App, name: string, admin: boolean, user: User | undefined): Promise<{ slug: string; as: GithubEnv }> {
+  let owner: string | null;
+  let as: GithubEnv;
+  if (admin) {
+    owner = app.store.getSetting<string>(GITHUB_OWNER) ?? await citadelOwner();
+    if (!owner) throw new HttpError(400, `Set the GitHub owner for new schemes in Settings → ${APP_NAME}-wide first`);
+  } else {
+    const mine = user ? githubOf(app, user) : null;
+    if (!mine?.login) throw new HttpError(403, LINK_FIRST);
+    ({ login: owner, env: as } = mine);
+  }
   const repo = repoName(name);
   if (!repo) throw new HttpError(400, 'The scheme name needs a letter or digit to name its GitHub repo');
-  return `${owner}/${repo}`;
+  return { slug: `${owner}/${repo}`, as };
 }
 
 /** Put a new scheme's repo on GitHub, recording the outcome on the scheme for its strip. */
-async function putOnGithub(app: App, projectId: number, dir: string, slug: string, checked: boolean): Promise<Project> {
+async function putOnGithub(app: App, projectId: number, dir: string, slug: string, checked: boolean, as: GithubEnv): Promise<Project> {
   try {
-    await pushToGithub(dir, slug, checked);
+    await pushToGithub(dir, slug, checked, as);
     app.store.setProjectUpstream(projectId, githubUrl(slug), null);
   } catch (err) {
     // Keeps any repo_url: a Retry racing one that just worked mustn't drop its URL.
@@ -218,10 +236,11 @@ export const projectRoutes: Route[] = [
       let upstream: string | null = null;
       let folder: string | null = null;
       let slug: string | null = null;
+      // Whose GitHub the clone or the new repo uses: undefined is the box's login, an admin's only (#195).
+      let as: GithubEnv;
+      const user = session.uid ? app.store.getUser(session.uid) : undefined;
       // A folder on this machine could be anyone's, another scheme's included.
       if (source === 'folder' && !session.admin) throw new HttpError(403, 'Only an admin can start a scheme from a folder on the server');
-      // A new repo goes on the admin's GitHub account.
-      if (source === 'new' && !session.admin) throw new HttpError(403, 'Only an admin can make a new GitHub repo; clone one from a URL instead');
       const about = body.about == null || body.about === '' ? '' : str(body.about, 'About', 4000);
       // "Create and set up" starts the Taskmaster's onboarding; "Create only" (and older callers) skip it.
       const setup = body.setup === true;
@@ -229,14 +248,20 @@ export const projectRoutes: Route[] = [
         if (!repoUrl) throw new HttpError(400, 'Repo URL is required');
         if (!/^(https:\/\/|git@)/.test(repoUrl)) throw new HttpError(400, 'Repo URL must be https:// or git@');
         upstream = repoUrl;
+        if (!session.admin) {
+          // The box's SSH key and gh login are Cara's: anyone else clones with their own token, or none.
+          if (!repoUrl.startsWith('https://')) throw new HttpError(400, 'Use the repo\'s https:// URL: a git@ URL would clone with the server\'s own SSH key');
+          if (!user) throw new HttpError(403, 'Sign in with your own login to clone a repo');
+          as = githubOf(app, user).env;
+        }
       } else if (source === 'folder') {
         const checked = await checkFolder(str(body.folder, 'Folder', 4096), app.dataDir);
         if ('error' in checked) throw new HttpError(400, checked.error);
         folder = checked.path;
       } else if (source === 'new') {
-        slug = await newRepoSlug(app, name);
+        ({ slug, as } = await newRepoSlug(app, name, !!session.admin, user));
         // Refused before anything exists, with the name shown so the person can pick another.
-        if (await githubRepoExists(slug) === true) throw new HttpError(409, `GitHub repo ${slug} already exists; pick another scheme name`);
+        if (await githubRepoExists(slug, as) === true) throw new HttpError(409, `GitHub repo ${slug} already exists; pick another scheme name`);
       }
       let project;
       try {
@@ -247,7 +272,7 @@ export const projectRoutes: Route[] = [
       if (source !== 'none') {
         const dir = join(projectDir(app.dataDir, project.id), 'repo');
         try {
-          if (source === 'url') await cloneProject(app.dataDir, project.id, repoUrl!);
+          if (source === 'url') await cloneProject(app.dataDir, project.id, repoUrl!, as);
           else {
             // Project ids can be reused after a failed create; clear any leftover partial repo.
             await rm(dir, { recursive: true, force: true });
@@ -262,7 +287,7 @@ export const projectRoutes: Route[] = [
           throw new HttpError(400, `${source === 'new' ? 'Could not make the repo' : 'Could not clone repo'}: ${errorText(err)}`);
         }
         // A GitHub failure keeps the scheme: the strip on it offers Retry, so a blip doesn't lose the form.
-        if (source === 'new') await putOnGithub(app, project.id, dir, slug!, true);
+        if (source === 'new') await putOnGithub(app, project.id, dir, slug!, true, as);
       }
       app.store.setProjectSettings(project.id, { onboarding: setup ? 'interview' : 'skipped' });
       if (setup) {
@@ -273,12 +298,16 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    // Try again to put a new scheme's repo on GitHub after it failed at creation.
-    method: 'POST', path: '/api/projects/:project/github', who: ['person'], access: 'admin',
+    // Try again to put a new scheme's repo on GitHub after it failed at creation. It goes where the
+    // create would have put it: on the scheme owner's GitHub, with their token, unless they're an admin (#195).
+    method: 'POST', path: '/api/projects/:project/github', who: ['person'], access: 'owner',
     async handler({ res, app, project }) {
       if (app.preview) throw new HttpError(403, 'A preview can\'t make GitHub repos');
       if (!project.github_error || !project.repo_dir) throw new HttpError(409, 'This scheme has no GitHub repo waiting to be made');
-      const saved = await putOnGithub(app, project.id, project.repo_dir, await newRepoSlug(app, project.name), false);
+      const owner = project.owner_id === null ? undefined : app.store.getUser(project.owner_id);
+      // A scheme with no owner left was an admin's to begin with (#34 made new repos admin-only).
+      const { slug, as } = await newRepoSlug(app, project.name, !owner || !!owner.admin, owner);
+      const saved = await putOnGithub(app, project.id, project.repo_dir, slug, false, as);
       if (saved.github_error) throw new HttpError(502, `GitHub repo not created: ${saved.github_error}`);
       return json(res, 200, saved);
     },

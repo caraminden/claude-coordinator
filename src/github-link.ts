@@ -143,6 +143,13 @@ export class GithubLink {
     this.creds.remove(uid, 'github');
   }
 
+  /** A person's working token and its account, or null: not linked, the link failed, they're disabled, or no OAuth App. */
+  token(person: User): { secret: string; login: string } | null {
+    if (!this.configured || person.disabled_at) return null;
+    const c = this.creds.get<GithubMeta>(person.id, 'github');
+    return c?.secret && !c.failed ? { secret: c.secret, login: c.meta.login } : null;
+  }
+
   /** A person's GitHub login as People shows it, without decrypting anything. */
   login(uid: number): { login: string; failed: boolean } | null {
     const row = this.store.getCredential(uid, 'github');
@@ -156,9 +163,7 @@ export class GithubLink {
    */
   forTurn(person: User | null, turnDir: string): TurnGithub | null {
     if (!this.configured) return null;
-    const ghDir = join(turnDir, 'gh');
-    mkdirSync(ghDir, { recursive: true, mode: 0o700 });
-    const env: Record<string, string> = { GH_CONFIG_DIR: ghDir, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' };
+    const env = noLogin(turnDir);
     const who = person?.name ?? 'Nobody';
     // A disabled person's link isn't used: their minions' turns can't push until someone else's message runs one.
     const c = person && !person.disabled_at ? this.creds.get<GithubMeta>(person.id, 'github') : null;
@@ -174,6 +179,22 @@ export class GithubLink {
       line: `GitHub: this turn runs for ${who}, and ${why}, so it can't push or open pull requests. Commit on your branch, and tell them they can link GitHub in Settings → Your account. Never push from another account or login to get round it.`,
     };
   }
+}
+
+/**
+ * gh and git env for work the server does for a non-admin `person` (#195: making or cloning their
+ * scheme's repo): their own token when linked, otherwise no login at all, never the box's.
+ */
+export function personGithub(link: GithubLink, person: User, dir: string): { env: Record<string, string>; login: string | null } {
+  const c = link.token(person);
+  return c ? { env: { ...noLogin(dir), GH_TOKEN: c.secret }, login: c.login } : { env: noLogin(dir), login: null };
+}
+
+/** An empty gh config folder in `dir`, so gh and git's gh credential helper can't fall back to the box's login; no prompts. */
+function noLogin(dir: string): Record<string, string> {
+  const ghDir = join(dir, 'gh');
+  mkdirSync(ghDir, { recursive: true, mode: 0o700 });
+  return { GH_CONFIG_DIR: ghDir, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' };
 }
 
 /** GitHub's private address for a person, which links commits to their profile without showing their email. */

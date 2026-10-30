@@ -29,7 +29,8 @@ export async function openStartScheme() {
 
 /** Where a new scheme's code comes from. */
 const SOURCES = [
-  { value: 'new', label: 'New repo (private, on GitHub too)', admin: true },
+  // Anyone's own, once they've linked GitHub (#195); an admin's goes under the Citadel-wide owner.
+  { value: 'new', label: 'New repo (private, on GitHub too)', linked: true },
   { value: 'url', label: 'Clone from a URL', field: 'repoUrl', placeholder: 'https://github.com/caraminden/gamedevtest.git' },
   { value: 'folder', label: 'Clone a folder on perigee', field: 'folder', placeholder: '~/projects/…', admin: true },
   { value: 'none', label: 'No code (docs, research, art)' },
@@ -40,10 +41,12 @@ const DEFAULT_SOURCE = 'new';
 
 /** Name, code source and what it's about for a new scheme; on success it opens the scheme. */
 function newSchemeForm() {
-  const sources = SOURCES.filter((s) => !s.admin || account?.admin).map((s) => h('label', { class: 'source' },
-    h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === (account?.admin ? DEFAULT_SOURCE : 'none') }),
+  const admin = !!account?.admin;
+  const sources = SOURCES.filter((s) => !s.admin || admin).map((s) => h('label', { class: 'source' },
+    h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === (admin ? DEFAULT_SOURCE : 'none'), disabled: !!s.linked && !admin }),
     h('span', {}, s.label),
-    s.field ? h('input', { name: s.field, 'data-draft': true, placeholder: s.placeholder }) : ''));
+    s.field ? h('input', { name: s.field, 'data-draft': true, placeholder: s.placeholder }) : '',
+    s.linked && !admin ? h('span', { class: 'source-note muted', hidden: true }) : ''));
   const form = h('form', {},
     h('label', {}, 'Name', h('input', { name: 'name', required: true, maxlength: 80, 'data-draft': true })),
     h('fieldset', { class: 'sources' }, h('legend', {}, 'Code'), ...sources),
@@ -60,8 +63,10 @@ function newSchemeForm() {
       if (field) field.hidden = !l.querySelector('input[type=radio]').checked;
     }
   };
-  form.addEventListener('change', showField);
+  let touched = false;
+  form.addEventListener('change', () => { touched = true; showField(); });
   showField();
+  if (!admin) linkedRepo(form, () => { if (!touched) { form.source.value = DEFAULT_SOURCE; showField(); } });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = e.submitter ?? form.querySelector('button[type=submit]');
@@ -84,6 +89,28 @@ function newSchemeForm() {
     }
   });
   return form;
+}
+
+/**
+ * A non-admin's "New repo" goes on their own GitHub, so it waits on their link (#195): enabled and
+ * named for their account once linked, otherwise a pointer to where they link it.
+ */
+async function linkedRepo(form, onLinked) {
+  const radio = form.querySelector('input[name=source][value=new]');
+  const label = radio.closest('label');
+  const note = label.querySelector('.source-note');
+  const gh = await api('api/me/github').catch(() => null);
+  const login = gh?.configured && gh.link && !gh.link.failed ? gh.link.login : null;
+  if (login) {
+    radio.disabled = false;
+    label.querySelector('span').textContent = `New repo (private, on your GitHub, @${login})`;
+    return onLinked();
+  }
+  const scheme = view?.projectId ?? view?.projects?.[0]?.id;
+  note.replaceChildren(gh?.link?.failed ? 'Link GitHub again in ' : 'Link GitHub in ',
+    scheme != null ? h('a', { href: `#/p/${scheme}/account`, onclick: () => form.closest('dialog')?.close() }, 'Settings → Your account') : 'Settings → Your account',
+    ' to make one on your own account.');
+  note.hidden = false;
 }
 
 /** The new-scheme form in a modal: a centred box on desktop, a sheet along the bottom on phones. */

@@ -4,13 +4,13 @@ import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { identity } from './scheme-repo.ts';
+import { asEnv, identity, type GithubEnv } from './scheme-repo.ts';
 
 const run = promisify(execFile);
 const GIT_TIMEOUT_MS = 10 * 60 * 1000;
 
-async function git(args: string[], cwd?: string): Promise<string> {
-  const { stdout } = await run('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, timeout: GIT_TIMEOUT_MS });
+async function git(args: string[], cwd?: string, as?: GithubEnv): Promise<string> {
+  const { stdout } = await run('git', args, { cwd, env: asEnv(as), maxBuffer: 16 * 1024 * 1024, timeout: GIT_TIMEOUT_MS });
   return stdout.trim();
 }
 
@@ -31,13 +31,13 @@ export async function removeProjectDir(dataDir: string, projectId: number) {
   await rm(projectDir(dataDir, projectId), { recursive: true, force: true });
 }
 
-/** Clone the project's repo into the data dir. Returns the checkout path. */
-export async function cloneProject(dataDir: string, projectId: number, repoUrl: string): Promise<string> {
+/** Clone the project's repo into the data dir, as `as` (#195) or the box's login. Returns the checkout path. */
+export async function cloneProject(dataDir: string, projectId: number, repoUrl: string, as?: GithubEnv): Promise<string> {
   const dir = join(projectDir(dataDir, projectId), 'repo');
   // Project ids can be reused after a failed create; clear any leftover partial clone.
   await rm(dir, { recursive: true, force: true });
   await mkdir(projectDir(dataDir, projectId), { recursive: true });
-  await git(['clone', '--quiet', '--', repoUrl, dir]);
+  await git(['clone', '--quiet', '--', repoUrl, dir], undefined, as);
   return dir;
 }
 

@@ -4,9 +4,12 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { Auth } from '../src/auth.ts';
+import { Credentials } from '../src/credentials.ts';
+import { Store } from '../src/db.ts';
 import { repoSlug } from '../src/prlinks.ts';
 import { repoName } from '../src/scheme-repo.ts';
-import { bootServer, REPO, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 
 // A new scheme's code sources (#173). The server runs with HOME set to the scratch folder (so its
 // data dir is under HOME) and a stub `gh` first on PATH: no test makes a real GitHub repo.
@@ -27,6 +30,7 @@ writeFileSync(join(stub, 'bin', 'gh'), `#!/bin/sh
 S=${JSON.stringify(stub)}
 [ "$1 $2" = "pr list" ] && exit 0
 echo "$*" >> "$S/calls"
+echo "\${GH_TOKEN:-box} $*" >> "$S/as"
 [ "$1 $2" = "repo view" ] && { [ -e "$S/taken/$(echo "$3" | tr / _)" ] && { echo '{"name":"x"}'; exit 0; }; echo "GraphQL: Could not resolve to a Repository with the name '$3'. (repository)" >&2; exit 1; }
 if [ "$1 $2" = "repo create" ]; then
   [ -e "$S/fail" ] && { cat "$S/fail" >&2; exit 1; }
@@ -40,6 +44,15 @@ fi
 exit 0
 `);
 chmodSync(join(stub, 'bin', 'gh'), 0o755);
+// A git that logs whose token each clone ran with ("box" for the server's own login) and runs the real one.
+const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+writeFileSync(join(stub, 'bin', 'git'), `#!/bin/sh
+[ "$1" = clone ] && echo "\${GH_TOKEN:-box} \${GH_CONFIG_DIR:-box-config} $*" >> ${JSON.stringify(join(stub, 'clones'))}
+exec ${JSON.stringify(realGit)} "$@"
+`);
+chmodSync(join(stub, 'bin', 'git'), 0o755);
+const asCalls = () => (existsSync(join(stub, 'as')) ? readFileSync(join(stub, 'as'), 'utf8').trim().split('\n') : []);
+const clones = () => (existsSync(join(stub, 'clones')) ? readFileSync(join(stub, 'clones'), 'utf8').trim().split('\n') : []);
 
 // A "remote" that https://example.test/remote.git clones from, through git's insteadOf.
 const seed = join(root, 'seed');
@@ -53,7 +66,8 @@ writeFileSync(join(root, '.gitconfig'), `[url "${join(root, 'remote.git')}"]\n\t
 
 let s: Booted;
 before(async () => {
-  s = await bootServer({ root, env: { HOME: root, PATH: `${join(stub, 'bin')}:${process.env.PATH}` } });
+  // With an OAuth App set up, so people's own GitHub links count (#195); never a GH_TOKEN of the test's own.
+  s = await bootServer({ root, env: { HOME: root, PATH: `${join(stub, 'bin')}:${process.env.PATH}`, GITHUB_CLIENT_ID: 'cid', GITHUB_CLIENT_SECRET: 'csecret', GH_TOKEN: undefined, GITHUB_TOKEN: undefined, GH_CONFIG_DIR: undefined } });
 });
 after(() => {
   s?.stop();
@@ -284,4 +298,98 @@ test('when the repo was made but the push failed, Retry only pushes', async () =
   assert.equal(ok.data.repo_url, 'https://github.com/test-owner/half-made');
   assert.deepEqual(ghCalls(), [], 'no second gh repo create');
   assert.equal(git(['rev-parse', 'main'], join(stub, 'remotes', 'test-owner_half-made.git')), git(['rev-parse', 'main'], r.data.repo_dir));
+});
+
+// #195: anyone who has linked GitHub makes a new repo on their own account with their own token;
+// the box's login (Cara's) only ever works for admins.
+test('non-admins: New repo goes on their own GitHub with their token, or is refused until they link', async () => {
+  const store = new Store(join(s.data, 'coordinator.db'));
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const olive = store.createUser({ name: 'Olive', login: 'olive' });
+  new Credentials(store, SECRET).put(josh.id, 'github', 'gho_josh', { login: 'joshgh', id: 7, name: 'Josh' });
+  const auth = new Auth(PASSWORD, SECRET);
+  const as = (u: { id: number; name: string }) => async (path: string, body?: unknown) => {
+    const r = await fetch(s.base + path, { method: body === undefined ? 'GET' : 'POST', headers: { Cookie: auth.issueCookie(u, false).split(';')[0], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: r.status, data: await r.json() };
+  };
+  const asJosh = as(josh);
+  const asOlive = as(olive);
+  rmSync(join(stub, 'as'), { force: true });
+
+  // Unlinked: refused before anything exists, and never on the box's login.
+  const count = (await s.call('/api/projects')).data.length;
+  const no = await asOlive('/api/projects', { name: 'Olive repo', source: 'new' });
+  assert.equal(no.status, 403);
+  assert.match(no.data.error, /Link GitHub in Settings → Your account/);
+  assert.equal((await s.call('/api/projects')).data.length, count);
+  assert.deepEqual(asCalls(), []);
+  // A folder on the server stays admin-only, linked or not.
+  assert.equal((await asJosh('/api/projects', { name: 'Josh folder', source: 'folder', folder: join(root, 'seed') })).status, 403);
+
+  // Linked: under their own login, with their token, private.
+  writeFileSync(join(stub, 'taken', 'joshgh_josh-taken'), '');
+  const taken = await asJosh('/api/projects', { name: 'Josh taken', source: 'new' });
+  assert.equal(taken.status, 409);
+  assert.match(taken.data.error, /joshgh\/josh-taken already exists/);
+  const r = await asJosh('/api/projects', { name: 'Josh Game', source: 'new' });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  assert.equal(r.data.repo_url, 'https://github.com/joshgh/josh-game');
+  assert.equal(r.data.owner_id, josh.id);
+  assert.deepEqual(asCalls().slice(-2), ['gho_josh repo view joshgh/josh-game --json name', `gho_josh repo create joshgh/josh-game --private --source ${r.data.repo_dir} --remote origin --push`]);
+  assert.ok(asCalls().every((c) => c.startsWith('gho_josh ')), 'never the box login');
+
+  // Retry: the scheme's owner may, with their token; someone else may not; an admin's goes on the owner's GitHub too.
+  writeFileSync(join(stub, 'fail'), 'HTTP 502');
+  const failed = await asJosh('/api/projects', { name: 'Josh Retry', source: 'new' });
+  assert.equal(failed.status, 201, JSON.stringify(failed.data));
+  assert.match(failed.data.github_error, /HTTP 502/);
+  rmSync(join(stub, 'fail'));
+  store.addMember(failed.data.id, olive.id);
+  const notOwner = await asOlive(`/api/projects/${failed.data.id}/github`, {});
+  assert.equal(notOwner.status, 403);
+  assert.match(notOwner.data.error, /Only the scheme's owner/);
+  const ok = await asJosh(`/api/projects/${failed.data.id}/github`, {});
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  assert.equal(ok.data.repo_url, 'https://github.com/joshgh/josh-retry');
+  assert.equal(asCalls().at(-1), `gho_josh repo create joshgh/josh-retry --private --source ${failed.data.repo_dir} --remote origin --push`);
+
+  // An owner who unlinked since can't retry, even when an admin presses it: it would be the box's login.
+  writeFileSync(join(stub, 'fail'), 'HTTP 502');
+  const later = await asJosh('/api/projects', { name: 'Josh Later', source: 'new' });
+  rmSync(join(stub, 'fail'));
+  store.deleteCredential(josh.id, 'github');
+  const before = asCalls().length;
+  assert.equal((await asJosh(`/api/projects/${later.data.id}/github`, {})).status, 403);
+  const byAdmin = await s.call(`/api/projects/${later.data.id}/github`, {});
+  assert.equal(byAdmin.status, 403);
+  assert.match(byAdmin.data.error, /Link GitHub/);
+  assert.equal(asCalls().length, before, 'no gh call on anyone else\'s login');
+
+});
+
+test('cloning by URL: an admin uses the box login; anyone else their own token or none, and https only', async () => {
+  const store = new Store(join(s.data, 'coordinator.db'));
+  const linked = store.createUser({ name: 'Rae', login: 'rae' });
+  const unlinked = store.createUser({ name: 'Uma', login: 'uma' });
+  new Credentials(store, SECRET).put(linked.id, 'github', 'gho_rae', { login: 'raegh', id: 8, name: null });
+
+  const auth = new Auth(PASSWORD, SECRET);
+  const create = (u: { id: number; name: string } | null, body: object) => u
+    ? fetch(s.base + '/api/projects', { method: 'POST', headers: { Cookie: auth.issueCookie(u, false).split(';')[0], 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json() }))
+    : s.call('/api/projects', body);
+  const url = 'https://example.test/remote.git';
+  for (const [who, name, token] of [[null, 'Admin clone', 'box'], [linked, 'Rae clone', 'gho_rae'], [unlinked, 'Uma clone', 'box']] as const) {
+    rmSync(join(stub, 'clones'), { force: true });
+    const r = await create(who, { name, source: 'url', repoUrl: url });
+    assert.equal(r.status, 201, JSON.stringify(r.data));
+    const [line] = clones();
+    assert.ok(line.startsWith(`${token} `), line);
+    // Not the admin's: an empty gh config, so the box's gh login can't answer git's credential ask either.
+    if (who) assert.match(line, new RegExp(`^${token} ${join(s.data, 'people', String(who.id), 'gh')} `), line);
+    else assert.match(line, /^box box-config /, line);
+  }
+  // A git@ URL would use the server's SSH key: admins only.
+  const ssh = await create(linked, { name: 'Rae ssh', source: 'url', repoUrl: 'git@github.com:someone/hub.git' });
+  assert.equal(ssh.status, 400);
+  assert.match(ssh.data.error, /https:\/\/ URL/);
 });

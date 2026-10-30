@@ -17,8 +17,22 @@ export type Source = (typeof SOURCES)[number];
 /** The app setting that names the GitHub account new schemes' repos are made under. */
 export const GITHUB_OWNER = 'github_owner';
 
-async function git(args: string[], cwd?: string): Promise<string> {
-  const { stdout } = await run('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, timeout: TIMEOUT_MS });
+/** Extra env a person's GitHub work runs with (src/github-link.ts personGithub); undefined runs as the box's login. */
+export type GithubEnv = Record<string, string> | undefined;
+
+/** The server's env plus `as`; with `as` and no token in it, the server's own GH_TOKEN can't leak in either. */
+export function asEnv(as: GithubEnv): NodeJS.ProcessEnv | undefined {
+  if (!as) return undefined;
+  const env = { ...process.env, ...as };
+  if (!as.GH_TOKEN) {
+    delete env.GH_TOKEN;
+    delete env.GITHUB_TOKEN;
+  }
+  return env;
+}
+
+async function git(args: string[], cwd?: string, as?: GithubEnv): Promise<string> {
+  const { stdout } = await run('git', args, { cwd, env: asEnv(as), maxBuffer: 16 * 1024 * 1024, timeout: TIMEOUT_MS });
   return stdout.trim();
 }
 const gitOk = (args: string[], cwd?: string) => git(args, cwd).then(() => true, () => false);
@@ -60,9 +74,9 @@ export async function initRepo(dir: string, name: string, about: string): Promis
 }
 
 /** Whether `owner/name` already exists on GitHub: true, false, or null when gh couldn't tell (offline, signed out). */
-export async function githubRepoExists(slug: string): Promise<boolean | null> {
+export async function githubRepoExists(slug: string, as?: GithubEnv): Promise<boolean | null> {
   try {
-    await run('gh', ['repo', 'view', slug, '--json', 'name'], { timeout: 60_000 });
+    await run('gh', ['repo', 'view', slug, '--json', 'name'], { env: asEnv(as), timeout: 60_000 });
     return true;
   } catch (err) {
     return /Could not resolve to a Repository/i.test(errorText(err)) ? false : null;
@@ -75,14 +89,14 @@ export const githubUrl = (slug: string) => `https://github.com/${slug}`;
 /**
  * Put the local repo `dir` on GitHub as private `slug` and push main. When a past try already made
  * the repo and set `origin` but the push failed, this only pushes. `checked`: the caller already
- * found the name free. Throws gh's or git's words.
+ * found the name free. `as`: whose GitHub it goes on (#195). Throws gh's or git's words.
  */
-export async function pushToGithub(dir: string, slug: string, checked: boolean): Promise<void> {
+export async function pushToGithub(dir: string, slug: string, checked: boolean, as?: GithubEnv): Promise<void> {
   if (await gitOk(['remote', 'get-url', 'origin'], dir)) {
-    await git(['push', '--quiet', '-u', 'origin', 'main'], dir);
+    await git(['push', '--quiet', '-u', 'origin', 'main'], dir, as);
   } else {
-    if (!checked && await githubRepoExists(slug)) throw new Error(`GitHub repo ${slug} already exists`);
-    await run('gh', ['repo', 'create', slug, '--private', '--source', dir, '--remote', 'origin', '--push'], { cwd: dir, timeout: TIMEOUT_MS });
+    if (!checked && await githubRepoExists(slug, as)) throw new Error(`GitHub repo ${slug} already exists`);
+    await run('gh', ['repo', 'create', slug, '--private', '--source', dir, '--remote', 'origin', '--push'], { cwd: dir, env: asEnv(as), timeout: TIMEOUT_MS });
   }
   // A push sets no origin/HEAD; with it, ticketBase notices when a push elsewhere puts origin ahead.
   await gitOk(['remote', 'set-head', 'origin', 'main'], dir);

@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
-import { GithubLink } from '../src/github-link.ts';
+import { GithubLink, personGithub } from '../src/github-link.ts';
+import { asEnv } from '../src/scheme-repo.ts';
 import { hideTokens, pushKind, Runner, slimEvent } from '../src/runner.ts';
 
 // People link their own GitHub (#182): the token is kept encrypted, and each turn gets the token of the
@@ -113,6 +114,28 @@ test('a turn gets its person\'s token and name; unlinked, none and a line saying
   assert.equal(new GithubLink(store, creds, '', '').forTurn(josh, dir), null);
   // Disabled: their link stays, but no turn uses it.
   assert.equal(link.forTurn({ ...josh, disabled_at: Date.now() }, dir)!.env.GH_TOKEN, undefined);
+});
+
+test('server work for a person (#195): their token, or no login at all, and never the server\'s own GH_TOKEN', () => {
+  const link = new GithubLink(store, creds, 'cid', 'csecret');
+  const dir = join(root, 'person-env');
+  assert.deepEqual(personGithub(link, josh, dir), { login: 'joshdev', env: { GH_CONFIG_DIR: join(dir, 'gh'), GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1', GH_TOKEN: 'gho_new' } });
+  for (const none of [personGithub(link, cara, dir), personGithub(link, { ...josh, disabled_at: Date.now() }, dir), personGithub(new GithubLink(store, creds, '', ''), josh, dir)]) {
+    assert.equal(none.login, null);
+    assert.equal(none.env.GH_TOKEN, undefined);
+    assert.equal(none.env.GH_CONFIG_DIR, join(dir, 'gh'));
+  }
+  const saved = { GH_TOKEN: process.env.GH_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+  Object.assign(process.env, { GH_TOKEN: 'gho_box', GITHUB_TOKEN: 'gho_box' });
+  try {
+    const none = asEnv(personGithub(link, cara, dir).env)!;
+    assert.equal(none.GH_TOKEN, undefined);
+    assert.equal(none.GITHUB_TOKEN, undefined);
+    assert.equal(asEnv(personGithub(link, josh, dir).env)!.GH_TOKEN, 'gho_new');
+    assert.equal(asEnv(undefined), undefined, 'an admin\'s runs as the server does');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
 });
 
 test('pushKind spots pushes and new pull requests, not the word in passing', () => {

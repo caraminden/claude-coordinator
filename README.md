@@ -95,7 +95,8 @@ Planned next: runners on other people's own Claude logins.
   nothing is sent twice, and a PR's first look sends nothing.
 - **Push notifications**: "Notify me on this device" in the overview panel subscribes that
   browser (desktop, or the installed Android app) with Web Push, and once on, a scheme can be
-  muted there. Claude only pings for decisions, blockers and results: a question card (from a
+  muted there, or the device kept to "Only my pinned minions": the minions that person pinned,
+  anyone's, in schemes they're still in, plus the Taskmaster, which can't be pinned. Claude only pings for decisions, blockers and results: a question card (from a
   minion or the Taskmaster), a failed turn, or a minion set to ready, try or blocked; never for
   plain replies, and never the person who caused it. One notification per minion, replaced by the
   next; clicking it opens the minion. `src/push.ts` signs with VAPID and encrypts payloads

@@ -51,7 +51,7 @@ export function pushControls(project) {
   const pinned = h('input', { type: 'checkbox' });
   const hint = h('span', { class: 'hint', hidden: true });
   const muteRow = h('label', { class: 'toggle', hidden: true, title: 'Stop notifications from this scheme on this device' }, mute, `Mute ${project.name} here`);
-  const pinnedRow = h('label', { class: 'toggle', hidden: true, title: 'On this device, notify only about minions you pinned, in any scheme you\'re in, including other people\'s' }, pinned, 'Only my pinned minions');
+  const pinnedRow = h('label', { class: 'toggle', hidden: true, title: 'On this device, notify only about minions you pinned (other people\'s too) and the Taskmaster' }, pinned, 'Only my pinned minions');
   const el = h('div', { class: 'push' },
     h('label', { class: 'toggle', title: 'Questions for you, failed turns, and minions that are ready or blocked' }, on, 'Notify me on this device'),
     pinnedRow, muteRow, hint);

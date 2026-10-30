@@ -185,7 +185,7 @@ test('a pinned-only device hears about the minions its person pinned, anyone\'s,
   const q = store.createProject('Q', null, cara.id);
   store.addMember(p.id, josh.id);
   store.addMember(q.id, josh.id);
-  const mk = (project_id: number, title: string, created_by: string) => store.createTicket({ project_id, title, permission_mode: 'default', created_by });
+  const mk = (project_id: number, title: string, created_by: string, kind: 'ticket' | 'coordinator' = 'ticket') => store.createTicket({ project_id, title, permission_mode: 'default', created_by, kind });
   const ownPinned = mk(p.id, 'Own, pinned', 'Josh');
   const ownUnpinned = mk(p.id, 'Own, not pinned', 'Josh');
   const carasPinned = mk(p.id, 'Cara\'s, pinned by Josh', 'Cara');
@@ -213,6 +213,8 @@ test('a pinned-only device hears about the minions its person pinned, anyone\'s,
   assert.deepEqual(await who(carasPinned), ['cara-all', 'josh-pinned']);
   // A pin left behind in a scheme Josh is no longer in sends nothing.
   assert.deepEqual(await who(leftScheme), ['cara-all']);
+  // The Taskmaster can't be pinned, so it always reaches a pinned-only device.
+  assert.deepEqual(await who(mk(p.id, 'Taskmaster', 'Cara', 'coordinator')), ['cara-all', 'josh-pinned']);
 
   // Unpinning stops it; a browser someone else signs in on starts back at every minion.
   store.setTicketPinned('Josh', ownPinned.id, false);

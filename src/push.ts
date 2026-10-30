@@ -178,15 +178,15 @@ export class Pusher {
 
   /**
    * Tell everyone in the ticket's project who subscribed, except `except` (the person who caused it),
-   * devices that muted the project, and pinned-only devices whose person hasn't pinned this minion.
-   * Resolves once every push service has answered.
+   * devices that muted the project, and pinned-only devices whose person hasn't pinned this minion
+   * (the Taskmaster can't be pinned, so it always gets through). Resolves once every push service has answered.
    */
   async notify(ticket: Ticket, trigger: PushTrigger, except: string | null = null): Promise<void> {
     const project = this.store.getProject(ticket.project_id);
     const msg = notificationFor(ticket, trigger, project?.name);
     if (!msg) return;
     const subs = this.store.listPushSubscriptions().filter((s) => s.name !== except && !JSON.parse(s.muted).includes(ticket.project_id)
-      && (!s.only_pinned || this.store.isTicketPinned(s.name, ticket.id)) && this.inScheme(s.name, ticket.project_id));
+      && this.inScheme(s.name, ticket.project_id) && (!s.only_pinned || ticket.kind !== 'ticket' || this.store.isTicketPinned(s.name, ticket.id)));
     await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
   }
 

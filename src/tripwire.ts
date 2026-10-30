@@ -2,9 +2,11 @@
 // Taskmasters and minions in every scheme. It stops the known accidents (writes to the live database,
 // the live checkout, the service's config and units, other schemes' folders; restarting or stopping
 // the app's services; reading SSH keys, the Claude or GitHub login, the service's env file or any
-// process's environment; running server.ts against the live data) and the git habits every scheme
-// shares (no path checkout, restore or stash; no checkout, merge or reset over uncommitted changes; no
-// push to main or plain force push from a minion's worktree), and says why and what to do instead.
+// process's environment, or printing the turn's own; state.db opened writable and the credentials
+// table; other people's homes and Claude runners; signing Claude in; running server.ts against the
+// live data) and the git habits every scheme shares (no path checkout, restore or stash; no checkout,
+// merge or reset over uncommitted changes; no push to main or plain force push from a minion's
+// worktree), and says why and what to do instead.
 //
 // Two tiers. Real dangers are hard blocks. Things a person may reasonably want once (deleting or
 // changing files in the data dir other than the live database, installing or enabling a user unit)
@@ -74,7 +76,7 @@ function writeReason(p: string, cfg: TripwireConfig): string | null {
   for (const units of [join(configDir, 'systemd/user'), join(configDir, 'containers/systemd')]) {
     if (under(p, units)) return `${units} holds the box's service units. Put unit files in the repo (deploy/) and ask Cara to install them.`;
   }
-  return null;
+  return runnerReason(p, cfg);
 }
 
 /** Why reading this absolute path is blocked, or null. */
@@ -84,12 +86,24 @@ function readReason(p: string, cfg: TripwireConfig): string | null {
   if (under(p, join(cfg.home, '.config/claude-coordinator'))) return `${join(cfg.home, '.config/claude-coordinator')} holds the live service's password and session secret, which let anyone act as a person. To try the API, log in to a dev copy or a preview with its own password; ask Cara to change the env file.`;
   if (ENVIRON.test(p)) return ENVIRON_WHY;
   if (p === join(cfg.home, '.config/gh/hosts.yml')) return GH_TOKEN_WHY;
+  return runnerReason(p, cfg);
+}
+
+/** Why a read or write of this path is blocked as another person's (their home, their runner's sign-in), or null. */
+function runnerReason(p: string, cfg: TripwireConfig): string | null {
+  const homes = dirname(cfg.home);
+  if (homes !== '/' && under(p, homes) && p !== homes && !under(p, cfg.home)) return `${p} is in another person's home folder, where their Claude runner and sign-in live. Leave it to them.`;
+  if (p.split('/').includes('citadel-claude') || RUNNER_SOCKET.test(basename(p))) return `${p} belongs to a Claude runner: its sign-in or its socket. Turns never touch a runner directly; Citadel talks to it.`;
   return null;
 }
+const RUNNER_SOCKET = /^(citadel|claude)-runner.*\.sock$/;
+// A runner's endpoints in Citadel's API (pairing, connecting): only the runner itself calls them.
+const RUNNER_API = /\/api\/(claude-)?runners?\b/;
+const NETWORK = new Set(['curl', 'wget', 'http', 'https', 'xh', 'websocat', 'socat', 'nc', 'ncat']);
 
 // A process's environment holds whatever secrets it started with (the service's password and session secret).
 const ENVIRON = /^\/proc\/[^/]+(\/task\/[^/]+)?\/environ$/;
-const ENVIRON_WHY = "A process's environment can hold the live service's password and session secret. Use `env` for your own; to find your dev server, take the pid from `ss -ltnp 'sport = :<your port>'` (or `$!` when you start it) and check `readlink /proc/<pid>/cwd`.";
+const ENVIRON_WHY = "A process's environment can hold the live service's password and session secret. To find your dev server, take the pid from `ss -ltnp 'sport = :<your port>'` (or `$!` when you start it) and check `readlink /proc/<pid>/cwd`.";
 const GH_TOKEN_WHY = "That is Cara's GitHub login; gh and git use it on their own.";
 // The same read with the pid in a variable, where the lexer leaves an unknown `/proc//environ`, or in
 // `$(…)`, where it splits the path into `/proc/`, the ( … ) and the rest (see commandReason).
@@ -98,7 +112,9 @@ const ENVIRON_REST = /^(\/task\/[^/]*)?\/environ$/;
 
 /** For a recursive search: a secret readReason guards that lies inside this folder, or null. */
 function secretInside(root: string, cfg: TripwireConfig): string | null {
-  const secrets = [join(cfg.home, '.ssh'), join(cfg.claudeConfig, '.credentials.json'), join(cfg.home, '.claude/.credentials.json'), join(cfg.home, '.config/claude-coordinator'), join(cfg.home, '.config/gh/hosts.yml')];
+  const secrets = [join(cfg.home, '.ssh'), join(cfg.claudeConfig, '.credentials.json'), join(cfg.home, '.claude/.credentials.json'), join(cfg.home, '.config/claude-coordinator'), join(cfg.home, '.config/gh/hosts.yml'), join(cfg.home, '.config/citadel-claude')];
+  const homes = dirname(cfg.home);
+  if (homes !== '/' && under(homes, root)) return `other people's home folders in ${homes}`;
   return secrets.find((x) => x !== root && under(x, root)) ?? null;
 }
 const SEARCHERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag']);
@@ -415,17 +431,42 @@ function writeTargets(name: string, args: Word[]): Word[] {
       return a.includes('-delete') || a.some((t, i) => /^-(exec|execdir|ok|okdir)$/.test(t) && REMOVERS.has(basename(a[i + 1] ?? ''))) ? args : [];
     case 'sqlite3': {
       if (a.some((t) => t === '-readonly' || t === '--readonly' || t.includes('mode=ro'))) return [];
-      const rest: Word[] = [];
-      for (let i = 0; i < args.length; i++) {
-        if (/^--?(cmd|separator|newline|nullvalue|init|vfs|maxsize|mmap|lookaside|pagecache|heap)$/.test(a[i])) i++;
-        else if (!a[i].startsWith('-')) rest.push(args[i]);
-      }
-      const [db, ...sql] = rest;
+      const [db, ...sql] = sqliteOperands(args);
       // Plain queries are reads; SQL that writes, or SQL fed on stdin where we can't see it, is a write.
       return db && (sql.length === 0 || sql.some((w) => SQL_WRITE.test(w.text))) ? [db] : [];
     }
   }
   return [];
+}
+
+/** A sqlite3 call's database and SQL: its plain words, past the options and their values. */
+function sqliteOperands(args: Word[]): Word[] {
+  const rest: Word[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (/^--?(cmd|separator|newline|nullvalue|init|vfs|maxsize|mmap|lookaside|pagecache|heap)$/.test(args[i].text)) i++;
+    else if (!args[i].text.startsWith('-')) rest.push(args[i]);
+  }
+  return rest;
+}
+
+const ENV_WHY = "A turn's environment can hold its tokens. Check one variable with `[ -n \"$NAME\" ] && echo set`, or print a harmless one with `echo \"$PATH\"`.";
+
+/**
+ * Why a sqlite3 call on the live data is blocked, or null: state.db (every minion's session) opened
+ * writable, or SQL that reads the credentials table (people's linked accounts), a whole-file `.dump` included.
+ */
+function sqliteReason(args: Word[], st: State, cfg: TripwireConfig): string | null {
+  const a = args.map((w) => w.text);
+  const [db, ...sql] = sqliteOperands(args);
+  if (!db) return null;
+  const file = db.text.startsWith('file:') ? { ...db, text: db.text.slice(5).replace(/\?.*$/, '') } : db;
+  const p = pathsOf(file, st, cfg)[0];
+  if (!p || !under(p, cfg.data)) return null;
+  const readonly = a.some((t) => t === '-readonly' || t === '--readonly' || t.includes('mode=ro'));
+  if (/^state\b/.test(basename(p)) && !readonly) return `${basename(p)} holds every minion's Claude session. Open it with \`sqlite3 -readonly\`.`;
+  const shown = [...sql, ...args.filter((_, k) => /^--?cmd$/.test(a[k - 1] ?? ''))].map((w) => w.text);
+  if (shown.some((t) => /\bcredentials\b/i.test(t) || /^\s*\.dump\s*$/m.test(t))) return "The credentials table holds people's linked accounts; nothing here needs to read it. Name the tables you need (`.dump tickets`).";
+  return null;
 }
 
 /** Whether a sqlite3 call's SQL is all in the command, rather than on stdin or in a file it reads. */
@@ -626,6 +667,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
         if (/^-(u|C|n|I|P|d|L|s|E|k)$|^--(unset|chdir|adjustment|signal|kill-after)$/.test(opt)) i++;
       }
       takeAssignments(name === 'env');
+      if (name === 'env' && i >= words.length) return hard(`\`env\` with no command prints the whole environment. ${ENV_WHY}`);
       if (/^(timeout|nice|ionice|chrt)$/.test(name) && /^[\d.]+[smhd]?$/.test(words[i]?.text ?? '')) i++;
     } else break;
     if (i >= words.length) return null;
@@ -664,6 +706,15 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const bsdE = (w: Word, k: number) => /^[a-zA-Z]*e[a-zA-Z]*$/.test(w.text) && !/^-[a-zA-Z]*[oOpCuUgGtq]$|^--\w+$|^[a-zA-Z]*[oOpUt]$/.test(args[k - 1]?.text ?? '');
   if (name === 'ps' && args.some(bsdE)) return hard(`This \`ps\` prints processes' environments. ${ENVIRON_WHY}`);
   const sub = args.filter((w) => !w.text.startsWith('-')).map((w) => w.text);
+  if (name === 'printenv') return hard(`\`printenv\` prints the environment. ${ENV_WHY}`);
+  if (name === 'claude' && (sub[0] === 'setup-token' || sub[0] === '/login' || sub[0] === 'login' || (sub[0] === 'auth' && sub[1] === 'login'))) {
+    return hard('Signing Claude in from a turn would make or replace a login token. People sign in themselves, in their own terminal.');
+  }
+  if (NETWORK.has(name) && args.some((w) => RUNNER_API.test(w.text) || /(citadel|claude)-runner[^/\s]*\.sock/.test(w.text))) return hard("A runner's socket and its endpoints in Citadel's API are for the runner and Citadel; a turn never pairs, connects or sends as one.");
+  if (name === 'sqlite3') {
+    const why = sqliteReason(args, st, cfg);
+    if (why) return hard(why);
+  }
   if (name === 'gh' && sub[0] === 'auth' && (sub[1] === 'token' || (sub[1] === 'status' && args.some((w) => /^(-t|--show-token)$/.test(w.text))))) return hard(`\`gh auth\` would print the token. ${GH_TOKEN_WHY}`);
 
   const recursive = name === 'rg' || name === 'ag' || args.some((w) => /^-[a-zA-Z]*[rR]|^--recursive$|^--dereference-recursive$|^--directories=recurse$/.test(w.text));

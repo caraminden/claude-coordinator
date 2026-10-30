@@ -38,6 +38,28 @@ const BLOCKED: [string, string?][] = [
   ['rm ~/.local/share/claude-coordinator/x.bak; systemctl --user restart claude-coordinator'],
   ['systemctl --user enable x.timer && cat ~/.ssh/id_rsa'],
   ['rm -rf ~/.local/share'],
+  // a turn's own environment, the transcripts, the credentials table, runners, signing in (#185)
+  ['env'],
+  ['env | grep -i token'],
+  ['env -0 | tr "\\0" "\\n"'],
+  ['printenv'],
+  ['printenv GH_TOKEN'],
+  ['sqlite3 ~/.local/share/claude-coordinator/state.db "select count(*) from claude_state"'],
+  ['sqlite3 "file:/home/u/.local/share/claude-coordinator/state.db" .tables'],
+  ['cd ~/.local/share/claude-coordinator/backups && sqlite3 state-2026-10-29.db .tables'],
+  ['sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db "select user_id, secret from credentials"'],
+  ['sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db .dump > /tmp/all.sql'],
+  ['sqlite3 -readonly -cmd "select * from Credentials" ~/.local/share/claude-coordinator/coordinator.db .quit'],
+  ['cat /home/josh/.config/citadel-claude/.credentials.json'],
+  ['cat ~/.config/citadel-claude/settings.json'],
+  ['cp x.sh /home/josh/bin/'],
+  ['grep -r token /home'],
+  ['curl --unix-socket /run/user/1001/claude-runner.sock http://x/turn'],
+  ['socat - UNIX-CONNECT:/run/user/1001/citadel-runner.sock'],
+  ['curl -X POST http://127.0.0.1:8573/api/runners/pair -d code=123'],
+  ['claude setup-token'],
+  ['claude /login'],
+  ['CLAUDE_CONFIG_DIR=/tmp/c claude auth login'],
   ['rm -rf ~'],
   // the live checkout
   ['cd ~/claude-coordinator && git checkout -- .'],
@@ -221,7 +243,15 @@ const ALLOWED = [
   'cat /proc/1234/status && cat /proc/meminfo',
   'ls -la /proc/1234/',
   'ls -la ~/.config/claude-coordinator/',
-  'env | grep PORT && printenv HOME',
+  'echo "$PATH" && [ -n "$GH_TOKEN" ] && echo set',
+  'env DATA_DIR=/tmp/d PORT=8126 node --test test/',
+  'sqlite3 -readonly ~/.local/share/claude-coordinator/state.db "select count(*) from claude_state"',
+  'sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db ".dump tickets"',
+  'grep -rn credentials src test',
+  'claude --version && claude -p "say hi" --model haiku',
+  'curl -s localhost:8573/api/health',
+  'ls /home && ls -la /home/josh',
+  'rg -n runner ~/.local/share/claude-coordinator/projects/2/shared',
   'grep -n environ src/tripwire.ts',
   'gh auth status && gh pr view 3',
   'cat ~/.config/gh/config.yml',
@@ -374,6 +404,9 @@ test('file tools: writes, edits and reads', () => {
   assert.ok(t('Read', { file_path: '/proc/1234/environ' }));
   assert.ok(t('Read', { file_path: '~/.config/gh/hosts.yml' }));
   assert.equal(t('Read', { file_path: '/proc/1234/status' }), null);
+  assert.ok(t('Read', { file_path: '/home/josh/.config/citadel-claude/.credentials.json' }));
+  assert.ok(t('Write', { file_path: '/home/josh/notes.md' }));
+  assert.ok(t('Grep', { pattern: 'token', path: '/home' }));
   assert.ok(t('Grep', { pattern: 'SECRET', path: `${home}/.config` }));
   assert.ok(t('Grep', { pattern: 'x', path: home }));
   assert.ok(t('Grep', { pattern: 'x', path: '/' }));

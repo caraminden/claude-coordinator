@@ -71,10 +71,12 @@
     function add(id, host, title) {
       const note = el('input', { type: 'text', placeholder: 'Note (optional)', 'aria-label': `Note on ${title}`, maxlength: 2000 });
       let timer = null;
+      const keep = () => { clearTimeout(timer); save(id, stamp({ ...docs.get(id), note: note.value.trim() })); };
       note.addEventListener('input', () => {
         clearTimeout(timer);
-        timer = setTimeout(() => save(id, stamp({ ...docs.get(id), note: note.value.trim() })), 400);
+        timer = setTimeout(keep, 400);
       });
+      note.addEventListener('change', keep); // leaving the box (say, for Send) saves now, so the summary has it
       const buttons = opts.map((o) => {
         const b = el('button', { type: 'button', 'data-v': o.v, 'aria-pressed': 'false' }, o.label);
         b.addEventListener('click', () => choose(id, o.v));

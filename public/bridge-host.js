@@ -65,7 +65,7 @@ async function onMessage(e) {
       if (!frame.onSend) throw new Error('This view has no comment box to put that in');
       // Only on a person's click or key: a page can't fill the box while someone types in it.
       if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
-      frame.onSend(req.text);
+      await frame.onSend(req.text); // may leave full screen first; a failure reaches the page
       return reply({ ok: true, result: { shown: true } });
     }
     if (req.op === 'write' && !takeWrite(frame)) throw new Error('Too many writes; slow down');

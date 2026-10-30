@@ -41,13 +41,56 @@ export async function cloneProject(dataDir: string, projectId: number, repoUrl: 
   return dir;
 }
 
+/**
+ * Bring the scheme checkout's main up to origin's (#208): PRs merged on GitHub leave it behind, and
+ * the base check, self-review and the catalogue read it. Only a fast-forward, only when origin is
+ * strictly ahead (a scheme whose base is local main, moved by land.sh, is left alone), and only on
+ * main with nothing uncommitted. Returns why it didn't, or null when it moved or had nothing to do.
+ */
+export async function catchUpMain(repoDir: string): Promise<string | null> {
+  const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
+  const origin = await git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repoDir).catch(() => null);
+  const local = origin?.replace(/^origin\//, '');
+  if (!origin || !local || !await ok(['rev-parse', '--verify', '--quiet', `refs/heads/${local}`])) return null;
+  if (await ok(['merge-base', '--is-ancestor', origin, local])) return null; // level, or local is ahead
+  if (!await ok(['merge-base', '--is-ancestor', local, origin])) return `${local} and ${origin} have diverged`;
+  const on = await git(['symbolic-ref', '--quiet', '--short', 'HEAD'], repoDir).catch(() => null);
+  if (on !== local) return `the checkout is on ${on ?? 'a detached HEAD'}, not ${local}`;
+  // Untracked files don't block it: the merge itself refuses to overwrite one.
+  if (await git(['status', '--porcelain', '--untracked-files=no'], repoDir)) return 'the checkout has uncommitted changes';
+  try {
+    await git(['merge', '--ff-only', '--quiet', origin], repoDir);
+  } catch (err: any) {
+    return `the fast-forward failed: ${String(err.stderr || err.message).trim().split('\n')[0]}`;
+  }
+  return null;
+}
+
+/** Told after each catch-up of a scheme's main why it couldn't, or null when it's level (server.ts surfaces it). */
+export const mainSync = {
+  stuck: (repoDir: string, why: string | null) => { if (why) console.warn(`Not fast-forwarding main in ${repoDir}: ${why}`); },
+};
+
+// One catch-up per repo at a time: two at once would trip over git's index lock.
+const syncing = new Map<string, Promise<void>>();
+
+/** Fetch origin, best effort, then catch the checkout's main up to it. */
+export function syncMain(repoDir: string): Promise<void> {
+  const next = (syncing.get(repoDir) ?? Promise.resolve()).then(async () => {
+    try {
+      await git(['fetch', '--quiet', 'origin'], repoDir);
+    } catch {
+      // Unreachable remote: work from what we already have.
+    }
+    mainSync.stuck(repoDir, await catchUpMain(repoDir).catch((err) => `the catch-up failed: ${err.message}`));
+  });
+  syncing.set(repoDir, next.catch(() => {}));
+  return next;
+}
+
 /** What a new minion branches from: local main, or origin's if a push put it ahead. Fetches first. */
 export async function ticketBase(repoDir: string): Promise<string> {
-  try {
-    await git(['fetch', '--quiet', 'origin'], repoDir);
-  } catch {
-    // Best effort: branch from what we already have if the remote is unreachable.
-  }
+  await syncMain(repoDir);
   const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
   let base = 'HEAD';
   try {

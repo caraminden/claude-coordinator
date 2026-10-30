@@ -213,3 +213,23 @@ test('the watcher sends new events into the ticket once, remembering them across
   store.deleteTicket(ticket.id);
   assert.deepEqual(store.githubSeen(ticket.id, ''), []);
 });
+
+test("a PR seen merged catches its scheme's main up once, even at the first look; open or closed ones don't", async () => {
+  const store = new Store(join(root, 'merged.db'));
+  const project = store.createProject('P', null);
+  const ticket = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(ticket.id, root, 'ticket/1-t');
+  const t = store.getTicket(ticket.id)!;
+  let snapshot = pr();
+  const w = new GithubWatcher(store, () => {}, async () => ({ pr: snapshot, self: 'cara' }));
+  const synced: string[] = [];
+  w.onMerged = (repoDir) => synced.push(repoDir);
+  await w.poll(t, root, 'o/r');
+  snapshot = pr({ state: 'CLOSED', closedAt: T });
+  await w.poll(t, root, 'o/r');
+  assert.deepEqual(synced, []);
+  snapshot = pr({ number: 13, state: 'MERGED', closedAt: T, closedBy: 'josh' });
+  await w.poll(t, root, 'o/r');
+  await w.poll(t, root, 'o/r');
+  assert.deepEqual(synced, [root]);
+});

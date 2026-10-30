@@ -287,6 +287,8 @@ export class GithubWatcher {
   private pausedUntil = 0;
   private busy = false;
   private timer: NodeJS.Timeout | null = null;
+  /** A ticket's PR was seen merged (or already merged at first look): its scheme's main can catch up (#208). */
+  onMerged: (repoDir: string) => void = () => {};
 
   constructor(store: Store, send: (ticketId: number, text: string) => void, fetch = fetchSnapshot) {
     this.store = store;
@@ -383,6 +385,7 @@ export class GithubWatcher {
     // Recorded before sending, so a crash in between drops a message rather than repeating it forever.
     if (handled.length) this.store.addGithubSeen(ticket.id, handled.map((k) => prefix + k), messages.length > 0);
     if (messages.length) this.send(ticket.id, messages.join('\n\n'));
+    if (pr.state === 'MERGED' && handled.some((k) => k.startsWith('state:'))) this.onMerged(repoDir);
 
     const open = pr.state === 'OPEN';
     const last = JSON.stringify([pr.state, pr.headSha, pr.checks.map((c) => c.status), pr.remarks.length]);

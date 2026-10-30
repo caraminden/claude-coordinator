@@ -128,12 +128,12 @@ hook once your merge brings `.githooks/` there. Then prove it:
 
 ```bash
 tools/guard.sh --install && git config --get core.hooksPath            # .githooks
-echo '{"tool_name":"Bash","command":"git push origin main","cwd":"'"$PWD"'"}' | tools/guard.sh --hook bash; echo $?   # 2
-echo '{"tool_name":"Bash","command":"git push origin HEAD:refs/heads/topic","cwd":"'"$PWD"'"}' | tools/guard.sh --hook bash; echo $?   # 0
+tools/guard.sh --self-test                                              # ... 0 failed
 echo 'refs/heads/x 0 refs/heads/main 0' | .githooks/pre-push; echo $?   # 1
 ```
 
-*Done when* the four lines print `.githooks`, `2`, `0` and `1`.
+*Done when* the three lines print `.githooks`, `0 failed` and `1`. If you added a protected
+branch name, add a self-test line pushing to it first, in `self_test` in `guard.sh`.
 
 ### 5. Adapt each skill the plan pulls in
 

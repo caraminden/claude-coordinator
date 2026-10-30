@@ -151,11 +151,13 @@ const PR_URL = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?:[/?#].
 
 /**
  * The one `gh pr merge` a Bash command runs, anywhere in a pipe or a chain, or null: no merge, more
- * than one (counting any inside $( ), quotes or `xargs gh …`), or a PR or repo that depends on the
- * shell (a variable or a substitution). Null keeps the plain card, so a wrong guess never reaches it.
+ * than one (counting any inside $( ), quotes or `xargs gh …`), a PR or repo that depends on the
+ * shell (a variable or a substitution), or GH_REPO or GH_HOST named anywhere in it. Null keeps the plain card, so a wrong guess never reaches it.
  */
 export function parseMerge(command: string): MergeCall | null {
   if (command.match(/\bgh\s+pr\s+merge\b/g)?.length !== 1) return null;
+  // GH_REPO or GH_HOST set in the command points gh somewhere the lookup wouldn't follow.
+  if (/\bGH_(REPO|HOST)\b/.test(command)) return null;
   const tokens = tokenize(command);
   if (!tokens) return null;
   const commands: { word: string }[][] = [[]];

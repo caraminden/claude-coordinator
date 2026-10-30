@@ -47,6 +47,9 @@ test('parseMerge falls back to the plain card for anything else', () => {
     'gh pr merge 4 5',
     'gh pr merge "4',
     'gh pr merge 4 --repo',
+    'GH_REPO=o/other gh pr merge 5 --squash',
+    'export GH_REPO=o/other; gh pr merge 5 -s',
+    'env GH_HOST=ghe.example.com gh pr merge 5 -s',
   ]) assert.equal(parseMerge(cmd), null, cmd);
 });
 

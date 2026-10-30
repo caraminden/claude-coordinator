@@ -20,6 +20,12 @@ Planned next: runners on other people's own Claude logins.
   output to a file in `$DATA_DIR/run/turns/` that the server tails. A restart
   leaves running turns alone: the next server re-attaches and catches up, and the
   turns' MCP calls wait for it (up to 2 min).
+- People sign in with their own login and password. An admin invites them from
+  Settings → People with a one-time link (7 days) that sets their password; the
+  same button makes a reset link later. Each person sees only the schemes they own
+  or were added to (Settings → Members); admins see every scheme. Only people an
+  admin switches **Turns** on for start turns on the server's Claude login; anyone
+  else's messages are kept with a note until per-person Claude accounts arrive.
 - Every stream event is stored in SQLite and pushed to browsers over
   server-sent events.
 - Messages sent while a turn is running are queued and sent together as the
@@ -120,7 +126,8 @@ uses the built-in `node:sqlite`.
 | `src/workspace.ts` | Clones scheme repos, creates per-ticket worktrees |
 | `src/instructions.ts` | Finds Claude Code instruction and memory files to import as scheme instructions |
 | `src/db.ts` | SQLite schema and queries |
-| `src/auth.ts` | Shared-password login, signed session cookies |
+| `src/auth.ts` | Per-person sign-in (and the admin's shared password), invite links, signed session cookies |
+| `src/access.ts`, `src/routes/people.ts`, `public/people.js` | Who sees what: news filtered by scheme membership, the turn gate, People and Members |
 | `public/` | Front end (vanilla JS, no build) |
 | `kit/` | The Citadel kit: a Claude Code plugin (skills, agents, hooks) every turn of every scheme loads |
 | `public/progress.js` | Task-list and step tracking, shared with the server |
@@ -135,7 +142,8 @@ Configuration comes from the environment:
 
 | Variable | Default | |
 | --- | --- | --- |
-| `COORDINATOR_PASSWORD` | (required, 12+ chars) | Shared sign-in password |
+| `COORDINATOR_PASSWORD` | (required, 12+ chars) | The admin's master password: it signs in as the admin whose login is typed (or the first admin for any other login). Never hand it out; invite people instead |
+| `COORDINATOR_ADMIN` | `Cara` | Name of the admin made on first start, when the database has no people yet; their login is the name in lower case |
 | `SESSION_SECRET` | (required, 32+ chars) | Signs session cookies |
 | `HOST` / `PORT` | `127.0.0.1` / `8573` | Listen address |
 | `DATA_DIR` | `~/.local/share/claude-coordinator` | Database, clones, worktrees |

@@ -984,7 +984,7 @@ a.thread-ref:hover { text-decoration: underline; }
 .machine-item .name, .machine-row .name { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .machine-item .meta, .machine-row .meta { color: var(--muted); font-size: 0.78em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .machine-add { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin: 0.9rem 0; }
-.machine-add label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85em; }
+.machine-add label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85em; margin-bottom: 0; }
 .machine-add label.wide { flex: 1 1 18rem; }
 .machine-setup { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 1rem; }
 .machine-setup pre { margin: 0.4rem 0 0; padding: 0.5rem 0.6rem; background: var(--code-bg); border-radius: 6px; overflow-x: auto; font-size: 0.82em; white-space: pre-wrap; word-break: break-all; user-select: all; }
@@ -1187,6 +1187,9 @@ dialog.viewer .composer .picker { display: none; }
 .person-row .meta { color: var(--muted); font-size: 0.8em; }
 .person-row .turns-toggle { display: inline-flex; gap: 0.3rem; align-items: center; margin: 0; }
 .person-row .turns-toggle input { width: auto; margin: 0; }
+.person-row button { padding: 0.2rem 0.6rem; font-size: 0.82em; }
+.person-row .person-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
 .people-add { margin-top: 0.5rem; }
+.people-add[hidden] { display: none; }
 .people-add select { width: auto; flex: 1; max-width: 20rem; }
 .account-form { display: flex; flex-direction: column; gap: 0.5rem; max-width: 24rem; margin-top: 1rem; }

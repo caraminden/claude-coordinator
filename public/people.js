@@ -75,7 +75,9 @@ export function peoplePage() {
   const list = h('div', { class: 'people-list' });
   const show = (who, token, what) => link.replaceChildren(linkBox(who, token, what));
   const render = (people) => list.replaceChildren(...people.map((u) => {
-    const state = u.disabled ? 'disabled' : !u.has_password ? (u.invite_open ? 'invited' : 'invite expired') : u.invite_open ? 'reset link open' : '';
+    // An admin with no password of their own signs in with the shared one (COORDINATOR_PASSWORD).
+    const state = u.disabled ? 'disabled' : u.invite_open ? (u.has_password ? 'reset link open' : 'invited')
+      : u.has_password ? '' : u.admin ? 'shared password only' : 'invite expired';
     const patch = async (body) => render(await api(`api/people/${u.id}`, { method: 'PATCH', body }).then(() => api('api/people')).catch(fail) ?? people);
     const turns = h('input', { type: 'checkbox', checked: u.server_login, onchange: (e) => patch({ server_login: e.target.checked }) });
     const self = u.id === account?.id;
@@ -83,6 +85,7 @@ export function peoplePage() {
       h('span', { class: 'text' },
         h('span', { class: 'name' }, u.name, u.admin ? ' · admin' : ''),
         h('span', { class: 'meta' }, [u.login, state].filter(Boolean).join(' · '))),
+      h('span', { class: 'person-actions' },
       h('label', { class: 'small turns-toggle', title: 'Their messages start and steer turns on the server\'s Claude login. Off: their messages wait in the chat.' }, turns, 'Turns'),
       h('button', {
         type: 'button', class: 'secondary small',
@@ -90,7 +93,7 @@ export function peoplePage() {
           const r = await api(`api/people/${u.id}/invite`, { method: 'POST' }).catch(fail);
           if (r) { show(u, r.token, u.has_password ? 'Password reset' : 'Invite'); render(await api('api/people')); }
         },
-      }, u.has_password ? 'Reset link' : 'New invite'),
+      }, u.has_password ? 'Reset link' : u.admin ? 'Set-password link' : 'New invite'),
       !self && h('button', { type: 'button', class: 'secondary small', onclick: () => patch({ disabled: !u.disabled }) }, u.disabled ? 'Enable' : 'Disable'),
       !self && h('button', {
         type: 'button', class: 'secondary small',
@@ -99,7 +102,7 @@ export function peoplePage() {
           await api(`api/people/${u.id}`, { method: 'DELETE' }).catch(fail);
           render(await api('api/people'));
         },
-      }, 'Remove'));
+      }, 'Remove')));
   }));
   const form = h('form', { class: 'machine-add' },
     h('label', {}, 'Name', name), h('label', {}, 'Login', login),

@@ -18,6 +18,7 @@ paths come from each repo's CLAUDE.md "Project facts".
 | Path | From | Local change |
 |------|------|--------------|
 | `.claude/rules/ponytail.md` (Citadel's repo; a plugin can't carry rules) | ponytail `AGENTS.md` | Path-scoped to code files; "In this repo" section added |
+| `scheme-setup/templates/ponytail.md` (copied into each new scheme's `.claude/rules/`) | ponytail `AGENTS.md`, via the row above | "In this repo" left for each scheme to write |
 | `ponytail-review/` | ponytail `skills/ponytail-review` | none |
 | `ponytail-audit/` | ponytail `skills/ponytail-audit` | none |
 | `ponytail-debt/` | ponytail `skills/ponytail-debt` | none |

@@ -9,7 +9,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/tools/guard.sh --hook bash", "timeout": 30 }
         ]

@@ -1175,6 +1175,8 @@ export class Runner {
       const file = join(live!.dir, 'steer.jsonl');
       appendFileSync(file, line);
       this.saveTurn(ticketId, { steered: [...(turn!.steered ?? []), { end: statSync(file).size, msg }] });
+      // A person steering in speaks after the relay, so what the turn starts now is theirs.
+      if (person && !extra.from) this.turnFrom.delete(ticketId);
       return;
     }
     const q = this.queues.get(ticketId) ?? [];

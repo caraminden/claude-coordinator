@@ -16,9 +16,9 @@ export interface InboxItem {
  * Approval cards hold up a running turn, so they come first; the rest newest first. For `person`, only
  * minions assigned to them or to no one (#197); the Taskmaster is no one's.
  */
-export function inboxItems(store: Store, approvals: Approvals, projectId: number, person?: string): InboxItem[] {
+export function inboxItems(store: Store, approvals: Approvals, projectId: number, person: string): InboxItem[] {
   const assignee = (id: number) => String(store.props.forTarget('minion', id).assigned ?? '').toLowerCase();
-  const tickets = store.listTickets(projectId).filter((t) => t.status !== 'closed' && (person === undefined || ['', person.toLowerCase()].includes(assignee(t.id))));
+  const tickets = store.listTickets(projectId).filter((t) => t.status !== 'closed' && ['', person.toLowerCase()].includes(assignee(t.id)));
   const ids = new Set(tickets.map((t) => t.id));
   const items: InboxItem[] = [
     ...approvals.pending().filter((a) => ids.has(a.ticketId)).map(({ ticketId, at, card }) => ({ kind: 'approval', ticketId, at, card })),

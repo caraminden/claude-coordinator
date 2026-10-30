@@ -38,7 +38,7 @@ test('a scheme\'s inbox: open cards, ready/try minions and ones offering replies
 
   approvals.request(elsewhere, 'Bash', { command: 'id' });
 
-  const items = inboxItems(store, approvals, p1);
+  const items = inboxItems(store, approvals, p1, 'Cara');
   assert.deepEqual([items[0].kind, items[0].ticketId, (items[0].card as any).id], ['approval', a, approvalId]);
   assert.deepEqual(items.slice(1).map((i) => [i.kind, i.ticketId, (i.card as any)?.id ?? null]).sort(),
     [['plan', b, 'p-open'], ['question', a, 'q-open'], ['replies', offering, null], ['state', ready, null]], 'a ready minion with replies is listed once');
@@ -120,9 +120,8 @@ test('each person\'s inbox holds only their own minions and unassigned ones, car
   store.addEvent(tm, 'question', { id: 'q-tm', questions: [] });
   approvals.request(josh, 'Bash', { command: 'ls' });
 
-  const ids = (person?: string) => [...new Set(inboxItems(store, approvals, p, person).map((i) => i.ticketId))].sort();
+  const ids = (person: string) => [...new Set(inboxItems(store, approvals, p, person).map((i) => i.ticketId))].sort();
   assert.deepEqual(ids('cara'), [cara, nobody, tm].sort(), 'names match in any case');
   assert.deepEqual(ids('Josh'), [josh, nobody, tm].sort());
-  assert.deepEqual(ids(), [cara, josh, nobody, tm].sort(), 'no person: everyone\'s');
   assert.equal(inboxCount(store, approvals, p, 'Josh', {}), 5, 'their ready minion, its question and approval, the unassigned one and the Taskmaster\'s question');
 });

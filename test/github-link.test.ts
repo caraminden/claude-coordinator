@@ -263,6 +263,8 @@ test('a message from someone else waits for its own turn instead of steering; a 
   assert.equal(store.getTicket(t.id)!.person_id, josh.id);
   assert.equal(env(t.dir).token, 'gho_new');
   assert.equal(r.relayedBy(t.id), tm.id, 'a new minion it starts this turn is the relayer\'s (#197)');
+  r.send(t.id, 'Josh', 'start one for me', [], {}, true);
+  await until(() => r.relayedBy(t.id) === null);
   await finish(r, t);
 });
 

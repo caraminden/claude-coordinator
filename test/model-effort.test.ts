@@ -75,6 +75,8 @@ test('a new minion takes a model and effort; the scheme default shows when it ha
   assert.equal(plain.data.effort, null);
   assert.equal(plain.data.default_effort, 'high');
   assert.equal(plain.data.properties.assigned, 'Cara', 'a new minion is its starter\'s (#197)');
+  const nobodys = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Nobody', message: 'hi', properties: { assigned: null } } });
+  assert.equal(nobodys.data.properties.assigned, undefined, 'unless it says otherwise');
 
   const changed = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { default_effort: 'medium' } });
   assert.equal(changed.data.default_effort, 'medium');

@@ -123,7 +123,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   const t = await call('Cara', `/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'build it', title: 'Build it' } });
   await until('the first turn to end', async () => (await call('Cara', `/api/tickets/${t.id}`)).ticket.status === 'idle');
 
-  assert.deepEqual(await subscribe('Cara', 'cara'), { subscribed: true, muted: [] });
+  assert.deepEqual(await subscribe('Cara', 'cara'), { subscribed: true, muted: [], onlyPinned: false });
   await subscribe('Josh', 'josh');
   await subscribe('Josh', 'josh-gone');
   const url = `/#/p/${project.id}/t/${t.number}`;
@@ -135,7 +135,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   assert.deepEqual(got.cara, { title: '#1 Build it', body: 'Tabs or list?', tag: `thread-${t.id}`, url });
   assert.deepEqual(got.josh, got.cara);
   // The push service said Josh's old browser is gone, so it is forgotten.
-  assert.deepEqual(await call('Josh', '/api/push/subscription', { method: 'POST', body: { endpoint: browsers['josh-gone'].endpoint } }), { subscribed: false, muted: [] });
+  assert.deepEqual(await call('Josh', '/api/push/subscription', { method: 'POST', body: { endpoint: browsers['josh-gone'].endpoint } }), { subscribed: false, muted: [], onlyPinned: false });
 
   // The thread says it's ready: everyone. Josh marks it blocked by hand: only Cara.
   n = received.length;
@@ -162,7 +162,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
 
   // Josh mutes the project on his browser; the coordinator's question then reaches only Cara.
   assert.deepEqual(await call('Josh', '/api/push/subscription', { method: 'PATCH', body: { endpoint: browsers.josh.endpoint, projectId: project.id, muted: true } }),
-    { subscribed: true, muted: [project.id] });
+    { subscribed: true, muted: [project.id], onlyPinned: false });
   n = received.length;
   await call(`agent:${coordinator.id}`, `/api/tickets/${coordinator.id}/questions`, { method: 'POST', body: { questions: [{ question: 'Which first?', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } });
   got = await pushes(n, 1);
@@ -174,7 +174,12 @@ test('only people subscribe, and only https push services', async () => {
   await assert.rejects(call('Cara', '/api/push/subscription', { method: 'PUT', body: { subscription: { endpoint: 'http://127.0.0.1/x', keys: {} } } }), /400/);
   const { publicKey } = await call('Cara', '/api/push/key');
   assert.equal(Buffer.from(publicKey, 'base64url').length, 65);
+  // Pinned-only is per device, and only its own person may set it.
+  const pinned = await call('Cara', '/api/push/subscription', { method: 'PATCH', body: { endpoint: browsers.cara.endpoint, onlyPinned: true } });
+  assert.equal(pinned.onlyPinned, true);
+  assert.deepEqual(await call('Josh', '/api/push/subscription', { method: 'PATCH', body: { endpoint: browsers.cara.endpoint, onlyPinned: false } }), { subscribed: false, muted: [], onlyPinned: false });
+  assert.equal((await call('Cara', '/api/push/subscription', { method: 'POST', body: { endpoint: browsers.cara.endpoint } })).onlyPinned, true);
   // Turning it off forgets the browser.
   await call('Cara', '/api/push/subscription', { method: 'DELETE', body: { endpoint: browsers.cara.endpoint } });
-  assert.deepEqual(await call('Cara', '/api/push/subscription', { method: 'POST', body: { endpoint: browsers.cara.endpoint } }), { subscribed: false, muted: [] });
+  assert.deepEqual(await call('Cara', '/api/push/subscription', { method: 'POST', body: { endpoint: browsers.cara.endpoint } }), { subscribed: false, muted: [], onlyPinned: false });
 });

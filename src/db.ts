@@ -191,6 +191,8 @@ export interface PushSubscriptionRow {
   auth: string;
   /** JSON list of project ids this device doesn't want notifications from. */
   muted: string;
+  /** 1: only minions this device's person pinned (#198); 0: every minion that needs them. */
+  only_pinned: number;
   created_at: number;
 }
 
@@ -400,7 +402,8 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   p256dh TEXT NOT NULL,
   auth TEXT NOT NULL,
   muted TEXT NOT NULL DEFAULT '[]',
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  only_pinned INTEGER NOT NULL DEFAULT 0
 );
 -- Each person's own saved views (#194), keyed by name like ticket_pins. saved_views, the shared ones
 -- before it, moves in at start: see Store.moveSharedViews.
@@ -507,6 +510,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
   ['machines', 'workspace_tools', 'ALTER TABLE machines ADD COLUMN workspace_tools INTEGER NOT NULL DEFAULT 0'],
+  ['push_subscriptions', 'only_pinned', 'ALTER TABLE push_subscriptions ADD COLUMN only_pinned INTEGER NOT NULL DEFAULT 0'],
 ];
 
 /**
@@ -514,7 +518,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 15; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views
+export const SCHEMA_VERSION = 16; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -1113,6 +1117,13 @@ export class Store {
     return rows.map((r) => r.ticket_id);
   }
 
+  /** Whether `name` pinned this minion, by the same rule as pinnedTickets. */
+  isTicketPinned(name: string, ticketId: number): boolean {
+    return !!this.db
+      .prepare('SELECT 1 FROM ticket_pins p JOIN tickets t ON t.id = p.ticket_id WHERE p.name = ? AND p.ticket_id = ? AND p.pinned_at >= t.created_at')
+      .get(name, ticketId);
+  }
+
   setTicketPinned(name: string, ticketId: number, pinned: boolean) {
     if (pinned) this.db.prepare('INSERT INTO ticket_pins (name, ticket_id, pinned_at) VALUES (?, ?, ?) ON CONFLICT(name, ticket_id) DO NOTHING').run(name, ticketId, Date.now());
     else this.db.prepare('DELETE FROM ticket_pins WHERE name = ? AND ticket_id = ?').run(name, ticketId);
@@ -1505,7 +1516,8 @@ export class Store {
       .prepare(
         `INSERT INTO push_subscriptions (name, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth,
-           muted = CASE WHEN name = excluded.name THEN muted ELSE '[]' END, name = excluded.name`,
+           muted = CASE WHEN name = excluded.name THEN muted ELSE '[]' END,
+           only_pinned = CASE WHEN name = excluded.name THEN only_pinned ELSE 0 END, name = excluded.name`,
       )
       .run(name, endpoint, p256dh, auth, Date.now());
     return this.getPushSubscription(endpoint)!;
@@ -1513,6 +1525,10 @@ export class Store {
 
   setPushMuted(endpoint: string, muted: number[]) {
     this.db.prepare('UPDATE push_subscriptions SET muted = ? WHERE endpoint = ?').run(JSON.stringify(muted), endpoint);
+  }
+
+  setPushOnlyPinned(endpoint: string, onlyPinned: boolean) {
+    this.db.prepare('UPDATE push_subscriptions SET only_pinned = ? WHERE endpoint = ?').run(onlyPinned ? 1 : 0, endpoint);
   }
 
   deletePushSubscription(endpoint: string) {

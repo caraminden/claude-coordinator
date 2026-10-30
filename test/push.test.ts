@@ -176,3 +176,47 @@ test('notify skips whoever caused it, muted devices and people outside the schem
   assert.equal(store.getPushSubscription(browsers.cody.endpoint)!.name, 'Josh');
   assert.equal(store.getPushSubscription(browsers.cody.endpoint)!.muted, '[]');
 });
+
+test('a pinned-only device hears about the minions its person pinned, anyone\'s, while they can still see the scheme', async () => {
+  const store = new Store(join(root, 'pinned.db'));
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const p = store.createProject('P', null, cara.id);
+  const q = store.createProject('Q', null, cara.id);
+  store.addMember(p.id, josh.id);
+  store.addMember(q.id, josh.id);
+  const mk = (project_id: number, title: string, created_by: string) => store.createTicket({ project_id, title, permission_mode: 'default', created_by });
+  const ownPinned = mk(p.id, 'Own, pinned', 'Josh');
+  const ownUnpinned = mk(p.id, 'Own, not pinned', 'Josh');
+  const carasPinned = mk(p.id, 'Cara\'s, pinned by Josh', 'Cara');
+  const leftScheme = mk(q.id, 'In a scheme Josh left', 'Cara');
+  for (const t of [ownPinned, carasPinned, leftScheme]) store.setTicketPinned('Josh', t.id, true);
+  store.removeMember(q.id, josh.id);
+
+  const all = browser('https://push.example/cara-all');
+  const pinned = browser('https://push.example/josh-pinned');
+  store.savePushSubscription('Cara', all.endpoint, all.p256dh, all.auth);
+  store.savePushSubscription('Josh', pinned.endpoint, pinned.p256dh, pinned.auth);
+  store.setPushOnlyPinned(pinned.endpoint, true);
+
+  const sent: string[] = [];
+  const fakeFetch = (async (url: string) => (sent.push(url), new Response('', { status: 201 }))) as unknown as typeof fetch;
+  const pusher = new Pusher(store, loadVapidKeys(root), fakeFetch);
+  const who = async (t: Ticket) => {
+    sent.length = 0;
+    await pusher.notify(t, { kind: 'state', state: 'blocked', note: 'stuck' });
+    return sent.map((url) => url.split('/').pop()).sort();
+  };
+  // An every-minion device hears about all of them; the pinned-only one only its person's pins.
+  assert.deepEqual(await who(ownPinned), ['cara-all', 'josh-pinned']);
+  assert.deepEqual(await who(ownUnpinned), ['cara-all']);
+  assert.deepEqual(await who(carasPinned), ['cara-all', 'josh-pinned']);
+  // A pin left behind in a scheme Josh is no longer in sends nothing.
+  assert.deepEqual(await who(leftScheme), ['cara-all']);
+
+  // Unpinning stops it; a browser someone else signs in on starts back at every minion.
+  store.setTicketPinned('Josh', ownPinned.id, false);
+  assert.deepEqual(await who(ownPinned), ['cara-all']);
+  store.savePushSubscription('Cara', pinned.endpoint, pinned.p256dh, pinned.auth);
+  assert.equal(store.getPushSubscription(pinned.endpoint)!.only_pinned, 0);
+});

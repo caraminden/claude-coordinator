@@ -43,33 +43,36 @@ export async function pushOff() {
   await sub.unsubscribe();
 }
 
-/** "Notify me on this device", and once on, a mute for this project; in the account box. */
+/** "Notify me on this device", and once on, pinned-only and a mute for this project; in the account box. */
 export function pushControls(project) {
   if (!pushSupported) return null;
   const on = h('input', { type: 'checkbox' });
   const mute = h('input', { type: 'checkbox' });
+  const pinned = h('input', { type: 'checkbox' });
   const hint = h('span', { class: 'hint', hidden: true });
   const muteRow = h('label', { class: 'toggle', hidden: true, title: 'Stop notifications from this scheme on this device' }, mute, `Mute ${project.name} here`);
+  const pinnedRow = h('label', { class: 'toggle', hidden: true, title: 'On this device, notify only about minions you pinned, in any scheme you\'re in, including other people\'s' }, pinned, 'Only my pinned minions');
   const el = h('div', { class: 'push' },
     h('label', { class: 'toggle', title: 'Questions for you, failed turns, and minions that are ready or blocked' }, on, 'Notify me on this device'),
-    muteRow, hint);
+    pinnedRow, muteRow, hint);
   const show = (state, err) => {
     on.checked = state.subscribed;
     mute.checked = state.muted.includes(project.id);
-    muteRow.hidden = !state.subscribed;
+    pinned.checked = !!state.onlyPinned;
+    muteRow.hidden = pinnedRow.hidden = !state.subscribed;
     const denied = Notification.permission === 'denied';
     on.disabled = denied && !state.subscribed;
     hint.textContent = err ?? (denied && !state.subscribed ? 'Blocked for this site in the browser settings' : '');
     hint.hidden = !hint.textContent;
   };
   const busy = async (fn) => {
-    on.disabled = mute.disabled = true;
+    on.disabled = mute.disabled = pinned.disabled = true;
     try {
       show(await fn());
     } catch (ex) {
       await refresh(ex.message);
     } finally {
-      mute.disabled = false;
+      mute.disabled = pinned.disabled = false;
       if (Notification.permission !== 'denied') on.disabled = false;
     }
   };
@@ -89,6 +92,10 @@ export function pushControls(project) {
   mute.addEventListener('change', () => busy(async () => {
     const sub = await pushSubscription();
     return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, projectId: project.id, muted: mute.checked } });
+  }));
+  pinned.addEventListener('change', () => busy(async () => {
+    const sub = await pushSubscription();
+    return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, onlyPinned: pinned.checked } });
   }));
   refresh();
   return el;

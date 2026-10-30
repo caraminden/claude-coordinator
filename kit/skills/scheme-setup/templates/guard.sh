@@ -66,6 +66,8 @@ json_field() {
 # \036 word (newlines as \037) between \034 lines, for check_command to check on its own: the
 # whole body when its line runs a shell (bash <<EOF, cat <<EOF | sh), else only the $(...) and
 # backtick substitutions of an unquoted <<EOF. The rest is data (gh pr create --body-file -).
+# shortcut: a body written to a file and run later (cat > x.sh <<EOF, then bash x.sh) is data
+# here, like any script file; .githooks/pre-push still refuses the push it makes.
 # ps=1 switches to PowerShell rules: backtick escapes, backslash is literal, <# #> comments.
 # ps=2 is cmd.exe: ^ escapes, and no single quotes, comments or backtick substitution.
 tokenize() {
@@ -73,9 +75,12 @@ tokenize() {
     function flush(   b) {
       if (!intok) return
       gsub(/\n/, " ", tok)
-      # shortcut: any shell word on the line counts, not just the heredoc'\''s own pipeline.
+      # A shell, eval or a run-time command word anywhere on the line makes its heredocs code
+      # (shortcut: the whole line, not just the heredoc'\''s own pipeline).
       b = tolower(tok); sub(/[<>].*$/, "", b); sub(/.*[\/\\]/, "", b); sub(/\.exe$/, "", b)
-      if (b ~ /^(sh|bash|zsh|dash|ksh|fish|pwsh|powershell|cmd|source)$/) shellline = 1
+      if ((nw == 0 || prevw ~ /^(env|sudo|exec|command|builtin|nohup|time|nice|xargs|busybox|do|then|else|if|while|until|!|\{)$/ || prevw ~ /^[a-z_][a-z0-9_]*=/) &&
+          (b ~ /^(sh|bash|zsh|dash|ash|ksh|mksh|rbash|csh|tcsh|fish|pwsh|powershell|cmd|source|\.|eval)$/ || (tok ~ /\035\$/ && b !~ /^[a-z_][a-z0-9_]*=/))) shellline = 1
+      nw++; prevw = b; tail = ""
       print tok; tok = ""; intok = 0
     }
     function emit(t) { gsub(/\n/, "\037", t); print "\036" t; print "\034" }
@@ -88,7 +93,11 @@ tokenize() {
         if (c2 == "`") { e2 = index(substr(b, k + 1), "`"); if (!e2) e2 = m - k + 1; emit(substr(b, k + 1, e2 - 1)); k += e2; continue }
         if (c2 == "$" && substr(b, k + 1, 1) == "(") {
           start = k + 2; depth = 1
-          for (k = start; k <= m; k++) { c2 = substr(b, k, 1); if (c2 == "(") depth++; else if (c2 == ")" && !--depth) break }
+          for (k = start; k <= m; k++) {
+            c2 = substr(b, k, 1)
+            if (c2 == "\047" || c2 == "\"") { e2 = index(substr(b, k + 1), c2); k = e2 ? k + e2 : m; continue }
+            if (c2 == "(") depth++; else if (c2 == ")" && !--depth) break
+          }
           emit(substr(b, start, k - start))
         }
       }
@@ -132,8 +141,11 @@ tokenize() {
         }
         if (c == "(" || (c == "`" && ps == "0")) { tok = tok "\035"; intok = 1 }
         if (c == "\n" || c == ";" || c == "&" || c == "|" || c == "(" || c == ")" || (c == "`" && ps == "0")) {
-          flush(); print "\034"
-          if (c == "\n") {
+          flush(); print "\034"; nw = 0; prevw = ""
+          if (c != "\n") tail = c
+          else {
+            # A line ending in | or && goes on after the bodies: its next command may run them.
+            if (tail == "|" || tail == "&") shellline = 1
             for (h = 1; h <= nh; h++) {
               body = ""; ended = 0
               while (i < n) {
@@ -147,7 +159,7 @@ tokenize() {
               # No end line: likely no heredoc at all ($((1 << 2))), so check the rest as commands.
               if (shellline || !ended) emit(body); else if (!hq[h]) substitutions(body)
             }
-            nh = 0; shellline = 0
+            nh = 0; shellline = 0; tail = ""
           }
           continue
         }
@@ -373,6 +385,15 @@ self_test() {
   t 2 Bash topic $'sh -s <<\'EOF\'\ngit push origin main\nEOF'
   t 2 Bash topic $'cat <<\'EOF\' | bash\ngit push origin main\nEOF'
   t 2 Bash topic $'gh pr create --body-file - <<\'EOF\'\nit\'s data\nEOF\ngit push origin main'
+  t 0 Bash topic $'gh pr create --label source --body-file - <<\'EOF\'\ngit push origin main\nEOF'
+  t 0 Bash topic $'echo sh; git add . && git commit -F - <<\'EOF\'\ngit push origin main\nEOF'
+  t 0 Bash topic $'msg=$(cat <<\'EOF\'\ngit push origin main\nEOF\n)'
+  t 2 Bash topic $'. /dev/stdin <<\'EOF\'\ngit push origin main\nEOF'
+  t 2 Bash topic $'env FOO=1 tcsh <<\'EOF\'\ngit push origin main\nEOF'
+  t 2 Bash topic $'"$SHELL" <<\'EOF\'\ngit push origin main\nEOF'
+  t 2 Bash topic $'cat <<\'EOF\' | while read -r l; do eval "$l"; done\ngit push origin main\nEOF'
+  t 2 Bash topic $'cat <<\'EOF\' |\ngit push origin main\nEOF\nsh'
+  t 2 Bash topic $'cat <<EOF\n$(echo ")"; git push origin main)\nEOF'
   t 0 Bash topic 'bash -c "git push origin topic"'
   t 0 PowerShell topic 'git push origin topic'
   t 0 PowerShell topic 'git push origin topic <# main #>'

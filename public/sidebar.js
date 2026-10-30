@@ -34,10 +34,13 @@ const SOURCES = [
   { value: 'none', label: 'No code (docs, research, art)' },
 ];
 
+/** Picked at first: no code, so a scheme with just a name still creates (#173 makes it 'new', as the mockup has). */
+const DEFAULT_SOURCE = 'none';
+
 /** Name, code source and what it's about for a new scheme; on success it opens the scheme. */
 function newSchemeForm() {
   const sources = SOURCES.map((s) => h('label', { class: 'source' },
-    h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === 'url', disabled: !!s.soon }),
+    h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === DEFAULT_SOURCE, disabled: !!s.soon }),
     h('span', {}, s.label, s.soon ? h('span', { class: 'muted' }, ' (soon)') : ''),
     s.field ? h('input', { name: s.field, 'data-draft': true, placeholder: s.placeholder, disabled: !!s.soon }) : ''));
   const form = h('form', {},

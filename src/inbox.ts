@@ -26,3 +26,10 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
   ];
   return items.sort((a, b) => Number(b.kind === 'approval') - Number(a.kind === 'approval') || b.at - a.at);
 }
+
+/** How many items the scheme's Needs-you badge counts for someone who last saw each minion at `seen` (ticket id -> time): a ready/try or replies minion they opened since it changed stops counting, as in public/inbox.js. */
+export function inboxCount(store: Store, approvals: Approvals, projectId: number, seen: Record<number, number>): number {
+  const updated = new Map(store.listTickets(projectId).map((t) => [t.id, t.updated_at]));
+  return inboxItems(store, approvals, projectId)
+    .filter((i) => !((i.kind === 'state' || i.kind === 'replies') && (seen[i.ticketId] ?? 0) >= (updated.get(i.ticketId) ?? 0))).length;
+}

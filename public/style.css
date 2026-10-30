@@ -161,6 +161,10 @@ dialog.start-brief .from { margin: -0.4rem 0 0.9rem; }
 .start-brief-form details pre { max-height: 40vh; overflow: auto; margin: 0.25rem 0 0; font-size: 0.8rem; white-space: pre-wrap; }
 .start-brief-form .sheet-actions { gap: 0.5rem; }
 .scheme-menu { position: fixed; z-index: 40; min-width: 12rem; max-width: calc(100vw - 16px); max-height: 60vh; overflow-y: auto; padding: 0.3rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); box-shadow: 0 6px 20px rgb(0 0 0 / 0.15); }
+a.nav-item:has(> .scheme-count) { display: flex; align-items: center; gap: 0.5rem; }
+a.nav-item:has(> .scheme-count) > .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.scheme-count { background: var(--accent); color: #fff; border-radius: 999px; padding: 0.1rem 0.45rem; font-size: 0.85em; line-height: 1.3; font-weight: 600; }
+.scheme-count[hidden] { display: none; }
 button.nav-item.add { width: 100%; text-align: left; background: none; border: 0; color: var(--accent); font-weight: normal; }
 
 /* Board */

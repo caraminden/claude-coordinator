@@ -7,7 +7,7 @@ import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
-import { renderInbox } from './inbox.js';
+import { renderInbox, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
 
 // ---------- projects ----------
@@ -105,7 +105,7 @@ export function toggleSchemeMenu(button) {
   if (document.getElementById('scheme-menu')) return closeSchemeMenu();
   const menu = h('div', { id: 'scheme-menu', class: 'scheme-menu' },
     view.projects.map((p) => h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, onclick: () => closeSchemeMenu() },
-      h('span', { class: 'name', 'data-project-name': p.id }, p.name))),
+      h('span', { class: 'name', 'data-project-name': p.id }, p.name), schemeCount(p))),
     h('button', { type: 'button', class: 'nav-item add', onclick: () => { closeSchemeMenu(); openNewScheme(); } }, '+ New scheme'));
   const outside = (e) => { if (!menu.contains(e.target) && !button.contains(e.target)) closeSchemeMenu(); };
   const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeSchemeMenu(); button.focus(); } };
@@ -123,6 +123,12 @@ export function toggleSchemeMenu(button) {
   const r = button.getBoundingClientRect();
   menu.style.top = `${r.bottom + 4}px`;
   menu.style.left = `${Math.max(8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8))}px`;
+  // The counts came with the page; other schemes' minions have moved since, so fetch them again.
+  api('api/projects').then((projects) => {
+    if (view.kind === 'project') view.projects = projects;
+    for (const p of projects) for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
+    renderInbox(); // the open scheme's count stays the badge's own
+  }, () => {});
 }
 
 export function newTicketForm(projectId) {

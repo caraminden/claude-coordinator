@@ -8,7 +8,7 @@ import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, TICKET_TAGS, type Project, type Ticket, type TicketTag } from '../db.ts';
 import { lendsMachines } from '../access.ts';
-import { inboxItems } from '../inbox.ts';
+import { inboxCount, inboxItems } from '../inbox.ts';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { TAG_TO_TYPE } from '../property-seed.ts';
@@ -188,7 +188,11 @@ const LINE_FIELDS = ['number', 'title', 'tag', 'properties', 'build', 'model', '
 export const projectRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects', who: ['person'],
-    handler: ({ res, app: { store }, session }) => json(res, 200, visibleSchemes(store, session).map((p) => ({ ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length }))),
+    // inbox: the count on the scheme's Needs-you badge, for the scheme switcher.
+    handler: ({ res, app: { store, runner }, session }) => json(res, 200, visibleSchemes(store, session).map((p) => ({
+      ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length,
+      inbox: inboxCount(store, runner.approvals, p.id, store.seenTimes(session.name, p.id)),
+    }))),
   },
   {
     // What a scheme being set up can adapt (#172): names and descriptions from every scheme's .claude/ and the kit, never file bodies.

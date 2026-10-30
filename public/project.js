@@ -6,7 +6,7 @@ import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResu
 import { chatSection, chatView, mountChat } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
-import { inboxStrip, refreshInbox } from './inbox.js';
+import { inboxStrip, refreshInbox, schemeCount } from './inbox.js';
 import { schedulesButton, showSchedules } from './schedules.js';
 import { replaceHash } from './navstack.js';
 import { accountPage, membersPage, peoplePage } from './people.js';
@@ -97,7 +97,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('section', { class: 'column' },
       h('h3', {}, 'Schemes'),
       projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
-        h('span', { class: 'name', 'data-project-name': p.id }, p.name))),
+        h('span', { class: 'name', 'data-project-name': p.id }, p.name), schemeCount(p))),
       h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme')),
     h('div', { id: 'machines-shelf' }),
     h('div', { id: 'artifact-shelf' }));

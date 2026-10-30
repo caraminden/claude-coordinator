@@ -51,14 +51,20 @@ export function inboxStrip() {
   return strip;
 }
 
+/** A scheme's Needs-you count (`inbox` from api/projects) as a pill for the scheme lists; hidden at zero. */
+export function schemeCount(p) {
+  return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !p.inbox, title: 'Waiting on you' }, p.inbox || '');
+}
+
 /** Redraw the strip: the count while minimized; opened, one row per waiting minion, linking to its chat. */
 export function renderInbox() {
   if (view?.kind !== 'project' || inbox.projectId !== view.projectId) return;
   const items = inbox.items.filter((i) => ticketOf(i.ticketId));
   const strip = inboxStrip();
+  const count = items.filter((i) => !faded(i)).length;
+  for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: count }));
   strip.hidden = !items.length;
   if (!items.length) return strip.replaceChildren();
-  const count = items.filter((i) => !faded(i)).length;
   let open = false;
   try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch {}
   // A minion's items share its row, in the order of its most urgent one.

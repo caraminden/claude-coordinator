@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
-import { inboxItems } from '../src/inbox.ts';
+import { inboxCount, inboxItems } from '../src/inbox.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'inbox-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -87,4 +87,19 @@ test('openCardAt: when a minion\'s oldest open card was posted, for the list\'s 
   assert.ok(store.openCardAt(gone));
   store.updateTicket(gone, { status: 'closed' });
   assert.equal(store.openCardAt(gone), null);
+});
+
+test('inboxCount: the Needs-you badge\'s number for one person; a ready or replies minion they opened since it changed stops counting, cards never do', () => {
+  const store = new Store(join(root, 'count.sqlite'));
+  const approvals = new Approvals(() => {});
+  const p = store.createProject('One', null).id;
+  const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const ready = minion('ready'), offering = minion('offering'), asking = minion('asking');
+  store.updateTicket(ready, { state: 'ready' });
+  store.updateTicket(offering, { replies: JSON.stringify(['Do it']) });
+  store.addEvent(asking, 'question', { id: 'q', questions: [] });
+  const at = (id: number) => store.getTicket(id)!.updated_at;
+
+  assert.equal(inboxCount(store, approvals, p, {}), 3);
+  assert.equal(inboxCount(store, approvals, p, { [ready]: at(ready), [offering]: at(offering) - 1, [asking]: at(asking) + 1 }), 2, 'only the opened ready minion fades');
 });

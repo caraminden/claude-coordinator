@@ -175,3 +175,29 @@ test("the viewer's details of a linked or shared file load, and a file that's go
     assert.match((await res.json()).error, /no longer there/, path);
   }
 });
+
+test('a linked script, stylesheet or data file opens as text in the viewer; other source still does not (#202)', async () => {
+  const headers = { Cookie: srv.cookie };
+  writeFileSync(join(shared, 'page.js'), 'document.body.textContent = 1');
+  writeFileSync(join(shared, 'data.json'), '{"a":1}');
+  for (const [url, type] of [
+    [`/api/tickets/${M.id}/file?path=app.js`, 'text/javascript; charset=utf-8'],
+    [`/api/tickets/${M.id}/file?path=css/site.css`, 'text/css; charset=utf-8'],
+    [`/api/projects/${P.id}/shared/file?path=page.js`, 'text/javascript; charset=utf-8'],
+    [`/api/projects/${P.id}/shared/file?path=data.json`, 'application/json'],
+  ]) {
+    const res = await get(url, headers);
+    assert.equal(res.status, 200, url);
+    assert.equal(res.headers.get('content-type'), type, url);
+    // Served sandboxed with no scripts, like any text file: opening it never runs it.
+    assert.match(res.headers.get('content-security-policy')!, /^sandbox; default-src 'none'/, url);
+    assert.equal((await (await get(`${url}&info`, headers)).json()).kind, 'text', url);
+  }
+  assert.equal((await get(`/api/tickets/${M.id}/file?path=main.ts`, headers)).status, 404);
+  // Outside the minion's folders stays out, whatever the type.
+  writeFileSync(join(outside, 'x.js'), '1');
+  assert.equal((await get(`/api/tickets/${M.id}/file?path=${encodeURIComponent(join(outside, 'x.js'))}`, headers)).status, 404);
+  assert.equal((await get(`/api/tickets/${M.id}/file?path=escdir/x.js`, headers)).status, 404);
+  // Still not listed as artifacts: only documents, pages and downloads are.
+  assert.ok(!(await (await get(`/api/projects/${P.id}/shared`, headers)).json()).some((f: any) => /\.(js|json)$/.test(f.path)));
+});

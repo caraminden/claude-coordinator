@@ -12,7 +12,8 @@ export type FileKind = 'markdown' | 'text' | 'canvas' | 'html' | 'pdf' | 'image'
  * File types the app will serve from a ticket's folder. Only documents, pages and downloads
  * (`artifact`) are listed as artifacts; images and media are served when a document embeds them.
  * Downloads (archives such as a game build) are never shown, only saved.
- * Source code is left out on purpose; it lives in the branch.
+ * Other source code is left out on purpose; it lives in the branch. Scripts, styles and data show
+ * as text, as a document may link them (old claude.ai page code), and an HTML page loads them.
  */
 export const FILE_TYPES: Record<string, { kind: FileKind; mime: string; artifact?: true }> = {
   '.md': { kind: 'markdown', mime: 'text/plain; charset=utf-8', artifact: true },
@@ -23,6 +24,10 @@ export const FILE_TYPES: Record<string, { kind: FileKind; mime: string; artifact
   '.pdf': { kind: 'pdf', mime: 'application/pdf', artifact: true },
   '.txt': { kind: 'text', mime: 'text/plain; charset=utf-8' },
   '.csv': { kind: 'text', mime: 'text/plain; charset=utf-8' },
+  '.js': { kind: 'text', mime: 'text/javascript; charset=utf-8' },
+  '.mjs': { kind: 'text', mime: 'text/javascript; charset=utf-8' },
+  '.css': { kind: 'text', mime: 'text/css; charset=utf-8' },
+  '.json': { kind: 'text', mime: 'application/json' },
   '.png': { kind: 'image', mime: 'image/png' },
   '.jpg': { kind: 'image', mime: 'image/jpeg' },
   '.jpeg': { kind: 'image', mime: 'image/jpeg' },
@@ -48,12 +53,8 @@ export function fileType(path: string) {
   return FILE_TYPES[extname(path).toLowerCase()];
 }
 
-/** What an HTML page may also load from beside it (styles, scripts, data, fonts, captions), only through its file token. */
+/** What an HTML page may also load from beside it (fonts, wasm, captions), only through its file token. */
 const SIBLING_TYPES: Record<string, { kind: FileKind; mime: string }> = {
-  '.css': { kind: 'text', mime: 'text/css; charset=utf-8' },
-  '.js': { kind: 'text', mime: 'text/javascript; charset=utf-8' },
-  '.mjs': { kind: 'text', mime: 'text/javascript; charset=utf-8' },
-  '.json': { kind: 'text', mime: 'application/json' },
   '.wasm': { kind: 'text', mime: 'application/wasm' },
   '.woff': { kind: 'text', mime: 'font/woff' },
   '.woff2': { kind: 'text', mime: 'font/woff2' },

@@ -113,6 +113,7 @@ function unescapeHtml(s) {
 // What the server will serve from a thread's folders, by extension (mirrors src/artifacts.ts).
 const FILE_KINDS = {
   md: 'markdown', markdown: 'markdown', canvas: 'canvas', html: 'html', htm: 'html', pdf: 'pdf', txt: 'text', csv: 'text',
+  js: 'text', mjs: 'text', css: 'text', json: 'text',
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', avif: 'image', svg: 'image',
   mp4: 'video', webm: 'video', mov: 'video', mp3: 'audio', wav: 'audio', ogg: 'audio', m4a: 'audio',
   zip: 'download', '7z': 'download', tar: 'download', gz: 'download', tgz: 'download',

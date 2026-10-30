@@ -24,7 +24,7 @@ process.env.LC_TIME = 'en_GB.UTF-8';
 process.env.COORDINATOR_API = 'http://service.invalid';
 process.env.COORDINATOR_TOKEN = 'service-token';
 process.env.COORDINATOR_TICKET = '999';
-const { KIT, MCP_DIR, MCP_SERVER, Runner, turnEnv } = await import('../src/runner.ts');
+const { CHECKOUT, KIT, MCP_DIR, MCP_SERVER, Runner, turnEnv } = await import('../src/runner.ts');
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -169,7 +169,7 @@ test("a Taskmaster may search and fetch the web without a prompt nobody can answ
 
 test("only Citadel's own Taskmaster may read the live checkout, never write it, and every Taskmaster is told git -C, never cd", async () => {
   while (!store.getProject(GLOBAL_OWNER)) store.createProject(`P${Math.random()}`, null);
-  const checkout = join(import.meta.dirname, '..');
+  const checkout = CHECKOUT;
   const own = await turn('coordinator', 'connected', {}, undefined, GLOBAL_OWNER);
   const addDirs = own.args.slice(own.args.indexOf('--add-dir') + 1);
   assert.ok(addDirs.includes(checkout));

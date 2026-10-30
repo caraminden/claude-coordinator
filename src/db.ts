@@ -109,9 +109,22 @@ export interface Ticket {
   last_model: string | null;
   last_effort: string | null;
   last_activity: string | null;
+  /** Whose turn it last ran (users.id; src/access.ts turnPerson): set when a minion is made, then at each turn's start. */
+  person_id: number | null;
   created_by: string;
   created_at: number;
   updated_at: number;
+}
+
+/** One of a person's linked accounts (src/credentials.ts); `secret` is still encrypted. */
+export interface CredentialRow {
+  user_id: number;
+  kind: string;
+  secret: string;
+  meta: string;
+  created_at: number;
+  updated_at: number;
+  failed_at: number | null;
 }
 
 export interface Artifact {
@@ -433,6 +446,18 @@ CREATE TABLE IF NOT EXISTS artifact_data (
   at INTEGER NOT NULL,
   PRIMARY KEY (project_id, file, key)
 );
+-- A person's linked accounts (src/credentials.ts): secret is AES-256-GCM, keyed from SESSION_SECRET; meta
+-- is JSON in the clear (a GitHub login, never a token). One row per person and kind.
+CREATE TABLE IF NOT EXISTS credentials (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  meta TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  failed_at INTEGER,
+  PRIMARY KEY (user_id, kind)
+);
 `;
 
 /**
@@ -477,6 +502,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'onboarding_mode', "ALTER TABLE projects ADD COLUMN onboarding_mode TEXT NOT NULL DEFAULT 'first-run'"],
   ['projects', 'github_error', 'ALTER TABLE projects ADD COLUMN github_error TEXT'],
   ['projects', 'owner_id', 'ALTER TABLE projects ADD COLUMN owner_id INTEGER REFERENCES users(id)'],
+  ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
   ['machines', 'workspace_tools', 'ALTER TABLE machines ADD COLUMN workspace_tools INTEGER NOT NULL DEFAULT 0'],
 ];
@@ -486,7 +512,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 13; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id
+export const SCHEMA_VERSION = 14; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -766,6 +792,30 @@ export class Store {
     }
   }
 
+  getCredential(userId: number, kind: string): CredentialRow | undefined {
+    return this.db.prepare('SELECT * FROM credentials WHERE user_id = ? AND kind = ?').get(userId, kind) as CredentialRow | undefined;
+  }
+
+  listCredentials(kind: string): CredentialRow[] {
+    return this.db.prepare('SELECT * FROM credentials WHERE kind = ?').all(kind) as unknown as CredentialRow[];
+  }
+
+  putCredential(userId: number, kind: string, secret: string, meta: object) {
+    const now = Date.now();
+    this.db.prepare(`INSERT INTO credentials (user_id, kind, secret, meta, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, kind) DO UPDATE SET secret = excluded.secret, meta = excluded.meta, updated_at = excluded.updated_at, failed_at = NULL`)
+      .run(userId, kind, secret, JSON.stringify(meta), now, now);
+  }
+
+  /** The account refused it (revoked, or it can't be decrypted): kept, so Settings can say "link again". */
+  failCredential(userId: number, kind: string) {
+    this.db.prepare('UPDATE credentials SET failed_at = ? WHERE user_id = ? AND kind = ? AND failed_at IS NULL').run(Date.now(), userId, kind);
+  }
+
+  deleteCredential(userId: number, kind: string) {
+    this.db.prepare('DELETE FROM credentials WHERE user_id = ? AND kind = ?').run(userId, kind);
+  }
+
   /** Schemes from before owners (and any whose owner is gone) become this admin's. */
   adoptOwnerless(adminId: number) {
     this.db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id IS NULL OR owner_id NOT IN (SELECT id FROM users)').run(adminId);
@@ -858,7 +908,7 @@ export class Store {
     this.db.prepare(`UPDATE tickets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   }
 
-  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'tag' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'last_model' | 'last_effort'>>) {
+  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'tag' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'last_model' | 'last_effort' | 'person_id'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');

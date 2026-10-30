@@ -28,6 +28,8 @@ import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
 import { peopleRoutes } from './src/routes/people.ts';
+import { Credentials } from './src/credentials.ts';
+import { GithubLink } from './src/github-link.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
 import { fileRoutes } from './src/routes/files.ts';
@@ -107,9 +109,11 @@ if (!store.listUsers().some((u) => u.admin)) {
   store.createUser({ name, login: name.toLowerCase().replace(/[^a-z0-9._-]/g, ''), admin: true, server_login: true });
 }
 store.adoptOwnerless(store.listUsers().find((u) => u.admin)!.id);
+const githubLink = new GithubLink(store, new Credentials(store, process.env.SESSION_SECRET ?? ''), process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '');
 // Keep secrets out of the environment that claude and its tools inherit.
 delete process.env.COORDINATOR_PASSWORD;
 delete process.env.SESSION_SECRET;
+delete process.env.GITHUB_CLIENT_SECRET;
 
 const MAX_CLIENT_BACKLOG = 4 * 1024 * 1024;
 const clients = new Map<ServerResponse, Session>();
@@ -549,7 +553,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink,
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {
     return ASSET_VERSION;

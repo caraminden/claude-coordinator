@@ -1,15 +1,29 @@
 // People: an admin invites them and manages them; anyone signed in changes their own password; a
 // scheme's owner picks who else is in it.
 import type { User } from '../db.ts';
-import { clientIp, HttpError, json, readJson, type App, type Route } from '../http.ts';
+import type { IncomingMessage } from 'node:http';
+import { clientIp, HttpError, isSecure, json, readJson, type App, type Route } from '../http.ts';
 import { cleanLogin, cleanName, newPasswordHash } from './app.ts';
 
-/** A person as Settings → People shows them: never a hash. */
-function personView(u: User) {
+/** A person as Settings → People shows them: never a hash or a token. */
+function personView(app: App, u: User) {
   return {
     id: u.id, name: u.name, login: u.login, admin: !!u.admin, server_login: !!u.server_login,
     disabled: !!u.disabled_at, has_password: !!u.password_hash, invite_open: (u.invite_expires ?? 0) > Date.now(),
+    github: app.github.login(u.id),
   };
+}
+
+/** The signed-in person's id; a cookie from before per-person logins has none. */
+function uidOf(session: { uid?: number }): number {
+  if (typeof session.uid !== 'number') throw new HttpError(400, 'Sign in again first');
+  return session.uid;
+}
+
+/** Where GitHub sends people back: the address they reached Citadel at, which must be the OAuth App's callback URL. */
+function callbackUrl(req: IncomingMessage): string {
+  const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? 'localhost');
+  return `${isSecure(req) ? 'https' : 'http'}://${host}/api/github/callback`;
 }
 
 function person(app: App, id: string): User {
@@ -30,7 +44,7 @@ export const peopleRoutes: Route[] = [
     // Everyone sees names and logins, to add people to their schemes; admins see the rest.
     method: 'GET', path: '/api/people', who: ['person'],
     handler: ({ res, app, session }) => json(res, 200, app.store.listUsers().filter((u) => session.admin || !u.disabled_at)
-      .map((u) => (session.admin ? personView(u) : { id: u.id, name: u.name, login: u.login }))),
+      .map((u) => (session.admin ? personView(app, u) : { id: u.id, name: u.name, login: u.login }))),
   },
   {
     // A new person and their invite link's token (shown once; only its hash is kept).
@@ -42,7 +56,7 @@ export const peopleRoutes: Route[] = [
       if (app.store.findUser('name', name)) throw new HttpError(409, `There is already someone called ${name}`);
       if (app.store.findUser('login', login)) throw new HttpError(409, `The login ${login} is taken`);
       const user = app.store.createUser({ name, login });
-      return json(res, 201, { person: personView(app.store.getUser(user.id)!), token: app.auth.newInvite(user.id) });
+      return json(res, 201, { person: personView(app, app.store.getUser(user.id)!), token: app.auth.newInvite(user.id) });
     },
   },
   {
@@ -50,7 +64,7 @@ export const peopleRoutes: Route[] = [
     method: 'POST', path: '/api/people/:person/invite', ...admin,
     handler({ res, app, params }) {
       const user = person(app, params.person);
-      return json(res, 200, { person: personView(user), token: app.auth.newInvite(user.id) });
+      return json(res, 200, { person: personView(app, user), token: app.auth.newInvite(user.id) });
     },
   },
   {
@@ -64,7 +78,7 @@ export const peopleRoutes: Route[] = [
         if (body.disabled) dropStreams(app, user.id);
       }
       if (body.server_login !== undefined) app.store.updateUser(user.id, { server_login: body.server_login ? 1 : 0 });
-      return json(res, 200, personView(app.store.getUser(user.id)!));
+      return json(res, 200, personView(app, app.store.getUser(user.id)!));
     },
   },
   {
@@ -73,7 +87,7 @@ export const peopleRoutes: Route[] = [
     handler({ res, app, params, session }) {
       const user = person(app, params.person);
       if (user.id === session.uid) throw new HttpError(400, 'You can\'t remove yourself');
-      app.store.deleteUser(user.id, session.uid!);
+      app.store.deleteUser(user.id, uidOf(session));
       dropStreams(app, user.id);
       return json(res, 200, {});
     },
@@ -89,6 +103,31 @@ export const peopleRoutes: Route[] = [
       if ((await auth.signIn(ip, me.login, String(body.current ?? '').slice(0, 1000)))?.id !== me.id) throw new HttpError(403, 'Your current password is wrong');
       store.updateUser(me.id, { password_hash: await newPasswordHash(body.password) });
       return json(res, 200, {});
+    },
+  },
+  // Linking your own GitHub (src/github-link.ts): its state, GitHub's authorize page and back, and unlinking.
+  { method: 'GET', path: '/api/me/github', who: ['person'], handler: async ({ res, app, session }) => json(res, 200, await app.github.status(uidOf(session))) },
+  {
+    method: 'GET', path: '/api/github/link', who: ['person'],
+    handler({ req, res, app, url, session }) {
+      if (!app.github.configured) throw new HttpError(503, 'GitHub linking isn\'t set up on this server yet: an admin adds the OAuth App (see the README).');
+      const project = Number(url.searchParams.get('project'));
+      if (!Number.isSafeInteger(project) || !app.store.canSee(session, project)) throw new HttpError(400, 'Which scheme\'s Settings to come back to?');
+      res.writeHead(302, { Location: app.github.authorizeUrl(uidOf(session), project, callbackUrl(req)), 'Cache-Control': 'no-store' }).end();
+    },
+  },
+  {
+    method: 'GET', path: '/api/github/callback', who: ['person'],
+    async handler({ req, res, app, url, session }) {
+      const project = await app.github.finish(uidOf(session), url.searchParams, callbackUrl(req));
+      res.writeHead(302, { Location: project === null ? '../../' : `../../#/p/${project}/account`, 'Cache-Control': 'no-store' }).end();
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/me/github', who: ['person'],
+    async handler({ res, app, session }) {
+      await app.github.unlink(uidOf(session));
+      return json(res, 200, await app.github.status(uidOf(session)));
     },
   },
   { method: 'GET', path: '/api/projects/:project/members', who: ['person'], handler: ({ res, app, project }) => json(res, 200, app.store.listMembers(project.id)) },

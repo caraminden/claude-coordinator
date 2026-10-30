@@ -6,6 +6,7 @@ import type { Auth, Session } from './auth.ts';
 import type { BranchStatus } from './branch.ts';
 import type { Artifact, Machine, Project, Store, Ticket, TicketTag } from './db.ts';
 import type { MachineRelay } from './machines.ts';
+import type { GithubLink } from './github-link.ts';
 import type { Previews } from './previews.ts';
 import type { Pusher, PushTrigger } from './push.ts';
 import type { Runner } from './runner.ts';
@@ -153,6 +154,8 @@ export interface App {
   previews: Previews | null;
   machines: MachineRelay;
   pusher: Pusher;
+  /** People's own GitHub links (src/github-link.ts). */
+  github: GithubLink;
   /** Open event streams (GET /api/stream), with whose they are. */
   clients: Map<ServerResponse, Session>;
   dataDir: string;

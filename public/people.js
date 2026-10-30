@@ -84,7 +84,7 @@ export function peoplePage() {
     return h('div', { class: 'person-row' },
       h('span', { class: 'text' },
         h('span', { class: 'name' }, u.name, u.admin ? ' · admin' : ''),
-        h('span', { class: 'meta' }, [u.login, state].filter(Boolean).join(' · '))),
+        h('span', { class: 'meta' }, [u.login, state, u.github ? `GitHub @${u.github.login}${u.github.failed ? ' (needs linking again)' : ''}` : 'GitHub not linked'].filter(Boolean).join(' · '))),
       h('span', { class: 'person-actions' },
       h('label', { class: 'small turns-toggle', title: 'Their messages start and steer turns on the server\'s Claude login. Off: their messages wait in the chat.' }, turns, 'Turns'),
       h('button', {
@@ -154,5 +154,45 @@ export function accountPage() {
   return page(
     head('Your account', [`Signed in as ${account?.name} (login ${account?.login ?? '—'})`, account?.admin ? ', an admin.' : '.',
       account?.turns ? '' : ' Your messages don\'t start turns yet: they wait in the chat until you can link your own Claude account.']),
-    form);
+    form, githubCard());
+}
+
+/** Your GitHub link: turns you start push and open pull requests as you (src/github-link.ts). */
+function githubCard() {
+  const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading GitHub…'));
+  const render = ({ configured, error, link }) => {
+    const title = (chip, cls = '') => h('h3', {}, 'GitHub', h('span', { class: `link-chip ${cls}` }, chip));
+    const errLine = error ? h('p', { class: 'error', role: 'status' }, error) : '';
+    const linkBtn = (label) => h('a', { class: 'button small', href: `api/github/link?project=${view.projectId}` }, label);
+    const unlink = h('button', {
+      type: 'button', class: 'secondary small',
+      onclick: async () => {
+        if (!confirm('Unlink your GitHub? Citadel forgets the token and revokes it on GitHub; your turns stop pushing until you link again.')) return;
+        render(await api('api/me/github', { method: 'DELETE' }).catch(fail) ?? { configured, error: null, link });
+      },
+    }, 'Unlink');
+    const note = h('p', { class: 'muted small' }, 'The link lets Citadel act on every repo your GitHub account can reach, and lasts until you unlink it here or revoke "Citadel" on GitHub under Settings → Applications. ',
+      'Links are kept encrypted with the server\'s session secret: if an admin changes that secret, everyone links again.');
+    if (!configured) {
+      return card.replaceChildren(title('Not set up', 'off'), errLine, h('p', { class: 'muted' }, 'An admin hasn\'t set up Citadel\'s GitHub OAuth App yet (see the README), so turns push with the server\'s own GitHub login.'));
+    }
+    if (!link) {
+      return card.replaceChildren(title('Not linked', 'off'), errLine,
+        h('p', {}, 'Link your GitHub so turns you start push branches and open pull requests as you. Until then they run and commit, but can\'t push.'),
+        h('div', { class: 'row' }, linkBtn('Link GitHub')), note);
+    }
+    if (link.failed) {
+      return card.replaceChildren(title('Needs linking again', 'warn'), errLine,
+        h('p', {}, `GitHub stopped accepting Citadel's link for @${link.login} (revoked on GitHub, or the server's secret changed). Your turns can't push until you link again.`),
+        h('div', { class: 'row' }, linkBtn('Link GitHub again'), unlink));
+    }
+    return card.replaceChildren(title('Linked', 'ok'), errLine,
+      h('dl', { class: 'kv' },
+        h('dt', {}, 'Pushes and PRs as'), h('dd', {}, `@${link.login}`),
+        h('dt', {}, 'Commits as'), h('dd', {}, `${link.name || link.login} <${link.email}>`),
+        h('dt', {}, 'Linked'), h('dd', {}, new Date(link.linked_at).toLocaleDateString(undefined, { dateStyle: 'medium' }))),
+      h('div', { class: 'row' }, unlink), note);
+  };
+  api('api/me/github').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
+  return card;
 }

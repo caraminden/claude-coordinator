@@ -66,15 +66,19 @@ export async function catchUpMain(repoDir: string): Promise<string | null> {
   return null;
 }
 
-/** Told after each catch-up of a scheme's main why it couldn't, or null when it's level (server.ts surfaces it). */
+/** Told when why a scheme's main can't catch up changes: a reason, or null once it's level again (server.ts notes it). */
 export const mainSync = {
   stuck: (repoDir: string, why: string | null) => { if (why) console.warn(`Not fast-forwarding main in ${repoDir}: ${why}`); },
 };
 
 // One catch-up per repo at a time: two at once would trip over git's index lock.
 const syncing = new Map<string, Promise<void>>();
+const stuckWhy = new Map<string, string | null>();
 
-/** Fetch origin, best effort, then catch the checkout's main up to it. */
+/**
+ * Fetch origin, best effort, then catch the checkout's main up to it. Not under the deploy lock: if
+ * a merge on GitHub moves Citadel's main mid-land, land.sh's own fast-forward refuses and nothing lands.
+ */
 export function syncMain(repoDir: string): Promise<void> {
   const next = (syncing.get(repoDir) ?? Promise.resolve()).then(async () => {
     try {
@@ -82,7 +86,14 @@ export function syncMain(repoDir: string): Promise<void> {
     } catch {
       // Unreachable remote: work from what we already have.
     }
-    mainSync.stuck(repoDir, await catchUpMain(repoDir).catch((err) => `the catch-up failed: ${err.message}`));
+    const why = await catchUpMain(repoDir).catch((err) => `the catch-up failed: ${err.message}`);
+    if ((stuckWhy.get(repoDir) ?? null) === why) return;
+    stuckWhy.set(repoDir, why);
+    try {
+      mainSync.stuck(repoDir, why);
+    } catch (err) {
+      console.error(`Reporting main in ${repoDir} failed:`, err);
+    }
   });
   syncing.set(repoDir, next.catch(() => {}));
   return next;

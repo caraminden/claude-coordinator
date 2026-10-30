@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { catchUpMain, catchUpTicketDir, createTicketDir } from '../src/workspace.ts';
+import { catchUpMain, catchUpTicketDir, createTicketDir, mainSync, syncMain } from '../src/workspace.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'wtbase-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -108,4 +108,27 @@ test("main catches up: only a fast-forward, only on a clean main, never when it'
   const local = main();
   assert.match(await catchUpMain(r) ?? '', /diverged/);
   assert.equal(main(), local);
+});
+
+test('a stuck main is reported once per reason, and once more when it is level again', async () => {
+  const r = join(root, 'stuck');
+  git(['clone', '--quiet', remote, r], root);
+  git(['pull', '--quiet', '--ff-only', remote, 'main'], seed);
+  const told: (string | null)[] = [];
+  const was = mainSync.stuck;
+  mainSync.stuck = (_dir, why) => { told.push(why); throw new Error('a broken reporter must not fail the sync'); };
+  try {
+    await syncMain(r);
+    commit(seed, 'merged on GitHub');
+    git(['push', '--quiet', remote, 'main'], seed);
+    git(['switch', '--quiet', '-c', 'side'], r);
+    await syncMain(r);
+    await syncMain(r);
+    git(['switch', '--quiet', 'main'], r);
+    await syncMain(r);
+    assert.deepEqual(told, ['the checkout is on side, not main', null]);
+    assert.equal(git(['rev-parse', 'main'], r), head(seed));
+  } finally {
+    mainSync.stuck = was;
+  }
 });

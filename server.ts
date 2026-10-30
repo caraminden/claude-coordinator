@@ -494,17 +494,13 @@ if (!BOOT_CHECK) github.start();
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);
 github.onMerged = (repoDir) => void syncMain(repoDir).catch((err) => console.error(`Catching up main in ${repoDir} failed:`, err));
 
-// A scheme's main that can't follow origin's (#208) is told once per reason in its Taskmaster's chat.
-const mainStuck = new Map<string, string>();
-const logStuck = mainSync.stuck;
+// A scheme's main that can't follow origin's (#208) is told in its Taskmaster's chat, once per reason.
 mainSync.stuck = (repoDir, why) => {
-  logStuck(repoDir, why);
-  if (!why) return void mainStuck.delete(repoDir);
-  if (mainStuck.get(repoDir) === why) return;
-  mainStuck.set(repoDir, why);
+  if (!why) return;
+  console.warn(`Not fast-forwarding main in ${repoDir}: ${why}`);
   const project = store.listProjects().find((p) => p.repo_dir === repoDir);
   const coordinator = project && store.getCoordinator(project.id);
-  if (coordinator) runner.emit(coordinator.id, 'note', { text: `This scheme's main checkout (${repoDir}) is behind GitHub and wasn't fast-forwarded: ${why}. A person needs to sort it out; until then the base check, self-review and the catalogue see old code.` });
+  if (coordinator) runner.emit(coordinator.id, 'note', { text: `This scheme's main checkout (${repoDir}) isn't level with GitHub's main, and ${APP_NAME} didn't fast-forward it: ${why}. A person needs to look.` });
 };
 
 /** After a turn's tool calls (commits, merges, `gh pr create`), look again shortly. */

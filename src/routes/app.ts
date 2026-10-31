@@ -29,9 +29,9 @@ export async function newPasswordHash(v: unknown): Promise<string> {
 }
 
 /** Who you are, as the front end needs it. */
-function meView({ store, claude }: Ctx['app'], session: Ctx['session']) {
+function meView({ store, claude, runner }: Ctx['app'], session: Ctx['session']) {
   const user = session.uid ? store.getUser(session.uid) : undefined;
-  return { id: user?.id ?? null, name: session.name, login: user?.login ?? null, admin: !!session.admin, turns: !!user?.server_login || (!!user && claude.linked(user.id) === 'linked') };
+  return { id: user?.id ?? null, name: session.name, login: user?.login ?? null, admin: !!session.admin, turns: !!user?.server_login || (!!user && claude.linked(user.id) === 'linked'), payer: runner.payerOf(user?.id) };
 }
 
 export const appRoutes: Route[] = [

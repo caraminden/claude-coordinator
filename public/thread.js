@@ -10,6 +10,7 @@ import { narrationSorter } from './narration.js';
 import { gist, groupTitle, gruntName, gruntOf } from './grunts.js';
 import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
+import { payerChip, payerLine } from './payer.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
 
@@ -157,6 +158,8 @@ export function chatSection(chatId, ticket) {
   latest.addEventListener('click', scrollToBottom);
   form.querySelector('.row > .add-image').after(latest);
   // One-tap replies sit at the top of the composer, so they stay in view with it (renderTicketHead fills them).
+  // Whose plan your message runs on, only when that's news (public/payer.js); under the replies, right over the box.
+  form.prepend(h('div', { id: 'chat-payer', hidden: true }));
   form.prepend(h('div', { class: 'replies-bar', id: 'chat-replies', hidden: true }));
   return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);
 }
@@ -279,6 +282,10 @@ export function renderTicketHead() {
     const chips = replyChips(t, form.sendText);
     bar.hidden = !chips;
     bar.replaceChildren(chips);
+    const slot = chat.querySelector('#chat-payer');
+    const line = payerLine(t, form.sendText);
+    slot.hidden = !line;
+    slot.replaceChildren(line ?? '');
   }
   const actions = [];
   // The minion's branch, running on a copy of the data (start_preview, src/previews.ts).
@@ -319,6 +326,7 @@ export function renderTicketHead() {
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       h('span', { class: 'spacer' }),
+      payerChip(t),
       phone ? '' : nav),
     coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
     h('div', { class: 'head-sub' }, stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),

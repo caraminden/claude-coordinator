@@ -265,6 +265,9 @@ interface LiveTurn {
   stopTimer?: NodeJS.Timeout;
 }
 
+/** A minion's context size at its last turn's last API call (tokens), for what switching its payer costs. */
+const contextKey = (ticketId: number) => `context:${ticketId}`;
+
 /** Where a person's own plan usage is kept (their container turns'), apart from the server login's `usage`. */
 export const usageKey = (person: number) => `usage:user:${person}`;
 
@@ -957,6 +960,9 @@ export class Runner {
       ship: this.ship(ticket.id),
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
+      // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
+      payer: this.payerView(ticket.person_id),
+      context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
       // What "Default" means in the composer: the effort a turn gets when the ticket has none of its own.
       default_effort: turnSettings({ ...ticket, effort: null }, this.store.getProject(ticket.project_id) ?? { default_effort: '' }).effort,
     };
@@ -1284,7 +1290,12 @@ export class Runner {
       return;
     }
     const q = this.queues.get(ticketId) ?? [];
-    q.push(msg);
+    // Waiting on its payer's usage limit, a message on another plan carries on now (sender pays): first, so the turn is its sender's.
+    const otherPlan = !!(person && ticket && this.limitWait(ticketId) && this.payerOf(person) !== this.payerOf(ticket.person_id ?? this.store.getProject(ticket.project_id)?.owner_id));
+    if (otherPlan) {
+      q.unshift(msg);
+      this.cancelLimitWait(ticketId);
+    } else q.push(msg);
     this.queues.set(ticketId, q);
     if (!this.isRunning(ticketId)) {
       this.next(ticketId);
@@ -1938,6 +1949,13 @@ export class Runner {
     }
     if (!ev || typeof ev !== 'object') return;
     if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info, ticketId);
+    // Each main-thread API call re-reads the whole context: its input is the context's size.
+    const u = ev.type === 'assistant' && !ev.parent_tool_use_id ? ev.message?.usage : null;
+    if (u) this.contextSizes.set(ticketId, (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0));
+    if (ev.type === 'result' && this.contextSizes.has(ticketId)) {
+      this.store.setSetting(contextKey(ticketId), this.contextSizes.get(ticketId));
+      this.contextSizes.delete(ticketId);
+    }
     if (DROPPED_TYPES.has(ev.type)) return;
     if (ev.session_id && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
@@ -1973,6 +1991,9 @@ export class Runner {
     }
     this.notePushes(ticketId, ev);
   }
+
+  /** The running turn's latest context size, saved when it ends (contextKey). */
+  private contextSizes = new Map<number, number>();
 
   /** Bash calls that push or open a pull request, by tool_use id, until their result comes back. */
   private pushCalls = new Map<string, 'push' | 'pr'>();
@@ -2030,6 +2051,14 @@ export class Runner {
   /** Whose plan a person's turns run on: null for the server login (its owner's turns run on the host), else their own. */
   payerOf(uid: number | null | undefined): number | null {
     return uid && !this.store.getUser(uid)?.server_login ? uid : null;
+  }
+
+  /** A plan as the minion's chip names it: payerOf's id, and whose it is (the server login's owner for it). */
+  private payerView(uid: number | null): { id: number | null; name: string } | null {
+    if (!uid) return null;
+    const id = this.payerOf(uid);
+    const name = this.store.getUser(id ?? this.store.serverLoginOwner() ?? uid)?.name;
+    return name ? { id, name } : null;
   }
 
   /** A person's own plan usage, for their top-bar meter: the server login's, or their container turns'. */

@@ -90,7 +90,9 @@ export function renderInbox() {
   const items = inbox.items.filter((i) => ticketOf(i.ticketId));
   const strip = inboxStrip();
   const count = items.filter((i) => !faded(i)).length;
-  for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: count }));
+  // A scheme you hid (#226) keeps its strip but no pill.
+  const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
+  for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count }));
   strip.hidden = !items.length;
   if (!items.length) return strip.replaceChildren();
   let open = false;

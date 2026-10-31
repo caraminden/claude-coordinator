@@ -20,8 +20,9 @@ export async function openStartScheme() {
   const projects = await api('api/projects');
   let last = NaN;
   try { last = Number(localStorage.getItem(LAST_SCHEME)); } catch {}
-  // A hidden scheme only opens by itself when it was the last one open (#226).
-  const id = startScheme(projects.filter((p) => !p.hidden || p.id === last), last);
+  // A hidden scheme only opens by itself when it was the last one open, or every one is hidden (#226).
+  const shown = projects.filter((p) => !p.hidden || p.id === last);
+  const id = startScheme(shown.length ? shown : projects, last);
   if (id != null) return replaceHash(`#/p/${id}`); // replace: Back shouldn't bounce through here
   setView({ kind: 'projects' });
   crumbs.replaceChildren('New scheme');

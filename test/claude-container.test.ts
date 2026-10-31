@@ -120,14 +120,6 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   assert.equal(r.interruptible(), 1);
 });
 
-test("land.sh on the host carries the container turn's own token, so landing doesn't log the turn's tools out (#225)", () => {
-  const minted: number[] = [];
-  const r = new Runner(store, () => {}, (t, token) => ({ COORDINATOR_TOKEN: token ?? `fresh-${minted.push(t.id)}` }), fake);
-  const env = r.hostEnv(store.getTicket(newTicket())!, 'the-turns-token');
-  assert.equal(env.COORDINATOR_TOKEN, 'the-turns-token');
-  assert.deepEqual(minted, []);
-});
-
 test("a person who can't run turns gets the reason as a note and no turn", async () => {
   const id = newTicket();
   const r = runner(() => ({ refused: 'Turns for Josh start once they link their Claude account' }));

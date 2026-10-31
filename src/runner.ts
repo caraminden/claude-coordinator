@@ -783,8 +783,7 @@ export function onboardingPrompt(project: Project, sharedDir: string | null): st
   ].join('\n');
 }
 
-/** Extra process setup for coordinator turns: how its MCP server reaches the API. */
-/** A turn's COORDINATOR_* variables; without `token` it mints the ticket's next turn token, which retires the one before. */
+/** How a turn's MCP server reaches the API; without `token` it mints the ticket's next turn token, which retires the one before. */
 export type CoordinatorEnv = (ticket: Ticket, token?: string) => Record<string, string>;
 
 /**

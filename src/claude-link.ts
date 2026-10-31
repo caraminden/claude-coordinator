@@ -8,7 +8,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { delimiter, dirname, join, relative } from 'node:path';
 import { Containers, specHash, type ContainerSpec, type Mount } from './containers.ts';
 import type { Credentials } from './credentials.ts';
 import type { Store } from './db.ts';
@@ -149,6 +149,10 @@ export class ClaudeLink {
     await this.containers.createVolume(spec.name);
     // A bind mount's folder must exist: a fresh server has no run/turns until its first turn.
     for (const m of spec.mounts) if (!m.volume && !m.ro) mkdirSync(m.src, { recursive: true });
+    // Mounts inside HOME need their folders made in the volume first, as the person: podman makes missing
+    // ones as root, and a root-owned ~/.claude left Claude unable to save the sign-in.
+    const vol = await this.containers.volumePath(spec.name);
+    for (const m of spec.mounts) if (vol && !m.volume && m.dst.startsWith(this.home + '/')) mkdirSync(join(vol, relative(this.home, m.dst)), { recursive: true });
     const now = await this.containers.status(spec.name);
     // shortcut: a changed spec (new image, a new scheme's memory) waits until no turn runs in the container; a busy one keeps its old mounts meanwhile.
     if (now.state === 'running' && (now.spec === specHash(spec) || this.busy(spec.name))) return;
@@ -184,6 +188,8 @@ export class ClaudeLink {
     const login: Login = { child: null, out: '' };
     this.logins.set(uid, login);
     try {
+      // A sign-in starts in a fresh container: the restart's :U chown also mends a volume an older start left root-owned folders in.
+      if (!this.busy(this.name(uid))) await this.containers.stop(this.name(uid));
       await this.ensure(uid);
       const claude = resolveClaude(this.claudeBin);
       const child = spawn('podman', ['exec', '-i', '-e', `CLAUDE_CONFIG_DIR=${join(this.home, '.claude')}`, this.name(uid), 'script', '-qfec', `stty cols 4000; ${claude} auth login --claudeai`, '/dev/null'], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -230,7 +236,9 @@ export class ClaudeLink {
     if (!who.loggedIn) {
       const said = signInOutcome(login.out, code);
       login.error = `The sign-in didn't take (${exit === null ? 'no answer within a minute' : `exit ${exit}`}): ${said}${exit === 0 ? ` Then \`claude auth status\` said: ${who.said}` : ''}`;
-      console.warn(`claude-link: sign-in for user ${uid} didn't take (exit ${exit}): ${said} | auth status: ${who.said}`);
+      // File names and owners only: what the sign-in left in the Claude folder, for the server log.
+      const files = await this.containers.exec(this.name(uid), ['sh', '-c', 'id; ls -la "$CLAUDE_CONFIG_DIR"'], { env: { CLAUDE_CONFIG_DIR: join(this.home, '.claude') }, timeout: 30_000 });
+      console.warn(`claude-link: sign-in for user ${uid} didn't take (exit ${exit}): ${said} | auth status: ${who.raw} | ${files.stdout}${files.stderr}`);
       login.child = null;
       return this.status(uid);
     }
@@ -262,15 +270,16 @@ export class ClaudeLink {
   }
 
   /** `claude auth status` in the container: signed in or not, and as whom. */
-  private async whoami(uid: number): Promise<{ loggedIn: boolean; email?: string; plan?: string; said: string }> {
+  private async whoami(uid: number): Promise<{ loggedIn: boolean; email?: string; plan?: string; said: string; raw: string }> {
     const r = await this.containers.exec(this.name(uid), [resolveClaude(this.claudeBin), 'auth', 'status'], { env: { CLAUDE_CONFIG_DIR: join(this.home, '.claude') }, timeout: 30_000 });
-    const said = lastLines(`${r.stdout}\n${r.stderr}`);
+    const raw = `${r.stdout}\n${r.stderr}`;
+    const said = lastLines(raw);
     try {
       // The JSON may follow a warning line.
       const s = JSON.parse(r.stdout.slice(r.stdout.indexOf('{')));
-      return { loggedIn: !!s.loggedIn, email: s.email ?? s.account?.email, plan: s.subscriptionType ?? s.plan, said };
+      return { loggedIn: !!s.loggedIn, email: s.email ?? s.account?.email, plan: s.subscriptionType ?? s.plan, said, raw };
     } catch {
-      return { loggedIn: false, said };
+      return { loggedIn: false, said, raw };
     }
   }
 }

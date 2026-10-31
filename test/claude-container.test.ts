@@ -148,6 +148,7 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   const fakeRun: RunCmd = async (cmd, args) => {
     log.push([cmd, ...args]);
     if (args[0] === 'container' && args[1] === 'inspect') return { code: 0, stdout: 'true deadbeef', stderr: '' };
+    if (args[0] === 'volume' && args[1] === 'inspect') return { code: 0, stdout: join(root, 'josh-vol-ensure') + '\n', stderr: '' };
     return { code: 0, stdout: '', stderr: '' };
   };
   const creds = new Credentials(store, 'x'.repeat(40));
@@ -164,6 +165,10 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   // A fresh server has no run/turns yet; podman refuses a bind mount whose folder is missing.
   await link.ensure(josh.id);
   assert.ok(existsSync(join(root, 'data', 'run', 'turns')) && existsSync(join(root, 'data', 'projects')));
+  // ...and podman would make mount points inside HOME as root, leaving ~/.claude unwritable.
+  const inHome = spec.mounts.filter((m) => !m.volume && m.dst.startsWith(home + '/'));
+  assert.ok(inHome.length > 0);
+  for (const m of inHome) assert.ok(existsSync(join(root, 'josh-vol-ensure', m.dst.slice(home.length + 1))), m.dst);
   assert.ok(log.some((c) => c[0] === 'systemd-run' && c.includes(`--unit=citadel-claude-t-${josh.id}`)));
   creds.put(josh.id, 'claude_runner', link.name(josh.id), { container: link.name(josh.id), home: volume, linkedAt: 1 });
   const place = link.place(josh.id);

@@ -133,6 +133,32 @@ test('a card waiting through a restart still waits in the re-attached turn, and 
   assert.deepEqual(results, ['allowed', 'denied'], 'no expiry from the restart');
 });
 
+test("a typed go that started a turn survives a restart, and never reaches the next turn (#209)", async () => {
+  const id = newTicket();
+  rmSync(release, { force: true });
+  const before = server();
+  before.send(id, 'Cara', 'Fold it', [], { typed: true });
+  await until(() => texts(id).length > 0);
+  before.detachAll();
+
+  const next = server();
+  next.recover();
+  assert.ok(next.approvals.hasGo(id), 'kept with the turn through the restart');
+  writeFileSync(release, '');
+  await until(() => !next.isRunning(id));
+  assert.equal(next.approvals.hasGo(id), false);
+  assert.equal(store.getSetting(`turn:${id}`), null, 'the ended turn left nothing behind to bring it back');
+  rmSync(release, { force: true });
+  next.send(id, 'GitHub', 'CI passed');
+  await until(() => next.isRunning(id));
+  next.detachAll();
+  const third = server();
+  third.recover();
+  assert.equal(third.approvals.hasGo(id), false, 'a later turn, across another restart, starts without it');
+  writeFileSync(release, '');
+  await until(() => !third.isRunning(id));
+});
+
 test('a card whose turn did not survive the restart expires', async () => {
   const id = newTicket();
   const before = await started(id);

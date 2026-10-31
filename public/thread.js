@@ -674,6 +674,8 @@ export function appendEvent(event, scroll = true) {
         { id: event.id, strikes: data.strikes, brief: data.brief },
         (data.files ?? []).map((f) => ({ ...f, href: uploadUrl(event.ticket_id, f.name) })));
       bubble.dataset.event = event.id;
+      // What its ✎ puts back in the message box while it waits in the queue (markQueued).
+      if (data.author === me) bubble.sent = { text: data.text ?? '', images: data.images ?? [], files: data.files ?? [] };
       stamped(bubble, event);
       if (data.steered) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'Sent into the turn that was running: Claude read it between steps' }, 'into the running turn'));
       markQueued(bubble, view.ticket);
@@ -901,6 +903,20 @@ function shortDuration(ms) {
 /** An object URL for base64 image data (the page's CSP allows blob: images but not data: ones). */
 export function base64Url(mediaType, data) {
   return URL.createObjectURL(new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: mediaType }));
+}
+
+/** A sent image fetched back as { mediaType, data }, the way the composer holds one. */
+async function imageData(src) {
+  const res = await fetch(src);
+  if (!res.ok) throw new Error(`Could not load its image (HTTP ${res.status})`);
+  const blob = await res.blob();
+  const data = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1]);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+  return { mediaType: blob.type, data };
 }
 
 /**
@@ -1319,14 +1335,33 @@ function machineAuthor(author) {
 }
 
 /** A chat message from a person; `about`, for a comment on a file, links that file. */
-/** A message still queued for the next turn says so, with a ✕ to take it back; it loses both once sent. */
+/**
+ * A message still queued for the next turn says so, with a ✕ to take it back and, on your own, a ✎ to
+ * take it back into the message box to fix and resend; it loses them once sent.
+ */
 function markQueued(bubble, ticket) {
   const id = Number(bubble.dataset.event);
   const queued = !!ticket?.queued_ids?.includes(id);
   const tag = bubble.querySelector('.queued-tag');
   if (!queued) return tag?.remove();
   if (tag) return;
-  bubble.querySelector('.who').append(h('span', { class: 'msg-tag queued-tag' }, 'queued for the next turn',
+  const edit = bubble.sent && h('button', { type: 'button', class: 'take-back', title: 'Take back to edit', 'aria-label': 'Take back to edit',
+    onclick: async (e) => {
+      e.preventDefault();
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        // Images first: if one won't load, the message stays queued rather than coming back without it.
+        const images = await Promise.all(bubble.sent.images.map((name) => imageData(`api/tickets/${ticket.id}/images/${encodeURIComponent(name)}`)));
+        await api(`api/tickets/${ticket.id}/unqueue`, { method: 'POST', body: { id } });
+        const form = view?.id === ticket.id && document.querySelector('.composer');
+        form?.editBack(bubble.sent.text, [...images, ...bubble.sent.files.map((upload) => ({ upload }))]);
+      } catch (err) {
+        btn.disabled = false;
+        alertNote(err.message);
+      }
+    } }, '✎');
+  bubble.querySelector('.who').append(h('span', { class: 'msg-tag queued-tag' }, 'queued for the next turn', edit ?? '',
     h('button', { type: 'button', class: 'take-back', title: 'Take back this message', 'aria-label': 'Take back this message',
       onclick: (e) => {
         e.preventDefault(); // a Taskmaster message's ✕ sits in its <summary>

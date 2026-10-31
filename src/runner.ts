@@ -20,6 +20,7 @@ import { projectDir, restoreTicketDir } from './workspace.ts';
 import { previewKey } from './previews.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { CITADEL_REPLY_MS } from './access.ts';
+import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDir, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
@@ -241,6 +242,8 @@ interface TurnState {
   person?: number | null;
   /** Their GitHub login it pushes as; null when they haven't linked, absent with GitHub linking not set up. */
   github?: string | null;
+  /** The person's Claude container it runs in (#213); absent on the host. */
+  container?: string;
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
@@ -251,13 +254,30 @@ interface LiveTurn {
   startedAt: number;
   configDir: string;
   chosenEffort: boolean;
+  container: string | null;
   timer: NodeJS.Timeout;
   ticks: number;
   stopTimer?: NodeJS.Timeout;
 }
 
-/** A turn's wrapper still runs: its pid is alive and is that turn's wrapper, not a reused pid. */
+/** Where a person's own plan usage is kept (their container turns'), apart from the server login's `usage`. */
+export const usageKey = (person: number) => `usage:user:${person}`;
+
+/** A container turn's wrapper beat (src/turn-wrapper.ts) longer ago than this is gone. */
+const BEAT_STALE_MS = 30_000;
+
+/**
+ * A turn's wrapper still runs: its pid is alive and is that turn's wrapper, not a reused pid. In a
+ * container (the `container` file) its pids are the container's, so its heartbeat says instead.
+ */
 function wrapperAlive(dir: string): boolean | null {
+  if (existsSync(join(dir, 'container'))) {
+    try {
+      return Date.now() - statSync(join(dir, 'beat')).mtimeMs < BEAT_STALE_MS;
+    } catch {
+      return null;
+    }
+  }
   let pid: number;
   try {
     pid = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8')).wrapper;
@@ -832,6 +852,15 @@ export class Runner {
   approvals: Approvals;
   /** Whether a scheme's minions may use the connected machines (an admin's schemes only: they are the admin's). */
   lendsMachines?: (project: Project) => boolean;
+  /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
+  placeFor?: (person: number | null) => TurnPlace | { refused: string };
+  /** A container turn's Claude sign-in was refused, so that person has to link again. */
+  onAuthFailure?: (person: number) => void;
+
+  /** Whether any turn runs in this container now (it isn't restarted under them). */
+  inContainer(container: string): boolean {
+    return [...this.turns.values()].some((t) => t.container === container);
+  }
   /** Why a message can't start or steer a turn (src/access.ts turnRefusal), or null when it can. */
   refuseTurn?: (ticket: Ticket, author: string) => string | null;
   /** The person a message speaks for: its author, or for a relay (`from`), the sending turn's person. */
@@ -1408,6 +1437,12 @@ export class Runner {
     } catch {
       // Not started yet.
     }
+    // A container's pids mean nothing here: signal its process group from inside.
+    if (pid && live.container) {
+      const s = sig.replace(/^SIG/, '');
+      execFile('podman', ['exec', live.container, 'sh', '-c', `kill -${s} -${pid} 2>/dev/null || kill -${s} ${pid}`], () => {});
+      return;
+    }
     if (pid) {
       try {
         process.kill(-pid, sig);
@@ -1460,6 +1495,12 @@ export class Runner {
     // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
     if (this.noTurns) {
       this.emit(ticket.id, 'note', { text: 'This is a preview: it shows the app on a copy of the data, but it never runs turns.' });
+      return this.broadcastTicket(ticket.id);
+    }
+    // Whose Claude it runs on (sender pays, #213): the host's login for its owner, else their own container.
+    const place = this.placeFor?.(person) ?? { host: true as const };
+    if ('refused' in place) {
+      this.emit(ticket.id, 'note', { text: place.refused });
       return this.broadcastTicket(ticket.id);
     }
     this.approvals.heard(ticket.id, batch, true);
@@ -1566,6 +1607,11 @@ export class Runner {
     // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
     args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', 'AskUserQuestion', ...UNUSED_TOOLS);
     env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
+    // In a container, claude signs in with the person's own login, so nothing of the server's may win over it.
+    if (!place.host) {
+      for (const v of AUTH_VARS) delete env[v];
+      env = { ...env, ...place.env };
+    }
     // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
     if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;
     if (filesDir) env.COORDINATOR_FILES_DIR = filesDir;
@@ -1576,7 +1622,11 @@ export class Runner {
     const github = this.githubFor?.(person, dir) ?? null;
     if (github) env = { ...env, ...github.env };
     const prompt = promptMessage(github ? [{ author: 'System', text: github.line, images: [] }, ...batch] : batch);
-    if (person !== ticket.person_id) this.store.updateTicket(ticket.id, { person_id: person });
+    if (person !== ticket.person_id) {
+      this.store.updateTicket(ticket.id, { person_id: person });
+      const name = person && this.store.getUser(person)?.name;
+      if (ticket.person_id && name) this.emit(ticket.id, 'note', { text: place.host ? `Turns now run for ${name}, on the server's Claude login.` : `Turns now run on ${name}'s Claude plan.` });
+    }
     const from = batch.find((m) => m.from || this.personOf?.(m.author))?.from;
     if (from) this.turnFrom.set(ticket.id, from);
     else this.turnFrom.delete(ticket.id);
@@ -1593,7 +1643,7 @@ export class Runner {
 
     // The session's transcript, task list and memory live in the database too; put back anything this
     // config dir lacks (another account, a fresh machine) before resuming.
-    const configDir = claudeConfigDir(env);
+    const configDir = place.host ? claudeConfigDir(env) : place.configDir;
     try {
       const restored = restoreSession(this.store, ticket, project, configDir);
       if (restored) console.log(`Ticket ${ticket.id}: restored the Claude session from the database (${restored} file${restored === 1 ? '' : 's'}).`);
@@ -1612,12 +1662,13 @@ export class Runner {
     writeFileSync(join(dir, 'prompt.jsonl'), prompt);
     for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
     // Holds the turn's token: private, and the wrapper deletes it once read.
-    writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: this.claudeBin, args, cwd: ticket.cwd, env }), { mode: 0o600 });
-    const unit = this.units ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, ...(github ? { github: github.login } : {}) };
+    writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: place.host ? this.claudeBin : resolveClaude(this.claudeBin), args, cwd: ticket.cwd, env }), { mode: 0o600 });
+    const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     this.setStatus(ticket.id, 'running');
+    if (!place.host) return this.spawnInContainer(place, dir, pinned(TURN_WRAPPER));
     const wrapper = [process.execPath, pinned(TURN_WRAPPER), dir];
     if (!unit) return this.spawnWrapper(wrapper, dir);
     const run = ['--user', '--collect', '--quiet', `--unit=${unit}`, `--slice=${TURN_SLICE}`, '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper];
@@ -1628,6 +1679,25 @@ export class Runner {
       this.saveTurn(ticket.id, { unit: null });
       this.spawnWrapper(wrapper, dir);
     });
+  }
+
+  /**
+   * Start a turn's wrapper in the person's container, detached: podman's conmon holds it, not this
+   * server, so it outlives a restart. Its pids are the container's, so the `container` file tells
+   * wrapperAlive to go by its heartbeat instead.
+   */
+  private spawnInContainer(place: Extract<TurnPlace, { host: false }>, dir: string, wrapper: string) {
+    writeFileSync(join(dir, 'container'), place.container);
+    const beat = () => writeFileSync(join(dir, 'beat'), '');
+    beat();
+    // Starting the container (building its image, the first time) can take minutes; it counts as running meanwhile.
+    const starting = setInterval(beat, 5_000);
+    place.ensure()
+      .then(() => new Promise<void>((resolve, reject) => {
+        execFile('podman', ['exec', '-d', place.container, 'node', wrapper, dir], (err, _out, stderr) => (err ? reject(new Error(String(stderr).trim() || err.message)) : resolve()));
+      }))
+      .catch((err) => writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${place.container}: ${err.message}` })))
+      .finally(() => clearInterval(starting));
   }
 
   /** Start a turn's wrapper as a detached child: no unit, so it dies when the service restarts. */
@@ -1641,7 +1711,7 @@ export class Runner {
   private follow(ticketId: number, turn: TurnState): LiveTurn {
     const live: LiveTurn = {
       dir: turn.dir!, unit: turn.unit ?? null, offset: turn.offset ?? 0, startedAt: turn.startedAt ?? Date.now(),
-      configDir: turn.configDir ?? claudeConfigDir(process.env), chosenEffort: !!turn.chosenEffort, ticks: 0,
+      configDir: turn.configDir ?? claudeConfigDir(process.env), chosenEffort: !!turn.chosenEffort, container: turn.container ?? null, ticks: 0,
       timer: setInterval(() => this.poll(ticketId), this.pollMs),
     };
     // The server's listener keeps the process up; a Runner alone (a test) can exit with turns followed.
@@ -1750,7 +1820,13 @@ export class Runner {
       // Stopped by the user; leave it waiting for the next message.
     } else if (killed || !sawResult || code !== 0 || resultIsError) {
       status = 'error';
-      this.turnFailed(ticketId, killed || resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0);
+      // A container's sign-in that stopped working: their messages wait until they link again.
+      if (turn?.container && turn.person && isAuthFailure(`${resultError ?? ''}\n${stderr.join('\n')}`)) {
+        this.onAuthFailure?.(turn.person);
+        this.emit(ticketId, 'note', { text: `${this.store.getUser(turn.person)?.name ?? 'This person'}'s Claude sign-in expired. Link Claude again in Settings → Your account; their messages wait until then.` });
+      }
+      const usage = turn?.container && turn.person ? this.store.getSetting<Usage>(usageKey(turn.person)) : this.usage;
+      this.turnFailed(ticketId, killed || resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0, usage);
     }
     const closing = this.closing.has(ticketId);
     const reason = this.closing.get(ticketId);
@@ -1789,7 +1865,7 @@ export class Runner {
    * lines). A usage limit is a wait, not an error: no push, and it resumes after the reset. An account
    * problem needs a person: it blocks, never retries, and pushes once for everyone.
    */
-  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number) {
+  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage) {
     const exited = code ? `claude exited with code ${code}` : 'claude ended without finishing';
     const why = reason || stderr;
     const text = why ? `${why}${reason && stderr ? `\n${stderr}` : ''}\n(${exited})` : exited;
@@ -1805,7 +1881,6 @@ export class Runner {
         this.onTurnError(ticketId, `Usage limit: gave up after ${limitTries} resumes in a row`);
         return;
       }
-      const usage = this.usage;
       const hit = [usage?.session, usage?.weekly].filter((w) => w?.status === 'rejected' && w.resetsAt && w.resetsAt > Date.now()).map((w) => w!.resetsAt!);
       const resetAt = hit.length ? Math.max(...hit) : parseResetTime(reason) ?? Date.now() + this.limitFallbackMs;
       const at = this.waitForLimit(ticketId, resetAt, limitTries + 1, tz);
@@ -1838,7 +1913,7 @@ export class Runner {
       return;
     }
     if (!ev || typeof ev !== 'object') return;
-    if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info);
+    if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info, ticketId);
     if (DROPPED_TYPES.has(ev.type)) return;
     if (ev.session_id && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
@@ -1928,11 +2003,14 @@ export class Runner {
     return this.store.getSetting<Usage>('usage');
   }
 
-  private updateUsage(info: any) {
+  /** Record a turn's plan usage: the server login's (the top bar's meter), or a container turn's payer's own (#213). */
+  private updateUsage(info: any, ticketId?: number) {
     const windows = info?.unifiedWindows;
     if (!windows) return;
     const usage: Usage = { weekly: usageWindow(windows.seven_day), session: usageWindow(windows.five_hour), updatedAt: Date.now() };
     if (!usage.weekly && !usage.session) return;
+    const turn = ticketId === undefined ? null : this.store.getSetting<TurnState>(turnKey(ticketId));
+    if (turn?.container && turn.person) return this.store.setSetting(usageKey(turn.person), usage);
     this.store.setSetting('usage', usage);
     this.broadcast({ type: 'usage', usage });
   }

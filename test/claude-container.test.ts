@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, ut
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ClaudeLink, signInUrl } from '../src/claude-link.ts';
+import { ClaudeLink, signInOutcome, signInUrl } from '../src/claude-link.ts';
 import { Containers, runArgs, specHash, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
@@ -181,4 +181,10 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
 test("the sign-in link is read from the terminal's output", () => {
   assert.equal(signInUrl('Browser didn\'t open? Use the url below:\nhttps://claude.ai/oauth/authorize?code=true&client_id=x&state=y\n\nPaste code here'), 'https://claude.ai/oauth/authorize?code=true&client_id=x&state=y');
   assert.equal(signInUrl('Opening browser…'), null);
+});
+
+test("a failed sign-in says Claude's own last words, without the link or the pasted code", () => {
+  const out = 'Opening browser to sign in...\nIf the browser didn\'t open, visit: https://claude.com/cai/oauth/authorize?code=true&' + 'x'.repeat(400) + '\nPaste code here if prompted > abc#def\n\nLogin failed: Request failed with status code 400\n';
+  const said = signInOutcome(out, 'abc#def');
+  assert.equal(said, 'Paste code here if prompted > [code] Login failed: Request failed with status code 400');
 });

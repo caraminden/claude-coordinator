@@ -2014,6 +2014,17 @@ export class Runner {
     return this.store.getSetting<Usage>('usage');
   }
 
+  /** Whose plan a person's turns run on: null for the server login (its owner's turns run on the host), else their own. */
+  payerOf(uid: number | null | undefined): number | null {
+    return uid && !this.store.getUser(uid)?.server_login ? uid : null;
+  }
+
+  /** A person's own plan usage, for their top-bar meter: the server login's, or their container turns'. */
+  usageOf(uid: number | null | undefined): Usage | null {
+    const payer = this.payerOf(uid);
+    return payer === null ? this.usage : this.store.getSetting<Usage>(usageKey(payer));
+  }
+
   /** Record a turn's plan usage: the server login's (the top bar's meter), or a container turn's payer's own (#213). */
   private updateUsage(info: any, ticketId?: number) {
     const windows = info?.unifiedWindows;
@@ -2021,9 +2032,10 @@ export class Runner {
     const usage: Usage = { weekly: usageWindow(windows.seven_day), session: usageWindow(windows.five_hour), updatedAt: Date.now() };
     if (!usage.weekly && !usage.session) return;
     const turn = ticketId === undefined ? null : this.store.getSetting<TurnState>(turnKey(ticketId));
-    if (turn?.container && turn.person) return this.store.setSetting(usageKey(turn.person), usage);
-    this.store.setSetting('usage', usage);
-    this.broadcast({ type: 'usage', usage });
+    const payer = turn?.container && turn.person ? turn.person : null;
+    this.store.setSetting(payer === null ? 'usage' : usageKey(payer), usage);
+    // Only the payer's own meter shows it (server.ts, broadcast).
+    this.broadcast({ type: 'usage', usage, payer });
   }
 
   private setStatus(ticketId: number, status: Ticket['status']) {

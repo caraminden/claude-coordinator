@@ -12,6 +12,7 @@ function personView(app: App, u: User) {
     disabled: !!u.disabled_at, has_password: !!u.password_hash, invite_open: (u.invite_expires ?? 0) > Date.now(),
     github: app.github.login(u.id),
     claude: app.claude.linked(u.id), server_login_owner: u.id === app.store.serverLoginOwner(),
+    week: app.runner.usageOf(u.id)?.weekly ?? null,
   };
 }
 
@@ -137,7 +138,7 @@ export const peopleRoutes: Route[] = [
   },
   // Linking your own Claude plan (src/claude-link.ts, #213): its state, starting the sign-in, the code
   // Anthropic shows you, and unlinking. Only the one-time code passes through; never a token.
-  { method: 'GET', path: '/api/me/claude', who: ['person'], handler: ({ res, app, session }) => json(res, 200, app.claude.status(uidOf(session))) },
+  { method: 'GET', path: '/api/me/claude', who: ['person'], handler: ({ res, app, session }) => json(res, 200, { ...app.claude.status(uidOf(session)), usage: app.runner.usageOf(uidOf(session)) }) },
   {
     method: 'POST', path: '/api/me/claude', who: ['person'],
     handler({ res, app, session }) {

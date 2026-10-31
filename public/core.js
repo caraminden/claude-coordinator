@@ -362,7 +362,8 @@ function connectStream(catchUp = false) {
       }
       assetVersion ??= msg.version;
     }
-    if (msg.type === 'hello' || msg.type === 'usage') {
+    // A hello after a front-end reload carries no usage: the meter keeps the stream's own.
+    if ((msg.type === 'hello' || msg.type === 'usage') && 'usage' in msg) {
       renderUsage(msg.usage);
       // Rows of minions that hit the usage limit count down to its reset.
       if (view?.kind === 'project') renderSidebar();
@@ -458,7 +459,7 @@ export function renderUsage(next = usage) {
     el.dataset.level = week.status && week.status !== 'allowed' ? 'error' : pct >= 90 ? 'error' : pct >= 75 ? 'warn' : '';
     const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
     el.title = [
-      `Weekly usage of this Claude account: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
+      `Weekly usage of your Claude plan: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
       usage.session ? `5-hour window: ${Math.round(usage.session.utilization * 100)}%${usage.session.resetsAt ? `, resets ${when(usage.session.resetsAt)}` : ''}` : null,
       `As of the last turn, ${ago(usage.updatedAt)}`,
     ].filter(Boolean).join('\n');

@@ -131,7 +131,7 @@ function broadcast(msg: object) {
     if (res.writableLength > MAX_CLIENT_BACKLOG) {
       clients.delete(res);
       res.destroy();
-    } else if (mayReceive(store, who, scope)) {
+    } else if (mayReceive(store, who, scope) && (!('payer' in msg) || runner.payerOf(who.uid) === (msg as { payer: number | null }).payer)) {
       res.write(data);
     }
   }
@@ -668,7 +668,7 @@ process.on('SIGHUP', () => {
   loadAssets().then(
     () => {
       console.log(`Reloaded public/ on SIGHUP: front end ${before} → ${ASSET_VERSION}`);
-      if (ASSET_VERSION !== before) broadcast({ type: 'hello', version: ASSET_VERSION, usage: runner.usage });
+      if (ASSET_VERSION !== before) broadcast({ type: 'hello', version: ASSET_VERSION });
       // tools/deploy.sh sends SIGHUP only for a change to public/ alone, so the checkout's HEAD is now live.
       if (!BOOT_CHECK) liveOn(checkoutHead());
     },

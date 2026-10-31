@@ -85,7 +85,7 @@ export function peoplePage() {
     return h('div', { class: 'person-row' },
       h('span', { class: 'text' },
         h('span', { class: 'name' }, u.name, u.admin ? ' · admin' : ''),
-        h('span', { class: 'meta' }, [u.login, state, claude, u.github ? `GitHub @${u.github.login}${u.github.failed ? ' (needs linking again)' : ''}` : 'GitHub not linked'].filter(Boolean).join(' · '))),
+        h('span', { class: 'meta' }, [u.login, state, claude, u.week && `week ${Math.round(u.week.utilization * 100)}%`, u.github ? `GitHub @${u.github.login}${u.github.failed ? ' (needs linking again)' : ''}` : 'GitHub not linked'].filter(Boolean).join(' · '))),
       h('span', { class: 'person-actions' },
       turns && h('label', { class: 'small turns-toggle', title: 'Your messages start and steer turns on the server\'s Claude login. Off: they run on the Claude you link in Your account.' }, turns, 'Turns'),
       h('button', {
@@ -158,6 +158,9 @@ export function accountPage() {
     form, claudeCard(), githubCard());
 }
 
+/** A plan's week as of its last turn: "41%, resets Mon 9:00 AM", or null before its first turn. */
+const weekText = (w) => w ? `${Math.round(Math.min(1, Math.max(0, w.utilization)) * 100)}%${w.resetsAt ? `, resets ${new Date(w.resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}` : null;
+
 /** Your own Claude plan (#213): turns you start run on it, in a container of your own on the server. */
 function claudeCard() {
   const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading Claude…'));
@@ -167,6 +170,7 @@ function claudeCard() {
     if (!card.isConnected && poll) return;
     const title = (chip, cls = '') => h('h3', {}, 'Claude', h('span', { class: `link-chip ${cls}` }, chip));
     const errLine = st.error ? h('p', { class: 'error', role: 'status' }, st.error) : '';
+    const week = weekText(st.usage?.weekly);
     const act = (label, method, path, body, cls = '') => h('button', {
       type: 'button', class: `small ${cls}`,
       onclick: async (e) => {
@@ -185,7 +189,8 @@ function claudeCard() {
     const note = h('p', { class: 'muted small' }, 'Turns you start run on your plan and count against its limits. ',
       'You sign in with Anthropic inside your own container on the server: Citadel never sees your password or token, only the one-time code you paste here.');
     if (st.host) {
-      return card.replaceChildren(title('Server login', 'ok'), h('p', {}, 'Your turns run on this server\'s own Claude login, so there\'s nothing to link.'));
+      return card.replaceChildren(title('Server login', 'ok'), h('p', {}, 'Your turns run on this server\'s own Claude login, so there\'s nothing to link.'),
+        week ? h('dl', { class: 'kv' }, h('dt', {}, 'This week'), h('dd', {}, week)) : '');
     }
     if (st.state === 'starting') {
       poll = setTimeout(() => api('api/me/claude').then(render).catch(() => {}), 2000);
@@ -216,7 +221,8 @@ function claudeCard() {
       return card.replaceChildren(title('Linked', 'ok'), errLine,
         h('dl', { class: 'kv' },
           h('dt', {}, 'Signed in as'), h('dd', {}, st.email || '—'),
-          h('dt', {}, 'Plan'), h('dd', {}, st.plan || '—')),
+          h('dt', {}, 'Plan'), h('dd', {}, st.plan || '—'),
+          week && [h('dt', {}, 'This week'), h('dd', {}, week)]),
         h('div', { class: 'row' }, unlink), note);
     }
     return card.replaceChildren(title('Not linked', 'off'), errLine,

@@ -103,6 +103,12 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   assert.equal(env.COORDINATOR_CONTAINER, '1');
   assert.equal(store.getSetting<any>(usageKey(josh.id))?.weekly?.utilization, 0.42);
   assert.equal(store.getSetting('usage'), null);
+  // Josh's meter shows his own plan; the server login's owner keeps the server's.
+  assert.equal(r.usageOf(josh.id)?.weekly?.utilization, 0.42);
+  assert.equal(r.payerOf(josh.id), josh.id);
+  const owner = store.createUser({ name: 'Owner', login: 'owner', server_login: true });
+  assert.equal(r.payerOf(owner.id), null);
+  assert.equal(r.usageOf(owner.id), null);
   assert.equal(r.inContainer('citadel-claude-test-2'), 0);
   // A landing running on the host does: the restart would kill it.
   r.hostJobs = () => 1;

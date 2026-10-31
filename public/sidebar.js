@@ -1,7 +1,7 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
 import { weekShare } from './cost.js';
 import { account, ago, api, app, costText, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, usage, view } from './core.js';
-import { loadDraft, saveDraft } from './composer.js';
+import { fitHeight, loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
@@ -163,12 +163,7 @@ export function newTicketForm(projectId) {
   const box = h('textarea', { name: 'message', required: true, rows: 1, placeholder: 'New minion: what should it work on?', 'aria-label': 'Start a new minion', 'data-draft': true });
   const err = h('p', { class: 'error', hidden: true });
   const form = h('form', { class: 'new-thread' }, box, err);
-  const fit = () => {
-    box.style.height = 'auto';
-    // Not laid out (a folded panel, or a phone's drawer still tucked away): keep the one-line default.
-    if (!box.scrollHeight) { box.style.height = ''; return; }
-    box.style.height = `${box.scrollHeight + box.offsetHeight - box.clientHeight}px`;
-  };
+  const fit = () => fitHeight(box);
   const draftKey = `cc-new-thread:${projectId}`;
   const draft = loadDraft(draftKey);
   if (draft) box.value = draft.message ?? '';

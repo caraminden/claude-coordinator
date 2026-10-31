@@ -19,6 +19,14 @@ export function saveDraft(key, value) {
   } catch {}
 }
 
+/** Grow (or shrink) a message box to fit its text; CSS min-height and max-height bound it. */
+export function fitHeight(box) {
+  box.style.height = 'auto';
+  // Not laid out (a folded panel, or a phone's drawer still tucked away): keep the CSS height.
+  if (!box.scrollHeight) { box.style.height = ''; return; }
+  box.style.height = `${box.scrollHeight + box.offsetHeight - box.clientHeight}px`;
+}
+
 let draftDb = null;
 function draftStore(mode, fn) {
   draftDb ??= new Promise((resolve, reject) => {
@@ -55,7 +63,12 @@ export function composer(chatId, ticket) {
   });
   const draftKey = `cc-draft:${chatId}`;
   textarea.value = loadDraft(draftKey) ?? '';
-  textarea.addEventListener('input', () => saveDraft(draftKey, textarea.value));
+  const fit = () => fitHeight(textarea);
+  requestAnimationFrame(fit);
+  textarea.addEventListener('input', () => {
+    fit();
+    saveDraft(draftKey, textarea.value);
+  });
   const sendBtn = h('button', { type: 'submit' }, 'Send');
   // Mid-turn, Send steers the running turn; the ▾ (shown only then, style.css) offers queueing instead.
   let after = false;
@@ -134,11 +147,13 @@ export function composer(chatId, ticket) {
     if (!text && !attachments.items.length) return;
     const sent = attachments.items.slice();
     textarea.value = '';
+    fit();
     saveDraft(draftKey, '');
     attachments.remove(sent);
     send(text, sent, queue).catch((ex) => {
       // Not sent: put it back in the composer.
       textarea.value = textarea.value.trim() ? `${text}\n${textarea.value}` : text;
+      fit();
       saveDraft(draftKey, textarea.value);
       attachments.restore([...sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data })), ...sent.filter((i) => i.upload).map(({ upload }) => ({ upload }))]);
       alertNote(ex.message);

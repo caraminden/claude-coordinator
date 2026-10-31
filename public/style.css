@@ -344,7 +344,8 @@ details.turn-end .phases, details.turn-end .cmds { text-align: left; margin-left
 details.turn-end .recap { text-align: left; margin: 0.4rem 0 0.2rem; font-size: 1.1em; }
 details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 1.1em; }
 .composer { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 1rem; }
-.composer textarea { min-height: 4.5rem; resize: vertical; }
+/* It grows with its text (composer.js fitHeight), like the new-minion box, up to a cap that leaves the chat in view. */
+.composer textarea { min-height: 4.5rem; max-height: 40vh; resize: none; overflow-y: auto; }
 .composer .composer-note { margin: 0 0 0.4rem; }
 .composer .row { margin-top: 0.5rem; }
 .composer button.small { padding: 0.2rem 0.65rem; font-size: 0.85em; }
@@ -1119,7 +1120,7 @@ dialog.viewer .ticket-head { top: 0; margin: 0 0 0.75rem; }
 dialog.viewer .ticket-head > .row > h2 { font-size: 0.95rem; }
 dialog.viewer .ticket-head :is(.prop-chip, .find-box, .head-nav > :not(.refresh-btn), .close-view, button[title='Dismiss minion']) { display: none; }
 dialog.viewer .msg .file-preview img, dialog.viewer .msg .file-preview video { max-height: 10rem; }
-dialog.viewer .composer textarea { min-height: 2.6rem; height: 2.6rem; }
+dialog.viewer .composer textarea { min-height: 2.6rem; height: 2.6rem; max-height: 10rem; }
 dialog.viewer .composer .picker { display: none; }
 @media (max-width: 800px) {
   /* Phones: the file on top with most of the height, the chat below it. */

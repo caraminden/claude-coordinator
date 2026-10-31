@@ -784,7 +784,8 @@ export function onboardingPrompt(project: Project, sharedDir: string | null): st
 }
 
 /** Extra process setup for coordinator turns: how its MCP server reaches the API. */
-export type CoordinatorEnv = (ticket: Ticket) => Record<string, string>;
+/** A turn's COORDINATOR_* variables; without `token` it mints the ticket's next turn token, which retires the one before. */
+export type CoordinatorEnv = (ticket: Ticket, token?: string) => Record<string, string>;
 
 /**
  * Model and effort for a ticket's turns: its own choice (composer or update_ticket) first, then the
@@ -865,9 +866,12 @@ export class Runner {
   /** A container turn's Claude sign-in was refused, so that person has to link again. */
   onAuthFailure?: (person: number) => void;
 
-  /** The environment a host turn's tools get, for running a minion's tools/land.sh on the host (src/land.ts). */
-  hostEnv(ticket: Ticket): Record<string, string> {
-    return { ...turnEnv(process.env), ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id) };
+  /**
+   * The environment a host turn's tools get, for running a minion's tools/land.sh on the host (src/land.ts).
+   * It carries the calling turn's own token: a fresh one would log that turn's tools out (#225).
+   */
+  hostEnv(ticket: Ticket, token: string): Record<string, string> {
+    return { ...turnEnv(process.env), ...this.coordinatorEnv(ticket, token), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id) };
   }
 
   /** How many turns run in this container now (it isn't restarted under them). */

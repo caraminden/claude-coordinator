@@ -560,10 +560,12 @@ export const ticketRoutes: Route[] = [
     // The land tool (src/land.ts): run tools/land.sh in this minion's worktree on the host, for a turn in a container.
     method: 'POST', path: '/api/tickets/:ticket/land', who: ['minion'], refuse: 'Only the minion itself can land its branch',
     handler(ctx) {
-      const { res, app, ticket } = ctx;
+      const { req, res, app, ticket } = ctx;
       const project = app.store.getProject(ticket.project_id)!;
       if (ticket.kind !== 'ticket' || !ticket.cwd || !runsRepo(project.repo_dir, app.waiters.head)) throw new HttpError(403, 'Only a minion of the scheme this server runs lands with tools/land.sh');
-      return json(res, 202, app.landings.start(ticket.id, ticket.cwd, app.runner.hostEnv(ticket)));
+      // Only a minion's own bearer token gets here (who: minion).
+      const token = String(req.headers.authorization).replace(/^Bearer /, '');
+      return json(res, 202, app.landings.start(ticket.id, ticket.cwd, app.runner.hostEnv(ticket, token)));
     },
   },
   {

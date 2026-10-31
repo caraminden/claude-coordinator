@@ -140,9 +140,9 @@ function broadcast(msg: object) {
 const runner = new Runner(
   store,
   broadcast,
-  (ticket) => ({
+  (ticket, token) => ({
     COORDINATOR_API: `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`,
-    COORDINATOR_TOKEN: auth.turnToken(ticket.id),
+    COORDINATOR_TOKEN: token ?? auth.turnToken(ticket.id),
     COORDINATOR_PROJECT: String(ticket.project_id),
   }),
   process.env.CLAUDE_BIN ?? 'claude',

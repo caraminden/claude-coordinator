@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
@@ -368,7 +368,8 @@ for (const command of ALLOWED) {
 
 test('git habits: path checkouts and moves over uncommitted changes, read from the real repo', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'tripwire-git-'));
-  const c = { ...cfg, data: tmp };
+  // The real home: a turn's TMPDIR is under it (#218), where cfg's /home/u would make the scratch another person's.
+  const c = { ...cfg, home: homedir(), data: tmp };
   const wt = join(tmp, 'projects/2/tickets/9');
   const sh = (cmd: string, cwd = wt) => execSync(cmd, { cwd, stdio: 'pipe', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
   try {

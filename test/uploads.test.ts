@@ -7,12 +7,12 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { promptMessage } from '../src/runner.ts';
 import { isUploadName, safeFileName, saveUpload, UploadTooLarge } from '../src/uploads.ts';
-import { agentToken, bootServer } from './helpers.ts';
+import { agentToken, bootServer, stopProcs } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'uploads-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
   rmSync(root, { recursive: true, force: true });
 });
 

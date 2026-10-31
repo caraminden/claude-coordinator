@@ -184,7 +184,7 @@ test('through the server, in a scheme it does not run: no commit is refused, a c
     assert.equal(r.status, 201);
     assert.deepEqual([r.data.waiting, r.data.commit, r.data.merged], [true, work, true]);
   } finally {
-    stop();
+    await stop();
   }
 });
 

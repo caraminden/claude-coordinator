@@ -5,13 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { bootServer } from './helpers.ts';
+import { bootServer, stopProcs } from './helpers.ts';
 
 // A project's name is display-only: renaming it changes nothing that goes by id (repo, folders, links).
 const root = mkdtempSync(join(tmpdir(), 'rename-project-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
   rmSync(root, { recursive: true, force: true });
 });
 

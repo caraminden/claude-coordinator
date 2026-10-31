@@ -6,14 +6,14 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { LOOP_LIMIT, LOOP_WINDOW_MS, Runner, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS } from '../src/runner.ts';
-import { agentToken, bootServer, until } from './helpers.ts';
+import { agentToken, bootServer, until, stopProcs } from './helpers.ts';
 
 // The loop guard: Taskmaster↔minion messages past LOOP_LIMIT per LOOP_WINDOW_MS (ten minutes) wait for a person. A stand-in
 // `claude -p` ends every turn at once.
 const root = mkdtempSync(join(tmpdir(), 'loop-guard-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
   rmSync(root, { recursive: true, force: true });
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');

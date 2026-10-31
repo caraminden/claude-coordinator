@@ -279,7 +279,7 @@ test("the messages route marks a person's own message typed, and the Taskmaster'
     assert.equal(msgs.find((d: any) => d.text === 'merge it, from the Taskmaster').typed, undefined);
     assert.equal(msgs.find((d: any) => d.text === 'build it').typed, undefined, 'a brief is not typed');
   } finally {
-    srv.stop();
+    await srv.stop();
   }
 });
 
@@ -377,6 +377,6 @@ console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.c
     const results = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.filter((e: any) => e.kind === 'approval_result').map((e: any) => JSON.parse(e.data));
     assert.deepEqual(results.map((r: any) => [r.by, r.via?.text]), [['Cara', 'merge it'], ['Cara', 'merge it'], ['Cara', 'merge PR #188'], ['Cara', 'fold it']]);
   } finally {
-    srv.stop();
+    await srv.stop();
   }
 });

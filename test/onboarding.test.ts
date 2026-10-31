@@ -8,14 +8,14 @@ import { after, before, test } from 'node:test';
 import { catalogue, frontmatter } from '../src/catalogue.ts';
 import { ONBOARDING, ONBOARDING_MODES, Store, type Project } from '../src/db.ts';
 import { onboardingPrompt } from '../src/runner.ts';
-import { bootServer, jsonLines, REPO, until } from './helpers.ts';
+import { bootServer, jsonLines, REPO, until, stopProcs } from './helpers.ts';
 
 // New scheme onboarding (#172): the kickoff from the form, the Taskmaster's onboarding section while
 // setup runs, its plan card and catalogue, and the catalogue never handing out a file's body.
 const root = mkdtempSync(join(tmpdir(), 'onboarding-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
   rmSync(root, { recursive: true, force: true });
 });
 

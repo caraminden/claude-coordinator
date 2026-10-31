@@ -4,15 +4,15 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, freePort, until } from './helpers.ts';
+import { bootServer, freePort, until, stopProcs } from './helpers.ts';
 
 // With MACHINES_URL set, agents connect only there (the tailnet), and that listener serves nothing
 // but agents.
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'machines-tailnet-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
   rmSync(root, { recursive: true, force: true });
 });
 

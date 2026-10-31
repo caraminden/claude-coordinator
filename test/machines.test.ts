@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, until } from './helpers.ts';
+import { bootServer, jsonLines, until, stopProcs } from './helpers.ts';
 
 // The whole path from a thread's turn to a machine and back: the real server, the real agent
 // (public/machine-agent.mjs) running a stand-in MCP server, and a stand-in `claude -p` that acts
@@ -12,8 +12,8 @@ import { bootServer, jsonLines, until } from './helpers.ts';
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'machines-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
   rmSync(root, { recursive: true, force: true });
 });
 

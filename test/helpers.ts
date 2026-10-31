@@ -7,6 +7,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
 import { freePort, listeningPort } from '../src/ports.ts';
 
+/**
+ * Stop servers a test started and wait until they have exited: a server still finishing its requests
+ * can write into its folder while the test deletes it (ENOTEMPTY on a disk-backed TMPDIR, #218).
+ */
+export async function stopProcs(procs: ChildProcess[]) {
+  await Promise.all(procs.map((p) => (p.exitCode !== null || p.signalCode !== null ? undefined : new Promise((r) => { p.once('exit', r); p.kill(); }))));
+}
+
 export { freePort, listeningPort };
 
 export const REPO = join(import.meta.dirname, '..');
@@ -51,7 +59,7 @@ export type Booted = {
   /** A JSON call as that person: GET without a body, else `method` (POST by default). */
   call: (path: string, body?: unknown, method?: string) => Promise<{ status: number; data: any }>;
   /** Kill the server and delete the scratch folder. */
-  stop: () => void;
+  stop: () => Promise<void>;
 };
 
 /**
@@ -70,13 +78,13 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
-  const stop = () => {
-    proc.kill();
+  const stop = async () => {
+    await stopProcs([proc]);
     if (!opts.root) rmSync(root, { recursive: true, force: true });
   };
   if (opts.stdout) proc.stdout!.pipe(process.stdout);
-  const port = await listeningPort(proc).catch((err) => {
-    stop();
+  const port = await listeningPort(proc).catch(async (err) => {
+    await stop();
     throw err;
   });
   const base = `http://127.0.0.1:${port}`;
@@ -85,7 +93,7 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
   });
   const cookie = login.headers.get('set-cookie')?.split(';')[0];
   if (!cookie) {
-    stop();
+    await stop();
     throw new Error(`Signing in answered ${login.status} without a cookie`);
   }
   const call = async (path: string, body?: unknown, method?: string) => {

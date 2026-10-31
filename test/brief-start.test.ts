@@ -61,6 +61,6 @@ test('starting a brief creates the minion once, records it, and notes it to the 
     assert.equal((await s.call(`/api/projects/${p.id}/tickets`, { message: 'x', brief: { heading } })).status, 400, 'a brief needs its file');
     assert.deepEqual((await s.call(`/api/projects/${p.id}/briefs?path=elsewhere.md`)).data, []);
   } finally {
-    s.stop();
+    await s.stop();
   }
 });

@@ -8,15 +8,15 @@ import { promisify } from 'node:util';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { agentToken, bootServer } from './helpers.ts';
+import { agentToken, bootServer, stopProcs } from './helpers.ts';
 
 // Safe deploys (tools/deploy.sh): the server reloads public/ on SIGHUP, answers /api/health, and takes
 // deploy reports; the script tells front-end-only changes from the rest.
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'deploy-test-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
   rmSync(root, { recursive: true, force: true });
 });
 

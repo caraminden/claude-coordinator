@@ -294,6 +294,6 @@ test('through the server: Link GitHub goes to GitHub for a scheme you can see; a
     assert.equal(status.link, null);
     assert.match(status.error, /expired or was for someone else/);
   } finally {
-    s.stop();
+    await s.stop();
   }
 });

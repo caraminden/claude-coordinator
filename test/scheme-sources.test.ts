@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Credentials } from '../src/credentials.ts';
@@ -69,8 +69,8 @@ before(async () => {
   // With an OAuth App set up, so people's own GitHub links count (#195); never a GH_TOKEN of the test's own.
   s = await bootServer({ root, env: { HOME: root, PATH: `${join(stub, 'bin')}:${process.env.PATH}`, GITHUB_CLIENT_ID: 'cid', GITHUB_CLIENT_SECRET: 'csecret', GH_TOKEN: undefined, GITHUB_TOKEN: undefined, GH_CONFIG_DIR: undefined } });
 });
-after(() => {
-  s?.stop();
+after(async () => {
+  await s?.stop();
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -214,7 +214,8 @@ test('folder refuses relative, missing, outside-HOME, data-dir, non-repo, sub-fo
   const cases: [string, RegExp][] = [
     ['code/plain', /absolute path/],
     [join(root, 'code', 'nope'), /There is no folder/],
-    [tmpdir(), /under your home folder/],
+    // The server's HOME is root, so its parent is outside it wherever TMPDIR points (a turn's is under the real home, #218).
+    [dirname(root), /under your home folder/],
     [join(s.data, 'projects', '1'), /data folder/],
     [s.data, /data folder/],
     [join(root, 'code', 'loose'), /isn't a git repo/],
@@ -222,8 +223,9 @@ test('folder refuses relative, missing, outside-HOME, data-dir, non-repo, sub-fo
     [join(root, 'code', 'empty'), /no commits/],
   ];
   const count = (await s.call('/api/projects')).data.length;
-  for (const [folder, why] of cases) {
-    const r = await create({ name: `Refused ${folder}`, source: 'folder', folder });
+  for (const [i, [folder, why]] of cases.entries()) {
+    // Not the folder in the name: a long TMPDIR pushes it past the 80-character cap.
+    const r = await create({ name: `Refused ${i}`, source: 'folder', folder });
     assert.equal(r.status, 400, folder);
     assert.match(r.data.error, why, folder);
   }

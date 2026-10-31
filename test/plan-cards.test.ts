@@ -4,15 +4,15 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, until } from './helpers.ts';
+import { bootServer, jsonLines, until, stopProcs } from './helpers.ts';
 
 // Plan cards through the real server: a minion proposes, only a person approves or sends it back,
 // and a newer plan supersedes the open one. A stand-in `claude -p` records each turn's prompt and
 // thread token, then ends the turn.
 const root = mkdtempSync(join(tmpdir(), 'plan-cards-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
   rmSync(root, { recursive: true, force: true });
 });
 

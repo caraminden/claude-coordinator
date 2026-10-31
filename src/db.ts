@@ -540,7 +540,8 @@ export class Store {
 
   constructor(path: string) {
     this.path = path;
-    this.db = new DatabaseSync(path);
+    // Wait out another connection's write (a test's second Store, a backup) instead of failing at once with SQLITE_BUSY.
+    this.db = new DatabaseSync(path, { timeout: 5000 });
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.db.exec(SCHEMA);
     this.attachState();

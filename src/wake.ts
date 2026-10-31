@@ -6,8 +6,11 @@
 // is dismissed.
 // In a scheme whose code this server doesn't run (Delve), nothing deploys here, so live means merged
 // on that scheme's main, for chains and commit waiters alike: checked whenever chains are.
+// Merged also counts a pull request merged on GitHub (#229): a squash or rebase merge leaves none of
+// the branch's commits on main, so there the PR's merge commit stands in for them.
 import { execFileSync } from 'node:child_process';
 import type { Store } from './db.ts';
+import { githubRepo } from './github.ts';
 
 /** A minion waiting for a commit to be live, or (commit null) for the next deploy after `since`. */
 export interface Waiter {
@@ -33,6 +36,65 @@ export interface Chain {
   since?: number;
   /** People were told the followed minion was dismissed without shipping; kept, in case it ships after all. */
   held?: boolean;
+}
+
+/** A merged pull request: the commit it was opened at (its head) and the one main got (its merge commit). */
+export interface PrMerge {
+  number: number;
+  head: string;
+  commit: string | null;
+}
+
+/** Asks GitHub about merged pull requests in a scheme's repo; tests swap in their own. */
+export interface PrLookup {
+  /** The newest PR opened from `branch` (whose tip is `tip`), if it is merged. */
+  branch(repo: string, branch: string, tip: string): PrMerge | null;
+  /** A merged PR that contains `commit`. */
+  commit(repo: string, commit: string): PrMerge | null;
+}
+
+/** The answer of `gh pr list --json number,state,headRefOid,mergeCommit`, newest first: its first PR if merged. */
+export function mergedPr(list: { number: number; state: string; headRefOid: string; mergeCommit?: { oid: string } | null }[]): PrMerge | null {
+  const pr = list[0];
+  return pr?.state === 'MERGED' ? { number: pr.number, head: pr.headRefOid, commit: pr.mergeCommit?.oid ?? null } : null;
+}
+
+/** The answer of GitHub's "pull requests of a commit" API: a merged one, if any. */
+export function mergedPrOf(list: { number: number; merged_at: string | null; head: { sha: string }; merge_commit_sha: string | null }[]): PrMerge | null {
+  const pr = list.find((p) => p.merged_at);
+  return pr ? { number: pr.number, head: pr.head.sha, commit: pr.merge_commit_sha } : null;
+}
+
+// A PR that wasn't merged is asked about again after this long; a merged one is remembered.
+const UNMERGED_MS = 60_000;
+
+/**
+ * PR lookups through the gh CLI, for repos whose origin is on GitHub. Synchronous like the git calls
+ * here, so each is cached: checks run at restarts, reloads and dismissals, not on a timer.
+ */
+export function githubPrs(): PrLookup {
+  const merged = new Map<string, PrMerge>();
+  const unmerged = new Map<string, number>();
+  const ask = (repo: string, key: string, args: string[], parse: (json: any) => PrMerge | null): PrMerge | null => {
+    const hit = merged.get(key);
+    if (hit) return hit;
+    if ((unmerged.get(key) ?? 0) > Date.now() || !githubRepo(git(repo, ['remote', 'get-url', 'origin']) ?? '')) return null;
+    let pr: PrMerge | null = null;
+    try {
+      pr = parse(JSON.parse(execFileSync('gh', args, { cwd: repo, encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] })));
+    } catch (err: any) {
+      console.error(`Asking GitHub about ${key.split('\0').slice(1).join(' ')} failed:`, err.stderr?.trim() || err.message);
+    }
+    if (pr) merged.set(key, pr);
+    else unmerged.set(key, Date.now() + UNMERGED_MS);
+    return pr;
+  };
+  return {
+    // Keyed by the tip too: a new commit on the branch may mean a new PR.
+    branch: (repo, branch, tip) => ask(repo, `${repo}\0${branch}\0${tip}`,
+      ['pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', 'number,state,headRefOid,mergeCommit'], mergedPr),
+    commit: (repo, commit) => ask(repo, `${repo}\0${commit}`, ['api', `repos/{owner}/{repo}/commits/${commit}/pulls`], mergedPrOf),
+  };
 }
 
 /** All waiters, in the settings table so they outlive the restart they wait for. */
@@ -63,6 +125,7 @@ export class LiveWaiters {
   hold: (c: Chain, why: string) => void = () => {};
   /** The commit the server runs now: what it booted from, then what its front end last reloaded to. */
   head: string | null;
+  prs: PrLookup = githubPrs();
 
   constructor(store: Store, repo: string, head: string | null, send: (ticketId: number, text: string) => void) {
     this.store = store;
@@ -85,6 +148,24 @@ export class LiveWaiters {
   /** Is `commit` on the scheme's main, locally or on origin? */
   private merged(repo: string, commit: string): boolean {
     return ['HEAD', 'refs/remotes/origin/HEAD'].some((ref) => git(repo, ['merge-base', '--is-ancestor', commit, ref]) !== null);
+  }
+
+  /** The refs that are a repo's main: local, and origin's if it has one. */
+  private mains(repo: string): string[] {
+    return ['HEAD', 'refs/remotes/origin/HEAD'].filter((ref) => git(repo, ['rev-parse', '-q', '--verify', ref]) !== null);
+  }
+
+  /**
+   * The commit by which a followed minion's work is on its scheme's main, or null: its branch tip when
+   * main has it, else the merge commit of the branch's newest PR, if that is merged and the branch has
+   * no commits of its own since the PR's head (merging main in doesn't count).
+   */
+  private landed(b: { repo: string; branch: string; tip: string }): string | null {
+    if (this.merged(b.repo, b.tip)) return b.tip;
+    const pr = this.prs.branch(b.repo, b.branch, b.tip);
+    if (!pr?.commit) return null;
+    const since = pr.head === b.tip ? '0' : git(b.repo, ['rev-list', '--count', '--no-merges', b.tip, `^${pr.head}`, ...this.mains(b.repo).map((r) => `^${r}`)]);
+    return since === '0' ? pr.commit : null;
   }
 
   /** The followed minion's scheme repo, branch and its tip, or null when it has neither. */
@@ -121,11 +202,11 @@ export class LiveWaiters {
     const closed = leader.status === 'closed';
     const b = this.tip(c.after);
     if (!b) return closed ? 'go' : 'wait'; // no repo: dismissed is all there is to wait for
-    const merged = this.merged(b.repo, b.tip);
-    if (closed && !merged) return 'unshipped';
-    if (!merged || (!closed && !this.committed(b.repo, b.branch, c.base ? (c.since ?? Infinity) : 0))) return 'wait';
+    if (!closed && !this.committed(b.repo, b.branch, c.base ? (c.since ?? Infinity) : 0)) return 'wait';
+    const landed = this.landed(b);
+    if (!landed) return closed ? 'unshipped' : 'wait';
     if (c.when === 'merged' || !runsRepo(b.repo, this.head)) return 'go';
-    return this.live({ ticket: c.ticket, commit: b.tip, reason: '', since: null }) ? 'go' : 'wait';
+    return this.live({ ticket: c.ticket, commit: landed, reason: '', since: null }) ? 'go' : 'wait';
   }
 
   /**
@@ -134,7 +215,7 @@ export class LiveWaiters {
    */
   follow(after: number, when: Chain['when']): { state: 'go' | 'wait' | 'unshipped'; base: string | null; since: number } {
     const b = this.tip(after);
-    const base = b && this.merged(b.repo, b.tip) ? b.tip : null;
+    const base = b && this.landed(b) ? b.tip : null;
     const since = Math.floor(Date.now() / 1000);
     return { state: this.chainState({ ticket: 0, after, when, message: '', from: '', base, since }), base, since };
   }
@@ -185,13 +266,19 @@ export class LiveWaiters {
     return null;
   }
 
-  /** Is this waiter's deploy live (in a scheme this server doesn't run: its commit merged)? */
+  /**
+   * Is this waiter's deploy live (in a scheme this server doesn't run: its commit merged)? A commit
+   * in a merged PR counts by the PR's merge commit, which a squash or rebase merge needs.
+   */
   private live(w: Waiter): boolean {
     if (!this.head) return false;
     const other = this.elsewhere(w.ticket);
-    if (other) return !!w.commit && this.merged(other, w.commit);
+    if (other) return !!w.commit && (this.merged(other, w.commit) || !!this.prs.commit(other, w.commit)?.commit);
     if (!w.commit) return this.head !== w.since;
-    return git(this.repo, ['merge-base', '--is-ancestor', w.commit, this.head]) !== null;
+    const runs = (c: string) => git(this.repo, ['merge-base', '--is-ancestor', c, this.head!]) !== null;
+    if (runs(w.commit)) return true;
+    const pr = this.prs.commit(this.repo, w.commit);
+    return !!pr?.commit && runs(pr.commit);
   }
 
   /**

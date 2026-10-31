@@ -508,7 +508,8 @@ if (!BOOT_CHECK || PREVIEW) {
 const github = new GithubWatcher(store, (ticketId, text) => runner.send(ticketId, GITHUB_NAME, text));
 if (!BOOT_CHECK) github.start();
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);
-github.onMerged = (repoDir) => void syncMain(repoDir).catch((err) => console.error(`Catching up main in ${repoDir} failed:`, err));
+// Then chains and commit waiters look again: a merged PR can be what they wait on (#229).
+github.onMerged = (repoDir) => void syncMain(repoDir).catch((err) => console.error(`Catching up main in ${repoDir} failed:`, err)).then(() => waiters.check());
 
 // A scheme's main that can't follow origin's (#208) is told in its Taskmaster's chat, once per reason.
 mainSync.stuck = (repoDir, why) => {

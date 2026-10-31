@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { type Chain, LiveWaiters } from '../src/wake.ts';
+import { type Chain, LiveWaiters, mergedPr, mergedPrOf, type PrMerge } from '../src/wake.ts';
 import { bootServer } from './helpers.ts';
 
 // Chained minions: one created parked, whose brief is held until the minion it follows (its leader)
@@ -61,10 +61,23 @@ function minion(project = citadel.id, repo = live) {
   return { id: t.id, branch };
 }
 
+// GitHub as the waiters see it: the pull requests merged so far, newest last.
+const prs: (PrMerge & { branch: string })[] = [];
+/** Squash-merge `branch` into main as a merged PR would: main gets one new commit, none of the branch's. */
+function squash(repo: typeof live, branch: string) {
+  repo.git('merge', '--squash', '-q', branch);
+  repo.git('commit', '-q', '--allow-empty', '-m', `squashed ${branch}`);
+  prs.push({ branch, number: prs.length + 1, head: repo.git('rev-parse', `refs/heads/${branch}`), commit: repo.git('rev-parse', 'HEAD') });
+}
+
 const started: { c: Chain; why: string }[] = [];
 const held: { c: Chain; why: string }[] = [];
 function waiters(head: string) {
   const w = new LiveWaiters(store, live.dir, head, () => {});
+  w.prs = {
+    branch: (_repo, branch) => prs.findLast((p) => p.branch === branch) ?? null,
+    commit: () => null,
+  };
   w.start = (c, why) => started.push({ c, why });
   w.hold = (c, why) => held.push({ c, why });
   return w;
@@ -179,6 +192,81 @@ test('a leader dismissed without its work merged holds the chain and tells peopl
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
   assert.equal(w.check(), 1);
   assert.equal(started[0].c.ticket, follower);
+});
+
+// #229: a squash (or rebase) merge on GitHub leaves none of the branch's commits on main, so a leader
+// whose PR was merged that way read as dismissed without its work merged.
+test('a leader whose PR was squash-merged counts as merged, and a held chain starts once its PR shows merged', () => {
+  reset();
+  const w = waiters(live.git('rev-parse', 'HEAD'));
+  const leader = minion();
+  const follower = chain(w, leader.id, 'merged');
+  live.work(leader.branch);
+  squash(live, leader.branch);
+  assert.throws(() => live.git('merge-base', '--is-ancestor', leader.branch, 'main'), 'none of its commits are on main');
+  store.updateTicket(leader.id, { status: 'closed' });
+  assert.equal(w.check(), 1);
+  assert.equal(held.length, 0, 'no false alarm');
+  assert.equal(started[0].c.ticket, follower);
+  assert.match(started[0].why, /work is merged$/);
+
+  // A chain held before its leader's PR showed as merged (#87's) starts at the next check.
+  reset();
+  const late = minion();
+  chain(w, late.id, 'merged');
+  live.work(late.branch);
+  store.updateTicket(late.id, { status: 'closed' });
+  assert.equal(w.check(), 0);
+  assert.equal(held.length, 1);
+  squash(live, late.branch);
+  assert.equal(w.check(), 1);
+});
+
+test('GitHub\'s answers read as a merged PR or none', () => {
+  const head = 'bd6f4c67cf2aac6092ffcb39fea1df1d43e024bd';
+  const merge = '28f4915f1bdea4505501ed04412272a36941d760';
+  assert.deepEqual(mergedPr([{ number: 204, state: 'MERGED', headRefOid: head, mergeCommit: { oid: merge } }]), { number: 204, head, commit: merge });
+  assert.equal(mergedPr([{ number: 205, state: 'OPEN', headRefOid: head, mergeCommit: null }]), null, 'only the newest PR counts');
+  assert.equal(mergedPr([]), null);
+  const pulls = [
+    { number: 3, merged_at: null, head: { sha: head }, merge_commit_sha: 'abc' },
+    { number: 204, merged_at: '2026-10-31T21:12:16Z', head: { sha: head }, merge_commit_sha: merge },
+  ];
+  assert.deepEqual(mergedPrOf(pulls), { number: 204, head, commit: merge });
+  assert.equal(mergedPrOf(pulls.slice(0, 1)), null);
+});
+
+test('a live chain on a squash-merged leader waits for the server to run the merge commit', () => {
+  reset();
+  const w = waiters(live.git('rev-parse', 'HEAD'));
+  const leader = minion();
+  chain(w, leader.id, 'live');
+  live.work(leader.branch);
+  squash(live, leader.branch);
+  assert.equal(w.check(), 0, 'merged, but the server still runs the old commit');
+  assert.equal(w.check(live.git('rev-parse', 'HEAD')), 1);
+  assert.match(started[0].why, /work is live$/);
+});
+
+test('a leader that commits after its PR was squash-merged waits for that work; catching up to main is not work', () => {
+  reset();
+  const w = waiters(live.git('rev-parse', 'HEAD'));
+  const leader = minion();
+  // Its first PR, an hour back (the reflog stamps entries with the committer date).
+  const old = { ...process.env, GIT_COMMITTER_DATE: `${Math.floor(Date.now() / 1000) - 3600} +0000` };
+  const shipped = execFileSync('git', ['commit-tree', '-p', leader.branch, '-m', 'old work', 'main^{tree}'], { cwd: live.dir, encoding: 'utf8', env: old }).trim();
+  execFileSync('git', ['update-ref', '-m', 'commit: old work', `refs/heads/${leader.branch}`, shipped], { cwd: live.dir, env: old });
+  squash(live, leader.branch);
+  chain(w, leader.id, 'merged');
+  assert.equal(w.check(), 0, 'its merged PR is not new work');
+  live.work(leader.branch);
+  assert.equal(w.check(), 0, 'its newest commit is in no merged PR');
+  squash(live, leader.branch);
+  // Main moves on and the leader merges it in: a merge commit and main's commits, none of its own.
+  live.commit();
+  live.git('update-ref', '-m', 'merge main', `refs/heads/${leader.branch}`,
+    live.git('commit-tree', '-p', `refs/heads/${leader.branch}`, '-p', 'main', '-m', 'merge main', 'main^{tree}'));
+  assert.equal(w.check(), 1);
 });
 
 test('a leader with no commits of its own counts as done once dismissed', () => {

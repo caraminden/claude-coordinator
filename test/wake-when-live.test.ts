@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 import { APP_NAME } from '../src/appname.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { LiveWaiters } from '../src/wake.ts';
+import { LiveWaiters, type PrMerge } from '../src/wake.ts';
 import { bootServer, REPO } from './helpers.ts';
 
 // wake_when_live: a waiter is messaged once the server runs a commit containing its commit (or, with
@@ -163,6 +163,25 @@ test('in a scheme whose code this server does not run, a commit waiter wakes onc
   assert.deepEqual(sent, [{ id: t.id, text: `\`${work.slice(0, 7)}\` is on the scheme's main now: play the new level` }]);
   assert.equal(w.add(t.id, work, 'x'), false, 'already merged');
   assert.equal(w.list().length, 0);
+});
+
+test('in a scheme whose code this server does not run, a commit waiter wakes once a PR containing it is merged, squashed or not', () => {
+  // #229: a squash merge puts none of the branch's commits on main.
+  const { other, og, work } = otherScheme('other-squash');
+  const delve = store.createProject('D squashed', null);
+  store.setProjectRepoDir(delve.id, other);
+  const t = store.createTicket({ project_id: delve.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(t.id, { status: 'idle' });
+  const w = waiters(commit());
+  let merged: PrMerge | null = null;
+  w.prs = { branch: () => null, commit: (_repo, c) => (c === work ? merged : null) };
+  sent.length = 0;
+  assert.equal(w.add(t.id, work, 'play the new level'), true);
+  assert.equal(w.check(), 0, 'not merged yet');
+  og('commit', '-q', '--allow-empty', '-m', 'squashed ticket/x');
+  merged = { number: 1, head: work, commit: og('rev-parse', 'HEAD') };
+  assert.equal(w.check(), 1);
+  assert.deepEqual(sent, [{ id: t.id, text: `\`${work.slice(0, 7)}\` is on the scheme's main now: play the new level` }]);
 });
 
 test('through the server, in a scheme it does not run: no commit is refused, a commit of its own is waited on until merged', async () => {

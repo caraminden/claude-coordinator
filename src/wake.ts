@@ -51,6 +51,8 @@ export interface PrLookup {
   branch(repo: string, branch: string, tip: string): PrMerge | null;
   /** A merged PR that contains `commit`. */
   commit(repo: string, commit: string): PrMerge | null;
+  /** Drop the remembered "not merged" answers: a PR was just seen merged. */
+  forget?(): void;
 }
 
 /** The answer of `gh pr list --json number,state,headRefOid,mergeCommit`, newest first: its first PR if merged. */
@@ -81,7 +83,7 @@ export function githubPrs(): PrLookup {
     if ((unmerged.get(key) ?? 0) > Date.now() || !githubRepo(git(repo, ['remote', 'get-url', 'origin']) ?? '')) return null;
     let pr: PrMerge | null = null;
     try {
-      pr = parse(JSON.parse(execFileSync('gh', args, { cwd: repo, encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] })));
+      pr = parse(JSON.parse(execFileSync('gh', args, { cwd: repo, encoding: 'utf8', timeout: 8_000, stdio: ['ignore', 'pipe', 'pipe'] })));
     } catch (err: any) {
       console.error(`Asking GitHub about ${key.split('\0').slice(1).join(' ')} failed:`, err.stderr?.trim() || err.message);
     }
@@ -94,6 +96,7 @@ export function githubPrs(): PrLookup {
     branch: (repo, branch, tip) => ask(repo, `${repo}\0${branch}\0${tip}`,
       ['pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', 'number,state,headRefOid,mergeCommit'], mergedPr),
     commit: (repo, commit) => ask(repo, `${repo}\0${commit}`, ['api', `repos/{owner}/{repo}/commits/${commit}/pulls`], mergedPrOf),
+    forget: () => unmerged.clear(),
   };
 }
 

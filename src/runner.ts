@@ -272,7 +272,7 @@ const BEAT_STALE_MS = 30_000;
  * A turn's wrapper still runs: its pid is alive and is that turn's wrapper, not a reused pid. In a
  * container (the `container` file) its pids are the container's, so its heartbeat says instead.
  */
-function wrapperAlive(dir: string): boolean | null {
+export function wrapperAlive(dir: string): boolean | null {
   if (existsSync(join(dir, 'container'))) {
     try {
       return Date.now() - statSync(join(dir, 'beat')).mtimeMs < BEAT_STALE_MS;

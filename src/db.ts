@@ -518,7 +518,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 16; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned
+export const SCHEMA_VERSION = 17; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213)
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -556,6 +556,7 @@ export class Store {
     this.props.seed();
     this.settleBuilds();
     this.schedules = new Schedules(this.db);
+    this.serverLoginOwnerOnly();
     this.noteSchemaVersion();
   }
 
@@ -594,6 +595,20 @@ export class Store {
     this.db.exec(`BEGIN; INSERT INTO person_views (project_id, owner, name, picks, created_at)
       SELECT project_id, created_by, name, picks, created_at FROM saved_views WHERE true ON CONFLICT DO NOTHING;
       DROP TABLE saved_views; COMMIT;`);
+  }
+
+  /**
+   * The server's Claude login is one person's subscription (#213): from schema 17 only its owner runs
+   * on it, and everyone else links their own Claude. Once, so a later grant isn't undone.
+   */
+  private serverLoginOwnerOnly() {
+    if ((this.getSetting<number>('schema_version') ?? 0) >= 17) return;
+    this.db.prepare('UPDATE users SET server_login = 0 WHERE id IS NOT (SELECT min(id) FROM users WHERE admin = 1)').run();
+  }
+
+  /** Whose subscription the server's own Claude login is: the first admin, the one Citadel made at its first start. */
+  serverLoginOwner(): number | null {
+    return (this.db.prepare('SELECT min(id) AS id FROM users WHERE admin = 1').get() as { id: number | null }).id;
   }
 
   /** Records SCHEMA_VERSION, never lowering it: after a rollback, the newer number says what migrated it. */

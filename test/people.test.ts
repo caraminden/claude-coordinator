@@ -107,6 +107,11 @@ test("turns run for people allowed on the server's login; anyone else's message 
   assert.match(turnRefusal(store, his, 'GitHub')!, /its owner, Josh,/);
   store.updateUser(josh.id, { server_login: 1 });
   assert.equal(turnRefusal(store, his, 'Josh'), null);
+  // His own Claude (#213): linked runs, expired waits with its own words.
+  store.updateUser(josh.id, { server_login: 0 });
+  assert.equal(turnRefusal(store, his, 'Josh', (uid) => (uid === josh.id ? 'linked' : null)), null);
+  assert.match(turnRefusal(store, his, 'Josh', (uid) => (uid === josh.id ? 'expired' : null))!, /Josh's Claude sign-in expired/);
+  assert.match(turnRefusal(store, his, 'GitHub', () => null)!, /its owner, Josh, links/);
   // The connected machines are the admin's: only their schemes' minions get them.
   assert.ok(lendsMachines(store, citadel) && !lendsMachines(store, games));
 });
@@ -177,16 +182,40 @@ test('people make their own schemes, add others to them, and see nothing else', 
   assert.equal((await as('Josh', '/api/app/instructions')).status, 403);
 });
 
-test("Josh's message waits until Cara allows Josh the server's login; then Josh's turns run", async () => {
+test('schema 17 leaves the server login to its owner, the first admin, once (#213)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'server-login-'));
+  try {
+    const path = join(dir, 'c.db');
+    let store = new Store(path);
+    const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true, server_login: true });
+    const josh = store.createUser({ name: 'Josh', login: 'josh', server_login: true });
+    const ann = store.createUser({ name: 'Ann', login: 'ann', admin: true, server_login: true });
+    store.setSetting('schema_version', 16);
+    store = new Store(path);
+    assert.deepEqual([cara, josh, ann].map((u) => store.getUser(u.id)!.server_login), [1, 0, 0]);
+    assert.equal(store.serverLoginOwner(), cara.id);
+    // Only once: a later grant (by hand, in the DB) stays.
+    store.updateUser(josh.id, { server_login: 1 });
+    store = new Store(path);
+    assert.equal(store.getUser(josh.id)!.server_login, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Josh's message waits until he links his own Claude; the server's login is Cara's alone (#213)", async () => {
   const p = (await as('Josh', '/api/projects')).data.find((x: any) => x.name === 'Joshs');
   const t = (await as('Josh', `/api/projects/${p.id}/tickets`, { message: 'build it', title: 'Build it' })).data;
   const notes = async () => (await as('Josh', `/api/tickets/${t.id}/events`)).data.events.filter((e: any) => e.kind === 'note').map((e: any) => JSON.parse(e.data).text);
   await until('the waiting note', async () => (await notes()).some((n: string) => /Turns for Josh start once/.test(n)));
   assert.notEqual((await as('Josh', `/api/tickets/${t.id}`)).data.ticket.status, 'running');
 
-  assert.equal((await as('Cara', `/api/people/${people.Josh.id}`, { server_login: true }, 'PATCH')).data.server_login, true);
-  await as('Josh', `/api/tickets/${t.id}/messages`, { text: 'now?' });
-  await until('the turn to run and end', async () => (await as('Josh', `/api/tickets/${t.id}`)).data.ticket.status === 'idle');
+  assert.match((await notes()).find((n: string) => /Turns for Josh start once/.test(n)), /Settings → Your account/);
+  const refused = await as('Cara', `/api/people/${people.Josh.id}`, { server_login: true }, 'PATCH');
+  assert.equal(refused.status, 400);
+  assert.match(refused.data.error, /Only the server login's owner/);
+  const list = (await as('Cara', '/api/people')).data;
+  assert.deepEqual(list.map((u: any) => [u.name, u.server_login, u.server_login_owner, u.claude]).filter(([n]: any) => n === 'Cara' || n === 'Josh'), [['Cara', true, true, null], ['Josh', false, false, null]]);
 });
 
 test("the stream doesn't carry other schemes' news; disabling someone ends theirs", async () => {

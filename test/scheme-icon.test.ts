@@ -1,12 +1,14 @@
-// A scheme's own icon (#222): served from its checkout's assets/icon/icon.svg to its people only,
-// inert (headers), capped in size, never through a symlink out of the repo, and re-read when it changes.
+// A scheme's own icon (#222): its favicon, served from its checkout to its people only, inert (headers),
+// capped in size, never through a symlink out of the repo, and re-read when it changes.
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { ICON_PATH, MAX_ICON_BYTES } from '../src/scheme-icon.ts';
+import { ICON_PATHS, MAX_ICON_BYTES } from '../src/scheme-icon.ts';
+
+const ICON_PATH = ICON_PATHS[0];
 import { bootServer } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'scheme-icon-'));
@@ -31,8 +33,15 @@ const plain = scheme('Plain');
 const huge = scheme('Huge', `<svg xmlns="http://www.w3.org/2000/svg"><!--${'x'.repeat(MAX_ICON_BYTES)}--></svg>`);
 writeFileSync(join(root, 'secret.svg'), SVG);
 const linked = scheme('Linked', { link: join(root, 'secret.svg') });
+// A web app's favicon in public/, as Citadel keeps its own; and one with both, where assets/icon/ wins.
+const webApp = scheme('WebApp');
+mkdirSync(join(webApp.repo, 'public'));
+writeFileSync(join(webApp.repo, 'public', 'icon.svg'), SVG.replace('red', 'green'));
+const both = scheme('Both', SVG);
+mkdirSync(join(both.repo, 'public'));
+writeFileSync(join(both.repo, 'public', 'icon.svg'), SVG.replace('red', 'green'));
 
-test('a scheme icon goes to its people only, inert, and falls back to a tile when there is none', { timeout: 60_000 }, async () => {
+test('a scheme favicon goes to its people only, inert, and is left out when there is none', { timeout: 60_000 }, async () => {
   const srv = await bootServer({ root });
   after(() => srv.proc.kill());
   const invited = async (name: string) => {
@@ -58,7 +67,7 @@ test('a scheme icon goes to its people only, inert, and falls back to a tile whe
   assert.equal(refused.status, 404);
   assert.equal((await refused.json()).error, 'No such scheme');
 
-  // No file, a file too big, and a symlink out of the repo all answer 404; the list says to draw a tile.
+  // No file, a file too big, and a symlink out of the repo all answer 404; the list says there is none.
   for (const [p, why] of [[plain, 'has no'], [huge, 'is over 256 KB'], [linked, 'points outside']] as const) {
     const r = await get(p.id, srv.cookie);
     assert.equal(r.status, 404, p.name);
@@ -69,6 +78,10 @@ test('a scheme icon goes to its people only, inert, and falls back to a tile whe
   assert.equal(typeof icons.Iconic, 'number');
   assert.deepEqual([icons.Plain, icons.Huge, icons.Linked], [null, null, null]);
   assert.deepEqual(Object.keys(await list(member.cookie)).sort(), ['Iconic', 'Plain']);
+
+  // A favicon in public/ is found too, but assets/icon/icon.svg comes first.
+  assert.equal(await (await get(webApp.id, srv.cookie)).text(), SVG.replace('red', 'green'));
+  assert.equal(await (await get(both.id, srv.cookie)).text(), SVG);
 
   // A new icon (a fast-forward rewrites the file) is served at once, under a new version.
   const SVG2 = SVG.replace('red', 'blue');

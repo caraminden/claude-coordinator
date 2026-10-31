@@ -1,6 +1,5 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
 import { account, ago, api, h, icon, schemeIcon, view } from './core.js';
-import { tileLetter } from './schemes.js';
 import { openNewScheme, toggleSchemeMenu } from './sidebar.js';
 
 // ---------- push notifications ----------
@@ -119,7 +118,6 @@ const count = (n) => n.toLocaleString('en');
 export function onProjectUpdate(project) {
   for (const el of document.querySelectorAll(`[data-project-name="${project.id}"]`)) el.textContent = project.name;
   for (const el of document.querySelectorAll(`[data-taskmaster-name="${project.id}"]`)) el.textContent = `${project.name} Taskmaster`;
-  for (const el of document.querySelectorAll(`[data-project-letter="${project.id}"]`)) el.textContent = tileLetter(project.name);
   if (view?.kind !== 'project') return;
   view.projects = view.projects.map((p) => (p.id === project.id ? { ...p, name: project.name } : p));
   if (view.projectId !== project.id) return;
@@ -193,7 +191,8 @@ export function projectTitle(project) {
     err.hidden = true;
     err.remove();
     wrap.replaceChildren(
-      schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project),
+      // replaceChildren would print a null, so none when there's no favicon.
+      ...[schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project)].filter(Boolean),
       h('span', { class: 'label', 'data-project-name': project.id }, view.project.name),
       h('button', { type: 'button', class: 'rename', 'aria-label': 'Rename scheme', title: 'Rename scheme (its repo stays as it is)', onclick: edit }, '✎'),
       h('span', { class: 'spacer' }),

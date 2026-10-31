@@ -208,7 +208,7 @@ export const projectRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects', who: ['person'],
     // inbox: the count on the scheme's Needs-you badge, for the scheme switcher.
-    // icon: the version of the scheme's own icon (#222) for its URL, or null to draw a letter tile.
+    // icon: the version of the scheme's favicon (#222) for its URL, or null when it has none.
     handler: async ({ res, app: { store, runner }, session }) => json(res, 200, await Promise.all(visibleSchemes(store, session).map(async (p) => ({
       ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length,
       inbox: inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id)),
@@ -216,7 +216,7 @@ export const projectRoutes: Route[] = [
     })))),
   },
   {
-    // The scheme's assets/icon/icon.svg (src/scheme-icon.ts). Its URL carries the version, so it can be kept long.
+    // The scheme's favicon (src/scheme-icon.ts). Its URL carries the version, so it can be kept long.
     method: 'GET', path: '/api/projects/:project/icon', who: ['person'],
     async handler({ res, project }) {
       const icon = await readIcon(project.id, project.repo_dir);

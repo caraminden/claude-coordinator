@@ -12,7 +12,6 @@ import { onSchedulesChanged } from './schedules.js';
 import { inAppHash, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { uploadsRunning } from './composer.js';
 import { renderMarkdown } from './markdown.js';
-import { tileHue, tileLetter } from './schemes.js';
 
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
@@ -79,15 +78,10 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-/**
- * A scheme's icon (#222): its repo's assets/icon/icon.svg, only ever as an <img> (an SVG there can't run
- * scripts), or a letter tile in a colour of its own when it has none or the icon fails to load.
- */
+/** A scheme's favicon (#222), only ever as an <img> (an SVG there can't run scripts); nothing when it has none. */
 export function schemeIcon(p) {
-  const tile = h('span', { class: 'scheme-icon tile', 'data-project-letter': p.id, 'aria-hidden': 'true' }, tileLetter(p.name));
-  tile.style.setProperty('--hue', tileHue(p.id));
-  if (p.icon == null) return tile;
-  const img = h('img', { class: 'scheme-icon', src: `api/projects/${p.id}/icon?v=${p.icon}`, alt: '', onerror: () => img.replaceWith(tile) });
+  if (p.icon == null) return null;
+  const img = h('img', { class: 'scheme-icon', src: `api/projects/${p.id}/icon?v=${p.icon}`, alt: '', onerror: () => img.remove() });
   return img;
 }
 

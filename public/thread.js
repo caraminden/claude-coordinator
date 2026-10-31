@@ -326,10 +326,11 @@ export function renderTicketHead() {
       h('span', { class: `dot ${t.status}` }),
       h('h2', { title: threadFullName(t) }, threadTitleParts(t)),
       h('span', { class: 'spacer' }),
-      payerChip(t),
+      phone ? '' : payerChip(t),
       phone ? '' : nav),
     coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
-    h('div', { class: 'head-sub' }, stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
+    // Phones give the title its own line (#158), so the payer chip leads the line under it.
+    h('div', { class: 'head-sub' }, phone ? payerChip(t) : '', stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
       h('span', { class: 'spacer' }), ...actions, view.findEl ?? '', phone ? nav : ''),
     view.progressEl);
   renderTyping();

@@ -358,9 +358,9 @@ button.reply-chip { background: color-mix(in srgb, var(--accent) 8%, var(--panel
 button.reply-chip:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, var(--panel)); }
 button.reply-chip.sent { background: var(--accent); color: #fff; opacity: 1; }
 #chat-payer[hidden] { display: none; }
-.payer-line { font-size: 0.85rem; line-height: 1.4; padding: 0.35rem 0.6rem; margin-bottom: 0.5rem; border-radius: 6px; background: var(--code-bg); }
+.payer-line { font-size: 0.85rem; line-height: 1.4; padding: 0.5rem 0.65rem; margin-bottom: 0.5rem; border-radius: 6px; background: var(--code-bg); }
 .payer-line.warn { background: color-mix(in srgb, var(--waiting-tint) 16%, transparent); }
-.payer-line .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.35rem; }
+.payer-line .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.45rem; }
 .payer-chip { white-space: nowrap; flex: none; }
 .replies-bar[hidden] { display: none; }
 .replies-bar { margin-bottom: 0.5rem; }

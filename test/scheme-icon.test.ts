@@ -94,4 +94,9 @@ test('a scheme favicon goes to its people only, inert, and is left out when ther
   utimesSync(join(withIcon.repo, ICON_PATH), new Date(), new Date(Date.now() + 5000));
   assert.equal(await (await get(withIcon.id, member.cookie)).text(), SVG2);
   assert.notEqual((await list(srv.cookie)).Iconic, icons.Iconic);
+
+  // Delve's case: a scheme with none whose main gains one in a fast-forward gets it on the next list, no restart.
+  writeFileSync(join(plain.repo, ICON_PATH), SVG2);
+  assert.equal(typeof (await list(srv.cookie)).Plain, 'number');
+  assert.equal(await (await get(plain.id, member.cookie)).text(), SVG2);
 });

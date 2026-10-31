@@ -1,7 +1,8 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
-import { ago, api, h, isCoordinator, isSeen, STATES, taskmasterLabel, threadHref, view } from './core.js';
+import { ago, api, h, isCoordinator, isSeen, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './core.js';
 import { cardEvent, countMoved, otherSchemes } from './schemecounts.js';
+import { iconSrc } from './schemes.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
 const inbox = { projectId: null, items: [], timer: 0, countsTimer: 0 };
@@ -30,7 +31,11 @@ function refreshSoon() {
 export function refreshSchemeCounts() {
   return api('api/projects').then((projects) => {
     if (view?.kind === 'project') view.projects = projects;
-    for (const p of projects) for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
+    for (const p of projects) {
+      for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
+      // A favicon a merge added or changed since the page drew it.
+      for (const el of document.querySelectorAll(`[data-scheme-icon="${p.id}"]`)) if (el.getAttribute('src') !== iconSrc(p)) el.replaceWith(schemeIcon(p));
+    }
     renderInbox();
   }, () => {});
 }

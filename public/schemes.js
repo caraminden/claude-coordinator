@@ -10,3 +10,8 @@ export function startScheme(projects, lastId) {
   if (has(HOME_SCHEME)) return HOME_SCHEME;
   return projects[0]?.id ?? null;
 }
+
+/** Where a scheme's favicon is served (#222), its version in the URL so a new one isn't cached; null when it has none. */
+export function iconSrc(p) {
+  return p.icon == null ? null : `api/projects/${p.id}/icon?v=${p.icon}`;
+}

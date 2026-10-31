@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startScheme } from '../public/schemes.js';
+import { iconSrc, startScheme } from '../public/schemes.js';
 
 const list = (...ids) => ids.map((id) => ({ id }));
 
@@ -16,4 +16,10 @@ test('falls back to Citadel, then the first scheme', () => {
 
 test('no schemes: nothing to open', () => {
   assert.equal(startScheme([], 2), null);
+});
+
+test("a scheme's favicon URL carries its version, so a merged new icon is fetched afresh; none without one", () => {
+  assert.equal(iconSrc({ id: 1, icon: null }), null);
+  assert.equal(iconSrc({ id: 1, icon: 5 }), 'api/projects/1/icon?v=5');
+  assert.notEqual(iconSrc({ id: 1, icon: 6 }), iconSrc({ id: 1, icon: 5 }));
 });

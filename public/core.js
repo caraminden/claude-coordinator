@@ -12,6 +12,7 @@ import { onSchedulesChanged } from './schedules.js';
 import { inAppHash, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { uploadsRunning } from './composer.js';
 import { renderMarkdown } from './markdown.js';
+import { iconSrc } from './schemes.js';
 
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
@@ -78,10 +79,13 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-/** A scheme's favicon (#222), only ever as an <img> (an SVG there can't run scripts); nothing when it has none. */
+/**
+ * A scheme's favicon (#222), only ever as an <img> (an SVG there can't run scripts); hidden when it has
+ * none, so refreshSchemeCounts can swap it in once a merge brings one.
+ */
 export function schemeIcon(p) {
-  if (p.icon == null) return null;
-  const img = h('img', { class: 'scheme-icon', src: `api/projects/${p.id}/icon?v=${p.icon}`, alt: '', onerror: () => img.remove() });
+  const src = iconSrc(p);
+  const img = h('img', { class: 'scheme-icon', 'data-scheme-icon': p.id, src, alt: '', hidden: !src, onerror: () => { img.hidden = true; } });
   return img;
 }
 

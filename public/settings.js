@@ -191,8 +191,7 @@ export function projectTitle(project) {
     err.hidden = true;
     err.remove();
     wrap.replaceChildren(
-      // replaceChildren would print a null, so none when there's no favicon.
-      ...[schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project)].filter(Boolean),
+      schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project),
       h('span', { class: 'label', 'data-project-name': project.id }, view.project.name),
       h('button', { type: 'button', class: 'rename', 'aria-label': 'Rename scheme', title: 'Rename scheme (its repo stays as it is)', onclick: edit }, '✎'),
       h('span', { class: 'spacer' }),

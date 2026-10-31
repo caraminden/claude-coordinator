@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { listeningPort, PASSWORD } from './helpers.ts';
+import { listeningPort, PASSWORD, stopProcs } from './helpers.ts';
 
 // A preview (PREVIEW=1) serves the app on a copy of the database and must never act on it: no turns
 // (from people's messages or auto-resume), no new minions or schemes, no pushes, no machines.
@@ -19,8 +19,8 @@ const pushServer = createHttpServer((req, res) => {
   pushHits++;
   res.writeHead(201).end();
 });
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
   pushServer.close();
   rmSync(root, { recursive: true, force: true });
 });

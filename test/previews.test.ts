@@ -7,15 +7,15 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Previews } from '../src/previews.ts';
-import { agentToken, listeningPort, PASSWORD, SECRET } from './helpers.ts';
+import { agentToken, listeningPort, PASSWORD, SECRET, stopProcs } from './helpers.ts';
 
 // Previews (src/previews.ts): the live server runs a minion's worktree in preview mode on a copy of
 // its database and proxies /preview/<id>/ to it, for signed-in people only.
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'previews-test-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
   rmSync(root, { recursive: true, force: true });
 });
 

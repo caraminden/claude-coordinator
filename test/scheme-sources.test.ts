@@ -214,7 +214,7 @@ test('folder refuses relative, missing, outside-HOME, data-dir, non-repo, sub-fo
   const cases: [string, RegExp][] = [
     ['code/plain', /absolute path/],
     [join(root, 'code', 'nope'), /There is no folder/],
-    // The server's HOME is root, so its parent is outside it wherever TMPDIR points (a turn's is under the real home, #218).
+    // The server's HOME is root, so its parent is outside that HOME.
     [dirname(root), /under your home folder/],
     [join(s.data, 'projects', '1'), /data folder/],
     [s.data, /data folder/],

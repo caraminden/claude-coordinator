@@ -7,14 +7,17 @@ import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs } from './helpers.ts';
 
 // pin_artifact / unpin_artifact / list_artifacts: a Taskmaster or a minion pins an artifact of its own
 // scheme when a person asks, through the real MCP server talking to a real server.
 const root = mkdtempSync(join(tmpdir(), 'pin-artifacts-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  if (srv) await stopProcs([srv.proc]);
+  rmSync(root, { recursive: true, force: true });
+});
 
 const store = new Store(join(data, 'coordinator.db'));
 const A = store.createProject('A', null);
@@ -49,7 +52,6 @@ let srv: Booted;
 before(async () => {
   srv = await bootServer({ root });
 });
-after(() => srv?.proc.kill());
 
 /** One tool call through a fresh mcp.ts acting as `ticket`. */
 async function tool(ticket: { id: number; project_id: number; kind: string }, name: string, args: object): Promise<{ text: string; error: boolean }> {

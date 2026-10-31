@@ -8,13 +8,13 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { turnSettings } from '../src/runner.ts';
-import { bootServer } from './helpers.ts';
+import { bootServer, stopProcs } from './helpers.ts';
 
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'model-effort-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
   rmSync(root, { recursive: true, force: true });
 });
 

@@ -9,6 +9,7 @@
 //   stream.jsonl  out: claude's stdout, the stream-json the runner tails
 //   stderr.log    out: claude's stderr
 //   exit.json     out: { code, signal, error? } once claude has exited
+//   beat          out: touched every 5 s while this runs
 import { spawn } from 'node:child_process';
 import { appendFileSync, closeSync, fstatSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -51,6 +52,8 @@ try {
 child!.on('error', failed);
 if (child!.pid) put('pid.json', JSON.stringify({ wrapper: process.pid, claude: child.pid }));
 child!.on('exit', (code, signal) => done({ code, signal }));
+// In a container the runner can't see these pids, so it goes by this heartbeat (runner.ts wrapperAlive).
+setInterval(() => writeFileSync(file('beat'), ''), 5_000).unref();
 
 // Claude reads stdin line by line, mid-turn too, and waits for more until it closes. So steers go in
 // until the turn's reply (its result) is out; anything written before the close is still handled.

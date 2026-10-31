@@ -48,7 +48,9 @@ Planned next: runners on other people's own Claude logins.
   run with an extra MCP server (`src/mcp.ts`) whose tools call this app's API
   with a bearer token that only reaches that scheme's minions (never the
   Taskmaster itself). The one way past that is `message_taskmaster`, which
-  messages another scheme's Taskmaster (never its minions), with a loop guard of
+  messages another scheme's Taskmaster (never its minions): one the turn's person is also in (an admin is
+  in all), or Citadel's from anywhere, labelled with who asks and whether they're a Citadel member;
+  Citadel's may answer a scheme for 7 days after it last wrote (`src/access.ts`). A loop guard allows
   6 messages per pair of Taskmasters in 10 minutes. The token is passed in the environment, not on the
   command line, so other users on the box can't read it from `ps`.
 - Each scheme can have **instructions** (up to 16,000 characters), edited on the

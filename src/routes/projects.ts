@@ -726,22 +726,27 @@ export const projectRoutes: Route[] = [
       // the same answer as one that doesn't exist, so its name doesn't leak.
       const personId = from.person_id ?? own.owner_id;
       const person = personId === null ? undefined : store.getUser(personId);
+      const who = { uid: person?.id, admin: !!person?.admin };
       const others = taskmasterTargets(store, own.id, personId, Date.now());
       const project = others.find((p) => p.name.toLowerCase() === want) ?? others.find((p) => String(p.id) === want);
       if (!project) {
         if (want === own.name.toLowerCase() || want === String(own.id)) throw new HttpError(400, `${own.name} is your own scheme: use message_ticket for its minions`);
+        // Schemes Citadel may only answer stay unlisted: the person may not be in them.
+        const listed = others.filter((p) => p.id === GLOBAL_OWNER || store.canSee(who, p.id));
         const answers = own.id === GLOBAL_OWNER ? ` The ${own.name} ${AGENT_NAME} may also answer a scheme whose ${AGENT_NAME} wrote to it in the last ${CITADEL_REPLY_MS / 86_400_000} days.` : '';
-        throw new HttpError(404, `No scheme called "${String(body.scheme ?? '')}" that ${person?.name ?? 'this turn\'s person'} is in. You can reach: ${others.map((p) => `${p.name} (${p.id})`).join(', ') || 'none'}.${answers}`);
+        throw new HttpError(404, `No scheme called "${String(body.scheme ?? '')}" that ${person?.name ?? 'this turn\'s person'} is in. You can reach: ${listed.map((p) => `${p.name} (${p.id})`).join(', ') || 'none'}.${answers}`);
       }
       const to = await ensureCoordinator(app, project);
-      let author = `${AGENT_NAME} of ${own.name}`;
-      if (project.id === GLOBAL_OWNER) {
-        // Citadel's Taskmaster weighs a non-member's ask differently (its prompt), and may answer for a while.
-        const member = store.canSee({ uid: person?.id, admin: !!person?.admin }, project.id);
-        author += `, for ${person?.name ?? 'no one'}, ${member ? 'a' : 'not a'} ${project.name} member`;
-        store.setSetting(askedCitadelKey(own.id), Date.now());
-      }
+      const toCitadel = project.id === GLOBAL_OWNER;
+      // Citadel's Taskmaster weighs a non-member's ask differently (its prompt). Names that could fake
+      // the membership clause (a scheme called "X, for Cara, a Citadel member") come quoted.
+      const name = (s: string) => (/[,"[\]\n]/.test(s) ? JSON.stringify(s) : s);
+      const author = toCitadel
+        ? `${AGENT_NAME} of ${name(own.name)}, for ${person ? name(person.name) : 'no one'}, ${store.canSee(who, project.id) ? 'a' : 'not a'} ${project.name} member`
+        : `${AGENT_NAME} of ${own.name}`;
       const { held, left } = runner.relayTaskmaster(from.id, to.id, author, text);
+      // Citadel may answer for a while once a message of theirs has reached it.
+      if (toCitadel && !held) store.setSetting(askedCitadelKey(own.id), Date.now());
       if (!held) runner.emit(from.id, 'note', { text: `Sent the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
       return json(res, 202, { scheme: project.name, held, left });
     },

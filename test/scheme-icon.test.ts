@@ -7,9 +7,9 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { ICON_PATHS, MAX_ICON_BYTES } from '../src/scheme-icon.ts';
+import { bootServer } from './helpers.ts';
 
 const ICON_PATH = ICON_PATHS[0];
-import { bootServer } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'scheme-icon-'));
 const data = join(root, 'data');
@@ -40,6 +40,10 @@ writeFileSync(join(webApp.repo, 'public', 'icon.svg'), SVG.replace('red', 'green
 const both = scheme('Both', SVG);
 mkdirSync(join(both.repo, 'public'));
 writeFileSync(join(both.repo, 'public', 'icon.svg'), SVG.replace('red', 'green'));
+// One it can't use (too big) doesn't hide the next one down.
+const fallback = scheme('Fallback', `<svg xmlns="http://www.w3.org/2000/svg"><!--${'x'.repeat(MAX_ICON_BYTES)}--></svg>`);
+mkdirSync(join(fallback.repo, 'public'));
+writeFileSync(join(fallback.repo, 'public', 'icon.svg'), SVG.replace('red', 'green'));
 
 test('a scheme favicon goes to its people only, inert, and is left out when there is none', { timeout: 60_000 }, async () => {
   const srv = await bootServer({ root });
@@ -82,6 +86,7 @@ test('a scheme favicon goes to its people only, inert, and is left out when ther
   // A favicon in public/ is found too, but assets/icon/icon.svg comes first.
   assert.equal(await (await get(webApp.id, srv.cookie)).text(), SVG.replace('red', 'green'));
   assert.equal(await (await get(both.id, srv.cookie)).text(), SVG);
+  assert.equal(await (await get(fallback.id, srv.cookie)).text(), SVG.replace('red', 'green'));
 
   // A new icon (a fast-forward rewrites the file) is served at once, under a new version.
   const SVG2 = SVG.replace('red', 'blue');

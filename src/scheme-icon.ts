@@ -22,21 +22,28 @@ type Found = { file: string; size: number; mtime: number };
 
 const NO_ICON = { missing: 'This scheme has no favicon' };
 
-/** The scheme's icon file, or why there is none: none of ICON_PATHS, a link out of the checkout, or too big. */
+/** The first usable of ICON_PATHS, or why there is none: none there, a link out of the checkout, or too big. */
 export async function findIcon(repoDir: string | null): Promise<Found | { missing: string }> {
   const root = repoDir && await realpath(repoDir).catch(() => null);
   if (!root) return NO_ICON;
+  let refused: { missing: string } | undefined;
   for (const path of ICON_PATHS) {
     // realpath, so neither the file nor a folder on its way can be a symlink out of the checkout.
     const file = await realpath(join(root, path)).catch(() => null);
     if (!file) continue;
-    if (!file.startsWith(root + sep)) return { missing: `${path} points outside the scheme's repo` };
+    if (!file.startsWith(root + sep)) {
+      refused ??= { missing: `${path} points outside the scheme's repo` };
+      continue;
+    }
     const st = await stat(file).catch(() => null);
     if (!st?.isFile()) continue;
-    if (st.size > MAX_ICON_BYTES) return { missing: `${path} is over ${MAX_ICON_BYTES / 1024} KB` };
+    if (st.size > MAX_ICON_BYTES) {
+      refused ??= { missing: `${path} is over ${MAX_ICON_BYTES / 1024} KB` };
+      continue;
+    }
     return { file, size: st.size, mtime: Math.floor(st.mtimeMs) };
   }
-  return NO_ICON;
+  return refused ?? NO_ICON;
 }
 
 /** The icon's version for the scheme list (its mtime, which a fast-forward that changes it moves), or null for none. */

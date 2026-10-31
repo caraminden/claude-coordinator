@@ -76,12 +76,13 @@ const pr = (number: number, head: string, repo = 'cara/delve'): PrInfo => ({
 });
 
 test("a merge's target: only a PR in the scheme's repo, and whether it is the minion's own", () => {
-  assert.deepEqual(mergeTarget(pr(191, 'ticket/74-x'), 'Cara/Delve', 'ticket/74-x'), { number: 191, own: true });
-  assert.deepEqual(mergeTarget(pr(188, 'ticket/70-y'), 'cara/delve', 'ticket/74-x'), { number: 188, own: false });
+  assert.deepEqual(mergeTarget(pr(191, 'ticket/74-x'), 'Cara/Delve', 'ticket/74-x'), { number: 191, own: true, open: true });
+  assert.deepEqual(mergeTarget(pr(188, 'ticket/70-y'), 'cara/delve', 'ticket/74-x'), { number: 188, own: false, open: true });
+  assert.equal(mergeTarget({ ...pr(191, 'ticket/74-x'), state: 'MERGED' }, 'cara/delve', 'ticket/74-x')?.open, false, 'merged');
   assert.equal(mergeTarget(pr(191, 'ticket/74-x', 'someone/else'), 'cara/delve', 'ticket/74-x'), null, 'another repo');
   assert.equal(mergeTarget(null, 'cara/delve', 'ticket/74-x'), null, 'the lookup failed');
   assert.equal(mergeTarget(pr(191, 'ticket/74-x'), null, 'ticket/74-x'), null, 'a scheme with no GitHub repo');
-  assert.deepEqual(mergeTarget(pr(191, 'ticket/74-x'), 'cara/delve', null), { number: 191, own: false });
+  assert.deepEqual(mergeTarget(pr(191, 'ticket/74-x'), 'cara/delve', null), { number: 191, own: false, open: true });
 });
 
 // ---------- the gate ----------
@@ -182,6 +183,23 @@ test('a merge the go covers, run chained or without --repo, is sent back once wi
   assert.ok('id' in other, 'a PR the go does not cover gets the card, not a hint');
   a.heard(1, [{ author: 'Taskmaster', text: 'merge it' }], true);
   assert.ok('id' in ask({ number: 199, own: true }), 'no typed go: the card');
+});
+
+test('a merge GitHub refused leaves the go for a retry of that PR; once it is merged, or for another PR, the card', () => {
+  const { a, merge } = gate();
+  // Delve #72: "fold it", then --match-head-commit 2efe2fb2, which GitHub refused as too short.
+  const open = { number: 205, own: true, open: true };
+  a.heard(1, [typed('fold it')], true);
+  assert.equal(merge(1, open), 'allowed', 'the short-SHA try');
+  assert.equal(merge(1, open), 'allowed', 'the full-SHA retry: still open, so nothing merged');
+  assert.equal(merge(1, { ...open, open: false }), 'pending', 'merged now: a second merge gets the card');
+  a.heard(1, [typed('merge it')], true);
+  assert.equal(merge(1, open), 'allowed');
+  assert.equal(merge(1, { number: 206, own: true, open: true }), 'pending', 'a retry is for the PR it let through, not another');
+  assert.equal(merge(1, { number: 205, own: true }), 'pending', 'a PR whose state is unknown gets the card');
+  a.heard(1, [typed('merge PR #188')], true);
+  assert.equal(merge(1, { number: 188, own: false, open: true }), 'allowed');
+  assert.equal(merge(1, { number: 188, own: false, open: true }), 'allowed', 'a named PR, retried while open');
 });
 
 // ---------- the runner hands a turn what it read ----------
@@ -297,7 +315,8 @@ if (a[0] !== 'pr' || a[1] !== 'view') process.exit(1);
 const head = require('node:child_process').execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
 const n = /^\\d+$/.test(a[2] ?? '') ? Number(a[2]) : 191;
 const repo = a.includes('--repo') ? a[a.indexOf('--repo') + 1] : 'cara/delve';
-console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.com/' + repo + '/pull/' + n, state: 'OPEN', isDraft: false, headRefName: n === 191 ? head : 'ticket/other', baseRefName: 'main' }));
+const state = require('node:fs').existsSync(${JSON.stringify(join(root, 'e2e', 'merged-'))} + n) ? 'MERGED' : 'OPEN';
+console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.com/' + repo + '/pull/' + n, state, isDraft: false, headRefName: n === 191 ? head : 'ticket/other', baseRefName: 'main' }));
 `);
   chmodSync(join(bin, 'gh'), 0o755);
   const srv = await bootServer({ root: home, env: { HOME: home, PATH: `${bin}:${process.env.PATH}`, CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1', GH_TOKEN: undefined, GITHUB_TOKEN: undefined } });
@@ -337,8 +356,11 @@ console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.c
     assert.equal(await merge('gh pr merge 188 -R cara/delve --squash'), 'pending', "no number named: not another branch's PR");
     assert.equal(await merge('gh pr merge -R someone/else 191'), 'pending', 'another repo');
     assert.equal(await merge('gh pr merge 191 -R cara/delve -F README.md'), 'pending', 'a file in the merge commit');
-    assert.equal(await merge('gh pr merge 191 -R cara/delve --squash'), 'allowed', 'its own PR');
-    assert.equal(await merge('gh pr merge 191 -R cara/delve --squash'), 'pending', 'once');
+    assert.equal(await merge('gh pr merge 191 -R cara/delve --squash --match-head-commit 2efe2fb2'), 'allowed', 'its own PR');
+    assert.equal(await merge('gh pr merge 191 -R cara/delve --squash --match-head-commit 2efe2fb20f139cc9e77834436066a504c2793977'), 'allowed', 'GitHub refused the short SHA, so the retry passes');
+    writeFileSync(join(home, 'merged-191'), '');
+    assert.equal(await merge('gh pr merge 191 -R cara/delve --squash'), 'pending', 'once it has merged');
+    rmSync(join(home, 'merged-191'));
 
     await say('merge PR #188');
     await steered('merge PR #188');
@@ -353,7 +375,7 @@ console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.c
     assert.equal(await merge('gh pr merge 191 -R cara/delve --merge --body done'), 'pending', 'a body');
     assert.equal(await merge('gh pr merge 191 -R cara/delve --merge'), 'allowed');
     const results = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.filter((e: any) => e.kind === 'approval_result').map((e: any) => JSON.parse(e.data));
-    assert.deepEqual(results.map((r: any) => [r.by, r.via?.text]), [['Cara', 'merge it'], ['Cara', 'merge PR #188'], ['Cara', 'fold it']]);
+    assert.deepEqual(results.map((r: any) => [r.by, r.via?.text]), [['Cara', 'merge it'], ['Cara', 'merge it'], ['Cara', 'merge PR #188'], ['Cara', 'fold it']]);
   } finally {
     srv.stop();
   }

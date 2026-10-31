@@ -103,15 +103,24 @@ interface Go {
   text: string;
   /** A merge it covers was sent back once with the plain command to run (#209). */
   hinted?: boolean;
+  /** The PR a merge it let through named: retries of that PR pass while it is still open (#209). */
+  spent?: number;
 }
 
-/** Whether a go covers a merge's PR: the one they named or, with none named, the minion's own. */
-const covers = (go: Go, target: MergeTarget) => (go.pr === null ? target.own : target.number === go.pr);
+/**
+ * Whether a go covers a merge's PR: the one they named or, with none named, the minion's own. Once it
+ * has let a merge through, only that PR again, and only while it is open: a merge GitHub refused (a
+ * short --match-head-commit, a check still running) left nothing merged, so the go isn't used up.
+ */
+const covers = (go: Go, target: MergeTarget) =>
+  (go.pr === null ? target.own : target.number === go.pr) && (go.spent === undefined || (go.spent === target.number && target.open === true));
 
 /** A merge call's PR as a go is checked against: its number, and whether it is the minion's own branch's PR. */
 export interface MergeTarget {
   number: number;
   own: boolean;
+  /** The lookup found it open, so no merge of it has gone through yet. */
+  open?: boolean;
 }
 
 // The gh pr merge switches a go lets through: squash or a merge commit, not rebase (nobody asked for it).
@@ -160,7 +169,7 @@ export function mcpMerge(tool: string, input: any): MergeCall | null {
 export function mergeTarget(pr: PrInfo | null, schemeRepo: string | null, branch: string | null): MergeTarget | null {
   const repo = pr?.url.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/\d+/)?.[1];
   if (!pr || !repo || !schemeRepo || repo.toLowerCase() !== schemeRepo.toLowerCase()) return null;
-  return { number: pr.number, own: !!branch && pr.head === branch };
+  return { number: pr.number, own: !!branch && pr.head === branch, open: pr.state === 'OPEN' };
 }
 
 interface Request {
@@ -226,7 +235,7 @@ export class Approvals {
       // A person's go covers one merge: of the PR they named, or with none named, of this minion's own.
       const go = target && this.goes.get(ticketId);
       if (go && covers(go, target)) {
-        this.goes.delete(ticketId);
+        go.spent = target.number;
         this.settle(id, this.requests.get(id)!, { state: 'allowed', by: go.by, via: { message: go.message, text: go.text } });
       }
       return { id };
@@ -243,7 +252,7 @@ export class Approvals {
   /**
    * Messages a minion's turn read, in order (at its start or steered in). Only `typed` ones count: what a
    * signed-in person sent from the chat, as the messages route marks it. A go stands until that turn's
-   * next typed message that isn't one, its one merge, or the turn's end. A turn's start (`start`) drops
+   * next typed message that isn't one, its PR is merged, or the turn's end. A turn's start (`start`) drops
    * any go left from before, so a go never outlives the turn that read it.
    */
   heard(ticketId: number, msgs: { author: string; text: string; id?: number; typed?: boolean }[], start = false) {

@@ -1,6 +1,6 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
-import { alertNote, composer, composerPlaceholder, renderModelPicker } from './composer.js';
+import { alertNote, composer, composerPlaceholder, loadDraft, renderModelPicker, saveDraft } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
@@ -674,8 +674,8 @@ export function appendEvent(event, scroll = true) {
         { id: event.id, strikes: data.strikes, brief: data.brief },
         (data.files ?? []).map((f) => ({ ...f, href: uploadUrl(event.ticket_id, f.name) })));
       bubble.dataset.event = event.id;
-      // What its ✎ puts back in the message box while it waits in the queue (markQueued).
-      if (data.author === me) bubble.sent = { text: data.text ?? '', images: data.images ?? [], files: data.files ?? [] };
+      // What its ✎ puts back in the message box while it waits in the queue (markQueued); a comment on a file would lose its file.
+      if (data.author === me && !data.comment) bubble.sent = { text: data.text ?? '', images: data.images ?? [], files: data.files ?? [] };
       stamped(bubble, event);
       if (data.steered) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'Sent into the turn that was running: Claude read it between steps' }, 'into the running turn'));
       markQueued(bubble, view.ticket);
@@ -1355,7 +1355,12 @@ function markQueued(bubble, ticket) {
         const images = await Promise.all(bubble.sent.images.map((name) => imageData(`api/tickets/${ticket.id}/images/${encodeURIComponent(name)}`)));
         await api(`api/tickets/${ticket.id}/unqueue`, { method: 'POST', body: { id } });
         const form = view?.id === ticket.id && document.querySelector('.composer');
-        form?.editBack(bubble.sent.text, [...images, ...bubble.sent.files.map((upload) => ({ upload }))]);
+        if (form) form.editBack(bubble.sent.text, [...images, ...bubble.sent.files.map((upload) => ({ upload }))]);
+        else {
+          // Moved to another chat meanwhile: the text waits in this chat's draft (attachments stay in the struck bubble).
+          const draft = loadDraft(`cc-draft:${ticket.id}`)?.trim();
+          saveDraft(`cc-draft:${ticket.id}`, draft ? `${bubble.sent.text}\n${draft}` : bubble.sent.text);
+        }
       } catch (err) {
         btn.disabled = false;
         alertNote(err.message);

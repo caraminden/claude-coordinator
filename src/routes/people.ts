@@ -160,7 +160,7 @@ export const peopleRoutes: Route[] = [
   {
     method: 'DELETE', path: '/api/me/claude', who: ['person'],
     async handler({ res, app, session }) {
-      await app.claude.unlink(uidOf(session));
+      await app.claude.unlink(uidOf(session)).catch((err) => { throw new HttpError(400, err.message); });
       return json(res, 200, app.claude.status(uidOf(session)));
     },
   },

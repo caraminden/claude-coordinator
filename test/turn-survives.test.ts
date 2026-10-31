@@ -108,6 +108,39 @@ test('a turn that ends while no server is running is finished by the next one', 
   assert.equal(store.getTicket(id)!.status, 'idle');
 });
 
+test('a card waiting through a restart still waits in the re-attached turn, and a click settles it (#209)', async () => {
+  const id = newTicket();
+  const before = await started(id);
+  const card = before.approvals.request(id, 'Bash', { command: 'gh pr merge 205 --repo o/r --merge' });
+  before.detachAll();
+
+  const next = server();
+  next.recover();
+  assert.equal(next.approvals.get(id, card).state, 'pending', "the minion's poll still finds it");
+  assert.equal(next.approvals.pending().length, 1, 'and Needs-you lists it');
+  assert.equal(next.approvals.decide(id, card, true, 'Cara').state, 'allowed');
+  writeFileSync(release, '');
+  await until(() => !next.isRunning(id));
+  const results = store.listEvents(id).filter((e) => e.kind === 'approval_result').map((e) => JSON.parse(e.data).state);
+  assert.deepEqual(results, ['allowed'], 'no expiry from the restart');
+});
+
+test('a card whose turn did not survive the restart expires', async () => {
+  const id = newTicket();
+  const before = await started(id);
+  const card = before.approvals.request(id, 'Bash', { command: 'gh pr merge 205 --repo o/r --merge' });
+  const dir = turnDir(before, id);
+  before.detachAll();
+  writeFileSync(release, '');
+  await until(() => existsSync(join(dir, 'exit.json')));
+
+  const next = server();
+  next.recover();
+  await until(() => !next.isRunning(id));
+  assert.equal(next.approvals.get(id, card).state, 'expired');
+  assert.equal(next.approvals.pending().length, 0);
+});
+
 test('a re-attached turn can be stopped, and messages queued behind it survive the restart', async () => {
   const stopped = newTicket();
   const queued = newTicket();

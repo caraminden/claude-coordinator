@@ -10,7 +10,7 @@ import { APP_NAME } from './appname.ts';
 import { AGENT_NAME } from './auth.ts';
 import { onboardingOpen, type EventRow, type Machine, type Project, type Store, type Ticket } from './db.ts';
 import { WS_SUFFIX, type MachineServer } from './machines.ts';
-import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, unsettledCards } from './approvals.ts';
+import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
 import type { TurnGithub } from './github-link.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
@@ -1051,16 +1051,16 @@ export class Runner {
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
         if (t.status === 'running') {
-          // Waiting cards lived in the old server's memory; nobody's click can count for them now.
-          for (const id of unsettledCards(this.store.listEvents(t.id))) {
-            this.emit(t.id, 'approval_result', { id, state: 'expired', reason: 'The server restarted while this waited.' });
-          }
+          // Waiting cards come back: a turn that is still running still polls for them (#209).
+          this.approvals.restore(t.id, this.store.listEvents(t.id));
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
           try {
             if (turn?.dir && this.reattach(t.id, turn)) continue;
           } catch (err: any) {
             console.error(`Ticket ${t.id}: could not re-attach to its turn, so it counts as interrupted:`, err);
           }
+          // Its turn is gone, so nobody's click can count for them now.
+          this.approvals.endTurn(t.id, 'The server restarted while this waited.');
           this.store.deleteSetting(turnKey(t.id));
           const unsent = turn ? unsentSteers(turn) : [];
           if (turn?.dir) rmSync(turn.dir, { recursive: true, force: true });
@@ -1576,7 +1576,8 @@ export class Runner {
     // title, tag, state and note. The token travels in the environment (which the MCP server
     // inherits), never on the command line.
     const role = ticket.kind === 'coordinator' ? 'coordinator' : 'thread';
-    const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [pinned(MCP_SERVER)] } };
+    // A card can wait for days: past MCP_TOOL_TIMEOUT, Claude Code also drops a tool silent for 30 minutes unless its server sets a timeout.
+    const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [pinned(MCP_SERVER)], ...(role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) } };
     for (const m of machines) {
       for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: process.execPath, args: [pinned(MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
     }

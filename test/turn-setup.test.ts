@@ -6,6 +6,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
+import { APPROVAL_TIMEOUT_MS } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 
@@ -220,6 +221,11 @@ test("a scheme with machine tools off gives its minions no machine servers or no
   } finally {
     runner.machines = () => [];
   }
+});
+
+test("a minion's thread server may stay silent as long as a card can wait; Claude Code's 30-minute idle abort expired Delve #46's merge card (#209)", async () => {
+  assert.equal((await turn('ticket', 'connected')).mcp.mcpServers.thread.timeout, APPROVAL_TIMEOUT_MS);
+  assert.equal((await turn('coordinator', 'connected')).mcp.mcpServers.coordinator.timeout, undefined, 'a Taskmaster posts no cards');
 });
 
 test("a Taskmaster's settings travel as a file, so hundreds of worktrees stay under Linux's 128 KiB argument cap", async () => {

@@ -265,6 +265,19 @@ export class Approvals {
     }
   }
 
+  /**
+   * After a server restart, the cards a turn left waiting, from its stored events: its minion's
+   * approve call is still polling for them (#209). The runner expires them again if the turn didn't survive.
+   */
+  restore(ticketId: number, events: { kind: string; data: string; created_at: number }[]) {
+    const open = new Set(unsettledCards(events));
+    for (const e of events) {
+      if (e.kind !== 'approval') continue;
+      const card = JSON.parse(e.data);
+      if (open.has(card.id)) this.requests.set(card.id, { ticketId, tripwire: !!card.tripwire, decision: { state: 'pending' }, wake: new Set(), card, at: e.created_at });
+    }
+  }
+
   /** Whether a turn holds a go to merge, so a merge call is worth looking up. */
   hasGo(ticketId: number): boolean {
     return this.goes.has(ticketId);

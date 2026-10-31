@@ -36,5 +36,19 @@ export function continueList(textarea, e, enterAddsLine = false) {
     textarea.setRangeText(edit.text, edit.from, edit.to, 'end');
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
   }
+  revealCaret(textarea);
   return true;
+}
+
+// A scripted insert doesn't scroll the box the way a typed newline does, so the new item could sit
+// below its bottom edge: measure the text up to the caret in a hidden copy and scroll down to it.
+function revealCaret(textarea) {
+  const copy = textarea.cloneNode();
+  copy.removeAttribute('id');
+  copy.style.cssText += `;position:absolute;visibility:hidden;box-sizing:border-box;height:0;min-height:0;width:${textarea.offsetWidth}px`;
+  copy.value = textarea.value.slice(0, textarea.selectionEnd);
+  textarea.after(copy);
+  const caretBottom = copy.scrollHeight;
+  copy.remove();
+  if (caretBottom > textarea.scrollTop + textarea.clientHeight) textarea.scrollTop = caretBottom - textarea.clientHeight;
 }

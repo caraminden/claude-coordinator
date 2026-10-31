@@ -153,11 +153,80 @@ export function accountPage() {
   };
   return page(
     head('Your account', [`Signed in as ${account?.name} (login ${account?.login ?? '—'})`, account?.admin ? ', an admin.' : '.',
-      account?.turns ? '' : ' Your messages don\'t start turns yet: they wait in the chat until you can link your own Claude account.']),
-    form, githubCard());
+      account?.turns ? '' : ' Your messages don\'t start turns yet: they wait in the chat until you link your Claude below.']),
+    form, claudeCard(), githubCard());
 }
 
 /** Your GitHub link: turns you start push and open pull requests as you (src/github-link.ts). */
+/** Your own Claude plan (#213): turns you start run on it, in a container of your own on the server. */
+function claudeCard() {
+  const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading Claude…'));
+  let poll = null;
+  const render = (st) => {
+    clearTimeout(poll);
+    if (!card.isConnected && poll) return;
+    const title = (chip, cls = '') => h('h3', {}, 'Claude', h('span', { class: `link-chip ${cls}` }, chip));
+    const errLine = st.error ? h('p', { class: 'error', role: 'status' }, st.error) : '';
+    const act = (label, method, path, body, cls = '') => h('button', {
+      type: 'button', class: `small ${cls}`,
+      onclick: async (e) => {
+        e.target.disabled = true;
+        render(await api(path, { method, body }).catch((err) => ({ ...st, error: err.message })));
+      },
+    }, label);
+    const link = (label) => act(label, 'POST', 'api/me/claude');
+    const unlink = h('button', {
+      type: 'button', class: 'secondary small',
+      onclick: async () => {
+        if (!confirm('Unlink your Claude? Citadel signs you out and deletes your container and its files; your messages wait in the chat until you link again.')) return;
+        render(await api('api/me/claude', { method: 'DELETE' }).catch((err) => ({ ...st, error: err.message })));
+      },
+    }, 'Unlink');
+    const note = h('p', { class: 'muted small' }, 'Turns you start run on your plan and count against its limits. ',
+      'You sign in with Anthropic inside your own container on the server: Citadel never sees your password or token, only the one-time code you paste here.');
+    if (st.host) {
+      return card.replaceChildren(title('Server login', 'ok'), h('p', {}, 'Your turns run on this server\'s own Claude login, so there\'s nothing to link.'));
+    }
+    if (st.state === 'starting') {
+      poll = setTimeout(() => api('api/me/claude').then(render).catch(() => {}), 2000);
+      return card.replaceChildren(title('Starting', 'off'), errLine,
+        h('p', {}, 'Starting your container and Anthropic\'s sign-in. The first time builds Citadel\'s image, which can take a few minutes.'));
+    }
+    if (st.state === 'waiting for code') {
+      const code = h('input', { placeholder: 'Paste the code here', autocomplete: 'off', spellcheck: 'false', required: true, maxlength: 2000 });
+      const send = h('button', { type: 'submit' }, 'Finish signing in');
+      const form = h('form', { class: 'row' }, code, send);
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        send.disabled = true;
+        send.textContent = 'Signing in…';
+        render(await api('api/me/claude/code', { method: 'POST', body: { code: code.value.trim() } }).catch((err) => ({ ...st, error: err.message })));
+      };
+      return card.replaceChildren(title('Signing in', 'off'), errLine,
+        h('p', {}, '1. ', h('a', { href: st.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Anthropic\'s sign-in'), ' and sign in with your Claude account.'),
+        h('p', {}, '2. Paste the code it shows you:'), form,
+        h('div', { class: 'row' }, act('Cancel', 'DELETE', 'api/me/claude', undefined, 'secondary')), note);
+    }
+    if (st.state === 'expired') {
+      return card.replaceChildren(title('Needs linking again', 'warn'), errLine,
+        h('p', {}, `Anthropic stopped accepting your sign-in${st.email ? ` as ${st.email}` : ''} (signed out or expired). Your messages wait in the chat until you link again.`),
+        h('div', { class: 'row' }, link('Link Claude again'), unlink), note);
+    }
+    if (st.state === 'linked') {
+      return card.replaceChildren(title('Linked', 'ok'), errLine,
+        h('dl', { class: 'kv' },
+          h('dt', {}, 'Signed in as'), h('dd', {}, st.email || '—'),
+          h('dt', {}, 'Plan'), h('dd', {}, st.plan || '—')),
+        h('div', { class: 'row' }, unlink), note);
+    }
+    return card.replaceChildren(title('Not linked', 'off'), errLine,
+      h('p', {}, 'Link your Claude plan so the turns your messages start run on it. Until then your messages wait in the chat.'),
+      h('div', { class: 'row' }, link('Link Claude')), note);
+  };
+  api('api/me/claude').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
+  return card;
+}
+
 function githubCard() {
   const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading GitHub…'));
   const render = ({ configured, error, link }) => {

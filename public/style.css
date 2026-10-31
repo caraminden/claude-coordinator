@@ -348,7 +348,8 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .composer .composer-note { margin: 0 0 0.4rem; }
 .composer .row { margin-top: 0.5rem; }
 .composer button.small { padding: 0.2rem 0.65rem; font-size: 0.85em; }
-.composer .to-latest { position: absolute; right: 0; bottom: calc(100% + 0.5rem); background: var(--panel); box-shadow: 0 2px 8px rgb(0 0 0 / 0.15); }
+/* Wide screens float Latest over the chat's bottom corner; phones keep it in the button row, where it covers no words (#212). */
+@media (min-width: 801px) { .composer .to-latest { position: absolute; right: 0; bottom: calc(100% + 0.5rem); background: var(--panel); box-shadow: 0 2px 8px rgb(0 0 0 / 0.15); } }
 .composer .to-latest[hidden] { display: none; }
 /* One-tap replies (public/replies.js): outlined pills that send their text, above the composer. */
 .replies { display: flex; flex-wrap: wrap; gap: 0.35rem; min-width: 0; }
@@ -780,10 +781,10 @@ mark.find.current { background: var(--waiting); color: #fff; }
   .composer .row { gap: 0.5rem; flex-wrap: nowrap; }
   .composer .pickers { min-width: 0; }
   .composer select.picker { min-width: 0; flex: 0 1 auto; }
-  .composer .row > .add-image, .composer .send-group { flex: none; }
+  .composer .row > .add-image, .composer .row > .to-latest, .composer .send-group { flex: none; }
   .composer textarea { min-height: 3rem; }
 }
-/* Words that only fit on wider screens ("BUG:", "Close ticket", "Add image"); phones get the short form. */
+/* Words that only fit on wider screens ("BUG:", "Close ticket", "Add image", "Latest"); phones get the short form. */
 @media (max-width: 800px) { .wide-only { display: none; } }
 /* Refresh button at the top of the screen, phones only (desktop browsers have their own). */
 .refresh-btn { display: none; }
@@ -817,7 +818,7 @@ mark.find.current { background: var(--waiting); color: #fff; }
 /* Attach, the pickers and Send (with its ▾) share one height, content centred; taller on phones to stay tappable. */
 .composer { --control-h: 2rem; }
 @media (max-width: 800px) { .composer { --control-h: 2.5rem; } }
-.composer button.add-image, .composer select.picker, .composer .send-group > button { height: var(--control-h); padding-top: 0.2rem; padding-bottom: 0.2rem; }
+.composer button.add-image, .composer button.to-latest, .composer select.picker, .composer .send-group > button { height: var(--control-h); padding-top: 0.2rem; padding-bottom: 0.2rem; }
 
 /* Question cards: Claude's multiple-choice questions, answered with a click */
 .qcard { border: 1px solid color-mix(in srgb, var(--running) 45%, var(--line)); border-radius: 10px; background: var(--panel); padding: 0.6rem 0.85rem; display: flex; flex-direction: column; gap: 0.75rem; }

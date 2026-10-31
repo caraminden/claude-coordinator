@@ -151,9 +151,11 @@ export function chatSection(chatId, ticket) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReadout(); }
   };
   // Opening at the first unread message leaves the newest out of sight; this takes you there.
-  const latest = h('button', { type: 'button', class: 'small secondary to-latest', hidden: true }, '↓ Latest');
+  // It sits in the composer's button row: phones keep it there, wide screens float it over the chat (style.css).
+  const latest = h('button', { type: 'button', class: 'small secondary to-latest', title: 'Jump to the latest', 'aria-label': 'Jump to the latest', hidden: true },
+    h('span', { 'aria-hidden': 'true' }, '↓'), h('span', { class: 'wide-only' }, ' Latest'));
   latest.addEventListener('click', scrollToBottom);
-  form.append(latest);
+  form.querySelector('.row > .add-image').after(latest);
   // One-tap replies sit at the top of the composer, so they stay in view with it (renderTicketHead fills them).
   form.prepend(h('div', { class: 'replies-bar', id: 'chat-replies', hidden: true }));
   return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), log, view.typingEl, form);

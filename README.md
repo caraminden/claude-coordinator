@@ -8,7 +8,6 @@ dismissed), and any minion can also be opened and chatted with directly. Each
 minion is one Claude Code session working in its own git worktree.
 
 This is the proof-of-concept stage: minions, chat, live output and a board.
-Planned next: runners on other people's own Claude logins.
 
 ## How it works
 
@@ -27,9 +26,10 @@ Planned next: runners on other people's own Claude logins.
 - People sign in with their own login and password. An admin invites them from
   Settings → People with a one-time link (7 days) that sets their password; the
   same button makes a reset link later. Each person sees only the schemes they own
-  or were added to (Settings → Members); admins see every scheme. Only people an
-  admin switches **Turns** on for start turns on the server's Claude login; anyone
-  else's messages are kept with a note until per-person Claude accounts arrive.
+  or were added to (Settings → Members); admins see every scheme. A turn runs on
+  the Claude plan of the person who sent its messages: the server's own login for
+  its owner (the first admin), and everyone else's own linked Claude (below). A
+  message from someone who hasn't linked is kept with a note.
 - Every stream event is stored in SQLite and pushed to browsers over
   server-sent events.
 - Messages sent while a turn is running are queued and sent together as the
@@ -219,8 +219,27 @@ systemctl --user daemon-reload
 systemctl --user enable --now claude-coordinator-backup.timer claude-coordinator-prune.timer
 ```
 
-Turns run as the service's user with that user's Claude Code login, so every
-minion currently uses Cara's account.
+Turns for the server login's owner run as the service's user on that user's
+Claude Code login. Everyone else's run in a Claude container of their own.
+
+**People's own Claude.** Each person links their Claude plan in Settings → Your
+account (`src/claude-link.ts`). Linking starts a rootless podman container,
+`citadel-claude-<user id>`, from `deploy/claude-container/Containerfile`, with a
+named volume as its HOME. `claude auth login` runs inside it; the person opens the
+link, signs in with Anthropic and pastes the one-time code back into the card, and
+the login stays in the volume. Citadel never sees a password or token. The
+container runs `sleep infinity` under a transient `systemd-run --user` unit (no
+unit file to install), with the host network, `--userns=keep-id`, 6 GB and 4 CPUs.
+It mounts the data dir's `projects/` and `run/turns/`, the schemes' memory folders,
+Claude Code's versions folder and the tool folders (read-only), and never `~/.ssh`,
+`~/.config/gh`, the server's `~/.claude`, the database or the user bus. A turn goes
+in with `podman exec -d … node src/turn-wrapper.ts`; its liveness is a heartbeat
+file. Usage is kept per person (`usage:user:<id>`). If Anthropic turns the login
+down mid-turn, the link is marked expired and the turn says so. Unlink signs out,
+stops the container and deletes the volume. A turn in a container lands with the
+`land` tool (mcp__thread), which runs `tools/land.sh` on the host for it, since
+podman and systemd aren't reachable from inside. The tripwire keeps turns away from
+`citadel-claude-*` containers and podman's storage.
 
 **People's own GitHub.** With an OAuth App set up, each person links their GitHub
 in Settings → Your account, and a turn pushes and opens pull requests as the
@@ -337,7 +356,8 @@ dir (the database, its backups, other schemes' folders under `projects/`), the l
 checkout (except a fast-forward `git pull` there until `tools/deploy.sh` exists, and
 that script itself), `~/.config/claude-coordinator/` and the systemd and Quadlet
 unit folders; `systemctl --user restart|stop|kill` of the app's or Godot's units;
-reading `~/.ssh` or the Claude login; and running `server.ts` without `DATA_DIR`
+reading `~/.ssh` or the Claude login; people's Claude containers and podman's
+storage; and running `server.ts` without `DATA_DIR`
 and `PORT`. It reads the command text, so it's a tripwire, not a sandbox: a script,
 an interpreter or a path in a variable gets past it. The table of blocked and
 allowed commands is `test/tripwire.test.ts`.

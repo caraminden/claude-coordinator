@@ -10,7 +10,7 @@ import { APP_NAME } from './appname.ts';
 import { AGENT_NAME } from './auth.ts';
 import { onboardingOpen, type EventRow, type Machine, type Project, type Store, type Ticket } from './db.ts';
 import { WS_SUFFIX, type MachineServer } from './machines.ts';
-import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs } from './approvals.ts';
+import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, type Go } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
 import type { TurnGithub } from './github-link.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
@@ -247,6 +247,8 @@ interface TurnState {
   github?: string | null;
   /** The person's Claude container it runs in (#213); absent on the host. */
   container?: string;
+  /** A person's typed go to merge it read, kept here so a restart mid-turn doesn't drop it (#209). */
+  go?: Go;
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
@@ -888,6 +890,11 @@ export class Runner {
       // The threads list shows which threads are waiting on an approval.
       this.broadcastTicket(ticketId);
     });
+    // A go is kept with its running turn; a turn's state that's already gone isn't brought back.
+    this.approvals.onGo = (ticketId) => {
+      const turn = this.isRunning(ticketId) && this.store.getSetting<TurnState>(turnKey(ticketId));
+      if (turn) this.store.setSetting(turnKey(ticketId), { ...turn, go: this.approvals.goOf(ticketId) });
+    };
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
     this.turnsDir = join(dirname(store.path), 'run', 'turns');
@@ -1054,6 +1061,7 @@ export class Runner {
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
           // This turn's waiting cards come back: if it is still running, it still polls for them (#209).
           this.approvals.restore(t.id, this.store.listEvents(t.id), turn?.startedAt);
+          if (turn?.go) this.approvals.restoreGo(t.id, turn.go);
           try {
             if (turn?.dir && this.reattach(t.id, turn)) continue;
           } catch (err: any) {
@@ -1675,7 +1683,7 @@ export class Runner {
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: place.host ? this.claudeBin : resolveClaude(this.claudeBin), args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }) };
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), go: this.approvals.goOf(ticket.id) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     this.setStatus(ticket.id, 'running');

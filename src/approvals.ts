@@ -85,7 +85,7 @@ export type Decision =
   | { state: 'expired'; reason: string };
 
 // A message that is only a go to merge (#201): "merge it", "ok, fold it", "yes merge PR #191", "ship it".
-const GO = /^(?:(?:ok|okay|yes|yep|great|lgtm|looks good|go ahead|go|please),? )?(?:and )?(?:merge|fold|land|squash|ship)(?: (?:it|this|the pr|pr #?(\d{1,7})|#(\d{1,7})|(\d{1,7})))?(?: in)?(?: (?:please|now))?$/;
+const GO = /^(?:(?:ok|okay|yes|yep|great|lgtm|looks good|go ahead|go|please|pls|plz),? )?(?:and )?(?:merge|fold|land|squash|ship)(?: (?:it|this|the pr|pr #?(\d{1,7})|#(\d{1,7})|(\d{1,7})))?(?: in)?(?: (?:please|pls|plz|now))?$/;
 
 /** The PR a message that says nothing but "merge it" means: its number, or null for the minion's own; null if it isn't one. */
 export function mergeGo(text: string): { pr: number | null } | null {
@@ -96,7 +96,7 @@ export function mergeGo(text: string): { pr: number | null } | null {
 }
 
 /** A person's go a turn read: who typed it, the PR it names (null: the minion's own) and the message. */
-interface Go {
+export interface Go {
   by: string;
   pr: number | null;
   message?: number;
@@ -197,6 +197,8 @@ export class Approvals {
   /** Each running turn's standing go to merge, from a message a person typed into that minion's chat (#201). */
   private goes = new Map<number, Go>();
   private emit: Emit;
+  /** Called whenever a turn's go changes, so the runner can keep it with the turn through a restart (#209). */
+  onGo: (ticketId: number) => void = () => {};
 
   constructor(emit: Emit) {
     this.emit = emit;
@@ -230,6 +232,7 @@ export class Approvals {
       const near = retry && this.goes.get(ticketId);
       if (near && !near.hinted && covers(near, retry.target)) {
         near.hinted = true;
+        this.onGo(ticketId);
         return { refused: `${near.by}'s go to merge covers PR #${retry.target.number}, but only as a lone plain merge, so this was not run. Run exactly \`${retry.command}\` as its own Bash call, with nothing before or after it (no cd, 2>&1, pipe, $( ) or chained check); --match-head-commit with the full SHA written out, and --delete-branch, may go on it. Check the result in a separate call. If you need what this call added, run it again unchanged and it gets the approval card.` };
       }
       const id = this.request(ticketId, tool, input, undefined, merge);
@@ -237,6 +240,7 @@ export class Approvals {
       const go = target && this.goes.get(ticketId);
       if (go && covers(go, target)) {
         go.spent = target.number;
+        this.onGo(ticketId);
         this.settle(id, this.requests.get(id)!, { state: 'allowed', by: go.by, via: { message: go.message, text: go.text } });
       }
       return { id };
@@ -264,6 +268,18 @@ export class Approvals {
       if (go) this.goes.set(ticketId, { by: m.author, pr: go.pr, message: m.id, text: m.text.trim().slice(0, 200) });
       else this.goes.delete(ticketId);
     }
+    this.onGo(ticketId);
+  }
+
+  /** A turn's go as it stands, to keep with the turn; undefined if none. */
+  goOf(ticketId: number): Go | undefined {
+    const go = this.goes.get(ticketId);
+    return go && { ...go };
+  }
+
+  /** After a restart, the go a surviving turn had read (#209). */
+  restoreGo(ticketId: number, go: Go) {
+    this.goes.set(ticketId, { ...go });
   }
 
   /**
@@ -338,6 +354,7 @@ export class Approvals {
   /** The thread's turn ended: expire its undecided cards and forget them all. */
   endTurn(ticketId: number, reason: string) {
     this.goes.delete(ticketId);
+    this.onGo(ticketId);
     for (const [id, r] of this.requests) {
       if (r.ticketId !== ticketId) continue;
       if (r.decision.state === 'pending') this.settle(id, r, { state: 'expired', reason });

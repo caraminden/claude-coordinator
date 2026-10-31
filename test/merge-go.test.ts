@@ -24,7 +24,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test('a go is a whole message that only says merge, with at most one PR number', () => {
   for (const [text, pr] of [
-    ['Merge it', null], ['fold it', null], ['Merge it.', null], ['ok, merge it', null], ['LGTM, merge it!', null],
+    ['Merge it', null], ['fold it', null], ['fold', null], ['merge pls', null], ['pls merge 205', 205], ['Fold it plz', null], ['Merge it.', null], ['ok, merge it', null], ['LGTM, merge it!', null],
     ['go ahead and merge', null], ['ship it', null], ['fold it in', null], ['please merge it', null], ['merge it please', null],
     ['yes merge PR #191', 191], ['merge #188 please', 188], ['merge 42', 42], ['Merge  PR 7 now', 7], ['  squash it  ', null],
   ] as const) assert.deepEqual(mergeGo(text), { pr }, text);
@@ -297,8 +297,12 @@ test('typed is set in exactly one place: the person path of the messages route',
 
 // ---------- end to end: the approval route checks the PR with gh, as the turn's login ----------
 
-test('through the routes: a typed go lets one plain merge of the right PR through; relays and wider calls get the card', async () => {
-  const home = join(root, 'e2e');
+/**
+ * A Delve-like scheme's files: a seed repo, and a stand-in gh whose `pr view [N]` answers for
+ * cara/delve, PR 191 being the worktree's own branch, merged once `merged-<N>` exists in `home`.
+ */
+function delveRepo(name: string) {
+  const home = join(root, name);
   const bin = join(home, 'bin');
   mkdirSync(bin, { recursive: true });
   const git = (args: string[], cwd: string) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -308,18 +312,23 @@ test('through the routes: a typed go lets one plain merge of the right PR throug
   writeFileSync(join(seed, 'README.md'), 'x\n');
   git(['add', '.'], seed);
   git(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'seed'], seed);
-  // A stand-in gh: `pr view [N]` answers for cara/delve, PR 191 being the worktree's own branch.
   writeFileSync(join(bin, 'gh'), `#!${process.execPath}
 const a = process.argv.slice(2);
 if (a[0] !== 'pr' || a[1] !== 'view') process.exit(1);
 const head = require('node:child_process').execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
 const n = /^\\d+$/.test(a[2] ?? '') ? Number(a[2]) : 191;
 const repo = a.includes('--repo') ? a[a.indexOf('--repo') + 1] : 'cara/delve';
-const state = require('node:fs').existsSync(${JSON.stringify(join(root, 'e2e', 'merged-'))} + n) ? 'MERGED' : 'OPEN';
+const state = require('node:fs').existsSync(${JSON.stringify(join(home, 'merged-'))} + n) ? 'MERGED' : 'OPEN';
 console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.com/' + repo + '/pull/' + n, state, isDraft: false, headRefName: n === 191 ? head : 'ticket/other', baseRefName: 'main' }));
 `);
   chmodSync(join(bin, 'gh'), 0o755);
-  const srv = await bootServer({ root: home, env: { HOME: home, PATH: `${bin}:${process.env.PATH}`, CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1', GH_TOKEN: undefined, GITHUB_TOKEN: undefined } });
+  const env = { HOME: home, PATH: `${bin}:${process.env.PATH}`, CLAUDE_BIN: fake, NODE_NO_WARNINGS: '1', GH_TOKEN: undefined, GITHUB_TOKEN: undefined };
+  return { home, seed, env, git };
+}
+
+test('through the routes: a typed go lets one plain merge of the right PR through; relays and wider calls get the card', async () => {
+  const { home, seed, env, git } = delveRepo('e2e');
+  const srv = await bootServer({ root: home, env });
   procs.push(srv.proc);
   try {
     const project = (await srv.call('/api/projects', { name: 'Delve', source: 'folder', folder: seed })).data;
@@ -376,6 +385,53 @@ console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.c
     assert.equal(await merge('gh pr merge 191 -R cara/delve --merge'), 'allowed');
     const results = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.filter((e: any) => e.kind === 'approval_result').map((e: any) => JSON.parse(e.data));
     assert.deepEqual(results.map((r: any) => [r.by, r.via?.text]), [['Cara', 'merge it'], ['Cara', 'merge it'], ['Cara', 'merge PR #188'], ['Cara', 'fold it']]);
+  } finally {
+    await srv.stop();
+  }
+});
+
+// ---------- replays of real Delve merges: each one once showed Cara a card she shouldn't have had to click ----------
+
+test('Delve replays: a typed fold survives restarts mid-turn, a refused merge and its retry; chained calls get the plain command (#209)', async () => {
+  const { home, seed, env, git } = delveRepo('replay');
+  let srv = await bootServer({ root: home, env });
+  procs.push(srv.proc);
+  try {
+    const project = (await srv.call('/api/projects', { name: 'Delve', source: 'folder', folder: seed })).data;
+    assert.equal((await srv.call(`/api/projects/${project.id}`, { approval_rules: 'Bash(gh pr merge:*)' }, 'PATCH')).status, 200);
+    const created = (await srv.call(`/api/projects/${project.id}/tickets`, { message: 'build the enchanting table' })).data;
+    const t = created.ticket ?? created;
+    git(['remote', 'set-url', 'origin', 'https://github.com/cara/delve.git'], project.repo_dir);
+    const minion = () => ({ Authorization: `Bearer ${agentToken(srv.data, t.id)}`, 'Content-Type': 'application/json' });
+    const attached = () => until('the turn', async () => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion() })).ok);
+    const ask = async (command: string) => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Fold the PR' } }) })).json();
+    const merge = async (command: string) => {
+      const r = await ask(command);
+      assert.ok(r.id, JSON.stringify(r));
+      const settled = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.find((e: any) => e.kind === 'approval_result' && JSON.parse(e.data).id === r.id);
+      return settled ? JSON.parse(settled.data).state : 'pending';
+    };
+    const restart = async () => {
+      await srv.stop();
+      srv = await bootServer({ root: home, env });
+      procs.push(srv.proc);
+      await attached();
+    };
+    await attached();
+
+    // #63 (10-31): "Fold it", then two other minions' deploys restarted the server before the merge.
+    assert.equal((await srv.call(`/api/tickets/${t.id}/messages`, { text: 'Fold it' })).status, 202);
+    await until('"Fold it" steered', async () => (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.some((e: any) => e.kind === 'user_message' && JSON.parse(e.data).text === 'Fold it'));
+    await restart();
+    await restart();
+    // #63 and #72: a --match-head-commit GitHub refused (made up, or too short), then the retry.
+    assert.equal(await merge('gh pr merge 191 --repo cara/delve --merge --match-head-commit f6670d1f5c1f9fa3a7b8c1a5e2d0f0b4c3a2e1d0'), 'allowed', 'the go outlived both restarts');
+    await restart();
+    assert.equal(await merge('gh pr merge 191 --repo cara/delve --merge'), 'allowed', 'nothing merged, so the retry needs no card, after another restart too');
+    // #80: the merge chained to its own check and without --repo: sent back with the plain command.
+    assert.match((await ask('gh pr merge 191 --merge --match-head-commit 7ff3d3e 2>&1 | tail -3; gh pr view 191 --json state')).refused ?? '', /`gh pr merge 191 --repo cara\/delve --merge`/);
+    writeFileSync(join(home, 'merged-191'), '');
+    assert.equal(await merge('gh pr merge 191 --repo cara/delve --merge'), 'pending', 'merged: a second merge gets the card');
   } finally {
     await srv.stop();
   }

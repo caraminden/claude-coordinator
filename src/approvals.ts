@@ -252,7 +252,7 @@ export class Approvals {
   /**
    * Messages a minion's turn read, in order (at its start or steered in). Only `typed` ones count: what a
    * signed-in person sent from the chat, as the messages route marks it. A go stands until that turn's
-   * next typed message that isn't one, its PR is merged, or the turn's end. A turn's start (`start`) drops
+   * next typed message that isn't one, its PR no longer being open, or the turn's end. A turn's start (`start`) drops
    * any go left from before, so a go never outlives the turn that read it.
    */
   heard(ticketId: number, msgs: { author: string; text: string; id?: number; typed?: boolean }[], start = false) {

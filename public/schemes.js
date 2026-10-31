@@ -10,3 +10,13 @@ export function startScheme(projects, lastId) {
   if (has(HOME_SCHEME)) return HOME_SCHEME;
   return projects[0]?.id ?? null;
 }
+
+/** A letter tile's letter (#222): the scheme name's first letter or digit, upper-cased; '?' for none. */
+export function tileLetter(name) {
+  return (String(name ?? '').match(/[\p{L}\p{N}]/u)?.[0] ?? '?').toLocaleUpperCase();
+}
+
+/** A letter tile's hue, from the scheme's id so it stays put through renames; golden-angle steps keep neighbours apart. */
+export function tileHue(id) {
+  return Math.round((id * 137.508) % 360);
+}

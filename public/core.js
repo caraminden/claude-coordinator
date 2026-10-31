@@ -12,6 +12,7 @@ import { onSchedulesChanged } from './schedules.js';
 import { inAppHash, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { uploadsRunning } from './composer.js';
 import { renderMarkdown } from './markdown.js';
+import { tileHue, tileLetter } from './schemes.js';
 
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
@@ -76,6 +77,18 @@ export function h(tag, attrs = {}, ...children) {
   }
   for (const c of children.flat()) if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
   return el;
+}
+
+/**
+ * A scheme's icon (#222): its repo's assets/icon/icon.svg, only ever as an <img> (an SVG there can't run
+ * scripts), or a letter tile in a colour of its own when it has none or the icon fails to load.
+ */
+export function schemeIcon(p) {
+  const tile = h('span', { class: 'scheme-icon tile', 'data-project-letter': p.id, 'aria-hidden': 'true' }, tileLetter(p.name));
+  tile.style.setProperty('--hue', tileHue(p.id));
+  if (p.icon == null) return tile;
+  const img = h('img', { class: 'scheme-icon', src: `api/projects/${p.id}/icon?v=${p.icon}`, alt: '', onerror: () => img.replaceWith(tile) });
+  return img;
 }
 
 const ICONS = { back: 'M10.25 3.5 5.75 8l4.5 4.5', forward: 'M5.75 3.5 10.25 8l-4.5 4.5', close: 'M4 4l8 8M12 4l-8 8', pin: 'M5.5 2.5h5M6.5 2.5v4l-2 3h7l-2-3v-4M8 9.5V14' };

@@ -1,6 +1,6 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
 import { weekShare } from './cost.js';
-import { account, ago, api, app, costText, crumbs, h, isCoordinator, isSeen, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, usage, view } from './core.js';
+import { account, ago, api, app, costText, crumbs, h, isCoordinator, isSeen, schemeIcon, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, usage, view } from './core.js';
 import { fitHeight, loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -135,7 +135,7 @@ export function toggleSchemeMenu(button) {
   if (document.getElementById('scheme-menu')) return closeSchemeMenu();
   const menu = h('div', { id: 'scheme-menu', class: 'scheme-menu' },
     view.projects.map((p) => h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, onclick: () => closeSchemeMenu() },
-      h('span', { class: 'name', 'data-project-name': p.id }, p.name), schemeCount(p))),
+      schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), schemeCount(p))),
     h('button', { type: 'button', class: 'nav-item add', onclick: () => { closeSchemeMenu(); openNewScheme(); } }, '+ New scheme'));
   const outside = (e) => { if (!menu.contains(e.target) && !button.contains(e.target)) closeSchemeMenu(); };
   const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeSchemeMenu(); button.focus(); } };

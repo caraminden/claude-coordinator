@@ -1,5 +1,5 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
-import { account, api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, setView, threadHref, usageMeter, view } from './core.js';
+import { account, api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, schemeIcon, setView, threadHref, usageMeter, view } from './core.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachinesShelf } from './settings.js';
 import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
@@ -20,7 +20,9 @@ export async function showTicket(ticketId) {
 
 function renderCrumbs(main) {
   const { project } = view;
-  const projectLink = h('a', { href: `#/p/${project.id}`, 'data-project-name': project.id }, project.name);
+  // The scheme list's row carries the icon's version; the scheme's own doesn't.
+  const icon = () => schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project);
+  const projectLink = h('a', { href: `#/p/${project.id}`, class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name));
   const artifactsLink = h('a', { href: `#/p/${project.id}/artifacts` }, 'Artifacts');
   const settingsLink = h('a', { href: `#/p/${project.id}/settings` }, 'Settings');
   crumbs.replaceChildren(...(
@@ -37,7 +39,7 @@ function renderCrumbs(main) {
       : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
       : main.kind === 'shared' ? [projectLink, ' / ', h('a', { href: `#/p/${project.id}/shared` }, 'Shared files'), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
-          : [h('span', { 'data-project-name': project.id }, project.name)]));
+          : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]));
 }
 
 /**
@@ -98,7 +100,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('section', { class: 'column' },
       h('h3', {}, 'Schemes'),
       projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
-        h('span', { class: 'name', 'data-project-name': p.id }, p.name), schemeCount(p))),
+        schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), schemeCount(p))),
       h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme')),
     h('div', { id: 'machines-shelf' }),
     h('div', { id: 'artifact-shelf' }));

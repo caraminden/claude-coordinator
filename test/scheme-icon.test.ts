@@ -1,0 +1,79 @@
+// A scheme's own icon (#222): served from its checkout's assets/icon/icon.svg to its people only,
+// inert (headers), capped in size, never through a symlink out of the repo, and re-read when it changes.
+import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+import { Store } from '../src/db.ts';
+import { ICON_PATH, MAX_ICON_BYTES } from '../src/scheme-icon.ts';
+import { bootServer } from './helpers.ts';
+
+const root = mkdtempSync(join(tmpdir(), 'scheme-icon-'));
+const data = join(root, 'data');
+mkdirSync(data, { recursive: true });
+after(() => rmSync(root, { recursive: true, force: true }));
+
+const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="red"/></svg>';
+const store = new Store(join(data, 'coordinator.db'));
+/** A scheme whose checkout holds `icon` at assets/icon/icon.svg (a string, or a symlink target), or nothing. */
+function scheme(name: string, icon?: string | { link: string }) {
+  const p = store.createProject(name, null);
+  const repo = join(root, 'repos', name);
+  mkdirSync(join(repo, 'assets', 'icon'), { recursive: true });
+  if (typeof icon === 'string') writeFileSync(join(repo, ICON_PATH), icon);
+  else if (icon) symlinkSync(icon.link, join(repo, ICON_PATH));
+  store.setProjectRepoDir(p.id, repo);
+  return { ...p, repo };
+}
+const withIcon = scheme('Iconic', SVG);
+const plain = scheme('Plain');
+const huge = scheme('Huge', `<svg xmlns="http://www.w3.org/2000/svg"><!--${'x'.repeat(MAX_ICON_BYTES)}--></svg>`);
+writeFileSync(join(root, 'secret.svg'), SVG);
+const linked = scheme('Linked', { link: join(root, 'secret.svg') });
+
+test('a scheme icon goes to its people only, inert, and falls back to a tile when there is none', { timeout: 60_000 }, async () => {
+  const srv = await bootServer({ root });
+  after(() => srv.proc.kill());
+  const invited = async (name: string) => {
+    const made = await fetch(`${srv.base}/api/people`, { method: 'POST', headers: { Cookie: srv.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => r.json());
+    const res = await fetch(`${srv.base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
+    return { id: made.person.id as number, cookie: res.headers.get('set-cookie')!.split(';')[0] };
+  };
+  const [member, outsider] = [await invited('Max'), await invited('Olive')];
+  store.addMember(withIcon.id, member.id);
+  store.addMember(plain.id, member.id);
+  const get = (id: number, cookie: string) => fetch(`${srv.base}/api/projects/${id}/icon`, { headers: { Cookie: cookie } });
+
+  // A member gets the file, with the headers that keep it inert.
+  const res = await get(withIcon.id, member.cookie);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), SVG);
+  assert.equal(res.headers.get('content-type'), 'image/svg+xml');
+  assert.equal(res.headers.get('content-security-policy'), "default-src 'none'; style-src 'unsafe-inline'");
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+
+  // Someone not in the scheme is told it doesn't exist.
+  const refused = await get(withIcon.id, outsider.cookie);
+  assert.equal(refused.status, 404);
+  assert.equal((await refused.json()).error, 'No such scheme');
+
+  // No file, a file too big, and a symlink out of the repo all answer 404; the list says to draw a tile.
+  for (const [p, why] of [[plain, 'has no'], [huge, 'is over 256 KB'], [linked, 'points outside']] as const) {
+    const r = await get(p.id, srv.cookie);
+    assert.equal(r.status, 404, p.name);
+    assert.match((await r.json()).error, new RegExp(why), p.name);
+  }
+  const list = async (cookie: string) => Object.fromEntries((await fetch(`${srv.base}/api/projects`, { headers: { Cookie: cookie } }).then((r) => r.json())).map((p: any) => [p.name, p.icon]));
+  const icons = await list(srv.cookie);
+  assert.equal(typeof icons.Iconic, 'number');
+  assert.deepEqual([icons.Plain, icons.Huge, icons.Linked], [null, null, null]);
+  assert.deepEqual(Object.keys(await list(member.cookie)).sort(), ['Iconic', 'Plain']);
+
+  // A new icon (a fast-forward rewrites the file) is served at once, under a new version.
+  const SVG2 = SVG.replace('red', 'blue');
+  writeFileSync(join(withIcon.repo, ICON_PATH), SVG2);
+  utimesSync(join(withIcon.repo, ICON_PATH), new Date(), new Date(Date.now() + 5000));
+  assert.equal(await (await get(withIcon.id, member.cookie)).text(), SVG2);
+  assert.notEqual((await list(srv.cookie)).Iconic, icons.Iconic);
+});

@@ -19,7 +19,8 @@ import { KIT } from '../runner.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import type { Chain } from '../wake.ts';
 import { cloneProject, projectDir, removeProjectDir } from '../workspace.ts';
-import { HttpError, json, oneOf, readJson, str, ticketView, type App, type Ctx, type Route } from '../http.ts';
+import { ICON_HEADERS, iconVersion, readIcon } from '../scheme-icon.ts';
+import { HttpError, json, oneOf, readJson, send, str, ticketView, type App, type Ctx, type Route } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
@@ -207,10 +208,21 @@ export const projectRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects', who: ['person'],
     // inbox: the count on the scheme's Needs-you badge, for the scheme switcher.
-    handler: ({ res, app: { store, runner }, session }) => json(res, 200, visibleSchemes(store, session).map((p) => ({
+    // icon: the version of the scheme's own icon (#222) for its URL, or null to draw a letter tile.
+    handler: async ({ res, app: { store, runner }, session }) => json(res, 200, await Promise.all(visibleSchemes(store, session).map(async (p) => ({
       ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length,
       inbox: inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id)),
-    }))),
+      icon: await iconVersion(p.repo_dir),
+    })))),
+  },
+  {
+    // The scheme's assets/icon/icon.svg (src/scheme-icon.ts). Its URL carries the version, so it can be kept long.
+    method: 'GET', path: '/api/projects/:project/icon', who: ['person'],
+    async handler({ res, project }) {
+      const icon = await readIcon(project.id, project.repo_dir);
+      if (!Buffer.isBuffer(icon)) throw new HttpError(404, icon.missing);
+      send(res, 200, { ...ICON_HEADERS, 'Cache-Control': 'private, max-age=31536000, immutable' }, icon);
+    },
   },
   {
     // What a scheme being set up can adapt (#172): names and descriptions from every scheme's .claude/ and the kit, never file bodies.

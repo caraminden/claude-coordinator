@@ -245,7 +245,10 @@ export class ClaudeLink {
 
   /** Sign out inside the container, stop it, and remove the volume with everything in it. */
   async unlink(uid: number): Promise<void> {
+    // shortcut: a sign-in abandoned across a restart leaves its small volume behind until they link and unlink again.
+    const started = this.logins.has(uid) || !!this.meta(uid);
     this.cancel(uid);
+    if (!started) return;
     const name = this.name(uid);
     if ((await this.containers.status(name)).state === 'running') await this.containers.exec(name, [resolveClaude(this.claudeBin), 'auth', 'logout'], { env: { CLAUDE_CONFIG_DIR: join(this.home, '.claude') }, timeout: 30_000 });
     await this.containers.stop(name);

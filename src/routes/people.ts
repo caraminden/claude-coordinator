@@ -130,6 +130,35 @@ export const peopleRoutes: Route[] = [
       return json(res, 200, await app.github.status(uidOf(session)));
     },
   },
+  // Linking your own Claude plan (src/claude-link.ts, #213): its state, starting the sign-in, the code
+  // Anthropic shows you, and unlinking. Only the one-time code passes through; never a token.
+  { method: 'GET', path: '/api/me/claude', who: ['person'], handler: ({ res, app, session }) => json(res, 200, app.claude.status(uidOf(session))) },
+  {
+    method: 'POST', path: '/api/me/claude', who: ['person'],
+    handler({ res, app, session }) {
+      const uid = uidOf(session);
+      if (app.store.getUser(uid)?.server_login) throw new HttpError(400, 'Your turns run on the server\'s own Claude login, so there\'s nothing to link.');
+      // Starting the container can take minutes the first time (it builds the image): Settings polls GET meanwhile.
+      void app.claude.link(uid);
+      return json(res, 202, app.claude.status(uid));
+    },
+  },
+  {
+    method: 'POST', path: '/api/me/claude/code', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const code = String((await readJson(req)).code ?? '').trim();
+      // It is typed into the sign-in's terminal: printable characters only, so nothing can act as a key press.
+      if (!/^[\x21-\x7e]{1,2000}$/.test(code)) throw new HttpError(400, 'Paste the code Anthropic showed you.');
+      return json(res, 200, await app.claude.code(uidOf(session), code).catch((err) => { throw new HttpError(400, err.message); }));
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/me/claude', who: ['person'],
+    async handler({ res, app, session }) {
+      await app.claude.unlink(uidOf(session));
+      return json(res, 200, app.claude.status(uidOf(session)));
+    },
+  },
   { method: 'GET', path: '/api/projects/:project/members', who: ['person'], handler: ({ res, app, project }) => json(res, 200, app.store.listMembers(project.id)) },
   {
     method: 'POST', path: '/api/projects/:project/members', who: ['person'], access: 'owner',

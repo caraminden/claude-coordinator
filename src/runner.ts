@@ -16,7 +16,7 @@ import type { TurnGithub } from './github-link.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import type { Ship } from './branch.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession } from './sessions.ts';
-import { restoreTicketDir } from './workspace.ts';
+import { projectDir, restoreTicketDir } from './workspace.ts';
 import { previewKey } from './previews.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { CITADEL_REPLY_MS } from './access.ts';
@@ -804,8 +804,8 @@ export class Runner {
   units = false;
   /** Where turn folders go: beside the database, so a test's or dev copy's never mix with the live ones. */
   turnsDir: string;
-  /** Where each ticket's TMPDIR goes (src/turn-tmp.ts): beside the database, on disk, not in the shared /tmp tmpfs. */
-  tmpRoot: string;
+  /** The data dir this runner's turns use (beside the database), so a test's or dev copy's stay apart. */
+  private dataDir: string;
   /** Tells this server's turn units apart from another server's (a dev copy) on the same user manager. */
   private unitTag: string;
   /** Set in a preview (server.ts, PREVIEW=1): messages are kept, but no turn ever starts. */
@@ -852,8 +852,16 @@ export class Runner {
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
     this.turnsDir = join(dirname(store.path), 'run', 'turns');
-    this.tmpRoot = resolve(dirname(store.path), 'tmp');
+    this.dataDir = resolve(dirname(store.path));
     this.unitTag = createHash('sha256').update(this.turnsDir).digest('hex').slice(0, 8);
+  }
+
+  /**
+   * Where a scheme's minions keep their TMPDIRs (src/turn-tmp.ts): on disk, not the shared /tmp tmpfs,
+   * and inside the scheme's own folder, which the tripwire lets its minions write.
+   */
+  tmpRoot(projectId: number): string {
+    return join(projectDir(this.dataDir, projectId), 'tmp');
   }
 
   isRunning(ticketId: number): boolean {
@@ -916,7 +924,8 @@ export class Runner {
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
     try {
-      clearTmpDir(this.tmpRoot, ticketId);
+      const ticket = this.store.getTicket(ticketId);
+      if (ticket) clearTmpDir(this.tmpRoot(ticket.project_id), ticketId);
     } catch (err: any) {
       console.error(`Ticket ${ticketId}: could not clear its temp folder: ${err.message}`);
     }
@@ -1060,10 +1069,16 @@ export class Runner {
     }
     // Temp folders of minions dismissed or deleted while no server watched (or whose clearing failed).
     try {
-      const gone = sweepTmpDirs(this.tmpRoot, (id) => this.turns.has(id) || (this.store.getTicket(id)?.status ?? 'closed') !== 'closed');
+      const gone = readdirSync(join(this.dataDir, 'projects')).filter((name) => /^\d+$/.test(name)).flatMap((name) => {
+        const keep = (id: number) => {
+          const t = this.store.getTicket(id);
+          return this.turns.has(id) || (t?.project_id === Number(name) && t.status !== 'closed');
+        };
+        return sweepTmpDirs(this.tmpRoot(Number(name)), keep);
+      });
       if (gone.length) console.log(`Cleared the temp folders of ${gone.length} dismissed or deleted minion${gone.length === 1 ? '' : 's'}.`);
     } catch (err: any) {
-      console.error(`Could not sweep the temp folders: ${err.message}`);
+      if (err.code !== 'ENOENT') console.error(`Could not sweep the temp folders: ${err.message}`);
     }
   }
 
@@ -1543,7 +1558,7 @@ export class Runner {
     // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
     // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
     try {
-      const tmp = makeTmpDir(this.tmpRoot, ticket.id);
+      const tmp = makeTmpDir(this.tmpRoot(project.id), ticket.id);
       env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
     } catch (err: any) {
       this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${err.message}` });

@@ -20,7 +20,7 @@ Planned next: runners on other people's own Claude logins.
   output to a file in `$DATA_DIR/run/turns/` that the server tails. A restart
   leaves running turns alone: the next server re-attaches and catches up, and the
   turns' MCP calls wait for it (up to 2 min).
-- Each minion and Taskmaster gets its own temp folder, `$DATA_DIR/tmp/<ticket id>`
+- Each minion and Taskmaster gets its own temp folder, `$DATA_DIR/projects/<scheme id>/tmp/<ticket id>`
   (`TMPDIR`, `TMP`, `TEMP` and `CLAUDE_CODE_TMPDIR`), on disk rather than in the
   shared `/tmp` tmpfs. Dismissing a minion clears it, and server start sweeps the
   folders of dismissed or deleted ones (`src/turn-tmp.ts`).

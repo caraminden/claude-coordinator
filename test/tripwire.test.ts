@@ -512,3 +512,9 @@ test('cards: refused for hard blocks, missing explanations, long calls, and othe
   assert.equal(refused({ command: 'gh pr merge 3' }, true), undefined);
   assert.equal(a.waiting(5), 1);
 });
+
+test("a minion can write in its TMPDIR, its scheme's tmp folder (#218)", () => {
+  const tmp = `${data}/projects/2/tmp/9`;
+  assert.equal(tripwire({ tool_name: 'Write', tool_input: { file_path: `${tmp}/out.txt`, content: 'x' }, cwd: worktree }, { ...cfg, ask: true }), null);
+  for (const command of [`echo hi > ${tmp}/x.txt`, `cp a ${tmp}/`, `mkdir -p ${tmp}/b && cd ${tmp}/b && dotnet build`, `rm -rf ${tmp}/b`]) assert.equal(bash(command), null, command);
+});

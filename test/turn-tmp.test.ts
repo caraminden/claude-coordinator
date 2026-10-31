@@ -50,14 +50,15 @@ test("dismissing a minion clears its temp folder, and a restart sweeps those of 
   mkdirSync(data);
   const store = new Store(join(data, 'test.db'));
   const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
-  assert.equal(runner.tmpRoot, join(data, 'tmp'));
   const project = store.createProject('Test', null);
+  const tmpRoot = runner.tmpRoot(project.id);
+  assert.equal(tmpRoot, join(data, 'projects', String(project.id), 'tmp'));
   const ticket = () => store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' }).id;
 
   const dismissed = ticket();
-  writeFileSync(join(makeTmpDir(runner.tmpRoot, dismissed), 'leftover'), 'x');
+  writeFileSync(join(makeTmpDir(tmpRoot, dismissed), 'leftover'), 'x');
   runner.close(dismissed, 'Dismissed.');
-  assert.ok(!existsSync(join(runner.tmpRoot, String(dismissed))));
+  assert.ok(!existsSync(join(tmpRoot, String(dismissed))));
   assert.equal(store.getTicket(dismissed)!.status, 'closed');
 
   // Left behind by a server that died before clearing them, or by minions deleted since.
@@ -66,14 +67,18 @@ test("dismissing a minion clears its temp folder, and a restart sweeps those of 
   const closedEarlier = ticket();
   store.updateTicket(closedEarlier, { status: 'closed' });
   const deleted = ticket();
-  for (const id of [taskmaster, open, closedEarlier, deleted]) makeTmpDir(runner.tmpRoot, id);
+  for (const id of [taskmaster, open, closedEarlier, deleted]) makeTmpDir(tmpRoot, id);
   store.deleteTicket(deleted);
-  const stray = join(runner.tmpRoot, 'not-a-ticket');
+  // A folder in the wrong scheme's root belongs to no open minion there.
+  const other = store.createProject('Other', null);
+  makeTmpDir(runner.tmpRoot(other.id), open);
+  const stray = join(tmpRoot, 'not-a-ticket');
   mkdirSync(stray);
   runner.recover();
-  assert.ok(existsSync(join(runner.tmpRoot, String(open))), 'an open minion keeps its folder');
-  assert.ok(existsSync(join(runner.tmpRoot, String(taskmaster))), 'so does the Taskmaster');
-  assert.ok(!existsSync(join(runner.tmpRoot, String(closedEarlier))));
-  assert.ok(!existsSync(join(runner.tmpRoot, String(deleted))));
+  assert.ok(existsSync(join(tmpRoot, String(open))), 'an open minion keeps its folder');
+  assert.ok(existsSync(join(tmpRoot, String(taskmaster))), 'so does the Taskmaster');
+  assert.ok(!existsSync(join(tmpRoot, String(closedEarlier))));
+  assert.ok(!existsSync(join(tmpRoot, String(deleted))));
+  assert.ok(!existsSync(join(runner.tmpRoot(other.id), String(open))));
   assert.ok(existsSync(stray));
 });

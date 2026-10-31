@@ -1,6 +1,6 @@
 /**
- * Each minion's and Taskmaster's own temp folder (#218), on disk beside the database rather than in
- * perigee's /tmp, a 15 GB tmpfs every session shares, which their leftovers filled on 2026-10-31.
+ * Each minion's and Taskmaster's own temp folder (#218), on disk in its scheme's data folder rather
+ * than in perigee's /tmp, a 15 GB tmpfs every session shares, which their leftovers filled on 2026-10-31.
  * A folder is named by its ticket id; nothing but such a folder, directly under the root, is ever removed.
  */
 import { chmodSync, mkdirSync, readdirSync, rmSync } from 'node:fs';

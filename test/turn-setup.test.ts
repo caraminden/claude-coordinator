@@ -110,13 +110,13 @@ test("a minion turn gets the compaction window, no service secrets, Claude Code'
   assert.deepEqual(errors, []);
 });
 
-test("each minion's and Taskmaster's turn gets its own private temp folder beside the database, not /tmp (#218)", async () => {
+test("each minion's and Taskmaster's turn gets its own private temp folder in its scheme's data folder, not /tmp (#218)", async () => {
   for (const kind of ['ticket', 'coordinator'] as const) {
     const t = await turn(kind, 'connected');
-    const tmp = join(root, 'tmp', String(t.id));
+    const tmp = join(root, 'projects', String(store.getTicket(t.id)!.project_id), 'tmp', String(t.id));
     for (const name of ['TMPDIR', 'TMP', 'TEMP', 'CLAUDE_CODE_TMPDIR']) assert.equal(t.env[name], tmp, name);
     assert.equal(statSync(tmp).mode & 0o777, 0o700);
-    assert.equal(statSync(join(root, 'tmp')).mode & 0o777, 0o700);
+    assert.equal(statSync(dirname(tmp)).mode & 0o777, 0o700);
   }
 });
 

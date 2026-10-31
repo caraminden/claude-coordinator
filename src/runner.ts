@@ -5,7 +5,7 @@ import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { APP_NAME } from './appname.ts';
 import { AGENT_NAME } from './auth.ts';
 import { onboardingOpen, type EventRow, type Machine, type Project, type Store, type Ticket } from './db.ts';
@@ -22,6 +22,7 @@ import { GLOBAL_OWNER } from './properties.ts';
 import { CITADEL_REPLY_MS } from './access.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
+import { clearTmpDir, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -803,6 +804,8 @@ export class Runner {
   units = false;
   /** Where turn folders go: beside the database, so a test's or dev copy's never mix with the live ones. */
   turnsDir: string;
+  /** Where each ticket's TMPDIR goes (src/turn-tmp.ts): beside the database, on disk, not in the shared /tmp tmpfs. */
+  tmpRoot: string;
   /** Tells this server's turn units apart from another server's (a dev copy) on the same user manager. */
   private unitTag: string;
   /** Set in a preview (server.ts, PREVIEW=1): messages are kept, but no turn ever starts. */
@@ -849,6 +852,7 @@ export class Runner {
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
     this.turnsDir = join(dirname(store.path), 'run', 'turns');
+    this.tmpRoot = resolve(dirname(store.path), 'tmp');
     this.unitTag = createHash('sha256').update(this.turnsDir).digest('hex').slice(0, 8);
   }
 
@@ -911,6 +915,11 @@ export class Runner {
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
+    try {
+      clearTmpDir(this.tmpRoot, ticketId);
+    } catch (err: any) {
+      console.error(`Ticket ${ticketId}: could not clear its temp folder: ${err.message}`);
+    }
     return this.onClose(ticketId);
   }
 
@@ -1048,6 +1057,13 @@ export class Runner {
       }
     } catch {
       // No turns yet.
+    }
+    // Temp folders of minions dismissed or deleted while no server watched (or whose clearing failed).
+    try {
+      const gone = sweepTmpDirs(this.tmpRoot, (id) => this.turns.has(id) || (this.store.getTicket(id)?.status ?? 'closed') !== 'closed');
+      if (gone.length) console.log(`Cleared the temp folders of ${gone.length} dismissed or deleted minion${gone.length === 1 ? '' : 's'}.`);
+    } catch (err: any) {
+      console.error(`Could not sweep the temp folders: ${err.message}`);
     }
   }
 
@@ -1524,6 +1540,14 @@ export class Runner {
     if (effort) args.push('--effort', effort);
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
     let env: Record<string, string> = { ...turnEnv(process.env), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
+    // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
+    // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
+    try {
+      const tmp = makeTmpDir(this.tmpRoot, ticket.id);
+      env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
+    } catch (err: any) {
+      this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${err.message}` });
+    }
     // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
     args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', 'AskUserQuestion', ...UNUSED_TOOLS);
     env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };

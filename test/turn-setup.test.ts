@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -108,6 +108,16 @@ test("a minion turn gets the compaction window, no service secrets, Claude Code'
   assert.equal(t.flag('--effort'), 'high', "the scheme's default effort");
   assert.deepEqual(t.events, []);
   assert.deepEqual(errors, []);
+});
+
+test("each minion's and Taskmaster's turn gets its own private temp folder beside the database, not /tmp (#218)", async () => {
+  for (const kind of ['ticket', 'coordinator'] as const) {
+    const t = await turn(kind, 'connected');
+    const tmp = join(root, 'tmp', String(t.id));
+    for (const name of ['TMPDIR', 'TMP', 'TEMP', 'CLAUDE_CODE_TMPDIR']) assert.equal(t.env[name], tmp, name);
+    assert.equal(statSync(tmp).mode & 0o777, 0o700);
+    assert.equal(statSync(join(root, 'tmp')).mode & 0o777, 0o700);
+  }
 });
 
 test('a Taskmaster turn defaults to opus at high effort, and keeps a choice people made', async () => {

@@ -89,6 +89,9 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   const r = runner(inContainer);
   r.send(id, 'Josh', 'build it');
   await until(() => status(id) === 'running');
+  // A server restart doesn't stop a container turn, so it doesn't hold up the idle restart.
+  assert.equal(r.inContainer('citadel-claude-test-2'), 1);
+  assert.equal(r.interruptible(), 0);
   await until(() => status(id) === 'idle');
   const execs = readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const start = execs.find((a) => a[0] === 'exec' && a[1] === '-d');
@@ -100,7 +103,10 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   assert.equal(env.COORDINATOR_CONTAINER, '1');
   assert.equal(store.getSetting<any>(usageKey(josh.id))?.weekly?.utilization, 0.42);
   assert.equal(store.getSetting('usage'), null);
-  assert.ok(r.inContainer('citadel-claude-test-2') === false);
+  assert.equal(r.inContainer('citadel-claude-test-2'), 0);
+  // A landing running on the host does: the restart would kill it.
+  r.hostJobs = () => 1;
+  assert.equal(r.interruptible(), 1);
 });
 
 test("a person who can't run turns gets the reason as a note and no turn", async () => {
@@ -163,13 +169,25 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   assert.equal(link.place(josh.id), null);
   assert.equal(link.linked(josh.id), null);
   // A fresh server has no run/turns yet; podman refuses a bind mount whose folder is missing.
-  await link.ensure(josh.id);
+  // Two turns starting at once share one start.
+  await Promise.all([link.ensure(josh.id, true), link.ensure(josh.id, true)]);
+  assert.equal(log.filter((c) => c[0] === 'systemd-run').length, 1);
   assert.ok(existsSync(join(root, 'data', 'run', 'turns')) && existsSync(join(root, 'data', 'projects')));
   // ...and podman would make mount points inside HOME as root, leaving ~/.claude unwritable.
   const inHome = spec.mounts.filter((m) => !m.volume && m.dst.startsWith(home + '/'));
   assert.ok(inHome.length > 0);
   for (const m of inHome) assert.ok(existsSync(join(root, 'josh-vol-ensure', m.dst.slice(home.length + 1))), m.dst);
   assert.ok(log.some((c) => c[0] === 'systemd-run' && c.includes(`--unit=citadel-claude-t-${josh.id}`)));
+  // The container runs an old spec: a starting turn that's its only one restarts it; with another turn there, it waits.
+  link.busy = () => 2;
+  await link.ensure(josh.id, true);
+  assert.equal(log.filter((c) => c[0] === 'systemd-run').length, 1);
+  link.busy = () => 1;
+  await link.ensure(josh.id, true);
+  assert.equal(log.filter((c) => c[0] === 'systemd-run').length, 2);
+  // Unlinking under running turns is refused rather than stopping the container under them.
+  await assert.rejects(link.unlink(josh.id), /Turns are running/);
+  link.busy = () => 0;
   creds.put(josh.id, 'claude_runner', link.name(josh.id), { container: link.name(josh.id), home: volume, linkedAt: 1 });
   const place = link.place(josh.id);
   assert.ok(place && !place.host && place.container === 'citadel-claude-t-' + josh.id && place.configDir === join(volume, '.claude'));

@@ -71,7 +71,10 @@ export class ClaudeLink {
   private logins = new Map<number, Login>();
   private home = homedir();
   /** Whether turns are running in a container right now (it isn't restarted under them). */
-  busy: (container: string) => boolean = () => false;
+  /** How many turns run in a container now. */
+  busy: (container: string) => number = () => 0;
+  /** Starts in flight, per person: two turns starting at once share one. */
+  private starting = new Map<number, Promise<void>>();
 
   private store: Store;
   private credentials: Credentials;
@@ -143,7 +146,15 @@ export class ClaudeLink {
   }
 
   /** Build the image if needed, make the volume and start the container (or keep it, if it runs from this spec or turns run in it). */
-  async ensure(uid: number): Promise<void> {
+  ensure(uid: number, forTurn = false): Promise<void> {
+    const now = this.starting.get(uid);
+    if (now) return now;
+    const run = this.start(uid, forTurn).finally(() => this.starting.delete(uid));
+    this.starting.set(uid, run);
+    return run;
+  }
+
+  private async start(uid: number, forTurn: boolean): Promise<void> {
     const spec = this.spec(uid);
     await this.containers.ensureImage(spec.image, CONTAINERFILE_DIR);
     await this.containers.createVolume(spec.name);
@@ -154,8 +165,9 @@ export class ClaudeLink {
     const vol = await this.containers.volumePath(spec.name);
     for (const m of spec.mounts) if (vol && !m.volume && m.dst.startsWith(this.home + '/')) mkdirSync(join(vol, relative(this.home, m.dst)), { recursive: true });
     const now = await this.containers.status(spec.name);
-    // shortcut: a changed spec (new image, a new scheme's memory) waits until no turn runs in the container; a busy one keeps its old mounts meanwhile.
-    if (now.state === 'running' && (now.spec === specHash(spec) || this.busy(spec.name))) return;
+    // shortcut: a changed spec (new image, a new scheme's memory) waits until no other turn runs in the container; a busy one keeps its old mounts meanwhile.
+    // A starting turn already counts as one of the container's turns.
+    if (now.state === 'running' && (now.spec === specHash(spec) || this.busy(spec.name) > (forTurn ? 1 : 0))) return;
     await this.containers.start(spec);
     void this.containers.pruneImages(IMAGE_REPO, spec.image);
   }
@@ -169,7 +181,7 @@ export class ClaudeLink {
     return {
       host: false, container: c.meta.container, configDir: join(c.meta.home, '.claude'),
       env: { HOME: this.home, CLAUDE_CONFIG_DIR: join(this.home, '.claude'), DISABLE_AUTOUPDATER: '1' },
-      ensure: () => this.ensure(user.id),
+      ensure: () => this.ensure(user.id, true),
     };
   }
 
@@ -260,9 +272,10 @@ export class ClaudeLink {
   async unlink(uid: number): Promise<void> {
     // shortcut: a sign-in abandoned across a restart leaves its small volume behind until they link and unlink again.
     const started = this.logins.has(uid) || !!this.meta(uid);
+    const name = this.name(uid);
+    if (this.busy(name)) throw new Error('Turns are running on your Claude now: stop them first, then unlink.');
     this.cancel(uid);
     if (!started) return;
-    const name = this.name(uid);
     if ((await this.containers.status(name)).state === 'running') await this.containers.exec(name, [resolveClaude(this.claudeBin), 'auth', 'logout'], { env: { CLAUDE_CONFIG_DIR: join(this.home, '.claude') }, timeout: 30_000 });
     await this.containers.stop(name);
     await this.containers.removeVolume(name);

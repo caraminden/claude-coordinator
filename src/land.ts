@@ -32,6 +32,11 @@ export class Landings {
     return run;
   }
 
+  /** Landings still running. */
+  running(): number {
+    return [...this.runs.values()].filter((r) => r.code === null).length;
+  }
+
   get(ticketId: number): Landing | null {
     return this.runs.get(ticketId) ?? null;
   }

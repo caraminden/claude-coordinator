@@ -184,6 +184,8 @@ runner.placeFor = (person) => {
 };
 runner.onAuthFailure = (person) => claudeLink.expire(person);
 claudeLink.busy = (container) => runner.inContainer(container);
+const landings = new Landings();
+runner.hostJobs = () => landings.running();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = (author, from) => {
   if (from) return store.getTicket(from)?.person_id ?? null;
@@ -587,7 +589,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink, landings: new Landings(),
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink, landings,
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {
     return ASSET_VERSION;

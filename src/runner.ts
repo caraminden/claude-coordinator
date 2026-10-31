@@ -865,10 +865,12 @@ export class Runner {
     return { ...turnEnv(process.env), ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id) };
   }
 
-  /** Whether any turn runs in this container now (it isn't restarted under them). */
-  inContainer(container: string): boolean {
-    return [...this.turns.values()].some((t) => t.container === container);
+  /** How many turns run in this container now (it isn't restarted under them). */
+  inContainer(container: string): number {
+    return [...this.turns.values()].filter((t) => t.container === container).length;
   }
+  /** Other children of this server a restart would kill: landings (src/land.ts). */
+  hostJobs?: () => number;
   /** Why a message can't start or steer a turn (src/access.ts turnRefusal), or null when it can. */
   refuseTurn?: (ticket: Ticket, author: string) => string | null;
   /** The person a message speaks for: its author, or for a relay (`from`), the sending turn's person. */
@@ -913,9 +915,9 @@ export class Runner {
     return { ...turnEnv(process.env), ...this.githubFor?.(person, live.dir)?.env };
   }
 
-  /** Running turns a restart of this server would kill: those not in a unit of their own. */
+  /** Running work a restart of this server would kill: turns not in a unit or a container of their own, and landings. */
   interruptible(): number {
-    return [...this.turns.values()].filter((t) => !t.unit).length;
+    return [...this.turns.values()].filter((t) => !t.unit && !t.container).length + (this.hostJobs?.() ?? 0);
   }
 
   /** Stop following turns, for a server shutting down; they keep running, and the next server re-attaches. */

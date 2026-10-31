@@ -158,7 +158,6 @@ export function accountPage() {
     form, claudeCard(), githubCard());
 }
 
-/** Your GitHub link: turns you start push and open pull requests as you (src/github-link.ts). */
 /** Your own Claude plan (#213): turns you start run on it, in a container of your own on the server. */
 function claudeCard() {
   const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading Claude…'));
@@ -228,6 +227,7 @@ function claudeCard() {
   return card;
 }
 
+/** Your GitHub link: turns you start push and open pull requests as you (src/github-link.ts). */
 function githubCard() {
   const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading GitHub…'));
   const render = ({ configured, error, link }) => {

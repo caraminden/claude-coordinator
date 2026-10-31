@@ -146,9 +146,12 @@ export const TURN_SETTINGS = { autoCompactWindow: 250_000, bashOutputMaxChars: 1
  * and state.db with its backups (every minion's session). Claude Code enforces these, unlike the
  * tripwire's pattern match; Bash is the tripwire's.
  */
-export function credentialDenies(home: string, claudeConfig: string, dataDir: string): string[] {
+export function credentialDenies(home: string, claudeConfig: string, dataDir: string, runtimeDir = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`): string[] {
+  // podman's storage and socket (#213): every person's Claude container and its sign-in. If Claude
+  // Code's sandbox is ever turned on for turns, these same paths go in its filesystem denyRead list.
   const files = [join(home, '.claude/.credentials.json'), join(claudeConfig, '.credentials.json'), join(home, '.ssh/**'), join(home, '.config/claude-coordinator/**'),
-    join(home, '.config/gh/hosts.yml'), join(home, '.config/citadel-claude/**'), join(dataDir, 'state.db*'), join(dataDir, 'backups/state-*')];
+    join(home, '.config/gh/hosts.yml'), join(home, '.config/citadel-claude/**'), join(dataDir, 'state.db*'), join(dataDir, 'backups/state-*'),
+    join(home, '.local/share/containers/storage/**'), join(runtimeDir, 'podman/**'), join(runtimeDir, 'containers/**')];
   // `//` makes the path absolute.
   return [...new Set(files)].map((f) => `Read(/${f})`);
 }
@@ -853,6 +856,11 @@ export class Runner {
   placeFor?: (person: number | null) => TurnPlace | { refused: string };
   /** A container turn's Claude sign-in was refused, so that person has to link again. */
   onAuthFailure?: (person: number) => void;
+
+  /** The environment a host turn's tools get, for running a minion's tools/land.sh on the host (src/land.ts). */
+  hostEnv(ticket: Ticket): Record<string, string> {
+    return { ...turnEnv(process.env), ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id) };
+  }
 
   /** Whether any turn runs in this container now (it isn't restarted under them). */
   inContainer(container: string): boolean {
@@ -1571,7 +1579,7 @@ export class Runner {
     // In a container, claude signs in with the person's own login, so nothing of the server's may win over it.
     if (!place.host) {
       for (const v of AUTH_VARS) delete env[v];
-      env = { ...env, ...place.env };
+      env = { ...env, ...place.env, COORDINATOR_CONTAINER: '1' };
     }
     // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
     if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;

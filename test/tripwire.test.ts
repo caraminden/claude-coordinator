@@ -60,6 +60,29 @@ const BLOCKED: [string, string?][] = [
   ['curl --unix-socket /run/user/1001/claude-runner.sock http://x/turn'],
   ['socat - UNIX-CONNECT:/run/user/1001/citadel-runner.sock'],
   ['curl -X POST http://127.0.0.1:8573/api/runners/pair -d code=123'],
+  // people's Claude containers, their volumes, podman's storage and socket (#213)
+  ['podman exec -it citadel-claude-3 cat /home/u/.claude/.credentials.json'],
+  ['podman cp citadel-claude-3:/home/u/.claude/.credentials.json /tmp/'],
+  ['docker exec citadel-claude-3 sh'],
+  ['podman volume inspect citadel-claude-3'],
+  ['podman inspect citadel-claude-3'],
+  ['podman export citadel-claude-3 -o /tmp/x.tar'],
+  ['podman commit citadel-claude-3 mine'],
+  ['podman mount citadel-claude-3'],
+  ['podman stop citadel-claude-3'],
+  ['podman unshare ls /home/u/.local/share/containers/storage/volumes'],
+  ['podman unshare'],
+  ['podman exec --latest cat /etc/hostname'],
+  ['podman stop -a'],
+  ['podman rm -af'],
+  ['podman system reset -f'],
+  ['podman volume prune -f'],
+  ['cat ~/.local/share/containers/storage/volumes/citadel-claude-3/_data/.claude/.credentials.json'],
+  ['grep -r token ~/.local/share/containers'],
+  ['curl --unix-socket /run/user/1000/podman/podman.sock http://d/v4.0.0/libpod/containers/json'],
+  ['cat /run/user/1000/containers/auth.json'],
+  ['systemctl --user stop citadel-claude-3'],
+  ['systemctl --user restart citadel-claude-3.service'],
   ['claude setup-token'],
   ['claude /login'],
   ['claude --model haiku setup-token'],
@@ -287,6 +310,11 @@ const ALLOWED = [
   'rg -t ts "/home/u/.config" docs',
   'grep -rn -A 3 /home/u/.config src test',
   'gh search issues auth token',
+  'podman exec perigee-godot godot --version',
+  'podman ps -a && podman images',
+  'podman logs perigee-godot',
+  'podman run --rm docker.io/library/alpine:3 echo hi',
+  'systemctl --user status citadel-claude-3',
   'gh issue create -t auth -b token',
   'rg -n "/" src',
   'cd ~/claude-coordinator && git pull --ff-only /home/u/.local/share/claude-coordinator/projects/2/repo main && systemd-run --user --collect --unit=cc-restart-when-idle /tmp/cc-restart-when-idle.sh',
@@ -423,6 +451,9 @@ test('file tools: writes, edits and reads', () => {
   assert.ok(t('Read', { file_path: '~/.config/gh/hosts.yml' }));
   assert.equal(t('Read', { file_path: '/proc/1234/status' }), null);
   assert.ok(t('Read', { file_path: '/home/josh/.config/citadel-claude/.credentials.json' }));
+  assert.ok(t('Read', { file_path: `${home}/.local/share/containers/storage/volumes/citadel-claude-3/_data/.claude/.credentials.json` }));
+  assert.ok(t('Grep', { pattern: 'token', path: `${home}/.local/share/containers` }));
+  assert.ok(t('Read', { file_path: '/run/user/1000/podman/podman.sock' }));
   assert.ok(t('Write', { file_path: '/home/josh/notes.md' }));
   assert.ok(t('Grep', { pattern: 'token', path: '/home' }));
   assert.ok(t('Grep', { pattern: 'SECRET', path: `${home}/.config` }));

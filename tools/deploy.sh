@@ -18,6 +18,8 @@
 # Every path and name can be overridden with DEPLOY_* variables, which is how it is tested on a dev copy.
 set -euo pipefail
 
+# A turn in its person's Claude container (#213) can't deploy: the land tool runs land.sh (and this) on the host.
+[ "${COORDINATOR_CONTAINER:-}" != 1 ] || { echo "deploy: this turn runs in a container: land with the land tool (mcp__thread) instead" >&2; exit 1; }
 LIVE=${DEPLOY_LIVE:-$HOME/claude-coordinator}
 SOURCE=${DEPLOY_SOURCE:-$HOME/.local/share/claude-coordinator/projects/2/repo}
 SERVICE=${DEPLOY_SERVICE:-claude-coordinator}

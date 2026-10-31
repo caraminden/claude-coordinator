@@ -58,7 +58,7 @@ const TICKET_ROUTES: Probe[] = [
   P('POST', '/api/tickets/:t/plans'), P('POST', '/api/tickets/:t/verdict'), P('POST', '/api/tickets/:t/approvals'),
   P('GET', '/api/tickets/:t/approvals'), P('POST', '/api/tickets/:t/approve'), P('PUT', '/api/tickets/:t/properties'),
   P('POST', '/api/tickets/:t/stop'), P('POST', '/api/tickets/:t/status'), P('POST', '/api/tickets/:t/coordinator'),
-  P('POST', '/api/tickets/:t/deploy'), P('POST', '/api/tickets/:t/preview'), P('POST', '/api/tickets/:t/wake'),
+  P('POST', '/api/tickets/:t/deploy'), P('POST', '/api/tickets/:t/land'), P('GET', '/api/tickets/:t/land'), P('POST', '/api/tickets/:t/preview'), P('POST', '/api/tickets/:t/wake'),
   P('POST', '/api/tickets/:t/close'), P('GET', '/api/tickets/:t/images/0123456789abcdef01234567.png'),
   P('GET', '/api/tickets/:t/uploads/nothing.txt'),
   // Wrong methods and unknown actions.

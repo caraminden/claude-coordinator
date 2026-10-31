@@ -76,7 +76,10 @@ test("an even day's share of the weekly limit, priced from the meter and what tu
   store.recordTurn(t.id, { session_id: 'b', ended_at: Date.now(), session_cost_usd: 70 });
   // Before the window: not counted.
   store.recordTurn(t.id, { session_id: 'c', ended_at: Date.now() - 3 * 86400_000, session_cost_usd: 1000 });
-  close(dayBudget(store, { utilization: 0.1, resetsAt })!, 210 / 0.1 / 7);
-  assert.equal(dayBudget(store, { utilization: 0.02, resetsAt }), null); // too coarse yet
+  assert.equal(dayBudget(store, { utilization: 0.02, resetsAt }), null); // too coarse yet, and no earlier estimate
   assert.equal(dayBudget(store, null), null);
+  close(dayBudget(store, { utilization: 0.1, resetsAt })!, 210 / 0.1 / 7);
+  // A fresh window's meter is too coarse again: the last estimate stands in rather than dropping to dollars.
+  close(dayBudget(store, { utilization: 0.01, resetsAt: resetsAt + 7 * 86400_000 })!, 210 / 0.1 / 7);
+  close(dayBudget(store, null)!, 210 / 0.1 / 7);
 });

@@ -43,12 +43,20 @@ export function costDays(store: Store, now = Date.now()): CostDay[] {
 /** Below this the weekly meter, read to two decimals, is too coarse to price a week by. */
 const MIN_UTILIZATION = 0.03;
 
+/** The last estimate a meter could price, kept for the start of the next window. */
+const LAST_BUDGET = 'day_budget';
+
 /**
  * An even day's share of the plan's weekly limit (a seventh of it) at API prices: what turns cost since the
- * weekly window opened, scaled up by how full the meter is. Null early in a window, while the meter is too coarse.
+ * weekly window opened, scaled up by how full the meter is. Early in a window, while the meter is too coarse,
+ * the last window's estimate stands in, so shares don't drop back to dollars every reset; null before any.
  */
 export function dayBudget(store: Store, weekly: { utilization: number; resetsAt: number | null } | null | undefined): number | null {
-  if (!weekly?.resetsAt || weekly.utilization < MIN_UTILIZATION) return null;
+  const last = store.getSetting<number>(LAST_BUDGET);
+  if (!weekly?.resetsAt || weekly.utilization < MIN_UTILIZATION) return last;
   const spent = store.dailyCosts(weekly.resetsAt - 7 * 86400_000).reduce((sum, r) => sum + r.cost, 0);
-  return spent > 0 ? spent / weekly.utilization / 7 : null;
+  if (!(spent > 0)) return last;
+  const budget = spent / weekly.utilization / 7;
+  if (budget !== last) store.setSetting(LAST_BUDGET, budget);
+  return budget;
 }

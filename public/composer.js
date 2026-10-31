@@ -21,10 +21,15 @@ export function saveDraft(key, value) {
 
 /** Grow (or shrink) a message box to fit its text; CSS min-height and max-height bound it. */
 export function fitHeight(box) {
+  // Collapsing to 'auto' can shorten the page for a moment and move the scroll: put it back after,
+  // and keep a chat that was at its end there, so the growing box doesn't cover the last message.
+  const scrolled = [document.scrollingElement, box.closest('.chat')].filter(Boolean)
+    .map((el) => [el, el.scrollTop, el.scrollTop >= el.scrollHeight - el.clientHeight - 2]);
   box.style.height = 'auto';
   // Not laid out (a folded panel, or a phone's drawer still tucked away): keep the CSS height.
-  if (!box.scrollHeight) { box.style.height = ''; return; }
-  box.style.height = `${box.scrollHeight + box.offsetHeight - box.clientHeight}px`;
+  if (!box.scrollHeight) box.style.height = '';
+  else box.style.height = `${box.scrollHeight + box.offsetHeight - box.clientHeight}px`;
+  for (const [el, top, atEnd] of scrolled) el.scrollTop = atEnd ? el.scrollHeight : top;
 }
 
 let draftDb = null;

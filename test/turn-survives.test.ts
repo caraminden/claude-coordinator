@@ -111,18 +111,26 @@ test('a turn that ends while no server is running is finished by the next one', 
 test('a card waiting through a restart still waits in the re-attached turn, and a click settles it (#209)', async () => {
   const id = newTicket();
   const before = await started(id);
+  // A card from an earlier turn that never got an outcome (data from before #209) stays gone.
+  store.addEvent(id, 'approval', { id: 'old', tool: 'Bash', input: {} });
+  store.db.prepare("UPDATE events SET created_at = 1 WHERE kind = 'approval' AND ticket_id = ?").run(id);
   const card = before.approvals.request(id, 'Bash', { command: 'gh pr merge 205 --repo o/r --merge' });
+  const tripwire = before.approvals.request(id, 'Bash', { command: 'rm x', description: 'why' }, { reason: 'r', explanation: 'why' });
   before.detachAll();
 
   const next = server();
   next.recover();
   assert.equal(next.approvals.get(id, card).state, 'pending', "the minion's poll still finds it");
-  assert.equal(next.approvals.pending().length, 1, 'and Needs-you lists it');
+  assert.equal(next.approvals.pending().length, 2, 'and Needs-you lists them');
+  assert.equal(next.approvals.get(id, 'old').state, 'expired');
   assert.equal(next.approvals.decide(id, card, true, 'Cara').state, 'allowed');
+  assert.equal(next.approvals.isTripwire(card), false);
+  assert.ok(next.approvals.isTripwire(tripwire), 'a tripwire card comes back as one, for admins only');
+  assert.equal(next.approvals.decide(id, tripwire, false, 'Cara').state, 'denied');
   writeFileSync(release, '');
   await until(() => !next.isRunning(id));
   const results = store.listEvents(id).filter((e) => e.kind === 'approval_result').map((e) => JSON.parse(e.data).state);
-  assert.deepEqual(results, ['allowed'], 'no expiry from the restart');
+  assert.deepEqual(results, ['allowed', 'denied'], 'no expiry from the restart');
 });
 
 test('a card whose turn did not survive the restart expires', async () => {

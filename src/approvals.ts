@@ -186,8 +186,9 @@ interface Request {
 type Emit = (ticketId: number, kind: string, data: unknown) => void;
 
 /**
- * Approval cards waiting on people. They live only in memory, with the turn that asked: when the
- * turn ends (or the server restarts), anything undecided expires and never counts as approval.
+ * Approval cards waiting on people. They live in memory, with the turn that asked: when the turn
+ * ends, anything undecided expires and never counts as approval. A server restart puts back the
+ * waiting cards of turns that survive it (restore), and expires the rest.
  */
 export class Approvals {
   private requests = new Map<string, Request>();
@@ -269,10 +270,10 @@ export class Approvals {
    * After a server restart, the cards a turn left waiting, from its stored events: its minion's
    * approve call is still polling for them (#209). The runner expires them again if the turn didn't survive.
    */
-  restore(ticketId: number, events: { kind: string; data: string; created_at: number }[]) {
+  restore(ticketId: number, events: { kind: string; data: string; created_at: number }[], since = 0) {
     const open = new Set(unsettledCards(events));
     for (const e of events) {
-      if (e.kind !== 'approval') continue;
+      if (e.kind !== 'approval' || e.created_at < since) continue;
       const card = JSON.parse(e.data);
       if (open.has(card.id)) this.requests.set(card.id, { ticketId, tripwire: !!card.tripwire, decision: { state: 'pending' }, wake: new Set(), card, at: e.created_at });
     }
@@ -295,7 +296,7 @@ export class Approvals {
     return [...this.requests.values()].filter((r) => r.decision.state === 'pending').map(({ ticketId, at, card }) => ({ ticketId, at, card }));
   }
 
-  /** The card's outcome so far; unknown cards (another thread's, or from before a restart) are expired. */
+  /** The card's outcome so far; unknown cards (another thread's, or an ended turn's from before a restart) are expired. */
   get(ticketId: number, id: string): Decision {
     const r = this.requests.get(id) ?? this.ended.get(id);
     return r && r.ticketId === ticketId ? r.decision : { state: 'expired', reason: 'This request is no longer waiting.' };

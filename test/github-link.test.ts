@@ -21,6 +21,8 @@ const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true, server
 const josh = store.createUser({ name: 'Josh', login: 'josh', server_login: true });
 const rachel = store.createUser({ name: 'Rachel', login: 'rachel', server_login: true });
 const project = store.createProject('Test', null, cara.id);
+// Josh works in this scheme: a relay carries its sender's person only inside a scheme they're in (#211).
+store.addMember(project.id, josh.id);
 const creds = new Credentials(store, 'secret one');
 
 /** GitHub, faked: the token exchange gives `token`, and /user answers for tokens in `users` (401 otherwise). */

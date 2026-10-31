@@ -14,7 +14,7 @@ export function payerChip(t) {
   if (!t.payer) return '';
   const who = mine(t) ? 'Your plan' : `${t.payer.name}'s plan`;
   const limited = t.state === 'limited';
-  const text = [who, limited ? `limit${t.limit_resume_at ? `, ${time(t.limit_resume_at)}` : ''}` : mine(t) && myWeek()].filter(Boolean).join(' · ');
+  const text = [who, limited ? (t.limit_resume_at ? `limit, ${time(t.limit_resume_at)}` : 'limit') : mine(t) && myWeek()].filter(Boolean).join(' · ');
   return h('span', { class: `link-chip payer-chip ${limited ? 'warn' : 'ok'}`, title: `Its last turn ran on ${mine(t) ? 'your' : `${t.payer.name}'s`} Claude plan` }, text);
 }
 
@@ -24,15 +24,19 @@ export function payerLine(t, sendText) {
   const cost = loadCost(t);
   if (t.state === 'limited' && t.payer) {
     const other = account.turns && !mine(t);
-    // Sends what's in the box the usual way (clearing it), or a plain "Carry on." when it's empty.
+    // Sends the box (and any attachments) the usual way, with a plain "Carry on." when the box is empty.
     const go = other && h('button', { type: 'button', class: 'small', onclick: (e) => {
       const form = e.target.closest('.composer');
-      if (form?.querySelector('textarea')?.value.trim()) form.requestSubmit();
-      else sendText('Carry on.');
+      const box = form?.querySelector('textarea');
+      if (!form || !box) return sendText('Carry on.');
+      if (!box.value.trim()) box.value = 'Carry on.';
+      form.requestSubmit();
     } }, 'Continue on my plan');
+    // Sender pays: any message from another plan carries on now, so the cost is said for Send too.
     return h('div', { class: 'payer-line warn' },
-      `${mine(t) ? 'Your' : `${t.payer.name}'s`} plan hit its usage limit; this minion carries on${t.limit_resume_at ? ` at ${time(t.limit_resume_at)}` : ' once it resets'}.`,
-      go ? h('span', { class: 'row' }, go, cost ? h('span', { class: 'muted' }, `${cost} of your usage to load it`) : '') : '');
+      `${mine(t) ? 'Your' : `${t.payer.name}'s`} plan hit its usage limit; `,
+      t.limit_resume_at ? `this minion carries on at ${time(t.limit_resume_at)}.` : 'this minion stopped retrying and waits for a message.',
+      go ? h('span', { class: 'row' }, go, h('span', { class: 'muted' }, `${cost ? `${cost} of your usage to load it. ` : ''}Any message you send carries on too.`)) : '');
   }
   if (!account.turns) {
     return h('div', { class: 'payer-line' }, 'You haven\'t linked a Claude plan yet: messages wait until you do. ',

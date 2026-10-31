@@ -172,26 +172,29 @@ test("someone on another plan carries on through the payer's limit, on their own
   store.createUser({ name: 'Cara', login: 'cara', admin: true, server_login: true });
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   runner.personOf = (author) => store.findUser('name', author)?.id ?? null;
-  const id = minion();
-  await turn(id, LIMIT);
-  let t = store.getTicket(id)!;
-  assert.equal(t.state, 'limited');
-  assert.deepEqual(runner.view(t).payer, { id: null, name: 'Cara' });
-  assert.equal(runner.view(t).context_tokens, 122005);
-  writeFileSync(release, 'ok');
-  runner.send(id, 'Cara', 'more from cara');
-  assert.equal(runner.isRunning(id), false, "Cara's own message waits for her reset");
-  const before = turnsRun();
-  runner.send(id, 'Josh', 'carry on, josh');
-  await until(() => turnsRun() === before + 1 && !runner.isRunning(id), "Josh's turn");
-  t = store.getTicket(id)!;
-  assert.equal(t.person_id, josh.id);
-  assert.equal(t.state, null);
-  assert.equal(runner.view(t).limit_resume_at, null);
-  assert.deepEqual(runner.view(t).payer, { id: josh.id, name: 'Josh' });
-  const prompt = readFileSync(prompts, 'utf8').trim().split('\n').at(-1)!;
-  assert.ok(prompt.indexOf('carry on, josh') < prompt.indexOf('more from cara'), "Josh's message leads, so the turn is his");
-  runner.personOf = undefined;
+  try {
+    const id = minion();
+    await turn(id, LIMIT);
+    let t = store.getTicket(id)!;
+    assert.equal(t.state, 'limited');
+    assert.deepEqual(runner.view(t).payer, { id: null, name: 'Cara' });
+    assert.equal(runner.view(t).context_tokens, 122005);
+    writeFileSync(release, 'ok');
+    runner.send(id, 'Cara', 'more from cara');
+    assert.equal(runner.isRunning(id), false, "Cara's own message waits for her reset");
+    const before = turnsRun();
+    runner.send(id, 'Josh', 'carry on, josh');
+    await until(() => turnsRun() === before + 1 && !runner.isRunning(id), "Josh's turn");
+    t = store.getTicket(id)!;
+    assert.equal(t.person_id, josh.id);
+    assert.equal(t.state, null);
+    assert.equal(runner.view(t).limit_resume_at, null);
+    assert.deepEqual(runner.view(t).payer, { id: josh.id, name: 'Josh' });
+    const prompt = readFileSync(prompts, 'utf8').trim().split('\n').at(-1)!;
+    assert.ok(prompt.indexOf('carry on, josh') < prompt.indexOf('more from cara'), "Josh's message leads, so the turn is his");
+  } finally {
+    runner.personOf = undefined;
+  }
 });
 
 test(`it gives up after ${MAX_LIMIT_RESUMES} resumes in a row`, async () => {

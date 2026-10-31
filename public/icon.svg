@@ -1,5 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#c2410c"/>
-  <path d="M256 104 L408 256 L256 408 L104 256 Z M196 256 L256 316 L316 256 L256 196 Z" fill="#fff" fill-rule="evenodd"/>
-  <rect x="226" y="286" width="60" height="140" fill="#c2410c"/>
+  <defs>
+    <radialGradient id="glow" cx="256" cy="220" r="330" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9333ea"/>
+      <stop offset="1" stop-color="#1e0a3c"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
+  <path d="M256 104 L408 256 L286 378 V286 L316 256 L256 196 L196 256 L226 286 V378 L104 256 Z" fill="#fff"/>
 </svg>

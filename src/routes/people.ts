@@ -11,6 +11,7 @@ function personView(app: App, u: User) {
     id: u.id, name: u.name, login: u.login, admin: !!u.admin, server_login: !!u.server_login,
     disabled: !!u.disabled_at, has_password: !!u.password_hash, invite_open: (u.invite_expires ?? 0) > Date.now(),
     github: app.github.login(u.id),
+    claude: app.claude.linked(u.id), server_login_owner: u.id === app.store.serverLoginOwner(),
   };
 }
 
@@ -77,7 +78,11 @@ export const peopleRoutes: Route[] = [
         app.store.updateUser(user.id, { disabled_at: body.disabled ? Date.now() : null });
         if (body.disabled) dropStreams(app, user.id);
       }
-      if (body.server_login !== undefined) app.store.updateUser(user.id, { server_login: body.server_login ? 1 : 0 });
+      if (body.server_login !== undefined) {
+        // The server's login is one person's subscription (#213); everyone else links their own Claude.
+        if (body.server_login && user.id !== app.store.serverLoginOwner()) throw new HttpError(400, `Only the server login's owner runs on it; ${user.name} links their own Claude in Settings → Your account.`);
+        app.store.updateUser(user.id, { server_login: body.server_login ? 1 : 0 });
+      }
       return json(res, 200, personView(app, app.store.getUser(user.id)!));
     },
   },

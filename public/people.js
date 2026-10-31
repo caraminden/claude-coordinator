@@ -79,14 +79,15 @@ export function peoplePage() {
     const state = u.disabled ? 'disabled' : u.invite_open ? (u.has_password ? 'reset link open' : 'invited')
       : u.has_password ? '' : u.admin ? 'shared password only' : 'invite expired';
     const patch = async (body) => render(await api(`api/people/${u.id}`, { method: 'PATCH', body }).then(() => api('api/people')).catch(fail) ?? people);
-    const turns = h('input', { type: 'checkbox', checked: u.server_login, onchange: (e) => patch({ server_login: e.target.checked }) });
+    const turns = u.server_login_owner && h('input', { type: 'checkbox', checked: u.server_login, onchange: (e) => patch({ server_login: e.target.checked }) });
+    const claude = u.server_login ? 'Claude: server login' : u.claude === 'linked' ? 'Claude linked' : u.claude === 'expired' ? 'Claude needs linking again' : 'Claude not linked';
     const self = u.id === account?.id;
     return h('div', { class: 'person-row' },
       h('span', { class: 'text' },
         h('span', { class: 'name' }, u.name, u.admin ? ' · admin' : ''),
-        h('span', { class: 'meta' }, [u.login, state, u.github ? `GitHub @${u.github.login}${u.github.failed ? ' (needs linking again)' : ''}` : 'GitHub not linked'].filter(Boolean).join(' · '))),
+        h('span', { class: 'meta' }, [u.login, state, claude, u.github ? `GitHub @${u.github.login}${u.github.failed ? ' (needs linking again)' : ''}` : 'GitHub not linked'].filter(Boolean).join(' · '))),
       h('span', { class: 'person-actions' },
-      h('label', { class: 'small turns-toggle', title: 'Their messages start and steer turns on the server\'s Claude login. Off: their messages wait in the chat.' }, turns, 'Turns'),
+      turns && h('label', { class: 'small turns-toggle', title: 'Your messages start and steer turns on the server\'s Claude login. Off: they run on the Claude you link in Your account.' }, turns, 'Turns'),
       h('button', {
         type: 'button', class: 'secondary small',
         onclick: async () => {
@@ -125,8 +126,8 @@ export function peoplePage() {
     head('People', 'Everyone who can sign in to Citadel. Each person sees only the schemes they own or were added to, and can make schemes of their own.'),
     form, link, list,
     h('p', { class: 'muted small' },
-      'Turns: whether their messages start and steer turns on this server\'s Claude login. Leave it off for anyone but you: ',
-      'a Claude subscription is for one person, so others wait for per-person Claude accounts. Without it they can still read, write and add minions; their messages wait in the chat.'));
+      'Each person\'s messages start turns on their own Claude plan, which they link in Settings → Your account. Until they do, they can still read, write and add minions; their messages wait in the chat. ',
+      'Turns: whether your messages run on this server\'s own Claude login, which is your subscription.'));
 }
 
 /** Main panel: your own name, login and password. */

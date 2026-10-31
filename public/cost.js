@@ -77,6 +77,6 @@ function drawPop(chip) {
       h('tbody', {}, days.map((d, i) => h('tr', {}, h('th', { scope: 'row' }, label(d.day, i)), cell(here(d)), cell(d.total)))),
       h('tfoot', {}, h('tr', {}, h('th', { scope: 'row' }, budget ? '7-day average' : '7 days'), cell(sum(here), budget ? days.length : 1), cell(sum((d) => d.total), budget ? days.length : 1)))),
     h('p', { class: 'foot' }, budget
-      ? `100% is a seventh of the weekly limit, ≈ ${costText(budget).slice(2)} a day at API prices, worked out from the weekly meter and this week's turns. Over it, the week runs out early. Taskmasters included; not a bill.`
+      ? `100% is a seventh of the weekly limit, ≈ ${costText(budget).slice(2)} a day at API prices, worked out from the weekly meter and this week's turns (last week's, early in a week). Over it, the week runs out early. Taskmasters included; not a bill.`
       : "At API prices, not a bill. Taskmasters included. Shown against the weekly limit once its meter reaches 3%."));
 }

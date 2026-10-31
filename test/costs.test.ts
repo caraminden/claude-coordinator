@@ -82,4 +82,6 @@ test("an even day's share of the weekly limit, priced from the meter and what tu
   // A fresh window's meter is too coarse again: the last estimate stands in rather than dropping to dollars.
   close(dayBudget(store, { utilization: 0.01, resetsAt: resetsAt + 7 * 86400_000 })!, 210 / 0.1 / 7);
   close(dayBudget(store, null)!, 210 / 0.1 / 7);
+  // A meter that has moved but no turns priced in its window yet: the last estimate too.
+  close(dayBudget(store, { utilization: 0.5, resetsAt: resetsAt + 30 * 86400_000 })!, 210 / 0.1 / 7);
 });

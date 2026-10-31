@@ -1132,7 +1132,7 @@ export class Runner {
   /** Follow a turn a previous server started, if it still runs or ended while no server watched it. */
   private reattach(ticketId: number, turn: TurnState): boolean {
     const live = this.follow(ticketId, turn);
-    if (!existsSync(join(live.dir, 'exit.json')) && !this.running(live)) {
+    if (this.gone(live)) {
       clearInterval(live.timer);
       this.turns.delete(ticketId);
       return false;
@@ -1147,6 +1147,11 @@ export class Runner {
   /** Whether a followed turn's process may still be running: started, or still starting. */
   private running(live: LiveTurn): boolean {
     return wrapperAlive(live.dir) ?? Date.now() - live.startedAt < 60_000;
+  }
+
+  /** A followed turn's process ended without writing exit.json. Liveness goes first: the wrapper writes exit.json, then exits. */
+  private gone(live: LiveTurn): boolean {
+    return !this.running(live) && !existsSync(join(live.dir, 'exit.json'));
   }
 
   /**
@@ -1748,7 +1753,7 @@ export class Runner {
       this.readStream(ticketId, live, exited);
       if (exited) return this.finish(ticketId, live, JSON.parse(readFileSync(join(live.dir, 'exit.json'), 'utf8')));
       // Gone without a word: killed with its unit (out of memory, say).
-      if (++live.ticks % 20 === 0 && !this.running(live)) {
+      if (++live.ticks % 20 === 0 && this.gone(live)) {
         this.readStream(ticketId, live, true);
         this.finish(ticketId, live, null);
       }

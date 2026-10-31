@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { Runner } from '../src/runner.ts';
+import { Runner, wrapperAlive } from '../src/runner.ts';
 
 // Delve #14's claude was SIGTERMed by its own `pkill`, and the chat showed only a stderr warning and
 // "(claude exited with code 143)". A signal Citadel didn't send must be named as such.
@@ -54,6 +54,28 @@ test('a claude that exits 143 without a stop says it was killed from outside Cit
   assert.equal(errors.length, 1);
   assert.match(errors[0], /^Killed by SIGTERM \(exit 143\) from outside Citadel\.\nNobody pressed Stop/);
   assert.match(ticket.note!, /^Killed by SIGTERM \(exit 143\) from outside/);
+});
+
+test('a claude that exits while a poll is between its exit and liveness checks still fails the turn', async () => {
+  // Under load: the poll finds no exit.json, then the wrapper writes it and exits before the poll's
+  // every-20th liveness check, which then took the turn for one killed without a record (idle).
+  const r = runner as any;
+  const readStream = r.readStream;
+  r.readStream = function (this: any, id: number, live: any, toEnd: boolean) {
+    if (!toEnd && !existsSync(join(live.dir, 'exit.json'))) {
+      const sleeper = new Int32Array(new SharedArrayBuffer(4));
+      for (let i = 0; i < 250 && wrapperAlive(live.dir) !== false; i++) Atomics.wait(sleeper, 0, 0, 20);
+      live.ticks = 19;
+    }
+    return readStream.call(this, id, live, toEnd);
+  };
+  try {
+    const { ticket, errors } = await turn('exit 143');
+    assert.equal(ticket.status, 'error');
+    assert.match(errors[0] ?? '', /^Killed by SIGTERM \(exit 143\) from outside Citadel\./);
+  } finally {
+    r.readStream = readStream;
+  }
 });
 
 test('a claude killed outright by a signal nobody sent from Citadel fails the turn and names the signal', async () => {

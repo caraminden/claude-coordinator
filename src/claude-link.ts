@@ -222,12 +222,15 @@ export class ClaudeLink {
   async code(uid: number, code: string): Promise<ClaudeStatus> {
     const login = this.logins.get(uid);
     if (!login?.child || !login.url || !login.exited) throw new Error('No sign-in is waiting for a code: start linking again.');
+    login.child.stdin!.on('error', () => {}); // the sign-in may already have ended
     login.child.stdin!.write(`${code}\r`);
     const exit = await Promise.race([login.exited, new Promise<null>((r) => setTimeout(() => r(null), 60_000))]);
     if (exit === null) login.child.kill();
     const who = await this.whoami(uid);
     if (!who.loggedIn) {
-      login.error = `The sign-in didn't take${exit === null ? ' (no answer within a minute)' : ''}: ${lastLines(login.out)}`;
+      const said = signInOutcome(login.out, code);
+      login.error = `The sign-in didn't take (${exit === null ? 'no answer within a minute' : `exit ${exit}`}): ${said}${exit === 0 ? ` Then \`claude auth status\` said: ${who.said}` : ''}`;
+      console.warn(`claude-link: sign-in for user ${uid} didn't take (exit ${exit}): ${said} | auth status: ${who.said}`);
       login.child = null;
       return this.status(uid);
     }
@@ -259,13 +262,15 @@ export class ClaudeLink {
   }
 
   /** `claude auth status` in the container: signed in or not, and as whom. */
-  private async whoami(uid: number): Promise<{ loggedIn: boolean; email?: string; plan?: string }> {
+  private async whoami(uid: number): Promise<{ loggedIn: boolean; email?: string; plan?: string; said: string }> {
     const r = await this.containers.exec(this.name(uid), [resolveClaude(this.claudeBin), 'auth', 'status'], { env: { CLAUDE_CONFIG_DIR: join(this.home, '.claude') }, timeout: 30_000 });
+    const said = lastLines(`${r.stdout}\n${r.stderr}`);
     try {
-      const s = JSON.parse(r.stdout);
-      return { loggedIn: !!s.loggedIn, email: s.email ?? s.account?.email, plan: s.subscriptionType ?? s.plan };
+      // The JSON may follow a warning line.
+      const s = JSON.parse(r.stdout.slice(r.stdout.indexOf('{')));
+      return { loggedIn: !!s.loggedIn, email: s.email ?? s.account?.email, plan: s.subscriptionType ?? s.plan, said };
     } catch {
-      return { loggedIn: false };
+      return { loggedIn: false, said };
     }
   }
 }
@@ -280,5 +285,10 @@ export function signInUrl(out: string): string | null {
 }
 
 function lastLines(out: string): string {
-  return out.trim().split('\n').slice(-3).join(' ').slice(0, 300) || '(no output)';
+  return out.trim().split('\n').filter((l) => l.trim()).slice(-3).join(' ').slice(-300) || '(no output)';
+}
+
+/** What the sign-in said after the link: its last lines, without the long link and with the pasted code masked. */
+export function signInOutcome(out: string, code: string): string {
+  return lastLines(out.split(code).join('[code]').split('\n').filter((l) => !/https:\/\/|Opening browser/.test(l)).join('\n'));
 }

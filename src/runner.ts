@@ -1412,12 +1412,15 @@ export class Runner {
 
   /**
    * Who a turn runs for (its GitHub login, and #177's Claude plan): the first person in its messages
-   * (a relay counts as its sender's), else the minion's last person, else the scheme's owner.
+   * (a relay counts as its sender's), else the minion's last person, else the scheme's owner. A relay
+   * from someone outside this scheme (a non-member's ask to Citadel) runs as the scheme's owner (#211).
    */
   private turnPerson(ticket: Ticket, project: Project, batch: QueuedMessage[]): number | null {
     for (const m of batch) {
       const p = this.personOf?.(m.author, m.from);
-      if (p) return p;
+      if (!p) continue;
+      const user = m.from ? this.store.getUser(p) : null;
+      return user && !this.store.canSee({ uid: user.id, admin: !!user.admin }, project.id) ? project.owner_id : p;
     }
     return ticket.person_id ?? project.owner_id;
   }

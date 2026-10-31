@@ -7,7 +7,7 @@ import { askedCitadelKey, CITADEL_REPLY_MS, taskmasterTargets } from '../src/acc
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { systemPrompt } from '../src/runner.ts';
+import { Runner, systemPrompt } from '../src/runner.ts';
 import { bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
 
 // message_taskmaster by membership (#211): a Taskmaster turn reaches the schemes its person is in as
@@ -123,4 +123,20 @@ test("only Citadel's Taskmaster gets the bug/feature rule for non-members' asks"
   assert.match(prompt(Citadel), /A feature .* is never built on a non-member's word: start an idea minion that writes a proposal into specs\/.*When you are unsure whether it is a bug or a feature, treat it as a feature\. You may answer a scheme's Taskmaster for 7 days/);
   assert.doesNotMatch(prompt(Delve), /non-member/);
   assert.match(prompt(Delve), /always the Citadel scheme's Taskmaster: send it bug reports and feature asks/);
+});
+
+test("a non-member's ask runs Citadel's turn as Citadel's owner; a member's as themselves", () => {
+  const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+  runner.personOf = (author, from) => (from ? store.getTicket(from)?.person_id ?? null : store.findUser('name', author)?.id ?? null);
+  const fromScheme = (p: typeof Delve, person: number) => {
+    const t = store.createTicket({ project_id: p.id, title: `Asker for ${person}`, permission_mode: 'default', created_by: 'Cara' });
+    store.updateTicket(t.id, { person_id: person });
+    return t.id;
+  };
+  const citadelTM = store.getCoordinator(Citadel.id)!;
+  const turnFor = (from: number) => (runner as any).turnPerson(citadelTM, store.getProject(Citadel.id)!, [{ author: 'Taskmaster of X', text: 'hi', images: [], from }]);
+  assert.equal(turnFor(fromScheme(Obsidian, Rachel.id)), Cara.id);
+  assert.equal(turnFor(fromScheme(Delve, Josh.id)), Josh.id);
+  // A person typing in Citadel's chat still runs as themselves.
+  assert.equal((runner as any).turnPerson(citadelTM, store.getProject(Citadel.id)!, [{ author: 'Dana', text: 'hi', images: [] }]), Dana.id);
 });

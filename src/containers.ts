@@ -98,10 +98,14 @@ export class Containers {
     const until = Date.now() + timeoutMs;
     while (Date.now() < until) {
       if ((await this.status(spec.name)).state === 'running') return;
+      // Its unit ended (podman refused): say why now rather than at the timeout.
+      if ((await this.run('systemctl', ['--user', 'is-active', spec.name])).stdout.trim() === 'inactive') break;
       await new Promise((r) => setTimeout(r, 300));
     }
-    const log = await this.run('journalctl', ['--user', '-u', spec.name, '-n', '5', '--no-pager', '-o', 'cat']);
-    throw new Error(`${spec.name} didn't start within ${Math.round(timeoutMs / 1000)}s${log.stdout.trim() ? `: ${log.stdout.trim()}` : ''}`);
+    // podman's own error line, not the whole command systemd-run logs before it.
+    const log = (await this.run('journalctl', ['--user', '-u', spec.name, '-n', '20', '--no-pager', '-o', 'cat'])).stdout.split('\n');
+    const why = log.find((l) => /^Error: /.test(l.trim()))?.trim() ?? log.filter((l) => l.trim() && !/^Started /.test(l)).at(-1)?.trim();
+    throw new Error(`${spec.name} didn't start${why ? `: ${why.slice(0, 300)}` : ''}`);
   }
 
   /** Stop and remove the container (its unit ends with it). */

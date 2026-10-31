@@ -10,6 +10,7 @@ import { fileType, findArtifacts, isArtifact, linkedPaths, type FoundArtifact } 
 import { APP_NAME } from './src/appname.ts';
 import { claudeRefusal, lendsMachines, mayReceive, messageScope, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
+import { Landings } from './src/land.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
@@ -586,7 +587,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink, landings: new Landings(),
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {
     return ASSET_VERSION;

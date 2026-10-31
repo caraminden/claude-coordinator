@@ -18,6 +18,8 @@ SOURCE=${DEPLOY_SOURCE:-$HOME/.local/share/claude-coordinator/projects/2/repo}
 say() { echo "land: $*" >&2; }
 refuse() { say "$*"; exit 1; }
 
+# A turn in its person's Claude container (#213) has no deploy lock, user bus or GitHub login here.
+[ "${COORDINATOR_CONTAINER:-}" != 1 ] || refuse "this turn runs in a container: call the land tool (mcp__thread) instead, which runs land.sh on the host"
 [ $# -eq 0 ] || refuse "takes no arguments (for --now, land first, then run tools/deploy.sh --now with a person's OK)"
 here=$(git rev-parse --show-toplevel)
 branch=$(git branch --show-current)

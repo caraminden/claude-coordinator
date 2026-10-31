@@ -14,6 +14,8 @@ const TICKET = Number(process.env.COORDINATOR_TICKET);
 const APPROVALS = process.env.COORDINATOR_APPROVALS === '1';
 // A minion of the scheme whose code this server runs (runner.ts): only there do deploys and previews mean anything.
 const DEPLOYS = process.env.COORDINATOR_DEPLOYS === '1';
+/** This turn runs in its person's Claude container (#213), where tools/land.sh can't. */
+const IN_CONTAINER = process.env.COORDINATOR_CONTAINER === '1';
 // Set for the Citadel scheme's Taskmaster: it alone edits the Citadel-wide instructions.
 const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
 const MAX_TEXT = 4000;
@@ -647,6 +649,14 @@ const THREAD_TOOLS = [
     description: `${WAKE_DESCRIPTION.replace('the minion', 'this minion')} Use it instead of asking the Taskmaster to remember, then set state parked and end your turn.`,
     inputSchema: { type: 'object', properties: WAKE_PROPS, required: ['reason'] },
   },
+  ...(DEPLOYS && IN_CONTAINER
+    ? [{
+      name: 'land',
+      description:
+        "Land this minion's branch: the server runs tools/land.sh in your worktree on the host, since your turn runs in a container where it can't (wherever the instructions say to run tools/land.sh, call this instead). Commit everything first. It rebases onto main, runs the tests, fast-forwards main and deploys, and returns land.sh's output once it ends, which can take several minutes.",
+      inputSchema: { type: 'object', properties: {} },
+    }]
+    : []),
   ...(DEPLOYS
     ? [{
       name: 'start_preview',
@@ -868,6 +878,14 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'start_preview': {
       const { url } = await call('POST', `/api/tickets/${TICKET}/preview`, {});
       return `The preview is up at ${url}. Post that link in your reply (the minion's view also shows an Open preview button) and set state try.`;
+    }
+    case 'land': {
+      let r = await call('POST', `/api/tickets/${TICKET}/land`, {});
+      while (r.code === null) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        r = await call('GET', `/api/tickets/${TICKET}/land`);
+      }
+      return `tools/land.sh exited ${r.code}${r.code === 0 ? '' : ' (read its output: main only moved if it says so)'}.\n\n${String(r.output).slice(-12_000)}`;
     }
     case 'close_self':
       try {

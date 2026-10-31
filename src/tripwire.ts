@@ -93,10 +93,18 @@ function readReason(p: string, cfg: TripwireConfig): string | null {
 function runnerReason(p: string, cfg: TripwireConfig): string | null {
   const homes = dirname(cfg.home);
   if (homes !== '/' && under(p, homes) && p !== homes && !under(p, cfg.home)) return `${p} is in another person's home folder, where their Claude runner and sign-in live. Leave it to them.`;
+  // Each person's Claude container keeps its sign-in in a podman volume (#213): podman's storage holds every one of them.
+  if (under(p, join(cfg.home, CONTAINER_STORAGE)) || PODMAN_RUNTIME.test(p)) return `${p} is podman's storage or socket, which holds every person's Claude container and sign-in. Use the podman command for your own containers; Citadel runs the Claude ones.`;
   if (p.split('/').includes('citadel-claude') || RUNNER_SOCKET.test(basename(p))) return `${p} belongs to a Claude runner: its sign-in or its socket. Turns never touch a runner directly; Citadel talks to it.`;
   return null;
 }
 const RUNNER_SOCKET = /^(citadel|claude)-runner.*\.sock$/;
+const CONTAINER_STORAGE = '.local/share/containers/storage';
+// The rootless podman socket and registry logins, in $XDG_RUNTIME_DIR.
+const PODMAN_RUNTIME = /^\/run\/user\/\d+\/(podman|containers)(\/|$)/;
+// Podman subcommands that take or remove every container or volume at once, people's Claude ones included.
+const PODMAN_ALL = /^(stop|rm|kill|pause|restart)$/;
+const CLAUDE_CONTAINERS_WHY = "Each person's Claude container (citadel-claude-*) holds their sign-in and runs their turns; only Citadel's server drives them. Use podman for your own containers by name.";
 // A runner's endpoints in Citadel's API (pairing, connecting): only the runner itself calls them.
 const RUNNER_API = /\/api\/(claude-)?runners?\b/;
 const NETWORK = new Set(['curl', 'wget', 'http', 'https', 'xh', 'websocat', 'socat', 'nc', 'ncat']);
@@ -115,7 +123,7 @@ const ENVIRON_REST = /^(\/task\/[^/]*)?\/environ$/;
 
 /** For a recursive search: a secret readReason guards that lies inside this folder, or null. */
 function secretInside(root: string, cfg: TripwireConfig): string | null {
-  const secrets = [join(cfg.home, '.ssh'), join(cfg.claudeConfig, '.credentials.json'), join(cfg.home, '.claude/.credentials.json'), join(cfg.home, '.config/claude-coordinator'), join(cfg.home, '.config/gh/hosts.yml'), join(cfg.home, '.config/citadel-claude')];
+  const secrets = [join(cfg.home, '.ssh'), join(cfg.claudeConfig, '.credentials.json'), join(cfg.home, '.claude/.credentials.json'), join(cfg.home, '.config/claude-coordinator'), join(cfg.home, '.config/gh/hosts.yml'), join(cfg.home, '.config/citadel-claude'), join(cfg.home, CONTAINER_STORAGE)];
   const homes = dirname(cfg.home);
   if (homes !== '/' && under(homes, root)) return `other people's home folders in ${homes}`;
   return secrets.find((x) => x !== root && under(x, root)) ?? null;
@@ -380,7 +388,7 @@ const KEYWORDS = new Set(['!', '{', '}', 'then', 'do', 'else', 'if', 'while', 'u
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
 // ssh and friends take key paths and remote paths; their arguments are not local reads or writes.
 const REMOTE = new Set(['ssh', 'scp', 'sftp', 'ssh-add', 'ssh-keygen', 'ssh-copy-id', 'mosh']);
-const APP_UNITS = /^(claude-coordinator|perigee-godot[\w-]*)(\.service)?$/;
+const APP_UNITS = /^(claude-coordinator|perigee-godot[\w-]*|citadel-claude[\w-]*)(\.service)?$/;
 const STOP_VERBS = new Set(['restart', 'stop', 'kill', 'try-restart', 'reload-or-restart', 'try-reload-or-restart', 'condrestart', 'force-reload', 'freeze']);
 const UNIT_FILE_VERBS = new Set(['enable', 'disable', 'reenable', 'mask', 'unmask', 'link', 'edit', 'revert', 'preset', 'add-wants', 'add-requires', 'set-property']);
 const GIT_READ = new Set(`status log diff show blame rev-parse rev-list ls-files ls-tree ls-remote cat-file describe shortlog grep fetch help version
@@ -726,6 +734,15 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     return hard('Signing Claude in from a turn would make or replace a login token. People sign in themselves, in their own terminal.');
   }
   if (NETWORK.has(name) && args.some((w) => RUNNER_API.test(w.text) || /(citadel|claude)-runner[^/\s]*\.sock/.test(w.text))) return hard("A runner's socket and its endpoints in Citadel's API are for the runner and Citadel; a turn never pairs, connects or sends as one.");
+  if (name === 'podman' || name === 'docker') {
+    // unshare enters podman's user namespace, where every container's files (and sign-in) are open.
+    if (sub[0] === 'unshare') return hard(`\`${name} unshare\` opens podman's storage, which holds every person's Claude container and sign-in. ${CLAUDE_CONTAINERS_WHY}`);
+    if (args.some((w) => /citadel-claude/.test(w.text))) return hard(`That \`${name}\` call reaches a person's Claude container or volume. ${CLAUDE_CONTAINERS_WHY}`);
+    const all = args.some((w) => /^(-l|--latest|--all|-[a-zA-Z]*a[a-zA-Z]*)$/.test(w.text));
+    if ((all && (PODMAN_ALL.test(sub[0] ?? '') || sub[0] === 'exec' || (sub[0] === 'container' && PODMAN_ALL.test(sub[1] ?? '')) || (sub[0] === 'volume' && sub[1] === 'rm'))) || (sub[0] === 'system' && /^(prune|reset|migrate|renumber)$/.test(sub[1] ?? '')) || (sub[0] === 'volume' && sub[1] === 'prune')) {
+      return hard(`That \`${name}\` call takes every container or volume at once, people's Claude ones included. ${CLAUDE_CONTAINERS_WHY}`);
+    }
+  }
   if (name === 'sqlite3') {
     const why = sqliteReason(args, st, cfg);
     if (why) return hard(why);
@@ -762,7 +779,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     const plain = words.slice(sysctl + 1).filter((w) => !w.text.startsWith('-')).map((w) => w.text);
     const [verb, ...units] = plain;
     if (STOP_VERBS.has(verb) && units.some((u) => APP_UNITS.test(u))) {
-      return hard(`systemctl ${verb} of ${units.join(' ')} is blocked: it cuts off every running turn (or the shared Godot editor). Deploy with ${hasDeployScript(cfg) ? 'tools/deploy.sh, which restarts without stopping running turns' : 'the cc-restart-when-idle unit'}, or ask a person.`);
+      return hard(`systemctl ${verb} of ${units.join(' ')} is blocked: it cuts off every running turn (or the shared Godot editor, or a person's Claude container and their turns). Deploy with ${hasDeployScript(cfg) ? 'tools/deploy.sh, which restarts without stopping running turns' : 'the cc-restart-when-idle unit'}, or ask a person.`);
     }
     // `systemctl edit` opens an editor, which would hang a headless turn.
     if (UNIT_FILE_VERBS.has(verb)) return { reason: `systemctl ${verb} changes the box's unit files. Put units in the repo (deploy/) and ask Cara to install them.`, ask: verb !== 'edit' };

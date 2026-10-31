@@ -362,8 +362,7 @@ function connectStream(catchUp = false) {
       }
       assetVersion ??= msg.version;
     }
-    // A hello after a front-end reload carries no usage: the meter keeps the stream's own.
-    if ((msg.type === 'hello' || msg.type === 'usage') && 'usage' in msg) {
+    if (msg.type === 'hello' || msg.type === 'usage') {
       renderUsage(msg.usage);
       // Rows of minions that hit the usage limit count down to its reset.
       if (view?.kind === 'project') renderSidebar();

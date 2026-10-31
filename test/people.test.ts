@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { lendsMachines, mayReceive, messageScope, turnRefusal } from '../src/access.ts';
 import { Auth, hashPassword } from '../src/auth.ts';
@@ -121,6 +122,7 @@ test("turns run for people allowed on the server's login; anyone else's message 
 const fakeClaude = join(root, 'claude-fake');
 writeFileSync(fakeClaude, `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
+  console.log(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { seven_day: { utilization: 0.41 } } } }));
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
@@ -242,4 +244,41 @@ test("the stream doesn't carry other schemes' news; disabling someone ends their
   await reading;
   assert.equal((await as('Olive', '/api/projects')).status, 401);
   ctl.abort();
+});
+
+/** Read a person's live stream into a string until stopped. */
+function listen(cookie: string) {
+  const ctl = new AbortController();
+  const out = { seen: '', stop: () => ctl.abort() };
+  void fetch(`${srv.base}/api/stream`, { headers: { Cookie: cookie }, signal: ctl.signal }).then(async (res) => {
+    const reader = res.body!.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      out.seen += new TextDecoder().decode(value);
+    }
+  }).catch(() => {});
+  return out;
+}
+
+test("each person's meter shows their own plan: the stream's hello and usage news go to the payer alone (#219)", async () => {
+  // Josh's plan's usage, as his container turns record it (src/runner.ts, usageKey).
+  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'));
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(`usage:user:${people.Josh.id}`, JSON.stringify({ weekly: { utilization: 0.22, resetsAt: null, status: 'allowed' }, session: null, updatedAt: 1 }));
+  db.close();
+  const cara = listen(people.Cara.cookie);
+  const josh = listen(people.Josh.cookie);
+  await until('both hellos', () => cara.seen.includes('"hello"') && josh.seen.includes('"hello"'));
+  assert.match(josh.seen, /"hello".*"utilization":0\.22/);
+  assert.doesNotMatch(cara.seen, /0\.22/);
+  // A turn on the server login (Cara's): its usage goes to her meter, not Josh's.
+  const caras = (await as('Cara', '/api/projects')).data.find((x: any) => x.name === 'Caras');
+  await as('Cara', `/api/projects/${caras.id}/tickets`, { message: 'go', title: 'Meter' });
+  await until("Cara's usage news", () => cara.seen.includes('"type":"usage"'));
+  assert.match(cara.seen, /"type":"usage".*"utilization":0\.41/);
+  assert.ok(!josh.seen.includes('"type":"usage"'));
+  assert.equal((await as('Josh', '/api/me/claude')).data.usage.weekly.utilization, 0.22);
+  assert.deepEqual((await as('Cara', '/api/people')).data.filter((u: any) => u.name === 'Cara' || u.name === 'Josh').map((u: any) => u.week?.utilization), [0.41, 0.22]);
+  cara.stop();
+  josh.stop();
 });

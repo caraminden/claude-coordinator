@@ -71,7 +71,7 @@ const OTHER_ROUTES: Probe[] = [
   P('GET', '/api/me/claude'), P('DELETE', '/api/me/claude'), P('POST', '/api/me/claude/code'),
   P('GET', '/api/people'), P('POST', '/api/people'), P('POST', '/api/people/999/invite'), P('PATCH', '/api/people/999'),
   P('DELETE', '/api/people/999'), P('GET', '/api/projects/:p/members'), P('POST', '/api/projects/:p/members'),
-  P('DELETE', '/api/projects/:p/members/999'),
+  P('DELETE', '/api/projects/:p/members/999'), P('PUT', '/api/projects/:p/hidden'),
   P('GET', '/api/machines/connect'), P('POST', '/api/machines/send'), P('POST', '/api/machines/info'), P('POST', '/api/machines/upload'),
   P('GET', '/api/stream'), P('GET', '/api/costs'), P('GET', '/api/prs'), P('POST', '/api/taskmaster'),
   P('GET', '/api/projects'), P('POST', '/api/projects'), P('GET', '/api/catalogue'), P('GET', '/api/projects/:p'), P('PATCH', '/api/projects/:p'),

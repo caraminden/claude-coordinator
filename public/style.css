@@ -170,6 +170,19 @@ a.nav-item:has(> .scheme-count) > .name { flex: 1; overflow: hidden; text-overfl
 .scheme-count { background: var(--accent); color: #fff; border-radius: 999px; padding: 0.1rem 0.45rem; font-size: 0.85em; line-height: 1.3; font-weight: 600; }
 .scheme-count[hidden] { display: none; }
 button.nav-item.add { width: 100%; text-align: left; background: none; border: 0; color: var(--accent); font-weight: normal; }
+/* The shelf's scheme rows with their Hide or Unhide (#226): shown on hover where there is one, always on touch. */
+.scheme-row { display: flex; align-items: center; gap: 0.25rem; }
+.scheme-row > a.nav-item { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.5rem; }
+.scheme-row > a.nav-item > .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.scheme-hide { flex: none; padding: 0.2rem 0.45rem; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 0.8em; font-weight: normal; line-height: 1.3; cursor: pointer; }
+.scheme-hide:hover, .scheme-hide:focus-visible { background: var(--panel); color: var(--ink); }
+@media (hover: hover) { #schemes-shelf > .scheme-row:not(:hover, :focus-within) > .scheme-hide { opacity: 0; } }
+.hidden-schemes { margin-top: 0.25rem; }
+.hidden-schemes > summary { cursor: pointer; padding: 0.3rem 0.5rem; color: var(--muted); font-size: 0.85em; }
+.hidden-schemes .nav-item { color: var(--muted); }
+.hidden-note { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; padding: 0.35rem 0.7rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); font-size: 0.85em; }
+.hidden-note[hidden] { display: none; }
+.hidden-note button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
 
 /* Board */
 .board { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 1rem; align-items: start; }

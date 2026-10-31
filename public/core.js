@@ -9,6 +9,7 @@ import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './th
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
 import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, refreshInbox, refreshSchemeCounts } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
+import { onHiddenChanged } from './hidden.js';
 import { inAppHash, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { uploadsRunning } from './composer.js';
 import { renderMarkdown } from './markdown.js';
@@ -393,6 +394,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'properties') onPropertiesChanged(msg.projectId);
     if (msg.type === 'schedules') onSchedulesChanged(msg.projectId);
     if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
+    if (msg.type === 'hidden') onHiddenChanged(msg.name);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };

@@ -433,6 +433,13 @@ CREATE TABLE IF NOT EXISTS ticket_pins (
   pinned_at INTEGER NOT NULL,
   PRIMARY KEY (name, ticket_id)
 );
+-- Schemes a person hid from their own lists, badges and pushes (#226). Never changes who is in the scheme.
+CREATE TABLE IF NOT EXISTS project_hides (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  hidden_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, project_id)
+);
 CREATE TABLE IF NOT EXISTS shared_pins (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
@@ -518,7 +525,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 17; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213)
+export const SCHEMA_VERSION = 18; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -883,6 +890,17 @@ export class Store {
   canSee(who: { uid?: number; admin?: boolean }, projectId: number): boolean {
     return !!who.admin || !!this.db.prepare(`SELECT 1 FROM projects WHERE id = ?1 AND owner_id = ?2
       UNION SELECT 1 FROM project_members WHERE project_id = ?1 AND user_id = ?2`).get(projectId, who.uid ?? -1);
+  }
+
+  /** The schemes this person hid for themselves (#226). */
+  hiddenProjects(uid: number): Set<number> {
+    const rows = this.db.prepare('SELECT project_id FROM project_hides WHERE user_id = ?').all(uid) as { project_id: number }[];
+    return new Set(rows.map((r) => r.project_id));
+  }
+
+  setProjectHidden(uid: number, projectId: number, hidden: boolean) {
+    if (hidden) this.db.prepare('INSERT INTO project_hides (user_id, project_id, hidden_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(uid, projectId, Date.now());
+    else this.db.prepare('DELETE FROM project_hides WHERE user_id = ? AND project_id = ?').run(uid, projectId);
   }
 
   deleteProject(id: number) {

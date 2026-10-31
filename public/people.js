@@ -1,6 +1,7 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
 import { account, api, h, icon, view } from './core.js';
 import { settingsTabs } from './settings.js';
+import { hideButton } from './hidden.js';
 
 /** Whether you may change this scheme's members and settings: its owner, or an admin. */
 export const ownsScheme = (project) => !!account && (account.admin || project.owner_id === account.id);
@@ -48,6 +49,9 @@ export function membersPage() {
       ? 'Only the people here see this scheme, its minions and its files. Anyone in it can add minions and chat; only the owner changes its members and settings.'
       : 'Only the people here see this scheme, its minions and its files. Its owner adds and removes people.'),
     list, add,
+    h('h3', { class: 'settings-label' }, 'Just for you'),
+    h('p', { class: 'muted small' }, 'Hiding takes the scheme out of your scheme lists, Needs-you badges and notifications. You stay in it, and its link still opens it.'),
+    hideButton(p),
     account?.admin && h('p', { class: 'muted small' }, 'To add someone new to Citadel, invite them under People first.'));
 }
 

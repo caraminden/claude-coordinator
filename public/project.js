@@ -1,12 +1,13 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { account, api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, schemeIcon, setView, threadHref, usageMeter, view } from './core.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachinesShelf } from './settings.js';
-import { LAST_SCHEME, newTicketForm, openNewScheme, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
+import { LAST_SCHEME, newTicketForm, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
 import { chatSection, chatView, mountChat } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
-import { forgetOtherSchemes, inboxStrip, refreshInbox, schemeCount } from './inbox.js';
+import { forgetOtherSchemes, inboxStrip, refreshInbox } from './inbox.js';
+import { renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { schedulesButton, showSchedules } from './schedules.js';
 import { replaceHash } from './navstack.js';
 import { accountPage, membersPage, peoplePage } from './people.js';
@@ -97,17 +98,14 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
         h('button', { class: 'secondary small', onclick: logout }, 'Sign out')),
       usageMeter(),
       pushControls(project)),
-    h('section', { class: 'column' },
-      h('h3', {}, 'Schemes'),
-      projects.map((p) => h('a', { class: `nav-item${p.id === projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
-        schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), schemeCount(p))),
-      h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme')),
+    h('section', { class: 'column', id: 'schemes-shelf' }),
     h('div', { id: 'machines-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label' }, 'Minions'), schedulesButton()),
     newTicketForm(projectId),
     h('div', { id: 'github-strip', class: 'github-strip', hidden: true }),
+    h('div', { id: 'hidden-note', class: 'hidden-note', hidden: true }),
     inboxStrip(),
     // The coordinator sits above the search so it stays one click away while searching.
     h('div', { id: 'coordinator-row' }),
@@ -153,6 +151,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderShelf();
   renderSidebar();
   renderGithubStrip();
+  renderSchemesShelf();
+  renderHiddenNote();
   refreshInbox();
   prefetchTopRows();
   if (main.kind === 'artifacts') renderArtifactResults();

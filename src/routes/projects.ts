@@ -209,11 +209,29 @@ export const projectRoutes: Route[] = [
     method: 'GET', path: '/api/projects', who: ['person'],
     // inbox: the count on the scheme's Needs-you badge, for the scheme switcher.
     // icon: the version of the scheme's favicon (#222) for its URL, or null when it has none.
-    handler: async ({ res, app: { store, runner }, session }) => json(res, 200, await Promise.all(visibleSchemes(store, session).map(async (p) => ({
-      ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length,
-      inbox: inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id)),
-      icon: await iconVersion(p.repo_dir),
-    })))),
+    // hidden: this person hid it (#226); its badge stays at zero.
+    handler: async ({ res, app: { store, runner }, session }) => {
+      const hidden = store.hiddenProjects(session.uid ?? -1);
+      json(res, 200, await Promise.all(visibleSchemes(store, session).map(async (p) => ({
+        ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length,
+        hidden: hidden.has(p.id),
+        inbox: hidden.has(p.id) ? 0 : inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id)),
+        icon: await iconVersion(p.repo_dir),
+      }))));
+    },
+  },
+  {
+    // Hide a scheme from your own lists, badges and pushes, or show it again (#226). Only ever your own.
+    method: 'PUT', path: '/api/projects/:project/hidden', who: ['person'],
+    async handler({ req, res, app, session, project }) {
+      const body = await readJson(req);
+      if (typeof body.hidden !== 'boolean') throw new HttpError(400, 'hidden must be true or false');
+      if (session.uid === undefined) throw new HttpError(400, 'Sign in again first');
+      app.store.setProjectHidden(session.uid, project.id, body.hidden);
+      // Every stream of the scheme's people gets it; each tab refreshes only for its own person, like views.
+      app.broadcast({ type: 'hidden', name: session.name, projectId: project.id });
+      return json(res, 200, { hidden: body.hidden });
+    },
   },
   {
     // The scheme's favicon (src/scheme-icon.ts). Its URL carries the version, so it can be kept long.

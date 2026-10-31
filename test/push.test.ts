@@ -222,3 +222,31 @@ test('a pinned-only device hears about the minions its person pinned, anyone\'s,
   store.savePushSubscription('Cara', pinned.endpoint, pinned.p256dh, pinned.auth);
   assert.equal(store.getPushSubscription(pinned.endpoint)!.only_pinned, 0);
 });
+
+test('a scheme someone hid sends them no pushes, and Unhide brings them back (#226)', async () => {
+  const store = new Store(join(root, 'hidden.db'));
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const p = store.createProject('Obsidian', null, josh.id);
+  const t = store.createTicket({ project_id: p.id, title: 'Ready', permission_mode: 'default', created_by: 'Josh', kind: 'ticket' });
+  const coordinator = store.createTicket({ project_id: p.id, title: 'Coordinator', permission_mode: 'default', created_by: 'Josh', kind: 'coordinator' });
+  for (const name of ['Cara', 'Josh']) {
+    const b = browser(`https://push.example/${name}`);
+    store.savePushSubscription(name, b.endpoint, b.p256dh, b.auth);
+  }
+  const sent: string[] = [];
+  const fakeFetch = (async (url: string) => (sent.push(url), new Response('', { status: 201 }))) as unknown as typeof fetch;
+  const pusher = new Pusher(store, loadVapidKeys(root), fakeFetch);
+  const who = async (ticket: Ticket) => {
+    sent.length = 0;
+    await pusher.notify(ticket, { kind: 'state', state: 'blocked', note: 'stuck' });
+    return sent.map((url) => url.split('/').pop()).sort();
+  };
+  store.setProjectHidden(cara.id, p.id, true);
+  // Cara's hide is hers: Josh still hears, and the Taskmaster's news skips her too.
+  assert.deepEqual(await who(t), ['Josh']);
+  assert.deepEqual(await who(coordinator), ['Josh']);
+  store.setProjectHidden(cara.id, p.id, false);
+  assert.deepEqual(await who(t), ['Cara', 'Josh']);
+  store.db.close();
+});

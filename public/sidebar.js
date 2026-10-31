@@ -20,7 +20,8 @@ export async function openStartScheme() {
   const projects = await api('api/projects');
   let last = NaN;
   try { last = Number(localStorage.getItem(LAST_SCHEME)); } catch {}
-  const id = startScheme(projects, last);
+  // A hidden scheme only opens by itself when it was the last one open (#226).
+  const id = startScheme(projects.filter((p) => !p.hidden || p.id === last), last);
   if (id != null) return replaceHash(`#/p/${id}`); // replace: Back shouldn't bounce through here
   setView({ kind: 'projects' });
   crumbs.replaceChildren('New scheme');
@@ -134,7 +135,7 @@ let closeSchemeMenu = () => {};
 export function toggleSchemeMenu(button) {
   if (document.getElementById('scheme-menu')) return closeSchemeMenu();
   const menu = h('div', { id: 'scheme-menu', class: 'scheme-menu' },
-    view.projects.map((p) => h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, onclick: () => closeSchemeMenu() },
+    view.projects.filter((p) => !p.hidden || p.id === view.projectId).map((p) => h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, onclick: () => closeSchemeMenu() },
       schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), schemeCount(p))),
     h('button', { type: 'button', class: 'nav-item add', onclick: () => { closeSchemeMenu(); openNewScheme(); } }, '+ New scheme'));
   const outside = (e) => { if (!menu.contains(e.target) && !button.contains(e.target)) closeSchemeMenu(); };

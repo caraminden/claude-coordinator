@@ -1,4 +1,6 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
+import type { ClaudeLink } from './claude-link.ts';
+import type { Landings } from './land.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { gzip } from 'node:zlib';
 // Types only: this module loads nothing of the app's, so any module can import it.
@@ -156,6 +158,10 @@ export interface App {
   pusher: Pusher;
   /** People's own GitHub links (src/github-link.ts). */
   github: GithubLink;
+  /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */
+  claude: ClaudeLink;
+  /** land.sh runs for container turns' land tool (src/land.ts). */
+  landings: Landings;
   /** Open event streams (GET /api/stream), with whose they are. */
   clients: Map<ServerResponse, Session>;
   dataDir: string;

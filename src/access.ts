@@ -1,7 +1,7 @@
 // Who sees what: a person sees the schemes they own or are a member of (an admin sees all), the
 // live stream only carries a scheme's news to its people, and a Taskmaster writes only to schemes its person is in (and Citadel).
 import type { Session } from './auth.ts';
-import type { Project, Store, Ticket } from './db.ts';
+import type { Project, Store, Ticket, User } from './db.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 
 /** Stream messages only admins get: the Machines page and Citadel-wide instructions. */
@@ -32,13 +32,30 @@ export function mayReceive(store: Store, who: Session, scope: number | 'admin' |
  * and Max plans are per person). A message from no person (GitHub, a wake, another thread) counts
  * as the scheme owner's.
  */
-export function turnRefusal(store: Store, ticket: Ticket, author: string): string | null {
+export function turnRefusal(store: Store, ticket: Ticket, author: string, linked: ClaudeLinked = () => null): string | null {
   const person = store.findUser('name', author);
   const who = person ?? store.getUser(store.getProject(ticket.project_id)?.owner_id ?? -1);
-  if (who?.server_login && !who.disabled_at) return null;
-  return person
-    ? `Turns for ${person.name} start once they link their Claude account, so this message waits here and Claude hasn't seen it.`
-    : `Turns in this scheme start once its owner${who ? `, ${who.name},` : ''} links their Claude account, so this message waits here and Claude hasn't seen it.`;
+  if (!who) return "Turns in this scheme start once its owner links their Claude account, so this message waits here and Claude hasn't seen it.";
+  return claudeRefusal(who, linked, !person);
+}
+
+/** Whether a person has linked their own Claude (src/claude-link.ts): linked, expired, or not at all. */
+export type ClaudeLinked = (uid: number) => 'linked' | 'expired' | null;
+
+/**
+ * Why turns can't run on this person's Claude (#213), or null when they can: on the server's login
+ * (the Turns switch), or in their own container once linked and still signed in. `asOwner` words it
+ * for a scheme owner whose plan a message from no person (GitHub, a schedule) would run on.
+ */
+export function claudeRefusal(who: User, linked: ClaudeLinked, asOwner = false): string | null {
+  if (who.disabled_at) return `${who.name}'s login is disabled, so this message waits here and Claude hasn't seen it.`;
+  if (who.server_login) return null;
+  const state = linked(who.id);
+  if (state === 'linked') return null;
+  if (state === 'expired') return `${who.name}'s Claude sign-in expired, so this message waits here and Claude hasn't seen it. Link Claude again in Settings → Your account.`;
+  return asOwner
+    ? `Turns in this scheme start once its owner, ${who.name}, links their Claude account in Settings → Your account, so this message waits here and Claude hasn't seen it.`
+    : `Turns for ${who.name} start once they link their Claude account in Settings → Your account, so this message waits here and Claude hasn't seen it.`;
 }
 
 /** The connected machines (Cara's laptop, perigee's GPU) are an admin's: only their schemes' minions get them. */

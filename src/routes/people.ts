@@ -11,6 +11,7 @@ function personView(app: App, u: User) {
     id: u.id, name: u.name, login: u.login, admin: !!u.admin, server_login: !!u.server_login,
     disabled: !!u.disabled_at, has_password: !!u.password_hash, invite_open: (u.invite_expires ?? 0) > Date.now(),
     github: app.github.login(u.id),
+    claude: app.claude.linked(u.id), server_login_owner: u.id === app.store.serverLoginOwner(),
   };
 }
 
@@ -77,7 +78,11 @@ export const peopleRoutes: Route[] = [
         app.store.updateUser(user.id, { disabled_at: body.disabled ? Date.now() : null });
         if (body.disabled) dropStreams(app, user.id);
       }
-      if (body.server_login !== undefined) app.store.updateUser(user.id, { server_login: body.server_login ? 1 : 0 });
+      if (body.server_login !== undefined) {
+        // The server's login is one person's subscription (#213); everyone else links their own Claude.
+        if (body.server_login && user.id !== app.store.serverLoginOwner()) throw new HttpError(400, `Only the server login's owner runs on it; ${user.name} links their own Claude in Settings → Your account.`);
+        app.store.updateUser(user.id, { server_login: body.server_login ? 1 : 0 });
+      }
       return json(res, 200, personView(app, app.store.getUser(user.id)!));
     },
   },
@@ -128,6 +133,35 @@ export const peopleRoutes: Route[] = [
     async handler({ res, app, session }) {
       await app.github.unlink(uidOf(session));
       return json(res, 200, await app.github.status(uidOf(session)));
+    },
+  },
+  // Linking your own Claude plan (src/claude-link.ts, #213): its state, starting the sign-in, the code
+  // Anthropic shows you, and unlinking. Only the one-time code passes through; never a token.
+  { method: 'GET', path: '/api/me/claude', who: ['person'], handler: ({ res, app, session }) => json(res, 200, app.claude.status(uidOf(session))) },
+  {
+    method: 'POST', path: '/api/me/claude', who: ['person'],
+    handler({ res, app, session }) {
+      const uid = uidOf(session);
+      if (app.store.getUser(uid)?.server_login) throw new HttpError(400, 'Your turns run on the server\'s own Claude login, so there\'s nothing to link.');
+      // Starting the container can take minutes the first time (it builds the image): Settings polls GET meanwhile.
+      void app.claude.link(uid);
+      return json(res, 202, app.claude.status(uid));
+    },
+  },
+  {
+    method: 'POST', path: '/api/me/claude/code', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const code = String((await readJson(req)).code ?? '').trim();
+      // It is typed into the sign-in's terminal: printable characters only, so nothing can act as a key press.
+      if (!/^[\x21-\x7e]{1,2000}$/.test(code)) throw new HttpError(400, 'Paste the code Anthropic showed you.');
+      return json(res, 200, await app.claude.code(uidOf(session), code).catch((err) => { throw new HttpError(400, err.message); }));
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/me/claude', who: ['person'],
+    async handler({ res, app, session }) {
+      await app.claude.unlink(uidOf(session)).catch((err) => { throw new HttpError(400, err.message); });
+      return json(res, 200, app.claude.status(uidOf(session)));
     },
   },
   { method: 'GET', path: '/api/projects/:project/members', who: ['person'], handler: ({ res, app, project }) => json(res, 200, app.store.listMembers(project.id)) },

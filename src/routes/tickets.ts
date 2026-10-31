@@ -12,6 +12,7 @@ import { parseMerge, prInfo } from '../merge-card.ts';
 import { previewPath } from '../previews.ts';
 import { NOTIFY_STATES } from '../push.ts';
 import { tripwireConfig } from '../runner.ts';
+import { runsRepo } from '../wake.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, type App, type Ctx, type Route } from '../http.ts';
@@ -553,6 +554,24 @@ export const ticketRoutes: Route[] = [
       // A failed deploy leaves the minion in pending-deploy, so the error stays in view.
       const dismissed = !failed && runner.deployLive(id);
       return json(res, 201, { dismissed });
+    },
+  },
+  {
+    // The land tool (src/land.ts): run tools/land.sh in this minion's worktree on the host, for a turn in a container.
+    method: 'POST', path: '/api/tickets/:ticket/land', who: ['minion'], refuse: 'Only the minion itself can land its branch',
+    handler(ctx) {
+      const { res, app, ticket } = ctx;
+      const project = app.store.getProject(ticket.project_id)!;
+      if (ticket.kind !== 'ticket' || !ticket.cwd || !runsRepo(project.repo_dir, app.waiters.head)) throw new HttpError(403, 'Only a minion of the scheme this server runs lands with tools/land.sh');
+      return json(res, 202, app.landings.start(ticket.id, ticket.cwd, app.runner.hostEnv(ticket)));
+    },
+  },
+  {
+    method: 'GET', path: '/api/tickets/:ticket/land', who: ['minion'], refuse: 'Only the minion itself can land its branch',
+    handler: ({ res, app, ticket }) => {
+      const run = app.landings.get(ticket.id);
+      if (!run) throw new HttpError(404, 'No landing has started for this minion');
+      return json(res, 200, run);
     },
   },
   {

@@ -58,7 +58,7 @@ const TICKET_ROUTES: Probe[] = [
   P('POST', '/api/tickets/:t/plans'), P('POST', '/api/tickets/:t/verdict'), P('POST', '/api/tickets/:t/approvals'),
   P('GET', '/api/tickets/:t/approvals'), P('POST', '/api/tickets/:t/approve'), P('PUT', '/api/tickets/:t/properties'),
   P('POST', '/api/tickets/:t/stop'), P('POST', '/api/tickets/:t/status'), P('POST', '/api/tickets/:t/coordinator'),
-  P('POST', '/api/tickets/:t/deploy'), P('POST', '/api/tickets/:t/preview'), P('POST', '/api/tickets/:t/wake'),
+  P('POST', '/api/tickets/:t/deploy'), P('POST', '/api/tickets/:t/land'), P('GET', '/api/tickets/:t/land'), P('POST', '/api/tickets/:t/preview'), P('POST', '/api/tickets/:t/wake'),
   P('POST', '/api/tickets/:t/close'), P('GET', '/api/tickets/:t/images/0123456789abcdef01234567.png'),
   P('GET', '/api/tickets/:t/uploads/nothing.txt'),
   // Wrong methods and unknown actions.
@@ -67,6 +67,8 @@ const TICKET_ROUTES: Probe[] = [
 const OTHER_ROUTES: Probe[] = [
   P('POST', '/api/login'), P('POST', '/api/logout'), P('GET', '/api/health'), P('GET', '/api/me'),
   P('GET', '/api/invite/not-a-token'), P('POST', '/api/invite/not-a-token'), P('PUT', '/api/me/password'), P('GET', '/api/me/github'), P('DELETE', '/api/me/github'), P('GET', '/api/github/link?project=:p'), P('GET', '/api/github/callback?state=x&code=y'),
+  // POST /api/me/claude starts a real container, so only its refusals are probed (test/claude-link.test.ts covers it).
+  P('GET', '/api/me/claude'), P('DELETE', '/api/me/claude'), P('POST', '/api/me/claude/code'),
   P('GET', '/api/people'), P('POST', '/api/people'), P('POST', '/api/people/999/invite'), P('PATCH', '/api/people/999'),
   P('DELETE', '/api/people/999'), P('GET', '/api/projects/:p/members'), P('POST', '/api/projects/:p/members'),
   P('DELETE', '/api/projects/:p/members/999'),

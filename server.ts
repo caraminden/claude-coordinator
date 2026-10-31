@@ -8,7 +8,9 @@ import { basename, extname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
-import { lendsMachines, mayReceive, messageScope, turnRefusal } from './src/access.ts';
+import { claudeRefusal, lendsMachines, mayReceive, messageScope, turnRefusal } from './src/access.ts';
+import { ClaudeLink } from './src/claude-link.ts';
+import { Landings } from './src/land.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
@@ -42,7 +44,8 @@ let boundPort = PORT;
 // tailnet), served by a second listener that takes nothing but agents. The main listener then
 // refuses agents, so a leaked token is no use from the public internet.
 const MACHINES_URL = process.env.MACHINES_URL ? new URL(process.env.MACHINES_URL) : null;
-const DATA_DIR = process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator');
+const DEFAULT_DATA_DIR = join(homedir(), '.local/share/claude-coordinator');
+const DATA_DIR = process.env.DATA_DIR ?? DEFAULT_DATA_DIR;
 const PUBLIC_DIR = join(import.meta.dirname, 'public');
 // Headless turns can't ask for approval, so anything short of full access refuses most shell commands;
 // every thread gets full access.
@@ -109,7 +112,10 @@ if (!store.listUsers().some((u) => u.admin)) {
   store.createUser({ name, login: name.toLowerCase().replace(/[^a-z0-9._-]/g, ''), admin: true, server_login: true });
 }
 store.adoptOwnerless(store.listUsers().find((u) => u.admin)!.id);
-const githubLink = new GithubLink(store, new Credentials(store, process.env.SESSION_SECRET ?? ''), process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '');
+const credentials = new Credentials(store, process.env.SESSION_SECRET ?? '');
+const githubLink = new GithubLink(store, credentials, process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '');
+// People's own Claude plans (#213). A dev copy tags its containers so it never shares the live server's.
+const claudeLink = new ClaudeLink(store, credentials, DATA_DIR, process.env.CLAUDE_BIN ?? 'claude', undefined, DATA_DIR === DEFAULT_DATA_DIR ? 'citadel-claude-' : `citadel-claude-${createHash('sha256').update(DATA_DIR).digest('hex').slice(0, 6)}-`);
 // Keep secrets out of the environment that claude and its tools inherit.
 delete process.env.COORDINATOR_PASSWORD;
 delete process.env.SESSION_SECRET;
@@ -169,7 +175,17 @@ function liveOn(head: string | null) {
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 runner.machines = () => machines.online();
 runner.lendsMachines = (project) => lendsMachines(store, project);
-runner.refuseTurn = (ticket, author) => turnRefusal(store, ticket, author);
+runner.refuseTurn = (ticket, author) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid));
+// Sender pays (#213): the server login's owner runs on the host, everyone else in their own container.
+runner.placeFor = (person) => {
+  const user = person ? store.getUser(person) : undefined;
+  if (!user) return { host: true };
+  return claudeLink.place(user.id) ?? { refused: claudeRefusal(user, (uid) => claudeLink.linked(uid)) ?? `${user.name}'s Claude isn't ready, so this message waits here.` };
+};
+runner.onAuthFailure = (person) => claudeLink.expire(person);
+claudeLink.busy = (container) => runner.inContainer(container);
+const landings = new Landings();
+runner.hostJobs = () => landings.running();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = (author, from) => {
   if (from) return store.getTicket(from)?.person_id ?? null;
@@ -573,7 +589,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink, landings,
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {
     return ASSET_VERSION;

@@ -29,9 +29,9 @@ export async function newPasswordHash(v: unknown): Promise<string> {
 }
 
 /** Who you are, as the front end needs it. */
-function meView(store: Ctx['app']['store'], session: Ctx['session']) {
+function meView({ store, claude }: Ctx['app'], session: Ctx['session']) {
   const user = session.uid ? store.getUser(session.uid) : undefined;
-  return { id: user?.id ?? null, name: session.name, login: user?.login ?? null, admin: !!session.admin, turns: !!user?.server_login };
+  return { id: user?.id ?? null, name: session.name, login: user?.login ?? null, admin: !!session.admin, turns: !!user?.server_login || (!!user && claude.linked(user.id) === 'linked') };
 }
 
 export const appRoutes: Route[] = [
@@ -73,12 +73,13 @@ export const appRoutes: Route[] = [
   },
   {
     method: 'GET', path: '/api/me', who: ['person', 'taskmaster', 'minion'],
-    handler({ req, res, app: { store }, session, caller }) {
+    handler({ req, res, app, session, caller }) {
+      const { store } = app;
       // The app's public address, as Caddy forwards it, so start_preview can hand out a full link.
       const host = req.headers['x-forwarded-host'];
       const origin = typeof host === 'string' && !caller ? `${isSecure(req) ? 'https' : 'http'}://${host}` : null;
       if (origin && store.getSetting('public_origin') !== origin) store.setSetting('public_origin', origin);
-      return json(res, 200, caller ? { name: session.name } : meView(store, session));
+      return json(res, 200, caller ? { name: session.name } : meView(app, session));
     },
   },
   {

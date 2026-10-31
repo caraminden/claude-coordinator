@@ -1,0 +1,16 @@
+# The image every person's Claude container runs (src/claude-link.ts, #213). Built by the server as
+# localhost/citadel-claude:<hash of this file> the first time someone links, and again when this
+# file changes. claude itself isn't in it: the host's install is mounted read-only, so every
+# payer runs the same version (same tools, same prompt-cache prefix).
+FROM docker.io/library/node:26-bookworm
+# Turns' hook and MCP commands name the host's node by its path.
+RUN ln -s /usr/local/bin/node /usr/bin/node \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends chromium ripgrep jq python3 sqlite3 \
+ && curl -fsSL https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz | tar -xz -C /opt \
+ && ln -s /opt/gh_2.103.3_linux_amd64/bin/gh /usr/local/bin/gh \
+ && rm -rf /var/lib/apt/lists/* \
+ # A turn's GH_TOKEN pushes over https; someone who hasn't linked GitHub still commits, as Citadel.
+ && git config --system credential.https://github.com.helper '!gh auth git-credential' \
+ && git config --system user.name 'Citadel' \
+ && git config --system user.email 'citadel@localhost'

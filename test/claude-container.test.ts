@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -16,6 +16,8 @@ after(() => rmSync(root, { recursive: true, force: true }));
 process.env.CLAUDE_CONFIG_DIR = join(root, 'host-claude');
 // The server's own login: a container turn must never get it.
 process.env.ANTHROPIC_API_KEY = 'the-servers-key';
+// The host's runtime folder, which a container doesn't have (#225).
+process.env.XDG_RUNTIME_DIR = '/run/user/host';
 const bin = join(root, 'bin');
 mkdirSync(bin);
 const calls = join(root, 'podman-calls.jsonl');
@@ -101,6 +103,9 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   assert.equal(env.ANTHROPIC_API_KEY, undefined);
   assert.equal(env.CLAUDE_CONFIG_DIR, join(volume, '.claude'));
   assert.equal(env.COORDINATOR_CONTAINER, '1');
+  // The host's runtime folder isn't in the container: .NET's named mutexes need one that exists (#225).
+  assert.equal(env.XDG_RUNTIME_DIR, env.TMPDIR);
+  assert.ok(statSync(env.XDG_RUNTIME_DIR).isDirectory());
   assert.equal(store.getSetting<any>(usageKey(josh.id))?.weekly?.utilization, 0.42);
   assert.equal(store.getSetting('usage'), null);
   // Josh's meter shows his own plan; the server login's owner keeps the server's.

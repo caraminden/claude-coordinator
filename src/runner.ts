@@ -1633,8 +1633,9 @@ export class Runner {
     let env: Record<string, string> = { ...turnEnv(process.env), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
     // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
     // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
+    let tmp: string | null = null;
     try {
-      const tmp = makeTmpDir(this.tmpRoot(project.id), ticket.id);
+      tmp = makeTmpDir(this.tmpRoot(project.id), ticket.id);
       env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
     } catch (err: any) {
       this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${err.message}` });
@@ -1646,6 +1647,9 @@ export class Runner {
     if (!place.host) {
       for (const v of AUTH_VARS) delete env[v];
       env = { ...env, ...place.env, COORDINATOR_CONTAINER: '1' };
+      // The host's /run/user/<uid> isn't in the container, and .NET keeps named mutexes under
+      // XDG_RUNTIME_DIR: without it every one fails, NuGet's restore included (#225).
+      if (tmp) env.XDG_RUNTIME_DIR = tmp;
     }
     // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
     if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;

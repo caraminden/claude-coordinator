@@ -217,7 +217,7 @@ test('message_taskmaster: a Taskmaster reaches another scheme\'s Taskmaster, and
   assert.equal((await send(`agent:${tmTheirs.id}`, String(mine.id), 'on it')).scheme, 'Mine');
 
   await assert.rejects(send(tm, 'Mine'), /400 Mine is your own scheme/);
-  await assert.rejects(send(tm, 'Nope'), /404 No other scheme called "Nope"\. The other schemes: .*Theirs/);
+  await assert.rejects(send(tm, 'Nope'), /404 No scheme called "Nope" that Cara is in\. You can reach: .*Theirs/);
   await assert.rejects(send(`agent:${minion.id}`, 'Theirs'), /403/);
   await assert.rejects(send('Cara', 'Theirs'), /403/);
   // Still no reach into the other scheme's minions or its listing.

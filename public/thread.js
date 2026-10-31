@@ -1310,8 +1310,9 @@ const APP_AUTHOR = 'Citadel';
 function machineAuthor(author) {
   author ??= '';
   if (author === COORDINATOR_NAME || author === 'Taskmaster') return taskmasterName();
-  const scheme = author.match(/^Taskmaster of (.+)$/)?.[1];
-  if (scheme) return `${scheme} Taskmaster`;
+  // Citadel's Taskmaster also hears whose ask it is: "Taskmaster of Delve, for Josh, a Citadel member".
+  const [, scheme, whose = ''] = author.match(/^Taskmaster of (.+?)(, for .+)?$/) ?? [];
+  if (scheme) return `${scheme} Taskmaster${whose}`;
   return author === APP_AUTHOR || author === GITHUB_NAME || /^#\d+ /.test(author) ? author : null;
 }
 

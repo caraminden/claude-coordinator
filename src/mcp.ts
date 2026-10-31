@@ -271,7 +271,7 @@ const TOOLS = [
   {
     name: 'message_taskmaster',
     description:
-      "Send a message to another scheme's Taskmaster, waking it: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
+      "Send a message to another scheme's Taskmaster, waking it: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {

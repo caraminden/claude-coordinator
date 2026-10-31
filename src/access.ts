@@ -1,7 +1,8 @@
-// Who sees what: a person sees the schemes they own or are a member of (an admin sees all), and the
-// live stream only carries a scheme's news to its people.
+// Who sees what: a person sees the schemes they own or are a member of (an admin sees all), the
+// live stream only carries a scheme's news to its people, and a Taskmaster writes only to schemes its person is in (and Citadel).
 import type { Session } from './auth.ts';
 import type { Project, Store, Ticket } from './db.ts';
+import { GLOBAL_OWNER } from './properties.ts';
 
 /** Stream messages only admins get: the Machines page and Citadel-wide instructions. */
 const ADMIN_ONLY = new Set(['machines', 'app-instructions']);
@@ -43,4 +44,24 @@ export function turnRefusal(store: Store, ticket: Ticket, author: string): strin
 /** The connected machines (Cara's laptop, perigee's GPU) are an admin's: only their schemes' minions get them. */
 export function lendsMachines(store: Store, project: Project): boolean {
   return !!store.getUser(project.owner_id ?? -1)?.admin;
+}
+
+/** How long Citadel's Taskmaster may answer a scheme after that scheme's Taskmaster last wrote to it. */
+export const CITADEL_REPLY_MS = 7 * 24 * 60 * 60_000;
+/** When a scheme's Taskmaster last wrote to Citadel's (settings table). */
+export const askedCitadelKey = (projectId: number) => `taskmaster-asked:${projectId}`;
+
+/**
+ * The schemes a Taskmaster turn in scheme `from`, run for `personId`, may message with
+ * message_taskmaster: those that person is in as well as `from` (an admin is in all), Citadel always
+ * (for bug reports and feature asks), and for Citadel's own Taskmaster, any scheme whose Taskmaster
+ * wrote to it in the last CITADEL_REPLY_MS, so it can answer but never start a conversation there.
+ */
+export function taskmasterTargets(store: Store, from: number, personId: number | null, now: number): Project[] {
+  const user = personId === null ? undefined : store.getUser(personId);
+  const who = { uid: user?.id, admin: !!user?.admin };
+  const inFrom = store.canSee(who, from);
+  return store.listProjects().filter((p) => p.id !== from && (p.id === GLOBAL_OWNER
+    || (inFrom && store.canSee(who, p.id))
+    || (from === GLOBAL_OWNER && now - (store.getSetting<number>(askedCitadelKey(p.id)) ?? -Infinity) < CITADEL_REPLY_MS)));
 }

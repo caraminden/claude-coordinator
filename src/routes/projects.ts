@@ -7,7 +7,7 @@ import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, TICKET_TAGS, type Project, type Ticket, type TicketTag, type User } from '../db.ts';
-import { lendsMachines } from '../access.ts';
+import { askedCitadelKey, CITADEL_REPLY_MS, lendsMachines, taskmasterTargets } from '../access.ts';
 import { inboxCount, inboxItems } from '../inbox.ts';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
@@ -721,18 +721,27 @@ export const projectRoutes: Route[] = [
       const body = await readJson(req);
       const text = str(body.text, 'Message', 10_000);
       const want = String(body.scheme ?? '').trim().toLowerCase();
-      // Only schemes with the same owner: a Taskmaster never reaches into someone else's.
-      const ownerId = store.getProject(from.project_id)!.owner_id;
-      const others = store.listProjects().filter((p) => p.id !== from.project_id && p.owner_id === ownerId);
+      const own = store.getProject(from.project_id)!;
+      // Only schemes the turn's person is in, and Citadel (src/access.ts): a scheme they aren't in gets
+      // the same answer as one that doesn't exist, so its name doesn't leak.
+      const personId = from.person_id ?? own.owner_id;
+      const person = personId === null ? undefined : store.getUser(personId);
+      const others = taskmasterTargets(store, own.id, personId, Date.now());
       const project = others.find((p) => p.name.toLowerCase() === want) ?? others.find((p) => String(p.id) === want);
       if (!project) {
-        const own = store.getProject(from.project_id)!;
         if (want === own.name.toLowerCase() || want === String(own.id)) throw new HttpError(400, `${own.name} is your own scheme: use message_ticket for its minions`);
-        throw new HttpError(404, `No other scheme called "${String(body.scheme ?? '')}". The other schemes: ${others.map((p) => `${p.name} (${p.id})`).join(', ') || 'none'}`);
+        const answers = own.id === GLOBAL_OWNER ? ` The ${own.name} ${AGENT_NAME} may also answer a scheme whose ${AGENT_NAME} wrote to it in the last ${CITADEL_REPLY_MS / 86_400_000} days.` : '';
+        throw new HttpError(404, `No scheme called "${String(body.scheme ?? '')}" that ${person?.name ?? 'this turn\'s person'} is in. You can reach: ${others.map((p) => `${p.name} (${p.id})`).join(', ') || 'none'}.${answers}`);
       }
       const to = await ensureCoordinator(app, project);
-      const sender = store.getProject(from.project_id)!.name;
-      const { held, left } = runner.relayTaskmaster(from.id, to.id, `${AGENT_NAME} of ${sender}`, text);
+      let author = `${AGENT_NAME} of ${own.name}`;
+      if (project.id === GLOBAL_OWNER) {
+        // Citadel's Taskmaster weighs a non-member's ask differently (its prompt), and may answer for a while.
+        const member = store.canSee({ uid: person?.id, admin: !!person?.admin }, project.id);
+        author += `, for ${person?.name ?? 'no one'}, ${member ? 'a' : 'not a'} ${project.name} member`;
+        store.setSetting(askedCitadelKey(own.id), Date.now());
+      }
+      const { held, left } = runner.relayTaskmaster(from.id, to.id, author, text);
       if (!held) runner.emit(from.id, 'note', { text: `Sent the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
       return json(res, 202, { scheme: project.name, held, left });
     },

@@ -147,6 +147,8 @@ export class ClaudeLink {
     const spec = this.spec(uid);
     await this.containers.ensureImage(spec.image, CONTAINERFILE_DIR);
     await this.containers.createVolume(spec.name);
+    // A bind mount's folder must exist: a fresh server has no run/turns until its first turn.
+    for (const m of spec.mounts) if (!m.volume && !m.ro) mkdirSync(m.src, { recursive: true });
     const now = await this.containers.status(spec.name);
     // shortcut: a changed spec (new image, a new scheme's memory) waits until no turn runs in the container; a busy one keeps its old mounts meanwhile.
     if (now.state === 'running' && (now.spec === specHash(spec) || this.busy(spec.name))) return;

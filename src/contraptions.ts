@@ -6,15 +6,18 @@
 //   - verifyIdentity(header, identity.pub, name): what a contraption does with that header (stubs, tests)
 //   - byKey(bearer): the contraption a bearer contraption key belongs to, or null
 //   - enabled(name, userId): whether a person may use it, read fresh every call so disabling takes at once
+//   - caller(req): the contraption calling one of its own routes ('contraption' in src/http.ts), else a refusal
 // Each contraption's key folder, <dir>/<name>/ (0700), holds identity.pub (an Ed25519 public key, PEM
 // SPKI) and contraption.key (its bearer key, no trailing newline), both 0600. Citadel keeps the private
 // key sealed under SESSION_SECRET in the contraptions row, and only a hash of the bearer key.
 import { chmodSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, verify } from 'node:crypto';
 import { homedir } from 'node:os';
+import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { seal, sealKey, unseal } from './credentials.ts';
 import type { ContraptionRow, Store, User } from './db.ts';
+import { HttpError } from './http.ts';
 
 /** Where the live server's key folders go, unless CITADEL_CONTRAPTIONS_DIR says otherwise; another DATA_DIR keeps its own under it. */
 export const DEFAULT_CONTRAPTIONS_DIR = join(homedir(), '.config', 'citadel', 'contraptions');
@@ -126,6 +129,22 @@ export class Contraptions {
   byKey(bearer: string | null | undefined): ContraptionRow | null {
     if (!bearer || !/^ck_[\w-]{43}$/.test(bearer)) return null;
     return this.store.contraptionByKeyHash(keyHash(bearer)) ?? null;
+  }
+
+  /**
+   * The contraption calling one of its own routes (feature asks, the turn API): only its own server, on
+   * this machine, with its contraption key. A request that came through Caddy (it adds X-Forwarded-For),
+   * carries a browser's sign-in cookie (cc_session, src/auth.ts) or comes from another address is
+   * refused before its key is looked at.
+   */
+  caller(req: IncomingMessage): ContraptionRow {
+    const loopback = /^(127\.|::1$|::ffff:127\.)/.test(req.socket.remoteAddress ?? '');
+    if (!loopback || req.headers['x-forwarded-for'] !== undefined || req.headers.forwarded !== undefined || /(?:^|;\s*)cc_session=/.test(req.headers.cookie ?? '')) {
+      throw new HttpError(403, "Only a contraption's own server may call this, on Citadel's machine, not through the web");
+    }
+    const c = this.byKey(/^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1]);
+    if (!c) throw new HttpError(401, 'Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer');
+    return c;
   }
 
   /** Whether a contraption is enabled for a person (who isn't disabled in Citadel). Being in its home scheme grants nothing. */

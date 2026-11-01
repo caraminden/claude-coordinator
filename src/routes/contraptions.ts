@@ -1,11 +1,15 @@
 // Contraptions (src/contraptions.ts): admins register them, edit them, enable them per person and
-// rotate their keys; anyone signed in lists the ones enabled for them, for the app rail.
+// rotate their keys; anyone signed in lists the ones enabled for them, for the app rail; a contraption's
+// own server sends its people's bug reports and feature asks to its home scheme (src/contraption-asks.ts).
+import { ASK_FILES_MAX, askFiles, askMessage, saveAskFiles } from '../contraption-asks.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 import type { ContraptionRow } from '../db.ts';
-import { HttpError, json, readJson, type App, type Route } from '../http.ts';
+import { HttpError, json, oneOf, readJson, str, type App, type Route } from '../http.ts';
+import { projectSharedDir } from '../workspace.ts';
+import { ensureCoordinator } from './projects.ts';
 
 // Names the turn API (section 4) and the rail take under /api/contraptions/.
-const RESERVED = new Set(['mine', 'turns', 'sessions']);
+const RESERVED = new Set(['mine', 'turns', 'sessions', 'asks']);
 
 /** A contraption as Settings → Contraptions shows it: never a key. */
 function view(app: App, c: ContraptionRow) {
@@ -119,6 +123,29 @@ export const contraptionRoutes: Route[] = [
       const c = contraption(app, params.name);
       app.contraptions.rotate(c.name);
       return json(res, 200, view(app, contraption(app, c.name)));
+    },
+  },
+  {
+    // A bug report or feature ask from a contraption's server, as one of its people: files into the home
+    // scheme's shared folder, the ask to its Taskmaster, waking it.
+    method: 'POST', path: '/api/contraptions/asks', who: 'contraption',
+    async handler({ req, res, app, contraption: c }) {
+      // Base64 is 4/3 of the files, plus room for the text.
+      const body = await readJson(req, Math.ceil(ASK_FILES_MAX * 4 / 3) + 1_000_000);
+      const person = Number.isInteger(body.person) ? app.store.getUser(body.person) : undefined;
+      if (!person || !app.contraptions.enabled(c.name, person.id)) throw new HttpError(403, `${c.title} isn't enabled for that person`);
+      const kind = oneOf(body.kind, ['bug', 'feature'], 'Kind') as 'bug' | 'feature' | null;
+      if (!kind) throw new HttpError(400, 'Kind is required: bug or feature');
+      const text = str(body.text, 'Text', 10_000);
+      const files = askFiles(body.files);
+      const scheme = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme);
+      if (!scheme) throw new HttpError(409, `${c.title} has no home scheme to send asks to: an admin sets one in Settings → Contraptions`);
+      const paths = saveAskFiles(projectSharedDir(app.dataDir, scheme.id), c.name, person.login, files);
+      // A member as #211 counts one: in the scheme, or an admin.
+      const member = app.store.canSee({ uid: person.id, admin: !!person.admin }, scheme.id);
+      const ask = askMessage(c, scheme, person, member, kind, text, paths);
+      app.runner.send((await ensureCoordinator(app, scheme)).id, ask.author, ask.text);
+      return json(res, 202, { scheme: scheme.name, member, proposal: !member && kind === 'feature', files: paths });
     },
   },
 ];

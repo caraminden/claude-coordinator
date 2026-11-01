@@ -57,6 +57,11 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   Citadel's may answer a scheme for 7 days after it last wrote (`src/access.ts`). A loop guard allows
   6 messages per pair of Taskmasters in 10 minutes. The token is passed in the environment, not on the
   command line, so other users on the box can't read it from `ps`.
+- A **contraption**'s own server (local, with its contraption key, never through Caddy) sends its people's
+  bug reports and feature asks to its home scheme with `POST /api/contraptions/asks`: files (16 MiB in all)
+  go into that scheme's shared folder under `inbox/<contraption>/<login>/`, and the ask reaches its
+  Taskmaster labelled like `message_taskmaster`'s; a non-member's feature ask is a proposal only
+  (`src/contraption-asks.ts`).
 - Each scheme can have **instructions** (up to 16,000 characters), edited on the
   scheme's Settings page (beside Sign out in the overview panel). They're appended
   to the system prompt of the Taskmaster and every minion, so they apply from each one's next turn. "Import from Claude Code" lists

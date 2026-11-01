@@ -7,7 +7,7 @@ import { gzip } from 'node:zlib';
 // Types only: this module loads nothing of the app's, so any module can import it.
 import type { Auth, Session } from './auth.ts';
 import type { BranchStatus } from './branch.ts';
-import type { Artifact, Machine, Project, Store, Ticket, TicketTag } from './db.ts';
+import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket, TicketTag } from './db.ts';
 import type { MachineRelay } from './machines.ts';
 import type { GithubLink } from './github-link.ts';
 import type { Previews } from './previews.ts';
@@ -190,7 +190,7 @@ export interface Ctx {
   res: ServerResponse;
   url: URL;
   app: App;
-  /** Null only on 'anyone' and 'machine' routes. */
+  /** Null only on 'anyone', 'machine' and 'contraption' routes. */
   session: Session;
   /** The minion or Taskmaster calling, or null for a person. */
   caller: Ticket | null;
@@ -201,6 +201,8 @@ export interface Ctx {
   schedule: Schedule;
   artifact: Artifact;
   machine: Machine;
+  /** The contraption calling, on 'contraption' routes. */
+  contraption: ContraptionRow;
 }
 
 export interface Route {
@@ -210,8 +212,11 @@ export interface Route {
    * A last segment `*name` takes the rest of the path, slashes and all.
    */
   path: string;
-  /** 'anyone' needs no login; 'machine' is a machine's agent, which checks its own token. */
-  who: readonly Who[] | 'anyone' | 'machine';
+  /**
+   * 'anyone' needs no login; 'machine' is a machine's agent, which checks its own token; 'contraption' is
+   * a contraption's own server, local and with its key (src/contraptions.ts caller), and no one else.
+   */
+  who: readonly Who[] | 'anyone' | 'machine' | 'contraption';
   /** The 403 for a caller `who` leaves out (a minion always gets "A minion may only update itself"). */
   refuse?: string;
   /**
@@ -309,6 +314,10 @@ export function router(routes: Route[]) {
     const ctx = { req, res, url, app, session, caller: null, params: {} } as unknown as Ctx;
     if (hit) hit.re.exec(url.pathname)!.slice(1).forEach((v, i) => (ctx.params[hit.names[i]] = v));
     if (route?.who === 'anyone' || route?.who === 'machine') return route.handler(ctx);
+    if (route?.who === 'contraption') {
+      ctx.contraption = app.contraptions.caller(req);
+      return route.handler(ctx);
+    }
     if (!session) throw new HttpError(401, 'Not logged in');
 
     // Reject cross-site writes (SameSite=Lax and the JSON content type cover most of this already).

@@ -4,7 +4,7 @@
 # payer runs the same version (same tools, same prompt-cache prefix).
 FROM docker.io/library/node:26-bookworm
 # Turns' hook and MCP commands name the host's node by its path. graphviz, xvfb (with xauth, which
-# xvfb-run needs), ffmpeg and socat stand in for the host's: a turn's PATH puts this image's bin
+# xvfb-run needs), ffmpeg, socat, zip and unzip stand in for the host's: a turn's PATH puts this image's bin
 # folders first, so these win over host wrappers that can't run in here (#247). Godot's OpenGL under
 # Xvfb renders with the Mesa that chromium already brings.
 RUN ln -s /usr/local/bin/node /usr/bin/node \

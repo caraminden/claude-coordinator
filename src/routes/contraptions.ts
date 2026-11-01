@@ -26,7 +26,7 @@ function view(app: App, c: ContraptionRow) {
     name: c.name, title: c.title, icon: c.icon, port: c.port, home_scheme: c.home_scheme, open_paths: JSON.parse(c.open_paths) as string[],
     relay_paths: JSON.parse(c.relay_paths) as string[],
     default_model: c.default_model, turn_cap: c.turn_cap, keys_at: c.keys_at, keys_dir: app.contraptions.folder(c.name),
-    repo: c.repo, branch: c.branch ?? 'main', folder: app.services.folder(c),
+    repo: c.repo, branch: c.branch, folder: c.folder, // as set: null means main and ~/apps/<name>
     people: app.store.contraptionUsers(c.id),
     logins: app.store.contraptionUsers(c.id).map((id) => app.store.getUser(id)?.login).filter(Boolean),
   };

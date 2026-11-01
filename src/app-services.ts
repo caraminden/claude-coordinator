@@ -556,8 +556,8 @@ export class AppServices {
       prev = await git('rev-parse', 'HEAD');
       await say(`Fetching ${repo} ${view.branch}.`);
       if (await sh(['git', 'fetch', '--quiet', 'origin', view.branch], folder, 600_000)) throw new Error(`Fetching ${repo} failed: see the log.`);
-      await git('merge', '--ff-only', '--quiet', 'FETCH_HEAD').catch(() => {
-        throw new Error(`${folder}'s ${view.branch} has commits ${repo} doesn't: it can only fast-forward, so nothing changed.`);
+      await git('merge', '--ff-only', '--quiet', 'FETCH_HEAD').catch((err) => {
+        throw new Error(`${folder}'s ${view.branch} has commits ${repo} doesn't, or git refused: it can only fast-forward, so nothing changed. ${err.message}`);
       });
     }
     view.from = prev;

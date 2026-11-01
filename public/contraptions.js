@@ -65,7 +65,7 @@ function servicePanel(c) {
   // Its last deploy, followed while it runs.
   const deployLine = h('div', { class: 'small' });
   const deployLog = h('pre', { hidden: true });
-  const deployBtn = h('button', { type: 'button', class: 'secondary small', hidden: !c.repo, title: c.repo ? `Fetch ${c.repo} ${c.branch}, build, restart; rolls back if it fails` : '' }, 'Deploy');
+  const deployBtn = h('button', { type: 'button', class: 'secondary small', hidden: !c.repo, title: c.repo ? `Fetch ${c.repo} ${c.branch || 'main'}, build, restart; rolls back if it fails` : '' }, 'Deploy');
   const showDeploy = (d) => {
     deployBtn.disabled = d?.state === 'running';
     if (!d) return;
@@ -76,7 +76,7 @@ function servicePanel(c) {
     else api(base).then(show).catch(() => {});
   };
   deployBtn.onclick = async () => {
-    if (!confirm(`Deploy ${c.title} from ${c.repo} ${c.branch}? It builds and restarts it, and rolls back if that fails.`)) return;
+    if (!confirm(`Deploy ${c.title} from ${c.repo} ${c.branch || 'main'}? It builds and restarts it, and rolls back if that fails.`)) return;
     try {
       showDeploy(await api(`api/contraptions/${c.name}/deploy`, { method: 'POST' }));
     } catch (err) {

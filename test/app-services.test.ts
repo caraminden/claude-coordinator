@@ -355,7 +355,7 @@ test('a deploy refuses a folder with local changes, another origin or branch, or
     const local = git(folder, 'rev-parse', 'HEAD');
     services.deploy(c, 'Cara');
     d = await done(name);
-    assert.match(d.said.join('\n'), /has commits cara\/.* doesn't: it can only fast-forward/);
+    assert.match(d.said.join('\n'), /has commits cara\/.* doesn't, or git refused: it can only fast-forward, so nothing changed\. git merge/);
     assert.equal(git(folder, 'rev-parse', 'HEAD'), local);
   } finally {
     svc.close();

@@ -257,7 +257,9 @@ test('deploy_contraption: its home scheme\'s Taskmaster and minions, and Citadel
   // Only an admin sets the repo: the update route stays admin-only.
   const set = await srv.call('/api/contraptions/twin', { repo: 'caraminden/twin', branch: 'main', folder: '~/apps/twin' }, 'PATCH');
   assert.equal(set.status, 200);
-  assert.deepEqual([set.data.repo, set.data.branch, set.data.folder], ['caraminden/twin', 'main', join(home, 'apps/twin')]);
+  assert.deepEqual([set.data.repo, set.data.branch, set.data.folder], ['caraminden/twin', 'main', '~/apps/twin']);
+  const cleared = await srv.call('/api/contraptions/twin', { branch: '', folder: null }, 'PATCH');
+  assert.deepEqual([cleared.data.branch, cleared.data.folder], [null, null], 'blank means the defaults, which stay defaults');
   for (const bad of [{ repo: 'not a repo' }, { repo: 'a/../b' }, { branch: '-x' }, { folder: 'relative/path' }, { folder: '~/../etc' }]) {
     assert.equal((await srv.call('/api/contraptions/twin', bad, 'PATCH')).status, 400, JSON.stringify(bad));
   }

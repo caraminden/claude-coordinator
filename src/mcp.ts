@@ -588,7 +588,7 @@ function contraptionText(c: any): string {
     `turn cap ${c.turn_cap ?? 'none'}`,
     `enabled for ${c.logins.length ? c.logins.join(', ') : 'nobody'}`,
     `key folder ${c.keys_dir} (identity.pub, contraption.key)`,
-    `repo ${c.repo ? `${c.repo} ${c.branch}` : 'none'}, folder ${c.folder}`,
+    `repo ${c.repo ? `${c.repo} ${c.branch ?? 'main'}` : 'none'}, folder ${c.folder ?? `~/apps/${c.name}`}`,
   ].join(' | ');
 }
 

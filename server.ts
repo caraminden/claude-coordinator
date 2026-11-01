@@ -15,7 +15,7 @@ import { Landings } from './src/land.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
-import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
+import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { Store, type Artifact, type Project, type Ticket } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
@@ -435,7 +435,8 @@ if (!PREVIEW) void safely('startup sweep', async () => {
         const model = t.last_model ?? (init ? JSON.parse(init.data).model ?? null : null);
         store.updateTicketQuietly(t.id, { last_model: model, last_effort: t.last_effort ?? lastEffort(t, configDir) });
       }
-      await saveSession(store, t, p, configDir, false).catch((err) => console.error(`Saving the session of ticket ${t.id} failed:`, err));
+      // On its lane, so a turn a message starts meanwhile waits for it (#259); errors are logged there.
+      await runner.saveIdleSession(t.id, configDir);
     }
   }
 });

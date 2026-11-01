@@ -15,7 +15,8 @@ import type { TripwireConfig } from './tripwire.ts';
 import type { TurnGithub } from './github-link.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import type { Ship } from './branch.ts';
-import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, transcriptPath } from './sessions.ts';
+import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath } from './sessions.ts';
+import { Lanes } from './lanes.ts';
 import { projectDir, restoreTicketDir } from './workspace.ts';
 import { previewKey } from './previews.ts';
 import { GLOBAL_OWNER } from './properties.ts';
@@ -265,6 +266,11 @@ interface LiveTurn {
   timer: NodeJS.Timeout;
   ticks: number;
   stopTimer?: NodeJS.Timeout;
+  /** Resolves once the turn has ended and its session is saved: its step on the minion's lane. */
+  ended: Promise<void>;
+  end: () => void;
+  /** What the config dir held when the turn started, which its save may prune (null: nothing; a re-attached turn doesn't know). */
+  had: Set<string> | null;
 }
 
 /** A minion's context size at its last turn's last API call (tokens), for what switching its payer costs. */
@@ -272,6 +278,9 @@ const contextKey = (ticketId: number) => `context:${ticketId}`;
 
 /** Where a person's own plan usage is kept (their container turns'), apart from the server login's `usage`. */
 export const usageKey = (person: number) => `usage:user:${person}`;
+
+/** A turn whose wrapper hasn't said it runs (no pid.json or beat yet) counts as still starting for this long. */
+const START_GRACE_MS = 60_000;
 
 /** A container turn's wrapper beat (src/turn-wrapper.ts) longer ago than this is gone. */
 const BEAT_STALE_MS = 30_000;
@@ -324,6 +333,10 @@ const turnKey = (ticketId: number) => `turn:${ticketId}`;
 const goesKey = (projectId: number) => `merge_goes:${projectId}`;
 /** Set when a person writes to a minion waiting in pending-deploy: its deploy then leaves it open. */
 const talkedKey = (ticketId: number) => `talked-since-deploy:${ticketId}`;
+/** A turn's end-of-turn session save that hasn't finished yet: the config dir it reads, so a restart redoes it (#259). */
+const savingKey = (ticketId: number) => `saving:${ticketId}`;
+/** Messages waiting for a minion's lane while no turn runs (its last turn's save), so a restart doesn't lose them (#259). */
+const waitingKey = (ticketId: number) => `waiting:${ticketId}`;
 
 /** Taskmaster↔minion messages (both ways) one minion may exchange per LOOP_WINDOW_MS before the next waits for a person. */
 export const LOOP_LIMIT = 6;
@@ -807,8 +820,8 @@ export function turnSettings(ticket: Pick<Ticket, 'kind' | 'model' | 'effort'>, 
 
 export class Runner {
   private turns = new Map<number, LiveTurn>();
-  /** Tickets whose last turn's session is still being saved to the database; their next turn waits for it (#250). */
-  private saving = new Set<number>();
+  /** Each minion's lifecycle steps, one at a time (src/lanes.ts): a turn and its session save, a resume, a dismissal's cleanup. */
+  private lanes = new Lanes();
   private queues = new Map<number, QueuedMessage[]>();
   /** Tickets that asked to close when their current turn ends, with the reason they gave. */
   private closing = new Map<number, string | null>();
@@ -908,6 +921,8 @@ export class Runner {
     }, { get: (p) => store.getSetting<Go[]>(goesKey(p)) ?? [], set: (p, goes) => store.setSetting(goesKey(p), goes) });
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
+    // Messages that arrived while a step ran start a turn once the minion's lane is free.
+    this.lanes.onIdle = (ticketId) => this.next(ticketId);
     this.turnsDir = join(dirname(store.path), 'run', 'turns');
     this.dataDir = resolve(dirname(store.path));
     this.unitTag = createHash('sha256').update(this.turnsDir).digest('hex').slice(0, 8);
@@ -976,20 +991,39 @@ export class Runner {
     };
   }
 
-  /** Close a ticket that is not running. Its worktree and branch are kept. Resolves once its preview is gone. */
-  close(ticketId: number, text: string): Promise<void> | void {
+  /**
+   * Close a ticket that is not running. Its worktree and branch are kept. Its temp folder and preview
+   * go on its lane, after its last turn's save; resolves once they are gone.
+   */
+  close(ticketId: number, text: string): Promise<void> {
     if (this.cancelLimitWait(ticketId)) this.queues.delete(ticketId);
     // A reopened minion shouldn't offer the go-ahead it had when dismissed.
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
-    try {
+    return this.lanes.run(ticketId, 'dismissal cleanup', () => {
+      try {
+        const ticket = this.store.getTicket(ticketId);
+        // Reopened while this waited (the status route): its temp folder is in use again.
+        if (ticket?.status === 'closed') clearTmpDir(this.tmpRoot(ticket.project_id), ticketId);
+      } catch (err: any) {
+        console.error(`Ticket ${ticketId}: could not clear its temp folder: ${err.message}`);
+      }
+      return this.onClose(ticketId);
+    });
+  }
+
+  /**
+   * The boot sweep's copy of an idle minion's session into the database (nothing pruned): on its lane,
+   * so a turn that a message starts meanwhile waits for it. Null when the lane is busy (a turn runs).
+   */
+  saveIdleSession(ticketId: number, configDir: string): Promise<void> | null {
+    if (this.lanes.busy(ticketId)) return null;
+    return this.lanes.run(ticketId, 'session sweep', () => {
       const ticket = this.store.getTicket(ticketId);
-      if (ticket) clearTmpDir(this.tmpRoot(ticket.project_id), ticketId);
-    } catch (err: any) {
-      console.error(`Ticket ${ticketId}: could not clear its temp folder: ${err.message}`);
-    }
-    return this.onClose(ticketId);
+      const project = ticket && this.store.getProject(ticket.project_id);
+      if (ticket?.session_id && project) return this.saveSession(this.store, ticket, project, configDir, null);
+    });
   }
 
   /**
@@ -1071,6 +1105,15 @@ export class Runner {
     const later: (() => void)[] = [];
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
+        // A save the last server didn't finish: redone first on the lane, from the config dir its turn used.
+        const saving = this.store.getSetting<{ configDir: string }>(savingKey(t.id));
+        if (saving) this.lanes.run(t.id, 'session save cut off by a restart', () => this.saveAfterTurn(t.id, saving.configDir, null));
+        // Messages that waited for that save start a turn once it is in.
+        const waiting = this.store.getSetting<QueuedMessage[]>(waitingKey(t.id));
+        if (waiting?.length && t.status !== 'running') {
+          this.queues.set(t.id, [...waiting]);
+          later.push(() => this.next(t.id));
+        }
         if (t.status === 'running') {
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
           // This turn's waiting cards come back: if it is still running, it still polls for them (#209).
@@ -1125,16 +1168,20 @@ export class Runner {
         const dir = join(this.turnsDir, name);
         return /^person-\d+$/.test(name) ? readdirSync(dir).map((n) => join(dir, n)) : [dir];
       });
-      for (const dir of dirs) if (!followed.has(dir) && !wrapperAlive(dir)) rmSync(dir, { recursive: true, force: true });
+      // Gone for sure: its wrapper's pid is dead, or it never wrote one in the time a start takes. Not knowing isn't enough (#259).
+      const gone = (dir: string) => wrapperAlive(dir) === false || (wrapperAlive(dir) === null && Date.now() - statSync(dir).mtimeMs > START_GRACE_MS);
+      for (const dir of dirs) if (!followed.has(dir) && gone(dir)) rmSync(dir, { recursive: true, force: true });
     } catch {
       // No turns yet.
     }
     // Temp folders of minions dismissed or deleted while no server watched (or whose clearing failed).
     try {
       const gone = readdirSync(join(this.dataDir, 'projects')).filter((name) => /^\d+$/.test(name)).flatMap((name) => {
+        // Removed only on proof: the minion was dismissed, or its folder sits in another scheme's root. A
+        // minion the database doesn't know (a restored backup, say) keeps its folder (#259).
         const keep = (id: number) => {
           const t = this.store.getTicket(id);
-          return this.turns.has(id) || (t?.project_id === Number(name) && t.status !== 'closed');
+          return !t || this.turns.has(id) || this.lanes.busy(id) || (t.project_id === Number(name) && t.status !== 'closed');
         };
         return sweepTmpDirs(this.tmpRoot(Number(name)), keep);
       });
@@ -1155,13 +1202,14 @@ export class Runner {
     if (turn.queued?.length) this.queues.set(ticketId, turn.queued);
     if ('closing' in turn) this.closing.set(ticketId, turn.closing ?? null);
     if (turn.deployed) this.deployedMidTurn.add(ticketId);
+    this.lanes.run(ticketId, 're-attached turn', () => live.ended);
     console.log(`Ticket ${ticketId}: re-attached to its running turn${live.unit ? ` in ${live.unit}` : ''}.`);
     return true;
   }
 
   /** Whether a followed turn's process may still be running: started, or still starting. */
   private running(live: LiveTurn): boolean {
-    return wrapperAlive(live.dir) ?? Date.now() - live.startedAt < 60_000;
+    return wrapperAlive(live.dir) ?? Date.now() - live.startedAt < START_GRACE_MS;
   }
 
   /** A followed turn's process ended without writing exit.json. Liveness goes first: the wrapper writes exit.json, then exits. */
@@ -1176,13 +1224,22 @@ export class Runner {
   private resume(ticketId: number, resumes: number, limitTries = 0) {
     // Someone's message got in first; its turn took the queue, and that is resume enough.
     if (this.isRunning(ticketId)) return;
-    const ticket = this.store.getTicket(ticketId);
-    const project = ticket && this.store.getProject(ticket.project_id);
-    if (!ticket || !project || ticket.status === 'closed') return;
-    this.emit(ticketId, 'note', { text: limitTries ? 'Resumed after the usage limit reset' : 'Resumed after a server restart' });
-    const batch = this.queues.get(ticketId)?.splice(0) ?? [];
-    // It carries on the interrupted turn, so it runs for that turn's person.
-    this.startTurn(project, ticket, [{ author: 'System', text: limitTries ? RESUME_LIMIT_PROMPT : RESUME_PROMPT, images: [] }, ...batch], ticket.person_id ?? this.turnPerson(ticket, project, batch), resumes, limitTries);
+    // After the last turn's save, if that is still under way: no turn here starts before it is in (#259).
+    this.lanes.run(ticketId, 'resume', () => {
+      const ticket = this.store.getTicket(ticketId);
+      const project = ticket && this.store.getProject(ticket.project_id);
+      if (!ticket || !project || ticket.status === 'closed') return;
+      this.emit(ticketId, 'note', { text: limitTries ? 'Resumed after the usage limit reset' : 'Resumed after a server restart' });
+      const batch = this.takeQueue(ticketId);
+      // It carries on the interrupted turn, so it runs for that turn's person.
+      return this.startTurn(project, ticket, [{ author: 'System', text: limitTries ? RESUME_LIMIT_PROMPT : RESUME_PROMPT, images: [] }, ...batch], ticket.person_id ?? this.turnPerson(ticket, project, batch), resumes, limitTries);
+    });
+  }
+
+  /** Everything queued for the minion's next turn, which starts now. */
+  private takeQueue(ticketId: number): QueuedMessage[] {
+    this.store.deleteSetting(waitingKey(ticketId));
+    return this.queues.get(ticketId)?.splice(0) ?? [];
   }
 
   private limitResumes(): LimitResume[] {
@@ -1334,7 +1391,7 @@ export class Runner {
     const projectId = this.store.getTicket(ticketId)?.project_id;
     if (projectId !== undefined) this.approvals.unsaid(projectId, eventId);
     if (this.isRunning(ticketId)) this.saveTurn(ticketId, { queued: q });
-    else this.holdForLimit(ticketId);
+    else if (!this.holdForLimit(ticketId) && this.store.getSetting(waitingKey(ticketId))) this.store.setSetting(waitingKey(ticketId), q);
     this.emit(ticketId, 'unqueued', { id: eventId, by });
     this.broadcastTicket(ticketId);
     return true;
@@ -1514,15 +1571,21 @@ export class Runner {
     if (!q?.length) return;
     // Waiting for the usage limit to reset: the messages go into the resume, not a turn that would fail at once.
     if (this.holdForLimit(ticketId)) return;
-    // The last turn's save calls next() when it's done: a turn on another login restores from that save.
-    // shortcut: messages queued in that gap (usually well under a second) live only in memory, so a restart right then leaves them unanswered in the chat; persist the queue if that ever bites.
-    if (this.saving.has(ticketId)) return;
-    // Everything queued while the last turn ran goes into one turn.
-    const batch = q.splice(0);
-    const ticket = this.store.getTicket(ticketId);
-    const project = ticket && this.store.getProject(ticket.project_id);
-    if (!ticket || !project) return;
-    this.startTurn(project, ticket, batch, this.turnPerson(ticket, project, batch));
+    // One step at a time per minion (src/lanes.ts): the lane calls next() again once it is free. Its last
+    // turn's save above all: a turn on another login restores from that save (#250).
+    if (this.lanes.busy(ticketId)) {
+      // A running turn keeps its queue in its own record; in the gap after it, they're kept here (#259).
+      if (!this.isRunning(ticketId)) this.store.setSetting(waitingKey(ticketId), q);
+      return;
+    }
+    this.lanes.run(ticketId, 'turn', () => {
+      const ticket = this.store.getTicket(ticketId);
+      const project = ticket && this.store.getProject(ticket.project_id);
+      if (!ticket || !project) return;
+      // Everything queued while the last turn ran goes into one turn.
+      const batch = this.takeQueue(ticketId);
+      if (batch.length) return this.startTurn(project, ticket, batch, this.turnPerson(ticket, project, batch));
+    });
   }
 
   /** The minion that relayed the message the ticket's current (or last) turn answers, if a relay came before any person's message: whose minion a Taskmaster's new minion belongs to. */
@@ -1710,8 +1773,11 @@ export class Runner {
     // config dir lacks (another account, a fresh machine) before resuming.
     const configDir = place.host ? claudeConfigDir(env) : place.configDir;
     let restoreFailed = false;
+    let had: Set<string> | null = null;
     try {
       const restored = restoreSession(this.store, ticket, project, configDir);
+      // Everything stored is in the config dir now, so the end-of-turn save may prune what the turn deletes.
+      had = storedPaths(this.store, ticket, project);
       if (restored) console.log(`Ticket ${ticket.id}: restored the Claude session from the database (${restored} file${restored === 1 ? '' : 's'}).`);
     } catch (err: any) {
       this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${err.message}` });
@@ -1741,10 +1807,18 @@ export class Runner {
     const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, asker, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
+    live.had = had;
     this.setStatus(ticket.id, 'running');
-    if (!place.host) return this.spawnInContainer(place, dir, pinned(TURN_WRAPPER));
+    // Its step on the lane lasts until it has ended and its session is saved (finish).
+    if (!place.host) {
+      this.spawnInContainer(place, dir, pinned(TURN_WRAPPER));
+      return live.ended;
+    }
     const wrapper = [process.execPath, pinned(TURN_WRAPPER), dir];
-    if (!unit) return this.spawnWrapper(wrapper, dir);
+    if (!unit) {
+      this.spawnWrapper(wrapper, dir);
+      return live.ended;
+    }
     const run = ['--user', '--collect', '--quiet', `--unit=${unit}`, `--slice=${TURN_SLICE}`, '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper];
     execFile('systemd-run', run, (err, _out, stderr) => {
       if (!err) return;
@@ -1753,6 +1827,7 @@ export class Runner {
       this.saveTurn(ticket.id, { unit: null });
       this.spawnWrapper(wrapper, dir);
     });
+    return live.ended;
   }
 
   /**
@@ -1790,10 +1865,12 @@ export class Runner {
 
   /** Start tailing a turn's folder; the turn counts as running from here until finish(). */
   private follow(ticketId: number, turn: TurnState): LiveTurn {
+    let end!: () => void;
+    const ended = new Promise<void>((resolve) => (end = resolve));
     const live: LiveTurn = {
       dir: turn.dir!, unit: turn.unit ?? null, offset: turn.offset ?? 0, startedAt: turn.startedAt ?? Date.now(),
       configDir: turn.configDir ?? claudeConfigDir(process.env), chosenEffort: !!turn.chosenEffort, container: turn.container ?? null, ticks: 0,
-      timer: setInterval(() => this.poll(ticketId), this.pollMs),
+      timer: setInterval(() => this.poll(ticketId), this.pollMs), ended, end, had: null,
     };
     // The server's listener keeps the process up; a Runner alone (a test) can exit with turns followed.
     live.timer.unref();
@@ -1934,15 +2011,27 @@ export class Runner {
       this.store.updateTicketQuietly(ticketId, { last_effort: effort });
       this.broadcastTicket(ticketId);
     }
-    if (!after || !project) return this.next(ticketId);
-    // The next turn may run on another person's login, which only has the session once this lands (#250).
-    this.saving.add(ticketId);
-    this.saveSession(this.store, after, project, live.configDir, true)
-      .catch((err) => console.error(`Saving the session of ticket ${ticketId} failed:`, err))
-      .finally(() => {
-        this.saving.delete(ticketId);
-        this.next(ticketId);
-      });
+    // The next turn may run on another person's login, which only has the session once this lands (#250):
+    // the turn's step on its lane ends with the save, so the next step starts after it.
+    if (!after || !project) return live.end();
+    this.store.setSetting(savingKey(ticketId), { configDir: live.configDir });
+    // Messages queued during the turn wait for the save now; a usage-limit wait keeps its own.
+    const q = this.queues.get(ticketId);
+    if (q?.length && !this.limitWait(ticketId)) this.store.setSetting(waitingKey(ticketId), q);
+    this.saveAfterTurn(ticketId, live.configDir, live.had).then(live.end);
+  }
+
+  /** Copy a minion's session into the database after its turn (or a restart cut that off); never rejects. */
+  private async saveAfterTurn(ticketId: number, configDir: string, had: Set<string> | null) {
+    try {
+      const ticket = this.store.getTicket(ticketId);
+      const project = ticket && this.store.getProject(ticket.project_id);
+      if (ticket && project) await this.saveSession(this.store, ticket, project, configDir, had);
+    } catch (err) {
+      console.error(`Saving the session of ticket ${ticketId} failed:`, err);
+    } finally {
+      this.store.deleteSetting(savingKey(ticketId));
+    }
   }
 
   /**

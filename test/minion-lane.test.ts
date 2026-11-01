@@ -214,25 +214,28 @@ test("a memory note another login saved during this turn isn't pruned by this tu
   assert.ok(store.getClaudeState(join(memory, 'theirs.md')), "the other login's note is kept: this config dir never had it");
 });
 
-test('a restart during the end-of-turn save redoes the save at boot, and a message queued behind it still runs', async () => {
-  reset();
-  const r1 = makeRunner();
-  const save = heldSaves(r1);
-  const { id, cwd } = minion();
-  writeFileSync(go, '');
-  r1.send(id, 'Cara', 'one');
-  await until(() => save.saves() === 1, 'the turn to end and start saving');
-  const session = store.getTicket(id)!.session_id!;
-  r1.send(id, 'Cara', 'two');
-  assert.equal(r1.isRunning(id), false, 'waits for the save');
-  // The server restarts before the save finishes.
-  r1.detachAll();
-  const r2 = makeRunner();
-  r2.recover();
-  await until(() => turnsRun() === 2 && !r2.isRunning(id), 'the queued message to run after the restart');
-  assert.match(readFileSync(prompts, 'utf8').trim().split('\n').at(-1)!, /two/);
-  assert.ok(store.getClaudeState(join('projects', projectSlug(cwd), `${session}.jsonl`)), 'the save was redone');
-});
+for (const when of ['during the turn', 'during the save']) {
+  test(`a restart during the end-of-turn save redoes the save at boot, and a message sent ${when} still runs`, async () => {
+    reset();
+    const r1 = makeRunner();
+    const save = heldSaves(r1);
+    const { id, cwd } = minion();
+    r1.send(id, 'Cara', 'one');
+    if (when === 'during the turn') r1.send(id, 'Cara', `two, ${when}`);
+    writeFileSync(go, '');
+    await until(() => save.saves() === 1, 'the turn to end and start saving');
+    const session = store.getTicket(id)!.session_id!;
+    if (when === 'during the save') r1.send(id, 'Cara', `two, ${when}`);
+    assert.equal(r1.isRunning(id), false, 'waits for the save');
+    // The server restarts before the save finishes.
+    r1.detachAll();
+    const r2 = makeRunner();
+    r2.recover();
+    await until(() => turnsRun() === 2 && !r2.isRunning(id), 'the queued message to run after the restart');
+    assert.match(readFileSync(prompts, 'utf8').trim().split('\n').at(-1)!, new RegExp(`two, ${when}`));
+    assert.ok(store.getClaudeState(join('projects', projectSlug(cwd), `${session}.jsonl`)), 'the save was redone');
+  });
+}
 
 test("a restart's sweep keeps a turn folder whose wrapper hasn't started yet, and removes one that never will", () => {
   const r = makeRunner();

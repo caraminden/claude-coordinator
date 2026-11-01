@@ -98,11 +98,14 @@ async function listFiles(configDir: string, root: string): Promise<string[]> {
 }
 
 /**
- * Copy a ticket's session state from the config dir into the database, skipping files whose size
- * and mtime are unchanged. With `prune`, rows for files that are gone are dropped too; only do that
- * right after a turn, when the config dir is known to hold everything (see restoreSession).
+ * Copy a ticket's session state from the config dir into the database. A file only replaces a row
+ * when it is newer: a login holding an older copy (the boot sweep on the host, after turns ran in a
+ * container) never rolls the database back (#259). `prunable` is what the turn's config dir held
+ * when it started (storedPaths, after restoreSession): only those rows may be dropped, when their
+ * file has gone since or they belong to an earlier session. A row the config dir never had (another
+ * login's new memory note) is no proof of anything, so it stays. Null prunes nothing.
  */
-export async function saveSession(store: Store, ticket: Ticket, project: Project, configDir: string, prune: boolean) {
+export async function saveSession(store: Store, ticket: Ticket, project: Project, configDir: string, prunable: Set<string> | null) {
   const { ticketRoots, projectRoots } = scope(ticket, project);
   for (const [roots, ticketId] of [[ticketRoots, ticket.id], [projectRoots, null]] as const) {
     const seen = new Set<string>();
@@ -117,19 +120,19 @@ export async function saveSession(store: Store, ticket: Ticket, project: Project
         }
         const mtime = Math.round(st.mtimeMs);
         const row = store.getClaudeState(path);
-        if (row && row.size === st.size && row.mtime === mtime) continue;
+        if (row && (row.mtime > mtime || (row.mtime === mtime && row.size === st.size))) continue;
         const data = await gz(await readFile(join(configDir, path)));
         store.putClaudeState({ path, project_id: project.id, ticket_id: ticketId, size: st.size, mtime, data });
       }
     }
-    if (!prune) continue;
+    if (!prunable) continue;
     // A config dir without the session's transcript (a restore that failed) doesn't hold everything: keep the database's copy.
     if (ticketId !== null && ticket.session_id && !existsSync(transcriptPath(configDir, ticket.cwd, ticket.session_id))) continue;
     const rows = ticketId === null ? store.listClaudeState(project.id, null) : store.listClaudeState(project.id, ticketId);
     for (const row of rows) {
       const inRoots = roots.some((r) => row.path === r || row.path.startsWith(r + sep));
-      // A row outside the current roots (an earlier session id) or a file deleted since: drop it.
-      if (!inRoots || !seen.has(row.path)) store.deleteClaudeState(row.path);
+      // A row this turn's config dir held at its start that is outside the current roots (an earlier session id) or whose file was deleted since: drop it.
+      if (prunable.has(row.path) && (!inRoots || !seen.has(row.path))) store.deleteClaudeState(row.path);
     }
   }
 }
@@ -154,6 +157,11 @@ export function restoreSession(store: Store, ticket: Ticket, project: Project, c
     written++;
   }
   return written;
+}
+
+/** The paths of a ticket's stored session state and its project's shared memory: after a restore that worked, all are in the config dir. */
+export function storedPaths(store: Store, ticket: Ticket, project: Project): Set<string> {
+  return new Set([...store.listClaudeState(project.id, ticket.id), ...store.listClaudeState(project.id, null)].map((r) => r.path));
 }
 
 /** Where Claude Code keeps a session's transcript, for a turn run in `cwd`. */

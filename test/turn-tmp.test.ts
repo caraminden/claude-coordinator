@@ -45,7 +45,7 @@ test('the sweep removes only ticket folders it is told to, and leaves anything e
   assert.deepEqual(sweepTmpDirs(join(root, 'missing'), () => false), []);
 });
 
-test("dismissing a minion clears its temp folder, and a restart sweeps those of dismissed and deleted minions (#218)", () => {
+test("dismissing a minion clears its temp folder, and a restart sweeps those of dismissed minions (#218), not of minions it can't find (#259)", () => {
   const data = join(root, 'data');
   mkdirSync(data);
   const store = new Store(join(data, 'test.db'));
@@ -61,7 +61,7 @@ test("dismissing a minion clears its temp folder, and a restart sweeps those of 
   assert.ok(!existsSync(join(tmpRoot, String(dismissed))));
   assert.equal(store.getTicket(dismissed)!.status, 'closed');
 
-  // Left behind by a server that died before clearing them, or by minions deleted since.
+  // Left behind by a server that died before clearing them; and one of a minion deleted since, which stays.
   const taskmaster = store.createTicket({ project_id: project.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' }).id;
   const open = ticket();
   const closedEarlier = ticket();
@@ -78,7 +78,8 @@ test("dismissing a minion clears its temp folder, and a restart sweeps those of 
   assert.ok(existsSync(join(tmpRoot, String(open))), 'an open minion keeps its folder');
   assert.ok(existsSync(join(tmpRoot, String(taskmaster))), 'so does the Taskmaster');
   assert.ok(!existsSync(join(tmpRoot, String(closedEarlier))));
-  assert.ok(!existsSync(join(tmpRoot, String(deleted))));
+  // A minion the database doesn't know is no proof its folder is stale (#259): a restored backup lacks the newest minions.
+  assert.ok(existsSync(join(tmpRoot, String(deleted))));
   assert.ok(!existsSync(join(runner.tmpRoot(other.id), String(open))));
   assert.ok(existsSync(stray));
 });

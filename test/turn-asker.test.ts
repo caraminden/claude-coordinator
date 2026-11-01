@@ -115,6 +115,36 @@ test("a non-member's relay runs as Citadel's owner but is the non-member's ask, 
   assert.equal(store.turnAsker(CitadelTM.id), Rachel.id);
 });
 
+test("a contraption's ask is its person's, and a held relay keeps the asker it had when held", async () => {
+  const r = new Runner(store, () => {}, () => ({}), fake);
+  r.pollMs = 10;
+  r.personOf = messagePerson(store);
+  const turn = async (to: number, author: string, extra: object = {}) => {
+    r.send(to, author, 'please', [], extra);
+    await until(() => !r.isRunning(to) && r.queued(to) === 0);
+  };
+  writeFileSync(join(CitadelTM.dir, 'release'), '');
+  await turn(CitadelTM.id, 'Cara');
+  await turn(CitadelTM.id, 'Contraption Mandate, for Josh, a Citadel member', { asker: Josh.id });
+  assert.equal(store.turnAsker(CitadelTM.id), Josh.id);
+
+  // Rachel's relays trip the loop guard, and the last waits for a person.
+  const relayAuthor = 'Taskmaster of Obsidian, for Rachel, not a Citadel member';
+  let held = false;
+  for (let i = 0; i < 10 && !held; i++) {
+    held = r.relayTaskmaster(ObsidianTM.id, CitadelTM.id, relayAuthor, `ask ${i}`).held;
+    await until(() => !r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0);
+  }
+  assert.ok(held, 'the loop guard held one');
+  await turn(CitadelTM.id, 'Cara');
+  // Cara then writes in Obsidian's Taskmaster chat: its turn is hers, and that continues the held relay.
+  store.setSetting(askerKey(ObsidianTM.id), Cara.id);
+  r.continueLoop(ObsidianTM.id, 'Cara');
+  await until(() => !r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0 && store.turnAsker(CitadelTM.id) !== Cara.id);
+  assert.equal(store.turnAsker(CitadelTM.id), Rachel.id, 'still Rachel\'s ask');
+  store.deleteSetting(askerKey(ObsidianTM.id));
+});
+
 test('admin-only routes refuse a Taskmaster turn a non-admin asked for, even one run as an admin', async () => {
   const tokens = new Auth(PASSWORD, SECRET);
   const srv = await bootServer({ root });

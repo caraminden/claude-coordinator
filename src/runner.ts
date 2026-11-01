@@ -337,7 +337,8 @@ interface LoopState {
   /** When each recent message went through. */
   sent: number[];
   /** Messages waiting for a person to continue, oldest first. */
-  held: { to: number; author: string; text: string; from?: number }[];
+  /** `asker` as it was when held (#255): the sender may since have started a turn for someone else. */
+  held: { to: number; author: string; text: string; from?: number; asker?: number | null }[];
 }
 
 const loopKey = (minionId: number) => `loop:${minionId}`;
@@ -1266,8 +1267,8 @@ export class Runner {
    * to Claude; a comment's file (`extra.comment.about`) is, in its "[Name on file]:" prefix.
    * `extra.from` is the thread that sent a relayed message, so it can strike_text it later.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number } & object = {}, steer = false, files: MessageFile[] = []) {
-    // A contraption's ask names its person, who isn't its author.
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number | null } & object = {}, steer = false, files: MessageFile[] = []) {
+    // Whose ask it is, when that isn't its author's or relay's now: a contraption's person, or a held relay's asker.
     const { asker: askedBy, ...shown } = extra;
     extra = shown;
     const ticket = this.store.getTicket(ticketId);
@@ -1282,7 +1283,7 @@ export class Runner {
     // A turn from before steering (no steer.jsonl) can't take one; nor can one whose reply is already out,
     // nor one run for someone else: that message waits for a turn of its own, as its sender.
     const person = this.personOf?.(author, extra.from) ?? null;
-    const asker = askedBy ?? person;
+    const asker = askedBy !== undefined ? askedBy : person;
     // Nor one someone else asked for (#255): a non-member's relay runs as the owner, whose message waits.
     const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker)));
     const steers = !!(steer && live && turn && !turn.result && !otherPerson && existsSync(join(live.dir, 'steer.jsonl')));
@@ -1389,7 +1390,7 @@ export class Runner {
       this.send(to, author, text, [], { from }, steer);
       return { held: 0, left: limit - loop.sent.length };
     }
-    loop.held.push({ to, author, text, from });
+    loop.held.push({ to, author, text, from, asker: this.personOf?.(author, from) ?? null });
     this.store.setSetting(key, loop);
     return { held: loop.held.length, left: 0 };
   }
@@ -1446,7 +1447,7 @@ export class Runner {
       // A minion's note is keyed by the minion in both chats; a Taskmasters' note by each chat's own Taskmaster.
       for (const id of chats) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' ? id : ticketId, by, text });
       // Only the Taskmaster's messages to its minion steer; Taskmasters' to each other queue.
-      for (const m of loop.held) this.send(m.to, m.author, m.text, [], { from: m.from }, ticket.kind !== 'coordinator' && m.to === ticketId);
+      for (const m of loop.held) this.send(m.to, m.author, m.text, [], { from: m.from, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, ticket.kind !== 'coordinator' && m.to === ticketId);
       total += n;
     }
     return total;

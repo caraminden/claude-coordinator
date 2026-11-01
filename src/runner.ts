@@ -579,7 +579,7 @@ const CHAT_FACTS = [
  * `deploys`: the server runs this scheme's code (runsRepo), so tools/deploy.sh and pending-deploy
  * mean something here; elsewhere those lines are left out.
  */
-export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = ''): string {
+export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null): string {
   if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir), onboardingPrompt(project, sharedDir), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
@@ -591,6 +591,8 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     ROLE_FRAMING,
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
     where,
+    // Parked on start_after (#261): a message gets an answer, and the work waits for its brief.
+    ...(held ? [`You are parked: your brief is held until ${held}, and arrives by itself then. Answer the message you got without starting the work; Start now on your page (or the Taskmaster's message_ticket with start_now) starts you early. End the turn with state parked and your note as it is.`] : []),
     'People follow your work through a progress readout ("Running tests… 3/7") built from your task list, so for anything beyond a quick answer, plan the work with TaskCreate before starting it:',
     '- Make 3 to 7 tasks that are conceptual chunks someone skimming would follow ("Find where the sidebar text comes from", "Make the readout show phases", "Test it on a copy"), not individual commands.',
     '- Give each a one-sentence description of what it involves and why, and a short activeForm ("Finding where the sidebar text comes from").',
@@ -879,6 +881,8 @@ export class Runner {
   ship: (ticketId: number) => Ship | null = () => null;
   /** Called when a turn's process has exited, however the turn ended. */
   onTurnEnd: (ticketId: number) => void = () => {};
+  /** What a minion parked on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
+  heldFor: (ticketId: number) => string | null = () => null;
   /** Approve / Deny cards waiting on people, for projects with approval rules. */
   approvals: Approvals;
   /** Whether a scheme's minions may use the connected machines (an admin's schemes only: they are the admin's). */
@@ -976,6 +980,8 @@ export class Runner {
       // When it resumes by itself after the usage limit, if it waits for that.
       limit_resume_at: this.limitWait(ticket.id)?.at ?? null,
       approvals: this.approvals.waiting(ticket.id),
+      // Parked on start_after: what it waits for, for Start now.
+      held: this.heldFor(ticket.id),
       // When its oldest question or plan card still waiting on a person was posted.
       pending_card_at: ticket.status === 'closed' ? null : this.store.openCardAt(ticket.id),
       properties: this.store.props.forTarget('minion', ticket.id),
@@ -1660,7 +1666,7 @@ export class Runner {
     // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
     const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
     // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
-    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text));
+    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id)));
     const args = [
       '-p',
       '--input-format', 'stream-json',
@@ -1764,7 +1770,8 @@ export class Runner {
     // outlasts a stray turn (a GitHub ping), so the deploy still dismisses the minion unless the turn
     // sets another state or a person wrote to it (personWrote).
     // A limited minion's note is the server's, about the wait this turn ends.
-    if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, ticket.state === 'limited' ? { state: null, note: null } : { state: null });
+    // A minion parked on start_after stays parked through a turn that answers a message (#261).
+    if (ticket.state && ticket.state !== 'pending-deploy' && !this.heldFor(ticket.id)) this.store.updateTicket(ticket.id, ticket.state === 'limited' ? { state: null, note: null } : { state: null });
     this.cancelLimitWait(ticket.id);
     // One-tap replies answer the turn that offered them; a new turn makes them stale.
     if (ticket.replies) this.store.updateTicket(ticket.id, { replies: null });

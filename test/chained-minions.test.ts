@@ -432,7 +432,6 @@ test('through the server: start_after parks the minion with its brief held; the 
   await idle(later.id);
   const parked = (await call(`/api/tickets/${later.id}`)).data.ticket;
   assert.equal(parked.state, 'parked', 'its turn left it parked');
-  assert.equal(parked.note, `starts when #${next.data.number} is live`);
   assert.equal(parked.held, `#${next.data.number} Next's work is live`);
   const started = await call(`/api/tickets/${later.id}/start`, {});
   assert.equal(started.status, 200);

@@ -320,6 +320,10 @@ export function renderTicketHead() {
   if (t.preview && t.status !== 'closed') {
     actions.push(h('button', { class: 'secondary', title: 'Open this minion\'s preview in a new tab', onclick: () => window.open(`preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
   }
+  // Parked on start_after (#261): a message only gets an answer; this starts the work, its held brief first.
+  if (t.held && t.status !== 'closed' && t.status !== 'running') {
+    actions.push(h('button', { class: 'secondary act-start', title: `Start it now, instead of when ${t.held}`, onclick: () => api(`api/tickets/${t.id}/start`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Start now'));
+  }
   // Waiting on the usage limit, Stop ends the wait (src/runner.ts, stop).
   if (t.status === 'running' || t.limit_resume_at) {
     actions.push(h('button', { class: 'secondary act-stop', title: t.limit_resume_at ? 'Don\'t resume after the usage limit resets' : undefined, onclick: () => api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));

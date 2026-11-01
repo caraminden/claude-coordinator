@@ -254,7 +254,14 @@ export class LiveWaiters {
     this.store.setSetting(CHAINS, [...this.chains().filter((o) => o.ticket !== c.ticket), c]);
   }
 
-  /** Take `ticket`'s held brief out of the chain (someone wrote to it: it starts now), or null. */
+  /** What `ticket`, parked on start_after, waits for ("#3 Leader's work is merged"), or null when it isn't. */
+  heldFor(ticket: number): string | null {
+    const c = this.chains().find((o) => o.ticket === ticket);
+    const leader = c && this.store.getTicket(c.after);
+    return c ? `#${leader?.number ?? c.after} ${leader?.title ?? ''}'s work is ${c.when}` : null;
+  }
+
+  /** Take `ticket`'s held brief out of the chain (someone started it early), or null. */
   release(ticket: number): Chain | null {
     const all = this.chains();
     const c = all.find((o) => o.ticket === ticket) ?? null;

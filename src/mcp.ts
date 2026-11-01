@@ -244,7 +244,7 @@ const TOOLS = [
         message: { type: 'string', description: 'First message to the new minion' },
         start_after: {
           type: 'integer',
-          description: "Optional: a minion number (#N) to chain this one after. It is created now but parked, with its message held until #N's work is live (or merged, see start_when), then starts by itself on a branch caught up to main. If #N is dismissed without its work merged, it stays parked and you and people hear about it. A message to it starts it early.",
+          description: "Optional: a minion number (#N) to chain this one after. It is created now but parked, with its message held until #N's work is live (or merged, see start_when), then starts by itself on a branch caught up to main. If #N is dismissed without its work merged, it stays parked and you and people hear about it. A message to it gets an answer and it stays parked; message_ticket with start_now starts it early.",
         },
         start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it is on main, for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means merged.' },
         model: MODEL,
@@ -259,7 +259,11 @@ const TOOLS = [
     description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. After 6 messages either way with one minion in 10 minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, text: { type: 'string' } },
+      properties: {
+        ticket_id: TICKET_ID,
+        text: { type: 'string' },
+        start_now: { type: 'boolean', description: 'For a minion parked on start_after: true starts it now, its held brief first, then this message. Without it, the message gets an answer and the minion stays parked.' },
+      },
       required: ['ticket_id', 'text'],
     },
   },
@@ -919,7 +923,9 @@ async function runTool(name: string, args: any): Promise<string> {
       return project.instructions ? `Saved (${project.instructions.length} characters).` : 'Cleared the scheme instructions.';
     }
     case 'message_ticket': {
-      const t = await call('POST', `/api/tickets/${await id(args)}/messages`, { text: args.text });
+      const ticketId = await id(args);
+      if (args.start_now === true) await call('POST', `/api/tickets/${ticketId}/start`, {});
+      const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text });
       return t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {

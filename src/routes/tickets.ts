@@ -221,15 +221,12 @@ export const ticketRoutes: Route[] = [
     async handler(ctx) {
       const { req, res, app, session, caller, ticket } = ctx;
       const { id } = ticket;
-      const { runner, waiters } = app;
+      const { runner } = app;
       // Room for MAX_IMAGES images at 5 MB each, base64-encoded.
       const body = await readJson(req, 45_000_000);
       const attached = (Array.isArray(body.images) && body.images.length > 0) || (Array.isArray(body.files) && body.files.length > 0);
       const text = attached && (typeof body.text !== 'string' || !body.text.trim()) ? '' : str(body.text, 'Message', 100_000);
       const files = await messageFiles(app, ticket, body.files);
-      // A chained minion that hasn't started: writing to it starts it now, its held brief first.
-      const chained = waiters.release(id);
-      if (chained) await app.startChained(chained, `${session.name} wrote to it before its leader's work was in`);
       // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
       if (caller && ticket.kind !== 'coordinator') {
         return json(res, 202, { ...ticketView(app, id), held: runner.relay(id, id, session.name, text) });
@@ -501,6 +498,17 @@ export const ticketRoutes: Route[] = [
       const { id } = ticket;
       const { runner } = app;
       return json(res, 200, { stopped: runner.stop(id) });
+    },
+  },
+  // Start now (#261): a minion parked on start_after starts before its leader's work is in, its held brief first.
+  {
+    method: 'POST', path: '/api/tickets/:ticket/start', who: ['person', 'taskmaster'],
+    async handler(ctx) {
+      const { res, app, session, ticket } = ctx;
+      const chained = app.waiters.release(ticket.id);
+      if (!chained) throw new HttpError(409, `#${ticket.number} isn't parked waiting on another minion's work`);
+      await app.startChained(chained, `${session.name} started it before its leader's work was in`);
+      return json(res, 200, ticketView(app, ticket.id));
     },
   },
   {

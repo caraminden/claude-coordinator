@@ -230,17 +230,18 @@ async function startChained(c: Chain, why: string) {
   runner.send(c.ticket, c.from, c.message, [], { brief: true });
 }
 waiters.start = (c, why) => void startChained(c, why);
+runner.heldFor = (id) => waiters.heldFor(id);
 // Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.
 waiters.hold = (c, why) => {
   const t = store.getTicket(c.ticket);
   if (!t) return;
   const leader = store.getTicket(c.after);
   store.updateTicket(c.ticket, { state: 'blocked', note: `#${leader?.number ?? c.after} didn't ship: message it to start, or dismiss` });
-  runner.emit(c.ticket, 'note', { text: `${why}, so this minion hasn't started. A message to it starts it with its brief; or dismiss it.` });
+  runner.emit(c.ticket, 'note', { text: `${why}, so this minion hasn't started. Start now starts it with its brief; or dismiss it.` });
   runner.broadcastTicket(c.ticket);
   notify(c.ticket, { kind: 'state', state: 'blocked', note: `${why}, so this one is held` });
   const coordinator = store.getCoordinator(t.project_id);
-  if (coordinator) runner.send(coordinator.id, APP_NAME, `${why}, so #${t.number} ${t.title}, chained on it, is held and hasn't started. Ask people whether to start it (message_ticket starts it with its brief) or dismiss it.`);
+  if (coordinator) runner.send(coordinator.id, APP_NAME, `${why}, so #${t.number} ${t.title}, chained on it, is held and hasn't started. Ask people whether to start it (message_ticket with start_now starts it with its brief) or dismiss it.`);
 };
 if (!BOOT_CHECK) {
   // A dismissal can be what a chained minion waits for.

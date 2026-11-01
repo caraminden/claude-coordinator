@@ -4,10 +4,10 @@
 /** Between the numbers of a list: "#1, #2 and #3", "#1/#2", "#1 &amp; #2". */
 const LIST_SEP = String.raw`(?:\s*(?:,|\/|&amp;)\s*|,?\s+(?:and|or)\s+)`;
 /**
- * A pull request mention: "PR #12", "PRs #1, #2 and #3", "pull request #9", or "PR 173" without the
- * "#" (one number only, so "PR 12 and 3 more" doesn't take the 3). Each number is a PR, not a minion.
+ * A pull request mention: "PR #12", "PRs #1, #2 and #3", "PRs (#1 and #2)", "PRs: #1, #2", "pull request #9",
+ * or "PR 173" without the "#" (one number only, so "PR 12 and 3 more" doesn't take the 3). Each number is a PR, not a minion.
  */
-const PR_LIST = String.raw`\b(?:(?:PRs?|[Pp]ull [Rr]equests?|[Pp]ulls?)\s#\d{1,6}(?:${LIST_SEP}#\d{1,6})*|(?:PR|[Pp]ull [Rr]equest)\s\d{1,6})(?![\w#/-])`;
+const PR_LIST = String.raw`\b(?:(?:PRs?|[Pp]ull [Rr]equests?|[Pp]ulls?):?\s\(?#\d{1,6}(?:${LIST_SEP}#\d{1,6})*|(?:PR|[Pp]ull [Rr]equest)\s\d{1,6})(?![\w#/-])`;
 /** "issue #4" / "issues #4, #5 and #6": GitHub issues, which nothing here owns, so they stay plain. */
 const ISSUE_LIST = String.raw`\b[Ii]ssues?\s#\d{1,6}(?:${LIST_SEP}#\d{1,6})*`;
 /** A standalone #N: not part of a word, URL, path, HTML entity (&#39;) or another #. */
@@ -35,13 +35,14 @@ const POSSESSIVE = String.raw`(?:&#39;|'|\u2019)s`;
 /**
  * Link #N references in a string of HTML. Only text between tags is touched, and nothing inside
  * an existing <a>, <code> or <pre>, so links, code and attributes are left alone. `titleOf(n)` may
- * give a hover title for a thread it knows; numbers it doesn't know still link, and opening one
- * that doesn't exist shows the usual "There is no thread #N" message. With `schemes` (the
+ * give a hover title for a thread it knows; numbers it doesn't know still link (opening one that
+ * doesn't exist shows "There is no thread #N"), except a bare "#N" of this scheme once `prRoute`
+ * is given: that is its repo's PR or issue N if it has one, else plain text. With `schemes` (the
  * projects list, { id, name }), a scheme's name scopes the numbers it names to that scheme: "Delve #68",
  * "Delve's minion #68", "Delve minions #5 and #6", "minion #5 in Delve".
  *
  * With `prRoute(projectId, n)` (see prNumberRoute), "PR #186" and "Delve's PR #186" link to the minion
- * owning that PR. One it can't place yet becomes a `span.pr-ref` carrying the scheme and number, for
+ * owning that PR, or to GitHub when none does. One it can't place yet becomes a `span.pr-ref` carrying the scheme and number, for
  * linkPrRefs to link once the PR list arrives; without `prRoute` PR mentions stay plain text.
  */
 export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = [], prRoute = null) {
@@ -68,7 +69,8 @@ export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = 
       if (pr || spr) return prRoute ? linkList(pr ?? spr, ref.slice(0, ref.length - (pr ?? spr).length), prLink(p)) : ref;
       if (sm) return linkList(sm, ref.slice(0, ref.length - sm.length), threadLink(p));
       if (tm) return linkList(tm, '', threadLink(p)) + ref.slice(tm.length);
-      return threadLink(p)(Number(n), ref);
+      if (!prRoute || p !== projectId || titleOf(Number(n))) return threadLink(p)(Number(n), ref);
+      return prRefHtml(p, Number(n), ref, prRoute(p, Number(n)));
     });
   });
 }
@@ -76,9 +78,10 @@ export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = 
 /** Each number of a list linked by `link(number, text)`: the first with its words ("Delve PR #186"), the rest alone ("#187"). */
 const linkList = (list, lead, link) => list.replace(/^\D*\d{1,6}|#\d{1,6}/g, (m, at) => link(Number(/\d+$/.exec(m)[0]), at ? m : lead + m));
 
-/** A PR mention as a link to its owner (`to`, from prNumberRoute), or a span linkPrRefs can link later. */
-const prRefHtml = (projectId, number, text, to) => to
-  ? `<a class="thread-ref" href="${escapeAttr(to.hash)}" title="${escapeAttr(to.title)}">${text}</a>`
+/** A PR mention as a link to `to` (from prNumberRoute), plain text when that's false, or while unknown a span linkPrRefs can link later. */
+const prRefHtml = (projectId, number, text, to) => to?.hash ? `<a class="thread-ref" href="${escapeAttr(to.hash)}" title="${escapeAttr(to.title)}">${text}</a>`
+  : to?.url ? `<a href="${escapeAttr(to.url)}" target="_blank" rel="noopener" title="${escapeAttr(to.title)}">${text}</a>`
+  : to === false ? text
   : `<span class="pr-ref" data-project="${projectId}" data-pr="${number}">${text}</span>`;
 
 const escapeAttr = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -168,8 +171,20 @@ export function prOwnerRoute(repos, href, hereId = null) {
   return pr ? ownerRoute(repos?.get(pr.repo), pr.number, hereId) : null;
 }
 
-/** As prOwnerRoute, for "PR #`number`" said in scheme `projectId`: its repo's PR of that number. `repos` is any list of api/prs entries. */
+/**
+ * Where "PR #`number`" (or a "#`number`" that is no minion) said in scheme `projectId` goes: the minion
+ * owning that PR of its repo, else the PR or issue on GitHub as { url, title }. False when the repo has
+ * no such number or the scheme no GitHub repo; null until `repos` (any list of api/prs entries) loads.
+ */
 export function prNumberRoute(repos, projectId, number, hereId = null) {
-  for (const repo of repos?.values() ?? []) if (repo.projectId === projectId) return ownerRoute(repo, number, hereId);
-  return null;
+  if (!repos) return null;
+  for (const repo of repos.values()) {
+    if (repo.projectId !== projectId) continue;
+    const kind = repo.pulls?.includes(number) ? 'pull' : repo.issues?.includes(number) ? 'issue' : null;
+    if (kind === 'pull' || repo.prs[number]) return ownerRoute(repo, number, hereId) ?? githubRoute(repo.repo, 'pull', number);
+    return kind ? githubRoute(repo.repo, kind, number) : false;
+  }
+  return false;
 }
+
+const githubRoute = (repo, kind, number) => ({ url: `https://github.com/${repo}/${kind}/${number}`, title: `${repo} ${kind === 'pull' ? 'PR' : 'issue'} #${number} on GitHub` });

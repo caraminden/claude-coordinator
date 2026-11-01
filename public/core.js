@@ -756,12 +756,13 @@ function prRefRoute(projectId, n) {
   if (!to) loadPrs();
   return to;
 }
-/** Point the PR links and "PR #186"s on the page at their owners, now that api/prs is known. */
+/** Point the PR links, "PR #186"s and "#N"s that are no minion at their owners or GitHub, now that api/prs is known. */
 function linkPrRefs() {
   for (const a of document.querySelectorAll('a[href^="https://github.com/"]')) pointPrLink(a);
   for (const span of document.querySelectorAll('span.pr-ref')) {
     const to = prRefRoute(Number(span.dataset.project), Number(span.dataset.pr));
-    if (to) span.replaceWith(h('a', { class: 'thread-ref', href: to.hash, title: to.title }, ...span.childNodes));
+    if (to?.hash) span.replaceWith(h('a', { class: 'thread-ref', href: to.hash, title: to.title }, ...span.childNodes));
+    else if (to?.url) span.replaceWith(h('a', { href: to.url, target: '_blank', rel: 'noopener', title: to.title }, ...span.childNodes));
   }
 }
 function pointPrLink(a) {

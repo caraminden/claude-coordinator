@@ -79,8 +79,9 @@ export function inboxStrip() {
   return strip;
 }
 
-/** A scheme's Needs-you count (`inbox` from api/projects) as a pill for the scheme lists; hidden at zero. */
+/** A scheme's Needs-you count (`inbox` from api/projects) as a pill for the scheme lists; at zero, a spinner while a turn runs in it (#248), else hidden. */
 export function schemeCount(p) {
+  if (!p.inbox && p.running) return h('span', { class: 'scheme-count busy', 'data-scheme-inbox': p.id, role: 'img', title: 'Minions working', 'aria-label': 'Minions working' }, h('i'));
   return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !p.inbox, title: 'Waiting on you' }, p.inbox || '');
 }
 
@@ -93,7 +94,8 @@ export function renderInbox() {
   const count = new Set(items.filter((i) => !faded(i)).map((i) => i.ticketId)).size;
   // A scheme you hid (#226) keeps its strip but no pill.
   const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
-  for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count }));
+  const running = !hidden && [view.coordinator, ...view.tickets.values()].some((t) => t?.status === 'running');
+  for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running }));
   strip.hidden = !items.length;
   if (!items.length) return strip.replaceChildren();
   let open = false;

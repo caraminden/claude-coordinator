@@ -210,14 +210,19 @@ export const projectRoutes: Route[] = [
     // inbox: the count on the scheme's Needs-you badge, for the scheme switcher.
     // icon: the version of the scheme's favicon (#222) for its URL, or null when it has none.
     // hidden: this person hid it (#226); its badge stays at zero.
+    // running: a minion or its Taskmaster has a turn running (#248), for the spinner; false when hidden.
     handler: async ({ res, app: { store, runner }, session }) => {
       const hidden = store.hiddenProjects(session.uid ?? -1);
-      json(res, 200, await Promise.all(visibleSchemes(store, session).map(async (p) => ({
-        ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: store.listTickets(p.id).filter((t) => t.kind === 'ticket').length,
-        hidden: hidden.has(p.id),
-        inbox: hidden.has(p.id) ? 0 : inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id)),
-        icon: await iconVersion(p.repo_dir),
-      }))));
+      json(res, 200, await Promise.all(visibleSchemes(store, session).map(async (p) => {
+        const tickets = store.listTickets(p.id);
+        return {
+          ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: tickets.filter((t) => t.kind === 'ticket').length,
+          hidden: hidden.has(p.id),
+          inbox: hidden.has(p.id) ? 0 : inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id)),
+          running: !hidden.has(p.id) && tickets.some((t) => t.status === 'running'),
+          icon: await iconVersion(p.repo_dir),
+        };
+      })));
     },
   },
   {

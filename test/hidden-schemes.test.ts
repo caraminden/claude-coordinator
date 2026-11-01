@@ -90,3 +90,20 @@ test('nobody hides a scheme they aren\'t in, and the body must say true or false
   assert.equal((await listed('Cara', carasOwn.id)).hidden, false);
   assert.equal((await call('Cara', `/api/projects/${carasOwn.id}/hidden`, { method: 'PUT', body: { hidden: 'yes' } })).status, 400);
 });
+
+test('running: a scheme with a turn running, its Taskmaster\'s included, says so for the spinner; a hidden one stays quiet (#248)', async () => {
+  const { data: busy } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Busy' } });
+  assert.equal((await listed('Cara', busy.id)).running, false, 'nothing running yet');
+  const store = new Store(join(root, 'data', 'coordinator.db'));
+  const t = store.createTicket({ project_id: busy.id, kind: 'ticket', title: 'Working one', permission_mode: 'default', created_by: 'Cara' });
+  const tm = store.createTicket({ project_id: busy.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(t.id, { status: 'running' });
+  assert.equal((await listed('Cara', busy.id)).running, true, 'a minion mid-turn');
+  store.updateTicket(t.id, { status: 'idle', state: 'parked' });
+  assert.equal((await listed('Cara', busy.id)).running, false, 'parked and idle: not working');
+  store.updateTicket(tm.id, { status: 'running' });
+  assert.equal((await listed('Cara', busy.id)).running, true, 'the Taskmaster mid-turn');
+  await call('Cara', `/api/projects/${busy.id}/hidden`, { method: 'PUT', body: { hidden: true } });
+  assert.equal((await listed('Cara', busy.id)).running, false, 'hidden: no spinner');
+  store.db.close();
+});

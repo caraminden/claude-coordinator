@@ -169,6 +169,12 @@ a.nav-item:has(> .scheme-count) > .name { flex: 1; overflow: hidden; text-overfl
 .scheme-crumb { display: inline-flex; align-items: center; gap: 0.35em; vertical-align: bottom; max-width: 100%; }
 .scheme-count { background: var(--accent); color: #fff; border-radius: 999px; padding: 0.1rem 0.45rem; font-size: 0.85em; line-height: 1.3; font-weight: 600; }
 .scheme-count[hidden] { display: none; }
+/* At zero with a turn running (#248): a blue ring in the pill's own box, so the row doesn't shift; a still dot without motion. */
+.scheme-count.busy { background: none; padding-inline: 0.2rem; display: inline-flex; align-items: center; justify-content: center; }
+.scheme-count.busy::before { content: '\2007'; width: 0; overflow: hidden; } /* a digit's height, as the pill has */
+.scheme-count.busy i { width: 1.05em; height: 1.05em; box-sizing: border-box; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--running) 30%, transparent); border-top-color: var(--running); animation: scheme-spin 0.9s linear infinite; }
+@keyframes scheme-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .scheme-count.busy i { animation: none; border-color: transparent; background: var(--running) content-box; } }
 button.nav-item.add { width: 100%; text-align: left; background: none; border: 0; color: var(--accent); font-weight: normal; }
 /* The shelf's scheme rows with their Hide or Unhide (#226): shown on hover where there is one, always on touch. */
 .scheme-row { display: flex; align-items: center; gap: 0.25rem; }

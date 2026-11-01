@@ -1696,14 +1696,17 @@ export class Runner {
     // The session's transcript, task list and memory live in the database too; put back anything this
     // config dir lacks (another account, a fresh machine) before resuming.
     const configDir = place.host ? claudeConfigDir(env) : place.configDir;
+    let restoreFailed = false;
     try {
       const restored = restoreSession(this.store, ticket, project, configDir);
       if (restored) console.log(`Ticket ${ticket.id}: restored the Claude session from the database (${restored} file${restored === 1 ? '' : 's'}).`);
     } catch (err: any) {
       this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${err.message}` });
+      restoreFailed = true;
     }
     // With no copy of its transcript on this login or in the database, --resume would fail every turn from now on.
-    if (ticket.session_id && existsSync(transcriptPath(configDir, ticket.cwd, ticket.session_id))) args.push('--resume', ticket.session_id);
+    // A restore that failed (disk full, say) still resumes and fails loudly: the database's copy may be fine.
+    if (ticket.session_id && (restoreFailed || existsSync(transcriptPath(configDir, ticket.cwd, ticket.session_id)))) args.push('--resume', ticket.session_id);
     else if (ticket.session_id) {
       this.emit(ticket.id, 'note', { text: `This minion's conversation (session ${ticket.session_id}) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here, but Claude doesn't remember the earlier turns.` });
       this.store.updateTicket(ticket.id, { session_id: null });

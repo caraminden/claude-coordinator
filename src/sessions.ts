@@ -123,6 +123,8 @@ export async function saveSession(store: Store, ticket: Ticket, project: Project
       }
     }
     if (!prune) continue;
+    // A config dir without the session's transcript (a restore that failed) doesn't hold everything: keep the database's copy.
+    if (ticketId !== null && ticket.session_id && !existsSync(transcriptPath(configDir, ticket.cwd, ticket.session_id))) continue;
     const rows = ticketId === null ? store.listClaudeState(project.id, null) : store.listClaudeState(project.id, ticketId);
     for (const row of rows) {
       const inRoots = roots.some((r) => row.path === r || row.path.startsWith(r + sep));

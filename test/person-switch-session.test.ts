@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
+import { gzipSync } from 'node:zlib';
 import { projectSlug } from '../src/sessions.ts';
 
 // #250: a minion whose turns move from one Claude login to another between turns (Josh's container,
@@ -119,4 +120,31 @@ test('a session nobody has a copy of starts fresh with a note, instead of failin
   assert.equal(store.getTicket(t.id)!.status, 'idle');
   assert.notEqual(store.getTicket(t.id)!.session_id, 'lost-session');
   assert.ok(notes(t.id).some((n) => /fresh session/.test(n) && n.includes('lost-session')), notes(t.id).join('\n'));
+});
+
+test("a restore that fails doesn't cost the database its copy: the turn resumes, fails, and the next one recovers", async () => {
+  rmSync(seen, { force: true });
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  const cwd = join(root, 'wt-3');
+  mkdirSync(cwd);
+  store.setTicketDir(t.id, cwd, null);
+  store.updateTicket(t.id, { session_id: 'kept', person_id: cara.id });
+  const path = join('projects', projectSlug(cwd), 'kept.jsonl');
+  const text = JSON.stringify({ turn: 0 }) + '\n';
+  store.putClaudeState({ path, project_id: project.id, ticket_id: t.id, size: text.length, mtime: Date.now(), data: gzipSync(text) });
+  // A file where the session's folder should be: the restore can't write there.
+  mkdirSync(join(hostConfig, 'projects'), { recursive: true });
+  writeFileSync(join(hostConfig, 'projects', projectSlug(cwd)), '');
+  const r = runner();
+  r.send(t.id, 'Cara', 'one');
+  await until(() => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
+  assert.equal(turns()[0].resume, 'kept');
+  await new Promise((res) => setTimeout(res, 300)); // the failed turn's save
+  assert.equal(store.getTicket(t.id)!.session_id, 'kept');
+  assert.ok(store.getClaudeState(path), "the database's copy survives the failed turn");
+  rmSync(join(hostConfig, 'projects', projectSlug(cwd)));
+  r.send(t.id, 'Cara', 'two');
+  await until(() => turns().length === 2 && store.getTicket(t.id)!.status !== 'running');
+  assert.equal(turns()[1].resume, 'kept');
+  assert.equal(store.getTicket(t.id)!.status, 'idle');
 });

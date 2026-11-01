@@ -6,8 +6,8 @@ import { cleanPluginDirs, cleanRules, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
-import { askedCitadelKey, CITADEL_REPLY_MS, lendsMachines, taskmasterTargets } from '../access.ts';
+import { askerKey, EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
+import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, lendsMachines, taskmasterTargets } from '../access.ts';
 import { inboxCount, inboxItems } from '../inbox.ts';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
@@ -427,8 +427,10 @@ export const projectRoutes: Route[] = [
         throw new HttpError(400, err.message);
       }
       // Plugins load code from any folder on the server: an admin's, or an admin's scheme's Taskmaster's.
-      if (settings.plugin_dirs !== undefined && settings.plugin_dirs !== (project.plugin_dirs ?? '') && !(session.admin || (caller && lendsMachines(store, project)))) {
-        throw new HttpError(403, 'Only an admin can change plugin folders');
+      if (settings.plugin_dirs !== undefined && settings.plugin_dirs !== (project.plugin_dirs ?? '') && !session.admin) {
+        if (!caller || !lendsMachines(store, project)) throw new HttpError(403, 'Only an admin can change plugin folders');
+        const refused = adminAskRefusal(store, caller.id);
+        if (refused) throw new HttpError(403, refused);
       }
       if (body.instructions !== undefined && typeof body.instructions !== 'string') throw new HttpError(400, 'instructions must be text');
       const instructions = body.instructions === undefined ? project.instructions : body.instructions.replace(/\r\n/g, '\n').trim();
@@ -511,6 +513,8 @@ export const projectRoutes: Route[] = [
       if (caller && caller.project_id !== GLOBAL_OWNER) {
         throw new HttpError(403, `Only people and the ${APP_NAME} scheme's ${AGENT_NAME} use this. The ${APP_NAME}-wide instructions are already in your prompt; to propose a change, message that ${AGENT_NAME} with message_taskmaster`);
       }
+      const refused = caller && adminAskRefusal(store, caller.id);
+      if (refused) throw new HttpError(403, refused);
       if (req.method === 'GET') return json(res, 200, store.appInstructions());
       const body = await readJson(req);
       if (typeof body.text !== 'string') throw new HttpError(400, 'text must be text');
@@ -590,6 +594,9 @@ export const projectRoutes: Route[] = [
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
       store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null });
+      // And it is that turn's asker's ask (#255), so its messages back count as theirs.
+      const asker = caller && store.turnAsker(caller.id);
+      if (asker && asker !== caller!.person_id) store.setSetting(askerKey(id), asker);
       if (brief) {
         store.settleBrief(project.id, brief.path, brief.heading, id);
         const coordinator = store.getCoordinator(project.id);
@@ -759,7 +766,8 @@ export const projectRoutes: Route[] = [
       const own = store.getProject(from.project_id)!;
       // Only schemes the turn's person is in, and Citadel (src/access.ts): a scheme they aren't in gets
       // the same answer as one that doesn't exist, so its name doesn't leak.
-      const personId = from.person_id ?? own.owner_id;
+      // Who asked for the turn (#255), not whom it runs as: a non-member's ask reaches no further than they could.
+      const personId = store.turnAsker(from.id) ?? own.owner_id;
       const person = personId === null ? undefined : store.getUser(personId);
       const who = { uid: person?.id, admin: !!person?.admin };
       const others = taskmasterTargets(store, own.id, personId, Date.now());

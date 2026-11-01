@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { messagePerson, turnAsker } from '../src/access.ts';
+import { messagePerson } from '../src/access.ts';
 import { Auth } from '../src/auth.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
@@ -86,20 +86,20 @@ test("a non-member's relay runs as Citadel's owner but is the non-member's ask, 
 
   await turn(CitadelTM.id, relayAuthor, ObsidianTM.id);
   assert.equal(store.getTicket(CitadelTM.id)!.person_id, Cara.id, 'it runs as the owner, as #211 has it');
-  assert.equal(turnAsker(store, CitadelTM.id), Rachel.id, 'but Rachel asked for it');
+  assert.equal(store.turnAsker(CitadelTM.id), Rachel.id, 'but Rachel asked for it');
   // A GitHub ping or a server notice is no one's ask: whoever asked last still stands.
   await turn(CitadelTM.id, 'GitHub');
-  assert.equal(turnAsker(store, CitadelTM.id), Rachel.id);
+  assert.equal(store.turnAsker(CitadelTM.id), Rachel.id);
   // A relay from a turn Rachel asked for is still Rachel's ask, wherever it goes.
   await turn(DelveTM.id, 'Taskmaster of Citadel', CitadelTM.id);
-  assert.equal(turnAsker(store, DelveTM.id), Rachel.id);
+  assert.equal(store.turnAsker(DelveTM.id), Rachel.id);
   assert.equal(store.getTicket(DelveTM.id)!.person_id, Cara.id, "Rachel isn't in Delve, so it runs as its owner");
 
   // Cara's own message is hers, and so is the GitHub ping after it.
   await turn(CitadelTM.id, 'Cara');
-  assert.equal(turnAsker(store, CitadelTM.id), Cara.id);
+  assert.equal(store.turnAsker(CitadelTM.id), Cara.id);
   await turn(CitadelTM.id, 'GitHub');
-  assert.equal(turnAsker(store, CitadelTM.id), Cara.id);
+  assert.equal(store.turnAsker(CitadelTM.id), Cara.id);
 
   // Mid-turn on Rachel's ask, Cara's message waits for a turn of its own rather than steer into it.
   release(false);
@@ -112,7 +112,7 @@ test("a non-member's relay runs as Citadel's owner but is the non-member's ask, 
   assert.equal(r.queued(CitadelTM.id), 2);
   release(true);
   await until(() => !r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0);
-  assert.equal(turnAsker(store, CitadelTM.id), Rachel.id);
+  assert.equal(store.turnAsker(CitadelTM.id), Rachel.id);
 });
 
 test('admin-only routes refuse a Taskmaster turn a non-admin asked for, even one run as an admin', async () => {
@@ -147,7 +147,7 @@ test('admin-only routes refuse a Taskmaster turn a non-admin asked for, even one
   // A minion made on Josh's ask is Josh's ask too, so its messages back can't stand in for Cara's.
   const made = await as('POST', `/api/projects/${Citadel.id}/tickets`, { message: 'look into it', properties: { type: 'bug' } });
   assert.equal(made.status, 201, JSON.stringify(made.body));
-  assert.equal(turnAsker(store, made.body.id), Josh.id);
+  assert.equal(store.turnAsker(made.body.id), Josh.id);
   assert.equal(store.appInstructions().text, '');
   assert.equal(store.getProject(Citadel.id)!.plugin_dirs ?? '', '');
 

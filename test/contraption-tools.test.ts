@@ -11,7 +11,7 @@ import { GLOBAL_OWNER } from '../src/properties.ts';
 import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 
 // Settings → Contraptions as coordinator tools (#246): only the Citadel scheme's Taskmaster, only on a
-// turn run for an admin, through the same routes the settings page calls, and never showing a key.
+// turn an admin asked for (#255), through the same routes the settings page calls, and never showing a key.
 const root = mkdtempSync(join(tmpdir(), 'contraption-tools-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
@@ -135,7 +135,7 @@ test('Citadel\'s Taskmaster registers and enables a contraption just as Settings
   noKeys(list.text, 'twin');
 });
 
-test('a turn run for someone who isn\'t an admin is refused, and changes nothing', async () => {
+test('a turn someone who isn\'t an admin asked for is refused, and changes nothing', async () => {
   turnFor(CitadelTM, olive.id);
   try {
     const before = keyFiles('twin');
@@ -145,7 +145,7 @@ test('a turn run for someone who isn\'t an admin is refused, and changes nothing
     ] as const) {
       const r = await tool(CitadelTM, name, args);
       assert.equal(r.isError, true, name);
-      assert.match(r.text, /Only a turn run for a Citadel admin may manage contraptions; this one runs for Olive/, name);
+      assert.match(r.text, /Only a turn a Citadel admin asked for may do this, and this one is Olive's ask\. Ask a Citadel admin to send the request in this chat\./, name);
     }
     assert.equal(existsSync(keysDir('sneaky')), false);
     assert.equal(store.getContraption('sneaky'), undefined);

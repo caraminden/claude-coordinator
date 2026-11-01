@@ -4,7 +4,7 @@ import { NOT_PEOPLE } from './auth.ts';
 import { Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
 
-/** Settings key: who asked for a ticket's turns, when that isn't whom they run as (src/access.ts turnAsker). */
+/** Settings key: who asked for a ticket's turns, when that isn't whom they run as (Store.turnAsker). */
 export const askerKey = (ticketId: number) => `asker:${ticketId}`;
 
 export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
@@ -1134,6 +1134,15 @@ export class Store {
 
   setTicketDir(id: number, cwd: string, branch: string | null) {
     this.db.prepare('UPDATE tickets SET cwd = ?, branch = ? WHERE id = ?').run(cwd, branch, id);
+  }
+
+  /**
+   * Who asked for a ticket's current (or last) turn (#255): the person whose ask it carries on, set at
+   * each turn's start (src/runner.ts startTurn). Usually whom it runs as; not for a non-member's relay,
+   * which runs as the scheme's owner (#211) but is still the non-member's ask.
+   */
+  turnAsker(ticketId: number): number | null {
+    return this.getSetting<number>(askerKey(ticketId)) ?? this.getTicket(ticketId)?.person_id ?? null;
   }
 
   deleteTicket(id: number) {

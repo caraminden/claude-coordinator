@@ -1,7 +1,8 @@
 // Who sees what: a person sees the schemes they own or are a member of (an admin sees all), the
 // live stream only carries a scheme's news to its people, and a Taskmaster writes only to schemes its person is in (and Citadel).
 import type { Session } from './auth.ts';
-import { askerKey, type Project, type Store, type Ticket, type User } from './db.ts';
+import type { Project, Store, Ticket, User } from './db.ts';
+import { APP_NAME } from './appname.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 
 /** Stream messages only admins get: the Machines page and Citadel-wide instructions. */
@@ -83,14 +84,20 @@ export function taskmasterTargets(store: Store, from: number, personId: number |
     || (from === GLOBAL_OWNER && now - (store.getSetting<number>(askedCitadelKey(p.id)) ?? -Infinity) < CITADEL_REPLY_MS)));
 }
 
-/** Who asked for a ticket's current (or last) turn: the person whose ask it carries on, not whom it runs as. */
-export function turnAsker(store: Store, ticketId: number): number | null {
-  return store.getSetting<number>(askerKey(ticketId)) ?? store.getTicket(ticketId)?.person_id ?? null;
+/**
+ * Why a Taskmaster's turn may not use an admin-only tool or route (#255), or null when an admin asked
+ * for it (Store.turnAsker). Whom it runs as doesn't count: a non-member's relay runs as the scheme's owner.
+ */
+export function adminAskRefusal(store: Store, ticketId: number): string | null {
+  const id = store.turnAsker(ticketId);
+  const user = id === null ? undefined : store.getUser(id);
+  if (user?.admin && !user.disabled_at) return null;
+  return `Only a turn a ${APP_NAME} admin asked for may do this, and this one is ${user ? `${user.name}'s` : "no one's"} ask. Ask a ${APP_NAME} admin to send the request in this chat.`;
 }
 
-/** Whose ask a message is (src/runner.ts personOf): a person by name, or for a relay the person of the turn that sent it. */
+/** Whose ask a message is (src/runner.ts personOf): a person by name, or for a relay the asker of the turn that sent it. */
 export const messagePerson = (store: Store) => (author: string, from?: number): number | null => {
-  if (from) return store.getTicket(from)?.person_id ?? null;
+  if (from) return store.turnAsker(from);
   const u = store.findUser('name', author);
   return u && !u.disabled_at ? u.id : null;
 };

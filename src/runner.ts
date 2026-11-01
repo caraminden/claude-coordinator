@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { APP_NAME } from './appname.ts';
 import { AGENT_NAME } from './auth.ts';
-import { onboardingOpen, type EventRow, type Machine, type Project, type Store, type Ticket } from './db.ts';
+import { askerKey, onboardingOpen, type EventRow, type Machine, type Project, type Store, type Ticket } from './db.ts';
 import { WS_SUFFIX, type MachineServer } from './machines.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, type Go } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
@@ -210,6 +210,7 @@ interface QueuedMessage {
   id?: number; // its user_message event, for taking it back while queued
   from?: number; // the minion or Taskmaster that relayed it, whose turn's person it carries
   typed?: boolean; // a signed-in person sent it from the chat; only these can be a go to merge (#201)
+  asker?: number | null; // whose ask it is (Store.turnAsker), taken when it was sent; null for no person's
 }
 
 /**
@@ -244,6 +245,8 @@ interface TurnState {
   limitTries?: number;
   /** The person it runs for (turnPerson). */
   person?: number | null;
+  /** Who asked for it (Store.turnAsker), which a non-member's relay keeps apart from `person`. */
+  asker?: number | null;
   /** Their GitHub login it pushes as; null when they haven't linked, absent with GitHub linking not set up. */
   github?: string | null;
   /** The person's Claude container it runs in (#213); absent on the host. */
@@ -1263,7 +1266,10 @@ export class Runner {
    * to Claude; a comment's file (`extra.comment.about`) is, in its "[Name on file]:" prefix.
    * `extra.from` is the thread that sent a relayed message, so it can strike_text it later.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean } & object = {}, steer = false, files: MessageFile[] = []) {
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number } & object = {}, steer = false, files: MessageFile[] = []) {
+    // A contraption's ask names its person, who isn't its author.
+    const { asker: askedBy, ...shown } = extra;
+    extra = shown;
     const ticket = this.store.getTicket(ticketId);
     const refused = ticket && this.refuseTurn?.(ticket, author);
     if (refused) {
@@ -1276,13 +1282,15 @@ export class Runner {
     // A turn from before steering (no steer.jsonl) can't take one; nor can one whose reply is already out,
     // nor one run for someone else: that message waits for a turn of its own, as its sender.
     const person = this.personOf?.(author, extra.from) ?? null;
-    const otherPerson = !!(person && turn && turn.person !== undefined && turn.person !== person);
+    const asker = askedBy ?? person;
+    // Nor one someone else asked for (#255): a non-member's relay runs as the owner, whose message waits.
+    const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker)));
     const steers = !!(steer && live && turn && !turn.result && !otherPerson && existsSync(join(live.dir, 'steer.jsonl')));
     const row = this.emit(ticketId, 'user_message', {
       author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}),
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}),
     });
-    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}) };
+    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), asker };
     // Anything said answers the one-tap replies; a steer or a held message starts no turn to clear them.
     if (this.store.getTicket(ticketId)?.replies) {
       this.store.updateTicket(ticketId, { replies: null });
@@ -1673,6 +1681,13 @@ export class Runner {
     const github = this.githubFor?.(person, dir) ?? null;
     if (github) env = { ...env, ...github.env };
     const prompt = promptMessage(github ? [{ author: 'System', text: github.line, images: [] }, ...batch] : batch);
+    // Who asked for it (#255): its messages' askers, any non-admin of them if several, since a ride-along
+    // ask is in the turn too; with none (GitHub, a notice), and on a resume, the last turn's carries on.
+    const before = this.store.turnAsker(ticket.id);
+    const askers = [...(resumes || limitTries ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
+    const asker = askers.find((a) => !this.store.getUser(a)?.admin) ?? askers[0] ?? before ?? person;
+    if (asker !== null && asker !== person) this.store.setSetting(askerKey(ticket.id), asker);
+    else this.store.deleteSetting(askerKey(ticket.id));
     if (person !== ticket.person_id) {
       this.store.updateTicket(ticket.id, { person_id: person });
       const name = person && this.store.getUser(person)?.name;
@@ -1724,7 +1739,7 @@ export class Runner {
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: place.host ? this.claudeBin : resolveClaude(this.claudeBin), args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), go: this.approvals.goOf(ticket.id) };
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, asker, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), go: this.approvals.goOf(ticket.id) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     this.setStatus(ticket.id, 'running');

@@ -342,6 +342,7 @@ export function router(routes: Route[]) {
       if (!ctx.caller) throw new HttpError(403, 'No such minion');
     }
     checkRole(route, ctx.caller, ctx.params);
+    // A Taskmaster on an admin route is checked by the route, after its own scheme check (src/access.ts adminAskRefusal).
     if (!ctx.caller && route.access === 'admin' && !session.admin) throw new HttpError(403, 'Only an admin can do that');
     let project: number | undefined;
     for (const name of hit!.names) {

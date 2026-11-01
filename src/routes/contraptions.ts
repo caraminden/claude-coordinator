@@ -4,6 +4,7 @@
 // reports and feature asks to its home scheme (src/contraption-asks.ts) and runs turns for its people through the turn API (src/contraption-turns.ts).
 import type { IncomingMessage } from 'node:http';
 import { APP_NAME } from '../appname.ts';
+import { adminAskRefusal } from '../access.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { ASK_FILES_MAX, askFiles, askMessage, saveAskFiles } from '../contraption-asks.ts';
 import { parseTurn, TurnError } from '../contraption-turns.ts';
@@ -78,8 +79,9 @@ function fields(app: App, body: any, creating: boolean) {
 }
 
 /**
- * An admin route: for admins, and for the Citadel scheme's Taskmaster on a turn run for an admin (its
- * contraption tools in src/mcp.ts). The registry is Citadel-wide, so other schemes' Taskmasters ask that one.
+ * An admin route: for admins, and for the Citadel scheme's Taskmaster on a turn an admin asked for (its
+ * contraption tools in src/mcp.ts). The registry is Citadel-wide, so other
+ * schemes' Taskmasters ask that one.
  */
 const admin = (route: Pick<Route, 'method' | 'path' | 'handler'>): Route => ({
   ...route, who: ['person', 'taskmaster'], access: 'admin',
@@ -89,11 +91,8 @@ const admin = (route: Pick<Route, 'method' | 'path' | 'handler'>): Route => ({
     if (caller.project_id !== GLOBAL_OWNER) {
       throw new HttpError(403, `Only the ${APP_NAME} scheme's ${AGENT_NAME} manages contraptions: ask it with message_taskmaster`);
     }
-    // Whose turn it is (src/runner.ts turnPerson), set at the turn's start.
-    const person = caller.person_id === null ? undefined : app.store.getUser(caller.person_id);
-    if (!person?.admin || person.disabled_at) {
-      throw new HttpError(403, `Only a turn run for a ${APP_NAME} admin may manage contraptions; this one runs for ${person?.name ?? 'nobody'}. Ask an admin to send the request.`);
-    }
+    const refused = adminAskRefusal(app.store, caller.id);
+    if (refused) throw new HttpError(403, refused);
     return route.handler(ctx);
   },
 });
@@ -213,7 +212,7 @@ export const contraptionRoutes: Route[] = [
       const ref = params.person.replace(/^%40/i, '@');
       const person = ref.startsWith('@') ? app.store.findUser('login', ref.slice(1)) : app.store.getUser(Number(ref));
       if (!person) throw new HttpError(404, 'No such person');
-      app.store.setContraptionUser(c.id, person.id, body.enabled, session.uid ?? caller?.person_id ?? null);
+      app.store.setContraptionUser(c.id, person.id, body.enabled, session.uid ?? (caller ? app.store.turnAsker(caller.id) : null));
       return json(res, 200, view(app, c));
     },
   }),
@@ -251,7 +250,7 @@ export const contraptionRoutes: Route[] = [
       // A member as #211 counts one: in the scheme, or an admin.
       const member = app.store.canSee({ uid: person.id, admin: !!person.admin }, scheme.id);
       const ask = askMessage(c, scheme, person, member, kind, text, paths);
-      app.runner.send(taskmaster.id, ask.author, ask.text);
+      app.runner.send(taskmaster.id, ask.author, ask.text, [], { asker: person.id });
       return json(res, 202, { scheme: scheme.name, member, proposal: !member && kind === 'feature', files: paths });
     },
   },

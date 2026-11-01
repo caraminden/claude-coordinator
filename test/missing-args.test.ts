@@ -20,6 +20,8 @@ const store = new Store(join(data, 'coordinator.db'));
 store.createProject('Delve', null);
 const Citadel = store.createProject('Citadel', null); // the second scheme is the global one
 const TM = store.createTicket({ project_id: Citadel.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
+// On a turn an admin asked for, so set_app_instructions gets past #255's check to its own.
+store.updateTicket(TM.id, { person_id: store.createUser({ name: 'Cara', login: 'cara', admin: true }).id });
 const Minion = store.createTicket({ project_id: Citadel.id, kind: 'ticket', title: 'Some work', permission_mode: 'default', created_by: 'Cara' });
 store.setProjectInstructions(Citadel.id, 'Scheme rule.', 'Cara');
 store.setAppInstructions('App rule.', 'Cara');

@@ -22,7 +22,13 @@ const store = new Store(join(data, 'coordinator.db'));
 const Delve = store.createProject('Delve', null);
 const Citadel = store.createProject('Citadel', null);
 assert.equal(Citadel.id, GLOBAL_OWNER, 'the second scheme stands in for Citadel');
-const taskmaster = (p: number) => store.createTicket({ project_id: p, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
+const Cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+// Turns an admin asked for (#255: a turn anyone else asked for is refused, test/turn-asker.test.ts).
+const taskmaster = (p: number) => {
+  const t = store.createTicket({ project_id: p, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
+  store.updateTicket(t.id, { person_id: Cara.id });
+  return t;
+};
 const DelveTM = taskmaster(Delve.id);
 const CitadelTM = taskmaster(Citadel.id);
 const Minion = store.createTicket({ project_id: Citadel.id, kind: 'ticket', title: 'Some work', permission_mode: 'default', created_by: 'Cara' });

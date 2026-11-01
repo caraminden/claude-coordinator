@@ -463,7 +463,7 @@ const APP_INSTRUCTION_TOOLS = [
   {
     name: 'set_app_instructions',
     description:
-      `Replace the ${APP_NAME}-wide instructions with new text (max 16,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change. A scheme instruction overrides one of these only where it names the rule it replaces.`,
+      `Replace the ${APP_NAME}-wide instructions with new text (max 16,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change. A scheme instruction overrides one of these only where it names the rule it replaces. Only on a turn a ${APP_NAME} admin asked for.`,
     inputSchema: { type: 'object', properties: { instructions: { type: 'string' } }, required: ['instructions'] },
   },
 ];
@@ -478,16 +478,16 @@ const CONTRAPTION_FIELDS = {
   turn_cap: { type: ['integer', 'null'], description: 'Most turns a day across its people; null for no cap.' },
 };
 
-// Settings → Contraptions as tools (#246): the same admin routes, for this Taskmaster on a turn run for an admin.
+// Settings → Contraptions as tools (#246): the same admin routes, for this Taskmaster on a turn an admin asked for (#255).
 const CONTRAPTION_TOOLS = [
   {
     name: 'list_contraptions',
-    description: `List the registered contraptions (personal apps reached through ${APP_NAME}, each with its own service): their settings, who they are enabled for, and their key folder.`,
+    description: `List the registered contraptions (personal apps reached through ${APP_NAME}, each with its own service): their settings, who they are enabled for, and their key folder. Only on a turn a ${APP_NAME} admin asked for.`,
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'register_contraption',
-    description: `Register a contraption, as an admin does in Settings → Contraptions: it writes fresh keys (identity.pub and contraption.key) into its key folder for its own service to read, and returns where. Enable it for people with set_contraption_person. Only on a turn run for a ${APP_NAME} admin.`,
+    description: `Register a contraption, as an admin does in Settings → Contraptions: it writes fresh keys (identity.pub and contraption.key) into its key folder for its own service to read, and returns where. Enable it for people with set_contraption_person. Only on a turn a ${APP_NAME} admin asked for.`,
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string', description: 'A short slug, kept for good: lowercase letters, digits and dashes, like mandate.' }, ...CONTRAPTION_FIELDS },
@@ -496,12 +496,12 @@ const CONTRAPTION_TOOLS = [
   },
   {
     name: 'update_contraption',
-    description: `Change a contraption's settings; only the fields given change, and null or "" clears an optional one. Its name stays. Only on a turn run for a ${APP_NAME} admin.`,
+    description: `Change a contraption's settings; only the fields given change, and null or "" clears an optional one. Its name stays. Only on a turn a ${APP_NAME} admin asked for.`,
     inputSchema: { type: 'object', properties: { name: { type: 'string' }, ...CONTRAPTION_FIELDS }, required: ['name'] },
   },
   {
     name: 'set_contraption_person',
-    description: `Enable or disable a contraption for one person, by login. Disabling takes at their next request. Only on a turn run for a ${APP_NAME} admin.`,
+    description: `Enable or disable a contraption for one person, by login. Disabling takes at their next request. Only on a turn a ${APP_NAME} admin asked for.`,
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string' }, login: { type: 'string' }, enabled: { type: 'boolean' } },
@@ -510,7 +510,7 @@ const CONTRAPTION_TOOLS = [
   },
   {
     name: 'rotate_contraption_keys',
-    description: `Replace a contraption's identity key pair and contraption key: both files in its key folder are rewritten and the old keys stop working at once, so its service must restart to read the new ones. Only on a turn run for a ${APP_NAME} admin.`,
+    description: `Replace a contraption's identity key pair and contraption key: both files in its key folder are rewritten and the old keys stop working at once, so its service must restart to read the new ones. Only on a turn a ${APP_NAME} admin asked for.`,
     inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
   },
 ];

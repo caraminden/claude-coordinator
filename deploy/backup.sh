@@ -6,6 +6,7 @@
 # (state.db) gets its own state-<day>.db, 3 dailies and no weeklies. Hand-made copies
 # there (coordinator-before-<what>.db, taken before a risky change) go once they are 7 days old, when
 # the dailies cover the same days. deploy.sh keeps its own pre-deploy-*.db copies.
+# Then offbox.sh refreshes $DATA_DIR/offbox, which Cara's desktop pulls each night (#252).
 # A weekly is a hard link to that Sunday's daily (or the first daily of a week with no weekly yet),
 # so it costs no extra space until the daily ages out.
 set -euo pipefail
@@ -76,3 +77,6 @@ if [[ -f $state ]]; then
 fi
 
 echo "Backed up to $out ($(du -h "$out" | cut -f1); projects ${lines[1]}, minions ${lines[2]}), weekly $(basename "$weekly")$state_note"
+
+# The copy set Cara's desktop pulls, with people's linked-account secrets stripped (#252).
+"$(dirname "$0")/offbox.sh"

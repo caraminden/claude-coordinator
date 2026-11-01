@@ -8,6 +8,9 @@
 // on that scheme's main, for chains and commit waiters alike: checked whenever chains are.
 // Merged also counts a pull request merged on GitHub (#229): a squash or rebase merge leaves none of
 // the branch's commits on main, so there the PR's merge commit stands in for them.
+// And a commit counts by its change (#261): one landed from another branch, cherry-picked or rebased
+// with a new hash, the way one minion lands another's work. A branch with no commits of its own never
+// counts as work in: it is on main trivially.
 import { execFileSync } from 'node:child_process';
 import type { Store } from './db.ts';
 import { githubRepo } from './github.ts';
@@ -112,6 +115,22 @@ function git(dir: string, args: string[]): string | null {
   }
 }
 
+/**
+ * The commit of `ref` by which `tip`'s work is in it, or null: `tip` when `ref` contains it, else the
+ * newest commit of `ref` with the same change as one of tip's own commits, once every one of those
+ * has its twin there (landed from another branch with new hashes). Merge commits aren't work.
+ * shortcut: a squash outside a PR, or a pick that resolved a conflict, changes the patch and isn't seen; the dependency's merged PR or its dismissal covers most of those.
+ */
+export function within(repo: string, ref: string, tip: string): string | null {
+  if (git(repo, ['merge-base', '--is-ancestor', tip, ref]) !== null) return tip;
+  // Each side's commits that change something, as '=' (has a twin) or '+' and the hash: empty commits all share one patch id.
+  const marks = (side: string) => (git(repo, ['log', '--cherry-mark', side, '--no-merges', '--topo-order', '--raw', '--format=%x00%m%H', `${ref}...${tip}`]) ?? '')
+    .split('\0').filter((c) => c.includes('\n:')).map((c) => c.slice(0, c.indexOf('\n')));
+  const own = marks('--right-only');
+  if (!own.length || own.some((m) => !m.startsWith('='))) return null;
+  return marks('--left-only').find((m) => m.startsWith('='))?.slice(1) ?? null;
+}
+
 /** Whether the server running `head` runs this scheme's code: that commit is in the scheme's repo. */
 export function runsRepo(repo: string | null, head: string | null): boolean {
   return !!repo && !!head && git(repo, ['cat-file', '-e', `${head}^{commit}`]) !== null;
@@ -148,9 +167,13 @@ export class LiveWaiters {
     return repo && this.head && !runsRepo(repo, this.head) ? repo : null;
   }
 
-  /** Is `commit` on the scheme's main, locally or on origin? */
-  private merged(repo: string, commit: string): boolean {
-    return ['HEAD', 'refs/remotes/origin/HEAD'].some((ref) => git(repo, ['merge-base', '--is-ancestor', commit, ref]) !== null);
+  /** The commit by which `commit` is on the scheme's main, locally or on origin, or null. */
+  private merged(repo: string, commit: string): string | null {
+    for (const ref of this.mains(repo)) {
+      const c = within(repo, ref, commit);
+      if (c) return c;
+    }
+    return null;
   }
 
   /** The refs that are a repo's main: local, and origin's if it has one. */
@@ -160,11 +183,13 @@ export class LiveWaiters {
 
   /**
    * The commit by which a followed minion's work is on its scheme's main, or null: its branch tip when
-   * main has it, else the merge commit of the branch's newest PR, if that is merged and the branch has
-   * no commits of its own since the PR's head (merging main in doesn't count).
+   * main has it (or the main commit by which main has all of its changes), else the merge commit of the
+   * branch's newest PR, if that is merged and the branch has no commits of its own since the PR's head
+   * (merging main in doesn't count).
    */
   private landed(b: { repo: string; branch: string; tip: string }): string | null {
-    if (this.merged(b.repo, b.tip)) return b.tip;
+    const merged = this.merged(b.repo, b.tip);
+    if (merged) return merged;
     const pr = this.prs.branch(b.repo, b.branch, b.tip);
     if (!pr?.commit) return null;
     const since = pr.head === b.tip ? '0' : git(b.repo, ['rev-list', '--count', '--no-merges', b.tip, `^${pr.head}`, ...this.mains(b.repo).map((r) => `^${r}`)]);
@@ -278,7 +303,7 @@ export class LiveWaiters {
     const other = this.elsewhere(w.ticket);
     if (other) return !!w.commit && (this.merged(other, w.commit) || !!this.prs.commit(other, w.commit)?.commit);
     if (!w.commit) return this.head !== w.since;
-    const runs = (c: string) => git(this.repo, ['merge-base', '--is-ancestor', c, this.head!]) !== null;
+    const runs = (c: string) => within(this.repo, this.head!, c) !== null;
     if (runs(w.commit)) return true;
     const pr = this.prs.commit(this.repo, w.commit);
     return !!pr?.commit && runs(pr.commit);
@@ -320,8 +345,9 @@ export class LiveWaiters {
   }
 
   /**
-   * Minions in pending-deploy whose branch the live commit contains. A deploy reports only to the
-   * minions that ran it, so this also catches one whose commit went live in someone else's restart.
+   * Minions in pending-deploy whose branch the live commit contains, by hash or by change. A deploy reports
+   * only to the minions that ran it, so this also catches one whose commit went live in someone else's
+   * restart. A branch the minion never committed on is no evidence: any live commit contains it.
    */
   pendingLive(): number[] {
     if (!this.head) return [];
@@ -331,7 +357,7 @@ export class LiveWaiters {
       for (const t of this.store.listTickets(p.id)) {
         if (t.state !== 'pending-deploy' || t.status === 'closed' || !t.branch) continue;
         // A scheme whose repo doesn't have the live commit (another app's) fails here, as it should.
-        if (git(p.repo_dir, ['merge-base', '--is-ancestor', `refs/heads/${t.branch}`, this.head]) !== null) ids.push(t.id);
+        if (this.committed(p.repo_dir, t.branch, 0) && within(p.repo_dir, this.head, `refs/heads/${t.branch}`)) ids.push(t.id);
       }
     }
     return ids;

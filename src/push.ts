@@ -29,10 +29,11 @@ export interface PushMessage {
   url: string;
 }
 
+/** `eventId`: the chat event the notification is about, which clicking it scrolls to (#236). */
 export type PushTrigger =
-  | { kind: 'question'; questions: { question: string }[] }
-  | { kind: 'plan'; summary: string }
-  | { kind: 'error'; text: string }
+  | { kind: 'question'; questions: { question: string }[]; eventId?: number }
+  | { kind: 'plan'; summary: string; eventId?: number }
+  | { kind: 'error'; text: string; eventId?: number }
   | { kind: 'state'; state: string | null; note: string | null };
 
 /** States worth a ping: a result to look at, or a blocker. */
@@ -138,11 +139,13 @@ export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectNam
     body = clip(trigger.note || NOTIFY_STATES[trigger.state]);
   }
   const coordinator = ticket.kind === 'coordinator';
+  // The chat opens at what it's about: the card or error, or for a state the minion's latest reply (public/core.js jumpHref).
+  const jump = trigger.kind === 'state' ? 'latest' : trigger.eventId;
   return {
     title: coordinator ? `${projectName ? `${projectName} ` : ''}Taskmaster` : `#${ticket.number ?? ticket.id} ${ticket.title}`,
     body,
     tag: `thread-${ticket.id}`,
-    url: coordinator || ticket.number == null ? `/#/p/${ticket.project_id}` : `/#/p/${ticket.project_id}/t/${ticket.number}`,
+    url: `${coordinator || ticket.number == null ? `/#/p/${ticket.project_id}` : `/#/p/${ticket.project_id}/t/${ticket.number}`}${jump ? `?e=${jump}` : ''}`,
   };
 }
 

@@ -84,6 +84,15 @@ const prRefHtml = (projectId, number, text, to) => to
 const escapeAttr = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 /**
+ * A chat address that asks to open scrolled to one thing in it (#236): the chat's own address plus
+ * `?e=<event id>`, or `?e=latest` for the minion's latest reply. Gives { hash, target }, or null.
+ */
+export function jumpParts(hash) {
+  const m = /^(#\/p\/\d+(?:\/t\/\d+)?|#\/t\/\d+)\?e=(\d+|latest)$/.exec(hash ?? '');
+  return m ? { hash: m[1], target: m[2] } : null;
+}
+
+/**
  * The in-app route ("#/p/2/t/11") a link points at, if it stays in this app: a bare "#/…" route,
  * or an absolute URL on this page (same origin and path) whose hash is a route. Null otherwise,
  * so links elsewhere keep opening in a new tab.

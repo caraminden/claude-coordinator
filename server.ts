@@ -215,7 +215,7 @@ function notify(ticketId: number, trigger: PushTrigger, except: string | null = 
   if (ticket) pusher.notify(ticket, trigger, except).catch((err) => console.error(`Push for ticket ${ticketId} failed:`, err));
 }
 
-runner.onTurnError = (ticketId, text) => notify(ticketId, { kind: 'error', text });
+runner.onTurnError = (ticketId, text, eventId) => notify(ticketId, { kind: 'error', text, eventId });
 
 // Chained minions (create_ticket's start_after): one starts with its held brief, on a branch caught
 // up to main so it builds on the work it waited for, once its leader's work is in.

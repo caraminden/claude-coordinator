@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cardEvent, countMoved, otherSchemes } from '../public/schemecounts.js';
+import { cardEvent, countMoved, otherSchemes, rowTarget } from '../public/schemecounts.js';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -43,4 +43,11 @@ test('forget: after the counts are fetched afresh, a minion the watcher last saw
   watch.forget(); // it went ready while you were in its scheme, then you came back
   watch.ticket(minion());
   assert.equal(fetches, 2, 'its state before may not be what the fresh counts saw');
+});
+
+test('rowTarget: a Needs-you row goes to the oldest thing its minion waits on you for (#236)', () => {
+  assert.equal(rowTarget([{ kind: 'approval', at: 30, eventId: 9 }, { kind: 'question', at: 10, eventId: 4 }, { kind: 'plan', at: 20, eventId: 6 }]), 4);
+  assert.equal(rowTarget([{ kind: 'question', at: 20, eventId: 4 }, { kind: 'state', at: 10 }]), 'latest', 'ready or try: the latest reply');
+  assert.equal(rowTarget([{ kind: 'replies', at: 10 }]), 'latest');
+  assert.equal(rowTarget([{ kind: 'approval', at: 10 }]), null, 'a card whose event is gone opens the chat as usual');
 });

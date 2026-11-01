@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { linkThreadRefs, linkUrls, prNumberRoute, prOwnerRoute, prUrlParts } from '../public/threadrefs.js';
+import { jumpParts, linkThreadRefs, linkUrls, prNumberRoute, prOwnerRoute, prUrlParts } from '../public/threadrefs.js';
 
 const link = (html, titleOf) => linkThreadRefs(html, 2, titleOf);
 const a = (n, text = `#${n}`) => `<a class="thread-ref" href="#/p/2/t/${n}">${text}</a>`;
@@ -199,4 +199,11 @@ test('bare PR URLs go to their owner from the start, GitHub otherwise', () => {
     assert.equal(linkUrls(url, null, route), tab(url), url);
   }
   assert.equal(linkUrls(owned, null, (url) => prOwnerRoute(delveRepos, url, 162)), tab(owned), 'its own PR opens GitHub');
+});
+
+test('jumpParts: a chat address asking to open at one event, or its latest reply (#236)', () => {
+  assert.deepEqual(jumpParts('#/p/2/t/34?e=901'), { hash: '#/p/2/t/34', target: '901' });
+  assert.deepEqual(jumpParts('#/p/2?e=latest'), { hash: '#/p/2', target: 'latest' }, 'the Taskmaster\'s chat');
+  assert.deepEqual(jumpParts('#/t/7?e=3'), { hash: '#/t/7', target: '3' });
+  for (const hash of ['#/p/2/t/34', '#/p/2/artifacts?e=1', '#/p/2/t/34?e=', '#/p/2/t/34?e=1x', '', undefined]) assert.equal(jumpParts(hash), null, String(hash));
 });

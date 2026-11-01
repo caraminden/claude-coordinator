@@ -103,6 +103,10 @@ test('only decisions, blockers and results make a notification', () => {
   const coord = notificationFor(ticket({ kind: 'coordinator', number: null }), { kind: 'question', questions: [{ question: 'Which first?' }] }, 'Coordinator app');
   assert.equal(coord?.title, 'Coordinator app Taskmaster');
   assert.equal(coord?.url, '/#/p/2');
+  // Clicking one opens the chat at what it's about (#236): its card or error, or a state's latest reply.
+  assert.equal(notificationFor(ticket(), { kind: 'plan', summary: 's', eventId: 41 })?.url, '/#/p/2/t/34?e=41');
+  assert.equal(notificationFor(ticket({ kind: 'coordinator', number: null }), { kind: 'error', text: 'boom', eventId: 9 })?.url, '/#/p/2?e=9');
+  assert.equal(notificationFor(ticket(), { kind: 'state', state: 'try', note: null })?.url, '/#/p/2/t/34?e=latest');
   assert.ok(notificationFor(ticket(), { kind: 'question', questions: [{ question: 'x'.repeat(1000) }] })!.body.length <= 300);
 });
 
@@ -160,7 +164,7 @@ test('notify skips whoever caused it, muted devices and people outside the schem
   assert.equal(toJosh.headers.Topic, `thread-${t.id}`);
   assert.ok(Number(toJosh.headers.TTL) > 0);
   const msg = JSON.parse(decrypt(toJosh.body, browsers.josh.ecdh.getPrivateKey(), browsers.josh.auth).toString());
-  assert.deepEqual(msg, { title: `#${t.number} Fix it`, body: 'Merged', tag: `thread-${t.id}`, url: `/#/p/${project.id}/t/${t.number}` });
+  assert.deepEqual(msg, { title: `#${t.number} Fix it`, body: 'Merged', tag: `thread-${t.id}`, url: `/#/p/${project.id}/t/${t.number}?e=latest` });
 
   // 404 and 410 mean the browser unsubscribed; anything else may be temporary. Outsiders' browsers stay, unsent.
   assert.deepEqual(store.listPushSubscriptions().map((s) => s.endpoint).sort(),

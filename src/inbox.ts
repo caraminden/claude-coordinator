@@ -21,9 +21,10 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
   const tickets = store.listTickets(projectId).filter((t) => t.status !== 'closed' && ['', person.toLowerCase()].includes(assignee(t.id)));
   const ids = new Set(tickets.map((t) => t.id));
   const items: InboxItem[] = [
-    ...approvals.pending().filter((a) => ids.has(a.ticketId)).map(({ ticketId, at, card }) => ({ kind: 'approval', ticketId, at, card })),
+    ...approvals.pending().filter((a) => ids.has(a.ticketId))
+      .map(({ ticketId, at, card }) => ({ kind: 'approval', ticketId, at, card, eventId: store.cardEventId(ticketId, 'approval', (card as { id: string }).id) ?? undefined })),
     // A new stored card kind only needs adding to Store.openCards.
-    ...store.openCards(projectId).filter((e) => ids.has(e.ticket_id)).map((e) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card: JSON.parse(e.data) })),
+    ...store.openCards(projectId).filter((e) => ids.has(e.ticket_id)).map((e) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card: JSON.parse(e.data), eventId: e.id })),
     ...tickets.filter((t) => t.state === 'ready' || t.state === 'try').map((t) => ({ kind: 'state', ticketId: t.id, at: t.updated_at })),
     // Minions set replies as a turn ends, so a running one is listed with its chips hidden for a moment.
     ...tickets.filter((t) => t.replies && t.state !== 'ready' && t.state !== 'try').map((t) => ({ kind: 'replies', ticketId: t.id, at: t.updated_at })),
@@ -31,9 +32,10 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
   return items.sort((a, b) => Number(b.kind === 'approval') - Number(a.kind === 'approval') || b.at - a.at);
 }
 
-/** How many items the scheme's Needs-you badge counts for `person`, who last saw each minion at `seen` (ticket id -> time): a ready/try or replies minion they opened since it changed stops counting, as in public/inbox.js. */
+/** How many minions the scheme's Needs-you badge counts for `person`, who last saw each minion at `seen` (ticket id -> time): one with any item left, where a ready/try or replies item they opened since it changed stops counting, as in public/inbox.js. */
 export function inboxCount(store: Store, approvals: Approvals, projectId: number, person: string, seen: Record<number, number>): number {
   const updated = new Map(store.listTickets(projectId).map((t) => [t.id, t.updated_at]));
-  return inboxItems(store, approvals, projectId, person)
-    .filter((i) => !((i.kind === 'state' || i.kind === 'replies') && (seen[i.ticketId] ?? 0) >= (updated.get(i.ticketId) ?? 0))).length;
+  const waiting = inboxItems(store, approvals, projectId, person)
+    .filter((i) => !((i.kind === 'state' || i.kind === 'replies') && (seen[i.ticketId] ?? 0) >= (updated.get(i.ticketId) ?? 0)));
+  return new Set(waiting.map((i) => i.ticketId)).size;
 }

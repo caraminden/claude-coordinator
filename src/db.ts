@@ -1401,6 +1401,13 @@ export class Store {
     return this.openCardsWhere('e.ticket_id = ?', ticketId)[0]?.created_at ?? null;
   }
 
+  /** The id of the chat event that posted a minion's card `cardId` of `kind`, or null if there's none. */
+  cardEventId(ticketId: number, kind: string, cardId: string): number | null {
+    const row = this.db.prepare("SELECT id FROM events WHERE ticket_id = ? AND kind = ? AND json_extract(data, '$.id') = ? ORDER BY id DESC LIMIT 1")
+      .get(ticketId, kind, cardId) as { id: number } | undefined;
+    return row?.id ?? null;
+  }
+
   private openCardsWhere(scope: string, id: number): EventRow[] {
     const bots = NOT_PEOPLE.map((n) => n.toLowerCase());
     return this.db.prepare(`

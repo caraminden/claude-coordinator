@@ -5,12 +5,13 @@ import { openStartScheme, renderSidebar } from './sidebar.js';
 import { showProject, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
 import { onArtifactData } from './bridge-host.js';
-import { appendEvent, refreshBranch, renderBranch, renderTicketHead } from './thread.js';
+import { appendEvent, jumpToEvent, refreshBranch, renderBranch, renderTicketHead } from './thread.js';
+import { replaceHash } from './navstack.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
 import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, refreshInbox, refreshSchemeCounts } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { onHiddenChanged } from './hidden.js';
-import { inAppHash, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
+import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { uploadsRunning } from './composer.js';
 import { renderMarkdown } from './markdown.js';
 import { iconSrc } from './schemes.js';
@@ -659,6 +660,12 @@ export let routeSeq = 0;
 
 async function route() {
   if (!me) return;
+  const jump = jumpParts(location.hash);
+  if (jump) {
+    // Open the chat at its plain address, so Back and a reload don't jump again; its mountChat takes the jump.
+    pendingJump = jump;
+    return replaceHash(jump.hash);
+  }
   saveScroll();
   const seq = ++routeSeq;
   const hash = location.hash || '#/';
@@ -704,7 +711,7 @@ document.addEventListener('click', (e) => {
   const hash = inAppHash(a.getAttribute('href'), location);
   if (!hash) return;
   e.preventDefault();
-  if (location.hash !== hash) location.hash = hash;
+  openHash(hash);
 });
 
 // A pull request goes to the minion that owns it instead of GitHub: PR links and "PR #186"s are
@@ -848,6 +855,24 @@ export function statusLabel(t) {
  */
 export const threadHref = (t) =>
   isCoordinator(t) ? `#/p/${t.project_id}` : t.number == null ? `#/t/${t.id}` : `#/p/${t.project_id}/t/${t.number}`;
+
+/** A link that opens `t`'s chat scrolled to one thing in it (threadrefs.js jumpParts). */
+export const jumpHref = (t, target) => `${threadHref(t)}?e=${target}`;
+let pendingJump = null; // { hash, target }: a jump for the chat route() is opening
+
+/** The jump waiting for the chat now open at its address, once (mountChat). */
+export function takeJump() {
+  const jump = pendingJump;
+  pendingJump = null;
+  return jump?.hash === location.hash ? jump.target : null;
+}
+
+/** Go to an in-app address; a jump within the chat already open scrolls it in place, with no reload and no history entry. */
+export function openHash(hash) {
+  const jump = jumpParts(hash);
+  if (jump && jump.hash === location.hash && view?.kind === 'project' && view.main === 'chat' && view.ticket && threadHref(view.ticket) === jump.hash) return void jumpToEvent(jump.target);
+  if (location.hash !== hash) location.hash = hash;
+}
 /** A scheme's Taskmaster goes by the scheme's name: "Delve Taskmaster". */
 export function taskmasterName(projectId = view?.projectId) {
   const p = view?.projects?.find((x) => x.id === projectId) ?? (view?.project?.id === projectId ? view.project : null);

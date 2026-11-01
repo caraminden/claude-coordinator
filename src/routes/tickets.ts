@@ -287,9 +287,9 @@ export const ticketRoutes: Route[] = [
       // Claude asks people multiple-choice questions; the card shows in the chat until someone answers.
       const questions = await cleanQuestions(app, ticket, (await readJson(req)).questions);
       const questionId = randomBytes(6).toString('hex');
-      runner.emit(id, 'question', { id: questionId, questions });
+      const event = runner.emit(id, 'question', { id: questionId, questions });
       runner.broadcastTicket(id);
-      app.notify(id, { kind: 'question', questions });
+      app.notify(id, { kind: 'question', questions, eventId: event.id });
       return json(res, 201, { id: questionId });
     },
   },
@@ -379,9 +379,9 @@ export const ticketRoutes: Route[] = [
         runner.emit(id, 'plan_result', { id: old.id, status: 'superseded' });
       }
       const planId = randomBytes(6).toString('hex');
-      runner.emit(id, 'plan', { id: planId, summary, plan, status: 'pending' });
+      const event = runner.emit(id, 'plan', { id: planId, summary, plan, status: 'pending' });
       runner.broadcastTicket(id);
-      app.notify(id, { kind: 'plan', summary });
+      app.notify(id, { kind: 'plan', summary, eventId: event.id });
       return json(res, 201, { id: planId });
     },
   },
@@ -548,8 +548,8 @@ export const ticketRoutes: Route[] = [
       const failed = body.ok === false;
       const loud = failed || body.warn === true;
       (loud ? console.error : console.log)(`Deploy report for minion ${id}: ${text}`);
-      runner.emit(id, loud ? 'error' : 'note', { text });
-      if (loud) app.notify(id, { kind: 'error', text });
+      const event = runner.emit(id, loud ? 'error' : 'note', { text });
+      if (loud) app.notify(id, { kind: 'error', text, eventId: event.id });
       if (failed) store.setSetting(DEPLOY_FAILURE, { text, head: waiters.head });
       // A failed deploy leaves the minion in pending-deploy, so the error stays in view.
       const dismissed = !failed && runner.deployLive(id);

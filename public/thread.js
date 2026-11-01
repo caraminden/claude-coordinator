@@ -1,5 +1,5 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
+import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, takeJump, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, loadDraft, renderModelPicker, saveDraft } from './composer.js';
 import { rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
@@ -41,13 +41,19 @@ export async function mountChat(chatId, ticket, page) {
   renderHistory();
   if (ticket.branch) refreshBranch(chatId);
   markSeen(chatId);
+  // Opened by a link to one thing in it (an inbox item, a notification), at that thing.
+  const jump = takeJump();
   // Open at the first thing you haven't seen, marked New; a minion you've never opened, at the top of
   // what's loaded. Unread from before the loaded page also opens there, under "Load earlier".
-  const divider = document.querySelector('#log > .unread-divider');
-  if (!divider) restoreScroll(chatId);
-  // A Taskmaster's history runs long; past that much unread, its newest matters more than where you left off.
-  else if (isCoordinator(ticket) && divider.parentElement.querySelectorAll(':scope > .unread-divider ~ [data-at]').length > TASKMASTER_UNREAD_LIMIT) scrollToBottom();
-  else scrollToUnread(divider);
+  const jumped = jump && await jumpToEvent(jump);
+  if (view.id !== chatId) return; // you moved on while it loaded back
+  if (!jumped) {
+    const divider = document.querySelector('#log > .unread-divider');
+    if (!divider) restoreScroll(chatId);
+    // A Taskmaster's history runs long; past that much unread, its newest matters more than where you left off.
+    else if (isCoordinator(ticket) && divider.parentElement.querySelectorAll(':scope > .unread-divider ~ [data-at]').length > TASKMASTER_UNREAD_LIMIT) scrollToBottom();
+    else scrollToUnread(divider);
+  }
   try {
     if (sessionStorage.getItem('cc-refocus')) {
       sessionStorage.removeItem('cc-refocus');
@@ -74,7 +80,7 @@ function renderHistory() {
     lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
     actions: new Map(), turnActions: [], cards: new Map(), heldCards: [], gruntStarts: new Map(),
     // The session started on an earlier page, if there is one.
-    sawInit: page.more, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, pendingRequest: [], turnRequest: undefined,
+    sawInit: page.more, latestReply: null, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, pendingRequest: [], turnRequest: undefined,
     pendingMessages: [],
   });
   log.replaceChildren(...(page.more ? [h('div', { class: 'load-earlier' },
@@ -104,6 +110,28 @@ function holdInPlace(el, top) {
   for (const type of USER_SCROLL) addEventListener(type, stop, { capture: true, passive: true });
   settle.observe(document.getElementById('log'));
   setTimeout(stop, 3000);
+}
+
+/**
+ * Scroll the open chat to event `target` (an id, or 'latest' for the minion's latest reply) and flash it,
+ * loading back to it if it's older than the loaded page (#236). False when it isn't there: gone, or
+ * folded away with nothing to show.
+ */
+export async function jumpToEvent(target) {
+  const id = target === 'latest' ? view.latestReply : Number(target);
+  if (!id) return false;
+  const find = () => document.querySelector(`#log [data-eid="${id}"]`);
+  if (!find() && view.page?.more && id < view.page.events[0].id) await showEarlier(null, id);
+  const found = find();
+  if (!found) return false;
+  // A reply folded into the turn's narration or a Taskmaster update shows as that fold.
+  const el = found.parentElement.closest('#log details:not([open])') ?? found;
+  el.scrollIntoView({ block: 'center' });
+  holdInPlace(el, el.getBoundingClientRect().top);
+  el.classList.remove('jumped');
+  void el.offsetWidth; // restart the flash on a second jump to the same thing
+  el.classList.add('jumped');
+  return true;
 }
 
 /** Load the page before what's shown (or back to event `from`) and redraw, keeping your place. */
@@ -744,6 +772,7 @@ export function appendEvent(event, scroll = true) {
           const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
           const msg = stamped(h('div', { class: 'msg' }, h('div', { class: 'who' }, speaker()), body), event);
           nodes.push(msg);
+          view.latestReply = event.id;
           settle.push(...view.narration.text({ el: msg, body, text: block.text }));
         } else if (block.type === 'tool_use') {
           settle.push(...view.narration.tool(block.name));
@@ -780,6 +809,8 @@ export function appendEvent(event, scroll = true) {
 
   // Unread starts at the first thing someone else added; your own messages don't count.
   if (!(event.kind === 'user_message' && data.author === me)) for (const n of nodes) n.dataset.at = event.created_at;
+  // What a jump link (#236) finds it by.
+  for (const n of nodes) n.dataset.eid = event.id;
   // A minion explains its card in the reply it writes after asking, so the card stays below that
   // turn's words until someone answers or the turn ends.
   const held = view.heldCards.find((el) => el.isConnected);

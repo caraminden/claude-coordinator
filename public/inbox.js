@@ -1,7 +1,7 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
-import { ago, api, h, isCoordinator, isSeen, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './core.js';
-import { cardEvent, countMoved, otherSchemes } from './schemecounts.js';
+import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './core.js';
+import { cardEvent, countMoved, otherSchemes, rowTarget } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
@@ -89,7 +89,8 @@ export function renderInbox() {
   if (view?.kind !== 'project' || inbox.projectId !== view.projectId) return;
   const items = inbox.items.filter((i) => ticketOf(i.ticketId));
   const strip = inboxStrip();
-  const count = items.filter((i) => !faded(i)).length;
+  // Minions, not items: one waiting on two things is one to see to (Cara, 2026-11-01).
+  const count = new Set(items.filter((i) => !faded(i)).map((i) => i.ticketId)).size;
   // A scheme you hid (#226) keeps its strip but no pill.
   const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
   for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count }));
@@ -106,7 +107,6 @@ export function renderInbox() {
   const toggle = h('button', { type: 'button', class: 'inbox-toggle', 'aria-expanded': String(open), title: open ? 'Minimize' : 'Show what waits on you' },
     h('span', { class: 'label' }, 'Needs you'),
     count ? h('span', { class: 'count' }, count) : h('span', { class: 'muted' }, 'all seen'),
-    h('span', { class: 'muted' }, `${rows.size} minion${rows.size === 1 ? '' : 's'}`),
     h('span', { class: 'spacer' }),
     h('span', { class: 'chev', 'aria-hidden': 'true' }, open ? '▾' : '▸'));
   toggle.addEventListener('click', () => {
@@ -126,7 +126,8 @@ function inboxRow(items) {
     asks.set(ask, (asks.get(ask) ?? 0) + 1);
   }
   const seen = items.every(faded);
-  return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: threadHref(t) },
+  const target = rowTarget(items);
+  return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t) },
     h('span', { class: 'name' }, isCoordinator(t) ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     h('span', { class: 'asks' }, [...asks].map(([ask, n]) => h('span', { class: 'chip' }, n > 1 ? `${ask} ×${n}` : ask))),
     // No one-tap replies on these rows (#130): a stray tap on "Merge it" would ship work nobody opened.

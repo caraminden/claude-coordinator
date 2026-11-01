@@ -1,5 +1,5 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
-import { account, ago, api, h, icon, schemeIcon, view } from './core.js';
+import { account, ago, api, h, icon, openHash, schemeIcon, view } from './core.js';
 import { openNewScheme, toggleSchemeMenu } from './sidebar.js';
 
 // ---------- push notifications ----------
@@ -106,7 +106,7 @@ if (pushSupported) {
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data?.type !== 'open' || typeof e.data.url !== 'string') return;
     const hash = new URL(e.data.url, location.href).hash;
-    if (hash && location.hash !== hash) location.hash = hash;
+    if (hash) openHash(hash);
   });
 }
 

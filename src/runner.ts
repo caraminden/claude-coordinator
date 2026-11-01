@@ -885,8 +885,8 @@ export class Runner {
   personOf?: (author: string, from?: number) => number | null;
   /** A turn's GitHub env and prompt line for its person (src/github-link.ts forTurn); null with linking not set up. */
   githubFor?: (person: number | null, turnDir: string) => TurnGithub | null;
-  /** Called when a turn fails (not when someone stops it), with the error shown in the chat. */
-  onTurnError: (ticketId: number, text: string) => void = () => {};
+  /** Called when a turn fails (not when someone stops it), with the error shown in the chat and its event, if it has one. */
+  onTurnError: (ticketId: number, text: string, eventId?: number) => void = () => {};
 
   constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
@@ -1940,9 +1940,9 @@ export class Runner {
       }
       return;
     }
-    this.emit(ticketId, 'error', { text });
+    const event = this.emit(ticketId, 'error', { text });
     this.store.updateTicket(ticketId, { note: short(first) });
-    this.onTurnError(ticketId, text);
+    this.onTurnError(ticketId, text, event.id);
   }
 
   private handleLine(ticketId: number, line: string, onResult: (isError: boolean, result: string | null) => void) {
@@ -2036,8 +2036,8 @@ export class Runner {
     if (status === 'connected' || status === 'pending') return;
     const text = `The ${role} MCP server is ${typeof status === 'string' ? status : 'missing'} in this turn, so its mcp__${role} tools are unavailable. Check the server log.`;
     console.error(`Ticket ${ticketId}: ${text}`);
-    this.emit(ticketId, 'error', { text });
-    this.onTurnError(ticketId, text);
+    const event = this.emit(ticketId, 'error', { text });
+    this.onTurnError(ticketId, text, event.id);
   }
 
   /** Task-list state for a ticket, rebuilt from its stored events the first time it is needed. */

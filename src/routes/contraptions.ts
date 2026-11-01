@@ -1,7 +1,7 @@
 // Contraptions (src/contraptions.ts): admins register them, edit them, enable them per person and
-// rotate their keys, as does Citadel's Taskmaster on an admin's turn (#246); anyone signed in lists the ones enabled for them, for the app rail; a contraption's
-// own server sends its people's bug reports and feature asks to its home scheme (src/contraption-asks.ts)
-// and runs turns for its people through the turn API (src/contraption-turns.ts).
+// rotate their keys, as does Citadel's Taskmaster on an admin's turn (#246); anyone signed in lists
+// the ones enabled for them, for the app rail; a contraption's own server sends its people's bug
+// reports and feature asks to its home scheme (src/contraption-asks.ts) and runs turns for its people through the turn API (src/contraption-turns.ts).
 import type { IncomingMessage } from 'node:http';
 import { APP_NAME } from '../appname.ts';
 import { AGENT_NAME } from '../auth.ts';

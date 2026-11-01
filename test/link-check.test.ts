@@ -49,13 +49,13 @@ test('stop_hook_active lets the turn end, and so does a reply with no text', asy
   assert.equal(await check({}, cfg), null);
 });
 
-test('one nudge per turn, counted by its own marker, not by another hook\'s stop_hook_active (#243)', async () => {
+test('one nudge per prompt, counted by its own marker, not by another hook\'s stop_hook_active (#243)', async () => {
   const nudged = join(root, 'turn-243', 'link-check-nudged');
   mkdirSync(join(root, 'turn-243'));
   const once = { ...cfg, nudged };
-  const bad = { last_assistant_message: '![x](../shared/project/handoff.md)' };
+  const bad = { last_assistant_message: '![x](../shared/project/handoff.md)', prompt_id: 'p1' };
   // Good links leave no marker, so a later bad reply in the same turn still gets its nudge.
-  assert.equal(await check({ last_assistant_message: `[h](${scheme}/handoff.md)` }, once), null);
+  assert.equal(await check({ last_assistant_message: `[h](${scheme}/handoff.md)`, prompt_id: 'p1' }, once), null);
   assert.equal(existsSync(nudged), false);
   // The job check blocked earlier this turn, so stop_hook_active is already true: still nudged.
   assert.equal((await check({ ...bad, stop_hook_active: true }, once))?.decision, 'block');
@@ -63,14 +63,26 @@ test('one nudge per turn, counted by its own marker, not by another hook\'s stop
   // The rewrite that's still broken ends the turn rather than looping.
   assert.equal(await check({ ...bad, stop_hook_active: true }, once), null);
   assert.equal(await check(bad, once), null);
+  // A message steered into the same turn is a new prompt, with its own nudge.
+  assert.equal((await check({ ...bad, prompt_id: 'p2' }, once))?.decision, 'block');
+  assert.equal(await check({ ...bad, prompt_id: 'p2', stop_hook_active: true }, once), null);
+  // Without a prompt id, one nudge for the turn.
+  rmSync(nudged);
+  assert.equal((await check({ last_assistant_message: bad.last_assistant_message }, once))?.decision, 'block');
+  assert.equal(await check({ last_assistant_message: bad.last_assistant_message }, once), null);
 });
 
 test('the hook script prints a block decision, or nothing', () => {
   const [node, script, config] = linkCheckHooks(cfg.roots).Stop[0].hooks[0].command.split(' ').map((s: string) => s.slice(1, -1));
   assert.equal(script, LINK_CHECK);
   assert.deepEqual(JSON.parse(config), cfg);
-  assert.equal(JSON.parse(linkCheckHooks(cfg.roots, LINK_CHECK, '/turn/link-check-nudged').Stop[0].hooks[0].command.split(' ')[2].slice(1, -1)).nudged, '/turn/link-check-nudged');
   const run = (input: object | string, c = config) => spawnSync(node, [script, c], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8' });
+  // As the runner wires it, with the turn's marker: the second stop of the prompt ends.
+  const nudged = join(root, 'script-nudged');
+  const withMarker = linkCheckHooks(cfg.roots, LINK_CHECK, nudged).Stop[0].hooks[0].command.split(' ')[2].slice(1, -1);
+  const again = { hook_event_name: 'Stop', stop_hook_active: true, prompt_id: 'p', last_assistant_message: '![x](../shared/268/people-desktop.png)' };
+  assert.equal(JSON.parse(run(again, withMarker).stdout).decision, 'block');
+  assert.deepEqual([existsSync(nudged), run(again, withMarker).stdout], [true, '']);
   const blocked = run({ hook_event_name: 'Stop', stop_hook_active: false, last_assistant_message: '![x](../shared/268/people-desktop.png)' });
   assert.equal(blocked.status, 0);
   assert.equal(JSON.parse(blocked.stdout).decision, 'block');

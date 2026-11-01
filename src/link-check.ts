@@ -30,18 +30,29 @@ export async function brokenLinks(text: string, cfg: LinkCheckConfig): Promise<s
   return broken;
 }
 
+/** The prompt the marker says was nudged, or null if none was. */
+function readMarker(file: string): string | null {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 /** The Stop hook's answer for this input: a block with the reason, or null to let the turn end. */
-export async function check(input: { stop_hook_active?: boolean; last_assistant_message?: string }, cfg: LinkCheckConfig) {
-  // One nudge per turn, counted in the turn's own marker: stop_hook_active is also set by any other
-  // Stop hook's block (the kit's job check), which once let a broken link through (#243).
-  if (!input.last_assistant_message || (cfg.nudged ? existsSync(cfg.nudged) : input.stop_hook_active)) return null;
+export async function check(input: { stop_hook_active?: boolean; last_assistant_message?: string; prompt_id?: string }, cfg: LinkCheckConfig) {
+  // One nudge per prompt (a steered turn holds several), noted in the turn's own marker:
+  // stop_hook_active is also set by any other Stop hook's block (the kit's job check), which once
+  // let a broken link through (#243).
+  const prompt = String(input.prompt_id ?? '');
+  if (!input.last_assistant_message || (cfg.nudged ? readMarker(cfg.nudged) === prompt : input.stop_hook_active)) return null;
   const broken = await brokenLinks(input.last_assistant_message, cfg);
   if (!broken.length) return null;
   if (cfg.nudged) {
     try {
-      writeFileSync(cfg.nudged, '');
+      writeFileSync(cfg.nudged, prompt);
     } catch {
-      // Without the marker, fall back to stop_hook_active so it can't loop.
+      // No marker to stop the next try, so stop_hook_active has to.
       if (input.stop_hook_active) return null;
     }
   }

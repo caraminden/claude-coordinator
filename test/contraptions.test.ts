@@ -2,6 +2,8 @@
 // for, its key files, identity headers, bearer keys, and the admin routes.
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { once } from 'node:events';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -31,7 +33,7 @@ test('a contraption is enabled only for the people on its list, and disabling ta
   store.setContraptionUser(mandate.id, josh.id, true, cara.id);
   assert.equal(c.enabled('mandate', josh.id), true);
   assert.equal(c.enabled('peek-auras', josh.id), false, 'enabling one contraption enables no other');
-  assert.deepEqual(store.contraptionsFor(josh.id).map((r) => ({ ...r })), [{ name: 'mandate', title: 'Mandate', icon: '/icon.svg' }]);
+  assert.deepEqual(store.contraptionsFor(josh.id).map((r) => ({ name: r.name, title: r.title, icon: r.icon })), [{ name: 'mandate', title: 'Mandate', icon: '/icon.svg' }]);
   store.setContraptionUser(mandate.id, josh.id, false, cara.id);
   assert.equal(c.enabled('mandate', josh.id), false);
   assert.deepEqual(store.contraptionsFor(josh.id), []);
@@ -94,6 +96,20 @@ test('a bearer contraption key names its contraption, and rotating replaces both
   assert.equal(mode(join(keys, 'mandate', 'contraption.key')), 0o600);
 });
 
+test('up: its key opens and its service takes a connection; a copy with another secret never is', async () => {
+  const listening = createServer().listen(0, '127.0.0.1');
+  await once(listening, 'listening');
+  const port = (listening.address() as AddressInfo).port;
+  const row = { ...store.getContraption('mandate')!, port };
+  try {
+    assert.equal(await c.up(row), true);
+    assert.equal(await new Contraptions(store, 'another secret, as in the boot check', keys).up(row), false, 'its key does not open in a copy');
+  } finally {
+    await new Promise((r) => listening.close(r));
+  }
+  assert.equal(await c.up(row), false, 'its service is down');
+});
+
 test('admins register, edit, enable and rotate; everyone else is refused, and lists only their own', { timeout: 60_000 }, async () => {
   const srv = await bootServer();
   after(() => srv.stop());
@@ -124,7 +140,9 @@ test('admins register, edit, enable and rotate; everyone else is refused, and li
   ] as const) assert.equal((await asOlive(path, body, method)).status, 403, `${method} ${path}`);
 
   assert.equal((await srv.call(`/api/contraptions/mandate/people/${olive.id}`, { enabled: true }, 'PUT')).data.people.includes(olive.id), true);
-  assert.deepEqual((await asOlive('/api/contraptions/mine')).data, [{ name: 'mandate', title: 'Mandate!', icon: '/icon.svg' }]);
+  const mine = (await asOlive('/api/contraptions/mine')).data;
+  assert.deepEqual(mine, [{ name: 'mandate', title: 'Mandate!', icon: '/icon.svg', up: mine[0]?.up }]);
+  assert.equal(typeof mine[0].up, 'boolean', 'whether it is up, for the rail (Contraptions.up, tested above)');
   assert.deepEqual((await srv.call('/api/contraptions/mine')).data, [], 'an admin isn\'t enabled by being one');
   const key = readFileSync(join(srv.data, 'contraptions', 'mandate', 'contraption.key'), 'utf8');
   assert.equal((await srv.call('/api/contraptions/mandate/keys', {})).status, 200);

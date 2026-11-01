@@ -1042,9 +1042,9 @@ export class Store {
   }
 
   /** The contraptions enabled for a person, for their app rail. */
-  contraptionsFor(userId: number): Pick<ContraptionRow, 'name' | 'title' | 'icon'>[] {
-    return this.db.prepare(`SELECT c.name, c.title, c.icon FROM contraptions c JOIN contraption_users cu ON cu.contraption_id = c.id
-      JOIN users u ON u.id = cu.user_id WHERE cu.user_id = ? AND u.disabled_at IS NULL ORDER BY c.title COLLATE NOCASE`).all(userId) as unknown as Pick<ContraptionRow, 'name' | 'title' | 'icon'>[];
+  contraptionsFor(userId: number): Pick<ContraptionRow, 'name' | 'title' | 'icon' | 'port' | 'identity_private'>[] {
+    return this.db.prepare(`SELECT c.name, c.title, c.icon, c.port, c.identity_private FROM contraptions c JOIN contraption_users cu ON cu.contraption_id = c.id
+      JOIN users u ON u.id = cu.user_id WHERE cu.user_id = ? AND u.disabled_at IS NULL ORDER BY c.title COLLATE NOCASE`).all(userId) as unknown as Pick<ContraptionRow, 'name' | 'title' | 'icon' | 'port' | 'identity_private'>[];
   }
 
   /** A person's named session in a contraption. */

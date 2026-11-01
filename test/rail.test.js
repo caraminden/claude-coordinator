@@ -15,6 +15,9 @@ test('the rail lists Citadel, then each contraption, and marks where you are', (
   assert.deepEqual(inCitadel.map((i) => i.icon), ['/icon.svg', '/apps/mandate/icon.svg', null]);
   const inMandate = railItems(mine, '/apps/mandate/today');
   assert.deepEqual(inMandate.map((i) => i.current), [false, true, false]);
+  // One that isn't up (service down, keys that don't open) gets a greyed letter tile: nothing is fetched from it.
+  const down = railItems([{ ...mine[0], up: false }, { ...mine[1], up: true }], '/');
+  assert.deepEqual(down.map((i) => [i.icon, i.down]), [['/icon.svg', undefined], [null, true], [null, false]]);
   // In a preview, Citadel is its preview's root.
   assert.equal(railItems(mine, '/preview/4/', '/preview/4/')[0].href, '/preview/4/');
 });

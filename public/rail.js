@@ -17,14 +17,16 @@ const root = new URL(inContraption ? '../../' : './', import.meta.url);
 
 /**
  * The rail's entries for the contraptions `mine` (GET /api/contraptions/mine) seen from the page at
- * `here` (a path): Citadel first, then each contraption. None at all when nothing is enabled.
+ * `here` (a path): Citadel first, then each contraption. None at all when nothing is enabled. One that
+ * isn't up (its service is down, or its keys don't open) is a greyed tile, so the page fetches nothing from it.
  */
 export function railItems(mine, here, citadel = '/') {
   if (!mine?.length) return [];
   const items = mine.map((c) => {
     const base = `/apps/${c.name}/`;
-    const icon = !c.icon ? null : /^(\/apps\/|https?:)/.test(c.icon) ? c.icon : base + c.icon.replace(/^\//, '');
-    return { name: c.name, title: c.title, href: base, icon, current: here.startsWith(base) };
+    const down = c.up === false;
+    const icon = !c.icon || down ? null : /^(\/apps\/|https?:)/.test(c.icon) ? c.icon : base + c.icon.replace(/^\//, '');
+    return { name: c.name, title: c.title, href: base, icon, current: here.startsWith(base), down };
   });
   const inCitadel = !items.some((i) => i.current);
   return [{ name: null, title: 'Citadel', href: citadel, icon: `${citadel}icon.svg`, current: inCitadel }, ...items];
@@ -133,17 +135,18 @@ export async function showRail() {
     if (i === 1) nav.append(document.createElement('hr'));
     const a = document.createElement('a');
     a.href = item.href;
-    a.title = item.title;
+    a.title = item.down ? `${item.title} (unavailable)` : item.title;
     if (item.current) { a.className = 'current'; a.setAttribute('aria-current', 'page'); }
-    let pic;
+    if (item.down) a.classList.add('down');
+    const tile = document.createElement('span');
+    tile.className = 'tile';
+    tile.textContent = item.title.slice(0, 1).toUpperCase();
+    let pic = tile;
     if (item.icon) {
       pic = document.createElement('img');
       pic.src = item.icon;
       pic.alt = '';
-    } else {
-      pic = document.createElement('span');
-      pic.className = 'tile';
-      pic.textContent = item.title.slice(0, 1).toUpperCase();
+      pic.addEventListener('error', () => pic.replaceWith(tile), { once: true }); // went down since the list was fetched
     }
     const label = document.createElement('span');
     label.className = 'label';
@@ -238,6 +241,7 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
 .citadel-rail img, .citadel-rail .tile { flex: none; width: 34px; height: 34px; border-radius: 9px; opacity: 0.65; }
 .citadel-rail .tile { display: flex; align-items: center; justify-content: center; background: #5a534c; font-weight: 650; }
 .citadel-rail a:is(.current, :hover, :focus-visible) :is(img, .tile) { opacity: 1; }
+.citadel-rail a.down .tile { opacity: 0.35; }
 .citadel-rail .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .citadel-rail hr { flex: none; width: 26px; border: 0; border-top: 1px solid #5a534c; margin: 2px 0; }
 .citadel-rail-backdrop, .citadel-rail-handle { display: none; }

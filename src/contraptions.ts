@@ -14,6 +14,7 @@ import { chmodSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, verify } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { IncomingMessage } from 'node:http';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { seal, sealKey, unseal } from './credentials.ts';
 import type { ContraptionRow, Store, User } from './db.ts';
@@ -145,6 +146,23 @@ export class Contraptions {
     const c = this.byKey(/^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1]);
     if (!c) throw new HttpError(401, 'Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer');
     return c;
+  }
+
+  /**
+   * Whether a contraption can serve a person right now, for the rail (#257): its key opens (it doesn't in a
+   * copy of the database run with another SESSION_SECRET: the boot check, a preview) and its service takes
+   * a connection. The rail draws one that can't as a greyed tile, fetching nothing from it.
+   */
+  async up(row: Pick<ContraptionRow, 'name' | 'port' | 'identity_private'>): Promise<boolean> {
+    if (!unseal(this.key, row.name, row.identity_private)) return false;
+    return new Promise((ok) => {
+      const s = connect({ host: '127.0.0.1', port: row.port, timeout: 500 });
+      const done = (v: boolean) => {
+        s.destroy();
+        ok(v);
+      };
+      s.once('connect', () => done(true)).once('error', () => done(false)).once('timeout', () => done(false));
+    });
   }
 
   /** Whether a contraption is enabled for a person (who isn't disabled in Citadel). Being in its home scheme grants nothing. */

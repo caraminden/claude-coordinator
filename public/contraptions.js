@@ -1,7 +1,8 @@
 // Settings → Contraptions, admins only: register personal apps, edit them, choose who each is
 // enabled for, and rotate their keys (src/routes/contraptions.ts).
-import { api, h, icon, view } from './core.js';
+import { account, api, h, icon, view } from './core.js';
 import { settingsTabs } from './settings.js';
+import { showRail } from './rail.js';
 
 const fail = (err) => alert(err.message);
 const when = (ms) => new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
@@ -54,6 +55,7 @@ function card(c, people, replace) {
             const r = await api(`api/contraptions/${c.name}/people/${u.id}`, { method: 'PUT', body: { enabled: e.target.checked } }).catch(fail);
             if (r) replace(r);
             else e.target.checked = !e.target.checked;
+            if (r && u.id === account?.id) showRail(); // enabling yourself: the rail appears now
           },
         }), u.name))),
     h('details', {}, h('summary', { class: 'small' }, 'Settings'), form));

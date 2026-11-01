@@ -1014,7 +1014,7 @@ a.thread-ref:hover { text-decoration: underline; }
    (back and forward) get there first. The button is wider than the pill it draws. */
 .drawer-handle { display: none; }
 @media (max-width: 800px) {
-  body:has(#app .panels) .drawer-handle {
+  body:has(#app .panels) .drawer-handle, .has-citadel-rail body .drawer-handle.left {
     display: block; position: fixed; top: 50%; z-index: 7; width: 1.1rem; height: 4rem; margin-top: -2rem; padding: 0;
     border: 0; border-radius: 0; background: none; cursor: pointer; -webkit-tap-highlight-color: transparent;
   }

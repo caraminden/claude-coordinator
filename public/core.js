@@ -15,6 +15,7 @@ import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRou
 import { uploadsRunning } from './composer.js';
 import { renderMarkdown } from './markdown.js';
 import { iconSrc } from './schemes.js';
+import { hideRail, showRail } from './rail.js';
 
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
@@ -769,6 +770,7 @@ for (const type of ['pointerover', 'focusin']) {
 
 function renderLogin() {
   view = null;
+  hideRail();
   crumbs.replaceChildren();
   meEl.replaceChildren();
   app.replaceChildren(document.getElementById('login-tpl').content.cloneNode(true));
@@ -834,6 +836,7 @@ export function start(who) {
   connectStream();
   loadPrs();
   route();
+  showRail();
 }
 
 export async function logout() {

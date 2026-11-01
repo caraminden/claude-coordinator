@@ -207,6 +207,16 @@ test('a contraption can set its own cookies, never Citadel\'s session', async ()
   assert.deepEqual(res.headers.getSetCookie(), ['stub=1; Path=/apps/stub/']);
 });
 
+test('the rail: its script is served to contraptions, and lists only what you are enabled for', async () => {
+  const res = await get('/apps/_citadel/rail.js');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type')!, /javascript/);
+  assert.match(await res.text(), /export function railItems/);
+  assert.deepEqual((await (await get('/api/contraptions/mine', asCara())).json()).map((c: { name: string }) => c.name), ['stub']);
+  // Nothing enabled: an empty list, so no rail.
+  assert.deepEqual(await (await get('/api/contraptions/mine', { Cookie: olive.cookie })).json(), []);
+});
+
 test('unknown contraptions are 404 and the bare name gets its slash', async () => {
   assert.equal((await get('/apps/nope/', asCara())).status, 404);
   const res = await get('/apps/stub?a=1', asCara());

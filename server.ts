@@ -629,6 +629,9 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
     if (url.pathname.startsWith('/api/')) {
       await routes(app, req, res, url, auth.session(req));
+    } else if (url.pathname === '/apps/_citadel/rail.js') {
+      // The app rail for contraptions' pages (public/rail.js); no contraption can be called _citadel.
+      await serveStatic(req, res, '/rail.js');
     } else if (url.pathname.startsWith('/apps/')) {
       apps.serve(req, res);
     } else if (preview) {

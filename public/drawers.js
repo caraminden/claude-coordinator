@@ -3,6 +3,10 @@
 // they are hidden until one is pulled out as a drawer over the page, and go back when closed.
 // Slim handles on the edges open them with a tap too, since in a Safari tab the edges belong to the
 // browser's back and forward swipes.
+// With the app rail showing (rail.js), a swipe right past the open overview, or from the left edge of
+// a page without one, slides out the app switcher (Cara, 2026-10-31: "you scroll left past the left
+// panel again on mobile to access the app switcher").
+import { hasRail, openRail } from './rail.js';
 
 export const NARROW = '(max-width: 800px)'; // the mobile layout's breakpoint in style.css
 export const EDGE = 44; // px from the screen edge a swipe has to start in: a thumb's width, not a sliver
@@ -176,9 +180,10 @@ export function initDrawers() {
       touch = { id: t.identifier, x0: t.clientX, y0: t.clientY, dir: drawer.side === 'left' ? -1 : 1, mode: 'wait', from: 1, target: e.target, samples: [] };
       return;
     }
-    const side = edgeSide(t.clientX, window.innerWidth);
-    if (!side || !panelFor(side)) { touch = null; return; }
-    touch = { id: t.identifier, x0: t.clientX, y0: t.clientY, side, dir: side === 'left' ? 1 : -1, mode: 'wait', from: 0, target: e.target, samples: [] };
+    let side = edgeSide(t.clientX, window.innerWidth);
+    if (side === 'left' && !panelFor(side) && hasRail()) side = 'rail';
+    if (!side || (side !== 'rail' && !panelFor(side))) { touch = null; return; }
+    touch = { id: t.identifier, x0: t.clientX, y0: t.clientY, side, dir: side === 'right' ? -1 : 1, mode: 'wait', from: 0, target: e.target, samples: [] };
   }, { passive: true });
 
   document.addEventListener('touchmove', (e) => {
@@ -190,6 +195,9 @@ export function initDrawers() {
     if (touch.mode === 'wait') {
       const kind = classify(dx, dy, touch.dir);
       if (kind === 'wait') return;
+      // Past the overview, or from an edge with none: the app switcher, which slides out by itself.
+      const pastOverview = kind === 'ignore' && drawer?.side === 'left' && hasRail() && classify(dx, dy, 1) === 'swipe';
+      if (pastOverview || (touch.side === 'rail' && kind === 'swipe')) { touch = null; openRail(); return; }
       if (kind === 'ignore' || scrollsSideways(touch.target, touch.dir, drawer?.el ?? document.body)) { touch = null; return; }
       if (!drawer && !mount(touch.side)) { touch = null; return; }
       touch.mode = 'drag';
@@ -230,6 +238,7 @@ export function initDrawers() {
     handle.setAttribute('aria-label', `Open ${LABELS[side].toLowerCase()}`);
     handle.title = LABELS[side];
     handle.addEventListener('click', () => {
+      if (side === 'left' && !drawer && narrow.matches && !panelFor(side) && hasRail()) return openRail();
       if (drawer || !narrow.matches || !mount(side)) return;
       drawer.returnFocus = handle;
       // Let the closed position paint first so the drawer slides in.

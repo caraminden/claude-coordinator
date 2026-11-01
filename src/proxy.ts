@@ -15,7 +15,7 @@ export interface ForwardOptions {
 
 export function forward(req: IncomingMessage, res: ServerResponse, port: number, path: string, headers: OutgoingHttpHeaders, opts: ForwardOptions) {
   const max = opts.maxBody ?? Infinity;
-  if (Number(req.headers['content-length'] ?? 0) > max) return void tooBig(res, max);
+  if (Number(req.headers['content-length'] ?? 0) > max) return void tooBig(req, res, max);
   let ended = false;
   const upstream = request({ host: '127.0.0.1', port, method: req.method, path, headers }, (up) => {
     const out = { ...up.headers };
@@ -41,15 +41,21 @@ export function forward(req: IncomingMessage, res: ServerResponse, port: number,
       ended = true;
       req.unpipe(upstream);
       upstream.destroy();
-      tooBig(res, max);
+      tooBig(req, res, max);
     });
   }
   req.pipe(upstream);
 }
 
-function tooBig(res: ServerResponse, max: number) {
-  if (!res.headersSent) res.writeHead(413, { 'Content-Type': 'text/plain', Connection: 'close' }).end(`Request bodies are limited to ${max / 1024 / 1024} MiB`);
-  else res.destroy();
+function tooBig(req: IncomingMessage, res: ServerResponse, max: number) {
+  if (res.headersSent) return void res.destroy();
+  const text = `Request bodies are limited to ${max / 1024 / 1024} MiB`;
+  res.writeHead(413, { 'Content-Type': 'text/plain', 'Content-Length': Buffer.byteLength(text), Connection: 'close' }).write(text);
+  // Close only once the rest of the body is read: closing with it unread resets the connection, and a client
+  // still sending gets EPIPE instead of this answer. Node's requestTimeout bounds how long that takes.
+  req.resume();
+  if (req.readableEnded) res.end();
+  else req.once('end', () => res.end());
 }
 
 /** A raw HTTP answer on a socket whose request asked for an upgrade, which has no ServerResponse. */

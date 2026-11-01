@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer, request, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
+import { connect } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -200,6 +201,36 @@ test('bodies up to 20 MiB go through; bigger ones are refused', async () => {
   const body = new ReadableStream({ pull: (c) => (sent++ < 21 ? c.enqueue(chunk) : c.close()) });
   const streamed = await get('/apps/stub/upload', asCara(), { method: 'POST', body, duplex: 'half' } as RequestInit).catch((err) => err);
   assert.equal(streamed.status, 413, String(streamed));
+});
+
+/** Upload `total` bytes on a raw socket and read the answer only once all of it is sent, as a busy client may.
+ * Declares the length, or sends it chunked. Resolves with the answer's first line, or the error the socket hit. */
+function uploadThenRead(total: number, declare: boolean) {
+  return new Promise<string>((resolve) => {
+    const socket = connect(Number(new URL(srv.base).port), '127.0.0.1');
+    socket.pause();
+    let got = '';
+    let error = '';
+    socket.on('data', (d) => (got += d));
+    socket.on('error', (err: NodeJS.ErrnoException) => (error = err.code ?? String(err)));
+    socket.on('close', () => resolve(error || got.split('\r\n')[0]));
+    socket.write(`POST /apps/stub/upload HTTP/1.1\r\nHost: x\r\nCookie: ${srv.cookie}\r\n${declare ? `Content-Length: ${total}` : 'Transfer-Encoding: chunked'}\r\n\r\n`);
+    let left = total;
+    const next = () => {
+      if (socket.destroyed) return;
+      if (left === 0) return void (declare ? socket.resume() : socket.write('0\r\n\r\n', () => socket.resume()));
+      const n = Math.min(left, 1024 * 1024);
+      left -= n;
+      const chunk = Buffer.alloc(n);
+      socket.write(declare ? chunk : Buffer.concat([Buffer.from(`${n.toString(16)}\r\n`), chunk, Buffer.from('\r\n')]), next);
+    };
+    next();
+  });
+}
+
+test('a refused upload is read to its end, so a client that reads after sending gets the 413, not a dropped connection', async () => {
+  assert.equal(await uploadThenRead(20 * 1024 * 1024 + 1, true), 'HTTP/1.1 413 Payload Too Large');
+  assert.equal(await uploadThenRead(20 * 1024 * 1024 + 1, false), 'HTTP/1.1 413 Payload Too Large');
 });
 
 test('a contraption can set its own cookies, never Citadel\'s session', async () => {

@@ -46,10 +46,12 @@ function newTicket(state: any = 'pending-deploy', note: string | null = null) {
   return t.id;
 }
 
+/** End the running turn: waits for that turn, not for nothing to run, since a queued one may start right after. */
 async function endTurn(id: number, outcome: 'ok' | 'error') {
+  const live = (runner as any).turns.get(id);
   rmSync(join(root, 'release'), { force: true });
   writeFileSync(join(root, 'release'), outcome);
-  while (runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
+  while ((runner as any).turns.get(id) === live) await new Promise((r) => setTimeout(r, 20));
   rmSync(join(root, 'release'), { force: true });
 }
 

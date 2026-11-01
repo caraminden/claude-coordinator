@@ -834,6 +834,8 @@ export class Runner {
   private lastLimitResume = 0;
   /** When each account error last pushed: one push per error for everyone, not one per minion. */
   private accountPushes = new Map<string, number>();
+  /** Copies a session into the database (src/sessions.ts); tests hold it open to race the next step against it. */
+  saveSession = saveSession;
   /** How often a running turn's stream file is read. */
   pollMs = 250;
   /** Run turns in transient systemd user units, which outlive this server, rather than as its children. */
@@ -1935,7 +1937,7 @@ export class Runner {
     if (!after || !project) return this.next(ticketId);
     // The next turn may run on another person's login, which only has the session once this lands (#250).
     this.saving.add(ticketId);
-    saveSession(this.store, after, project, live.configDir, true)
+    this.saveSession(this.store, after, project, live.configDir, true)
       .catch((err) => console.error(`Saving the session of ticket ${ticketId} failed:`, err))
       .finally(() => {
         this.saving.delete(ticketId);

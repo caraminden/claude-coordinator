@@ -35,6 +35,7 @@ import { peopleRoutes } from './src/routes/people.ts';
 import { Credentials } from './src/credentials.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { contraptionRoutes } from './src/routes/contraptions.ts';
+import { ContraptionTurns } from './src/contraption-turns.ts';
 import { GithubLink } from './src/github-link.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
@@ -191,9 +192,13 @@ runner.placeFor = (person) => {
   return claudeLink.place(user.id) ?? { refused: claudeRefusal(user, (uid) => claudeLink.linked(uid)) ?? `${user.name}'s Claude isn't ready, so this message waits here.` };
 };
 runner.onAuthFailure = (person) => claudeLink.expire(person);
-claudeLink.busy = (container) => runner.inContainer(container);
+// Contraptions' turns (the turn API): on the same Claude a person's minion turns use, never anyone else's.
+const contraptionTurns = new ContraptionTurns(store, contraptions, claudeLink, { dataDir: DATA_DIR, claudeBin: process.env.CLAUDE_BIN ?? 'claude' });
+contraptionTurns.noTurns = PREVIEW;
+claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container);
 const landings = new Landings();
-runner.hostJobs = () => landings.running();
+// Contraption turns run as the server's children: a restart waits for them like landings.
+runner.hostJobs = () => landings.running() + contraptionTurns.running();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = (author, from) => {
   if (from) return store.getTicket(from)?.person_id ?? null;
@@ -604,7 +609,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink, contraptions, landings,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink, contraptions, contraptionTurns, landings,
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {
     return ASSET_VERSION;

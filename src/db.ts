@@ -256,6 +256,31 @@ export interface ContraptionRow {
   created_at: number;
 }
 
+/** A contraption's named session for one person, and the Claude session it resumes. */
+export interface ContraptionSession {
+  contraption_id: number;
+  user_id: number;
+  name: string;
+  claude_session: string;
+  created_at: number;
+  used_at: number;
+}
+
+/** One contraption turn on the usage meter. outcome: 'end' or the error code it ended with. */
+export interface ContraptionTurnRow {
+  id: number;
+  contraption_id: number;
+  user_id: number;
+  session: string;
+  started_at: number;
+  ended_at: number | null;
+  outcome: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+}
+
 /** People's own note on a minion (#146): who last wrote it and when. Never shown to agents. */
 export const PERSON_NOTE_MAX = 200; // public/thread.js keeps the same limit on its input
 export interface PersonNote {
@@ -515,6 +540,32 @@ CREATE TABLE IF NOT EXISTS contraption_users (
   added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   PRIMARY KEY (contraption_id, user_id)
 );
+-- A contraption's named agent chats per person (src/contraption-turns.ts): the Claude session each name
+-- resumes. Only names and ids: the transcript stays in the person's own Claude folder.
+CREATE TABLE IF NOT EXISTS contraption_sessions (
+  contraption_id INTEGER NOT NULL REFERENCES contraptions(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  claude_session TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  used_at INTEGER NOT NULL,
+  PRIMARY KEY (contraption_id, user_id, name)
+);
+-- The usage meter for contraption turns: who, which session, tokens and time. Never a prompt, reply or tool content.
+CREATE TABLE IF NOT EXISTS contraption_turns (
+  id INTEGER PRIMARY KEY,
+  contraption_id INTEGER NOT NULL REFERENCES contraptions(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  outcome TEXT,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  cache_read_tokens INTEGER,
+  cache_write_tokens INTEGER
+);
+CREATE INDEX IF NOT EXISTS contraption_turns_day ON contraption_turns(contraption_id, user_id, started_at);
 `;
 
 /**
@@ -570,7 +621,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 19; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users
+export const SCHEMA_VERSION = 20; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -983,6 +1034,45 @@ export class Store {
   contraptionsFor(userId: number): Pick<ContraptionRow, 'name' | 'title' | 'icon'>[] {
     return this.db.prepare(`SELECT c.name, c.title, c.icon FROM contraptions c JOIN contraption_users cu ON cu.contraption_id = c.id
       JOIN users u ON u.id = cu.user_id WHERE cu.user_id = ? AND u.disabled_at IS NULL ORDER BY c.title COLLATE NOCASE`).all(userId) as unknown as Pick<ContraptionRow, 'name' | 'title' | 'icon'>[];
+  }
+
+  /** A person's named session in a contraption. */
+  contraptionSession(contraptionId: number, userId: number, name: string): ContraptionSession | undefined {
+    return this.db.prepare('SELECT * FROM contraption_sessions WHERE contraption_id = ? AND user_id = ? AND name = ?').get(contraptionId, userId, name) as unknown as ContraptionSession | undefined;
+  }
+
+  contraptionSessions(contraptionId: number, userId: number): ContraptionSession[] {
+    return this.db.prepare('SELECT * FROM contraption_sessions WHERE contraption_id = ? AND user_id = ? ORDER BY used_at DESC').all(contraptionId, userId) as unknown as ContraptionSession[];
+  }
+
+  /** Point a session name at a Claude session (a new one, or the id a resume reported), and mark it used now. */
+  putContraptionSession(contraptionId: number, userId: number, name: string, claudeSession: string) {
+    const now = Date.now();
+    this.db.prepare(`INSERT INTO contraption_sessions (contraption_id, user_id, name, claude_session, created_at, used_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (contraption_id, user_id, name) DO UPDATE SET claude_session = excluded.claude_session, used_at = excluded.used_at`).run(contraptionId, userId, name, claudeSession, now, now);
+  }
+
+  deleteContraptionSession(contraptionId: number, userId: number, name: string): boolean {
+    return this.db.prepare('DELETE FROM contraption_sessions WHERE contraption_id = ? AND user_id = ? AND name = ?').run(contraptionId, userId, name).changes > 0;
+  }
+
+  /** A contraption turn's meter row, at its start (so it counts towards the day's cap at once). */
+  startContraptionTurn(contraptionId: number, userId: number, session: string): number {
+    return Number(this.db.prepare('INSERT INTO contraption_turns (contraption_id, user_id, session, started_at) VALUES (?, ?, ?, ?)').run(contraptionId, userId, session, Date.now()).lastInsertRowid);
+  }
+
+  endContraptionTurn(id: number, outcome: string, usage: { input: number; output: number; cacheRead: number; cacheWrite: number } | null) {
+    this.db.prepare(`UPDATE contraption_turns SET ended_at = ?, outcome = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ? WHERE id = ?`)
+      .run(Date.now(), outcome, usage?.input ?? null, usage?.output ?? null, usage?.cacheRead ?? null, usage?.cacheWrite ?? null, id);
+  }
+
+  getContraptionTurn(id: number): ContraptionTurnRow | undefined {
+    return this.db.prepare('SELECT * FROM contraption_turns WHERE id = ?').get(id) as unknown as ContraptionTurnRow | undefined;
+  }
+
+  /** A person's turns in a contraption since `since` (the start of the server's day, for its turn_cap). */
+  contraptionTurnsSince(contraptionId: number, userId: number, since: number): number {
+    return (this.db.prepare('SELECT count(*) AS n FROM contraption_turns WHERE contraption_id = ? AND user_id = ? AND started_at >= ?').get(contraptionId, userId, since) as { n: number }).n;
   }
 
   /** The schemes this person hid for themselves (#226). */

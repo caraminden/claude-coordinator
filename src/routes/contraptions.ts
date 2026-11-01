@@ -1,10 +1,13 @@
 // Contraptions (src/contraptions.ts): admins register them, edit them, enable them per person and
 // rotate their keys; anyone signed in lists the ones enabled for them, for the app rail; a contraption's
-// own server sends its people's bug reports and feature asks to its home scheme (src/contraption-asks.ts).
+// own server sends its people's bug reports and feature asks to its home scheme (src/contraption-asks.ts)
+// and runs turns for its people through the turn API (src/contraption-turns.ts).
+import type { IncomingMessage } from 'node:http';
 import { ASK_FILES_MAX, askFiles, askMessage, saveAskFiles } from '../contraption-asks.ts';
+import { parseTurn, TurnError } from '../contraption-turns.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 import type { ContraptionRow } from '../db.ts';
-import { HttpError, json, oneOf, readJson, str, type App, type Route } from '../http.ts';
+import { HttpError, json, oneOf, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { projectSharedDir } from '../workspace.ts';
 import { ensureCoordinator } from './projects.ts';
 
@@ -77,7 +80,73 @@ const ASK_LIMIT = 10;
 const ASK_WINDOW_MS = 10 * 60_000;
 const askTimes = new Map<string, number[]>();
 
+/** A turn API route: 'contraption' routes get the calling contraption (src/contraptions.ts caller) as ctx.contraption. */
+const fromContraption = (method: string, path: string, handler: (ctx: Ctx, c: ContraptionRow) => unknown): Route => ({
+  method, path, who: 'contraption', handler: (ctx) => handler(ctx, ctx.contraption),
+});
+
+/** The `person` a sessions call names, who must have the contraption enabled. */
+function enabledPerson(app: App, c: ContraptionRow, url: URL): number {
+  const person = Number(url.searchParams.get('person'));
+  if (!Number.isInteger(person) || person < 1) throw new HttpError(400, 'person must be a person\'s id');
+  if (!app.contraptions.enabled(c.name, person)) throw new HttpError(403, 'not_enabled');
+  return person;
+}
+
+/** Server-sent events, one at a time, unbuffered. */
+function eventStream(req: IncomingMessage, res: Ctx['res']) {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+  req.socket.setNoDelay(true);
+  return (event: string, data: object) => {
+    if (!res.writableEnded && !res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+}
+
 export const contraptionRoutes: Route[] = [
+  fromContraption('POST', '/api/contraptions/turns', async ({ req, res, app }, c) => {
+    const body = await readJson(req, 4_000_000);
+    const emit = eventStream(req, res);
+    // The contraption hung up: stop its turn rather than run it for nobody.
+    let turn: number | null = null;
+    let gone = false;
+    res.on('close', () => {
+      if (res.writableFinished) return;
+      gone = true;
+      if (turn !== null) app.contraptionTurns.cancel(c.id, turn);
+    });
+    try {
+      await app.contraptionTurns.run(c, parseTurn(body, c), (event, data) => {
+        if (event === 'start') {
+          turn = (data as { turn: number }).turn;
+          if (gone) app.contraptionTurns.cancel(c.id, turn);
+        }
+        emit(event, data);
+      });
+    } catch (err) {
+      if (!(err instanceof TurnError)) throw err;
+      emit('error', { code: err.code, message: err.message });
+    }
+    res.end();
+  }),
+  fromContraption('POST', '/api/contraptions/turns/:turn/cancel', ({ res, app, params }, c) => {
+    if (!app.contraptionTurns.cancel(c.id, Number(params.turn))) throw new HttpError(404, 'No such turn running');
+    return json(res, 200, { ok: true });
+  }),
+  fromContraption('GET', '/api/contraptions/sessions', ({ res, app, url }, c) => {
+    return json(res, 200, app.contraptionTurns.sessions(c.id, enabledPerson(app, c, url)));
+  }),
+  fromContraption('DELETE', '/api/contraptions/sessions/:session', ({ res, app, url, params }, c) => {
+    let name: string;
+    try {
+      name = decodeURIComponent(params.session);
+    } catch {
+      throw new HttpError(400, 'Not a session name');
+    }
+    const done = app.contraptionTurns.deleteSession(c, enabledPerson(app, c, url), name);
+    if (done === 'busy') throw new HttpError(409, 'busy');
+    if (done === 'missing') throw new HttpError(404, 'No such session');
+    return json(res, 200, { ok: true });
+  }),
   {
     // The rail's list: the contraptions enabled for you. Empty for most people.
     method: 'GET', path: '/api/contraptions/mine', who: ['person'],

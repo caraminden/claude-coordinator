@@ -1,6 +1,7 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
 import type { ClaudeLink } from './claude-link.ts';
 import type { Contraptions } from './contraptions.ts';
+import type { ContraptionTurns } from './contraption-turns.ts';
 import type { Landings } from './land.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { gzip } from 'node:zlib';
@@ -163,6 +164,8 @@ export interface App {
   claude: ClaudeLink;
   /** Contraptions' keys and who each is enabled for (src/contraptions.ts). */
   contraptions: Contraptions;
+  /** Contraption turns: the turn API's engine (src/contraption-turns.ts). */
+  contraptionTurns: ContraptionTurns;
   /** land.sh runs for container turns' land tool (src/land.ts). */
   landings: Landings;
   /** Open event streams (GET /api/stream), with whose they are. */

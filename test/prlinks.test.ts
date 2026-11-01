@@ -42,3 +42,35 @@ test('prOwners lists every PR and issue number, and a failed issue list leaves t
     process.env.PATH = path;
   }
 });
+
+test('merged and closed PRs of dismissed minions find their owner in each scheme\'s own repo', async () => {
+  // A stand-in gh like GitHub's: without --state all it lists only open PRs. Each repo has its own PRs.
+  const bin = mkdtempSync(join(tmpdir(), 'prlinks-gh-'));
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh
+[ "$1" = pr ] || exit 1
+case "$*" in *"--state all"*) all=1 ;; esac
+case "$*" in
+  *"--repo stub/mandate-like"*) [ -n "$all" ] && echo '[{"number":15,"headRefName":"ticket/24-colours"},{"number":12,"headRefName":"ticket/16-ics"}]' || echo '[]' ;;
+  *"--repo stub/citadel-like"*) [ -n "$all" ] && echo '[{"number":15,"headRefName":"ticket/240-other"}]' || echo '[]' ;;
+  *) exit 1 ;;
+esac
+`);
+  chmodSync(join(bin, 'gh'), 0o755);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    // Mandate #24 merged PR 15 and was dismissed; #16's PR 12 was closed unmerged. Citadel's own PR 15 is #240's.
+    const t = (id: number, number: number, branch: string) => ({ id, number, branch, kind: 'ticket', status: 'closed', title: `t${number}` }) as unknown as Ticket;
+    const tickets: Record<number, Ticket[]> = { 5: [t(422, 24, 'ticket/24-colours'), t(380, 16, 'ticket/16-ics')], 2: [t(500, 240, 'ticket/240-other')] };
+    const repos = await prOwners([
+      { id: 2, name: 'Citadel', repo_url: 'https://github.com/stub/citadel-like' },
+      { id: 5, name: 'Mandate', repo_url: 'https://github.com/stub/mandate-like' },
+    ] as unknown as Project[], (id) => tickets[id]);
+    assert.deepEqual(repos.map((r) => [r.projectId, r.repo, r.prs]), [
+      [2, 'stub/citadel-like', { 15: { id: 500, number: 240, title: 't240' } }],
+      [5, 'stub/mandate-like', { 15: { id: 422, number: 24, title: 't24' }, 12: { id: 380, number: 16, title: 't16' } }],
+    ]);
+  } finally {
+    process.env.PATH = path;
+  }
+});

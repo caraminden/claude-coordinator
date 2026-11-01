@@ -752,7 +752,7 @@ function loadPrs() {
 const prUrlRoute = (href) => prOwnerRoute(prRepos, href, view?.id ?? null);
 /** Where "PR #n" said in scheme `projectId` goes (see prNumberRoute); one not known yet looks again, at most every 5 minutes. */
 function prRefRoute(projectId, n) {
-  const to = prNumberRoute(prList, projectId, n, view?.id ?? null);
+  const to = prNumberRoute(prList, projectId, n);
   if (!to) loadPrs();
   return to;
 }

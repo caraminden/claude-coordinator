@@ -42,7 +42,7 @@ const POSSESSIVE = String.raw`(?:&#39;|'|\u2019)s`;
  * "Delve's minion #68", "Delve minions #5 and #6", "minion #5 in Delve".
  *
  * With `prRoute(projectId, n)` (see prNumberRoute), "PR #186" and "Delve's PR #186" link to the minion
- * owning that PR, or to GitHub when none does. One it can't place becomes a `span.pr-ref` carrying the scheme and number, for
+ * owning that PR, or to GitHub, saying no minion owns it, when none does. One it can't place becomes a `span.pr-ref` carrying the scheme and number, for
  * linkPrRefs to link once a fresher PR list has it; without `prRoute` PR mentions stay plain text.
  */
 export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = [], prRoute = null) {
@@ -172,17 +172,16 @@ export function prOwnerRoute(repos, href, hereId = null) {
 
 /**
  * Where "PR #`number`" (or a "#`number`" that is no minion) said in scheme `projectId` goes: the minion
- * owning that PR of its repo, else the PR or issue on GitHub as { url, title }. Null when the repo has
- * no such number (yet), the scheme no GitHub repo, or `repos` (any list of api/prs entries) hasn't loaded.
+ * owning that PR of its repo, even the one on screen (#272); else the PR, saying no minion owns it, or the
+ * issue on GitHub as { url, title }. Null when the repo has no such number (yet), the scheme no GitHub
+ * repo, or `repos` (any list of api/prs entries) hasn't loaded.
  */
-export function prNumberRoute(repos, projectId, number, hereId = null) {
+export function prNumberRoute(repos, projectId, number) {
   for (const repo of repos?.values() ?? []) {
     if (repo.projectId !== projectId) continue;
-    const kind = repo.pulls?.includes(number) ? 'pull' : repo.issues?.includes(number) ? 'issue' : null;
-    if (kind === 'pull' || repo.prs[number]) return ownerRoute(repo, number, hereId) ?? githubRoute(repo.repo, 'pull', number);
-    return kind ? githubRoute(repo.repo, kind, number) : null;
+    if (repo.prs[number]) return ownerRoute(repo, number, null);
+    if (repo.pulls?.includes(number)) return { url: `https://github.com/${repo.repo}/pull/${number}`, title: `No minion owns this PR: opens ${repo.repo} PR #${number} on GitHub` };
+    return repo.issues?.includes(number) ? { url: `https://github.com/${repo.repo}/issues/${number}`, title: `${repo.repo} issue #${number} on GitHub` } : null;
   }
   return null;
 }
-
-const githubRoute = (repo, kind, number) => ({ url: `https://github.com/${repo}/${kind}/${number}`, title: `${repo} ${kind === 'pull' ? 'PR' : 'issue'} #${number} on GitHub` });

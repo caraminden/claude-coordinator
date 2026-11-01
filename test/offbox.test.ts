@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -72,6 +72,20 @@ test('only the newest state copy goes off-box, and files gone from the backups g
   run('offbox.sh');
   assert.ok(!existsSync(join(offbox, 'coordinator-2000-01-01.db')));
   assert.doesNotMatch(readFileSync(join(offbox, 'SHA256SUMS'), 'utf8'), /2000-01-01/);
+});
+
+test('a backup re-run the same day replaces its off-box copy, and the weekly follows it', () => {
+  const src = join(backups, `coordinator-${day}.db`);
+  const db = new DatabaseSync(src);
+  db.exec("UPDATE projects SET name = 'Renamed'");
+  db.close();
+  utimesSync(src, new Date(), new Date(Date.now() + 60_000));
+  run('offbox.sh');
+  const daily = join(offbox, `coordinator-${day}.db`);
+  assert.ok(readFileSync(daily).includes('Renamed'));
+  const weekly = readdirSync(offbox).find((f) => f.startsWith('coordinator-weekly-'))!;
+  assert.equal(statSync(join(offbox, weekly)).ino, statSync(daily).ino);
+  assert.match(readFileSync(join(offbox, 'SHA256SUMS'), 'utf8'), new RegExp(`${sha(daily)}  coordinator-${day}`));
 });
 
 test('the backup key can list the set and fetch a file from it, and nothing else', () => {

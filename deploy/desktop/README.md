@@ -5,7 +5,10 @@ Each night at 04:00 perigee's `deploy/backup.sh` backs up Citadel, then `deploy/
 
 - the coordinator dailies (7) and weeklies (4), with people's linked GitHub tokens (and any future
   secret kinds) removed from the `credentials` table and the file VACUUMed. Rows for linked Claude accounts
-  stay: they only hold a container name and an email address.
+  stay: they only hold a container name and an email address. Everything else travels as it is: every
+  scheme's chats and minions, people's Citadel password hashes (scrypt), invite and machine token hashes,
+  push subscriptions, and contraption keys sealed under `SESSION_SECRET`, which never leaves perigee.
+  After a restore from this copy, everyone links GitHub again.
 - the newest session-state copy (`state-<day>.db`, about 1.7 GB: minion transcripts, memory, task lists).
 - `SHA256SUMS`, the list the desktop checks every download against.
 
@@ -42,8 +45,9 @@ Run these in **Windows PowerShell** on the desktop.
    ssh -i "$env:USERPROFILE\.ssh\citadel_backup" cara@perigee.tail59477f.ts.net whoami
    ```
 
-   The first prints lines of `<checksum>  <name>.db` (or "No such file" until perigee's first nightly
-   run with this change, at 04:00). The second must say `Usage: list | get <name>`, not `cara`.
+   The first prints lines of `<checksum>  <name>.db`. Until perigee's first nightly run with this change
+   it says "No such file"; to make the set now, run `systemctl --user start claude-coordinator-backup.service`
+   on perigee (a few minutes) and try again. The second must say `Usage: list | get <name>`, not `cara`.
 
 4. Fetch the script with your normal login:
 

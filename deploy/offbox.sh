@@ -8,7 +8,7 @@
 # - only the newest state-<day>.db, as a hard link (claude_state holds transcripts, memory and task
 #   lists, no logins).
 # - SHA256SUMS, the list the desktop reads and checks each download against.
-# Safe to run again: copies already made are kept, files gone from backups go here too.
+# Safe to run again: copies already made are kept unless their backup is newer, files gone from backups go here too.
 set -euo pipefail
 umask 077
 
@@ -46,7 +46,7 @@ want=()
 for f in "$SRC"/coordinator-[0-9]*.db; do
   name=$(basename "$f")
   want+=("$name")
-  [[ -e $OUT/$name ]] || strip "$f" "$OUT/$name"
+  [[ $OUT/$name -nt $f ]] || strip "$f" "$OUT/$name" # a backup re-run the same day gets stripped again
 done
 
 # A weekly is a hard link to one of the dailies; link it to that daily's stripped copy. Once the daily

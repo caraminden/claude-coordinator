@@ -51,7 +51,8 @@ try {
     if ($name -notmatch $daily -and $name -notmatch $weekly -and $name -notmatch $state) { Log "Skipping unexpected name $name"; continue }
     $offered++
     $target = Join-Path $Dest $name
-    if (Test-Path -LiteralPath $target) { continue }
+    # Same name, other checksum: perigee re-ran its backup that day, so fetch it again.
+    if ((Test-Path -LiteralPath $target) -and (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash.ToLower() -eq $hash) { continue }
     $part = "$target.part"
     # Copy ssh's stdout stream straight to the file: PowerShell pipes and Start-Process's redirect both
     # treat it as text and change the bytes.

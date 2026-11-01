@@ -37,6 +37,9 @@ export interface IdentityClaims {
   name: string;
   iat: number;
   exp: number;
+  /** On a relayed call (src/relay.ts): the contraption calling for the person, and its title. */
+  from?: string;
+  fromTitle?: string;
 }
 
 const keyHash = (key: string) => createHash('sha256').update(key).digest('hex');
@@ -115,13 +118,17 @@ export class Contraptions {
     };
   }
 
-  /** The X-Citadel-Identity header for a person, or null when there's no such contraption or its key doesn't open (SESSION_SECRET changed: Rotate). */
-  signIdentity(name: string, person: Pick<User, 'id' | 'login' | 'name'>, now = Date.now()): string | null {
+  /**
+   * The X-Citadel-Identity header for a person, or null when there's no such contraption or its key doesn't
+   * open (SESSION_SECRET changed: Rotate). `via` names the contraption calling for them through the relay.
+   */
+  signIdentity(name: string, person: Pick<User, 'id' | 'login' | 'name'>, via?: Pick<ContraptionRow, 'name' | 'title'>, now = Date.now()): string | null {
     const row = this.store.getContraption(name);
     const pem = row && unseal(this.key, name, row.identity_private);
     if (!pem) return null;
     const iat = Math.floor(now / 1000);
     const claims: IdentityClaims = { app: name, sub: person.id, login: person.login, name: person.name, iat, exp: iat + IDENTITY_TTL };
+    if (via) Object.assign(claims, { from: via.name, fromTitle: via.title });
     const part = Buffer.from(JSON.stringify(claims)).toString('base64url');
     return `v1.${part}.${sign(null, Buffer.from(`v1.${part}`), createPrivateKey(pem)).toString('base64url')}`;
   }

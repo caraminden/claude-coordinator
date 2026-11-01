@@ -9,6 +9,7 @@ import { AGENT_NAME } from '../auth.ts';
 import { ASK_FILES_MAX, askFiles, askMessage, saveAskFiles } from '../contraption-asks.ts';
 import { parseTurn, TurnError } from '../contraption-turns.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
+import { relay } from '../relay.ts';
 import type { ContraptionRow } from '../db.ts';
 import { HttpError, json, oneOf, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
@@ -16,12 +17,13 @@ import { projectSharedDir } from '../workspace.ts';
 import { ensureCoordinator } from './projects.ts';
 
 // Names the turn API (section 4) and the rail take under /api/contraptions/.
-const RESERVED = new Set(['mine', 'turns', 'sessions', 'asks']);
+const RESERVED = new Set(['mine', 'turns', 'sessions', 'asks', 'relay']);
 
 /** A contraption as Settings → Contraptions shows it: never a key. */
 function view(app: App, c: ContraptionRow) {
   return {
     name: c.name, title: c.title, icon: c.icon, port: c.port, home_scheme: c.home_scheme, open_paths: JSON.parse(c.open_paths) as string[],
+    relay_paths: JSON.parse(c.relay_paths) as string[],
     default_model: c.default_model, turn_cap: c.turn_cap, keys_at: c.keys_at, keys_dir: app.contraptions.folder(c.name),
     people: app.store.contraptionUsers(c.id),
     logins: app.store.contraptionUsers(c.id).map((id) => app.store.getUser(id)?.login).filter(Boolean),
@@ -65,9 +67,10 @@ function fields(app: App, body: any, creating: boolean) {
     if (id !== null && !app.store.getProject(id)) throw new HttpError(400, 'No such scheme');
     out.home_scheme = id;
   }
-  if (body.open_paths !== undefined) {
-    if (!Array.isArray(body.open_paths) || body.open_paths.length > 20) throw new HttpError(400, 'Open paths must be a list of at most 20 paths');
-    out.open_paths = JSON.stringify(body.open_paths.map((p: unknown) => path(p, 'An open path')));
+  for (const [key, list, one] of [['open_paths', 'Open paths', 'An open path'], ['relay_paths', 'Relay paths', 'A relay path']] as const) {
+    if (body[key] === undefined) continue;
+    if (!Array.isArray(body[key]) || body[key].length > 20) throw new HttpError(400, `${list} must be a list of at most 20 paths`);
+    out[key] = JSON.stringify(body[key].map((p: unknown) => path(p, one)));
   }
   if (body.default_model !== undefined) {
     const m = body.default_model;
@@ -125,6 +128,8 @@ function eventStream(req: IncomingMessage, res: Ctx['res']) {
 }
 
 export const contraptionRoutes: Route[] = [
+  // First, so a relayed path like /people/5 never reads as an admin route on a contraption called relay (reserved anyway).
+  { method: ['GET', 'PUT', 'POST', 'DELETE'], path: '/api/contraptions/relay/:to/*rest', who: 'contraption', handler: (ctx) => relay(ctx, ctx.contraption) },
   fromContraption('POST', '/api/contraptions/turns', async ({ req, res, app }, c) => {
     const body = await readJson(req, 4_000_000);
     const emit = eventStream(req, res);
@@ -186,7 +191,7 @@ export const contraptionRoutes: Route[] = [
       if (app.store.getContraption(name)) throw new HttpError(409, `There is already a contraption called ${name}`);
       const f = fields(app, body, true);
       const c = app.contraptions.register({
-        name, title: f.title!, port: f.port!, icon: f.icon ?? null, home_scheme: f.home_scheme ?? null, open_paths: f.open_paths ?? '[]',
+        name, title: f.title!, port: f.port!, icon: f.icon ?? null, home_scheme: f.home_scheme ?? null, open_paths: f.open_paths ?? '[]', relay_paths: f.relay_paths ?? '[]',
         default_model: f.default_model ?? null, turn_cap: f.turn_cap ?? null,
       });
       return json(res, 201, view(app, c));

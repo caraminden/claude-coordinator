@@ -129,7 +129,7 @@ test('Citadel\'s Taskmaster registers and enables a contraption just as Settings
   noKeys(rot.text, 'mandate');
 
   const list = await tool(CitadelTM, 'list_contraptions');
-  assert.match(list.text, /^mandate: Mandate! \| port 7341 \| icon \/icons\/icon\.svg \| model haiku \| open paths none \| home scheme 2 \| turn cap 50 \| enabled for cara \| key folder /m);
+  assert.match(list.text, /^mandate: Mandate! \| port 7341 \| icon \/icons\/icon\.svg \| model haiku \| open paths none \| relay paths none \| home scheme 2 \| turn cap 50 \| enabled for cara \| key folder /m);
   assert.match(list.text, /^twin: Mandate/m);
   noKeys(list.text, 'mandate');
   noKeys(list.text, 'twin');

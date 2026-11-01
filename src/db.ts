@@ -240,7 +240,7 @@ export interface SavedView {
   created_at: number;
 }
 
-/** A contraption's row (src/contraptions.ts). open_paths is a JSON array of paths. */
+/** A contraption's row (src/contraptions.ts). open_paths and relay_paths are JSON arrays of paths. */
 export interface ContraptionRow {
   id: number;
   name: string;
@@ -249,6 +249,8 @@ export interface ContraptionRow {
   port: number;
   home_scheme: number | null;
   open_paths: string;
+  /** Path prefixes other contraptions may call for a person through the relay (src/relay.ts). */
+  relay_paths: string;
   default_model: string | null;
   turn_cap: number | null;
   identity_public: string;
@@ -617,6 +619,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
   ['machines', 'workspace_tools', 'ALTER TABLE machines ADD COLUMN workspace_tools INTEGER NOT NULL DEFAULT 0'],
+  ['contraptions', 'relay_paths', "ALTER TABLE contraptions ADD COLUMN relay_paths TEXT NOT NULL DEFAULT '[]'"],
   ['push_subscriptions', 'only_pinned', 'ALTER TABLE push_subscriptions ADD COLUMN only_pinned INTEGER NOT NULL DEFAULT 0'],
 ];
 
@@ -625,7 +628,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 21; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill
+export const SCHEMA_VERSION = 22; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".

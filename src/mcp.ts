@@ -478,6 +478,10 @@ const CONTRAPTION_FIELDS = {
   icon: { type: ['string', 'null'], description: 'Its icon, a path on its service starting with /, like /icons/icon.svg.' },
   default_model: { type: ['string', 'null'], description: 'The model its turns use unless it names one, like haiku.' },
   open_paths: { type: 'array', items: { type: 'string' }, description: 'Paths on its service anyone may open without signing in (at most 20), like /link.' },
+  relay_paths: {
+    type: 'array', items: { type: 'string' },
+    description: "Path prefixes other contraptions may call on it for a person, through Citadel's relay (at most 20), like /app-api/. Empty: none. List a path only once its code checks the `from` claim, or it takes a relayed call as the person acting in its own UI.",
+  },
   home_scheme: { type: ['integer', 'null'], description: "The id of the scheme its people's bug reports and feature asks go to." },
   turn_cap: { type: ['integer', 'null'], description: 'Most turns a day across its people; null for no cap.' },
 };
@@ -527,6 +531,7 @@ function contraptionText(c: any): string {
     `icon ${c.icon ?? 'none'}`,
     `model ${c.default_model ?? 'default'}`,
     `open paths ${c.open_paths.length ? c.open_paths.join(', ') : 'none'}`,
+    `relay paths ${c.relay_paths.length ? c.relay_paths.join(', ') : 'none'}`,
     `home scheme ${c.home_scheme ?? 'none'}`,
     `turn cap ${c.turn_cap ?? 'none'}`,
     `enabled for ${c.logins.length ? c.logins.join(', ') : 'nobody'}`,

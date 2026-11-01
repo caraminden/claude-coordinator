@@ -22,6 +22,7 @@ function card(c, people, replace) {
     field('Default model', 'default_model', c.default_model, { placeholder: 'haiku' }),
     field('Turns per person per day', 'turn_cap', c.turn_cap, { type: 'number', min: 1, placeholder: 'no cap' }),
     field('Open paths (no login)', 'open_paths', c.open_paths.join(', '), { placeholder: '/link', wide: true }),
+    field('Relay paths (apps may call)', 'relay_paths', c.relay_paths.join(', '), { placeholder: '/app-api/', wide: true, title: 'Path prefixes other contraptions may call for a person. Their code must check the from claim.' }),
     h('button', { type: 'submit' }, 'Save'), status);
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -31,6 +32,7 @@ function card(c, people, replace) {
       replace(await api(`api/contraptions/${c.name}`, { method: 'PATCH', body: {
         ...v, port: Number(v.port), home_scheme: v.home_scheme ? Number(v.home_scheme) : null,
         open_paths: v.open_paths.split(/[\s,]+/).filter(Boolean),
+        relay_paths: v.relay_paths.split(/[\s,]+/).filter(Boolean),
       } }));
     } catch (err) {
       status.textContent = err.message;

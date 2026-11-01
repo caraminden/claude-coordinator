@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { Runner } from '../src/runner.ts';
 import { type Chain, LiveWaiters, mergedPr, mergedPrOf, type PrMerge } from '../src/wake.ts';
 import { bootServer } from './helpers.ts';
 
@@ -188,6 +189,7 @@ test('a leader dismissed without its work merged holds the chain and tells peopl
   assert.equal(w.check(), 0);
   assert.equal(held.length, 1, 'told once');
   assert.equal(w.follow(leader.id, 'merged').state, 'unshipped', 'nothing new can chain on it');
+  assert.match(w.heldFor(follower)!, /^#\d+ T's work is merged, and #\d+ T was dismissed without it, so only Start now starts you$/);
 
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
   assert.equal(w.check(), 1);
@@ -375,6 +377,36 @@ test('a dismissed follower is dropped; release hands back the held brief once', 
   assert.equal(started.length, 0);
 });
 
+test('a turn answering a parked minion ends with it parked as before, whatever state the turn set', async () => {
+  const fake = join(root, 'claude-slow');
+  writeFileSync(fake, `#!${process.execPath}
+require('node:readline').createInterface({ input: process.stdin }).once('line', () => setTimeout(() => {
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'answered' }));
+  process.exit(0);
+}, 300));
+`);
+  chmodSync(fake, 0o755);
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  runner.heldFor = (id) => (id === t.id ? "#1 Leader's work is merged" : null);
+  const t = store.createTicket({ project_id: citadel.id, title: 'Parked', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(t.id, root, null);
+  store.updateTicket(t.id, { status: 'idle', state: 'parked', note: 'starts when #1 is merged' });
+  runner.send(t.id, 'Cara', 'what is this?');
+  for (let i = 0; store.getTicket(t.id)!.status !== 'running'; i++) {
+    assert.ok(i < 250, 'the turn starts');
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.equal(store.getTicket(t.id)!.state, 'parked', 'kept through the turn');
+  store.updateTicket(t.id, { state: 'ready', note: 'answered' }); // as the minion's set_thread_status would
+  for (let i = 0; store.getTicket(t.id)!.status === 'running'; i++) {
+    assert.ok(i < 500, 'the turn ends');
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  const after = store.getTicket(t.id)!;
+  assert.equal(after.status, 'idle');
+  assert.deepEqual([after.state, after.note], ['parked', 'starts when #1 is merged']);
+});
+
 test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or Start now starts it, a message only gets an answer; a brief is marked as one', async () => {
   const { base, cookie, proc } = await bootServer({ root });
   procs.push(proc);
@@ -425,17 +457,17 @@ test('through the server: start_after parks the minion with its brief held; the 
   // with its brief held (Cara, 2026-11-01: "Answer, keep it parked"); Start now starts it, brief and all.
   const later = (await create('Later', { start_after: next.data.number })).data;
   assert.equal(later.note, `starts when #${next.data.number} is live`);
-  assert.equal(later.held, `#${next.data.number} Next's work is live`);
+  assert.equal(later.parked_for, `#${next.data.number} Next's work is live`);
   assert.equal((await call(`/api/tickets/${leader.id}/start`, {})).status, 409, 'only a parked chained minion starts early');
   await call(`/api/tickets/${later.id}/messages`, { text: 'what is this?' });
   assert.deepEqual(await said(later.id), ['what is this?'], 'its brief is still held');
   await idle(later.id);
   const parked = (await call(`/api/tickets/${later.id}`)).data.ticket;
   assert.equal(parked.state, 'parked', 'its turn left it parked');
-  assert.equal(parked.held, `#${next.data.number} Next's work is live`);
+  assert.equal(parked.parked_for, `#${next.data.number} Next's work is live`);
   const started = await call(`/api/tickets/${later.id}/start`, {});
   assert.equal(started.status, 200);
-  assert.equal(started.data.held, null);
+  assert.equal(started.data.parked_for, null);
   assert.deepEqual(await said(later.id), ['what is this?', 'brief for Later']);
   assert.deepEqual(await briefs(later.id), [false, true]);
   assert.equal((await call(`/api/tickets/${later.id}/start`, {})).status, 409, 'started once');

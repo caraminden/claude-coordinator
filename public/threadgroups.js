@@ -6,7 +6,7 @@
 // Parked threads leave their build or group for one Parked section at the bottom (above Dismissed).
 
 /** Parked and resting there: a running, stuck or approval-waiting thread shows where it would otherwise. */
-const isParked = (t) => t.state === 'parked' && !t.approvals && !['running', 'error'].includes(t.status) && (t.status !== 'new' || !!t.held);
+const isParked = (t) => t.state === 'parked' && !t.approvals && !['running', 'error'].includes(t.status) && (t.status !== 'new' || !!t.parked_for);
 
 /**
  * [{ key, build?, current?, type?, group?, rows }] for open threads, empty sections left out. `types` are

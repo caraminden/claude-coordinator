@@ -592,7 +592,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     'Each user message starts with the sender\'s name in brackets, like "[Cara]: ...".',
     where,
     // Parked on start_after (#261): a message gets an answer, and the work waits for its brief.
-    ...(held ? [`You are parked: your brief is held until ${held}, and arrives by itself then. Answer the message you got without starting the work; Start now on your page (or the Taskmaster's message_ticket with start_now) starts you early. End the turn with state parked and your note as it is.`] : []),
+    ...(held ? [`You are parked: your brief is held until ${held}. Answer the message you got without starting the work; Start now on your page (or the Taskmaster's message_ticket with start_now) starts you with your brief. End the turn with the state and note you have now.`] : []),
     'People follow your work through a progress readout ("Running tests… 3/7") built from your task list, so for anything beyond a quick answer, plan the work with TaskCreate before starting it:',
     '- Make 3 to 7 tasks that are conceptual chunks someone skimming would follow ("Find where the sidebar text comes from", "Make the readout show phases", "Test it on a copy"), not individual commands.',
     '- Give each a one-sentence description of what it involves and why, and a short activeForm ("Finding where the sidebar text comes from").',
@@ -832,6 +832,8 @@ export class Runner {
   private progress = new Map<number, ReturnType<typeof createProgress>>();
   /** The minion whose relayed message started each ticket's current turn, when a relay came before any person's message. */
   private turnFrom = new Map<number, number>();
+  /** A parked minion's state and note when a turn answering a message started: put back at its end, while still parked (#261). */
+  private parkedAs = new Map<number, { state: string | null; note: string | null }>();
   private store: Store;
   private broadcast: Broadcast;
   private claudeBin: string;
@@ -981,7 +983,7 @@ export class Runner {
       limit_resume_at: this.limitWait(ticket.id)?.at ?? null,
       approvals: this.approvals.waiting(ticket.id),
       // Parked on start_after: what it waits for, for Start now.
-      held: this.heldFor(ticket.id),
+      parked_for: this.heldFor(ticket.id),
       // When its oldest question or plan card still waiting on a person was posted.
       pending_card_at: ticket.status === 'closed' ? null : this.store.openCardAt(ticket.id),
       properties: this.store.props.forTarget('minion', ticket.id),
@@ -1771,7 +1773,8 @@ export class Runner {
     // sets another state or a person wrote to it (personWrote).
     // A limited minion's note is the server's, about the wait this turn ends.
     // A minion parked on start_after stays parked through a turn that answers a message (#261).
-    if (ticket.state && ticket.state !== 'pending-deploy' && !this.heldFor(ticket.id)) this.store.updateTicket(ticket.id, ticket.state === 'limited' ? { state: null, note: null } : { state: null });
+    if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, { state: ticket.state, note: ticket.note });
+    else if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, ticket.state === 'limited' ? { state: null, note: null } : { state: null });
     this.cancelLimitWait(ticket.id);
     // One-tap replies answer the turn that offered them; a new turn makes them stale.
     if (ticket.replies) this.store.updateTicket(ticket.id, { replies: null });
@@ -2003,6 +2006,10 @@ export class Runner {
       const usage = turn?.container && turn.person ? this.store.getSetting<Usage>(usageKey(turn.person)) : this.usage;
       this.turnFailed(ticketId, killed || resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0, usage);
     }
+    // Still parked after answering: the row stays parked, whatever state the turn set. A failed turn keeps its error note.
+    const parkedAs = this.parkedAs.get(ticketId);
+    this.parkedAs.delete(ticketId);
+    if (parkedAs && status !== 'error' && this.heldFor(ticketId)) this.store.updateTicket(ticketId, parkedAs);
     const closing = this.closing.has(ticketId);
     const reason = this.closing.get(ticketId);
     this.closing.delete(ticketId);

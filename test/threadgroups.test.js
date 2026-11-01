@@ -36,7 +36,7 @@ test('parked minions leave their build or type for a Parked section at the botto
 
 test('a minion parked on start_after counts as parked before it ever runs; a new one without a chain does not (#261)', () => {
   assert.deepEqual(shape([
-    m(1, 'bug', { state: 'parked', status: 'new', held: "#3 Leader's work is merged" }), m(2, 'bug', { state: 'parked', status: 'new' }),
+    m(1, 'bug', { state: 'parked', status: 'new', parked_for: "#3 Leader's work is merged" }), m(2, 'bug', { state: 'parked', status: 'new' }),
   ]), [['bug', false, [2]], ['parked', false, [1]]]);
 });
 

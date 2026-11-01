@@ -236,7 +236,7 @@ waiters.hold = (c, why) => {
   const t = store.getTicket(c.ticket);
   if (!t) return;
   const leader = store.getTicket(c.after);
-  store.updateTicket(c.ticket, { state: 'blocked', note: `#${leader?.number ?? c.after} didn't ship: message it to start, or dismiss` });
+  store.updateTicket(c.ticket, { state: 'blocked', note: `#${leader?.number ?? c.after} didn't ship: Start now, or dismiss` });
   runner.emit(c.ticket, 'note', { text: `${why}, so this minion hasn't started. Start now starts it with its brief; or dismiss it.` });
   runner.broadcastTicket(c.ticket);
   notify(c.ticket, { kind: 'state', state: 'blocked', note: `${why}, so this one is held` });

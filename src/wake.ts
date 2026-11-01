@@ -258,7 +258,9 @@ export class LiveWaiters {
   heldFor(ticket: number): string | null {
     const c = this.chains().find((o) => o.ticket === ticket);
     const leader = c && this.store.getTicket(c.after);
-    return c ? `#${leader?.number ?? c.after} ${leader?.title ?? ''}'s work is ${c.when}` : null;
+    if (!c) return null;
+    const who = `#${leader?.number ?? c.after} ${leader?.title ?? ''}`;
+    return c.held ? `${who}'s work is ${c.when}, and ${who} was dismissed without it, so only Start now starts you` : `${who}'s work is ${c.when}`;
   }
 
   /** Take `ticket`'s held brief out of the chain (someone started it early), or null. */

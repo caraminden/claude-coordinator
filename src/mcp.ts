@@ -924,9 +924,10 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'message_ticket': {
       const ticketId = await id(args);
-      if (args.start_now === true) await call('POST', `/api/tickets/${ticketId}/start`, {});
+      // Already started (its leader just shipped) or never parked: say so, and deliver the message anyway.
+      const early = args.start_now === true ? await call('POST', `/api/tickets/${ticketId}/start`, {}).then(() => 'Started early, its brief first. ', (e) => `Not started early: ${e.message}. `) : '';
       const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text });
-      return t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
+      return early + (t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`);
     }
     case 'message_taskmaster': {
       const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, text: args.text });

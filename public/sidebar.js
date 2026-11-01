@@ -310,7 +310,7 @@ export function rowState(t) {
   const waited = (word) => `${word} ${shortAgo(t.updated_at)}`;
   if (t.approvals) return { rank: 0, fam: 'you', cell: waited('approve'), label: 'Waiting for your approval' };
   // A minion parked on start_after is new (it hasn't run) but not working (#261).
-  if (t.status === 'running' || (t.status === 'new' && !t.held)) return { rank: 1, fam: 'work', cell: [h('i', { class: 'pulse' }), steps.trim() || 'working'], counted: !!steps, label: 'Claude is working' };
+  if (t.status === 'running' || (t.status === 'new' && !t.parked_for)) return { rank: 1, fam: 'work', cell: [h('i', { class: 'pulse' }), steps.trim() || 'working'], counted: !!steps, label: 'Claude is working' };
   if (t.status === 'error' && t.state === 'limited') return limitState(t, waited);
   if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited('stuck'), label: 'Stuck: the last turn failed' };
   if (t.status === 'closed') return { rank: 5, fam: 'idle', cell: 'dismissed', label: 'Dismissed' };

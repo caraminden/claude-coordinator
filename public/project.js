@@ -11,6 +11,7 @@ import { renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { schedulesButton, showSchedules } from './schedules.js';
 import { replaceHash } from './navstack.js';
 import { accountPage, membersPage, peoplePage } from './people.js';
+import { contraptionsPage } from './contraptions.js';
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 export async function showTicket(ticketId) {
@@ -34,6 +35,7 @@ function renderCrumbs(main) {
       : main.kind === 'properties' ? [projectLink, ' / ', settingsLink, ' / ', 'Properties']
       : main.kind === 'members' ? [projectLink, ' / ', settingsLink, ' / ', 'Members']
       : main.kind === 'people' ? [projectLink, ' / ', settingsLink, ' / ', 'People']
+      : main.kind === 'contraptions' ? [projectLink, ' / ', settingsLink, ' / ', 'Contraptions']
       : main.kind === 'account' ? [projectLink, ' / ', settingsLink, ' / ', 'Your account']
       : main.kind === 'machines' ? [projectLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
@@ -134,6 +136,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'properties' ? propertiesPage()
     : main.kind === 'members' ? membersPage()
     : main.kind === 'people' ? peoplePage()
+    : main.kind === 'contraptions' ? contraptionsPage()
     : main.kind === 'account' ? accountPage()
     : main.kind === 'machines' ? machinesPage()
     : main.kind === 'sharedList' ? sharedList()

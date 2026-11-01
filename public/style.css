@@ -1241,6 +1241,12 @@ dialog.viewer .composer .picker { display: none; }
 .person-row button { padding: 0.2rem 0.6rem; font-size: 0.82em; }
 .person-row .person-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
 .people-add { margin-top: 0.5rem; }
+.contraption-list { display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
+.contraption .row { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+.contraption-people { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; align-items: center; margin: 0.5rem 0; }
+.contraption-people .turns-toggle { display: inline-flex; gap: 0.3rem; align-items: center; margin: 0; }
+.contraption-people .turns-toggle input { width: auto; margin: 0; }
+.contraption details > summary { cursor: pointer; padding: 0.2rem 0; }
 .people-add[hidden] { display: none; }
 .people-add select { width: auto; flex: 1; max-width: 20rem; }
 .account-form { display: flex; flex-direction: column; gap: 0.5rem; max-width: 24rem; margin-top: 1rem; }

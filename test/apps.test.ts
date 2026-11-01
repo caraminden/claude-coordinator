@@ -31,6 +31,11 @@ const stub = createServer((req: IncomingMessage, res: ServerResponse) => {
     release = () => res.end('data: two\n\n');
     return;
   }
+  if (path === '/apps/stub/drop') {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write('data: one\n\n');
+    return void setTimeout(() => res.socket!.destroy(), 100);
+  }
   if (path === '/apps/stub/cookie') res.setHeader('Set-Cookie', ['cc_session=forged; Path=/', 'stub=1; Path=/apps/stub/']);
   let size = 0;
   req.on('data', (c) => (size += c.length));
@@ -51,6 +56,14 @@ const get = (path: string, headers: Record<string, string> = {}, init: RequestIn
 const asCara = (h: Record<string, string> = {}) => ({ Cookie: srv.cookie, ...h });
 const enable = (id: number, enabled: boolean) => srv.call(`/api/contraptions/stub/people/${id}`, { enabled }, 'PUT');
 const lastSeen = () => seen.at(-1)!;
+/** Whether a stream ends (or fails) within ms, reading past whatever else arrives. */
+const ends = async (reader: ReadableStreamDefaultReader<Uint8Array>, ms: number) => {
+  const timeout = new Promise<'open'>((r) => setTimeout(() => r('open'), ms).unref());
+  for (;;) {
+    const r = await Promise.race([reader.read().then((x) => x.done, () => true), timeout]);
+    if (r !== false) return r === true;
+  }
+};
 const citadelHeaders = (h: IncomingHttpHeaders) => Object.keys(h).filter((k) => k.startsWith('x-citadel-') && k !== 'x-citadel-identity');
 
 before(async () => {
@@ -168,13 +181,25 @@ test('event streams arrive event by event', async () => {
   assert.equal(new TextDecoder().decode((await reader.read()).value), 'data: two\n\n');
 });
 
-test('bodies up to 20 MiB go through; bigger ones are refused before the contraption sees them', async () => {
+test('a stream the contraption drops ends for the browser too, so it reconnects', async () => {
+  const reader = (await get('/apps/stub/drop', asCara())).body!.getReader();
+  await reader.read();
+  assert.equal(await ends(reader, 3000), true);
+});
+
+test('bodies up to 20 MiB go through; bigger ones are refused', async () => {
   const ok = await get('/apps/stub/upload', asCara(), { method: 'POST', body: Buffer.alloc(20 * 1024 * 1024) });
   assert.equal((await ok.json()).size, 20 * 1024 * 1024);
   const n = seen.length;
   const big = await get('/apps/stub/upload', asCara(), { method: 'POST', body: Buffer.alloc(20 * 1024 * 1024 + 1) });
   assert.equal(big.status, 413);
   assert.equal(seen.length, n);
+  // A streamed body says no length up front, so it is counted as it comes and cut off at the limit.
+  const chunk = new Uint8Array(1024 * 1024);
+  let sent = 0;
+  const body = new ReadableStream({ pull: (c) => (sent++ < 21 ? c.enqueue(chunk) : c.close()) });
+  const streamed = await get('/apps/stub/upload', asCara(), { method: 'POST', body, duplex: 'half' } as RequestInit).catch((err) => err);
+  assert.equal(streamed.status, 413, String(streamed));
 });
 
 test('a contraption can set its own cookies, never Citadel\'s session', async () => {
@@ -203,7 +228,7 @@ test('disabling someone refuses their next request and ends the streams and webs
   ws.on('error', () => {});
   assert.equal((await enable(cara, false)).status, 200);
   assert.equal((await get('/apps/stub/hello', asCara())).status, 403);
-  await until('the open stream ends', () => reader.read().then((r) => r.done, () => true), 10_000);
+  assert.equal(await ends(reader, 10_000), true, 'the open stream ends');
   await until('the open websocket closes', () => wsClosed, 10_000);
   await enable(cara, true);
 });

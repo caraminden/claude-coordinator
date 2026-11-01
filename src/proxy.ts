@@ -24,6 +24,8 @@ export function forward(req: IncomingMessage, res: ServerResponse, port: number,
     // An event stream's headers go out now, not with its first event.
     res.flushHeaders();
     up.pipe(res);
+    // The service dropped its answer part way (a restart): end the browser's too, so an EventSource reconnects.
+    up.on('close', () => up.complete || res.destroy());
   });
   upstream.on('error', () => {
     if (ended) return;

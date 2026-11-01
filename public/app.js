@@ -15,8 +15,13 @@ new ResizeObserver(() => {
   const r = topbar.getBoundingClientRect();
   document.documentElement.style.setProperty('--topbar-h', `${r.width > r.height ? r.height : 0}px`);
 }).observe(topbar);
-// Phones: edge swipes pull out the overview (left) and threads (right) panels as drawers.
-initDrawers();
+// Phones: edge swipes pull out the overview (left) and threads (right) panels as drawers. Views redraw
+// the panels, so they're found afresh each time; the chat (the split's last child) is held still.
+initDrawers({
+  left: { el: () => document.querySelector('#app .panels > .shelf'), label: 'Overview' },
+  right: { el: () => document.querySelector('#app .panels > .sidebar'), label: 'Minions' },
+  main: () => [document.querySelector('#app .split > :not(.panels)'), topbar],
+});
 // Phones: a refresh button at the top of the screen, since an installed app has no browser reload.
 // It lives in the top bar and, on pages that hide the top bar, in the first thread bar: just before
 // ‹ › × where it has them, else after the title. Thread bars are rebuilt often, so it is put back after each change.

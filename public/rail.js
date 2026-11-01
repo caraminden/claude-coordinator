@@ -1,9 +1,10 @@
 // The app rail (#238): Citadel and the contraptions enabled for you, as icons down the left edge,
 // drawn only when you have at least one (Cara, 2026-11-01: "B · An app rail on the left edge", "Only
 // shows if you have an app enabled"). Wide screens: a fixed column with the page moved right of it.
-// Phones: hidden, and slid out as a list by a swipe right past the left panel (drawers.js in Citadel;
-// a left-edge swipe or its handle in a contraption). A contraption with its own page stack can place
-// it instead (mountRail): an icon column where the slot is narrow, a list where it's wide.
+// Phones: hidden, and slid out as a list by a swipe right past the left drawer (drawers.js, in Citadel
+// and in a contraption that uses it), else a left-edge swipe or its handle in a contraption. A
+// contraption can place it instead (mountRail): an icon column where the slot is narrow, a list where
+// it's wide; a slot hidden on a phone leaves the switcher to slide out as above.
 // Citadel imports this; a contraption's page loads it as /apps/_citadel/rail.js, which draws the rail
 // by itself. What a contraption includes and leaves free: shared/project/specs/contraptions/app-rail.md.
 // Standalone on purpose (no imports, its own styles), since contraptions load it from outside Citadel's pages.
@@ -35,14 +36,30 @@ let handle = null;
 let shown = 0; // bumped by each show and hide, so a fetch that finishes after signing out draws nothing
 let opener = null; // where focus was before the switcher opened
 let slot = null; // the contraption's own container for it (mountRail), else it is fixed to the left edge
+let edgeTaken = false; // drawers.js has a left drawer, so the left edge is its (leaveEdge)
 const narrow = typeof matchMedia === 'function' ? matchMedia(NARROW) : null;
 
 /** Whether the rail is showing (so the phone's swipe past the left panel has somewhere to go). */
 export const hasRail = () => !!nav;
 
+/** drawers.js: a swipe from the left edge pulls out its left drawer, and only past that the switcher. */
+export function leaveEdge() {
+  edgeTaken = true;
+  handle?.remove();
+  handle = null;
+}
+
 /** Phones: slide the rail out as the app switcher, over whatever is open. */
 export function openRail() {
-  if (!nav || slot || !narrow?.matches) return;
+  if (!nav || !narrow?.matches) return;
+  if (nav.classList.contains('placed')) {
+    // A slot showing on a phone is the contraption's own switcher page; a hidden one lends the switcher out.
+    if (slot.getClientRects().length) return;
+    nav.classList.remove('placed');
+    backdrop ??= makeBackdrop();
+    document.body.append(backdrop, nav);
+    nav.getBoundingClientRect(); // lay it out shut first, so it slides in
+  }
   if (!nav.classList.contains('open')) opener = document.activeElement;
   nav.classList.add('open');
   backdrop.hidden = false;
@@ -73,6 +90,14 @@ export function hideRail() {
   for (const el of [nav, backdrop, handle]) el?.remove();
   nav = backdrop = handle = null;
   document.documentElement.classList.remove('has-citadel-rail');
+}
+
+function makeBackdrop() {
+  const el = document.createElement('div');
+  el.className = 'citadel-rail-backdrop';
+  el.hidden = true;
+  el.addEventListener('click', closeRail);
+  return el;
 }
 
 /** Fetch your contraptions and draw the rail, or take it away when there are none. */
@@ -122,13 +147,10 @@ export async function showRail() {
     slot.append(nav);
     return true;
   }
-  backdrop = document.createElement('div');
-  backdrop.className = 'citadel-rail-backdrop';
-  backdrop.hidden = true;
-  backdrop.addEventListener('click', closeRail);
+  backdrop = makeBackdrop();
   document.body.append(backdrop, nav);
   document.documentElement.classList.add('has-citadel-rail');
-  if (inContraption) {
+  if (inContraption && !edgeTaken) {
     handle = document.createElement('button');
     handle.type = 'button';
     handle.className = 'citadel-rail-handle';
@@ -152,8 +174,9 @@ if (typeof document !== 'undefined') {
   document.addEventListener('touchstart', (e) => {
     const t = e.touches[0];
     const open = nav?.classList.contains('open');
-    // Open: a drag on it or its backdrop. Shut, in a contraption only: one from the left edge (Citadel's drawers.js does its own).
-    swipe = nav && !slot && narrow.matches && e.touches.length === 1 && (open ? nav.contains(e.target) || e.target === backdrop : inContraption && t.clientX <= EDGE)
+    // Open: a drag on it or its backdrop. Shut, in a contraption without drawers.js or a slot: one from the left edge.
+    swipe = nav && !nav.classList.contains('placed') && narrow.matches && e.touches.length === 1
+      && (open ? nav.contains(e.target) || e.target === backdrop : inContraption && !slot && !edgeTaken && t.clientX <= EDGE)
       ? { x: t.clientX, y: t.clientY, open } : null;
   }, { passive: true });
   document.addEventListener('touchend', (e) => {
@@ -166,7 +189,14 @@ if (typeof document !== 'undefined') {
     swipe = null;
   });
   addEventListener('hashchange', closeRail);
-  narrow?.addEventListener('change', closeRail);
+  narrow?.addEventListener('change', () => {
+    closeRail();
+    // Lent out from its slot on a phone: back into the slot on a wide screen.
+    if (!narrow.matches && slot && nav && nav.parentElement !== slot) {
+      nav.classList.add('placed');
+      slot.append(nav);
+    }
+  });
   // <html data-citadel-rail="slot">: the contraption calls mountRail itself.
   if (inContraption && document.documentElement.dataset.citadelRail !== 'slot') {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showRail);

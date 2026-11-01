@@ -981,57 +981,30 @@ a.thread-ref { color: var(--accent); font-weight: 600; text-decoration: none; wh
 a.thread-ref:hover { text-decoration: underline; }
 .phases .thread-refs { color: var(--muted); }
 
-/* Phones: the overview and threads panels pulled out from the screen edge as drawers (drawers.js). */
+/* Phones: the overview and threads panels pulled out from the screen edge as drawers (drawers.js,
+   which brings the placement, backdrop, handles and motion; these are Citadel's look and which views have them). */
 @media (max-width: 800px) {
-  /* Leave sideways swipes to the app rather than browser history, where the browser allows it. */
-  html, body { overscroll-behavior-x: none; }
-  /* The chat behind a drawer stays put from the moment it's pulled out until it goes back: a fling
-     still coasting, the swipe's vertical drift or a wheel stop there. On html only, so the viewport
-     keeps the sticky top bar in place; scripted scrolls (drawers.js's keepPlace) still work. */
-  html:has(.as-drawer) { overflow: hidden; }
   /* The drawers stand in for the panels, so their folded bars don't sit above the chat. */
-  .split > .panels:not(:has(> .as-drawer)) { display: none; }
-  .panels > details:not(.as-drawer) { display: none; }
-  .panels > details.as-drawer {
-    position: fixed; top: 0; bottom: 0; left: 0; z-index: 30;
-    width: min(86vw, 340px); max-height: none; margin: 0;
-    overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
+  .split > .panels:not(:has(> .citadel-drawer)) { display: none; }
+  .panels > details:not(.citadel-drawer) { display: none; }
+  .panels > details.citadel-drawer {
     background: var(--bg); border: 0; border-right: 1px solid var(--line);
     padding: calc(0.75rem + env(safe-area-inset-top, 0px)) 0.9rem calc(0.75rem + env(safe-area-inset-bottom, 0px)) calc(0.9rem + env(safe-area-inset-left, 0px));
-    box-shadow: 0 0 24px rgb(0 0 0 / 0.25);
-    will-change: transform;
   }
-  .panels > details.as-drawer.from-right {
-    left: auto; right: 0; border-right: 0; border-left: 1px solid var(--line);
+  .panels > details.citadel-drawer-right {
+    border-right: 0; border-left: 1px solid var(--line);
     padding-left: 0.9rem; padding-right: calc(0.9rem + env(safe-area-inset-right, 0px));
   }
   /* No gap for the placeholder a pulled-out panel leaves in the grid. */
   .split { gap: 0; }
-  .panels > details.as-drawer:focus { outline: none; }
   /* In a drawer the panel's bar closes it. */
-  .panels > details.as-drawer > summary::after { content: '✕'; }
-  .drawer-backdrop { position: fixed; inset: 0; z-index: 29; background: rgb(0 0 0 / 0.4); opacity: 0; touch-action: none; }
-  .as-drawer.settling { transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1); }
-  .drawer-backdrop.settling { transition: opacity 0.25s; }
+  .panels > details.citadel-drawer > summary::after { content: '✕'; }
+  body .citadel-drawer-handle { z-index: 7; }
+  body .citadel-drawer-handle::before { background: var(--muted); }
+  /* Handles only where there's something to open: the panels, or on the left the app rail. */
+  body:not(:has(#app .panels)) .citadel-drawer-handle.right,
+  html:not(.has-citadel-rail) body:not(:has(#app .panels)) .citadel-drawer-handle.left { display: none; }
 }
-.drawer-backdrop[hidden] { display: none; }
-/* Slim tabs on the screen edges that open the drawers with a tap, for browsers whose own edge swipes
-   (back and forward) get there first. The button is wider than the pill it draws. */
-.drawer-handle { display: none; }
-@media (max-width: 800px) {
-  body:has(#app .panels) .drawer-handle, .has-citadel-rail body .drawer-handle.left {
-    display: block; position: fixed; top: 50%; z-index: 7; width: 1.1rem; height: 4rem; margin-top: -2rem; padding: 0;
-    border: 0; border-radius: 0; background: none; cursor: pointer; -webkit-tap-highlight-color: transparent;
-  }
-  .drawer-handle.left { left: env(safe-area-inset-left, 0px); }
-  .drawer-handle.right { right: env(safe-area-inset-right, 0px); }
-  .drawer-handle::before { content: ''; position: absolute; top: 0.6rem; bottom: 0.6rem; width: 4px; border-radius: 999px; background: var(--muted); opacity: 0.45; }
-  .drawer-handle.left::before { left: 3px; }
-  .drawer-handle.right::before { right: 3px; }
-  .drawer-handle:hover::before, .drawer-handle:focus-visible::before { opacity: 0.9; }
-  body:has(.as-drawer) .drawer-handle { visibility: hidden; }
-}
-@media (prefers-reduced-motion: reduce) { .as-drawer.settling, .drawer-backdrop.settling { transition: none; } }
 
 /* Machines: live status in the overview panel, and the page that adds and connects them */
 .dot.online { background: #16a34a; box-shadow: 0 0 0 2px color-mix(in srgb, #16a34a 25%, transparent); }

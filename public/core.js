@@ -669,13 +669,19 @@ async function route() {
   saveScroll();
   const seq = ++routeSeq;
   const hash = location.hash || '#/';
+  // A jump left by a route that never opened its chat mustn't fire on a later, ordinary visit.
+  if (pendingJump?.hash !== hash) pendingJump = null;
   // Answer the click straight away: highlight the thread being opened and dim the old view.
   for (const a of document.querySelectorAll('#coordinator-row .thread-row, #threads .thread-row')) a.classList.toggle('active', a.getAttribute('href') === hash);
   document.body.classList.add('navigating');
   let m;
   try {
     // Leaving the file viewer for the chat under it just closes it; anywhere else goes on from there.
-    if (!hash.startsWith('#/f/') && closeViewer() === hash) return;
+    if (!hash.startsWith('#/f/') && closeViewer() === hash) {
+      const jump = takeJump();
+      if (jump) jumpToEvent(jump);
+      return;
+    }
     if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'artifacts' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/(?:settings|instructions)$/))) await showProject(Number(m[1]), { kind: 'instructions' });

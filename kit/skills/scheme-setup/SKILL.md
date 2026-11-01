@@ -115,6 +115,9 @@ each path named exists or is the stated place its first file goes.
 Copy from this skill's `templates/` folder: `guard.sh` to `tools/guard.sh` and `pre-push` to
 `.githooks/pre-push` (both executable), and `settings.json` to `.claude/settings.json`. When the
 repo already has a `.claude/settings.json`, add the template's hooks to it and keep the rest.
+The template carries no `permissions.allow` list: minions run in bypassPermissions, where allow
+rules change nothing, and the prompts left (Claude Code's check on an `rm` it cannot resolve)
+ignore allow rules and hooks alike; the minion prompt teaches the `rm` habits that avoid them.
 If the scheme's main branch has a name other than `main` or `master`, add it to `is_protected`
 in `guard.sh`, to the `case` in `pre-push`, and to `BRANCH` in `land.sh`.
 

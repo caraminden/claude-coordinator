@@ -217,13 +217,24 @@ test('pending-deploy minions whose branch the live commit contains are found, wh
     store.updateTicket(id, { state });
     return id;
   };
-  git('branch', 'ticket/live');
+  // #261: a branch with no commits of its own is on main trivially, which says nothing about its deploy.
+  git('branch', 'ticket/empty');
+  withBranch('pending-deploy', 'ticket/empty');
+  git('checkout', '-q', '-b', 'ticket/live');
+  commit();
+  git('checkout', '-q', 'main');
+  git('merge', '-q', '--ff-only', 'ticket/live');
   const shipped = withBranch('pending-deploy', 'ticket/live');
   const merged = commit(); // merged to main after the branch was cut: still contains it
   git('checkout', '-q', '-b', 'ticket/unmerged');
   commit();
   git('checkout', '-q', 'main');
   const unmerged = withBranch('pending-deploy', 'ticket/unmerged');
+  // Its commit landed by another minion from a temporary branch: a new hash, the same change.
+  git('checkout', '-q', '-b', 'ticket/picked', 'ticket/unmerged');
+  const pick = commit('picked.txt');
+  git('checkout', '-q', 'main');
+  const picked = withBranch('pending-deploy', 'ticket/picked');
   withBranch(null, 'ticket/live'); // not waiting on a deploy
   withBranch('pending-deploy', 'ticket/gone'); // no such branch
   withBranch('pending-deploy', null);
@@ -232,5 +243,7 @@ test('pending-deploy minions whose branch the live commit contains are found, wh
   assert.deepEqual(waiters(merged).pendingLive(), [shipped]);
   assert.deepEqual(waiters('f'.repeat(40)).pendingLive(), [], 'a head the repo does not know');
   git('merge', '-q', '--no-edit', 'ticket/unmerged');
-  assert.deepEqual(waiters(git('rev-parse', 'HEAD')).pendingLive().sort(), [shipped, unmerged].sort());
+  assert.deepEqual(waiters(git('rev-parse', 'HEAD')).pendingLive().sort(), [shipped, unmerged].sort(), 'not the empty branch, nor one with a commit main lacks');
+  git('cherry-pick', pick);
+  assert.deepEqual(waiters(git('rev-parse', 'HEAD')).pendingLive().sort(), [shipped, unmerged, picked].sort());
 });

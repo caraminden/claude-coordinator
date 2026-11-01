@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -297,6 +297,66 @@ test('in a scheme whose code the server does not run, live means merged', () => 
   other.work(leader.branch);
   other.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
   assert.equal(w.check(), 1);
+});
+
+/** A commit with a real change on `branch`, made in its own worktree, as a minion commits. */
+function own(repo: typeof live, branch: string, file: string) {
+  const dir = join(root, `wt-${branch.replace('/', '-')}`);
+  if (!existsSync(dir)) repo.git('worktree', 'add', '-q', dir, branch);
+  writeFileSync(join(dir, file), file);
+  execFileSync('git', ['add', '-A'], { cwd: dir });
+  execFileSync('git', ['commit', '-q', '-m', `own ${file}`], { cwd: dir });
+  return repo.git('rev-parse', `refs/heads/${branch}`);
+}
+/** Land `commits` on main from a temporary branch, as one minion landed another's (#250 landing #247's): new hashes, same changes. */
+function landElsewhere(repo: typeof live, commits: string[]) {
+  repo.git('checkout', '-q', '-b', `tmp-${++branches}`, 'main');
+  repo.commit(); // the lander's own work first, so the picks get new parents
+  for (const c of commits) repo.git('cherry-pick', c);
+  const tip = repo.git('rev-parse', 'HEAD');
+  repo.git('checkout', '-q', 'main');
+  repo.git('merge', '-q', '--ff-only', tip);
+}
+
+// #261: a leader's commits landed by another minion from a temporary branch reach main with new
+// hashes, so neither its tip nor a PR of its branch is on main: it read as still waiting, or as
+// dismissed unshipped, until it happened to rebase.
+for (const when of ['merged', 'live'] as const) {
+  test(`a ${when} chain starts once all of the leader's commits are on main by their changes, landed from another branch`, () => {
+    reset();
+    const w = waiters(live.git('rev-parse', 'HEAD'));
+    const leader = minion();
+    chain(w, leader.id, when);
+    const first = own(live, leader.branch, `${when}-a`);
+    const second = own(live, leader.branch, `${when}-b`);
+    landElsewhere(live, [first]);
+    assert.equal(w.check(live.git('rev-parse', 'HEAD')), 0, 'only one of its two commits is in');
+    landElsewhere(live, [second]);
+    assert.throws(() => live.git('merge-base', '--is-ancestor', leader.branch, 'main'), 'its tip is not on main');
+    store.updateTicket(leader.id, { status: 'closed' });
+    if (when === 'live') {
+      assert.equal(w.check(), 0, 'on main, but the server still runs the old commit');
+      assert.equal(held.length, 0, 'not dismissed unshipped: its work is merged');
+    }
+    assert.equal(w.check(live.git('rev-parse', 'HEAD')), 1);
+    assert.equal(held.length, 0);
+    assert.match(started[0].why, new RegExp(`work is ${when}$`));
+  });
+}
+
+test('a running leader whose branch has no commits of its own never counts, even on a stale base main has moved past', () => {
+  reset();
+  const w = waiters(live.git('rev-parse', 'HEAD'));
+  const leader = minion();
+  live.commit(); // main moves on after the leader's branch was cut, as origin/main lags local main
+  const follower = chain(w, leader.id, 'merged');
+  live.commit();
+  assert.equal(w.check(live.git('rev-parse', 'HEAD')), 0);
+  live.git('update-ref', '-m', 'merge main: Fast-forward', `refs/heads/${leader.branch}`, 'main');
+  assert.equal(w.check(live.git('rev-parse', 'HEAD')), 0, 'caught up to main: still nothing of its own');
+  assert.equal(w.chains().length, 1);
+  store.updateTicket(follower, { status: 'closed' });
+  w.check();
 });
 
 test('a dismissed follower is dropped; release hands back the held brief once', () => {

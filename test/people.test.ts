@@ -9,10 +9,13 @@ import { after, before, test } from 'node:test';
 import { lendsMachines, mayReceive, messageScope, turnRefusal } from '../src/access.ts';
 import { Auth, hashPassword } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, PASSWORD, until, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, until, type Booted, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'people-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 
 function world() {
   const store = new Store(':memory:');

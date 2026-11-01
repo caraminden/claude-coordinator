@@ -6,11 +6,15 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { noteStrike, struckSource } from '../public/strike.js';
+import { stopTurns } from './helpers.ts';
 
 // strike_text: a thread proven wrong strikes its own words, in its replies or in the messages it
 // sent another thread. A stand-in `claude -p` ends every turn at once.
 const root = mkdtempSync(join(tmpdir(), 'strike-text-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
 writeFileSync(fake, `#!${process.execPath}

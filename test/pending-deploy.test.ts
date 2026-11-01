@@ -5,11 +5,15 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
+import { stopTurns } from './helpers.ts';
 
 // pending-deploy: the state outlasts a new turn, and a deploy that went live dismisses the minion,
 // unless something is still open for a person. Same fake `claude -p` as close-self.test.ts.
 const root = mkdtempSync(join(tmpdir(), 'pending-deploy-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
 writeFileSync(

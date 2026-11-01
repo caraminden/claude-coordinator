@@ -8,11 +8,15 @@ import { Containers, runArgs, specHash, type RunCmd } from '../src/containers.ts
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { Runner, TURN_SLICE, usageKey, wrapperAlive } from '../src/runner.ts';
+import { stopTurns } from './helpers.ts';
 
 // Turns in a person's own Claude container (#213). A fake `podman` on PATH runs `exec` on the host,
 // so the whole path runs: placeFor, the detached wrapper, its heartbeat, the stream and the finish.
 const root = mkdtempSync(join(tmpdir(), 'claude-container-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'host-claude');
 // The server's own login: a container turn must never get it.
 process.env.ANTHROPIC_API_KEY = 'the-servers-key';

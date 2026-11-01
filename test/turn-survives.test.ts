@@ -6,12 +6,16 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
+import { stopTurns } from './helpers.ts';
 
 // Turns run in a process of their own (src/turn-wrapper.ts) and write to a turn folder, so a server
 // that dies mid-turn leaves the turn running, and the next server re-attaches and catches up. Here the
 // wrapper is a detached child, which outlives a Runner just as a unit outlives the service.
 const root = mkdtempSync(join(tmpdir(), 'turn-survives-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 // The live service's bus address; a turn must not inherit it.
 process.env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/run/user/0/bus';

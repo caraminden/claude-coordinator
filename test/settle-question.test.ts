@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, until, stopProcs } from './helpers.ts';
+import { bootServer, jsonLines, until, stopProcs, stopTurns } from './helpers.ts';
 
 // Question cards a minion settles (settle_question): it judged a typed reply answered the card, so the
 // card stops waiting on people. A stand-in `claude -p` records each turn's prompt and thread token,
@@ -13,6 +13,7 @@ const root = mkdtempSync(join(tmpdir(), 'settle-question-'));
 const procs: ChildProcess[] = [];
 after(async () => {
   await stopProcs(procs);
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
 

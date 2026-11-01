@@ -8,14 +8,15 @@ import { Approvals, mcpMerge, mergeGo, mergeTarget, plainMerge, type Go, type Go
 import { Store } from '../src/db.ts';
 import { parseMerge, type PrInfo } from '../src/merge-card.ts';
 import { Runner } from '../src/runner.ts';
-import { agentToken, bootServer, REPO, until } from './helpers.ts';
+import { agentToken, bootServer, REPO, stopProcs, stopTurns, until } from './helpers.ts';
 
 // A person's own typed "merge it" lets the turn that reads it merge once with no card (#201). Only
 // the messages route's person path marks a message typed; relays, card answers and agents never can.
 const root = mkdtempSync(join(tmpdir(), 'merge-go-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -491,7 +492,7 @@ test('Delve replays: a typed fold survives restarts mid-turn, a refused merge an
       return settled ? JSON.parse(settled.data).state : 'pending';
     };
     const restart = async () => {
-      await srv.stop();
+      await srv.stop({ keepTurns: true });
       srv = await bootServer({ root: home, env });
       procs.push(srv.proc);
       await attached();

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { bootServer, until } from './helpers.ts';
+import { bootServer, until, stopTurns } from './helpers.ts';
 
 // One-tap replies (#105): set with set_thread_status, gone once anyone writes or the next turn starts.
 const root = mkdtempSync(join(tmpdir(), 'replies-'));
@@ -14,6 +14,7 @@ const procs: ChildProcess[] = [];
 // The server writes into root until it exits, and its exit handler deletes its run/mcp-<pid> folder, so wait for that.
 after(async () => {
   await Promise.all(procs.map((p) => p.exitCode !== null || p.signalCode !== null ? undefined : new Promise((r) => { p.once('exit', r); p.kill(); })));
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
 

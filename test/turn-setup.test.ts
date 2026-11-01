@@ -9,10 +9,14 @@ import { after, test } from 'node:test';
 import { APPROVAL_TIMEOUT_MS } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
+import { stopTurns } from './helpers.ts';
 
 // The runner pins its MCP servers under $DATA_DIR/run when it loads, sweeping copies of dead servers.
 const root = mkdtempSync(join(tmpdir(), 'turn-setup-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.DATA_DIR = join(root, 'data');
 const stale = join(root, 'data', 'run', 'mcp-999999999');
 mkdirSync(stale, { recursive: true });

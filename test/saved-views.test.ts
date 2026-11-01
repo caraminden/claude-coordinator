@@ -6,14 +6,15 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../src/db.ts';
-import { listeningPort } from './helpers.ts';
+import { listeningPort, stopTurns, stopProcs } from './helpers.ts';
 
 // Saved views: named property filters, each person's own list per scheme (#194).
 const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'saved-views-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
 

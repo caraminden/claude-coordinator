@@ -8,12 +8,15 @@ import { APP_NAME } from '../src/appname.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { LiveWaiters, type PrMerge } from '../src/wake.ts';
-import { bootServer, REPO } from './helpers.ts';
+import { bootServer, REPO, stopTurns } from './helpers.ts';
 
 // wake_when_live: a waiter is messaged once the server runs a commit containing its commit (or, with
 // none, once the server runs anything new), then dropped. A stand-in live checkout in a temp repo.
 const root = mkdtempSync(join(tmpdir(), 'wake-when-live-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const repo = join(root, 'live');
 mkdirSync(join(repo, 'public'), { recursive: true });

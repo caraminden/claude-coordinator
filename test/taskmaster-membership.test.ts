@@ -8,7 +8,7 @@ import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { Runner, systemPrompt } from '../src/runner.ts';
-import { bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, type Booted, stopTurns } from './helpers.ts';
 
 // message_taskmaster by membership (#211): a Taskmaster turn reaches the schemes its person is in as
 // well as its own (an admin is in all), Citadel always, and Citadel's Taskmaster answers a scheme for
@@ -16,7 +16,10 @@ import { bootServer, PASSWORD, SECRET, type Booted } from './helpers.ts';
 const root = mkdtempSync(join(tmpdir(), 'tm-membership-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 
 const store = new Store(join(data, 'coordinator.db'));
 // No server_login anywhere, so the messages land but no turn starts and rewrites a Taskmaster's person.

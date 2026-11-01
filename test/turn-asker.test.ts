@@ -8,7 +8,7 @@ import { Auth } from '../src/auth.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { Runner } from '../src/runner.ts';
-import { bootServer, PASSWORD, SECRET } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, stopTurns } from './helpers.ts';
 
 // Admin-only tools and routes look at who asked for a Taskmaster's turn, not whom it runs as (#255).
 // A non-member's relay to Citadel runs as Citadel's owner (#211), an admin, but the non-member asked
@@ -16,7 +16,10 @@ import { bootServer, PASSWORD, SECRET } from './helpers.ts';
 const root = mkdtempSync(join(tmpdir(), 'turn-asker-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
 // Replies once `release` is in its folder, and exits at the end of its input.

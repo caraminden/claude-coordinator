@@ -8,12 +8,15 @@ import { Store } from '../src/db.ts';
 import { GithubLink, personGithub } from '../src/github-link.ts';
 import { asEnv } from '../src/scheme-repo.ts';
 import { hideTokens, pushKind, Runner, slimEvent } from '../src/runner.ts';
-import { jsonLines } from './helpers.ts';
+import { jsonLines, stopTurns } from './helpers.ts';
 
 // People link their own GitHub (#182): the token is kept encrypted, and each turn gets the token of the
 // person it runs for, or none, so an unlinked person's turn can't push as anyone else.
 const root = mkdtempSync(join(tmpdir(), 'ghlink-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
 const store = new Store(join(root, 'test.db'));

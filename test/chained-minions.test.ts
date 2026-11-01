@@ -7,15 +7,16 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { type Chain, LiveWaiters, mergedPr, mergedPrOf, type PrMerge } from '../src/wake.ts';
-import { bootServer } from './helpers.ts';
+import { bootServer, stopTurns, stopProcs } from './helpers.ts';
 
 // Chained minions: one created parked, whose brief is held until the minion it follows (its leader)
 // has its work live, or merged. A temp repo stands in for both the live checkout and the scheme's repo,
 // as for Citadel's own scheme; a second repo stands in for a scheme whose code the server doesn't run.
 const root = mkdtempSync(join(tmpdir(), 'chained-minions-'));
 const procs: ChildProcess[] = [];
-after(() => {
-  for (const p of procs) p.kill();
+after(async () => {
+  await stopProcs(procs);
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
 

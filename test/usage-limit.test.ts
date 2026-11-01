@@ -5,13 +5,17 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MAX_LIMIT_RESUMES, parseResetTime, Runner } from '../src/runner.ts';
+import { stopTurns } from './helpers.ts';
 
 // A failed turn says why. A usage limit is a wait: the minion is `limited`, resumes by itself after the
 // reset (spaced from the others, capped, held messages included, across a restart), and nobody gets
 // pushed. An account error needs a person: blocked, one push. Fake `claude -p` as in pending-deploy.test.ts:
 // it ends with the release file's words as its result (an error unless they are "ok"), and logs its prompt.
 const root = mkdtempSync(join(tmpdir(), 'usage-limit-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
 const release = join(root, 'release');

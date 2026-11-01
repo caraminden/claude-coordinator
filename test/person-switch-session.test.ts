@@ -7,12 +7,16 @@ import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { gzipSync } from 'node:zlib';
 import { projectSlug } from '../src/sessions.ts';
+import { stopTurns } from './helpers.ts';
 
 // #250: a minion whose turns move from one Claude login to another between turns (Josh's container,
 // then the host's login for Cara) must still resume its conversation there. The fake claude keeps
 // transcripts in its own CLAUDE_CONFIG_DIR, as the real one does, and fails a --resume it can't find.
 const root = mkdtempSync(join(tmpdir(), 'person-switch-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 const hostConfig = join(root, 'host-claude');
 process.env.CLAUDE_CONFIG_DIR = hostConfig;
 const bin = join(root, 'bin');

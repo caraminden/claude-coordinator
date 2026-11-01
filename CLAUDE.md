@@ -28,7 +28,7 @@ file contents and finished subagent reports, keeping one line for what each conc
 The kit's skills and agents read this repo's paths and commands from here. "None" means that
 skill step is skipped or uses its default.
 
-- **Check commands:** `npm test` (`node --test test/`). No build or lint step. A UI change is
+- **Check commands:** `npm test` (`node --test test/`, failing if it leaves processes running: `test/leak-guard.ts`). No build or lint step. A UI change is
   also checked in a dev copy or preview (scheme instructions, "UI checks").
 - **Front end:** `public/`, plain JS with no build step.
 - **High risk by file (self-review):** auth (`src/auth.ts`); deploy and restart code

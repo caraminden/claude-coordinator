@@ -8,6 +8,7 @@ import { Store } from '../src/db.ts';
 import { Lanes } from '../src/lanes.ts';
 import { Runner } from '../src/runner.ts';
 import { projectSlug, saveSession } from '../src/sessions.ts';
+import { stopTurns } from './helpers.ts';
 
 // #259: every step of a minion's turn lifecycle runs on one serial lane per minion, and cleanups
 // delete only what they can show is stale. Each test holds one step open and starts the next, as #250
@@ -15,7 +16,10 @@ import { projectSlug, saveSession } from '../src/sessions.ts';
 // the `go` file before it answers, deletes the config-dir file named in `rm` if there is one, and ends
 // with the `result` file's words (an error unless "ok").
 const root = mkdtempSync(join(tmpdir(), 'minion-lane-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 const config = join(root, 'claude');
 process.env.CLAUDE_CONFIG_DIR = config;
 const go = join(root, 'go');

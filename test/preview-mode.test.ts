@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { listeningPort, PASSWORD, stopProcs } from './helpers.ts';
+import { listeningPort, PASSWORD, stopProcs, stopTurns } from './helpers.ts';
 
 // A preview (PREVIEW=1) serves the app on a copy of the database and must never act on it: no turns
 // (from people's messages or auto-resume), no new minions or schemes, no pushes, no machines.
@@ -22,6 +22,7 @@ const pushServer = createHttpServer((req, res) => {
 after(async () => {
   await stopProcs(procs);
   pushServer.close();
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
 

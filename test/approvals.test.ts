@@ -9,9 +9,13 @@ import { after, test } from 'node:test';
 import { APPROVAL_TOOL, Approvals, cleanPluginDirs, cleanRules, permissionArgs, pluginDirArgs, unsettledCards } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
+import { stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'approvals-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- rules and plugin folders ----------

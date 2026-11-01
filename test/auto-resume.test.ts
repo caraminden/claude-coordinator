@@ -5,10 +5,14 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MAX_RESUMES, Runner } from '../src/runner.ts';
+import { stopTurns } from './helpers.ts';
 
 // A stand-in for `claude -p` that logs each prompt it gets and runs until a release file appears.
 const root = mkdtempSync(join(tmpdir(), 'auto-resume-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
 const prompts = join(root, 'prompts.log');

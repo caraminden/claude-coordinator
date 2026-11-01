@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, until, stopProcs } from './helpers.ts';
+import { bootServer, jsonLines, until, stopProcs, stopTurns } from './helpers.ts';
 
 // Option pictures on question cards and comments on files, through the real server. A stand-in
 // `claude -p` records each turn's prompt, folder and thread token, then ends the turn.
@@ -13,6 +13,7 @@ const procs: ChildProcess[] = [];
 // The server writes into root until it exits, and its exit handler deletes its run/mcp-<pid> folder, so wait for that.
 after(async () => {
   await stopProcs(procs);
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
 

@@ -6,14 +6,17 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, unsentSteers } from '../src/runner.ts';
-import { lines } from './helpers.ts';
+import { lines, stopTurns } from './helpers.ts';
 
 // Mid-turn messages steer: the runner appends them to the turn's steer.jsonl and the wrapper
 // (src/turn-wrapper.ts) passes them to claude's stdin until the turn's result is out. The fake reads
 // stdin line by line like claude, replies once `release` appears in its folder, and exits at the end
 // of its input (or, with `hold` there, only once that is gone).
 const root = mkdtempSync(join(tmpdir(), 'steer-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
 writeFileSync(

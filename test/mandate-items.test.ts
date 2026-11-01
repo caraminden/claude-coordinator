@@ -12,7 +12,7 @@ import { messagePerson } from '../src/access.ts';
 import { verifyIdentity } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { bootServer, freePort, jsonLines, stopProcs, until, type Booted } from './helpers.ts';
+import { bootServer, freePort, jsonLines, stopProcs, until, type Booted, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'mandate-items-'));
 const procs: ChildProcess[] = [];
@@ -105,6 +105,7 @@ after(async () => {
   await stopProcs(procs);
   mandate.closeAllConnections();
   mandate.close();
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
 

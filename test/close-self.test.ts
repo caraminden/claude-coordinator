@@ -5,11 +5,15 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
+import { stopTurns } from './helpers.ts';
 
 // A stand-in for `claude -p`: waits until a release file appears, then ends the turn the way
 // FAKE_OUTCOME says (ok, error), so the test can act while the turn is running.
 const root = mkdtempSync(join(tmpdir(), 'close-self-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
 writeFileSync(

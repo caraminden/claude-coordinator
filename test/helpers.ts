@@ -1,6 +1,6 @@
 // Shared test plumbing: boot the real server.ts on a scratch data dir and the port it picks.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -13,6 +13,46 @@ import { freePort, listeningPort } from '../src/ports.ts';
  */
 export async function stopProcs(procs: ChildProcess[]) {
   await Promise.all(procs.map((p) => (p.exitCode !== null || p.signalCode !== null ? undefined : new Promise((r) => { p.once('exit', r); p.kill(); }))));
+}
+
+/**
+ * Kill every process of this user that names a path in one of `dirs` (a turn's wrapper and claude name
+ * its turn folder), then wait until they have gone. Turns are detached so they outlive a server restart;
+ * a fake claude still waiting for its release would otherwise run forever once its test has deleted the
+ * folder (#271). It goes by the command line, not pid.json: a turn the server started just before it
+ * was stopped may not have written that yet.
+ */
+export async function stopTurns(...dirs: string[]) {
+  for (let i = 0; i < 100; i++) {
+    const left = procsUnder(dirs);
+    if (!left.size) return;
+    for (const pid of left.keys()) {
+      try {
+        process.kill(-pid, 'SIGKILL'); // claude leads a process group of its own, with its tools in it
+      } catch {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {}
+      }
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`Processes under ${dirs.join(', ')} would not exit`);
+}
+
+/** This user's live processes with an argument that is, or is inside, one of `dirs`: pid → command line. */
+export function procsUnder(dirs: string[]): Map<number, string> {
+  const found = new Map<number, string>();
+  for (const name of readdirSync('/proc')) {
+    if (!/^\d+$/.test(name) || Number(name) === process.pid) continue;
+    try {
+      if (statSync(`/proc/${name}`).uid !== process.getuid!()) continue;
+      if (/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${name}/stat`, 'utf8'))) continue; // exited, not yet reaped
+      const args = readFileSync(`/proc/${name}/cmdline`, 'utf8').split('\0').filter(Boolean);
+      if (args.some((a) => dirs.some((d) => a === d || a.startsWith(`${d}/`)))) found.set(Number(name), args.join(' '));
+    } catch {} // gone meanwhile
+  }
+  return found;
 }
 
 export { freePort, listeningPort };
@@ -68,8 +108,8 @@ export type Booted = {
   cookie: string;
   /** A JSON call as that person: GET without a body, else `method` (POST by default). */
   call: (path: string, body?: unknown, method?: string) => Promise<{ status: number; data: any }>;
-  /** Kill the server and delete the scratch folder. */
-  stop: () => Promise<void>;
+  /** Kill the server and its turns (all but `keepTurns`, for a restart), then delete the scratch folder. */
+  stop: (opts?: { keepTurns?: boolean }) => Promise<void>;
 };
 
 /**
@@ -88,8 +128,9 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
-  const stop = async () => {
+  const stop = async ({ keepTurns = false } = {}) => {
     await stopProcs([proc]);
+    if (!keepTurns) await stopTurns(data);
     if (!opts.root) rmSync(root, { recursive: true, force: true });
   };
   if (opts.stdout) proc.stdout!.pipe(process.stdout);

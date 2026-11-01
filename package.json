@@ -9,6 +9,6 @@
   },
   "scripts": {
     "start": "node server.ts",
-    "test": "node --test test/"
+    "test": "node --test --test-global-setup=test/leak-guard.ts test/"
   }
 }

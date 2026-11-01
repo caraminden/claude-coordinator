@@ -5,11 +5,15 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, wrapperAlive } from '../src/runner.ts';
+import { stopTurns } from './helpers.ts';
 
 // Delve #14's claude was SIGTERMed by its own `pkill`, and the chat showed only a stderr warning and
 // "(claude exited with code 143)". A signal Citadel didn't send must be named as such.
 const root = mkdtempSync(join(tmpdir(), 'outside-kill-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
 writeFileSync(

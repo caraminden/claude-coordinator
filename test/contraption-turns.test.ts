@@ -9,11 +9,14 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, until } from './helpers.ts';
+import { bootServer, until, stopTurns } from './helpers.ts';
 
 // The runner (which the turn module borrows from) pins files under $DATA_DIR/run when it loads.
 const root = mkdtempSync(join(tmpdir(), 'contraption-turns-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
+  rmSync(root, { recursive: true, force: true });
+});
 const data = join(root, 'data');
 process.env.DATA_DIR = data;
 const { ContraptionTurns, parseTurn, TurnError } = await import('../src/contraption-turns.ts');

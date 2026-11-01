@@ -28,13 +28,7 @@ const WAKE_PROPS = {
   commit: { type: 'string', description: 'Optional: the commit to wait for (a hash, short or full)' },
   reason: { type: 'string', description: 'What to do once it is live; it comes back in the wake message, e.g. "#63\'s approve cards are live: retry the tripwire test"' },
 };
-const TITLE = { type: 'string', description: 'The short ask, about 30 characters, e.g. "Usage bar in the top bar". No number, tag, build or emoji.' };
-const TAG = {
-  type: ['string', 'null'],
-  enum: ['feature', 'bug', 'design', 'process', 'idea', null],
-  description:
-    'What kind of work: feature (new or changed behaviour), bug (something broken), design (look and layout), process (how we work: tooling, prompts, docs, setup), idea (exploring or planning, no code yet). null for one-off questions and reviews.',
-};
+const TITLE = { type: 'string', description: 'The short ask, about 30 characters, e.g. "Usage bar in the top bar". No number, type, build or emoji.' };
 /** A minion or ticket state; without `deploys`, pending-deploy is left out. */
 const stateSchema = (deploys: boolean) => ({
   type: ['string', 'null'],
@@ -246,7 +240,6 @@ const TOOLS = [
       type: 'object',
       properties: {
         title: { ...TITLE, description: `${TITLE.description} Also used for the branch name.` },
-        tag: TAG,
         properties: { ...PROPERTIES, description: `${PROPERTIES.description} Must include type; if no type fits, use "other" and ask people where it belongs.` },
         message: { type: 'string', description: 'First message to the new minion' },
         start_after: {
@@ -285,10 +278,10 @@ const TOOLS = [
   },
   {
     name: 'update_ticket',
-    description: "Change a minion's title, tag, state, note, build group (the major build it is assigned to), model or effort; leave out what should stay. A new model or effort applies from its next turn. (The branch keeps its original name.)",
+    description: "Change a minion's title, state, note, build group (the major build it is assigned to), model or effort; leave out what should stay. A new model or effort applies from its next turn. (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, title: TITLE, tag: TAG, state: STATE, note: NOTE, build: BUILD, model: MODEL, effort: EFFORT },
+      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: BUILD, model: MODEL, effort: EFFORT },
       required: ['ticket_id'],
     },
   },
@@ -603,7 +596,6 @@ function registryReply(r: any, done: string): string {
 function ticketLine(t: any): string {
   return [
     `#${t.number} ${t.title}`,
-    t.tag ? `tag: ${t.tag}` : '',
     t.properties && Object.keys(t.properties).length ? propertyText(t.properties) : '',
     t.build ? `build: ${t.build}` : '',
     t.model ? `model: ${t.model}` : '',
@@ -653,19 +645,23 @@ async function id(args: any): Promise<number> {
   return ticket.id;
 }
 
-/** The label fields a call sets; ones left out stay as they are. */
+/** The label fields a call sets; ones left out stay as they are. A retired `tag` still goes along: the server makes it the type. */
 function labelFields(args: any) {
   const out: Record<string, unknown> = {};
   for (const k of ['title', 'tag', 'state', 'note', 'replies', 'build']) if (args[k] !== undefined) out[k] = args[k];
   return out;
 }
 
+// shortcut: a session that still sends the retired tag (#254) gets it as its type, and this; remove after a release.
+const TAG_RETIRED = "tag is retired; it set the minion's type this once. Set `type` with set_properties from now on.";
+const tagNote = (args: any) => (args.tag ? `\n${TAG_RETIRED}` : '');
+
 const THREAD_TOOLS = [
   {
     name: 'set_thread_status',
     description:
-      "Label this minion for the scheme's minions list: its short title, kind of work, and where things stand. Leave out what should stay. Call it when the work's kind becomes clear, and at the end of a turn whenever the state or note changes.",
-    inputSchema: { type: 'object', properties: { title: TITLE, tag: TAG, state: stateSchema(DEPLOYS), note: NOTE, replies: REPLIES, build: BUILD } },
+      "Label this minion for the scheme's minions list: its short title, build and where things stand (its kind of work is the `type` property: set_properties). Leave out what should stay. Call it once you know the short ask, and at the end of a turn whenever the state or note changes.",
+    inputSchema: { type: 'object', properties: { title: TITLE, state: stateSchema(DEPLOYS), note: NOTE, replies: REPLIES, build: BUILD } },
   },
   ASK_QUESTION,
   SETTLE_QUESTION,
@@ -820,13 +816,13 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'create_ticket': {
       // A session that loaded an older schema may leave out properties (or its type); a missing type
-      // must not stop it starting minions, so it gets `other` (or the tag's type, server-side) and is told.
+      // must not stop it starting minions, so it gets `other` (or a retired tag's type, server-side) and is told.
       const properties = args.properties && typeof args.properties === 'object' && !Array.isArray(args.properties) ? { ...args.properties } : {};
       const untyped = !args.tag && !Object.keys(properties).some((k) => k.toLowerCase() === 'type');
       if (untyped) properties.type = 'other';
       const t = await call('POST', `/api/projects/${PROJECT}/tickets`, {
         title: args.title,
-        tag: args.tag ?? null,
+        tag: args.tag ?? undefined,
         properties,
         message: args.message,
         start_after: args.start_after ?? null,
@@ -835,7 +831,7 @@ async function runTool(name: string, args: any): Promise<string> {
         effort: args.effort ?? null,
       });
       const fallback = untyped ? [`No type was given, so it is type: other for now. Set the right one with set_properties (ticket_id ${t.number}), and pass properties: { type: … } to create_ticket next time.`] : [];
-      return [`Created ${ticketLine(t)}`, ...(t.notes ?? []), ...fallback].join('\n');
+      return [`Created ${ticketLine(t)}`, ...(t.notes ?? []), ...fallback].join('\n') + tagNote(args);
     }
     case 'list_properties': {
       const { keys } = await call('GET', `/api/projects/${PROJECT}/properties`);
@@ -933,8 +929,8 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':
-      needOne(args, ['title', 'tag', 'state', 'note', 'replies', 'build', 'model', 'effort'], 'update_ticket');
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort }))}`;
+      if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort'], 'update_ticket');
+      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort }))}${tagNote(args)}`;
     case 'ask_question': {
       const { id: questionId } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
       return `The question card (id ${questionId}) is in the chat. End your turn now with a short reply; the answers will come as the next message.`;
@@ -955,8 +951,8 @@ async function runTool(name: string, args: any): Promise<string> {
       await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan });
       return 'The plan card is in the chat. End your turn now with a short reply and write no code; the go or the notes to revise it will come as the next message.';
     case 'set_thread_status':
-      needOne(args, ['title', 'tag', 'state', 'note', 'replies', 'build'], 'set_thread_status');
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}`;
+      if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
+      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}${tagNote(args)}`;
     case 'message_coordinator':
       if ((await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text })).held) return `Held, not delivered: ${HELD}`;
       return 'Sent. The Taskmaster runs it now, or after its current turn.';

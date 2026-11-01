@@ -16,7 +16,7 @@ import { Auth, type Nonces, type Session } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
 import { claudeConfigDir, lastEffort, saveSession } from './src/sessions.ts';
-import { Store, type Artifact, type Project, type Ticket, type TicketTag } from './src/db.ts';
+import { Store, type Artifact, type Project, type Ticket } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
@@ -262,8 +262,8 @@ if (!BOOT_CHECK) {
  * caller sends its first message. Properties must be checked already. Throws HttpError 500, leaving
  * nothing behind, when the worktree can't be made.
  */
-async function newMinion(project: Project, m: { title: string; tag: TicketTag | null; props: Record<string, unknown>; model?: string | null; effort?: string | null }, by: string) {
-  const { id, number } = store.createTicket({ project_id: project.id, title: m.title, tag: m.tag, permission_mode: THREAD_PERMISSION_MODE, created_by: by });
+async function newMinion(project: Project, m: { title: string; props: Record<string, unknown>; model?: string | null; effort?: string | null }, by: string) {
+  const { id, number } = store.createTicket({ project_id: project.id, title: m.title, permission_mode: THREAD_PERMISSION_MODE, created_by: by });
   const { notes } = store.props.set('minion', id, project.id, m.props, by);
   store.props.startStage(id);
   if (m.model || m.effort) store.updateTicket(id, { model: m.model ?? null, effort: m.effort ?? null });
@@ -292,7 +292,7 @@ async function startScheduled(s: Schedule, now: number) {
   try {
     // Its turns run for whoever made the schedule (their GitHub), or the scheme's owner once they're gone; it's theirs.
     const maker = store.findUser('name', s.created_by);
-    const { id, number } = await newMinion(project, { title: s.name, tag: null, props: { type: s.type, ...(maker && !maker.disabled_at ? { assigned: maker.name } : {}) } }, APP_NAME);
+    const { id, number } = await newMinion(project, { title: s.name, props: { type: s.type, ...(maker && !maker.disabled_at ? { assigned: maker.name } : {}) } }, APP_NAME);
     store.updateTicket(id, { person_id: maker?.id ?? null });
     store.schedules.ran(s.id, { ticketId: id }, now);
     runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });

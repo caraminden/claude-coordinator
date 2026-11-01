@@ -298,8 +298,12 @@ test('create_ticket lists properties but still starts a minion when a stale sess
     assert.match(bare.content[0].text, /type: other for now.*ticket_id 12/);
 
     const tagged = (await rpc('tools/call', { name: 'create_ticket', arguments: { title: 'X', tag: 'bug', message: 'go' } })).result;
-    assert.deepEqual(bodies.at(-1).properties, {}); // the server gives a tagged minion the tag's type
+    // A retired tag (#254) still goes to the server, which makes it the type, and the session hears it is retired.
+    assert.deepEqual(bodies.at(-1).properties, {});
+    assert.equal(bodies.at(-1).tag, 'bug');
     assert.doesNotMatch(tagged.content[0].text, /type: other/);
+    assert.match(tagged.content[0].text, /tag is retired.*set_properties/);
+    assert.ok(!('tag' in schema.properties));
 
     await rpc('tools/call', { name: 'create_ticket', arguments: { title: 'X', properties: { Type: 'art' }, message: 'go' } });
     assert.deepEqual(bodies.at(-1).properties, { Type: 'art' });

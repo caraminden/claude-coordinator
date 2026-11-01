@@ -161,7 +161,7 @@ export function toggleSchemeMenu(button) {
 
 export function newTicketForm(projectId) {
   // A one-line chat box: what you type becomes the new thread's first message. The thread names
-  // and tags itself from it, and every thread gets full access.
+  // and types itself from it, and every thread gets full access.
   const box = h('textarea', { name: 'message', required: true, rows: 1, placeholder: 'New minion: what should it work on?', 'aria-label': 'Start a new minion', 'data-draft': true });
   const err = h('p', { class: 'error', hidden: true });
   const form = h('form', { class: 'new-thread' }, box, err);

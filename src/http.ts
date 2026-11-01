@@ -8,7 +8,7 @@ import { gzip } from 'node:zlib';
 // Types only: this module loads nothing of the app's, so any module can import it.
 import type { Auth, Session } from './auth.ts';
 import type { BranchStatus } from './branch.ts';
-import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket, TicketTag } from './db.ts';
+import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket } from './db.ts';
 import type { MachineRelay } from './machines.ts';
 import type { GithubLink } from './github-link.ts';
 import type { Previews } from './previews.ts';
@@ -177,7 +177,7 @@ export interface App {
   readonly assetVersion: string;
   broadcast(msg: object): void;
   notify(ticketId: number, trigger: PushTrigger, except?: string | null): void;
-  newMinion(project: Project, m: { title: string; tag: TicketTag | null; props: Record<string, unknown>; model?: string | null; effort?: string | null }, by: string): Promise<{ id: number; number: number; notes: string[] }>;
+  newMinion(project: Project, m: { title: string; props: Record<string, unknown>; model?: string | null; effort?: string | null }, by: string): Promise<{ id: number; number: number; notes: string[] }>;
   startChained(c: Chain, why: string): Promise<void>;
   ticketBranch(ticketId: number): Promise<BranchStatus | null>;
   sharedFiles(projectId: number): Promise<SharedFile[]>;

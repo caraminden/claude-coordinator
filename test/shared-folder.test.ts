@@ -85,6 +85,10 @@ test('minions are told to batch TaskUpdate and set_thread_status with a real too
   assert.match(systemPrompt(project, ticket, null, null, tickets, null), /Send TaskUpdate and set_thread_status in the same message as a real tool call/);
 });
 
+test('neither prompt mentions the retired minion tag (#254)', () => {
+  for (const t of [ticket, coordinator]) assert.doesNotMatch(systemPrompt(project, t, null, null, tickets, null), /\btag\b/);
+});
+
 test('only the coordinator is told about its memory folder', () => {
   assert.ok(systemPrompt(project, coordinator, null, shared, tickets, memory).includes(memory));
   assert.ok(!systemPrompt(project, ticket, null, shared, tickets, null).includes('Claude Code memory'));

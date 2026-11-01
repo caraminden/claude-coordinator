@@ -78,8 +78,6 @@ export interface AppInstructions {
 export const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'] as const;
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 
-export const TICKET_TAGS = ['feature', 'bug', 'design', 'process', 'idea'] as const;
-export type TicketTag = (typeof TICKET_TAGS)[number];
 /** ready: done, ready to merge or pick up · try: ready for people to try · parked: on hold on purpose ·
  * blocked: stuck on something outside the thread · outside: work still running elsewhere (CI, someone's machine) ·
  * pending-deploy: deployed, not live yet; outlasts a new turn, and a successful deploy dismisses the thread ·
@@ -91,7 +89,6 @@ export interface Ticket {
   id: number;
   project_id: number;
   number: number | null; // shown as #n; counts up per project, null for the coordinator
-  tag: TicketTag | null; // what kind of work, for grouping the threads list
   state: TicketState | null; // set by the thread at the end of a turn; cleared when the next turn starts
   note: string | null; // the thread's own one-line status, ≤ 60 chars
   /** One-tap replies the thread offers at the end of a turn, as a JSON array of strings; cleared when anyone writes or the next turn starts. */
@@ -591,6 +588,7 @@ CREATE INDEX IF NOT EXISTS state.claude_state_owner ON claude_state(project_id, 
 const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
   ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
+  // shortcut: tag is retired (#254) and nothing writes it; the column stays so a rollback still boots, drop it in a later release.
   ['tickets', 'tag', 'ALTER TABLE tickets ADD COLUMN tag TEXT'],
   ['tickets', 'state', 'ALTER TABLE tickets ADD COLUMN state TEXT'],
   ['tickets', 'note', 'ALTER TABLE tickets ADD COLUMN note TEXT'],
@@ -1119,15 +1117,15 @@ export class Store {
   }
 
   /** Insert a ticket with no working directory yet; call setTicketDir once it exists. */
-  createTicket(t: Pick<Ticket, 'project_id' | 'title' | 'permission_mode' | 'created_by'> & { kind?: TicketKind; tag?: TicketTag | null }): Ticket {
+  createTicket(t: Pick<Ticket, 'project_id' | 'title' | 'permission_mode' | 'created_by'> & { kind?: TicketKind }): Ticket {
     const now = Date.now();
     const kind = t.kind ?? 'ticket';
     const r = this.db
       .prepare(
-        `INSERT INTO tickets (project_id, kind, number, tag, title, status, cwd, permission_mode, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'new', '', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (project_id, kind, number, title, status, cwd, permission_mode, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'new', '', ?, ?, ?, ?)`,
       )
-      .run(t.project_id, kind, kind === 'coordinator' ? null : this.nextNumber(t.project_id), t.tag ?? null, t.title, t.permission_mode, t.created_by, now, now);
+      .run(t.project_id, kind, kind === 'coordinator' ? null : this.nextNumber(t.project_id), t.title, t.permission_mode, t.created_by, now, now);
     return this.getTicket(Number(r.lastInsertRowid))!;
   }
 
@@ -1155,7 +1153,7 @@ export class Store {
     this.db.prepare(`UPDATE tickets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   }
 
-  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'tag' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'last_model' | 'last_effort' | 'person_id'>>) {
+  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'last_model' | 'last_effort' | 'person_id'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');

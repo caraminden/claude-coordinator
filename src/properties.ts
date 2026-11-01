@@ -3,7 +3,7 @@
 // Minions only propose. Writes are checked against the registry, aliases resolve to the canonical
 // value, and new keys and values are checked for near-duplicates first.
 import type { DatabaseSync } from 'node:sqlite';
-import { DELVE_SEED, GLOBAL_SEED, type SeedKey, TAG_TO_TYPE } from './property-seed.ts';
+import { DELVE_SEED, GLOBAL_SEED, type SeedKey } from './property-seed.ts';
 import { HttpError } from './http.ts';
 
 /** The scheme whose Taskmaster owns the global keys (Citadel itself). */
@@ -158,7 +158,7 @@ export class Registry {
 
   // ── Seeding ────────────────────────────────────────────────────────────
 
-  /** Fill an empty registry from the old docs, and give existing minions their type and stage once. */
+  /** Fill an empty registry from the old docs, and give existing minions a stage once. */
   seed() {
     const has = (scope: number | null) =>
       this.db.prepare('SELECT 1 FROM property_keys WHERE scope IS ?').get(scope) !== undefined;
@@ -191,21 +191,17 @@ export class Registry {
     for (const v of k.values ?? []) insert.run(r.lastInsertRowid, v.value, v.label ?? '', v.description ?? '', JSON.stringify(v.aliases ?? []), 'seed', now);
   }
 
-  /** Every minion with a tag gets the matching type; every minion gets a stage (dismissed ones done). */
+  /** Every minion gets a stage: dismissed ones done. */
   private backfill() {
-    const tickets = this.db.prepare("SELECT id, tag, status FROM tickets WHERE kind = 'ticket'").all() as { id: number; tag: string | null; status: string }[];
-    const type = this.globalKey('type');
+    const tickets = this.db.prepare("SELECT id, status FROM tickets WHERE kind = 'ticket'").all() as { id: number; status: string }[];
     const stage = this.globalKey('stage');
+    if (!stage) return;
     const put = this.db.prepare(
       "INSERT OR IGNORE INTO properties (target_type, target_id, key_id, value, set_by, set_at) VALUES ('minion', ?, ?, ?, 'migration', ?)",
     );
     const now = Date.now();
     for (const t of tickets) {
-      const typeValue = t.tag ? TAG_TO_TYPE[t.tag] : undefined;
-      if (type && typeValue && !this.valuesFor('minion', t.id, type.id).length) put.run(t.id, type.id, typeValue, now);
-      if (stage && !this.valuesFor('minion', t.id, stage.id).length) {
-        put.run(t.id, stage.id, t.status === 'closed' ? 'done' : typeValue === 'ideation' ? 'idea' : 'in-progress', now);
-      }
+      if (!this.valuesFor('minion', t.id, stage.id).length) put.run(t.id, stage.id, t.status === 'closed' ? 'done' : 'in-progress', now);
     }
   }
 
@@ -376,13 +372,8 @@ export class Registry {
         this.db.prepare('DELETE FROM properties WHERE target_type = ? AND target_id = ? AND key_id = ?').run(type, id, k.id);
         const put = this.db.prepare('INSERT INTO properties (target_type, target_id, key_id, value, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?)');
         for (const v of values) put.run(type, id, k.id, v, by, now);
-        if (type === 'minion' && k.scope === null && k.key === 'type') {
-          // Keep the old tag, which the minions list groups by, in step with the type.
-          const tag = Object.entries(TAG_TO_TYPE).find(([, t]) => t === values[0])?.[0] ?? null;
-          this.db.prepare('UPDATE tickets SET tag = ? WHERE id = ?').run(tag, id);
-          if (values[0] === 'other') {
-            notes.push('type is `other`: ask people with an ask_question card whether it should stay `other` or move to another type (or a new one), and change it if they say so.');
-          }
+        if (type === 'minion' && k.scope === null && k.key === 'type' && values[0] === 'other') {
+          notes.push('type is `other`: ask people with an ask_question card whether it should stay `other` or move to another type (or a new one), and change it if they say so.');
         }
         // The column the minions list groups by holds the same build.
         if (type === 'minion' && k.key === 'build') this.db.prepare('UPDATE tickets SET build = ? WHERE id = ?').run(Number(values[0]) || null, id);
@@ -393,15 +384,6 @@ export class Registry {
       throw err;
     }
     return { properties: this.forTarget(type, id), notes };
-  }
-
-  /** Mirror an old-style tag write onto `type`. */
-  setTypeFromTag(ticketId: number, tag: string | null, by: string) {
-    const type = this.globalKey('type');
-    const value = tag ? TAG_TO_TYPE[tag] : undefined;
-    if (!type || !value) return;
-    this.db.prepare('DELETE FROM properties WHERE target_type = ? AND target_id = ? AND key_id = ?').run('minion', ticketId, type.id);
-    this.db.prepare('INSERT INTO properties (target_type, target_id, key_id, value, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?)').run('minion', ticketId, type.id, value, by, Date.now());
   }
 
   /** Mirror a write to the build column onto the scheme's `build` key, when it has one. */

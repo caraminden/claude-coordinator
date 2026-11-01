@@ -5,7 +5,7 @@ import { isAbsolute, join, sep } from 'node:path';
 import { lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { commentMessage, optionImageProblem } from '../artifacts.ts';
-import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, TICKET_TAGS, type Ticket, type TicketState, type TicketTag } from '../db.ts';
+import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
@@ -113,24 +113,27 @@ export const ticketRoutes: Route[] = [
       const { req, res, app, session, caller, ticket } = ctx;
       const { id } = ticket;
       const { store, runner } = app;
-      // Any of title, tag, state, note, replies, build, model and effort; null (or "") clears all but the title.
+      // Any of title, state, note, replies, build, model and effort; null (or "") clears all but the title.
       const body = await readJson(req);
-      const fields: Partial<Pick<Ticket, 'title' | 'tag' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort'>> = {};
+      const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort'>> = {};
       if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
       if (body.effort !== undefined) fields.effort = oneOf(body.effort, EFFORTS, 'Effort');
       if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
-      if (body.tag !== undefined) fields.tag = oneOf(body.tag, TICKET_TAGS, 'Tag') as TicketTag | null;
       if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
       if (body.note !== undefined) fields.note = body.note ? str(body.note, 'Note', 60) : null;
       if (body.build !== undefined) fields.build = buildNumber(body.build);
       if (body.replies !== undefined) fields.replies = replyList(body.replies);
+      // shortcut: an old session's retired tag (#254) sets its type through type's aliases (process → chore, idea → ideation); remove after a release.
+      if (body.tag && ticket.kind === 'ticket') {
+        store.props.set('minion', id, ticket.project_id, { type: body.tag }, session.name);
+        runner.broadcastTicket(id);
+      }
       // The view's replies are a list; compare the stored JSON.
       const stored = store.getTicket(id)!;
       for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === stored[k]) delete fields[k];
       if (Object.keys(fields).length) {
         store.updateTicket(id, fields);
         if (fields.state === 'pending-deploy') runner.deployPending(id);
-        if ('tag' in fields) store.props.setTypeFromTag(id, fields.tag ?? null, session.name);
         if ('build' in fields) store.props.setBuild(id, fields.build ?? null, session.name);
         const who = caller?.id === id ? 'Claude' : session.name;
         if (fields.title) runner.emit(id, 'note', { text: `${who} renamed this minion from "${ticket.title}" to "${fields.title}".` });

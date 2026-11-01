@@ -6,12 +6,11 @@ import { cleanPluginDirs, cleanRules, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, TICKET_TAGS, type Project, type Ticket, type TicketTag, type User } from '../db.ts';
+import { EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { askedCitadelKey, CITADEL_REPLY_MS, lendsMachines, taskmasterTargets } from '../access.ts';
 import { inboxCount, inboxItems } from '../inbox.ts';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
-import { TAG_TO_TYPE } from '../property-seed.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
 import { personGithub } from '../github-link.ts';
 import { describeCron, type Schedule } from '../schedules.ts';
@@ -202,7 +201,7 @@ function visibleSchemes(store: App['store'], who: { uid?: number; admin?: boolea
 }
 
 // What one line of list_tickets shows (ticketLine in src/mcp.ts), and all a minion gets of another.
-const LINE_FIELDS = ['number', 'title', 'tag', 'properties', 'build', 'model', 'effort', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'last_activity'] as const;
+const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'last_activity'] as const;
 
 export const projectRoutes: Route[] = [
   {
@@ -555,14 +554,14 @@ export const projectRoutes: Route[] = [
       // the thread renames itself once it knows what the work is.
       const title = body.title === undefined ? provisionalTitle(message) : str(body.title, 'Title', 120);
       // Insert first so concurrent creates get distinct ids, then build the working dir.
-      const tag = oneOf(body.tag ?? null, TICKET_TAGS, 'Tag') as TicketTag | null;
       const model = oneOf(body.model ?? null, MODELS, 'Model');
       const effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
       // Properties are checked before the minion exists, so a bad one doesn't leave half a minion.
       const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
       if (typeof props !== 'object' || Array.isArray(props)) throw new HttpError(400, 'properties must be an object of key: value');
       const given = (key: string) => Object.keys(props).some((k) => k.toLowerCase() === key.toLowerCase());
-      if (tag && !given('type')) props.type = TAG_TO_TYPE[tag];
+      // shortcut: an old session's retired tag (#254) becomes its type through type's aliases (process → chore, idea → ideation); remove after a release.
+      if (body.tag && !given('type')) props.type = body.tag;
       if (!caller && !given('requestedBy')) props.requestedBy = session.name;
       // A new minion is its starter's: the person, or for the Taskmaster the minion that asked for it, else the person of its turn.
       if (!given('assigned')) {
@@ -587,7 +586,7 @@ export const projectRoutes: Route[] = [
       // Started from a brief in a file (#129): one minion per brief, so a second start is refused.
       const brief = body.brief == null ? null : { path: str(body.brief.path, 'Brief path', 1000), heading: typeof body.brief.heading === 'string' ? body.brief.heading.trim().slice(0, 500) : '' };
       if (brief && !store.claimBrief(project.id, brief.path, brief.heading, session.name)) throw new HttpError(409, 'That brief has been started already');
-      const { id, notes } = await app.newMinion(project, { title, tag, props, model, effort }, session.name)
+      const { id, notes } = await app.newMinion(project, { title, props, model, effort }, session.name)
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
       store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null });

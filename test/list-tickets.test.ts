@@ -78,7 +78,7 @@ test("the route gives a minion only the line's fields, and refuses another schem
   const { tickets } = await res.json();
   assert.deepEqual(tickets.map((t: any) => t.title).sort(), ['Asker', 'Sibling']);
   assert.deepEqual(Object.keys(tickets[0]).sort(), [
-    'branch', 'build', 'closing', 'created_by', 'effort', 'last_activity', 'model', 'note', 'number', 'properties', 'queued', 'state', 'status', 'tag', 'title',
+    'branch', 'build', 'closing', 'created_by', 'effort', 'last_activity', 'model', 'note', 'number', 'properties', 'queued', 'state', 'status', 'title',
   ]);
   const cross = await get(`/api/projects/${B.id}/tickets`, M1.id);
   assert.equal(cross.status, 403);

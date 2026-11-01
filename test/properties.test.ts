@@ -27,8 +27,8 @@ const tm = (projectId: number): Actor => ({ kind: 'coordinator', name: 'Taskmast
 const minion = (projectId: number): Actor => ({ kind: 'thread', name: '#5 Thing', projectId, ticketId: 5 });
 const err = (status: number, re: RegExp) => (e: unknown) => e instanceof PropertyError && e.status === status && re.test(e.message);
 
-function ticket(s: Store, projectId: number, tag: string | null = null, status = 'idle') {
-  const t = s.createTicket({ project_id: projectId, title: 'T', permission_mode: 'default', created_by: 'Cara', tag: tag as any });
+function ticket(s: Store, projectId: number, status = 'idle') {
+  const t = s.createTicket({ project_id: projectId, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   s.updateTicket(t.id, { status: status as any });
   return t.id;
 }
@@ -72,15 +72,13 @@ test("a person's name matches the spelling already in use, whatever its case", (
   assert.equal(s.props.forTarget('minion', b).assigned, undefined);
 });
 
-test('backfills type from the old tag and stage from status, once', () => {
+test('backfills stage from status, once', () => {
   let ids: number[] = [];
   const s = freshStore((st) => {
-    ids = [ticket(st, 1, 'process'), ticket(st, 1, 'idea'), ticket(st, 2, 'bug', 'closed'), ticket(st, 2, null)];
+    ids = [ticket(st, 1), ticket(st, 2, 'closed')];
   });
-  assert.deepEqual(s.props.forTarget('minion', ids[0]), { type: 'chore', stage: 'in-progress' });
-  assert.deepEqual(s.props.forTarget('minion', ids[1]), { type: 'ideation', stage: 'idea' });
-  assert.deepEqual(s.props.forTarget('minion', ids[2]), { type: 'bug', stage: 'done' });
-  assert.deepEqual(s.props.forTarget('minion', ids[3]), { stage: 'in-progress' });
+  assert.deepEqual(s.props.forTarget('minion', ids[0]), { stage: 'in-progress' });
+  assert.deepEqual(s.props.forTarget('minion', ids[1]), { stage: 'done' });
 });
 
 test('aliases, case and spacing resolve to the canonical value; unknowns get a hint', () => {
@@ -105,16 +103,15 @@ test("a scheme can't see or set another scheme's keys", () => {
   assert.throws(() => s.props.set('minion', id, 2, { area: 'town' }, 'Cara'), err(400, /no property `area`/));
 });
 
-test('type keeps the old tag in step, and other asks people', () => {
+test('the old tag names are type aliases, and other asks people', () => {
   const s = freshStore();
-  const id = ticket(s, 2, 'feature');
+  const id = ticket(s, 2);
   s.props.set('minion', id, 2, { type: 'process' }, 'x');
-  assert.equal(s.getTicket(id)!.tag, 'process');
-  const r = s.props.set('minion', id, 2, { type: 'other' }, 'x');
-  assert.equal(s.getTicket(id)!.tag, null);
-  assert.match(r.notes.join(), /ask people/);
-  s.props.setTypeFromTag(id, 'idea', 'x');
+  assert.equal(s.props.forTarget('minion', id).type, 'chore');
+  s.props.set('minion', id, 2, { type: 'idea' }, 'x');
   assert.equal(s.props.forTarget('minion', id).type, 'ideation');
+  const r = s.props.set('minion', id, 2, { type: 'other' }, 'x');
+  assert.match(r.notes.join(), /ask people/);
 });
 
 test("build: the property and the column stay in step, in schemes that have the key", () => {
@@ -175,8 +172,8 @@ test('titleWithoutBuild', () => {
 
 test('stage starts, finishes on dismissal and comes back on reopening', () => {
   const s = freshStore();
-  const a = ticket(s, 2, 'idea');
-  s.props.setTypeFromTag(a, 'idea', 'x');
+  const a = ticket(s, 2);
+  s.props.set('minion', a, 2, { type: 'ideation' }, 'x');
   s.props.startStage(a);
   assert.equal(s.props.forTarget('minion', a).stage, 'idea');
   s.updateTicket(a, { status: 'closed' });
@@ -309,7 +306,7 @@ test('list groups (#253): moving to schema 21 types every minion and promotes De
   let s = new Store(path);
   const delve = s.createProject('Delve', null).id;
   const citadel = s.createProject('Citadel', null).id;
-  const [untyped, typed] = [ticket(s, citadel, null, 'closed'), ticket(s, citadel)];
+  const [untyped, typed] = [ticket(s, citadel, 'closed'), ticket(s, citadel)];
   s.props.set('minion', typed, citadel, { type: 'bug' }, 'Cara');
   s.setSetting('schema_version', 20);
   s.db.close();

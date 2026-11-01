@@ -23,7 +23,7 @@ export const GLOBAL_SEED: SeedKey[] = [
   {
     key: 'type',
     label: 'Type',
-    description: 'What kind of work. Every minion has one; when nothing fits, use `other` and ask people whether it should stay `other` or go in another bucket. Replaces the old minion tag (feature, bug, design → the same; idea → ideation; process → chore).',
+    description: 'What kind of work. Every minion has one; when nothing fits, use `other` and ask people whether it should stay `other` or go in another bucket.',
     multi: false,
     value_kind: 'enum',
     values: [
@@ -151,5 +151,3 @@ export const DELVE_SEED: SeedKey[] = [
   },
 ];
 
-/** The old minion tag each `type` value matches, and back. Types with no tag of their own clear it. */
-export const TAG_TO_TYPE: Record<string, string> = { feature: 'feature', bug: 'bug', design: 'design', idea: 'ideation', process: 'chore' };

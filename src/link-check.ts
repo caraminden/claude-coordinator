@@ -4,7 +4,7 @@
 // (ticketRoots in routes/files.ts), and sends the reply back once if any link wouldn't open.
 //
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { fileType, linkedPaths, resolveFile } from './artifacts.ts';
 
@@ -13,6 +13,8 @@ export interface LinkCheckConfig {
   cwd: string;
   /** The folders the chat may show files from: the working directory and the shared folders. */
   roots: string[];
+  /** A file in the turn's folder marking that this turn's reply was sent back once already. */
+  nudged?: string;
 }
 
 /** Text the chat renders as code, where a "[x](y)" is not a link. */
@@ -30,10 +32,19 @@ export async function brokenLinks(text: string, cfg: LinkCheckConfig): Promise<s
 
 /** The Stop hook's answer for this input: a block with the reason, or null to let the turn end. */
 export async function check(input: { stop_hook_active?: boolean; last_assistant_message?: string }, cfg: LinkCheckConfig) {
-  // Second try: the reply was sent back once already; let it end rather than loop.
-  if (input.stop_hook_active || !input.last_assistant_message) return null;
+  // One nudge per turn, counted in the turn's own marker: stop_hook_active is also set by any other
+  // Stop hook's block (the kit's job check), which once let a broken link through (#243).
+  if (!input.last_assistant_message || (cfg.nudged ? existsSync(cfg.nudged) : input.stop_hook_active)) return null;
   const broken = await brokenLinks(input.last_assistant_message, cfg);
   if (!broken.length) return null;
+  if (cfg.nudged) {
+    try {
+      writeFileSync(cfg.nudged, '');
+    } catch {
+      // Without the marker, fall back to stop_hook_active so it can't loop.
+      if (input.stop_hook_active) return null;
+    }
+  }
   const lines = broken.map((abs) => `- ${abs}: ${existsSync(abs) ? 'outside the folders the chat can show' : 'no such file'}`);
   return {
     decision: 'block',

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -49,10 +49,27 @@ test('stop_hook_active lets the turn end, and so does a reply with no text', asy
   assert.equal(await check({}, cfg), null);
 });
 
+test('one nudge per turn, counted by its own marker, not by another hook\'s stop_hook_active (#243)', async () => {
+  const nudged = join(root, 'turn-243', 'link-check-nudged');
+  mkdirSync(join(root, 'turn-243'));
+  const once = { ...cfg, nudged };
+  const bad = { last_assistant_message: '![x](../shared/project/handoff.md)' };
+  // Good links leave no marker, so a later bad reply in the same turn still gets its nudge.
+  assert.equal(await check({ last_assistant_message: `[h](${scheme}/handoff.md)` }, once), null);
+  assert.equal(existsSync(nudged), false);
+  // The job check blocked earlier this turn, so stop_hook_active is already true: still nudged.
+  assert.equal((await check({ ...bad, stop_hook_active: true }, once))?.decision, 'block');
+  assert.equal(existsSync(nudged), true);
+  // The rewrite that's still broken ends the turn rather than looping.
+  assert.equal(await check({ ...bad, stop_hook_active: true }, once), null);
+  assert.equal(await check(bad, once), null);
+});
+
 test('the hook script prints a block decision, or nothing', () => {
   const [node, script, config] = linkCheckHooks(cfg.roots).Stop[0].hooks[0].command.split(' ').map((s: string) => s.slice(1, -1));
   assert.equal(script, LINK_CHECK);
   assert.deepEqual(JSON.parse(config), cfg);
+  assert.equal(JSON.parse(linkCheckHooks(cfg.roots, LINK_CHECK, '/turn/link-check-nudged').Stop[0].hooks[0].command.split(' ')[2].slice(1, -1)).nudged, '/turn/link-check-nudged');
   const run = (input: object | string, c = config) => spawnSync(node, [script, c], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8' });
   const blocked = run({ hook_event_name: 'Stop', stop_hook_active: false, last_assistant_message: '![x](../shared/268/people-desktop.png)' });
   assert.equal(blocked.status, 0);

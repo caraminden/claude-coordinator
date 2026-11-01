@@ -96,10 +96,11 @@ export function tripwireHooks(projectId: number, claudeConfig: string, ask = fal
 /**
  * The Stop hook every turn gets (src/link-check.ts): it sends a reply back once if a file it links
  * wouldn't open in the chat. `roots` are the folders the server shows the turn's files from
- * (ticketRoots in routes/files.ts), its working directory first.
+ * (ticketRoots in routes/files.ts), its working directory first. `nudged` is a file in the turn's
+ * folder the check leaves once it has sent the reply back.
  */
-export function linkCheckHooks(roots: string[], script = LINK_CHECK) {
-  const command = [process.execPath, script, JSON.stringify({ cwd: roots[0], roots })].map((s) => `'${s}'`).join(' ');
+export function linkCheckHooks(roots: string[], script = LINK_CHECK, nudged?: string) {
+  const command = [process.execPath, script, JSON.stringify({ cwd: roots[0], roots, ...(nudged ? { nudged } : {}) })].map((s) => `'${s}'`).join(' ');
   return { Stop: [{ hooks: [{ type: 'command', command, timeout: 10 }] }] };
 }
 
@@ -503,9 +504,10 @@ function describeActivity(ev: any): string | null {
 
 /** How a session can put files in front of people: links in its reply that the app turns into previews. */
 function showingFiles(ticket: Ticket, filesDir: string | null, sharedDir: string | null): string[] {
-  const where = filesDir ? `inside your working directory or in ${filesDir}` : 'inside your working directory';
+  const where = `inside your working directory${[filesDir, sharedDir].filter(Boolean).map((d) => ` or in ${d}`).join('')}`;
   return [
     `You can show people files (documents, images, GIFs, videos, web pages, PDFs, and zip or other archives to download) by linking them in your reply with a path ${where}; the app turns those links into previews that open the file in place of the chat:`,
+    '- Link files by absolute path, never `../`: a relative link resolves against your working directory and breaks at the wrong depth.',
     '- `![caption](path)` shows an inline preview: use it for images, GIFs and videos.',
     '- `[title](path)` shows a card: use it for documents, web pages and PDFs. A card for a .zip, .7z, .tar or .gz file downloads it when clicked.',
     filesDir
@@ -1610,7 +1612,7 @@ export class Runner {
     // One --settings per turn: the tripwire hook and the shared settings, plus approval rules or the Taskmaster's access rules.
     const deny = credentialDenies(homedir(), claudeConfigDir(process.env), dirname(this.store.path));
     // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
-    const linkCheck = ticket.cwd ? linkCheckHooks([ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d), pinned(LINK_CHECK)) : {};
+    const linkCheck = ticket.cwd ? linkCheckHooks([ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d), pinned(LINK_CHECK), join(dir, 'link-check-nudged')) : {};
     // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
     // title, tag, state and note. The token travels in the environment (which the MCP server
     // inherits), never on the command line.

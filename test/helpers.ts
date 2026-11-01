@@ -17,6 +17,16 @@ export async function stopProcs(procs: ChildProcess[]) {
 
 export { freePort, listeningPort };
 
+// Every test request gets a fresh connection. Under load a test's synchronous step can hold its event
+// loop past a server's 5 s keep-alive; fetch then sends the next request on the idle socket the server
+// closed meanwhile and fails with "other side closed" (#235).
+const keepAliveFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => {
+  const req = new Request(input, init);
+  req.headers.set('Connection', 'close');
+  return keepAliveFetch(req);
+};
+
 export const REPO = join(import.meta.dirname, '..');
 
 /** The lines a fake's log file holds, leaving out a last line it is still writing. */

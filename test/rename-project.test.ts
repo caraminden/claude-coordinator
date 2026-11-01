@@ -86,3 +86,13 @@ test('GET /api/projects/:id/instructions/history shows the last saves with their
   ]);
   assert.equal(typeof data.history[0].at, 'number');
 });
+
+test("PATCH /api/projects/:id saves list groups checked against the scheme's own keys", async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Groups' } });
+  const global = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { list_groups: ['type: bug'] } });
+  assert.equal(global.status, 400);
+  assert.match(global.data.error, /global key/);
+  const none = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { list_groups: [] } });
+  assert.equal(none.status, 200);
+  assert.equal(none.data.list_groups, '[]');
+});

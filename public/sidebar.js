@@ -1,6 +1,6 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
 import { weekShare } from './cost.js';
-import { account, ago, api, app, costText, crumbs, h, isCoordinator, isSeen, schemeIcon, sending, setSending, setView, STATES, statusLabel, TAGS, taskmasterLabel, threadFullName, threadHref, usage, view } from './core.js';
+import { account, ago, api, app, costText, crumbs, h, isCoordinator, isSeen, listGroupsOf, schemeIcon, sending, setSending, setView, STATES, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, usage, view } from './core.js';
 import { fitHeight, loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -208,6 +208,13 @@ export function newTicketForm(projectId) {
   return form;
 }
 
+/** A promoted group's heading: its value's label in the registry, or the value capitalised ("area: balance" → "Balance"). */
+function groupHeading(group) {
+  const [key, value] = group.split(/:(.*)/).map((x) => x.trim());
+  const label = propFilter.projectId === view.projectId && propFilter.keys?.find((k) => k.key === key)?.values?.find((v) => v.value === value)?.label;
+  return label || value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 export function renderSidebar() {
   const el = document.getElementById('threads');
   if (!el) return;
@@ -222,9 +229,9 @@ export function renderSidebar() {
   if (threadSearch.q) return renderThreadResults(el, tickets.sort((a, b) => b.updated_at - a.updated_at));
   const open = tickets.filter((t) => t.status !== 'closed');
   const closed = tickets.filter((t) => t.status === 'closed').sort((a, b) => b.updated_at - a.updated_at);
-  const sections = threadSections(open, Object.keys(TAGS)).map((s) =>
-    h('section', { class: `thread-group g-${s.build ? 'build' : s.key}` },
-      h('h3', {}, s.build ? ['Build ', s.build, s.current ? h('span', { class: 'muted' }, ' current') : ''] : s.key === 'parked' ? 'Parked' : s.tag ? TAGS[s.tag].section : 'Other'),
+  const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(view.project)).map((s) =>
+    h('section', { class: `thread-group g-${s.build ? 'build' : s.group ? 'promoted' : s.key}` },
+      h('h3', {}, s.build ? ['Build ', s.build, s.current ? h('span', { class: 'muted' }, ' current') : ''] : s.key === 'parked' ? 'Parked' : s.group ? groupHeading(s.group) : TYPES[s.type].section),
       s.rows.sort(byUrgency).map((t) => threadRow(t))));
   // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
   const byId = new Map(open.map((t) => [t.id, t]));

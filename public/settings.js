@@ -1,6 +1,6 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
-import { account, ago, api, h, icon, openHash, schemeIcon, view } from './core.js';
-import { openNewScheme, toggleSchemeMenu } from './sidebar.js';
+import { account, ago, api, h, icon, listGroupsOf, openHash, schemeIcon, view } from './core.js';
+import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
 
 // ---------- push notifications ----------
 
@@ -122,10 +122,11 @@ export function onProjectUpdate(project) {
   view.projects = view.projects.map((p) => (p.id === project.id ? { ...p, name: project.name } : p));
   if (view.projectId !== project.id) return;
   view.project = project;
-  for (const [id, key] of [['approval-rules', 'approval_rules'], ['plugin-dirs', 'plugin_dirs']]) {
+  for (const [id, key] of [['approval-rules', 'approval_rules'], ['plugin-dirs', 'plugin_dirs'], ['list-groups', 'list_groups']]) {
     const el = document.getElementById(id);
-    if (el && !el.hasAttribute('data-draft')) el.value = project[key];
+    if (el && !el.hasAttribute('data-draft')) el.value = settingText(project, key);
   }
+  renderSidebar(); // its promoted groups may have changed
   const text = document.getElementById('instructions-text');
   // Someone else saved: show their text unless this tab has edits of its own.
   if (text && !text.hasAttribute('data-draft')) text.value = project.instructions;
@@ -238,6 +239,8 @@ export function projectTitle(project) {
 }
 
 const splitLines = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+/** A settings field's text: list_groups is stored as a JSON list and edited one per line. */
+const settingText = (p, key) => (key === 'list_groups' ? listGroupsOf(p).join('\n') : p[key] ?? '');
 
 /** The Settings page's tabs; each is its own route, so old links to them still work. */
 export function settingsTabs() {
@@ -267,16 +270,18 @@ export function tuneUpButton() {
   return b;
 }
 
-/** Main panel: the project's approval rules and plugin folders. */
+/** Main panel: the project's approval rules, plugin folders and list groups. */
 export function approvalsEditor() {
   const p = view.project;
   const field = (id, key, placeholder) => {
     const t = h('textarea', { id, class: 'instructions-text settings-list', spellcheck: 'false', rows: 5, placeholder });
-    t.value = p[key] ?? '';
+    t.value = settingText(p, key);
     return t;
   };
   const rules = field('approval-rules', 'approval_rules', 'Bash(gh pr merge:*)\nmcp__*__merge_pull_request');
   const dirs = field('plugin-dirs', 'plugin_dirs', 'tools/mods/delve');
+  const groups = field('list-groups', 'list_groups', 'area: balance');
+  groups.rows = 3;
   // Plugins load code from any folder on the server, so only an admin changes them.
   dirs.readOnly = !account?.admin;
   const status = h('span', { class: 'muted', role: 'status' });
@@ -285,15 +290,15 @@ export function approvalsEditor() {
   const same = (a, b) => splitLines(a).join('\n') === splitLines(b).join('\n');
   const sync = () => {
     let dirty = false;
-    for (const [t, key] of [[rules, 'approval_rules'], [dirs, 'plugin_dirs']]) {
+    for (const [t, key] of [[rules, 'approval_rules'], [dirs, 'plugin_dirs'], [groups, 'list_groups']]) {
       // Marked as a draft only while it differs, so someone else's save still shows otherwise.
-      const d = !same(t.value, view.project[key]);
+      const d = !same(t.value, settingText(view.project, key));
       t.toggleAttribute('data-draft', d);
       dirty ||= d;
     }
     save.disabled = discard.disabled = !dirty;
   };
-  for (const t of [rules, dirs]) t.addEventListener('input', () => {
+  for (const t of [rules, dirs, groups]) t.addEventListener('input', () => {
     status.textContent = '';
     sync();
   });
@@ -301,9 +306,11 @@ export function approvalsEditor() {
     save.disabled = true;
     status.textContent = 'Saving…';
     try {
-      view.project = await api(`api/projects/${p.id}`, { method: 'PATCH', body: { approval_rules: rules.value, plugin_dirs: dirs.value } });
+      view.project = await api(`api/projects/${p.id}`, { method: 'PATCH', body: { approval_rules: rules.value, plugin_dirs: dirs.value, list_groups: splitLines(groups.value) } });
       rules.value = view.project.approval_rules;
       dirs.value = view.project.plugin_dirs;
+      groups.value = settingText(view.project, 'list_groups');
+      renderSidebar();
       status.textContent = 'Saved. Minions pick this up on their next turn.';
     } catch (err) {
       status.textContent = err.message;
@@ -313,6 +320,7 @@ export function approvalsEditor() {
   discard.onclick = () => {
     rules.value = view.project.approval_rules ?? '';
     dirs.value = view.project.plugin_dirs ?? '';
+    groups.value = settingText(view.project, 'list_groups');
     status.textContent = '';
     sync();
   };
@@ -333,6 +341,11 @@ export function approvalsEditor() {
       'Folders relative to the repo root, one per line, like ', h('code', {}, 'tools/mods/delve'),
       ', or absolute paths. Each minion loads the ones that exist (relative ones in its worktree) as Claude Code plugins (', h('code', {}, '--plugin-dir'), ').', account?.admin ? '' : ' Only an admin changes these.'),
     dirs,
+    h('h3', { class: 'settings-label' }, 'List groups'),
+    h('p', { class: 'muted small' },
+      'Values of this scheme\'s own properties, one per line, like ', h('code', {}, 'area: balance'),
+      '. Minions outside a build that carry one get their own group at the top of the minions list instead of sitting under their type; one that matches two sits in the first.'),
+    groups,
     h('div', { class: 'row instructions-actions' }, save, discard, status));
   sync();
   return section;

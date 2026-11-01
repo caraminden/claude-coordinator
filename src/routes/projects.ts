@@ -401,12 +401,12 @@ export const projectRoutes: Route[] = [
     method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER, access: 'owner',
     async handler({ req, res, app, session, caller, project }) {
       const { store, runner } = app;
-      // Any of name, instructions, approval_rules, plugin_dirs, default_effort, machine_tools, onboarding and onboarding_mode; what is left out stays.
+      // Any of name, instructions, approval_rules, plugin_dirs, default_effort, machine_tools, onboarding, onboarding_mode and list_groups; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'default_effort', 'machine_tools', 'onboarding', 'onboarding_mode'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'default_effort', 'machine_tools', 'onboarding', 'onboarding_mode', 'list_groups'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort' | 'machine_tools' | 'onboarding' | 'onboarding_mode'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort' | 'machine_tools' | 'onboarding' | 'onboarding_mode' | 'list_groups'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -423,6 +423,7 @@ export const projectRoutes: Route[] = [
       try {
         if (body.approval_rules !== undefined) settings.approval_rules = cleanRules(body.approval_rules);
         if (body.plugin_dirs !== undefined) settings.plugin_dirs = cleanPluginDirs(body.plugin_dirs);
+        if (body.list_groups !== undefined) settings.list_groups = JSON.stringify(store.props.listGroups(project.id, body.list_groups));
       } catch (err: any) {
         throw new HttpError(400, err.message);
       }

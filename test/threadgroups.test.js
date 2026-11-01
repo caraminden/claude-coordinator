@@ -2,34 +2,51 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { threadSections } from '../public/threadgroups.js';
 
-const TAGS = ['feature', 'bug', 'design', 'process', 'idea'];
-const shape = (open) => threadSections(open, TAGS).map((s) => [s.key, s.current ?? false, s.rows.map((t) => t.n)]);
+const TYPES = ['feature', 'bug', 'design', 'art', 'research', 'chore', 'other', 'ideation'];
+const shape = (open, groups) => threadSections(open, TYPES, groups).map((s) => [s.key, s.current ?? false, s.rows.map((t) => t.n)]);
+/** A minion numbered n of a type, with any other properties and fields. */
+const m = (n, type, rest = {}, props = {}) => ({ n, properties: { ...(type && { type }), ...props }, ...rest });
 
-test('no builds: grouped by kind only', () => {
-  assert.deepEqual(shape([{ n: 1, tag: 'bug' }, { n: 2, tag: 'feature' }, { n: 3, tag: null }, { n: 4, tag: 'odd' }]),
-    [['feature', false, [2]], ['bug', false, [1]], ['other', false, [3, 4]]]);
+test('no builds: grouped by type only, a missing or unknown type under Other', () => {
+  assert.deepEqual(shape([m(1, 'bug'), m(2, 'feature'), m(3, null), m(4, 'odd'), m(5, 'other'), m(6, 'art'), m(7, 'research')]),
+    [['feature', false, [2]], ['bug', false, [1]], ['art', false, [6]], ['research', false, [7]], ['other', false, [3, 4, 5]]]);
 });
 
-test('lowest build on top as current, later builds at the bottom ascending, any kind', () => {
+test('lowest build on top as current, later builds at the bottom ascending, any type', () => {
   assert.deepEqual(shape([
-    { n: 1, tag: 'idea', build: 9 }, { n: 2, tag: 'process', build: 8 }, { n: 3, tag: 'feature', build: 8 },
-    { n: 4, tag: 'bug' }, { n: 5, tag: 'idea' }, { n: 6, tag: 'feature', build: 10 },
-  ]), [['build-8', true, [2, 3]], ['bug', false, [4]], ['idea', false, [5]], ['build-9', false, [1]], ['build-10', false, [6]]]);
+    m(1, 'ideation', { build: 9 }), m(2, 'chore', { build: 8 }), m(3, 'feature', { build: 8 }),
+    m(4, 'bug'), m(5, 'ideation'), m(6, 'feature', { build: 10 }), m(7, 'chore'),
+  ]), [['build-8', true, [2, 3]], ['bug', false, [4]], ['chore', false, [7]], ['ideation', false, [5]], ['build-9', false, [1]], ['build-10', false, [6]]]);
 });
 
 test('only the build field counts, not a build named in the title', () => {
   assert.deepEqual(shape([
-    { n: 1, tag: 'feature', title: 'Major Build #7' }, { n: 2, tag: 'design', title: 'Lair Strip · Build #8' },
-    { n: 3, tag: 'feature', title: 'Workshop · Build #7', build: 9 },
+    m(1, 'feature', { title: 'Major Build #7' }), m(2, 'design', { title: 'Lair Strip · Build #8' }),
+    m(3, 'feature', { title: 'Workshop · Build #7', build: 9 }),
   ]), [['build-9', true, [3]], ['feature', false, [1]], ['design', false, [2]]]);
 });
 
-test('parked minions leave their build or kind for a Parked section at the bottom', () => {
+test('parked minions leave their build or type for a Parked section at the bottom', () => {
   assert.deepEqual(shape([
-    { n: 1, tag: 'bug', state: 'parked', status: 'idle' }, { n: 2, tag: 'bug' }, { n: 3, tag: 'feature', build: 7, state: 'parked' },
-    { n: 4, tag: 'feature', build: 8 }, { n: 5, tag: 'idea', build: 9 }, { n: 6, tag: 'idea', state: 'parked', status: 'running' },
-    { n: 7, tag: 'design', state: 'parked', approvals: 1 },
-  ]), [['build-8', true, [4]], ['bug', false, [2]], ['design', false, [7]], ['idea', false, [6]], ['build-9', false, [5]], ['parked', false, [1, 3]]]);
+    m(1, 'bug', { state: 'parked', status: 'idle' }), m(2, 'bug'), m(3, 'feature', { build: 7, state: 'parked' }),
+    m(4, 'feature', { build: 8 }), m(5, 'ideation', { build: 9 }), m(6, 'ideation', { state: 'parked', status: 'running' }),
+    m(7, 'design', { state: 'parked', approvals: 1 }),
+  ]), [['build-8', true, [4]], ['bug', false, [2]], ['design', false, [7]], ['ideation', false, [6]], ['build-9', false, [5]], ['parked', false, [1, 3]]]);
+});
+
+test("promoted groups come after the current build, in the scheme's order, the first match winning", () => {
+  const groups = ['area: balance', 'area: ui'];
+  assert.deepEqual(shape([
+    m(1, 'feature', {}, { area: ['town', 'balance'] }), // balance: leaves Features
+    m(2, 'bug', {}, { area: ['ui', 'balance'] }), // both: the first group in the scheme's list wins
+    m(3, 'design', {}, { area: 'ui' }),
+    m(4, 'feature', { build: 7 }, { area: ['balance'] }), // in a build: stays there
+    m(5, 'feature', { build: 8 }, { area: ['ui'] }),
+    m(6, 'chore', {}, { area: ['town'] }),
+    m(7, 'feature', { state: 'parked' }, { area: ['balance'] }), // parked: stays parked
+  ], groups), [['build-7', true, [4]], ['group-0', false, [1, 2]], ['group-1', false, [3]], ['chore', false, [6]], ['build-8', false, [5]], ['parked', false, [7]]]);
+  const [, balance] = threadSections([m(1, 'bug', { build: 3 }), m(2, 'bug', {}, { area: 'balance' })], TYPES, groups);
+  assert.equal(balance.group, 'area: balance');
 });
 
 test('search matches title, exact number and property values, not anything else', async () => {

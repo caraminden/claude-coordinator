@@ -25,6 +25,8 @@ export interface Project {
   default_effort: string;
   /** 1 when its minions get the connected machines' tools (#138): Godot's ~1.1k tokens of names on every call. */
   machine_tools: number;
+  /** The minions list's promoted groups (#253): a JSON list of "key: value" of the scheme's own keys, shown above the types. */
+  list_groups: string;
   /** Where its setup stands (#172): the Taskmaster gets its onboarding prompt section until it is done or skipped. */
   onboarding: Onboarding;
   /** first-run for a new scheme, tune-up for a re-run on an existing one. */
@@ -610,6 +612,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['projects', 'onboarding_mode', "ALTER TABLE projects ADD COLUMN onboarding_mode TEXT NOT NULL DEFAULT 'first-run'"],
   ['projects', 'github_error', 'ALTER TABLE projects ADD COLUMN github_error TEXT'],
   ['projects', 'owner_id', 'ALTER TABLE projects ADD COLUMN owner_id INTEGER REFERENCES users(id)'],
+  ['projects', 'list_groups', "ALTER TABLE projects ADD COLUMN list_groups TEXT NOT NULL DEFAULT '[]'"],
   ['tickets', 'person_id', 'ALTER TABLE tickets ADD COLUMN person_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
   ['machines', 'workspace_tools', 'ALTER TABLE machines ADD COLUMN workspace_tools INTEGER NOT NULL DEFAULT 0'],
@@ -621,7 +624,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 20; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns
+export const SCHEMA_VERSION = 21; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -661,6 +664,7 @@ export class Store {
     this.settleBuilds();
     this.schedules = new Schedules(this.db);
     this.serverLoginOwnerOnly();
+    this.groupByType();
     this.noteSchemaVersion();
   }
 
@@ -708,6 +712,13 @@ export class Store {
   private serverLoginOwnerOnly() {
     if ((this.getSetting<number>('schema_version') ?? 0) >= 17) return;
     this.db.prepare('UPDATE users SET server_login = 0 WHERE id IS NOT (SELECT min(id) FROM users WHERE admin = 1)').run();
+  }
+
+  /** The list groups by type from 21 (#253), once: every minion gets one, and Delve promotes its balance work. */
+  private groupByType() {
+    if ((this.getSetting<number>('schema_version') ?? 0) >= 21) return;
+    this.props.backfillOther();
+    this.db.prepare(`UPDATE projects SET list_groups = '["area: balance"]' WHERE name = 'Delve' AND list_groups = '[]'`).run();
   }
 
   /** Whose subscription the server's own Claude login is: the first admin, the one Citadel made at its first start. */
@@ -862,7 +873,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort' | 'machine_tools' | 'onboarding' | 'onboarding_mode'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort' | 'machine_tools' | 'onboarding' | 'onboarding_mode' | 'list_groups'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).

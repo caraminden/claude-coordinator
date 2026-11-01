@@ -209,6 +209,19 @@ export class Registry {
     }
   }
 
+  /** Every minion with no type gets `other` (#253): the list groups by type, so none is left out. */
+  backfillOther() {
+    const type = this.globalKey('type');
+    if (!type) return;
+    this.db
+      .prepare(
+        `INSERT INTO properties (target_type, target_id, key_id, value, set_by, set_at)
+         SELECT 'minion', t.id, ?, 'other', 'migration', ? FROM tickets t WHERE t.kind = 'ticket'
+           AND NOT EXISTS (SELECT 1 FROM properties p WHERE p.target_type = 'minion' AND p.target_id = t.id AND p.key_id = ?)`,
+      )
+      .run(type.id, Date.now(), type.id);
+  }
+
   // ── Reading ────────────────────────────────────────────────────────────
 
   private globalKey(key: string): KeyRow | undefined {
@@ -323,6 +336,25 @@ export class Registry {
       plan.push({ k, values: [...new Set(list.map((v) => this.resolve(k, v)))] });
     }
     return plan;
+  }
+
+  /**
+   * A scheme's promoted list groups (#253), checked: each "key: value" of one of the scheme's own keys,
+   * written as stored ("Area: Balance" → "area: balance"), duplicates dropped, order kept.
+   */
+  listGroups(projectId: number, input: unknown): string[] {
+    if (!Array.isArray(input)) throw new PropertyError('list_groups must be a list of "key: value"');
+    if (input.length > 12) throw new PropertyError('list_groups takes at most 12 groups');
+    const out: string[] = [];
+    for (const raw of input) {
+      const m = typeof raw === 'string' ? raw.match(/^([^:]+):(.+)$/) : null;
+      if (!m) throw new PropertyError(`${code(String(raw))} isn't "key: value"`);
+      const k = this.findKey(projectId, m[1].trim(), { activeOnly: true });
+      if (k.scope === null) throw new PropertyError(`${code(k.key)} is a global key: list groups use the scheme's own keys (the list already groups by type and build)`);
+      const g = `${k.key}: ${this.resolve(k, m[2].trim())}`;
+      if (!out.includes(g)) out.push(g);
+    }
+    return out;
   }
 
   /** Check properties without writing them: what each key would hold, by its canonical name. */

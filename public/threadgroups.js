@@ -1,24 +1,34 @@
 // Sections of the threads list, as in Delve's Custom view: the current build (the lowest build any
-// open thread is assigned to) on top, then the kinds of work, then later builds in ascending order.
-// Threads in a build sit in its section whatever their kind, by their build field.
-// Parked threads leave their build or kind for one Parked section at the bottom (above Dismissed).
-
-const KINDS = ['feature', 'bug', 'design', 'process', null, 'idea']; // null: untagged, "Other"
+// open thread is assigned to) on top, then the scheme's promoted groups (its list_groups setting,
+// like Delve's "area: balance"), then the types of work, then later builds in ascending order.
+// Threads in a build sit in its section whatever their type or properties, by their build field.
+// A thread outside a build that carries a promoted value sits in the first such group, not its type's.
+// Parked threads leave their build or group for one Parked section at the bottom (above Dismissed).
 
 /** Parked and resting there: a running, stuck or approval-waiting thread shows where it would otherwise. */
 const isParked = (t) => t.state === 'parked' && !t.approvals && !['running', 'new', 'error'].includes(t.status);
 
-/** [{ key, build?, current?, tag?, rows }] for open threads, empty sections left out. */
-export function threadSections(all, knownTags) {
+/**
+ * [{ key, build?, current?, type?, group?, rows }] for open threads, empty sections left out. `types` are
+ * the type values in list order (an unknown or missing type counts as "other"); `groups` the scheme's
+ * promoted "key: value"s.
+ */
+export function threadSections(all, types, groups = []) {
   const parked = all.filter(isParked);
   const open = all.filter((t) => !isParked(t));
   const buildOf = (t) => t.build ?? 0;
   const builds = [...new Set(open.map(buildOf).filter(Boolean))].sort((a, b) => a - b);
   const buildSection = (build, i) => ({ key: `build-${build}`, build, current: i === 0, rows: open.filter((t) => buildOf(t) === build) });
-  const kinds = KINDS.map((tag) => ({
-    key: tag ?? 'other', tag, rows: open.filter((t) => !buildOf(t) && (knownTags.includes(t.tag) ? t.tag : null) === tag),
-  }));
-  return [...builds.slice(0, 1).map(buildSection), ...kinds, ...builds.slice(1).map((b, i) => buildSection(b, i + 1)),
+  const has = (t, group) => {
+    const i = group.indexOf(':');
+    return [t.properties?.[group.slice(0, i).trim()]].flat().map(String).includes(group.slice(i + 1).trim());
+  };
+  const loose = open.filter((t) => !buildOf(t));
+  const promotedTo = new Map(loose.map((t) => [t, groups.find((g) => has(t, g))]));
+  const promoted = groups.map((group, i) => ({ key: `group-${i}`, group, rows: loose.filter((t) => promotedTo.get(t) === group) }));
+  const typeOf = (t) => (types.includes(t.properties?.type) ? t.properties.type : 'other');
+  const kinds = types.map((type) => ({ key: type, type, rows: loose.filter((t) => !promotedTo.get(t) && typeOf(t) === type) }));
+  return [...builds.slice(0, 1).map(buildSection), ...promoted, ...kinds, ...builds.slice(1).map((b, i) => buildSection(b, i + 1)),
     { key: 'parked', rows: parked }]
     .filter((s) => s.rows.length);
 }

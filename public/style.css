@@ -674,9 +674,12 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .g-feature > h3 { color: hsl(265 55% 55%); }
 .g-bug > h3 { color: hsl(0 60% 52%); }
 .g-design > h3 { color: hsl(330 55% 55%); }
-.g-process > h3 { color: hsl(180 55% 36%); }
+.g-art > h3 { color: hsl(15 65% 50%); }
+.g-research > h3 { color: hsl(220 30% 45%); }
+.g-chore > h3 { color: hsl(180 55% 36%); }
 .g-other > h3 { color: hsl(30 35% 48%); }
-.g-idea > h3 { color: hsl(45 75% 42%); }
+.g-ideation > h3 { color: hsl(45 75% 42%); }
+.g-promoted > h3 { color: hsl(150 50% 34%); }
 .g-parked > h3 { color: var(--muted); }
 .g-pinned > h3 { color: var(--accent); }
 .thread-row { text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 0.4rem; align-items: baseline; padding: 0.25rem 0.45rem; border-radius: 6px; text-decoration: none; color: var(--ink); font-size: 0.9em; border: 1px solid transparent; }

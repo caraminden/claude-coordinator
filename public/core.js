@@ -22,15 +22,27 @@ export const crumbs = document.getElementById('crumbs');
 const meEl = document.getElementById('me');
 
 const STATUS_LABEL = { running: 'Running', idle: 'Waiting for you', new: 'Starting', error: 'Error', closed: 'Dismissed' };
-// Thread naming and the threads list follow Delve's Custom view: threads are grouped by kind of
-// work, and each is one compact row of number + short ask, a state, and a terse note.
-export const TAGS = {
+// Thread naming and the threads list follow Delve's Custom view: threads are grouped by their `type`
+// property, and each is one compact row of number + short ask, a state, and a terse note.
+// In the list's order; `other` has no emoji or header word, as a minion of no particular kind.
+export const TYPES = {
   feature: { emoji: '🛠️', label: 'Feature', section: 'Features' },
   bug: { emoji: '🐛', label: 'Bug', section: 'Bugs' },
   design: { emoji: '🎨', label: 'Design', section: 'Design' },
-  process: { emoji: '⚙️', label: 'Process', section: 'Process' },
-  idea: { emoji: '💡', label: 'Idea', section: 'Ideas' },
+  art: { emoji: '🖌️', label: 'Art', section: 'Art' },
+  research: { emoji: '🔬', label: 'Research', section: 'Research' },
+  chore: { emoji: '⚙️', label: 'Chore', section: 'Chores' },
+  other: { section: 'Other' },
+  ideation: { emoji: '💡', label: 'Idea', section: 'Ideas' },
 };
+/** A scheme's promoted list groups, "key: value" each (#253). */
+export function listGroupsOf(p) {
+  try {
+    return JSON.parse(p?.list_groups || '[]');
+  } catch {
+    return [];
+  }
+}
 export const STATES = {
   ready: { emoji: '✅', label: 'Ready to merge or pick up' },
   try: { emoji: '🧪', label: 'Ready for you to try' },
@@ -896,17 +908,17 @@ export const threadLabel = (t) => (isCoordinator(t) ? taskmasterName(t.project_i
 /** The full name, Delve style: "🛠️ 12 FEATURE: Usage bar ✅". */
 export function threadFullName(t) {
   if (isCoordinator(t)) return taskmasterName(t.project_id);
-  const tag = TAGS[t.tag];
+  const type = TYPES[t.properties?.type];
   const state = t.status !== 'running' && STATES[t.state];
-  return [tag?.emoji, t.number ?? t.id, tag ? `${tag.label.toUpperCase()}: ${t.title}` : t.title, state?.emoji].filter(Boolean).join(' ');
+  return [type?.emoji, t.number ?? t.id, type?.label ? `${type.label.toUpperCase()}: ${t.title}` : t.title, state?.emoji].filter(Boolean).join(' ');
 }
 
-/** threadFullName in parts; phones hide the tag word and state emoji, which the emoji and state label already say. */
+/** threadFullName in parts; phones hide the type word and state emoji, which the emoji and state label already say. */
 export function threadTitleParts(t) {
   if (isCoordinator(t)) return taskmasterLabel(t.project_id);
-  const tag = TAGS[t.tag];
+  const type = TYPES[t.properties?.type];
   const state = t.status !== 'running' && STATES[t.state];
-  return [tag ? `${tag.emoji} ` : '', `${t.number ?? t.id} `, tag ? h('span', { class: 'wide-only' }, `${tag.label.toUpperCase()}: `) : '', t.title,
+  return [type?.emoji ? `${type.emoji} ` : '', `${t.number ?? t.id} `, type?.label ? h('span', { class: 'wide-only' }, `${type.label.toUpperCase()}: `) : '', t.title,
     state ? h('span', { class: 'wide-only' }, ` ${state.emoji}`) : ''];
 }
 

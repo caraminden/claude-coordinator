@@ -303,3 +303,36 @@ test('approving a proposed key approves every value under it, and a setup plan c
   assert.equal(s.props.propose(1, { key: 'north', reason: 'x' }, { ...minion(1), setupPlan: 'north' } as Actor).proposed, true);
   assert.equal(s.props.list(1).find((k) => k.key === 'north')!.status, 'proposed');
 });
+
+test('list groups (#253): moving to schema 21 types every minion and promotes Delve\'s balance work, once', () => {
+  const path = join(root, `${Math.random()}.db`);
+  let s = new Store(path);
+  const delve = s.createProject('Delve', null).id;
+  const citadel = s.createProject('Citadel', null).id;
+  const [untyped, typed] = [ticket(s, citadel, null, 'closed'), ticket(s, citadel)];
+  s.props.set('minion', typed, citadel, { type: 'bug' }, 'Cara');
+  s.setSetting('schema_version', 20);
+  s.db.close();
+  s = new Store(path);
+  assert.equal(s.props.forTarget('minion', untyped).type, 'other');
+  assert.equal((s.db.prepare('SELECT set_by FROM properties WHERE target_id = ? AND value = ?').get(untyped, 'other') as { set_by: string }).set_by, 'migration');
+  assert.equal(s.props.forTarget('minion', typed).type, 'bug');
+  assert.equal(s.getProject(delve)!.list_groups, '["area: balance"]');
+  assert.equal(s.getProject(citadel)!.list_groups, '[]');
+  // Once: Delve clearing its groups stays cleared after a restart.
+  s.setProjectSettings(delve, { list_groups: '[]' });
+  s.db.close();
+  s = new Store(path);
+  assert.equal(s.getProject(delve)!.list_groups, '[]');
+});
+
+test("list groups take the scheme's own keys and values, written as stored", () => {
+  const s = freshStore();
+  assert.deepEqual(s.props.listGroups(1, ['Area: Balance', 'area:ui', 'area: balance']), ['area: balance', 'area: ui']);
+  assert.deepEqual(s.props.listGroups(1, []), []);
+  assert.throws(() => s.props.listGroups(1, ['type: bug']), err(400, /global key/));
+  assert.throws(() => s.props.listGroups(1, ['area: nowhere']), err(400, /isn't one of the `area` values/));
+  assert.throws(() => s.props.listGroups(2, ['area: balance']), err(400, /no property `area`/));
+  assert.throws(() => s.props.listGroups(1, ['balance']), err(400, /key: value/));
+  assert.throws(() => s.props.listGroups(1, 'area: balance'), err(400, /must be a list/));
+});

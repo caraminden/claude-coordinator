@@ -1,13 +1,16 @@
 // Contraptions (src/contraptions.ts): admins register them, edit them, enable them per person and
-// rotate their keys; anyone signed in lists the ones enabled for them, for the app rail; a contraption's
+// rotate their keys, as does Citadel's Taskmaster on an admin's turn (#246); anyone signed in lists the ones enabled for them, for the app rail; a contraption's
 // own server sends its people's bug reports and feature asks to its home scheme (src/contraption-asks.ts)
 // and runs turns for its people through the turn API (src/contraption-turns.ts).
 import type { IncomingMessage } from 'node:http';
+import { APP_NAME } from '../appname.ts';
+import { AGENT_NAME } from '../auth.ts';
 import { ASK_FILES_MAX, askFiles, askMessage, saveAskFiles } from '../contraption-asks.ts';
 import { parseTurn, TurnError } from '../contraption-turns.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 import type { ContraptionRow } from '../db.ts';
 import { HttpError, json, oneOf, readJson, str, type App, type Ctx, type Route } from '../http.ts';
+import { GLOBAL_OWNER } from '../properties.ts';
 import { projectSharedDir } from '../workspace.ts';
 import { ensureCoordinator } from './projects.ts';
 
@@ -20,6 +23,7 @@ function view(app: App, c: ContraptionRow) {
     name: c.name, title: c.title, icon: c.icon, port: c.port, home_scheme: c.home_scheme, open_paths: JSON.parse(c.open_paths) as string[],
     default_model: c.default_model, turn_cap: c.turn_cap, keys_at: c.keys_at, keys_dir: app.contraptions.folder(c.name),
     people: app.store.contraptionUsers(c.id),
+    logins: app.store.contraptionUsers(c.id).map((id) => app.store.getUser(id)?.login).filter(Boolean),
   };
 }
 
@@ -73,7 +77,26 @@ function fields(app: App, body: any, creating: boolean) {
   return out;
 }
 
-const admin = { who: ['person'], access: 'admin' } as const;
+/**
+ * An admin route: for admins, and for the Citadel scheme's Taskmaster on a turn run for an admin (its
+ * contraption tools in src/mcp.ts). The registry is Citadel-wide, so other schemes' Taskmasters ask that one.
+ */
+const admin = (route: Pick<Route, 'method' | 'path' | 'handler'>): Route => ({
+  ...route, who: ['person', 'taskmaster'], access: 'admin',
+  handler(ctx) {
+    const { app, caller } = ctx;
+    if (!caller) return route.handler(ctx);
+    if (caller.project_id !== GLOBAL_OWNER) {
+      throw new HttpError(403, `Only the ${APP_NAME} scheme's ${AGENT_NAME} manages contraptions: ask it with message_taskmaster`);
+    }
+    // Whose turn it is (src/runner.ts turnPerson), set at the turn's start.
+    const person = caller.person_id === null ? undefined : app.store.getUser(caller.person_id);
+    if (!person?.admin || person.disabled_at) {
+      throw new HttpError(403, `Only a turn run for a ${APP_NAME} admin may manage contraptions; this one runs for ${person?.name ?? 'nobody'}. Ask an admin to send the request.`);
+    }
+    return route.handler(ctx);
+  },
+});
 
 /** Asks per contraption and person: ASK_LIMIT in ASK_WINDOW_MS, then 429. shortcut: kept in memory, so a restart forgets it; fine as a loop backstop. */
 const ASK_LIMIT = 10;
@@ -152,10 +175,10 @@ export const contraptionRoutes: Route[] = [
     method: 'GET', path: '/api/contraptions/mine', who: ['person'],
     handler: ({ res, app, session }) => json(res, 200, typeof session.uid === 'number' ? app.store.contraptionsFor(session.uid) : []),
   },
-  { method: 'GET', path: '/api/contraptions', ...admin, handler: ({ res, app }) => json(res, 200, app.store.listContraptions().map((c) => view(app, c))) },
-  {
+  admin({ method: 'GET', path: '/api/contraptions', handler: ({ res, app }) => json(res, 200, app.store.listContraptions().map((c) => view(app, c))) }),
+  admin({
     // Register: its key files are written now, for its own service to read.
-    method: 'POST', path: '/api/contraptions', ...admin,
+    method: 'POST', path: '/api/contraptions',
     async handler({ req, res, app }) {
       const body = await readJson(req);
       const name = typeof body.name === 'string' ? body.name.trim() : '';
@@ -168,37 +191,40 @@ export const contraptionRoutes: Route[] = [
       });
       return json(res, 201, view(app, c));
     },
-  },
-  {
+  }),
+  admin({
     // Its name stays: it is in its paths and its key folder.
-    method: 'PATCH', path: '/api/contraptions/:name', ...admin,
+    method: 'PATCH', path: '/api/contraptions/:name',
     async handler({ req, res, app, params }) {
       const c = contraption(app, params.name);
       app.store.updateContraption(c.name, fields(app, await readJson(req), false));
       return json(res, 200, view(app, contraption(app, c.name)));
     },
-  },
-  {
-    // Enable or disable it for one person; disabling takes at their next request.
-    method: 'PUT', path: '/api/contraptions/:name/people/:person', ...admin,
-    async handler({ req, res, app, params, session }) {
+  }),
+  admin({
+    // Enable or disable it for one person, by id or @login; disabling takes at their next request.
+    method: 'PUT', path: '/api/contraptions/:name/people/:person',
+    async handler({ req, res, app, params, session, caller }) {
       const c = contraption(app, params.name);
       const body = await readJson(req);
       if (typeof body.enabled !== 'boolean') throw new HttpError(400, 'Say enabled: true or false');
-      if (!app.store.getUser(Number(params.person))) throw new HttpError(404, 'No such person');
-      app.store.setContraptionUser(c.id, Number(params.person), body.enabled, session.uid ?? null);
+      // @login, since a login may be all digits.
+      const ref = params.person.replace(/^%40/i, '@');
+      const person = ref.startsWith('@') ? app.store.findUser('login', ref.slice(1)) : app.store.getUser(Number(ref));
+      if (!person) throw new HttpError(404, 'No such person');
+      app.store.setContraptionUser(c.id, person.id, body.enabled, session.uid ?? caller?.person_id ?? null);
       return json(res, 200, view(app, c));
     },
-  },
-  {
+  }),
+  admin({
     // Rotate: new identity key pair and contraption key, both files rewritten. Its service restarts to read them.
-    method: 'POST', path: '/api/contraptions/:name/keys', ...admin,
+    method: 'POST', path: '/api/contraptions/:name/keys',
     handler({ res, app, params }) {
       const c = contraption(app, params.name);
       app.contraptions.rotate(c.name);
       return json(res, 200, view(app, contraption(app, c.name)));
     },
-  },
+  }),
   {
     // A bug report or feature ask from a contraption's server, as one of its people: files into the home
     // scheme's shared folder, the ask to its Taskmaster, waking it.

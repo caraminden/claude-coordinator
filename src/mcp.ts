@@ -16,7 +16,7 @@ const APPROVALS = process.env.COORDINATOR_APPROVALS === '1';
 const DEPLOYS = process.env.COORDINATOR_DEPLOYS === '1';
 /** This turn runs in its person's Claude container (#213), where tools/land.sh can't. */
 const IN_CONTAINER = process.env.COORDINATOR_CONTAINER === '1';
-// Set for the Citadel scheme's Taskmaster: it alone edits the Citadel-wide instructions.
+// Set for the Citadel scheme's Taskmaster: it alone edits the Citadel-wide instructions and the contraptions.
 const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
 const MAX_TEXT = 4000;
 /** What message_ticket and message_coordinator say when the loop guard holds a message. */
@@ -475,6 +475,74 @@ const APP_INSTRUCTION_TOOLS = [
   },
 ];
 
+const CONTRAPTION_FIELDS = {
+  title: { type: 'string', description: 'What people see, at most 60 characters.' },
+  port: { type: 'integer', description: "The port its own service listens on, on Citadel's machine (1024-65535)." },
+  icon: { type: ['string', 'null'], description: 'Its icon, a path on its service starting with /, like /icons/icon.svg.' },
+  default_model: { type: ['string', 'null'], description: 'The model its turns use unless it names one, like haiku.' },
+  open_paths: { type: 'array', items: { type: 'string' }, description: 'Paths on its service anyone may open without signing in (at most 20), like /link.' },
+  home_scheme: { type: ['integer', 'null'], description: "The id of the scheme its people's bug reports and feature asks go to." },
+  turn_cap: { type: ['integer', 'null'], description: 'Most turns a day across its people; null for no cap.' },
+};
+
+// Settings → Contraptions as tools (#246): the same admin routes, for this Taskmaster on a turn run for an admin.
+const CONTRAPTION_TOOLS = [
+  {
+    name: 'list_contraptions',
+    description: `List the registered contraptions (personal apps reached through ${APP_NAME}, each with its own service): their settings, who they are enabled for, and their key folder.`,
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'register_contraption',
+    description: `Register a contraption, as an admin does in Settings → Contraptions: it writes fresh keys (identity.pub and contraption.key) into its key folder for its own service to read, and returns where. Enable it for people with set_contraption_person. Only on a turn run for a ${APP_NAME} admin.`,
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'A short slug, kept for good: lowercase letters, digits and dashes, like mandate.' }, ...CONTRAPTION_FIELDS },
+      required: ['name', 'title', 'port'],
+    },
+  },
+  {
+    name: 'update_contraption',
+    description: `Change a contraption's settings; only the fields given change, and null or "" clears an optional one. Its name stays. Only on a turn run for a ${APP_NAME} admin.`,
+    inputSchema: { type: 'object', properties: { name: { type: 'string' }, ...CONTRAPTION_FIELDS }, required: ['name'] },
+  },
+  {
+    name: 'set_contraption_person',
+    description: `Enable or disable a contraption for one person, by login. Disabling takes at their next request. Only on a turn run for a ${APP_NAME} admin.`,
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string' }, login: { type: 'string' }, enabled: { type: 'boolean' } },
+      required: ['name', 'login', 'enabled'],
+    },
+  },
+  {
+    name: 'rotate_contraption_keys',
+    description: `Replace a contraption's identity key pair and contraption key: both files in its key folder are rewritten and the old keys stop working at once, so its service must restart to read the new ones. Only on a turn run for a ${APP_NAME} admin.`,
+    inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+  },
+];
+
+/** A contraption as the tools show it: never a key, only where its key files are. */
+function contraptionText(c: any): string {
+  return [
+    `${c.name}: ${c.title}`,
+    `port ${c.port}`,
+    `icon ${c.icon ?? 'none'}`,
+    `model ${c.default_model ?? 'default'}`,
+    `open paths ${c.open_paths.length ? c.open_paths.join(', ') : 'none'}`,
+    `home scheme ${c.home_scheme ?? 'none'}`,
+    `turn cap ${c.turn_cap ?? 'none'}`,
+    `enabled for ${c.logins.length ? c.logins.join(', ') : 'nobody'}`,
+    `key folder ${c.keys_dir} (identity.pub, contraption.key)`,
+  ].join(' | ');
+}
+
+/** A contraption name for a path: the route checks the rest. */
+function contraptionPath(args: any): string {
+  if (typeof args.name !== 'string' || !/^[a-z0-9-]+$/.test(args.name)) throw new Error('name is required: the contraption\'s slug, like mandate');
+  return `/api/contraptions/${encodeURIComponent(args.name)}`;
+}
+
 /** How long a call keeps trying while the app restarts: the turn outlives the server, its calls wait for the next one. */
 const RETRY_MS = 120_000;
 
@@ -833,6 +901,23 @@ async function runTool(name: string, args: any): Promise<string> {
       const app = await call('PUT', '/api/app/instructions', { text: wholeText(args) });
       return app.text ? `Saved (${app.text.length} characters).` : `Cleared the ${APP_NAME}-wide instructions.`;
     }
+    case 'list_contraptions': {
+      const all = await call('GET', '/api/contraptions');
+      return all.length ? all.map(contraptionText).join('\n') : 'No contraptions registered yet.';
+    }
+    case 'register_contraption':
+      return `Registered. Its service reads its keys from the key folder.\n${contraptionText(await call('POST', '/api/contraptions', args))}`;
+    case 'update_contraption': {
+      const { name, ...fields } = args;
+      return `Saved.\n${contraptionText(await call('PATCH', contraptionPath(args), fields))}`;
+    }
+    case 'set_contraption_person': {
+      if (typeof args.login !== 'string' || !args.login) throw new Error('login is required');
+      const c = await call('PUT', `${contraptionPath(args)}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
+      return `${args.enabled ? 'Enabled' : 'Disabled'} for ${args.login}.\n${contraptionText(c)}`;
+    }
+    case 'rotate_contraption_keys':
+      return `New keys written; the old ones stopped working. Restart its service so it reads them.\n${contraptionText(await call('POST', `${contraptionPath(args)}/keys`, {}))}`;
     case 'set_project_instructions': {
       const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: wholeText(args) });
       return project.instructions ? `Saved (${project.instructions.length} characters).` : 'Cleared the scheme instructions.';
@@ -972,7 +1057,7 @@ function scheduleLine(s: any): string {
 }
 
 function toolList() {
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS] : TOOLS;
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS] : TOOLS;
   return APPROVALS ? [...THREAD_TOOLS, APPROVE] : THREAD_TOOLS;
 }
 

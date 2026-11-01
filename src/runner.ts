@@ -1678,7 +1678,7 @@ export class Runner {
     const from = batch.find((m) => m.from || this.personOf?.(m.author))?.from;
     if (from) this.turnFrom.set(ticket.id, from);
     else this.turnFrom.delete(ticket.id);
-    // Only the Citadel scheme's Taskmaster is offered get_app_instructions and set_app_instructions (the API checks too).
+    // Only the Citadel scheme's Taskmaster is offered the app instruction and contraption tools (the API checks too).
     if (ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER) env.COORDINATOR_APP_INSTRUCTIONS = '1';
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
     // outlasts a stray turn (a GitHub ping), so the deploy still dismisses the minion unless the turn

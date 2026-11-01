@@ -7,7 +7,7 @@ import { ClaudeLink, containerPath, IMAGE_PATH, signInOutcome, signInUrl, TOOL_D
 import { Containers, runArgs, specHash, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
-import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
+import { Runner, TURN_SLICE, usageKey, wrapperAlive } from '../src/runner.ts';
 
 // Turns in a person's own Claude container (#213). A fake `podman` on PATH runs `exec` on the host,
 // so the whole path runs: placeFor, the detached wrapper, its heartbeat, the stream and the finish.
@@ -36,6 +36,17 @@ else process.exit(spawnSync(run, rest, { stdio: 'inherit' }).status ?? 1);
 `,
 );
 chmodSync(join(bin, 'podman'), 0o755);
+// A fake `systemd-run` logs its arguments (as ['systemd-run', ...]) and runs the command after its options.
+writeFileSync(
+  join(bin, 'systemd-run'),
+  `#!${process.execPath}
+const args = process.argv.slice(2);
+require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(['systemd-run', ...args]) + '\\n');
+const [cmd, ...rest] = args.slice(args.findIndex((a) => !a.startsWith('-')));
+process.exit(require('node:child_process').spawnSync(cmd, rest, { stdio: 'inherit' }).status ?? 1);
+`,
+);
+chmodSync(join(bin, 'systemd-run'), 0o755);
 process.env.PATH = `${bin}:${process.env.PATH}`;
 
 const seen = join(root, 'seen.jsonl');
@@ -118,6 +129,21 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   // A landing running on the host does: the restart would kill it.
   r.hostJobs = () => 1;
   assert.equal(r.interruptible(), 1);
+});
+
+test("a container turn's exec runs in a scope of its own under the turns slice, so a restart of the server's unit doesn't kill its conmon (#258)", async () => {
+  const id = newTicket();
+  const r = runner(inContainer);
+  r.units = true;
+  r.send(id, 'Josh', 'build it');
+  await until(() => status(id) === 'idle');
+  const execs = readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const scope = execs.findLast((c) => c[0] === 'systemd-run');
+  assert.ok(scope, 'the exec starts through systemd-run');
+  assert.ok(scope.includes('--user') && scope.includes('--scope') && scope.includes(`--slice=${TURN_SLICE}`), scope.join(' '));
+  const cmd = scope.slice(scope.findIndex((a: string) => a === 'podman'));
+  assert.deepEqual(cmd.slice(0, 4), ['podman', 'exec', '-d', 'citadel-claude-test-2']);
+  assert.ok(notes(id).every((n) => !/citadel-claude-test-2:/.test(n)));
 });
 
 test("a person who can't run turns gets the reason as a note and no turn", async () => {

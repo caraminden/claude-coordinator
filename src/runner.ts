@@ -1742,9 +1742,12 @@ export class Runner {
   }
 
   /**
-   * Start a turn's wrapper in the person's container, detached: podman's conmon holds it, not this
-   * server, so it outlives a restart. Its pids are the container's, so the `container` file tells
-   * wrapperAlive to go by its heartbeat instead.
+   * Start a turn's wrapper in the person's container, detached. Rootless podman leaves an exec's conmon
+   * in the caller's cgroup, so a restart of this server's unit SIGTERMs it (conmon passes that on to the
+   * wrapper, which ignores it), waits out the stop timeout and SIGKILLs it (#258). So with units,
+   * `podman exec` runs in a transient scope under the turns slice, which the restart leaves alone and
+   * which goes once the turn ends. The wrapper's pids are the container's, so the `container` file
+   * tells wrapperAlive to go by its heartbeat instead.
    */
   private spawnInContainer(place: Extract<TurnPlace, { host: false }>, dir: string, wrapper: string) {
     writeFileSync(join(dir, 'container'), place.container);
@@ -1754,7 +1757,9 @@ export class Runner {
     const starting = setInterval(beat, 5_000);
     place.ensure()
       .then(() => new Promise<void>((resolve, reject) => {
-        execFile('podman', ['exec', '-d', place.container, 'node', wrapper, dir], (err, _out, stderr) => (err ? reject(new Error(String(stderr).trim() || err.message)) : resolve()));
+        const exec = ['podman', 'exec', '-d', place.container, 'node', wrapper, dir];
+        const [cmd, ...args] = this.units ? ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${TURN_SLICE}`, ...exec] : exec;
+        execFile(cmd, args, (err, _out, stderr) => (err ? reject(new Error(String(stderr).trim() || err.message)) : resolve()));
       }))
       .catch((err) => writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${place.container}: ${err.message}` })))
       .finally(() => clearInterval(starting));

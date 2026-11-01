@@ -126,10 +126,23 @@ test('a timer the manifest drops is removed; a unit Citadel didn\'t write is nev
   assert.ok(said.some((s) => /Removed citadel-app-mandate-backup.service, citadel-app-mandate-backup.timer/.test(s)), said.join(' '));
   assert.ok(!existsSync(join(unitDir, 'citadel-app-mandate-backup.timer')));
   assert.equal(readFileSync(join(unitDir, 'citadel-app-mandate-old.service'), 'utf8'), other);
-  // A hand-written file under Citadel's name is left alone and stops the install.
-  writeFileSync(join(unitDir, 'citadel-app-mandate.service'), '[Service]\nExecStart=/bin/true\n');
-  await assert.rejects(services.install(m), /Citadel didn't write it/);
-  assert.equal(readFileSync(join(unitDir, 'citadel-app-mandate.service'), 'utf8'), '[Service]\nExecStart=/bin/true\n');
+  // A hand-written file under Citadel's name is left alone and stops the install, before it stops anything.
+  const hand = '[Service]\nExecStart=/bin/true\nEnvironment=PORT=7341\n';
+  writeFileSync(join(unitDir, 'citadel-app-mandate.service'), hand);
+  writeFileSync(join(root, `systemd${n}`, 'citadel-app-mandate.service.active'), '');
+  const calls = fake.calls().length;
+  await assert.rejects(services.install(m, { replace: true }), /Citadel didn't write it/);
+  assert.equal(readFileSync(join(unitDir, 'citadel-app-mandate.service'), 'utf8'), hand);
+  assert.ok(!fake.calls().slice(calls).some((c) => /disable|stop/.test(c)), 'nothing stopped');
+  assert.ok(fake.state('citadel-app-mandate.service.active'));
+});
+
+test('a second install of the same app while one runs is refused', async () => {
+  appFolder('mandate');
+  const m = row('mandate', 7341);
+  const [a, b] = await Promise.allSettled([services.install(m), services.install(m)]);
+  assert.equal(a.status, 'fulfilled');
+  assert.match(String((b as PromiseRejectedResult).reason), /being installed or deployed already/);
 });
 
 test('a timer whose unit name is another contraption\'s is refused', async () => {

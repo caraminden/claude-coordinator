@@ -33,12 +33,14 @@ function servicePanel(c) {
       b.onclick = async () => {
         if (ask && !confirm(ask)) return;
         status.textContent = `${label}…`;
+        for (const x of buttons.querySelectorAll('button')) x.disabled = true;
         try {
           const r = await api(base, { method: 'POST', body: { action, ...extra } });
           status.textContent = r.said.join(' ');
           show(r.status);
         } catch (err) {
           status.textContent = err.message;
+          for (const x of buttons.querySelectorAll('button')) x.disabled = false;
         }
       };
       return b;

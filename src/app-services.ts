@@ -335,12 +335,34 @@ export class AppServices {
    */
   async install(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[] } = {}): Promise<string[]> {
     this.guard();
+    return this.alone(row.name, () => this.installNow(row, opts));
+  }
+
+  private busy = new Set<string>();
+  /** One install (or deploy) per app at a time: a second is refused rather than racing the first's files. */
+  private async alone<T>(name: string, work: () => Promise<T>): Promise<T> {
+    if (this.busy.has(name)) throw new ServiceError(409, `${name} is being installed or deployed already: wait for that to finish.`);
+    this.busy.add(name);
+    try {
+      return await work();
+    } finally {
+      this.busy.delete(name);
+    }
+  }
+
+  private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[] }): Promise<string[]> {
     const folder = this.folder(row);
     const manifest = await this.manifest(row, folder);
     const files = unitFiles(this.inputs(row, manifest, folder));
     // citadel-app-<name>-<job> mustn't be another contraption's own unit.
     for (const job of Object.keys(manifest.timers)) {
       if (opts.all?.some((c) => c.name === `${row.name}-${job}`)) throw new ServiceError(409, `Timer ${job} would share its unit name with the contraption ${row.name}-${job}: rename the timer.`);
+    }
+    // Every file it will write must be its own (or new) before anything is stopped.
+    for (const f of files.keys()) {
+      const path = join(this.opts.unitDir, f);
+      const old = await readFile(path, 'utf8').catch(() => null);
+      if (old !== null && ownedBy(old) !== row.name) throw new ServiceError(409, `${path} exists and Citadel didn't write it for ${row.name}: move it away first.`);
     }
     const said: string[] = [];
     const live = (await this.handInstalled(row)).filter((u) => u.active === 'active' || u.active === 'activating' || /^enabled/.test(u.enabled));
@@ -361,8 +383,6 @@ export class AppServices {
     }
     for (const [f, text] of files) {
       const path = join(this.opts.unitDir, f);
-      const old = await readFile(path, 'utf8').catch(() => null);
-      if (old !== null && ownedBy(old) !== row.name) throw new ServiceError(409, `${path} exists and Citadel didn't write it for ${row.name}: move it away first.`);
       await writeFile(`${path}.tmp`, text, { mode: 0o644 });
       await rename(`${path}.tmp`, path);
     }

@@ -653,7 +653,7 @@ function labelFields(args: any) {
 }
 
 // shortcut: a session that still sends the retired tag (#254) gets it as its type, and this; remove after a release.
-const TAG_RETIRED = "tag is retired; it set the minion's type this once. Set `type` with set_properties from now on.";
+const TAG_RETIRED = 'tag is retired: set `type` with set_properties (or create_ticket\'s properties) instead. Until then an old tag still sets the type when none is given.';
 const tagNote = (args: any) => (args.tag ? `\n${TAG_RETIRED}` : '');
 
 const THREAD_TOOLS = [

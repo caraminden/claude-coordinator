@@ -42,11 +42,24 @@ const narrow = typeof matchMedia === 'function' ? matchMedia(NARROW) : null;
 /** Whether the rail is showing (so the phone's swipe past the left panel has somewhere to go). */
 export const hasRail = () => !!nav;
 
-/** drawers.js: a swipe from the left edge pulls out its left drawer, and only past that the switcher. */
-export function leaveEdge() {
-  edgeTaken = true;
+/** drawers.js: a swipe from the left edge pulls out its left drawer, and only past that the switcher (false: not any more). */
+export function leaveEdge(taken = true) {
+  edgeTaken = taken;
   handle?.remove();
   handle = null;
+  if (nav && !slot) addHandle();
+}
+
+/** A contraption's slim tab on the left edge that opens the switcher, unless drawers.js has that edge. */
+function addHandle() {
+  if (!inContraption || edgeTaken) return;
+  handle = document.createElement('button');
+  handle.type = 'button';
+  handle.className = 'citadel-rail-handle';
+  handle.title = 'Apps';
+  handle.setAttribute('aria-label', 'Open apps');
+  handle.addEventListener('click', openRail);
+  document.body.append(handle);
 }
 
 /** Phones: slide the rail out as the app switcher, over whatever is open. */
@@ -150,15 +163,7 @@ export async function showRail() {
   backdrop = makeBackdrop();
   document.body.append(backdrop, nav);
   document.documentElement.classList.add('has-citadel-rail');
-  if (inContraption && !edgeTaken) {
-    handle = document.createElement('button');
-    handle.type = 'button';
-    handle.className = 'citadel-rail-handle';
-    handle.title = 'Apps';
-    handle.setAttribute('aria-label', 'Open apps');
-    handle.addEventListener('click', openRail);
-    document.body.append(handle);
-  }
+  addHandle();
   return true;
 }
 

@@ -145,7 +145,8 @@ export function initDrawers({ left, right, main } = {}) {
     };
     if (open) {
       const other = panelFor(d.side === 'left' ? 'right' : 'left');
-      for (const el of [...mains(), other]) if (el && el !== d.el && !el.inert) { el.inert = true; d.inerted.push(el); }
+      // Not anything holding the drawer itself, which would go inert with it.
+      for (const el of [...mains(), other]) if (el && !el.contains(d.el) && !el.inert) { el.inert = true; d.inerted.push(el); }
       if (!d.el.contains(document.activeElement)) d.el.focus({ preventScroll: true });
     }
     const animate = !instant && !reduceMotion.matches && d.el.isConnected;
@@ -316,6 +317,7 @@ export function initDrawers({ left, right, main } = {}) {
     destroy() {
       close({ instant: true });
       stop.abort();
+      if (left) leaveEdge(false);
       watch.disconnect();
       backdrop.remove();
       for (const h of handles) h.remove();

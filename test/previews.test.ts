@@ -93,7 +93,9 @@ test('a minion may only start its own preview', async () => {
 });
 
 test('the proxy serves the preview to a signed-in person, as that person, without touching the live cookie', async () => {
-  const res = await page(`/preview/${ticket.id}/`);
+  // The copy's own root sends the page on to its /c/ (src/http.ts ownPath), staying inside /preview/N/.
+  assert.equal((await page(`/preview/${ticket.id}/`)).headers.get('location'), 'c/');
+  const res = await page(`/preview/${ticket.id}/c/`);
   assert.equal(res.status, 200);
   assert.match(await res.text(), /<title>Citadel preview<\/title>/);
   const me = await fetch(`${base}/preview/${ticket.id}/api/me`, { headers: { Cookie: cookie } });

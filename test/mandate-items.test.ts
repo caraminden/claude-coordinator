@@ -116,7 +116,7 @@ test("a turn answering Cara's typed message puts the item straight in her Mandat
   const s = seen.at(-1)!;
   assert.deepEqual([s.method, s.path], ['PUT', `/apps/mandate/app-api/items/${minion.number}.pr-13`]);
   // hook is always on and link always the minion's page, whatever the caller sent.
-  assert.deepEqual(JSON.parse(s.body), { hook: true, link: `/#/p/${project.id}/t/${minion.number}`, title: 'Review PR #13', day: '2026-11-02' });
+  assert.deepEqual(JSON.parse(s.body), { hook: true, link: `/c/#/p/${project.id}/t/${minion.number}`, title: 'Review PR #13', day: '2026-11-02' });
   const claims = verifyIdentity(s.headers['x-citadel-identity'] as string, mandatePub, 'mandate');
   assert.ok(claims, "signed with Mandate's own key");
   assert.deepEqual([claims.sub, claims.login, claims.from, claims.fromTitle], [cara, 'cara', `scheme-${project.id}`, 'P']);

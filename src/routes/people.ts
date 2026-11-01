@@ -126,7 +126,7 @@ export const peopleRoutes: Route[] = [
     method: 'GET', path: '/api/github/callback', who: ['person'],
     async handler({ req, res, app, url, session }) {
       const project = await app.github.finish(uidOf(session), url.searchParams, callbackUrl(req));
-      res.writeHead(302, { Location: project === null ? '../../' : `../../#/p/${project}/account`, 'Cache-Control': 'no-store' }).end();
+      res.writeHead(302, { Location: project === null ? '../../c/' : `../../c/#/p/${project}/account`, 'Cache-Control': 'no-store' }).end();
     },
   },
   {

@@ -12,8 +12,8 @@
 const NARROW = '(max-width: 800px)'; // drawers.js's breakpoint
 const EDGE = 44; // px from the left edge a contraption's swipe has to start in, as in drawers.js
 const inContraption = import.meta.url.includes('/apps/_citadel/');
-// Citadel's own root: "/" live, "/preview/N/" in a preview; from a contraption, the host's root.
-const root = new URL(inContraption ? '../../' : './', import.meta.url);
+// Citadel's own root: "/c/" live, "/preview/N/c/" in a preview; from a contraption, the host's /c/ (src/http.ts ownPath).
+const root = new URL(inContraption ? '../../c/' : './', import.meta.url);
 
 /**
  * The rail's entries for the contraptions `mine` (GET /api/contraptions/mine) seen from the page at

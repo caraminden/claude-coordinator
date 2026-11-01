@@ -108,7 +108,7 @@ test('no session: a page goes to the login and back, anything else is refused, a
   const n = seen.length;
   const page = await get('/apps/stub/notes/1?x=2', { Accept: 'text/html', ...forged });
   assert.equal(page.status, 302);
-  assert.equal(page.headers.get('location'), `/?next=${encodeURIComponent('/apps/stub/notes/1?x=2')}`);
+  assert.equal(page.headers.get('location'), `/c/?next=${encodeURIComponent('/apps/stub/notes/1?x=2')}`);
   assert.equal((await get('/apps/stub/api/x', forged)).status, 401);
   assert.equal((await get('/apps/stub/api/x', { Authorization: `Bearer ${agentToken(srv.data, 1)}` })).status, 401, 'a minion\'s token is no person');
   assert.equal((await get('/apps/stub/linkage')).status, 401, 'only the open path itself and what is under it are open');

@@ -27,7 +27,7 @@ import { errorText } from './src/scheme-repo.ts';
 import { catchUpTicketDir, createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { describeCron, runBrief, type Schedule } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, HttpError, json, requestUrl, router, SECURITY_HEADERS, send, type App, type SharedFile } from './src/http.ts';
+import { acceptsGzip, HttpError, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App, type SharedFile } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
@@ -639,6 +639,10 @@ const apps = new AppProxy(store, contraptions, auth);
 const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').startsWith('/apps/') }, async (req, res) => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   try {
+    const own = ownPath(req.url ?? '/');
+    if (own && 'redirect' in own) {
+      if (req.method === 'GET' || req.method === 'HEAD') return void res.writeHead(302, { Location: own.redirect }).end();
+    } else if (own) req.url = own.url;
     const url = requestUrl(req);
     const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
     if (url.pathname.startsWith('/api/')) {

@@ -45,7 +45,7 @@ export async function mandateItem({ req, res, app, params, caller }: Ctx) {
   let body: Record<string, unknown> | undefined;
   if (req.method === 'PUT') {
     const given = await readJson(req, 16 * 1024);
-    body = { hook: true, link: `/#/p/${project.id}${ticket.number === null ? '' : `/t/${ticket.number}`}` };
+    body = { hook: true, link: `/c/#/p/${project.id}${ticket.number === null ? '' : `/t/${ticket.number}`}` };
     for (const f of FIELDS) if (given[f] !== undefined) body[f] = given[f];
   }
   let status: number, answer: unknown;

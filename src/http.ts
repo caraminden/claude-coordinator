@@ -80,6 +80,20 @@ export async function readJson(req: IncomingMessage, maxBytes = 1_000_000): Prom
   }
 }
 
+/**
+ * Citadel's own pages live under /c/ (manifest scope and start_url), so its installed app doesn't claim
+ * /apps/ and each contraption installs as its own app (#270: browsers won't install an app inside an
+ * installed one's scope). For a raw request URL: `{ redirect }` from the old root "/" (relative, so a
+ * preview's copy stays under its /preview/N/; browsers keep the #route), `{ url }` with the /c taken off
+ * for anything under /c/, so the front end's relative URLs (api/, app.js) reach the same routes; else null.
+ */
+export function ownPath(url: string): { redirect: string } | { url: string } | null {
+  const root = /^\/c?(\?.*)?$/.exec(url);
+  if (root) return { redirect: `c/${root[1] ?? ''}` };
+  if (url.startsWith('/c/') && !/^\/c\/(apps|preview)\//.test(url)) return { url: url.slice(2) };
+  return null;
+}
+
 /** A request's URL; a 400 for one that can't be parsed or decoded (`//`, `/%`) rather than a crash. */
 export function requestUrl(req: IncomingMessage): URL {
   try {

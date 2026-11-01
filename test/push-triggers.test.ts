@@ -126,7 +126,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   assert.deepEqual(await subscribe('Cara', 'cara'), { subscribed: true, muted: [], onlyPinned: false });
   await subscribe('Josh', 'josh');
   await subscribe('Josh', 'josh-gone');
-  const url = `/#/p/${project.id}/t/${t.number}`;
+  const url = `/c/#/p/${project.id}/t/${t.number}`;
 
   // The thread asks a question: everyone.
   let n = received.length;
@@ -173,7 +173,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   n = received.length;
   await call(`agent:${coordinator.id}`, `/api/tickets/${coordinator.id}/questions`, { method: 'POST', body: { questions: [{ question: 'Which first?', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } });
   got = await pushes(n, 1);
-  assert.deepEqual(got.cara, { title: 'P Taskmaster', body: 'Which first?', tag: `thread-${coordinator.id}`, url: `/#/p/${project.id}?e=${await eventOf(coordinator.id, 'question')}` });
+  assert.deepEqual(got.cara, { title: 'P Taskmaster', body: 'Which first?', tag: `thread-${coordinator.id}`, url: `/c/#/p/${project.id}?e=${await eventOf(coordinator.id, 'question')}` });
 });
 
 test('only people subscribe, and only https push services', async () => {

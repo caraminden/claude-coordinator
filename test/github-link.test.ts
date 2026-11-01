@@ -288,7 +288,7 @@ test('through the server: Link GitHub goes to GitHub for a scheme you can see; a
     assert.equal((await get('/api/github/link?project=99999')).status, 400);
     const back = await get('/api/github/callback?state=forged&code=c');
     assert.equal(back.status, 302);
-    assert.equal(back.headers.get('location'), '../../');
+    assert.equal(back.headers.get('location'), '../../c/');
     const status = (await s.call('/api/me/github')).data;
     assert.equal(status.configured, true);
     assert.equal(status.link, null);

@@ -145,7 +145,7 @@ export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectNam
     title: coordinator ? `${projectName ? `${projectName} ` : ''}Taskmaster` : `#${ticket.number ?? ticket.id} ${ticket.title}`,
     body,
     tag: `thread-${ticket.id}`,
-    url: `${coordinator || ticket.number == null ? `/#/p/${ticket.project_id}` : `/#/p/${ticket.project_id}/t/${ticket.number}`}${jump ? `?e=${jump}` : ''}`,
+    url: `${coordinator || ticket.number == null ? `/c/#/p/${ticket.project_id}` : `/c/#/p/${ticket.project_id}/t/${ticket.number}`}${jump ? `?e=${jump}` : ''}`,
   };
 }
 

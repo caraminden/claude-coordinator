@@ -36,7 +36,7 @@ export function isOpenPath(openPaths: string[], rest: string): boolean {
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const page = (title: string, text: string) =>
   `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(title)}</title>` +
-  `<body style="font:16px system-ui;padding:2rem;text-align:center"><p>${escape(text)}</p><p><a href="/">Open ${APP_NAME}</a></p></body>`;
+  `<body style="font:16px system-ui;padding:2rem;text-align:center"><p>${escape(text)}</p><p><a href="/c/">Open ${APP_NAME}</a></p></body>`;
 
 type Refusal = { status: number; reason: string; headers: OutgoingHttpHeaders; body: string };
 type Admitted = { row: ContraptionRow; path: string; headers: OutgoingHttpHeaders; uid: number | null };
@@ -130,7 +130,7 @@ export class AppProxy {
     const session = this.auth.session({ headers: { cookie: req.headers.cookie } } as IncomingMessage);
     if (!session || session.uid === undefined) {
       const isPage = req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? '')) && !req.headers.upgrade;
-      if (isPage) return { status: 302, reason: 'Found', headers: { Location: `/?next=${encodeURIComponent(path)}`, 'Cache-Control': 'no-store' }, body: '' };
+      if (isPage) return { status: 302, reason: 'Found', headers: { Location: `/c/?next=${encodeURIComponent(path)}`, 'Cache-Control': 'no-store' }, body: '' };
       return { status: 401, reason: 'Unauthorized', headers: text, body: 'Not logged in' };
     }
     const user = this.contraptions.enabled(row.name, session.uid) ? this.store.getUser(session.uid) : undefined;

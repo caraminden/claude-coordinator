@@ -28,14 +28,14 @@ self.addEventListener('push', (event) => {
     tag: msg.tag,
     renotify: !!msg.tag,
     icon: '/icon-192.png',
-    data: { url: msg.url || '/' },
+    data: { url: msg.url || '/c/' },
   }));
 });
 
 // Open the thread: in a window the app already has (focused, and told where to go), else a new one.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = new URL(event.notification.data?.url || '/', self.location.origin).href;
+  const url = new URL(event.notification.data?.url || '/c/', self.location.origin).href;
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const win = windows.find((w) => w.focused) ?? windows[0];

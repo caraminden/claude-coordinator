@@ -226,16 +226,19 @@ async function loadProperties() {
   return view?.projectId === projectId ? reg : null;
 }
 
-/** The overview's Settings link: how many property proposals wait for a person's review. */
+/** The overview's Settings link and the Settings page's Properties tab: how many property proposals wait for a person's review. */
 export async function renderSettingsCount() {
-  const el = document.getElementById('settings-count');
-  if (!el) return;
+  const counts = () => [...document.querySelectorAll('#settings-count, .settings-tabs .props-count')];
+  if (!counts().length) return;
   const reg = await loadProperties().catch(() => null);
-  if (!reg || !el.isConnected) return;
+  if (!reg) return;
   const waiting = toReview(reg).length;
-  el.textContent = waiting || '';
-  el.title = waiting ? `${waiting} properties to review` : '';
-  el.hidden = !waiting;
+  // Looked up again after the fetch: a route change meanwhile may have drawn new ones.
+  for (const el of counts()) {
+    el.textContent = waiting || '';
+    el.title = waiting ? `${waiting} properties to review` : '';
+    el.hidden = !waiting;
+  }
 }
 
 export function onPropertiesChanged(projectId) {

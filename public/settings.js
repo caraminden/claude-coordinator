@@ -247,7 +247,9 @@ export function settingsTabs() {
   return h('nav', { class: 'settings-tabs' },
     [['instructions', 'Instructions'], account?.admin && ['app-instructions', 'Citadel-wide'], ['approvals', 'Needs approval'], ['properties', 'Properties'],
       ['members', 'Members'], account?.admin && ['people', 'People'], account?.admin && ['contraptions', 'Contraptions'], ['account', 'Your account']].filter(Boolean).map(([kind, label]) =>
-      h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label)));
+      h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label,
+        // The same waiting-review count as the Settings button (renderSettingsCount fills both).
+        kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '')));
 }
 
 /** "Tune up" (#175): the Taskmaster runs setup again as a diff on what the scheme has, then the chat opens on it. */

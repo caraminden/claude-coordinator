@@ -35,7 +35,7 @@ export function isOpenPath(openPaths: string[], rest: string): boolean {
 
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const page = (title: string, text: string) =>
-  `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title>` +
+  `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(title)}</title>` +
   `<body style="font:16px system-ui;padding:2rem;text-align:center"><p>${escape(text)}</p><p><a href="/">Open ${APP_NAME}</a></p></body>`;
 
 type Refusal = { status: number; reason: string; headers: OutgoingHttpHeaders; body: string };

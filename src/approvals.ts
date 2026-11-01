@@ -260,7 +260,13 @@ export class Approvals {
       }
       const id = this.request(ticketId, tool, input, undefined, merge);
       // A person's go typed in any of the scheme's chats covers its PR until that merges or closes (#260).
-      const go = target && this.goFor(scheme, target)?.go;
+      const found = target && this.goFor(scheme, target);
+      const go = found?.go;
+      if (found && go!.pr === null) {
+        // "fold it" means the PR its branch had then: a later PR from the same branch needs a new go.
+        go!.pr = target!.number;
+        this.goes.set(scheme, found.goes);
+      }
       if (go) this.settle(id, this.requests.get(id)!, { state: 'allowed', by: go.by, via: { message: go.message, text: go.text, scheme, ticket: go.number } });
       return { id };
     }
@@ -284,6 +290,13 @@ export class Approvals {
     const goes = this.goes.get(scheme).filter((g) => g.ticket !== where.id || go);
     if (go) goes.push({ by: m.author, pr: go.pr, ticket: where.id, number: where.number, branch: where.branch, message: m.id, text: m.text.trim().slice(0, 200) });
     this.goes.set(scheme, goes.slice(-MAX_GOES));
+  }
+
+  /** A queued message taken back before any turn read it: a go it gave goes with it. */
+  unsaid(scheme: number, message: number) {
+    const goes = this.goes.get(scheme);
+    const left = goes.filter((g) => g.message !== message);
+    if (left.length !== goes.length) this.goes.set(scheme, left);
   }
 
   /**

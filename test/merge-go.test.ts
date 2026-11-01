@@ -121,6 +121,24 @@ test("a typed go lets its minion's own PR merge until it has merged, with the ca
   assert.equal(merge(FEEDER.id, { number: 196, head: 'ticket/50-feeder' }), 'pending', 'a PR whose state is unknown gets the card');
 });
 
+test('"fold it" means the PR its branch had when it first let a merge through, not a later PR from that branch', () => {
+  const { merge, say } = gate();
+  say('fold it');
+  assert.equal(merge(), 'allowed');
+  assert.equal(merge(BUILD.id, { number: 205, head: FEEDER.branch, open: true }), 'pending', "a follow-up PR from the same branch, before anyone saw #196 merged");
+  assert.equal(merge(), 'allowed', '#196 itself, still open, retried');
+});
+
+test('a queued go taken back before any turn read it is gone', () => {
+  const { a, merge, say } = gate();
+  say('fold 196', CATEGORY, 90);
+  say('merge it', FEEDER, 91);
+  a.unsaid(1, 90);
+  assert.equal(merge(BUILD.id, own), 'allowed', "the feeder's own go still stands");
+  a.unsaid(1, 91);
+  assert.equal(merge(BUILD.id, own), 'pending');
+});
+
 test('Delve #42: a go typed in one minion lets another minion of the scheme merge that PR, at any head, until it merges (#260)', () => {
   const { results, merge, say } = gate();
   say('you can fold 196', CATEGORY, 77);
@@ -266,6 +284,11 @@ test('a typed go is recorded for the scheme when sent, steered or not; a relay n
   runner.send(t.id, 'Cara', 'hm, not yet', [], { typed: true }, true);
   assert.equal(runner.approvals.hasGo(project.id), false);
   runner.send(t.id, 'Cara', 'fold it', [], { typed: true }, true);
+  // "Send after this turn", then taken back before any turn read it: its go goes with it.
+  runner.send(t.id, 'Cara', 'merge 300', [], { typed: true });
+  const queued = store.listEvents(t.id).findLast((e) => e.kind === 'user_message' && JSON.parse(e.data).text === 'merge 300')!;
+  assert.equal(store.getSetting<Go[]>(`merge_goes:${project.id}`)!.length, 2);
+  assert.equal(runner.unqueue(t.id, queued.id, 'Cara'), true);
   await finish();
   assert.equal(runner.approvals.hasGo(project.id), true, 'the turn ended, the go stands');
   assert.equal(new Runner(store, () => {}, () => ({}), fake).approvals.hasGo(project.id), true, 'kept in settings: a restart keeps it');

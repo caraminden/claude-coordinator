@@ -1329,6 +1329,8 @@ export class Runner {
     const i = q?.findIndex((m) => m.id === eventId) ?? -1;
     if (i < 0) return false;
     q!.splice(i, 1);
+    const projectId = this.store.getTicket(ticketId)?.project_id;
+    if (projectId !== undefined) this.approvals.unsaid(projectId, eventId);
     if (this.isRunning(ticketId)) this.saveTurn(ticketId, { queued: q });
     else this.holdForLimit(ticketId);
     this.emit(ticketId, 'unqueued', { id: eventId, by });

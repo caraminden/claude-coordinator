@@ -8,6 +8,7 @@ import { basename, extname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
+import { versionIcons } from './src/icons.ts';
 import { claudeRefusal, lendsMachines, mayReceive, messageScope, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
 import { Landings } from './src/land.ts';
@@ -67,6 +68,7 @@ async function loadAssets() {
     const body = await readFile(join(PUBLIC_DIR, f));
     assets.set(f, /\.(html|js|webmanifest)$/.test(f) ? Buffer.from(body.toString('utf8').replaceAll('%APP_NAME%', SHOWN_NAME)) : body);
   }
+  versionIcons(assets);
   // Built before anything is swapped, so a bad manifest leaves the old front end whole.
   const dark = darkManifest(assets);
   ASSETS = assets;

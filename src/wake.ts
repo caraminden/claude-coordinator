@@ -109,7 +109,8 @@ const CHAINS = 'chained-minions';
 
 function git(dir: string, args: string[]): string | null {
   try {
-    return execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    // A patch-id log over a long-lived branch's span can pass the 1 MB default.
+    return execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).trim();
   } catch {
     return null;
   }
@@ -301,7 +302,7 @@ export class LiveWaiters {
   private live(w: Waiter): boolean {
     if (!this.head) return false;
     const other = this.elsewhere(w.ticket);
-    if (other) return !!w.commit && (this.merged(other, w.commit) || !!this.prs.commit(other, w.commit)?.commit);
+    if (other) return !!w.commit && (!!this.merged(other, w.commit) || !!this.prs.commit(other, w.commit)?.commit);
     if (!w.commit) return this.head !== w.since;
     const runs = (c: string) => within(this.repo, this.head!, c) !== null;
     if (runs(w.commit)) return true;

@@ -197,8 +197,9 @@ export function initDrawers() {
       if (kind === 'wait') return;
       // Past the overview, or from an edge with none: the app switcher, which slides out by itself.
       const pastOverview = kind === 'ignore' && drawer?.side === 'left' && hasRail() && classify(dx, dy, 1) === 'swipe';
-      if (pastOverview || (touch.side === 'rail' && kind === 'swipe')) { touch = null; openRail(); return; }
+      if (pastOverview && !scrollsSideways(touch.target, 1, drawer.el)) { touch = null; openRail(); return; }
       if (kind === 'ignore' || scrollsSideways(touch.target, touch.dir, drawer?.el ?? document.body)) { touch = null; return; }
+      if (touch.side === 'rail') { touch = null; openRail(); return; }
       if (!drawer && !mount(touch.side)) { touch = null; return; }
       touch.mode = 'drag';
       touch.x0 = t.clientX; // follow from here, so the drawer doesn't jump by the slop

@@ -31,6 +31,8 @@ export function railItems(mine, here, citadel = '/') {
 let nav = null;
 let backdrop = null;
 let handle = null;
+let shown = 0; // bumped by each show and hide, so a fetch that finishes after signing out draws nothing
+let opener = null; // where focus was before the switcher opened
 const narrow = typeof matchMedia === 'function' ? matchMedia(NARROW) : null;
 
 /** Whether the rail is showing (so the phone's swipe past the left panel has somewhere to go). */
@@ -39,6 +41,7 @@ export const hasRail = () => !!nav;
 /** Phones: slide the rail out as the app switcher, over whatever is open. */
 export function openRail() {
   if (!nav || !narrow?.matches) return;
+  if (!nav.classList.contains('open')) opener = document.activeElement;
   nav.classList.add('open');
   backdrop.hidden = false;
   (nav.querySelector('a.current') ?? nav.querySelector('a'))?.focus({ preventScroll: true });
@@ -48,10 +51,13 @@ export function closeRail() {
   if (!nav?.classList.contains('open')) return;
   nav.classList.remove('open');
   backdrop.hidden = true;
+  if (nav.contains(document.activeElement)) opener?.isConnected ? opener.focus({ preventScroll: true }) : document.activeElement.blur();
+  opener = null;
 }
 
 /** Take the rail away (signing out). */
 export function hideRail() {
+  shown++;
   for (const el of [nav, backdrop, handle]) el?.remove();
   nav = backdrop = handle = null;
   document.documentElement.classList.remove('has-citadel-rail');
@@ -59,11 +65,13 @@ export function hideRail() {
 
 /** Fetch your contraptions and draw the rail, or take it away when there are none. */
 export async function showRail() {
+  const mark = ++shown;
   let mine = [];
   try {
     const res = await fetch(new URL('api/contraptions/mine', root), { headers: { Accept: 'application/json' } });
     if (res.ok) mine = await res.json();
   } catch {}
+  if (mark !== shown) return;
   const items = railItems(mine, location.pathname, root.pathname);
   hideRail();
   if (!items.length) return;

@@ -610,7 +610,8 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
   // Contraptions' pages load these on every page: a 304 until a deploy changes them.
   if (etag) {
     headers.ETag = `"${createHash('sha256').update(body).digest('hex').slice(0, 16)}"`;
-    if (req.headers['if-none-match'] === headers.ETag) return void res.writeHead(304, headers).end();
+    const asked = String(req.headers['if-none-match'] ?? '').split(',').map((t) => t.trim().replace(/^W\//, ''));
+    if (asked.includes(headers.ETag) || asked.includes('*')) return void res.writeHead(304, headers).end();
   }
   if (name === 'index.html') headers['Accept-CH'] = COLOR_SCHEME_HINT;
   if (name === 'manifest.webmanifest') {

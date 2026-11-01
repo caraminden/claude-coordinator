@@ -258,6 +258,7 @@ test('the rail and drawers: their scripts are served to contraptions, and lists 
   const etag = theme.headers.get('etag')!;
   assert.match(etag, /^"[0-9a-f]{16}"$/);
   assert.equal((await get('/apps/_citadel/theme.css', { 'If-None-Match': etag })).status, 304);
+  assert.equal((await get('/apps/_citadel/theme.css', { 'If-None-Match': `"stale", W/${etag}` })).status, 304);
   assert.equal((await get('/apps/_citadel/theme.css', { 'If-None-Match': '"stale"' })).status, 200);
   assert.deepEqual((await (await get('/api/contraptions/mine', asCara())).json()).map((c: { name: string }) => c.name), ['stub']);
   // Nothing enabled: an empty list, so no rail.

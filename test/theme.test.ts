@@ -13,6 +13,9 @@ test('every colour in style.css has a chosen --citadel-* name, in light and dark
   const { light, dark } = citadelPalette(style);
   const names = (b: typeof light) => b.vars.map(([n]) => n).sort();
   assert.ok(light.vars.length >= 10, 'found the light :root block');
+  // Counted without the parser: the declarations up to the second column-0 `}` (the end of the dark :root's @media).
+  const declared = style.split(/^\}$/m).slice(0, 2).join('').match(/^\s*--[\w-]+\s*:/gm)!.length;
+  assert.equal(light.vars.length + dark.vars.length, declared, 'the parser found every variable style.css declares');
   assert.deepEqual(names(dark), names(light), 'dark mode sets the same variables as light');
   // A new colour in style.css fails here until THEME_NAMES gives it a name (and app-rail.md lists it).
   assert.deepEqual(names(light).filter((n) => !(n in THEME_NAMES)), []);

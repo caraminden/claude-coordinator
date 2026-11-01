@@ -52,7 +52,7 @@ function tooBig(req: IncomingMessage, res: ServerResponse, max: number) {
   const text = `Request bodies are limited to ${max / 1024 / 1024} MiB`;
   res.writeHead(413, { 'Content-Type': 'text/plain', 'Content-Length': Buffer.byteLength(text), Connection: 'close' }).write(text);
   // Close only once the rest of the body is read: closing with it unread resets the connection, and a client
-  // still sending gets EPIPE instead of this answer. Node's requestTimeout bounds how long that takes.
+  // still sending gets EPIPE instead of this answer. server.requestTimeout (30 min) bounds it, as for any upload.
   req.resume();
   if (req.readableEnded) res.end();
   else req.once('end', () => res.end());

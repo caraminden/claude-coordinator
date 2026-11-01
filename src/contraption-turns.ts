@@ -115,7 +115,7 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
   return {
     person: body.person, session: body.session, fresh: body.fresh === true, prompt: body.prompt, system: body.system ?? '', model,
     compactWindow: int(body.compactWindow, 'compactWindow', 10_000, 1_000_000, DEFAULT_COMPACT_WINDOW), mcp, agents,
-    timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 3600, DEFAULT_TIMEOUT_SEC),
+    timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
   };
 }
 
@@ -210,6 +210,8 @@ export class ContraptionTurns {
     this.claudeBin = opts.claudeBin;
     this.podman = opts.podman ?? 'podman';
     this.env = opts.env ?? process.env;
+    // No turn outlives the server: drop what a crash left behind.
+    rmSync(join(this.dataDir, 'run', 'contraption-turns'), { recursive: true, force: true });
   }
 
   /** Turns running now, which a restart would cut off. */
@@ -236,6 +238,19 @@ export class ContraptionTurns {
     }
     const rel = join('.citadel', 'contraption-scratch', c.name);
     return { cwd: join(homedir(), rel), onHost: join(dirname(place.configDir), rel), configDir: place.configDir };
+  }
+
+  /**
+   * A turn's private folder (its prompt, the contraption's system prompt and MCP tokens), as this server
+   * sees it and as claude does. Never under run/turns, which every person's container mounts.
+   */
+  private turnDir(id: number, place: TurnPlace) {
+    if (place.host) {
+      const dir = join(this.dataDir, 'run', 'contraption-turns', String(id));
+      return { onHost: dir, inside: dir };
+    }
+    const rel = join('.citadel', 'contraption-turns', String(id));
+    return { onHost: join(dirname(place.configDir), rel), inside: join(homedir(), rel) };
   }
 
   /** A Claude session's transcript, as this server sees it. */
@@ -266,8 +281,8 @@ export class ContraptionTurns {
 
     this.names.add(key);
     const id = this.store.startContraptionTurn(c.id, req.person, req.session);
-    const dir = join(this.dataDir, 'run', 'turns', `contraption-${id}`);
-    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: place.host ? null : place.container, child: null, pidFile: join(dir, 'pid'), stopped: null };
+    const dir = this.turnDir(id, place);
+    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: place.host ? null : place.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null };
     this.live.set(id, live);
     let outcome: string = 'failed';
     let usage: Usage | null = null;
@@ -278,12 +293,12 @@ export class ContraptionTurns {
     } finally {
       this.live.delete(id);
       this.names.delete(key);
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir.onHost, { recursive: true, force: true });
       this.store.endContraptionTurn(id, outcome, usage);
     }
   }
 
-  private async turn(c: ContraptionRow, req: TurnRequest, place: TurnPlace, live: Live, dir: string, emit: Emit): Promise<{ outcome: string; usage: Usage | null }> {
+  private async turn(c: ContraptionRow, req: TurnRequest, place: TurnPlace, live: Live, dir: { onHost: string; inside: string }, emit: Emit): Promise<{ outcome: string; usage: Usage | null }> {
     const where = this.scratch(c, req.person, place);
     mkdirSync(where.onHost, { recursive: true });
     // Resume the name's session unless asked for a fresh one, or its transcript is gone (a relinked Claude).
@@ -295,19 +310,20 @@ export class ContraptionTurns {
     this.store.putContraptionSession(c.id, req.person, req.session, claudeSession);
 
     // Private: it holds the prompt, the contraption's system prompt and its MCP tokens until the turn ends.
-    mkdirSync(join(dir, 'slots'), { recursive: true, mode: 0o700 });
-    mkdirSync(join(dir, 'tmp'), { recursive: true });
-    const secret = (name: string, text: string) => writeFileSync(join(dir, name), text, { mode: 0o600 });
+    mkdirSync(dir.onHost, { recursive: true, mode: 0o700 });
+    mkdirSync(join(dir.onHost, 'slots'), { mode: 0o700 });
+    mkdirSync(join(dir.onHost, 'tmp'));
+    const secret = (name: string, text: string) => writeFileSync(join(dir.onHost, name), text, { mode: 0o600 });
     secret('mcp.json', JSON.stringify(mcpConfig(c.port, req.mcp)));
     if (req.system) secret('system.md', req.system);
     let hook = null;
     if (req.agents) {
       secret('agent-cap.ts', AGENT_CAP);
-      hook = { node: process.execPath, script: join(dir, 'agent-cap.ts'), slots: join(dir, 'slots') };
+      hook = { node: process.execPath, script: join(dir.inside, 'agent-cap.ts'), slots: join(dir.inside, 'slots') };
     }
     secret('settings.json', JSON.stringify(settings(req, hook)));
 
-    const tmp = join(dir, 'tmp');
+    const tmp = join(dir.inside, 'tmp');
     let env: Record<string, string> = {
       ...turnEnv(this.env), TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp,
       // Belt and braces with --setting-sources '': no CLAUDE.md or auto-memory, and Agent calls wait for their agent (the cap's hook counts on it).
@@ -315,7 +331,7 @@ export class ContraptionTurns {
     };
     delete env.SSH_AUTH_SOCK;
     if (req.agents && (req.agents.model ?? req.model)) env.CLAUDE_CODE_SUBAGENT_MODEL = (req.agents.model ?? req.model)!;
-    const argv = args(req, dir, claudeSession, resume);
+    const argv = args(req, dir.inside, claudeSession, resume);
     let cmd: string;
     let cmdArgs: string[];
     if (place.host) {
@@ -328,7 +344,7 @@ export class ContraptionTurns {
       // `exec` keeps the pid, written first, so a cancel can signal claude inside the container.
       cmd = this.podman;
       cmdArgs = ['exec', '-i', '-w', where.cwd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), place.container,
-        'sh', '-c', 'echo $$ > "$0"; exec "$@"', live.pidFile, resolveClaude(this.claudeBin), ...argv];
+        'sh', '-c', 'echo $$ > "$0"; exec "$@"', join(dir.inside, 'pid'), resolveClaude(this.claudeBin), ...argv];
     }
     if (live.stopped) return { outcome: live.stopped, usage: null };
 
@@ -460,7 +476,10 @@ export class ContraptionTurns {
     return this.store.contraptionSessions(contraption, person).map((s) => ({ name: s.name, lastUsed: s.used_at, busy: this.names.has(this.key(contraption, person, s.name)) }));
   }
 
-  /** Forget a session name and delete its transcript from the person's Claude folder. */
+  /**
+   * Forget a session name and delete its transcript from the person's Claude folder. With their sign-in
+   * expired there's no folder to reach, so the transcript stays in their own volume.
+   */
   deleteSession(c: ContraptionRow, person: number, name: string): 'deleted' | 'busy' | 'missing' {
     if (this.names.has(this.key(c.id, person, name))) return 'busy';
     const s = this.store.contraptionSession(c.id, person, name);

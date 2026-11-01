@@ -67,7 +67,7 @@ const lastRun = () => runs().at(-1);
 const argAfter = (argv: string[], name: string) => argv[argv.indexOf(name) + 1];
 
 // podman, for container turns: `exec -i -w <dir> -e K=V… <container> <cmd…>` runs the command here (it
-// logs its own argv); `exec <container> kill …` too.
+// logs its own argv), with the container's ~/.citadel (in the person's volume) at vol-josh's; `exec <container> kill …` too.
 const podmanLog = join(root, 'podman.jsonl');
 const podman = join(root, 'podman-fake');
 writeFileSync(
@@ -76,11 +76,13 @@ writeFileSync(
 const fs = require('node:fs'), { spawn } = require('node:child_process');
 const a = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(podmanLog)}, JSON.stringify(a) + '\\n');
-let i = 1, env = { ...process.env };
+const home = ${JSON.stringify(homedir())}, vol = ${JSON.stringify(join(root, 'vol-josh'))};
+const m = (s) => (s.startsWith(home + '/.citadel/') ? vol + s.slice(home.length) : s);
+let i = 1, env = { ...process.env }, cwd;
 if (a[i] === '-i') i++;
-if (a[i] === '-w') i += 2;
+if (a[i] === '-w') { cwd = m(a[i + 1]); i += 2; }
 while (a[i] === '-e') { const [k, ...v] = a[i + 1].split('='); env[k] = v.join('='); i += 2; }
-const child = spawn(a[i + 1], a.slice(i + 2), { env, stdio: 'inherit' });
+const child = spawn(a[i + 1], a.slice(i + 2).map(m), { env, cwd, stdio: 'inherit' });
 child.on('exit', (code) => process.exit(code ?? 1));
 `,
 );
@@ -175,7 +177,7 @@ test('a turn has only the contraption\'s MCP and no built-in tools, settings, CL
     { event: 'end', data: { stop: 'end_turn', usage: { input: 10, output: 5, cacheRead: 100, cacheWrite: 20 } } },
   ]);
   // The turn's folder (prompt, system prompt, MCP token) is gone once it ends.
-  assert.deepEqual(readdirSync(join(data, 'run', 'turns')).filter((n) => n.startsWith('contraption-')), []);
+  assert.deepEqual(readdirSync(join(data, 'run', 'contraption-turns')), []);
   // The meter: who, which session, tokens and time.
   const row = store.getContraptionTurn(start.data.turn)!;
   assert.deepEqual({ ...row, started_at: 0, ended_at: 0 }, {
@@ -307,6 +309,12 @@ test('a container turn runs in the person\'s own container, on their own sign-in
   assert.ok(call.includes('citadel-claude-t-2'));
   assert.ok(existsSync(join(vol, '.citadel', 'contraption-scratch', 'mandate')), 'made in the person\'s volume');
   assert.equal(argAfter(lastRun().argv, '--tools'), '');
+  // Its private files sit in the person's own volume, never under run/turns (every container mounts that).
+  const mcpFile = argAfter(call, '--mcp-config');
+  assert.ok(mcpFile.startsWith(join(homedir(), '.citadel', 'contraption-turns') + '/'), mcpFile);
+  assert.match(lastRun().mcp, /127\.0\.0\.1:9101\/mcp/);
+  assert.ok(lastRun().settings);
+  assert.deepEqual(readdirSync(join(vol, '.citadel', 'contraption-turns')), [], 'gone once the turn ends');
   // A refused sign-in: they link again, and no one else's plan steps in.
   assert.equal(errorOf(await turn(mandate, { person: josh.id, session: 'in-container', prompt: 'expired' })), 'no_plan');
   assert.deepEqual(expired, [josh.id]);
@@ -335,6 +343,7 @@ test('requests are checked before anything runs', () => {
   bad({ agents: { max: 50 } });
   bad({ compactWindow: 5 });
   bad({ timeoutSec: 0 });
+  bad({ timeoutSec: 901 }); // a running turn holds back Citadel's restarts
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p', agents: false }, mandate).agents, false);
   assert.deepEqual(parseTurn({ person: 1, session: 's', prompt: 'p', agents: { max: 3 } }, mandate).agents, { max: 3, model: null });
 });

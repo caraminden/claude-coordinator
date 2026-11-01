@@ -197,7 +197,7 @@ type Tok = { kind: 'word'; word: Word } | { kind: 'op'; text: string } | { kind:
  */
 export function lex(s: string, home: string): Tok[] {
   const toks: Tok[] = [];
-  const heredocs: { delim: string; strip: boolean }[] = [];
+  const heredocs: { delim: string; strip: boolean; body: Word }[] = [];
   let text = '';
   let tmpl = '';
   let unknown = false;
@@ -362,14 +362,17 @@ export function lex(s: string, home: string): Tok[] {
       flush();
       toks.push({ kind: 'op', text: '\n' });
       i++;
-      // Skip the bodies of heredocs started on the line that just ended.
+      // Step over the bodies of heredocs started on the line that just ended, into their << word.
       for (const h of heredocs.splice(0)) {
+        const lines: string[] = [];
         while (i < n) {
           const eol = s.indexOf('\n', i);
           const line = s.slice(i, eol < 0 ? n : eol);
           i = eol < 0 ? n : eol + 1;
           if ((h.strip ? line.replace(/^\t+/, '') : line) === h.delim) break;
+          lines.push(line);
         }
+        h.body.text = lines.join('\n');
       }
       continue;
     }
@@ -391,7 +394,10 @@ export function lex(s: string, home: string): Tok[] {
       if (op === '<<' || op === '<<-') {
         const m = /^[ \t]*(['"]?)([^\s'";&|<>()]+)\1/.exec(s.slice(i));
         if (m) {
-          heredocs.push({ delim: m[2], strip: op === '<<-' });
+          // The body is filled in at the end of the line; only a shell reading it as its script looks at it.
+          const body: Word = { text: '', unknown: false };
+          heredocs.push({ delim: m[2], strip: op === '<<-', body });
+          toks.push({ kind: 'redir', op: '<<' }, { kind: 'word', word: body });
           i += m[0].length;
         }
         continue;
@@ -424,10 +430,12 @@ export function lex(s: string, home: string): Tok[] {
 const MKTEMP_DIR = '__mktemp_dir';
 
 /**
- * What `$(mktemp …)` prints, as a word template: the folder it makes the file in (its -p or --tmpdir,
- * the template's own folder, or $TMPDIR) and the template. Null for any other command.
+ * What `$(pwd)` or `$(mktemp …)` prints, as a word template: for mktemp, the folder it makes the file
+ * in (its -p or --tmpdir, the template's own folder, or $TMPDIR) and the template. Null for any other command.
  */
 function mktempPath(src: string, home: string): string | null {
+  if (src.trim() === 'pwd') return '\0PWD\0';
+  if (!/^\s*mktemp\b/.test(src)) return null;
   const toks = lex(src, home);
   if (toks.some((t) => t.kind !== 'word')) return null;
   const words = toks.map((t) => (t as { word: Word }).word);
@@ -521,11 +529,22 @@ function literalPaths(text: string, st: State, cfg: TripwireConfig): string[] {
   return out;
 }
 
-/** Bash's brace expansion of a word (`a{b,c}` is ab and ac), capped. */
+/** Bash's brace expansion of a word (`a{b,c}` is ab and ac), capped; braces past the cap stay as they are. */
 function braces(s: string): string[] {
-  const m = /\{([^{}]*,[^{}]*)\}/.exec(s);
-  if (!m) return [s];
-  return m[1].split(',').flatMap((alt) => braces(s.slice(0, m.index) + alt + s.slice(m.index + m[0].length))).slice(0, 32);
+  let out = [s];
+  for (let round = 0; round < 8; round++) {
+    let more = false;
+    out = out
+      .flatMap((x) => {
+        const m = /\{([^{}]*,[^{}]*)\}/.exec(x);
+        if (!m) return [x];
+        more = true;
+        return m[1].split(',').map((alt) => x.slice(0, m.index) + alt + x.slice(m.index + m[0].length));
+      })
+      .slice(0, 32);
+    if (!more) break;
+  }
+  return out;
 }
 
 /** A glob for one path component, as a regex; a [class] it can't read matches any one character. */
@@ -645,7 +664,8 @@ function known(ws: Word[], cfg: TripwireConfig): string[] | undefined {
 
 function setVar(st: State, name: string, values: string[] | undefined) {
   st.vars.add(name);
-  if (values === undefined) st.values.delete(name);
+  // A value built up past any real path (A=$A$A …) counts as unknown.
+  if (values === undefined || values.join('').length > 10_000) st.values.delete(name);
   else st.values.set(name, values);
 }
 
@@ -665,9 +685,9 @@ function blindReason(w: Word, st: State, cfg: TripwireConfig, name: string): Ver
   if (w.text.startsWith('-') || /^[A-Za-z_]\w*=/.test(w.text)) return null;
   if (!w.unknown) {
     if (st.cwd || !w.text || isAbsolute(w.text) || w.text.startsWith('~')) return null;
-    // Relative to a folder it lost track of: that folder may be the data dir itself.
+    // Relative to a folder it lost track of: that folder may be the data dir itself, or a folder in it.
     const p = resolve(cfg.data, w.text);
-    if (!under(cfg.data, p) && (dirname(p) !== cfg.data || askable(p, name, cfg))) return null;
+    if (!w.text.split('/').includes('..') && !under(cfg.data, p) && (dirname(p) !== cfg.data || askable(p, name === 'sqlite3' ? '' : name, cfg))) return null;
     return hard(`${w.text} in a folder the tripwire lost track of (a cd to a variable or a $(…)): run from ${cfg.data}, the live data dir, it would hit the database. Use an absolute path. ${SCRATCH}`);
   }
   const tmpl = w.tmpl!;
@@ -880,7 +900,7 @@ function pushReason(args: Word[], dir: string): Verdict | null {
 
 function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | null {
   for (const r of seg.redirects) {
-    if (r.op === '<<<') continue;
+    if (r.op === '<<<' || r.op === '<<') continue;
     if (r.target.unknown && ENVIRON_HIDDEN.test(r.target.text)) return hard(`The redirect from ${r.target.text} is blocked. ${ENVIRON_WHY}`);
     // Appending (>>) can't wipe a file; the rest can.
     const blind = /^(<|>>|&>>)$/.test(r.op) ? null : blindWriteReason(r.target, st, cfg, '');
@@ -917,7 +937,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
       while (i < words.length && words[i].text.startsWith('-')) {
         const opt = words[i++].text;
         if (name === 'env' && (/^(-u|--unset)$/.test(opt) ? GH_VARS.test(words[i]?.text ?? '') : GH_VARS.test(opt.replace(/^(-u|--unset=)/, '')))) return hard(`Unsetting ${opt.replace(/^(-u|--unset=?)/, '') || words[i].text} is blocked. ${GH_ENV_WHY}`);
-        if (/^-(u|C|n|I|P|d|L|s|E|k)$|^--(unset|chdir|adjustment|signal|kill-after)$/.test(opt)) i++;
+        if (/^-(u|C|n|I|P|d|L|s|E|k|a)$|^--(unset|chdir|adjustment|signal|kill-after|arg-file)$/.test(opt)) i++;
       }
       takeAssignments(name === 'env');
       if (ghSet()) return hard(`Setting ${ghSet()} is blocked. ${GH_ENV_WHY}`);
@@ -962,7 +982,9 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   }
   if (SHELLS.has(name) || name === 'eval') {
     const k = name === 'eval' ? -1 : args.findIndex((w) => /^-[a-z]*c[a-z]*$/.test(w.text));
-    const script = name === 'eval' ? args : k >= 0 && args[k + 1] ? [args[k + 1]] : null;
+    // A shell with no script file reads its script from stdin: a heredoc or here-string shows it.
+    const stdin = seg.redirects.filter((r) => r.op === '<<' || r.op === '<<<').map((r) => r.target);
+    const script = name === 'eval' ? args : k >= 0 && args[k + 1] ? [args[k + 1]] : args.every((w) => w.text.startsWith('-')) && stdin.length ? stdin.slice(-1) : null;
     if (script) {
       // What the inner shell gets: the words with the variables we know filled in, the rest left for it to expand.
       const text = (w: Word) => (w.unknown ? w.tmpl!.replace(/\0([A-Za-z_]\w*)\0/g, '${$1}').replace(/\0\0/g, '${__unknown}') : w.text);

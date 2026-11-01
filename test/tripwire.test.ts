@@ -78,6 +78,12 @@ const BLOCKED: [string, string?][] = [
   [`rm -rf ${data}/projects/2/tickets`],
   [`rm -rf ${data}/projects/2/*`],
   ['cd ../.. && rm -rf repo'],
+  // self-review: a shell fed its script on stdin, sqlite3 or ../ after a lost cd, xargs -a
+  [`bash <<'EOF'\nD=${data}; rm -f $D/state.db\nEOF`],
+  [`bash -s <<< 'rm -f ${data}/state.db'`],
+  ['cd $X; sqlite3 state.db "delete from t"'],
+  ['cd $X; rm ../state.db'],
+  ['xargs -a list.txt rm -f'],
   // a turn's own environment, the transcripts, the credentials table, runners, signing in (#185)
   ['env'],
   ['env | grep -i token'],
@@ -386,6 +392,8 @@ const ALLOWED = [
   'find . -name "*.orig" -delete',
   `rm -rf ${data}/projects/2/tickets/9/build ${data}/projects/2/shared/9`,
   'git commit -m "$(cat <<\'EOF\'\nBlocks D=x; rm -f $D/state.db\nEOF\n)"',
+  'rm -rf $(pwd)/build',
+  "bash <<'EOF'\nnpm test\nrm -rf /tmp/x\nEOF",
   'env -i PATH="$PATH" HOME="$HOME" DATA_DIR=/tmp/d PORT=8691 SESSION_SECRET=$(head -c 32 /dev/urandom | base64) node server.ts',
 ];
 

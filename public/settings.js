@@ -306,7 +306,10 @@ export function approvalsEditor() {
     save.disabled = true;
     status.textContent = 'Saving…';
     try {
-      view.project = await api(`api/projects/${p.id}`, { method: 'PATCH', body: { approval_rules: rules.value, plugin_dirs: dirs.value, list_groups: splitLines(groups.value) } });
+      const body = { approval_rules: rules.value, plugin_dirs: dirs.value };
+      // Only when edited: a group whose value was archived since mustn't block saving the rules.
+      if (!same(groups.value, settingText(view.project, 'list_groups'))) body.list_groups = splitLines(groups.value);
+      view.project = await api(`api/projects/${p.id}`, { method: 'PATCH', body });
       rules.value = view.project.approval_rules;
       dirs.value = view.project.plugin_dirs;
       groups.value = settingText(view.project, 'list_groups');

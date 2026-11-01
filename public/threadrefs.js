@@ -37,13 +37,13 @@ const POSSESSIVE = String.raw`(?:&#39;|'|\u2019)s`;
  * an existing <a>, <code> or <pre>, so links, code and attributes are left alone. `titleOf(n)` may
  * give a hover title for a thread it knows; numbers it doesn't know still link (opening one that
  * doesn't exist shows "There is no thread #N"), except a bare "#N" of this scheme once `prRoute`
- * is given: that is its repo's PR or issue N if it has one, else plain text. With `schemes` (the
+ * is given: that is its repo's PR or issue N if it has one, else plain text (a span, as below). With `schemes` (the
  * projects list, { id, name }), a scheme's name scopes the numbers it names to that scheme: "Delve #68",
  * "Delve's minion #68", "Delve minions #5 and #6", "minion #5 in Delve".
  *
  * With `prRoute(projectId, n)` (see prNumberRoute), "PR #186" and "Delve's PR #186" link to the minion
- * owning that PR, or to GitHub when none does. One it can't place yet becomes a `span.pr-ref` carrying the scheme and number, for
- * linkPrRefs to link once the PR list arrives; without `prRoute` PR mentions stay plain text.
+ * owning that PR, or to GitHub when none does. One it can't place becomes a `span.pr-ref` carrying the scheme and number, for
+ * linkPrRefs to link once a fresher PR list has it; without `prRoute` PR mentions stay plain text.
  */
 export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = [], prRoute = null) {
   if (projectId == null || !(html.includes('#') || (prRoute && /\b(?:PR|[Pp]ull [Rr]equest)\s\d/.test(html)))) return html;
@@ -78,10 +78,9 @@ export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = 
 /** Each number of a list linked by `link(number, text)`: the first with its words ("Delve PR #186"), the rest alone ("#187"). */
 const linkList = (list, lead, link) => list.replace(/^\D*\d{1,6}|#\d{1,6}/g, (m, at) => link(Number(/\d+$/.exec(m)[0]), at ? m : lead + m));
 
-/** A PR mention as a link to `to` (from prNumberRoute), plain text when that's false, or while unknown a span linkPrRefs can link later. */
+/** A PR mention as a link to `to` (from prNumberRoute), or a plain-looking span linkPrRefs can link later. */
 const prRefHtml = (projectId, number, text, to) => to?.hash ? `<a class="thread-ref" href="${escapeAttr(to.hash)}" title="${escapeAttr(to.title)}">${text}</a>`
   : to?.url ? `<a href="${escapeAttr(to.url)}" target="_blank" rel="noopener" title="${escapeAttr(to.title)}">${text}</a>`
-  : to === false ? text
   : `<span class="pr-ref" data-project="${projectId}" data-pr="${number}">${text}</span>`;
 
 const escapeAttr = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -173,18 +172,17 @@ export function prOwnerRoute(repos, href, hereId = null) {
 
 /**
  * Where "PR #`number`" (or a "#`number`" that is no minion) said in scheme `projectId` goes: the minion
- * owning that PR of its repo, else the PR or issue on GitHub as { url, title }. False when the repo has
- * no such number or the scheme no GitHub repo; null until `repos` (any list of api/prs entries) loads.
+ * owning that PR of its repo, else the PR or issue on GitHub as { url, title }. Null when the repo has
+ * no such number (yet), the scheme no GitHub repo, or `repos` (any list of api/prs entries) hasn't loaded.
  */
 export function prNumberRoute(repos, projectId, number, hereId = null) {
-  if (!repos) return null;
-  for (const repo of repos.values()) {
+  for (const repo of repos?.values() ?? []) {
     if (repo.projectId !== projectId) continue;
     const kind = repo.pulls?.includes(number) ? 'pull' : repo.issues?.includes(number) ? 'issue' : null;
     if (kind === 'pull' || repo.prs[number]) return ownerRoute(repo, number, hereId) ?? githubRoute(repo.repo, 'pull', number);
-    return kind ? githubRoute(repo.repo, kind, number) : false;
+    return kind ? githubRoute(repo.repo, kind, number) : null;
   }
-  return false;
+  return null;
 }
 
 const githubRoute = (repo, kind, number) => ({ url: `https://github.com/${repo}/${kind}/${number}`, title: `${repo} ${kind === 'pull' ? 'PR' : 'issue'} #${number} on GitHub` });

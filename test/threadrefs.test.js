@@ -160,14 +160,14 @@ test('prNumberRoute finds a PR by its scheme\'s repo', () => {
   assert.deepEqual(prNumberRoute(delveRepos, 1, 186, 5), { hash: '#/p/1/t/68', title: 'Delve #68 Laptop "scripts" (owns PR #186)' });
   // #267: the minion on screen's own PR opens GitHub, as its URL does; one the repo doesn't have is false, not "unknown".
   assert.deepEqual(prNumberRoute(delveRepos, 1, 186, 162), { url: 'https://github.com/o/r/pull/186', title: 'o/r PR #186 on GitHub' }, 'the minion on screen');
-  assert.equal(prNumberRoute(delveRepos, 1, 7, 5), false, 'not in the repo');
-  assert.equal(prNumberRoute(delveRepos, 2, 186, 5), false, 'another scheme, with no repo');
+  assert.equal(prNumberRoute(delveRepos, 1, 7, 5), null, 'not in the repo');
+  assert.equal(prNumberRoute(delveRepos, 2, 186, 5), null, 'another scheme, with no repo');
   assert.equal(prNumberRoute(null, 1, 186, 5), null, 'not loaded yet');
 });
 
 test('"PR #N" links to the minion owning the PR in the scheme on screen', () => {
   const schemes = [{ id: 1, name: 'Delve' }, { id: 2, name: 'Citadel' }];
-  // Minion #187 is known; PR #7 isn't in the repo, so once api/prs is in it stays plain (#267).
+  // Minion #187 is known; PR #7 isn't in the repo, so it waits, plain, in a span for linkPrRefs.
   const lnk = (html, p = 1) => linkThreadRefs(html, p, (n) => (n === 187 ? 'Minion 187' : null), schemes, (projectId, n) => prNumberRoute(delveRepos, projectId, n, 5));
   const at = (p, n, text = `#${n}`) => `<a class="thread-ref" href="#/p/${p}/t/${n}">${text}</a>`;
   assert.equal(lnk('PR #186 shipped. #187 next'), `${toOwner('PR #186')} shipped. <a class="thread-ref" href="#/p/1/t/187" title="Minion 187">#187</a> next`);
@@ -175,20 +175,19 @@ test('"PR #N" links to the minion owning the PR in the scheme on screen', () => 
   assert.equal(lnk('Pull Requests #186'), toOwner('Pull Requests #186'));
   assert.equal(lnk('[PR 186]'), `[${toOwner('PR 186')}]`);
   // Each number of a list, the first with its words.
-  assert.equal(lnk('PRs #186, #7 and #186'), `${toOwner('PRs #186')}, #7 and ${toOwner('#186')}`);
-  assert.equal(lnk('PRs #7 &amp; #186'), `PRs #7 &amp; ${toOwner('#186')}`);
+  assert.equal(lnk('PRs #186, #7 and #186'), `${toOwner('PRs #186')}, ${pending(7)} and ${toOwner('#186')}`);
+  assert.equal(lnk('PRs #7 &amp; #186'), `${pending(7, 'PRs #7')} &amp; ${toOwner('#186')}`);
   // "PR 12" without a "#" is one number: "and 3 more" isn't a PR.
-  assert.equal(linkThreadRefs('PR 12 and 3 more', 1, () => null, schemes, () => null), `${pending(12, 'PR 12')} and 3 more`);
+  assert.equal(lnk('PR 12 and 3 more'), `${pending(12, 'PR 12')} and 3 more`);
   // Issues stay plain; so do look-alikes.
   for (const s of ['issues #4 and #5', 'issue #186', 'Pulls 3', 'PR #186abc', 'PR 2026-10-28', 'PRESS 186', 'PR186', '<code>PR #186</code>', '<a href="x">PR #186</a>']) {
     assert.equal(lnk(s), s, s);
   }
   // In Citadel, "PR #186" is Citadel's PR, and "Delve PR #186" Delve's.
-  assert.equal(lnk('PR #186', 2), 'PR #186');
-  assert.equal(linkThreadRefs('PR #186', 2, () => null, schemes, () => null), pending(186, 'PR #186', 2), 'not loaded yet');
+  assert.equal(lnk('PR #186', 2), pending(186, 'PR #186', 2));
   assert.equal(lnk('see Delve PR #186 and Delve #5', 2), `see ${toOwner('Delve PR #186')} and ${at(1, 5, 'Delve #5')}`);
   assert.equal(lnk('Delve&#39;s PR #186', 2), toOwner('Delve&#39;s PR #186'));
-  assert.equal(lnk('delve PRs #7 and #186', 2), `delve PRs #7 and ${toOwner('#186')}`);
+  assert.equal(lnk('delve PRs #7 and #186', 2), `${pending(7, 'delve PRs #7')} and ${toOwner('#186')}`);
   // Without a PR lookup, PR mentions stay plain text as before.
   assert.equal(linkThreadRefs('PR #186 and Delve PR #186', 2, () => null, schemes), 'PR #186 and Delve PR #186');
 });
@@ -222,18 +221,19 @@ test('a bare #N with no minion of that number links its repo\'s PR or issue, or 
   assert.equal(lnk('#186'), toOwner('#186'), 'a PR a minion owns goes to it');
   assert.equal(lnk('#115.'), `${gh('pull', 115, '#115')}.`, 'a PR nobody owns goes to GitHub');
   assert.equal(lnk('#120'), gh('issue', 120, '#120'), 'an issue goes to GitHub');
-  assert.equal(lnk('#999 and #7'), '#999 and #7', 'neither a minion nor in the repo: plain text, never a dead link');
-  assert.equal(lnk('#999', null), pending(999), 'PRs not loaded yet: waits for linkPrRefs');
-  assert.equal(lnk('#999', new Map()), '#999', 'a scheme with no GitHub repo: plain');
+  // Neither a minion nor (yet) in the repo: plain text, never a dead link, in a span linkPrRefs links if a fresher list has it.
+  assert.equal(lnk('#999 and #7'), `${pending(999)} and ${pending(7)}`);
+  assert.equal(lnk('#999', null), pending(999), 'PRs not loaded yet');
+  assert.equal(lnk('#999', new Map()), pending(999), 'a scheme with no GitHub repo');
 });
 
 test('"PR #N" nobody owns links to GitHub, and so does the PR of the minion on screen', () => {
   assert.deepEqual(prNumberRoute(knownRepos, 1, 115, 5), { url: 'https://github.com/o/r/pull/115', title: 'o/r PR #115 on GitHub' });
   assert.deepEqual(prNumberRoute(knownRepos, 1, 186, 162), { url: 'https://github.com/o/r/pull/186', title: 'o/r PR #186 on GitHub' });
-  assert.equal(prNumberRoute(knownRepos, 1, 999, 5), false, 'known not to exist');
+  assert.equal(prNumberRoute(knownRepos, 1, 999, 5), null, 'not in the repo');
   const lnk = (html) => linkThreadRefs(html, 1, () => null, [], (p, n) => prNumberRoute(knownRepos, p, n, 5));
   assert.equal(lnk('PR #115'), gh('pull', 115, 'PR #115'));
-  assert.equal(lnk('PR #999'), 'PR #999');
+  assert.equal(lnk('PR #999'), pending(999, 'PR #999'));
 });
 
 test('"PRs (#115 and #146)" reads every number after "PRs" as a PR, not a minion', () => {

@@ -93,7 +93,7 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   // Bad bodies.
   assert.equal((await ask({ ...good, kind: 'question' })).status, 400);
   assert.equal((await ask({ ...good, text: ' ' })).status, 400);
-  assert.equal((await ask({ ...good, files: [{ name: 'a', data: 'not base64!' }] })).status, 400);
+  for (const data of ['not base64!', '', 'QQ']) assert.equal((await ask({ ...good, files: [{ name: 'a', data }] })).status, 400, data);
   // Over 16 MiB in total: refused, and nothing is written.
   const half = b64(Buffer.alloc(8 * 1024 * 1024 + 1));
   const big = await ask({ ...good, files: [{ name: 'a.bin', data: half }, { name: 'b.bin', data: half }] });
@@ -137,4 +137,11 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   store.updateContraption('peek-auras', { home_scheme: null });
   assert.equal((await ask(good)).status, 409);
   store.updateContraption('peek-auras', { home_scheme: Peek.id });
+
+  // A contraption stuck in a loop is cut off after 10 asks per person in 10 minutes; others still get through.
+  for (let i = 0; i < 8; i++) assert.equal((await ask({ person: Josh.id, kind: 'bug', text: `again ${i}` })).status, 202);
+  r = await ask({ person: Josh.id, kind: 'bug', text: 'one too many' });
+  assert.equal(r.status, 429);
+  assert.equal(said().filter((e) => e.text.includes('one too many')).length, 0);
+  assert.equal((await ask({ person: Rachel.id, kind: 'bug', text: 'still fine' })).status, 202);
 });

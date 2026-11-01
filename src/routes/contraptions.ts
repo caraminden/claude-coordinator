@@ -72,6 +72,11 @@ function fields(app: App, body: any, creating: boolean) {
 
 const admin = { who: ['person'], access: 'admin' } as const;
 
+/** Asks per contraption and person: ASK_LIMIT in ASK_WINDOW_MS, then 429. shortcut: kept in memory, so a restart forgets it; fine as a loop backstop. */
+const ASK_LIMIT = 10;
+const ASK_WINDOW_MS = 10 * 60_000;
+const askTimes = new Map<string, number[]>();
+
 export const contraptionRoutes: Route[] = [
   {
     // The rail's list: the contraptions enabled for you. Empty for most people.
@@ -131,20 +136,26 @@ export const contraptionRoutes: Route[] = [
     method: 'POST', path: '/api/contraptions/asks', who: 'contraption',
     async handler({ req, res, app, contraption: c }) {
       // Base64 is 4/3 of the files, plus room for the text.
-      const body = await readJson(req, Math.ceil(ASK_FILES_MAX * 4 / 3) + 1_000_000);
+      const body = (await readJson(req, Math.ceil(ASK_FILES_MAX * 4 / 3) + 1_000_000)) ?? {};
       const person = Number.isInteger(body.person) ? app.store.getUser(body.person) : undefined;
       if (!person || !app.contraptions.enabled(c.name, person.id)) throw new HttpError(403, `${c.title} isn't enabled for that person`);
+      // A contraption stuck in a loop would wake the Taskmaster on every call.
+      const key = `${c.name}:${person.id}`;
+      const recent = (askTimes.get(key) ?? []).filter((t) => Date.now() - t < ASK_WINDOW_MS);
+      if (recent.length >= ASK_LIMIT) throw new HttpError(429, `At most ${ASK_LIMIT} asks per person in ${ASK_WINDOW_MS / 60_000} minutes: try again later`);
       const kind = oneOf(body.kind, ['bug', 'feature'], 'Kind') as 'bug' | 'feature' | null;
       if (!kind) throw new HttpError(400, 'Kind is required: bug or feature');
       const text = str(body.text, 'Text', 10_000);
       const files = askFiles(body.files);
       const scheme = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme);
       if (!scheme) throw new HttpError(409, `${c.title} has no home scheme to send asks to: an admin sets one in Settings → Contraptions`);
+      const taskmaster = await ensureCoordinator(app, scheme);
+      askTimes.set(key, [...recent, Date.now()]);
       const paths = saveAskFiles(projectSharedDir(app.dataDir, scheme.id), c.name, person.login, files);
       // A member as #211 counts one: in the scheme, or an admin.
       const member = app.store.canSee({ uid: person.id, admin: !!person.admin }, scheme.id);
       const ask = askMessage(c, scheme, person, member, kind, text, paths);
-      app.runner.send((await ensureCoordinator(app, scheme)).id, ask.author, ask.text);
+      app.runner.send(taskmaster.id, ask.author, ask.text);
       return json(res, 202, { scheme: scheme.name, member, proposal: !member && kind === 'feature', files: paths });
     },
   },

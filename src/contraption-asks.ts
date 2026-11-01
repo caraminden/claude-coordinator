@@ -32,7 +32,7 @@ export function askFiles(v: unknown): AskFile[] {
   if (!Array.isArray(v) || v.length > MAX_FILES) throw new HttpError(400, `Files must be a list of at most ${MAX_FILES}`);
   let total = 0;
   return v.map((f) => {
-    if (!f || typeof f.name !== 'string' || !f.name.trim() || typeof f.data !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(f.data)) {
+    if (!f || typeof f.name !== 'string' || !f.name.trim() || typeof f.data !== 'string' || !f.data || f.data.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(f.data)) {
       throw new HttpError(400, 'Each file needs a name and its data in base64');
     }
     const data = Buffer.from(f.data, 'base64');

@@ -10,7 +10,7 @@ import { TRIPWIRE, tripwireHooks } from '../src/runner.ts';
 
 const home = '/home/u';
 const data = `${home}/.local/share/claude-coordinator`;
-const cfg: TripwireConfig = { home, data, checkout: `${home}/claude-coordinator`, project: 2, claudeConfig: `${home}/.claude`, deployScript: false };
+const cfg: TripwireConfig = { home, data, checkout: `${home}/claude-coordinator`, project: 2, claudeConfig: `${home}/.claude`, deployScript: false, env: { TMPDIR: `${data}/projects/2/tmp/9`, PATH: "/usr/bin:/bin" } };
 const worktree = `${data}/projects/2/tickets/9`;
 
 const WHY = 'Delete the DB copies Cara approved in #54';
@@ -38,6 +38,46 @@ const BLOCKED: [string, string?][] = [
   ['rm ~/.local/share/claude-coordinator/x.bak; systemctl --user restart claude-coordinator'],
   ['systemctl --user enable x.timer && cat ~/.ssh/id_rsa'],
   ['rm -rf ~/.local/share'],
+  // #251: the command #249 ran, which deleted the live state.db, and the ways a path hides from the text
+  [`D=${data}; rm -f $D/state.db 2>/dev/null; sqlite3 -readonly $D/coordinator.db "select id,name from projects;"`],
+  ['D=~/.local/share/claude-coordinator && rm -f "$D/state.db"'],
+  ['export D=$HOME/.local/share/claude-coordinator; rm -f ${D}/state.db-wal'],
+  ['D=~/.local/share/claude-coordinator; cd $D && rm -f state.db'],
+  ['D=~/.local/share/claude-coordinator; cp /tmp/x.db "$D/coordinator.db"'],
+  ['D=~/.local/share/claude-coordinator; : > $D/state.db'],
+  ['D=~/.local/share/claude-coordinator; sqlite3 $D/state.db "select 1"'],
+  ['rm -f $D/state.db'],
+  ['rm -f "$tmp"'],
+  ['tmp=$(cat /tmp/where); rm -rf "$tmp"'],
+  ['truncate -s 0 "$DB"'],
+  ['sqlite3 "$DB" "delete from tickets"'],
+  ['mv "$f" /tmp/'],
+  ['echo x > "$out"'],
+  ['rm -rf "${d:?}"/*'],
+  ['rm -rf ~/$x'],
+  ['rm -rf ~/.local/share/claude-coord$x'],
+  ['rm -f "$(cat /tmp/dir)"/state.db'],
+  ['rm -rf $(echo ~/.local/share/claude-coordinator)/state.db'],
+  ['rm `echo ~/.local/share/claude-coordinator/state.db`'],
+  ['cd "$(dirname "$X")" && rm -f state.db'],
+  ['cd $X && rm -rf *'],
+  ['bash -c "rm -f $D/state.db"'],
+  ['D=~/.local/share/claude-coordinator; bash -c "rm -f $D/state.db"'],
+  [`sh -c 'rm -f "$1"' _ ${data}/state.db`],
+  ['find $D -name state.db -delete'],
+  ['find ~/.local/share/claude-coordinator -maxdepth 1 -name "*.db" -delete'],
+  ['echo ~/.local/share/claude-coordinator/state.db | xargs rm -f'],
+  ['for f in ~/.local/share/claude-coordinator/*.db; do rm "$f"; done'],
+  ['ls | while read f; do rm "$f"; done'],
+  ['rm ~/.local/share/claude-*/state.db'],
+  ['rm -rf ~/.local/share/claude-coord*'],
+  ['rm ~/.local/share/{claude-coordinator,x}/state.db'],
+  ['rm -rf /*'],
+  // the scheme's own folder: fine to work in, not to delete wholesale
+  [`rm -rf ${data}/projects/2`],
+  [`rm -rf ${data}/projects/2/tickets`],
+  [`rm -rf ${data}/projects/2/*`],
+  ['cd ../.. && rm -rf repo'],
   // a turn's own environment, the transcripts, the credentials table, runners, signing in (#185)
   ['env'],
   ['env | grep -i token'],
@@ -327,6 +367,26 @@ const ALLOWED = [
   'sqlite3 ~/.local/share/claude-coordinator/coordinator.db ".backup $D/coordinator.db"',
   "cd ~/.local/share/claude-coordinator/projects/2/tickets/9 && perl -pi -e 's/a\\/b/c/g' src/x.ts",
   "sed -i 's#/home/u/claude-coordinator#~/app#' README.md",
+  // #251: variables the command sets, or the turn's TMPDIR, are followed, so scratch work stays easy
+  'rm -rf "$TMPDIR/out" && mkdir -p "$TMPDIR/out"',
+  'd="$TMPDIR/out"; rm -rf "${d:?}"/*',
+  'rm -rf "$TMPDIR"/*',
+  'D=/tmp/x; rm -rf $D/state.db',
+  'T=$(mktemp -d); cp a.db $T/; rm -rf $T',
+  'D="$(mktemp -d /tmp/c86-XXXX)"; sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db ".backup $D/coordinator.db"; sqlite3 $D/coordinator.db "delete from push_subscriptions"; rm -rf "$D"',
+  'f=$(mktemp); echo hi > "$f"; rm -f "$f"',
+  `D=${data}; sqlite3 -readonly $D/state.db "select 1"; cp $D/coordinator.db "$TMPDIR/"; ls -la $D`,
+  'sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db ".backup $TMPDIR/copy.db"',
+  'rm -f /tmp/cc-$USER.log out-$N.txt',
+  'for f in src/*.ts test/*.ts; do sed -i "s/a/b/" "$f"; done',
+  'for f in a.png b.png; do mv "$f" "$TMPDIR/"; done',
+  'cd "$(git rev-parse --show-toplevel)" && rm -rf node_modules',
+  'echo scratch/ >> "$(git rev-parse --git-path info/exclude)"',
+  'git diff --name-only | xargs grep -n TODO',
+  'find . -name "*.orig" -delete',
+  `rm -rf ${data}/projects/2/tickets/9/build ${data}/projects/2/shared/9`,
+  'git commit -m "$(cat <<\'EOF\'\nBlocks D=x; rm -f $D/state.db\nEOF\n)"',
+  'env -i PATH="$PATH" HOME="$HOME" DATA_DIR=/tmp/d PORT=8691 SESSION_SECRET=$(head -c 32 /dev/urandom | base64) node server.ts',
 ];
 
 // Things a person may reasonably allow once: a card for that exact call.
@@ -340,6 +400,7 @@ const ASKS = [
   'echo x > ~/.local/share/claude-coordinator/coordinator.db.bak-machines',
   'echo x>>~/.local/share/claude-coordinator/vapid.json',
   'mv ~/.local/share/claude-coordinator/old ~/.local/share/claude-coordinator/old-2',
+  'rm ~/.local/share/claude-coordinator/backups/$F',
   // SQL on the live database, when the card can show all of it
   `sqlite3 ${data}/coordinator.db "delete from tickets where id = 3"`,
   'sqlite3 ~/.local/share/claude-coordinator/coordinator.db "update tickets set state=null"',
@@ -543,6 +604,14 @@ test('cards: refused for hard blocks, missing explanations, long calls, and othe
   // With approval rules, other prompts still get their card, as before.
   assert.equal(refused({ command: 'gh pr merge 3' }, true), undefined);
   assert.equal(a.waiting(5), 1);
+});
+
+test('a blocked data-dir write points at sqlite3 -readonly and a copy in TMPDIR (#251)', () => {
+  for (const command of [`D=${data}; rm -f $D/state.db`, 'rm -f "$D/state.db"', `rm -f ${data}/vapid.json`]) {
+    assert.match(bash(command) ?? '', /sqlite3 -readonly/, command);
+    assert.match(bash(command) ?? '', /\$TMPDIR\/copy\.db/, command);
+  }
+  assert.match(bash('rm -f "$D/state.db"') ?? '', /can't tell what \$D holds/);
 });
 
 test("a minion can write in its TMPDIR, its scheme's tmp folder (#218)", () => {

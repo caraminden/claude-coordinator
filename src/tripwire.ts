@@ -14,15 +14,18 @@
 // Approve / Deny card for that exact call (Approvals.ask in approvals.ts). Nothing a minion does
 // switches a tier off; only a person's click lets one call through.
 //
-// It is a tripwire, NOT a security boundary. It reads the command text, so anything that hides the
-// path from that text gets past it: a script file, an interpreter (`python -c`, `node -e`), a path
-// held in a variable, a symlink, `$(…)` inside double quotes, `xargs`, a glob in the middle of a path.
-// It aims to never block normal work; where it can't tell, it lets the command through.
+// It is a tripwire, NOT a security boundary. It reads the command text: it follows variables the
+// command sets and the turn's environment ($TMPDIR), loop variables, `$(mktemp)`, globs and braces
+// in folder names and symlinked folders, and a destructive write (rm, mv, cp onto, >, truncate,
+// find -delete, sqlite3 SQL that writes) whose path it still can't pin down is blocked if it could
+// land in the live data dir (#251: `D=<data dir>; rm -f $D/state.db` got through). Reads and other
+// writes it can't pin down go through. A script file or an interpreter (`python -c`, `node -e`)
+// still hides what it does.
 //
 // Run as a hook: node tripwire.ts '<config json>' < hook input; exits 2 with the reason on stderr, or
 // prints a PreToolUse "ask" decision for the approval card.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,6 +42,8 @@ export interface TripwireConfig {
   deployScript?: boolean;
   /** Whether this turn can show an approval card (minions can; Taskmasters can't), so ask-tier calls ask. */
   ask?: boolean;
+  /** The turn's environment, for paths like "$TMPDIR/x"; the hook's own (the turn's) when left out. */
+  env?: Record<string, string | undefined>;
 }
 
 /** Why a call is stopped, and whether a person may approve it once on a card instead. */
@@ -71,7 +76,7 @@ function writeReason(p: string, cfg: TripwireConfig): string | null {
     if (id === String(cfg.project)) return null;
     if (/^\d+$/.test(id)) return `${join(projects, id)} belongs to another scheme (${id}; yours is ${cfg.project}). Read it if you need to, but leave changes there to that scheme's minions: ask your Taskmaster to pass it on.`;
   }
-  if (under(p, cfg.data)) return `${cfg.data} is the live data dir: the database, its backups and every scheme's folders. Read the database with \`sqlite3 -readonly\`; change data through the app, or ask a person.`;
+  if (under(p, cfg.data)) return `${cfg.data} is the live data dir: the database, its backups and every scheme's folders. ${SCRATCH} Change data through the app, or ask a person.`;
   if (under(p, join(configDir, 'claude-coordinator'))) return `${join(configDir, 'claude-coordinator')} holds the live service's env file. Ask Cara to change it.`;
   for (const units of [join(configDir, 'systemd/user'), join(configDir, 'containers/systemd')]) {
     if (under(p, units)) return `${units} holds the box's service units. Put unit files in the repo (deploy/) and ask Cara to install them.`;
@@ -116,10 +121,8 @@ const GH_TOKEN_WHY = "That is Cara's GitHub login; gh and git use it on their ow
 // Each turn gets its person's GitHub token, or none (#182); these would reach another account's login.
 const GH_VARS = /^(GH_TOKEN|GITHUB_TOKEN|GH_CONFIG_DIR|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|GH_HOST)$/;
 const GH_ENV_WHY = "Each turn's GitHub login is set for the person it runs for (GH_TOKEN, with an empty GH_CONFIG_DIR so no other login is in reach), so pushes and pull requests go out under their name. Leave it as it is: if this turn's person hasn't linked GitHub, commit on your branch and tell them they can link it in Settings → Your account.";
-// The same read with the pid in a variable, where the lexer leaves an unknown `/proc//environ`, or in
-// `$(…)`, where it splits the path into `/proc/`, the ( … ) and the rest (see commandReason).
+// The same read with the pid in a variable or a $(…), where the lexer leaves an unknown `/proc//environ`.
 const ENVIRON_HIDDEN = /^\/proc\/[^/]*(\/task\/[^/]*)?\/environ$/;
-const ENVIRON_REST = /^(\/task\/[^/]*)?\/environ$/;
 
 /** For a recursive search: a secret readReason guards that lies inside this folder, or null. */
 function secretInside(root: string, cfg: TripwireConfig): string | null {
@@ -167,40 +170,68 @@ function askable(p: string, cmd: string, cfg: TripwireConfig): boolean {
   // Brace expansion could name anything; a glob is matched against the live files' names.
   const base = basename(p);
   if (base.includes('{')) return false;
-  const glob = new RegExp(`^${base.split(/(\*|\?|\[[^\]]*\])/).map((part, k) => (k % 2 ? (part === '*' ? '.*' : '.') : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('')}$`);
+  const glob = globRe(base);
   return !LIVE_DB.some((f) => glob.test(f));
 }
 
 /** For rm and mv: deleting or moving a folder that contains a protected one. */
 function containsProtected(p: string, cfg: TripwireConfig): boolean {
-  const configDir = join(cfg.home, '.config');
-  const roots = [cfg.checkout, cfg.data, join(configDir, 'claude-coordinator'), join(configDir, 'systemd/user'), join(configDir, 'containers/systemd'), join(cfg.home, '.ssh')];
-  return roots.some((r) => r !== p && under(r, p));
+  return protectedRoots(cfg).some((r) => r !== p && under(r, p));
 }
 
 // ---------- reading shell commands ----------
 
-interface Word { text: string; unknown: boolean }
+/**
+ * A word of the command. `unknown` when it holds an expansion the lexer can't see through; then `tmpl`
+ * is its text with each expansion marked: \0NAME\0 for a variable, \0\0 for anything else ($(…),
+ * $1, ${x%/*}), so a variable the command sets, or the turn's environment, can fill it in later.
+ */
+interface Word { text: string; unknown: boolean; tmpl?: string }
 type Tok = { kind: 'word'; word: Word } | { kind: 'op'; text: string } | { kind: 'redir'; op: string };
 
 /**
- * Splits a bash command into words, redirects and operators (; && || | & newline ( ) and backticks).
- * Expands ~, $HOME and ${HOME}; a word with any other $-expansion is marked unknown and never treated
- * as a path. Heredoc bodies are skipped, so a commit message can mention any path.
+ * Splits a bash command into words, redirects and operators (; && || | & newline ( ) $( ). A command
+ * substitution's inner command comes out between `$(` and `)`, and the word it sits in comes after,
+ * marked unknown. Expands ~, $HOME and ${HOME}; other expansions are marked (see Word). Heredoc bodies
+ * are skipped, so a commit message can mention any path.
  */
 export function lex(s: string, home: string): Tok[] {
   const toks: Tok[] = [];
   const heredocs: { delim: string; strip: boolean }[] = [];
   let text = '';
+  let tmpl = '';
   let unknown = false;
   let inWord = false;
   let quotedStart = false;
+  const put = (x: string) => {
+    text += x;
+    tmpl += x;
+  };
   const flush = () => {
-    if (inWord) toks.push({ kind: 'word', word: { text, unknown } });
+    if (inWord) toks.push({ kind: 'word', word: unknown ? { text, unknown, tmpl } : { text, unknown } });
     text = '';
+    tmpl = '';
     unknown = false;
     inWord = false;
     quotedStart = false;
+  };
+  // Open parens: null for a plain ( … ), or the word a $( … ) or `…` sits in, to pick up again after it.
+  type Saved = { text: string; tmpl: string; unknown: boolean; quotedStart: boolean; backtick: boolean; start: number };
+  const parens: (Saved | null)[] = [];
+  const open = (backtick: boolean, start: number) => {
+    parens.push({ text, tmpl, unknown, quotedStart, backtick, start });
+    text = tmpl = '';
+    unknown = inWord = quotedStart = false;
+    toks.push({ kind: 'op', text: '$(' });
+  };
+  const close = (end: number) => {
+    flush();
+    toks.push({ kind: 'op', text: ')' });
+    const w = parens.pop();
+    if (!w) return;
+    ({ text, tmpl, quotedStart } = w);
+    tmpl += mktempPath(s.slice(w.start, end), home) ?? '\0\0';
+    unknown = inWord = true;
   };
   const n = s.length;
   // Reads a $ expansion at s[i] ('$'); returns the next index.
@@ -221,6 +252,7 @@ export function lex(s: string, home: string): Tok[] {
         else if (s[j] === ')' && --depth === 0) break;
       }
       unknown = true;
+      tmpl += mktempPath(s.slice(i + 2, j), home) ?? '\0\0';
       return j + 1;
     }
     let name = '';
@@ -228,20 +260,25 @@ export function lex(s: string, home: string): Tok[] {
     if (c === '{') {
       const end = s.indexOf('}', j);
       if (end < 0) return n;
-      name = s.slice(j + 1, end);
+      // ${NAME:?…}, ${NAME:-…} and the like are NAME when it's set; other forms can't be followed.
+      const m = /^([A-Za-z_]\w*)(:?[-=?].*)?$/.exec(s.slice(j + 1, end));
+      name = m ? m[1] : '';
       j = end + 1;
     } else {
       const m = /^([A-Za-z_]\w*|[0-9@*#?$!-])/.exec(s.slice(j));
       if (!m) {
-        text += '$';
+        put('$');
         inWord = true;
         return i + 1;
       }
-      name = m[1];
-      j += name.length;
+      name = /^[A-Za-z_]/.test(m[1]) ? m[1] : '';
+      j += m[1].length;
     }
-    if (name === 'HOME') text += home;
-    else unknown = true;
+    if (name === 'HOME') put(home);
+    else {
+      unknown = true;
+      tmpl += `\0${name}\0`;
+    }
     inWord = true;
     return j;
   };
@@ -250,7 +287,7 @@ export function lex(s: string, home: string): Tok[] {
     const c = s[i];
     if (c === "'") {
       const end = s.indexOf("'", i + 1);
-      text += s.slice(i + 1, end < 0 ? n : end);
+      put(s.slice(i + 1, end < 0 ? n : end));
       if (!inWord) quotedStart = true;
       inWord = true;
       i = end < 0 ? n : end + 1;
@@ -259,7 +296,7 @@ export function lex(s: string, home: string): Tok[] {
     if (c === '$' && s[i + 1] === "'") {
       // ANSI-C quoting: rare enough to take literally.
       const end = s.indexOf("'", i + 2);
-      text += s.slice(i + 2, end < 0 ? n : end);
+      put(s.slice(i + 2, end < 0 ? n : end));
       inWord = true;
       i = end < 0 ? n : end + 1;
       continue;
@@ -270,21 +307,22 @@ export function lex(s: string, home: string): Tok[] {
       i++;
       while (i < n && s[i] !== '"') {
         if (s[i] === '\\' && i + 1 < n && '"\\$`\n'.includes(s[i + 1])) {
-          if (s[i + 1] !== '\n') text += s[i + 1];
+          if (s[i + 1] !== '\n') put(s[i + 1]);
           i += 2;
         } else if (s[i] === '$') i = dollar(i);
         else if (s[i] === '`') {
           const end = s.indexOf('`', i + 1);
           unknown = true;
+          tmpl += '\0\0';
           i = end < 0 ? n : end + 1;
-        } else text += s[i++];
+        } else put(s[i++]);
       }
       i++;
       continue;
     }
     if (c === '\\') {
       if (s[i + 1] !== '\n' && i + 1 < n) {
-        text += s[i + 1];
+        put(s[i + 1]);
         inWord = true;
       }
       i += 2;
@@ -292,16 +330,21 @@ export function lex(s: string, home: string): Tok[] {
     }
     if (c === '$') {
       if (s[i + 1] === '(') {
-        flush();
-        toks.push({ kind: 'op', text: '(' });
+        open(false, i + 2);
         i += 2;
         continue;
       }
       i = dollar(i);
       continue;
     }
+    if (c === '`') {
+      if (parens.at(-1)?.backtick) close(i);
+      else open(true, i + 1);
+      i++;
+      continue;
+    }
     if (c === '~' && !inWord && (i + 1 >= n || /[\/\s;&|)]/.test(s[i + 1]))) {
-      text += home;
+      put(home);
       inWord = true;
       i++;
       continue;
@@ -333,7 +376,7 @@ export function lex(s: string, home: string): Tok[] {
     if (c === '<' || c === '>' || (c === '&' && s[i + 1] === '>')) {
       // A bare number right before is the file descriptor, not a word.
       if (inWord && !quotedStart && !unknown && /^\d+$/.test(text)) {
-        text = '';
+        text = tmpl = '';
         inWord = false;
       } else flush();
       const op = /^(&>>|&>|>>|>\||>&|>|<<<|<<-|<<|<>|<&|<)/.exec(s.slice(i))![1];
@@ -356,15 +399,21 @@ export function lex(s: string, home: string): Tok[] {
       toks.push({ kind: 'redir', op });
       continue;
     }
-    if (c === ';' || c === '&' || c === '|' || c === '(' || c === ')' || c === '`') {
+    if (c === ')') {
+      close(i);
+      i++;
+      continue;
+    }
+    if (c === ';' || c === '&' || c === '|' || c === '(') {
       flush();
       const two = s.slice(i, i + 2);
       const op = ['&&', '||', '|&', ';;'].includes(two) ? two : c;
-      toks.push({ kind: 'op', text: op === '`' ? ';' : op });
+      if (op === '(') parens.push(null);
+      toks.push({ kind: 'op', text: op });
       i += op.length;
       continue;
     }
-    text += c;
+    put(c);
     inWord = true;
     i++;
   }
@@ -372,8 +421,35 @@ export function lex(s: string, home: string): Tok[] {
   return toks;
 }
 
+const MKTEMP_DIR = '__mktemp_dir';
+
+/**
+ * What `$(mktemp …)` prints, as a word template: the folder it makes the file in (its -p or --tmpdir,
+ * the template's own folder, or $TMPDIR) and the template. Null for any other command.
+ */
+function mktempPath(src: string, home: string): string | null {
+  const toks = lex(src, home);
+  if (toks.some((t) => t.kind !== 'word')) return null;
+  const words = toks.map((t) => (t as { word: Word }).word);
+  if (words[0]?.text !== 'mktemp') return null;
+  const tm = (w: Word) => w.tmpl ?? w.text;
+  let dir: string | null = null;
+  let template = 'tmp.XXXXXXXXXX';
+  let inTmp = false;
+  for (let k = 1; k < words.length; k++) {
+    const x = words[k].text;
+    if (x === '-p') (dir = words[k + 1] ? tm(words[k + 1]) : null), k++;
+    else if (x.startsWith('--tmpdir=')) dir = tm(words[k]).slice(9);
+    else if (/^--?[a-zA-Z]/.test(x)) inTmp ||= /^-[a-zA-Z]*t/.test(x) || x === '--tmpdir';
+    else template = tm(words[k]);
+  }
+  if (dir === null && !inTmp && words.slice(1).some((w) => !w.text.startsWith('-'))) return template;
+  return `${dir || `\0${MKTEMP_DIR}\0`}/${template}`;
+}
+
 interface Segment { words: Word[]; redirects: { op: string; target: Word }[] }
-interface State { cwd: string | null; vars: Set<string>; committed?: boolean }
+/** What the command has done so far: its folder, and the variables it set, with the values they can take where known (a loop variable takes several). */
+interface State { cwd: string | null; vars: Set<string>; values: Map<string, string[]>; committed?: boolean }
 
 // Only these commands count as writes. Anything else is taken as a read, so an interpreter or tool
 // that names a protected path (`node -e … coordinator.db`, `curl`) goes through: few false alarms,
@@ -394,20 +470,107 @@ const UNIT_FILE_VERBS = new Set(['enable', 'disable', 'reenable', 'mask', 'unmas
 const GIT_READ = new Set(`status log diff show blame rev-parse rev-list ls-files ls-tree ls-remote cat-file describe shortlog grep fetch help version
 whatchanged show-ref for-each-ref merge-base name-rev count-objects check-ignore var cherry range-diff format-patch archive merge-tree`.split(/\s+/));
 
-/** Paths a word may name: the word itself, and an option's or dd operand's value after `=`. */
-function pathsOf(w: Word, st: State, cfg: TripwireConfig): string[] {
-  if (w.unknown || !w.text) return [];
-  const eq = w.text.indexOf('=');
-  const candidates = w.text.startsWith('-') ? (eq > 0 ? [w.text.slice(eq + 1)] : []) : eq > 0 ? [w.text, w.text.slice(eq + 1)] : [w.text];
+// The turn's variables never fill in a path when their names suggest a secret.
+const SECRET_VAR = /TOKEN|SECRET|PASSW|KEY|COOKIE|CREDENTIAL/i;
+
+/** A variable's values: set earlier in the command, else (unless the command set it to something unknown) the turn's environment. */
+function valueOf(name: string, st: State, cfg: TripwireConfig): string[] | undefined {
+  if (st.values.has(name)) return st.values.get(name);
+  if (st.vars.has(name)) return undefined;
+  const env = cfg.env ?? process.env;
+  if (name === 'PWD') return st.cwd ? [st.cwd] : undefined;
+  // Where a bare mktemp puts its file (see mktempPath).
+  if (name === MKTEMP_DIR) return [env.TMPDIR || '/tmp'];
+  const v = SECRET_VAR.test(name) ? undefined : env[name];
+  return v === undefined ? undefined : [v];
+}
+
+/** The word with the variables it can fill in filled in, once per value they take; a word that stays unknown keeps the rest marked. */
+function expand(w: Word, st: State, cfg: TripwireConfig): Word[] {
+  if (!w.unknown || w.tmpl === undefined) return [w];
+  let alts = [''];
+  for (const part of w.tmpl.split(/(\0[A-Za-z_]\w*\0)/)) {
+    const known = part.length > 2 && part.startsWith('\0') ? valueOf(part.slice(1, -1), st, cfg) : undefined;
+    const vals = known ? known.map((v) => v.replace(/\0/g, '')) : [part];
+    alts = alts.flatMap((x) => vals.map((v) => x + v)).slice(0, 64);
+  }
+  return alts.map((t) => (t.includes('\0') ? { text: w.text, unknown: true, tmpl: t } : { text: t, unknown: false }));
+}
+
+/** An unknown word as the command wrote it, for a reason: `$D/state.db`. */
+const shown = (w: Word) => (w.tmpl ?? w.text).replace(/\0([A-Za-z_]\w*)\0/g, '$$$1').replace(/\0\0/g, '$(…)');
+
+/** Paths a word may name: the word itself, an option's or dd operand's value after `=`, brace and glob expansions, and where symlinks lead. */
+function pathsOf(word: Word, st: State, cfg: TripwireConfig): string[] {
   const out: string[] = [];
-  for (let c of candidates) {
+  for (const w of expand(word, st, cfg)) if (!w.unknown && w.text) out.push(...literalPaths(w.text, st, cfg));
+  return [...new Set(out)];
+}
+
+function literalPaths(text: string, st: State, cfg: TripwireConfig): string[] {
+  const eq = text.indexOf('=');
+  const candidates = text.startsWith('-') ? (eq > 0 ? [text.slice(eq + 1)] : []) : eq > 0 ? [text, text.slice(eq + 1)] : [text];
+  const out: string[] = [];
+  for (let c of candidates.flatMap(braces)) {
     if (c.startsWith('~/') || c === '~') c = cfg.home + c.slice(1);
     // URLs, host:path and the like.
     if (/^[A-Za-z][\w+.@-]*:/.test(c)) continue;
-    if (isAbsolute(c)) out.push(resolve(c));
-    else if (st.cwd && c) out.push(resolve(st.cwd, c));
+    const p = isAbsolute(c) ? resolve(c) : st.cwd && c ? resolve(st.cwd, c) : null;
+    if (p) out.push(p, ...globHits(p, cfg), ...realPath(p));
   }
   return out;
+}
+
+/** Bash's brace expansion of a word (`a{b,c}` is ab and ac), capped. */
+function braces(s: string): string[] {
+  const m = /\{([^{}]*,[^{}]*)\}/.exec(s);
+  if (!m) return [s];
+  return m[1].split(',').flatMap((alt) => braces(s.slice(0, m.index) + alt + s.slice(m.index + m[0].length))).slice(0, 32);
+}
+
+/** A glob for one path component, as a regex; a [class] it can't read matches any one character. */
+function globRe(part: string): RegExp {
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = part.split(/(\*|\?|\[[^\]]*\])/).map((x, k) => (k % 2 === 0 ? esc(x) : x === '*' ? '.*' : x === '?' ? '.' : `[${x.slice(1, -1).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`));
+  try {
+    return new RegExp(`^${re.join('')}$`);
+  } catch {
+    return new RegExp(`^${re.map((x, k) => (k % 2 && x.startsWith('[') ? '.' : x)).join('')}$`);
+  }
+}
+
+/** The folders whose writes are blocked, or that rm and mv mustn't take with them. */
+function protectedRoots(cfg: TripwireConfig): string[] {
+  const configDir = join(cfg.home, '.config');
+  return [cfg.checkout, cfg.data, join(configDir, 'claude-coordinator'), join(configDir, 'systemd/user'), join(configDir, 'containers/systemd'), join(cfg.home, '.ssh')];
+}
+
+/** For a path with a glob in it: the protected folders, or paths in them, it could match (`~/.local/*\/claude-coordinator/state.db`). */
+function globHits(p: string, cfg: TripwireConfig): string[] {
+  const parts = p.split('/');
+  if (!parts.some((x) => /[*?[]/.test(x))) return [];
+  const out: string[] = [];
+  for (const root of protectedRoots(cfg)) {
+    const r = root.split('/');
+    if (parts.slice(0, r.length).every((x, j) => globRe(x).test(r[j]))) out.push([...r.slice(0, parts.length), ...parts.slice(r.length)].join('/'));
+  }
+  return out;
+}
+
+/** Where a path really is, when a folder on the way is a symlink. */
+function realPath(p: string): string[] {
+  let head = p;
+  let tail = '';
+  while (head !== '/' && !existsSync(head)) {
+    tail = `/${basename(head)}${tail}`;
+    head = dirname(head);
+  }
+  try {
+    const real = join(realpathSync(head), tail);
+    return real === p ? [] : [real];
+  } catch {
+    return [];
+  }
 }
 
 /** The arguments a command writes to; empty for a command that only reads. */
@@ -438,8 +601,13 @@ function writeTargets(name: string, args: Word[]): Word[] {
       return a.some((t) => t.includes('inplace')) ? args : [];
     case 'sort':
       return a.some((t) => /^-[a-zA-Z]*o/.test(t) || t.startsWith('--output')) ? args : [];
-    case 'find':
-      return a.includes('-delete') || a.some((t, i) => /^-(exec|execdir|ok|okdir)$/.test(t) && REMOVERS.has(basename(a[i + 1] ?? ''))) ? args : [];
+    case 'find': {
+      if (!a.includes('-delete') && !a.some((t, i) => /^-(exec|execdir|ok|okdir)$/.test(t) && REMOVERS.has(basename(a[i + 1] ?? '')))) return [];
+      // The folders it starts from: the words before its first option or expression.
+      const k = a.findIndex((t) => /^[-(!]/.test(t));
+      const roots = args.slice(0, k < 0 ? args.length : k);
+      return roots.length ? roots : [{ text: '.', unknown: false }];
+    }
     case 'sqlite3': {
       if (a.some((t) => t === '-readonly' || t === '--readonly' || t.includes('mode=ro'))) return [];
       const [db, ...sql] = sqliteOperands(args);
@@ -458,6 +626,71 @@ function sqliteOperands(args: Word[]): Word[] {
     else if (!args[i].text.startsWith('-')) rest.push(args[i]);
   }
   return rest;
+}
+
+const SCRATCH = 'Read the live database with `sqlite3 -readonly`; for a copy to work on, back it up into your TMPDIR: `sqlite3 -readonly <db> ".backup $TMPDIR/copy.db"`.';
+
+/** A NAME=value word: the name, and the values it can take when they can be known. */
+function assignment(w: Word, st: State, cfg: TripwireConfig): [string, string[] | undefined] {
+  const eq = w.text.indexOf('=');
+  if (eq < 0) return [w.text, undefined];
+  return [w.text.slice(0, eq), known(expand({ text: w.text.slice(eq + 1), unknown: w.unknown, tmpl: w.tmpl?.slice(eq + 1) }, st, cfg), cfg)];
+}
+
+/** The words' texts, when none is unknown; a ~ after the = of an assignment expands too. */
+function known(ws: Word[], cfg: TripwireConfig): string[] | undefined {
+  if (ws.some((w) => w.unknown)) return undefined;
+  return ws.map((w) => (/^~(\/|$)/.test(w.text) ? cfg.home + w.text.slice(1) : w.text));
+}
+
+function setVar(st: State, name: string, values: string[] | undefined) {
+  st.vars.add(name);
+  if (values === undefined) st.values.delete(name);
+  else st.values.set(name, values);
+}
+
+/**
+ * For a destructive write whose path can't be pinned down (a variable that isn't set in the command
+ * or the turn's environment, a $(…), a relative path after a cd the tripwire lost track of): a block
+ * when it could land in the live data dir, or null. The reason starts with the path as written.
+ */
+function blindWriteReason(word: Word, st: State, cfg: TripwireConfig, name: string): Verdict | null {
+  for (const w of expand(word, st, cfg)) {
+    const why = blindReason(w, st, cfg, name);
+    if (why) return why;
+  }
+  return null;
+}
+function blindReason(w: Word, st: State, cfg: TripwireConfig, name: string): Verdict | null {
+  if (w.text.startsWith('-') || /^[A-Za-z_]\w*=/.test(w.text)) return null;
+  if (!w.unknown) {
+    if (st.cwd || !w.text || isAbsolute(w.text) || w.text.startsWith('~')) return null;
+    // Relative to a folder it lost track of: that folder may be the data dir itself.
+    const p = resolve(cfg.data, w.text);
+    if (!under(cfg.data, p) && (dirname(p) !== cfg.data || askable(p, name, cfg))) return null;
+    return hard(`${w.text} in a folder the tripwire lost track of (a cd to a variable or a $(…)): run from ${cfg.data}, the live data dir, it would hit the database. Use an absolute path. ${SCRATCH}`);
+  }
+  const tmpl = w.tmpl!;
+  const lit = tmpl.slice(0, tmpl.indexOf('\0'));
+  const cut = lit.lastIndexOf('/');
+  // `$x/…` could be anywhere; `out-$x` is in the current folder; `/a/b/$x` is in /a/b.
+  const dirs = cut >= 0 ? pathsOf({ text: lit.slice(0, cut) || '/', unknown: false }, st, cfg) : lit && st.cwd ? [st.cwd] : [];
+  const unknowns = [...new Set([...tmpl.matchAll(/\0([A-Za-z_]\w*)?\0/g)].map((m) => (m[1] ? `$${m[1]}` : '$(…)')))].join(' and ');
+  if (!dirs.length || dirs.some((d) => under(cfg.data, d))) {
+    return hard(`${shown(w)}: the tripwire can't tell what ${unknowns} holds, so this could reach ${cfg.data}, the live data dir (the database, its backups and every scheme's folders). Spell the path out in the command, or keep scratch files under $TMPDIR. ${SCRATCH}`);
+  }
+  for (const d of dirs) {
+    const p = join(d, '…');
+    const why = writeReason(p, cfg);
+    if (why) return { reason: `${shown(w)}: ${why}`, ask: askable(p, name, cfg) };
+  }
+  return null;
+}
+
+/** Your scheme's folder, or a folder right in it (its repo, tickets, shared, tmp): rm takes every minion's work with it. */
+function schemeFolder(p: string, cfg: TripwireConfig): boolean {
+  const own = join(cfg.data, 'projects', String(cfg.project));
+  return p === own || (under(p, own) && !p.slice(own.length + 1).includes('/'));
 }
 
 const ENV_WHY = "A turn's environment can hold its tokens. Check one variable with `[ -n \"$NAME\" ] && echo set`, or print a harmless one with `echo \"$PATH\"`.";
@@ -494,7 +727,7 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
     const t = args[j].text;
     if (t === '-C') {
       const p = args[j + 1];
-      dir = p && !p.unknown ? (st.cwd ? resolve(st.cwd, p.text) : isAbsolute(p.text) ? p.text : null) : null;
+      dir = p ? (pathsOf(p, st, cfg)[0] ?? null) : null;
       j++;
     } else if (t === '-c' || t === '--git-dir' || t === '--work-tree' || t === '--namespace') j++;
     else if (!t.startsWith('-')) break;
@@ -522,7 +755,7 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
   const targets = sub === 'clone' ? args.slice(j + 1).filter((w) => !w.text.startsWith('-')).slice(1) : args.slice(j + 1);
   // Relative paths after -C are relative to that folder.
   for (const w of targets) {
-    for (const p of pathsOf(w, { cwd: dir, vars: st.vars }, cfg)) {
+    for (const p of pathsOf(w, { ...st, cwd: dir }, cfg)) {
       const r = writeReason(p, cfg);
       if (r) return hard(`git ${sub} would change ${p}. ${r}`);
     }
@@ -649,6 +882,9 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   for (const r of seg.redirects) {
     if (r.op === '<<<') continue;
     if (r.target.unknown && ENVIRON_HIDDEN.test(r.target.text)) return hard(`The redirect from ${r.target.text} is blocked. ${ENVIRON_WHY}`);
+    // Appending (>>) can't wipe a file; the rest can.
+    const blind = /^(<|>>|&>>)$/.test(r.op) ? null : blindWriteReason(r.target, st, cfg, '');
+    if (blind) return { ...blind, reason: `The redirect to ${blind.reason}` };
     for (const p of pathsOf(r.target, st, cfg)) {
       const read = readReason(p, cfg);
       if (read) return hard(`The redirect to ${p} is blocked. ${read}`);
@@ -657,24 +893,26 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     }
   }
   const words = seg.words;
-  const assigned = new Set<string>();
+  const assigned = new Map<string, string | undefined>();
   let i = 0;
   // `env $VARS PORT=1 cmd`: an unknown word after env is most likely more assignments.
   const takeAssignments = (orUnknown = false) => {
-    while (i < words.length && (/^[A-Za-z_]\w*=/.test(words[i].text) || (orUnknown && words[i].unknown))) assigned.add(words[i++].text.split('=')[0]);
+    while (i < words.length && (/^[A-Za-z_]\w*=/.test(words[i].text) || (orUnknown && words[i].unknown))) assigned.set(...assignment(words[i++], st, cfg));
   };
   takeAssignments();
-  const ghSet = () => [...assigned].find((v) => GH_VARS.test(v));
+  const ghSet = () => [...assigned.keys()].find((v) => GH_VARS.test(v));
   if (ghSet()) return hard(`Setting ${ghSet()} is blocked. ${GH_ENV_WHY}`);
   if (i === words.length) {
-    for (const v of assigned) st.vars.add(v);
+    for (const [name, value] of assigned) setVar(st, name, value);
     return null;
   }
   // Step over keywords and wrappers (env VAR=x, timeout 5m, nice -n 5, …) to the real command.
+  let viaXargs = false;
   for (;;) {
     const name = basename(words[i]?.text ?? '');
     if (KEYWORDS.has(name)) i++;
     else if (WRAPPERS.has(name)) {
+      if (name === 'xargs') viaXargs = true;
       i++;
       while (i < words.length && words[i].text.startsWith('-')) {
         const opt = words[i++].text;
@@ -691,20 +929,30 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const cmd = words[i];
   const name = basename(cmd.text);
   const args = words.slice(i + 1);
-  const vars = new Set([...st.vars, ...assigned]);
+  const vars = new Set([...st.vars, ...assigned.keys()]);
 
   if (/^(export|declare|local|readonly|typeset|unset)$/.test(name)) {
     const gh = args.map((w) => w.text.split('=')[0]).find((v) => GH_VARS.test(v));
     if (gh) return hard(`${name === 'unset' ? 'Unsetting' : 'Setting'} ${gh} is blocked. ${GH_ENV_WHY}`);
   }
   if (name === 'export' || name === 'declare' || name === 'local' || name === 'readonly' || name === 'typeset') {
-    for (const w of args) if (/^[A-Za-z_]\w*=/.test(w.text)) st.vars.add(w.text.split('=')[0]);
+    for (const w of args) if (/^[A-Za-z_]\w*=/.test(w.text)) setVar(st, ...assignment(w, st, cfg));
+    return null;
+  }
+  // Variables set from what the command reads or loops over: their values can't be known.
+  if (name === 'for' || name === 'select') {
+    // `for f in a b`: f takes each listed value, when they're all known.
+    if (/^[A-Za-z_]\w*$/.test(args[0]?.text ?? '')) setVar(st, args[0].text, args[1]?.text === 'in' ? known(args.slice(2).flatMap((w) => expand(w, st, cfg)), cfg)?.flatMap(braces) : undefined);
+  } else if (/^(read|mapfile|readarray|getopts)$/.test(name)) {
+    const names = name === 'getopts' ? args.slice(1, 2) : args.filter((w, k) => !w.text.startsWith('-') && !/^-[a-zA-Z]*[pdnNtuaC]$/.test(args[k - 1]?.text ?? ''));
+    for (const w of names) if (/^[A-Za-z_]\w*$/.test(w.text)) setVar(st, w.text, undefined);
+    if (name === 'read' && !names.length) setVar(st, 'REPLY', undefined);
     return null;
   }
   if (name === 'cd' || name === 'pushd') {
     const to = args.find((w) => !w.text.startsWith('-') || w.text === '-');
     if (!to) st.cwd = cfg.home;
-    else if (to.unknown || to.text === '-') st.cwd = null;
+    else if (to.text === '-') st.cwd = null;
     else st.cwd = pathsOf(to, st, cfg)[0] ?? null;
     return null;
   }
@@ -716,8 +964,14 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     const k = name === 'eval' ? -1 : args.findIndex((w) => /^-[a-z]*c[a-z]*$/.test(w.text));
     const script = name === 'eval' ? args : k >= 0 && args[k + 1] ? [args[k + 1]] : null;
     if (script) {
-      if (script.some((w) => w.unknown)) return null;
-      return commandReason(script.map((w) => w.text).join(' '), { cwd: st.cwd, vars }, cfg);
+      // What the inner shell gets: the words with the variables we know filled in, the rest left for it to expand.
+      const text = (w: Word) => (w.unknown ? w.tmpl!.replace(/\0([A-Za-z_]\w*)\0/g, '${$1}').replace(/\0\0/g, '${__unknown}') : w.text);
+      const scripts = script.length === 1 ? expand(script[0], st, cfg).map(text) : [script.map((w) => text(expand(w, st, cfg)[0])).join(' ')];
+      for (const inner of scripts) {
+        const why = commandReason(inner, { cwd: st.cwd, vars: new Set([...st.vars, '__unknown']), values: st.values }, cfg);
+        if (why) return why;
+      }
+      return null;
     }
   }
   if (REMOTE.has(name)) return null;
@@ -796,11 +1050,18 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   }
 
   if (name === 'git') return gitReason(args, st, cfg);
+  // xargs hands the command paths from stdin, which can't be read here.
+  if (viaXargs && (REMOVERS.has(name) || name === 'truncate')) return hard(`\`xargs ${name}\` takes its paths from its input, so the tripwire can't tell whether they reach ${cfg.data}, the live data dir. Name the paths in the command, or use \`find <folder> … -delete\` on a folder outside it. ${SCRATCH}`);
   for (const w of writeTargets(name, args)) {
+    if (name !== 'touch' && name !== 'mkdir' && !(name === 'tee' && args.some((x) => /^-[a-zA-Z]*a|^--append$/.test(x.text)))) {
+      const blind = blindWriteReason(w, st, cfg, name);
+      if (blind) return { ...blind, reason: `\`${name}\` on ${blind.reason}` };
+    }
     for (const p of pathsOf(w, st, cfg)) {
       const why = writeReason(p, cfg);
       if (why) return { reason: `\`${name}\` would change ${p}. ${why}`, ask: askable(p, name === 'sqlite3' && !sqlShown(args) ? '' : name, cfg) };
-      if (REMOVERS.has(name) && containsProtected(p, cfg)) return hard(`\`${name}\` on ${p} would take protected folders with it (the live checkout, data, config or keys). Name the exact path you mean.`);
+      if ((REMOVERS.has(name) || name === 'find') && containsProtected(p, cfg)) return hard(`\`${name}\` on ${p} would take protected folders with it (the live checkout, data, config or keys). Name the exact path you mean.`);
+      if ((REMOVERS.has(name) || name === 'find') && schemeFolder(p, cfg)) return hard(`\`${name}\` on ${p} would take a whole part of your scheme's folder with it (its main checkout, every minion's worktree, the shared folder or every TMPDIR). Name the exact path you mean, one level further down.`);
     }
   }
   return null;
@@ -808,37 +1069,34 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
 
 /** Why this Bash command is blocked, or null. One hard-blocked part makes the whole command a hard block. */
 export function commandReason(command: string, st: State, cfg: TripwireConfig): Verdict | null {
-  const stack: (string | null)[] = [];
-  // For /proc/$(…)/environ: whether each open ( follows a word ending in /proc/, and whether one just closed.
-  const procs: boolean[] = [];
-  let prev: Tok | null = null;
-  let afterProc = false;
+  // Open parens: the folder before each, and for a $( … ), the command it sits in, to pick up after it.
+  const stack: { cwd: string | null; outer?: Segment; redir: string | null }[] = [];
   let seg: Segment = { words: [], redirects: [] };
   let redir: string | null = null;
   let asked: Verdict | null = null;
-  const end = () => {
-    const why = segmentReason(seg, st, cfg);
-    seg = { words: [], redirects: [] };
-    return why;
-  };
   for (const tok of [...lex(command, cfg.home), { kind: 'op', text: ';' } as Tok]) {
-    if (tok.kind === 'word' && afterProc && ENVIRON_REST.test(tok.word.text)) return hard(`Reading /proc/<pid>/environ is blocked. ${ENVIRON_WHY}`);
-    afterProc = tok.kind === 'op' && tok.text === ')' && !!procs.pop();
-    if (tok.kind === 'op' && tok.text === '(') procs.push(prev?.kind === 'word' && prev.word.text.endsWith('/proc/'));
-    prev = tok;
     if (tok.kind === 'word') {
       if (redir) seg.redirects.push({ op: redir, target: tok.word });
       else seg.words.push(tok.word);
       redir = null;
     } else if (tok.kind === 'redir') redir = tok.op;
-    else {
+    else if (tok.text === '$(') {
+      stack.push({ cwd: st.cwd, outer: seg, redir });
+      seg = { words: [], redirects: [] };
       redir = null;
-      const why = end();
+    } else {
+      redir = null;
+      const why = segmentReason(seg, st, cfg);
+      seg = { words: [], redirects: [] };
       if (why && !why.ask) return why;
       asked ??= why;
       // A cd inside ( … ) or $( … ) doesn't outlive it.
-      if (tok.text === '(') stack.push(st.cwd);
-      if (tok.text === ')' && stack.length) st.cwd = stack.pop()!;
+      if (tok.text === '(') stack.push({ cwd: st.cwd, redir: null });
+      if (tok.text === ')' && stack.length) {
+        const open = stack.pop()!;
+        st.cwd = open.cwd;
+        if (open.outer) (seg = open.outer), (redir = open.redir);
+      }
     }
   }
   return asked;
@@ -854,7 +1112,7 @@ export function tripwire(input: any, cfg: TripwireConfig): Verdict | null {
   const ti = input?.tool_input ?? {};
   const cwd = typeof input?.cwd === 'string' ? input.cwd : null;
   if (tool === 'Bash') {
-    const v = typeof ti.command === 'string' ? commandReason(ti.command, { cwd, vars: new Set() }, cfg) : null;
+    const v = typeof ti.command === 'string' ? commandReason(ti.command, { cwd, vars: new Set(), values: new Map() }, cfg) : null;
     if (!v?.ask) return v;
     if (!cfg.ask) return hard(v.reason);
     if (explanation(ti)) return v;
@@ -862,7 +1120,7 @@ export function tripwire(input: any, cfg: TripwireConfig): Verdict | null {
   }
   const file = ti.file_path ?? ti.notebook_path ?? ti.path;
   if (typeof file !== 'string' || !file) return null;
-  const st = { cwd, vars: new Set<string>() };
+  const st = { cwd, vars: new Set<string>(), values: new Map<string, string[]>() };
   const [p] = pathsOf({ text: file, unknown: false }, st, cfg);
   if (!p) return null;
   const read = readReason(p, cfg);

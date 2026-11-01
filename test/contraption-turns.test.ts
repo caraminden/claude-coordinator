@@ -239,6 +239,9 @@ test('a name resumes its own Claude session; fresh starts another; other contrap
   assert.notEqual(fresh, first);
   assert.equal(argAfter(lastRun().argv, '--session-id'), fresh);
   assert.equal(store.contraptionSession(mandate.id, cara.id, 'resume-me')!.claude_session, fresh);
+  const caraMandate = join(claudeDir, 'projects', join(data, 'contraption-scratch', 'mandate', String(cara.id)).replace(/[^a-zA-Z0-9]/g, '-'));
+  assert.ok(!existsSync(join(caraMandate, `${first}.jsonl`)), 'the session it left can\'t be resumed again, so its transcript is gone');
+  assert.ok(existsSync(join(caraMandate, `${fresh}.jsonl`)));
   // The same name in another contraption, or for another person, is another session in another folder.
   const peeks = (await turn(peek, { session: 'resume-me' }))[0].data.claudeSession;
   assert.ok(lastRun().argv.includes('--session-id'));

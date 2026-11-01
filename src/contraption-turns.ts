@@ -243,6 +243,13 @@ export class ContraptionTurns {
     return join(configDir, 'projects', projectSlug(cwd), `${claudeSession}.jsonl`);
   }
 
+  /** Delete a Claude session's transcript and its subagents' from the person's Claude folder. */
+  private dropTranscript(where: { configDir: string; cwd: string }, claudeSession: string) {
+    const file = this.transcript(where.configDir, where.cwd, claudeSession);
+    rmSync(file, { force: true });
+    rmSync(file.replace(/\.jsonl$/, ''), { recursive: true, force: true });
+  }
+
   /**
    * Run a turn, calling `emit` with its events, and resolve once it has ended (its last event is end or
    * error). Refusals are an error event too. Its start event carries the turn's id, for cancel().
@@ -283,6 +290,8 @@ export class ContraptionTurns {
     const known = this.store.contraptionSession(c.id, req.person, req.session);
     const resume = !!known && !req.fresh && existsSync(this.transcript(where.configDir, where.cwd, known.claude_session));
     const claudeSession = resume ? known!.claude_session : randomUUID();
+    // The name can never get back to the session it leaves, so that session's transcript goes.
+    if (known && !resume) this.dropTranscript(where, known.claude_session);
     this.store.putContraptionSession(c.id, req.person, req.session, claudeSession);
 
     // Private: it holds the prompt, the contraption's system prompt and its MCP tokens until the turn ends.
@@ -457,12 +466,7 @@ export class ContraptionTurns {
     const s = this.store.contraptionSession(c.id, person, name);
     if (!s) return 'missing';
     const place = this.claude.place(person);
-    if (place) {
-      const where = this.scratch(c, person, place);
-      const file = this.transcript(where.configDir, where.cwd, s.claude_session);
-      rmSync(file, { force: true });
-      rmSync(file.replace(/\.jsonl$/, ''), { recursive: true, force: true }); // its subagents' transcripts
-    }
+    if (place) this.dropTranscript(this.scratch(c, person, place), s.claude_session);
     this.store.deleteContraptionSession(c.id, person, name);
     return 'deleted';
   }

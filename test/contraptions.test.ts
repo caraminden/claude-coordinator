@@ -109,7 +109,7 @@ test('admins register, edit, enable and rotate; everyone else is refused, and li
   assert.equal((await srv.call('/api/contraptions', { name: 'mandate', title: 'Mandate', port: 80 })).status, 400);
   const reg = await srv.call('/api/contraptions', { name: 'mandate', title: 'Mandate', port: 9101, icon: '/icon.svg', default_model: 'haiku', turn_cap: 200 });
   assert.equal(reg.status, 201);
-  assert.equal(reg.data.keys_dir, join(srv.root, 'contraptions', 'mandate'));
+  assert.equal(reg.data.keys_dir, join(srv.data, 'contraptions', 'mandate'), 'a dev copy keeps its key files in its own data dir');
   assert.equal(JSON.stringify(reg.data).includes('ck_'), false, 'no key in what the API shows');
   assert.equal((await srv.call('/api/contraptions', { name: 'mandate', title: 'Again', port: 9102 })).status, 409);
   const edited = await srv.call('/api/contraptions/mandate', { title: 'Mandate!', open_paths: ['/link'], turn_cap: '' }, 'PATCH');
@@ -126,10 +126,18 @@ test('admins register, edit, enable and rotate; everyone else is refused, and li
   assert.equal((await srv.call(`/api/contraptions/mandate/people/${olive.id}`, { enabled: true }, 'PUT')).data.people.includes(olive.id), true);
   assert.deepEqual((await asOlive('/api/contraptions/mine')).data, [{ name: 'mandate', title: 'Mandate!', icon: '/icon.svg' }]);
   assert.deepEqual((await srv.call('/api/contraptions/mine')).data, [], 'an admin isn\'t enabled by being one');
-  const key = readFileSync(join(srv.root, 'contraptions', 'mandate', 'contraption.key'), 'utf8');
+  const key = readFileSync(join(srv.data, 'contraptions', 'mandate', 'contraption.key'), 'utf8');
   assert.equal((await srv.call('/api/contraptions/mandate/keys', {})).status, 200);
-  assert.notEqual(readFileSync(join(srv.root, 'contraptions', 'mandate', 'contraption.key'), 'utf8'), key);
+  assert.notEqual(readFileSync(join(srv.data, 'contraptions', 'mandate', 'contraption.key'), 'utf8'), key);
   await srv.call(`/api/contraptions/mandate/people/${olive.id}`, { enabled: false }, 'PUT');
   assert.deepEqual((await asOlive('/api/contraptions/mine')).data, []);
   assert.equal((await srv.call('/api/contraptions/nope/keys', {})).status, 404);
+  for (const [path, body, method, status] of [
+    ['/api/contraptions/mandate', { icon: 'icon.svg' }, 'PATCH', 400], ['/api/contraptions/mandate', { open_paths: '/link' }, 'PATCH', 400],
+    ['/api/contraptions/mandate', { open_paths: ['/a b'] }, 'PATCH', 400], ['/api/contraptions/mandate', { home_scheme: 999 }, 'PATCH', 400],
+    ['/api/contraptions/mandate', { default_model: 'rm -rf' }, 'PATCH', 400], ['/api/contraptions/mandate', { turn_cap: 0 }, 'PATCH', 400],
+    ['/api/contraptions/mandate', { title: '' }, 'PATCH', 400], [`/api/contraptions/mandate/people/${olive.id}`, { enabled: 'yes' }, 'PUT', 400],
+    ['/api/contraptions/mandate/people/999', { enabled: true }, 'PUT', 404],
+  ] as const) assert.equal((await srv.call(path, body, method)).status, status, `${method} ${path} ${JSON.stringify(body)}`);
+  assert.equal((await srv.call('/api/contraptions')).data[0].title, 'Mandate!', 'a refused edit changes nothing');
 });

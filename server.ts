@@ -117,7 +117,9 @@ if (!store.listUsers().some((u) => u.admin)) {
 }
 store.adoptOwnerless(store.listUsers().find((u) => u.admin)!.id);
 const credentials = new Credentials(store, process.env.SESSION_SECRET ?? '');
-const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '', process.env.CITADEL_CONTRAPTIONS_DIR || DEFAULT_CONTRAPTIONS_DIR);
+// Only the live data dir writes the real key folders: a dev copy registering "mandate" mustn't overwrite the live one's files.
+const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '',
+  process.env.CITADEL_CONTRAPTIONS_DIR || (DATA_DIR === DEFAULT_DATA_DIR ? DEFAULT_CONTRAPTIONS_DIR : join(DATA_DIR, 'contraptions')));
 const githubLink = new GithubLink(store, credentials, process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '');
 // People's own Claude plans (#213). A dev copy tags its containers so it never shares the live server's.
 const claudeLink = new ClaudeLink(store, credentials, DATA_DIR, process.env.CLAUDE_BIN ?? 'claude', undefined, DATA_DIR === DEFAULT_DATA_DIR ? 'citadel-claude-' : `citadel-claude-${createHash('sha256').update(DATA_DIR).digest('hex').slice(0, 6)}-`);

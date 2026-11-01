@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { seal, sealKey, unseal } from './credentials.ts';
 import type { ContraptionRow, Store, User } from './db.ts';
 
-/** Where key folders go unless CITADEL_CONTRAPTIONS_DIR says otherwise (tests and previews do). */
+/** Where the live server's key folders go, unless CITADEL_CONTRAPTIONS_DIR says otherwise; another DATA_DIR keeps its own under it. */
 export const DEFAULT_CONTRAPTIONS_DIR = join(homedir(), '.config', 'citadel', 'contraptions');
 
 /** A contraption's name: a slug, used in paths and its key folder. */
@@ -85,7 +85,10 @@ export class Contraptions {
     return this.store.createContraption({ ...fields, ...this.newKeys(fields.name) });
   }
 
-  /** New identity key pair and contraption key: both files rewritten, the old ones stop working at once. */
+  /**
+   * New identity key pair and contraption key: both files rewritten, the old ones stop working at once.
+   * shortcut: files are written before the row, so a failed database write leaves files the row doesn't match; Rotate again fixes it.
+   */
   rotate(name: string) {
     this.store.updateContraption(name, this.newKeys(name));
   }

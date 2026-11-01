@@ -74,7 +74,6 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
     env: {
       ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
-      CITADEL_CONTRAPTIONS_DIR: join(root, 'contraptions'),
       ...opts.env,
     },
     stdio: ['ignore', 'pipe', 'inherit'],

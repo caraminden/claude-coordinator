@@ -41,6 +41,7 @@ import { GithubLink } from './src/github-link.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
 import { fileRoutes } from './src/routes/files.ts';
+import { themeCss } from './src/theme.ts';
 
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8573);
@@ -74,6 +75,8 @@ async function loadAssets() {
     assets.set(f, /\.(html|js|webmanifest)$/.test(f) ? Buffer.from(body.toString('utf8').replaceAll('%APP_NAME%', SHOWN_NAME)) : body);
   }
   versionIcons(assets);
+  // Contraptions' copy of Citadel's colours, built from style.css (src/theme.ts).
+  assets.set('theme.css', Buffer.from(themeCss(assets.get('style.css')!.toString('utf8'))));
   // Built before anything is swapped, so a bad manifest leaves the old front end whole.
   const dark = darkManifest(assets);
   ASSETS = assets;
@@ -599,11 +602,16 @@ function darkManifest(assets: Map<string, Buffer>) {
   const manifest = JSON.parse(assets.get('manifest.webmanifest')!.toString());
   return Buffer.from(JSON.stringify({ ...manifest, ...manifest.color_scheme_dark }, null, 2));
 }
-async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string) {
+async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string, etag = false) {
   const name = path === '/' ? 'index.html' : path.replace(/^\//, '');
   let body = ASSETS.get(name);
   if (!body) throw new HttpError(404, 'Not found');
   const headers: Record<string, string> = { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(name)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' };
+  // Contraptions' pages load these on every page: a 304 until a deploy changes them.
+  if (etag) {
+    headers.ETag = `"${createHash('sha256').update(body).digest('hex').slice(0, 16)}"`;
+    if (req.headers['if-none-match'] === headers.ETag) return void res.writeHead(304, headers).end();
+  }
   if (name === 'index.html') headers['Accept-CH'] = COLOR_SCHEME_HINT;
   if (name === 'manifest.webmanifest') {
     if (/dark/.test(String(req.headers[COLOR_SCHEME_HINT.toLowerCase()] ?? ''))) body = DARK_MANIFEST;
@@ -634,9 +642,9 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
     if (url.pathname.startsWith('/api/')) {
       await routes(app, req, res, url, auth.session(req));
-    } else if (url.pathname === '/apps/_citadel/rail.js' || url.pathname === '/apps/_citadel/drawers.js') {
-      // The app rail and phone drawers for contraptions' pages (public/); no contraption can be called _citadel.
-      await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length));
+    } else if (/^\/apps\/_citadel\/(rail\.js|drawers\.js|theme\.css)$/.test(url.pathname)) {
+      // The app rail, phone drawers and colours for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
+      await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length), true);
     } else if (url.pathname.startsWith('/apps/')) {
       apps.serve(req, res);
     } else if (preview) {

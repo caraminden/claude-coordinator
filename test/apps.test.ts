@@ -250,6 +250,15 @@ test('the rail and drawers: their scripts are served to contraptions, and lists 
   const js = await drawers.text();
   assert.match(js, /export function initDrawers/);
   assert.match(js, /from '\.\/rail\.js'/);
+  // And Citadel's colours (#269), with an ETag so a page load revalidates for a 304.
+  const theme = await get('/apps/_citadel/theme.css');
+  assert.equal(theme.status, 200);
+  assert.match(theme.headers.get('content-type')!, /text\/css/);
+  assert.match(await theme.text(), /--citadel-surface: #ffffff;[\s\S]*prefers-color-scheme: dark/);
+  const etag = theme.headers.get('etag')!;
+  assert.match(etag, /^"[0-9a-f]{16}"$/);
+  assert.equal((await get('/apps/_citadel/theme.css', { 'If-None-Match': etag })).status, 304);
+  assert.equal((await get('/apps/_citadel/theme.css', { 'If-None-Match': '"stale"' })).status, 200);
   assert.deepEqual((await (await get('/api/contraptions/mine', asCara())).json()).map((c: { name: string }) => c.name), ['stub']);
   // Nothing enabled: an empty list, so no rail.
   assert.deepEqual(await (await get('/api/contraptions/mine', { Cookie: olive.cookie })).json(), []);

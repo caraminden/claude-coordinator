@@ -230,10 +230,11 @@ export class ContraptionTurns {
   private scratch(c: ContraptionRow, person: number, place: TurnPlace) {
     // In a container its home is the person's volume, at the host's home path; the volume holds only their own.
     if (place.host) {
-      const dir = join(this.dataDir, 'contraptions', c.name, String(person));
+      // Not DATA_DIR/contraptions: a dev copy keeps contraptions' key folders there.
+      const dir = join(this.dataDir, 'contraption-scratch', c.name, String(person));
       return { cwd: dir, onHost: dir, configDir: claudeConfigDir(this.env) };
     }
-    const rel = join('.citadel', 'contraptions', c.name);
+    const rel = join('.citadel', 'contraption-scratch', c.name);
     return { cwd: join(homedir(), rel), onHost: join(dirname(place.configDir), rel), configDir: place.configDir };
   }
 

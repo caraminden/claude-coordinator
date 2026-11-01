@@ -133,7 +133,7 @@ test('a card waiting through a restart still waits in the re-attached turn, and 
   assert.deepEqual(results, ['allowed', 'denied'], 'no expiry from the restart');
 });
 
-test("a typed go that started a turn survives a restart, and never reaches the next turn (#209)", async () => {
+test("a typed go that started a turn survives a restart, its turn's end and the next turn: it stands for the scheme until its PR merges (#260)", async () => {
   const id = newTicket();
   rmSync(release, { force: true });
   const before = server();
@@ -143,18 +143,20 @@ test("a typed go that started a turn survives a restart, and never reaches the n
 
   const next = server();
   next.recover();
-  assert.ok(next.approvals.hasGo(id), 'kept with the turn through the restart');
+  assert.ok(next.approvals.hasGo(project.id), 'kept through the restart');
   writeFileSync(release, '');
   await until(() => !next.isRunning(id));
-  assert.equal(next.approvals.hasGo(id), false);
-  assert.equal(store.getSetting(`turn:${id}`), null, 'the ended turn left nothing behind to bring it back');
+  assert.ok(next.approvals.hasGo(project.id), 'and through the end of its turn');
+  assert.equal(store.getSetting(`turn:${id}`), null, 'the ended turn left nothing behind');
   rmSync(release, { force: true });
   next.send(id, 'GitHub', 'CI passed');
   await until(() => next.isRunning(id));
   next.detachAll();
   const third = server();
   third.recover();
-  assert.equal(third.approvals.hasGo(id), false, 'a later turn, across another restart, starts without it');
+  assert.ok(third.approvals.hasGo(project.id), 'a later turn, across another restart, still has it: only a person, or the PR merging, ends it');
+  third.send(id, 'Cara', 'hold on', [], { typed: true }, true);
+  assert.equal(third.approvals.hasGo(project.id), false, 'her next words in that chat take it back');
   writeFileSync(release, '');
   await until(() => !third.isRunning(id));
 });

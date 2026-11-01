@@ -994,11 +994,18 @@ function toolTitle(name) {
   return m ? `${m[2]} (${m[1]})` : name;
 }
 
-/** "✓ Approved by Cara", "✗ Denied by Cara", "⌛ Expired, not run: …". */
+/** "✓ Approved by Cara", "✓ Approved on Cara's go in #42" (linked to her message), "✗ Denied by Cara", "⌛ Expired, not run: …". */
 function approvalOutcome(r) {
-  if (r.state === 'allowed') return `✓ Approved by ${r.by}`;
-  if (r.state === 'denied') return `✗ Denied by ${r.by}`;
-  return `⌛ Expired, not run: ${r.reason}`;
+  const v = r.state === 'allowed' && r.via;
+  if (v?.scheme && v.message) {
+    const here = view?.projectId === v.scheme && view.ticket?.number === v.ticket;
+    const where = here ? '' : v.ticket == null ? ` in the ${taskmasterName(v.scheme)} chat` : ` in #${v.ticket}`;
+    const href = `#/p/${v.scheme}${v.ticket == null ? '' : `/t/${v.ticket}`}?e=${v.message}`;
+    return ['✓ Approved on ', h('a', { href, title: v.text }, `${r.by}'s go${where}`)];
+  }
+  if (r.state === 'allowed') return [`✓ Approved by ${r.by}`];
+  if (r.state === 'denied') return [`✗ Denied by ${r.by}`];
+  return [`⌛ Expired, not run: ${r.reason}`];
 }
 
 /**
@@ -1050,7 +1057,7 @@ function approvalCard(ticketId, card) {
       settled = true;
       el.classList.add('answered', `a-${r.state}`);
       approve.hidden = deny.hidden = true;
-      status.textContent = approvalOutcome(r);
+      status.replaceChildren(...approvalOutcome(r));
     },
   });
   return el;

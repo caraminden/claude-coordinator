@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { Approvals, mcpMerge, mergeGo, mergeTarget, plainMerge } from '../src/approvals.ts';
+import { Approvals, mcpMerge, mergeGo, mergeTarget, plainMerge, type Go, type GoPlace, type GoStore, type MergeTarget } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { parseMerge, type PrInfo } from '../src/merge-card.ts';
 import { Runner } from '../src/runner.ts';
@@ -26,7 +26,7 @@ test('a go is a whole message that only says merge, with at most one PR number',
   for (const [text, pr] of [
     ['Merge it', null], ['fold it', null], ['fold', null], ['merge pls', null], ['pls merge 205', 205], ['Fold it plz', null], ['Merge it.', null], ['ok, merge it', null], ['LGTM, merge it!', null],
     ['go ahead and merge', null], ['ship it', null], ['fold it in', null], ['please merge it', null], ['merge it please', null],
-    ['yes merge PR #191', 191], ['merge #188 please', 188], ['merge 42', 42], ['Merge  PR 7 now', 7], ['  squash it  ', null],
+    ['yes merge PR #191', 191], ['you can fold 196', 196], ['ok, you can merge it', null], ['merge #188 please', 188], ['merge 42', 42], ['Merge  PR 7 now', 7], ['  squash it  ', null],
   ] as const) assert.deepEqual(mergeGo(text), { pr }, text);
   for (const text of [
     'merge it if CI is green', "don't merge it", 'do not merge it', 'merge it and deploy', 'can you merge it?', 'merge #1 and #2',
@@ -75,49 +75,104 @@ const pr = (number: number, head: string, repo = 'cara/delve'): PrInfo => ({
   number, title: 'T', url: `https://github.com/${repo}/pull/${number}`, state: 'OPEN', draft: false, head, base: 'main', additions: 1, deletions: 0, files: 1, commits: 1, checks: 'passed',
 });
 
-test("a merge's target: only a PR in the scheme's repo, and whether it is the minion's own", () => {
-  assert.deepEqual(mergeTarget(pr(191, 'ticket/74-x'), 'Cara/Delve', 'ticket/74-x'), { number: 191, own: true, open: true });
-  assert.deepEqual(mergeTarget(pr(188, 'ticket/70-y'), 'cara/delve', 'ticket/74-x'), { number: 188, own: false, open: true });
-  assert.equal(mergeTarget({ ...pr(191, 'ticket/74-x'), state: 'MERGED' }, 'cara/delve', 'ticket/74-x')?.open, false, 'merged');
-  assert.equal(mergeTarget(pr(191, 'ticket/74-x', 'someone/else'), 'cara/delve', 'ticket/74-x'), null, 'another repo');
-  assert.equal(mergeTarget(null, 'cara/delve', 'ticket/74-x'), null, 'the lookup failed');
-  assert.equal(mergeTarget(pr(191, 'ticket/74-x'), null, 'ticket/74-x'), null, 'a scheme with no GitHub repo');
-  assert.deepEqual(mergeTarget(pr(191, 'ticket/74-x'), 'cara/delve', null), { number: 191, own: false, open: true });
+test("a merge's target: only a PR in the scheme's repo, with its head branch", () => {
+  assert.deepEqual(mergeTarget(pr(191, 'ticket/74-x'), 'Cara/Delve'), { number: 191, head: 'ticket/74-x', open: true });
+  assert.equal(mergeTarget({ ...pr(191, 'ticket/74-x'), state: 'MERGED' }, 'cara/delve')?.open, false, 'merged');
+  assert.equal(mergeTarget({ ...pr(191, 'ticket/74-x'), state: 'CLOSED' }, 'cara/delve')?.open, false, 'closed');
+  assert.equal(mergeTarget(pr(191, 'ticket/74-x', 'someone/else'), 'cara/delve'), null, 'another repo: a number she named means the scheme\'s own repo only');
+  assert.equal(mergeTarget(null, 'cara/delve'), null, 'the lookup failed');
+  assert.equal(mergeTarget(pr(191, 'ticket/74-x'), null), null, 'a scheme with no GitHub repo');
 });
 
 // ---------- the gate ----------
 
 const CFG = { home: '/home/u', data: '/home/u/data', checkout: '/home/u/app', project: 1, claudeConfig: '/home/u/.claude', deployScript: true };
 const MERGE = { command: 'gh pr merge --squash', description: 'Merge my PR' };
-const own = { number: 191, own: true };
+// Delve's minions: #50 a feeder owning PR 196, #42 a category minion with no PR, #5 the build minion.
+const FEEDER = { id: 1, number: 50, branch: 'ticket/50-feeder' };
+const CATEGORY = { id: 2, number: 42, branch: 'ticket/42-category' };
+const BUILD = { id: 3, number: 5, branch: 'build/7' };
+const TASKMASTER = { id: 4, number: null, branch: null };
+const own = { number: 196, head: 'ticket/50-feeder', open: true };
 const typed = (text: string, id = 1) => ({ author: 'Cara', text, id, typed: true });
 
-function gate() {
+function gate(store?: GoStore) {
   const results: any[] = [];
-  const a = new Approvals((_t, kind, data) => kind === 'approval_result' && results.push(data));
-  const merge = (ticket = 1, target: { number: number; own: boolean } | null = own, rules = true) => {
-    const r = a.ask(ticket, 'Bash', MERGE, '/w', CFG, rules, undefined, target);
+  const a = new Approvals((_t, kind, data) => kind === 'approval_result' && results.push(data), store);
+  const merge = (ticket = FEEDER.id, target: MergeTarget | null = own, rules = true, scheme = 1) => {
+    const r = a.ask(ticket, 'Bash', MERGE, '/w', { ...CFG, project: scheme }, rules, undefined, target);
     return 'id' in r ? a.get(ticket, r.id).state : 'refused';
   };
-  return { a, results, merge };
+  const say = (text: string, where: GoPlace = FEEDER, id = 1, scheme = 1) => a.said(scheme, where, typed(text, id));
+  return { a, results, merge, say };
 }
 
-test("a typed go merges the minion's own PR once, with the card kept as a record of whose message it was", () => {
-  const { a, results, merge } = gate();
-  a.heard(1, [typed('Merge it', 41)], true);
+test("a typed go lets its minion's own PR merge until it has merged, with the card kept as a record of whose message it was", () => {
+  const { a, results, merge, say } = gate();
+  say('Merge it', FEEDER, 41);
   assert.equal(merge(), 'allowed');
-  assert.deepEqual(results[0].via, { message: 41, text: 'Merge it' });
+  assert.deepEqual(results[0].via, { message: 41, text: 'Merge it', scheme: 1, ticket: 50 });
   assert.equal(results[0].by, 'Cara');
-  assert.equal(merge(), 'pending', 'used up by the first merge');
+  assert.equal(merge(), 'allowed', 'GitHub refused the first try (a short --match-head-commit): still open, so the retry passes');
+  assert.equal(merge(FEEDER.id, { ...own, open: false }), 'pending', 'merged now: a second merge gets the card');
+  assert.equal(merge(), 'pending', 'and the go has ended, even if the PR reads open again');
+  assert.equal(a.hasGo(1), false);
+  say('merge it');
+  assert.equal(merge(FEEDER.id, { number: 196, head: 'ticket/50-feeder' }), 'pending', 'a PR whose state is unknown gets the card');
 });
 
-test('a named PR covers only that PR; with no number, only the minion\'s own', () => {
-  const { a, merge } = gate();
-  a.heard(1, [typed('merge PR #188')], true);
-  assert.equal(merge(1, own), 'pending', '#191 is not #188');
-  assert.equal(merge(1, { number: 188, own: false }), 'allowed', 'another minion\'s PR she named');
-  a.heard(1, [typed('merge it')], true);
-  assert.equal(merge(1, { number: 188, own: false }), 'pending', 'no number: not another branch\'s PR');
+test('Delve #42: a go typed in one minion lets another minion of the scheme merge that PR, at any head, until it merges (#260)', () => {
+  const { results, merge, say } = gate();
+  say('you can fold 196', CATEGORY, 77);
+  assert.equal(merge(BUILD.id, own), 'allowed', 'the build minion folds it with no card');
+  assert.deepEqual(results[0].via, { message: 77, text: 'you can fold 196', scheme: 1, ticket: 42 }, 'naming the chat and message the go came from');
+  // The build branch moved: #5 re-merges the build tip into 196, pushes a new head, and merges again.
+  assert.equal(merge(BUILD.id, { ...own, head: 'ticket/50-feeder' }), 'allowed', 'bound to the PR number, not the head');
+  assert.equal(merge(BUILD.id, { number: 197, head: 'ticket/51-other', open: true }), 'pending', 'another PR');
+  assert.equal(merge(BUILD.id, { ...own, open: false }), 'pending', 'merged');
+  assert.equal(merge(BUILD.id, own), 'pending', 'the go ended with the merge');
+
+  const g = gate();
+  g.say('fold it', FEEDER, 78);
+  assert.equal(g.merge(BUILD.id, own), 'allowed', "\"fold it\" in a feeder means the feeder's own PR, whoever merges it");
+  assert.equal(g.results[0].via.ticket, 50);
+  g.say('merge PR 196', TASKMASTER, 79);
+  g.say('hold on', FEEDER);
+  assert.equal(g.merge(BUILD.id, own), 'allowed', "the Taskmaster chat's go still stands; only the feeder's was taken back");
+  assert.deepEqual(g.results[1].via, { message: 79, text: 'merge PR 196', scheme: 1, ticket: null });
+});
+
+test('the card stays whenever it is unclear which PR she meant', () => {
+  const { merge, say } = gate();
+  say('fold it', CATEGORY);
+  assert.equal(merge(BUILD.id, own), 'pending', "\"fold it\" in a minion with no PR of its own names nothing");
+  assert.equal(merge(BUILD.id, { number: 196, head: 'ticket/42-category', open: true }), 'allowed', 'unless its branch has one');
+  say('fold it', TASKMASTER);
+  assert.equal(merge(BUILD.id, { number: 197, head: 'ticket/51-x', open: true }), 'pending', 'nor in the Taskmaster chat, which has no branch');
+  assert.equal(merge(BUILD.id, null), 'pending', 'a PR that could not be looked up, or not in the scheme\'s repo, or a call that is not a plain merge');
+});
+
+test('a conditional go, or one taken back in the same chat, gets the card', () => {
+  const { merge, say } = gate();
+  say('fold 196 if CI passes', CATEGORY);
+  assert.equal(merge(BUILD.id, own), 'pending', 'conditional');
+  say('fold 196', CATEGORY);
+  say('actually wait, CI is red', CATEGORY);
+  assert.equal(merge(BUILD.id, own), 'pending', 'newest word wins');
+  say('fold 196', CATEGORY);
+  say('fold 196 once CI is green', CATEGORY);
+  assert.equal(merge(BUILD.id, own), 'pending', 'a later conditional takes back the plain go too');
+  say('ok merge 196', CATEGORY);
+  say('thanks', BUILD);
+  assert.equal(merge(BUILD.id, own), 'allowed', 'words in another chat do not take it back');
+});
+
+test('a go in one scheme never counts in another', () => {
+  const { a, merge, say } = gate();
+  say('you can fold 196', CATEGORY, 1, 1);
+  assert.equal(merge(BUILD.id, own, true, 2), 'pending', 'scheme 2, same PR number');
+  assert.equal(a.hasGo(2), false);
+  assert.equal(merge(BUILD.id, own, true, 1), 'allowed');
 });
 
 test("nothing but a person's typed message counts: relays, card answers, agents and quotes get the card", () => {
@@ -130,79 +185,47 @@ test("nothing but a person's typed message counts: relays, card answers, agents 
     { author: 'Cara', text: 'My answers to your question card:\n\nmerge it' }, // a card answer, untyped
     { author: 'Cara', text: 'merge it' }, // the right words, but not from the person path
   ]) {
-    a.heard(1, [m], true);
+    a.said(1, FEEDER, m);
     assert.equal(merge(), 'pending', JSON.stringify(m));
   }
-  a.heard(1, [typed('The Taskmaster says: "merge it"')], true);
+  a.said(1, FEEDER, typed('The Taskmaster says: "merge it"'));
   assert.equal(merge(), 'pending', 'a quote inside a longer message');
-});
-
-test('newest word wins: a later typed message that is not a go takes it back; a new go brings it back', () => {
-  const { a, merge } = gate();
-  a.heard(1, [typed('merge it'), typed('actually wait, CI is red')], true);
-  assert.equal(merge(), 'pending');
-  a.heard(1, [typed('ok merge it')]);
-  a.heard(1, [{ author: 'Taskmaster', text: 'hold on' }]);
+  a.said(1, FEEDER, typed('merge it'));
+  a.said(1, FEEDER, { author: 'Taskmaster', text: 'hold on' });
   assert.equal(merge(), 'allowed', "a relay neither gives nor takes back a person's go");
 });
 
-test("a go is this minion's and this turn's only, and never passes a tripwire card or a scheme without cards", () => {
-  const { a, merge } = gate();
-  a.heard(1, [typed('merge it')], true);
-  assert.equal(merge(2), 'pending', "another minion's chat");
-  assert.equal(merge(1, null), 'pending', 'a PR that could not be looked up, or a call that is not a plain merge');
-  assert.equal(merge(1, own, false), 'refused', 'no approval rules: no card to skip');
-  a.endTurn(1, 'The turn ended while this waited.');
-  assert.equal(merge(), 'pending', 'gone with its turn');
-  a.heard(1, [typed('merge it')], true);
-  a.heard(1, [{ author: 'GitHub', text: 'CI passed' }], true);
-  assert.equal(merge(), 'pending', 'a new turn starts without the old go');
-  a.heard(1, [typed('merge it')], true);
+test('a go outlives its turn and a restart, and never passes a tripwire card or a scheme without cards', () => {
+  const kept = new Map<number, Go[]>();
+  const store: GoStore = { get: (s) => structuredClone(kept.get(s) ?? []), set: (s, g) => kept.set(s, structuredClone(g)) };
+  const { a, merge, say } = gate(store);
+  say('merge it');
+  a.endTurn(FEEDER.id, 'The turn ended while this waited.');
+  assert.equal(gate(store).merge(), 'allowed', 'a new Approvals over the same store: a restart keeps it');
+  assert.equal(merge(FEEDER.id, own, false), 'refused', 'no approval rules: no card to skip');
   const tw = a.ask(1, 'Bash', { command: 'rm /home/u/data/coordinator.db.bak-1', description: 'Delete the DB copy Cara approved' }, '/w', CFG, true, undefined, own);
   assert.ok('id' in tw && a.get(1, tw.id).state === 'pending', 'a tripwire card waits for an admin');
   assert.ok(a.hasGo(1), 'and leaves the go for the merge');
 });
 
 test('a merge the go covers, run chained or without --repo, is sent back once with the plain command to run instead (#209)', () => {
-  const { a, merge } = gate();
+  const { a, merge, say } = gate();
   // Delve #80's real call after Cara's typed "Merge it": the PR is right, the shape isn't.
-  const chained = { command: 'gh pr merge 199 --squash --match-head-commit 7ff3d3e693550d12e4dabcdacc5db281fe382b7b 2>&1 | tail -3; gh pr view 199 --json state', description: 'Squash-merge PR #199' };
-  const retry = (target: { number: number; own: boolean }) => ({ target, command: `gh pr merge ${target.number} --repo cara/delve --squash` });
-  const ask = (target: { number: number; own: boolean }) => a.ask(1, 'Bash', chained, '/w', CFG, true, undefined, null, retry(target));
-  a.heard(1, [typed('Merge it')], true);
-  assert.equal(merge(1, own, true), 'allowed', 'sanity: a plain merge is let through');
-  a.heard(1, [typed('Merge it')], true);
-  const first = ask({ number: 199, own: true });
-  assert.ok('refused' in first && first.refused.includes('`gh pr merge 199 --repo cara/delve --squash`'), JSON.stringify(first));
+  const chained = { command: 'gh pr merge 196 --squash --match-head-commit 7ff3d3e693550d12e4dabcdacc5db281fe382b7b 2>&1 | tail -3; gh pr view 196 --json state', description: 'Squash-merge PR #196' };
+  const retry = (target: MergeTarget) => ({ target, command: `gh pr merge ${target.number} --repo cara/delve --squash` });
+  const ask = (target: MergeTarget, ticket = FEEDER.id) => a.ask(ticket, 'Bash', chained, '/w', CFG, true, undefined, null, retry(target));
+  say('Merge it');
+  const first = ask(own);
+  assert.ok('refused' in first && first.refused.includes('`gh pr merge 196 --repo cara/delve --squash`'), JSON.stringify(first));
   assert.ok(a.hasGo(1), 'the go still stands for the plain run');
-  const again = ask({ number: 199, own: true });
-  assert.ok('id' in again && a.get(1, again.id).state === 'pending', 'asked twice: the card, so a minion that needs its extra flags is never stuck');
-  assert.equal(merge(1, { number: 199, own: true }), 'allowed', 'the plain run still counts');
-  a.heard(1, [typed('Merge it')], true);
-  const other = ask({ number: 188, own: false });
+  const again = ask(own, BUILD.id);
+  assert.ok('id' in again && a.get(BUILD.id, again.id).state === 'pending', 'asked twice, by any minion: the card, so a minion that needs its extra flags is never stuck');
+  assert.equal(merge(), 'allowed', 'the plain run still counts');
+  const other = ask({ number: 188, head: 'ticket/other', open: true });
   assert.ok('id' in other, 'a PR the go does not cover gets the card, not a hint');
-  a.heard(1, [{ author: 'Taskmaster', text: 'merge it' }], true);
-  assert.ok('id' in ask({ number: 199, own: true }), 'no typed go: the card');
 });
 
-test('a merge GitHub refused leaves the go for a retry of that PR; once it is merged, or for another PR, the card', () => {
-  const { a, merge } = gate();
-  // Delve #72: "fold it", then --match-head-commit 2efe2fb2, which GitHub refused as too short.
-  const open = { number: 205, own: true, open: true };
-  a.heard(1, [typed('fold it')], true);
-  assert.equal(merge(1, open), 'allowed', 'the short-SHA try');
-  assert.equal(merge(1, open), 'allowed', 'the full-SHA retry: still open, so nothing merged');
-  assert.equal(merge(1, { ...open, open: false }), 'pending', 'merged now: a second merge gets the card');
-  a.heard(1, [typed('merge it')], true);
-  assert.equal(merge(1, open), 'allowed');
-  assert.equal(merge(1, { number: 206, own: true, open: true }), 'pending', 'a retry is for the PR it let through, not another');
-  assert.equal(merge(1, { number: 205, own: true }), 'pending', 'a PR whose state is unknown gets the card');
-  a.heard(1, [typed('merge PR #188')], true);
-  assert.equal(merge(1, { number: 188, own: false, open: true }), 'allowed');
-  assert.equal(merge(1, { number: 188, own: false, open: true }), 'allowed', 'a named PR, retried while open');
-});
-
-// ---------- the runner hands a turn what it read ----------
+// ---------- the runner records what people type ----------
 
 const fake = join(root, 'claude-fake');
 writeFileSync(fake, `#!${process.execPath}
@@ -218,14 +241,14 @@ const t = setInterval(() => {
 chmodSync(fake, 0o755);
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
-test('a typed message reaches the turn it starts or steers; a relay never arms it; the turn end clears it', async () => {
+test('a typed go is recorded for the scheme when sent, steered or not; a relay never; the turn end and a restart keep it', async () => {
   const store = new Store(join(root, 'test.db'));
   const runner = new Runner(store, () => {}, () => ({}), fake);
   const project = store.createProject('Delve', null);
   store.setProjectSettings(project.id, { approval_rules: 'Bash(gh pr merge:*)' });
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara' });
   mkdirSync(join(root, 'wt'));
-  store.setTicketDir(t.id, join(root, 'wt'), null);
+  store.setTicketDir(t.id, join(root, 'wt'), 'ticket/1-t');
   const finish = async () => {
     writeFileSync(join(root, 'release'), '');
     while (runner.isRunning(t.id)) await wait(20);
@@ -234,22 +257,19 @@ test('a typed message reaches the turn it starts or steers; a relay never arms i
 
   runner.relay(t.id, t.id, 'Taskmaster', 'merge it');
   await until('the turn', () => runner.isRunning(t.id));
-  assert.equal(runner.approvals.hasGo(t.id), false, 'a relayed "merge it"');
+  assert.equal(runner.approvals.hasGo(project.id), false, 'a relayed "merge it"');
   // A person steering in: typed, so it counts; their next typed words take it back.
   await until('steering', () => existsSync(join(root, 'run')));
   await wait(100);
   runner.send(t.id, 'Cara', 'merge it', [], { typed: true }, true);
-  assert.equal(runner.approvals.hasGo(t.id), true);
+  assert.equal(runner.approvals.hasGo(project.id), true);
   runner.send(t.id, 'Cara', 'hm, not yet', [], { typed: true }, true);
-  assert.equal(runner.approvals.hasGo(t.id), false);
+  assert.equal(runner.approvals.hasGo(project.id), false);
   runner.send(t.id, 'Cara', 'fold it', [], { typed: true }, true);
   await finish();
-  assert.equal(runner.approvals.hasGo(t.id), false, 'the turn ended');
-
-  runner.send(t.id, 'Cara', 'Merge it', [], { typed: true });
-  await until('the second turn', () => runner.isRunning(t.id));
-  assert.equal(runner.approvals.hasGo(t.id), true, 'a typed message that starts the turn');
-  await finish();
+  assert.equal(runner.approvals.hasGo(project.id), true, 'the turn ended, the go stands');
+  assert.equal(new Runner(store, () => {}, () => ({}), fake).approvals.hasGo(project.id), true, 'kept in settings: a restart keeps it');
+  assert.deepEqual(store.getSetting<Go[]>(`merge_goes:${project.id}`)!.map((g) => [g.text, g.ticket, g.number, g.branch]), [['fold it', t.id, t.number, 'ticket/1-t']]);
   store.close?.();
 });
 
@@ -385,6 +405,42 @@ test('through the routes: a typed go lets one plain merge of the right PR throug
     assert.equal(await merge('gh pr merge 191 -R cara/delve --merge'), 'allowed');
     const results = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.filter((e: any) => e.kind === 'approval_result').map((e: any) => JSON.parse(e.data));
     assert.deepEqual(results.map((r: any) => [r.by, r.via?.text]), [['Cara', 'merge it'], ['Cara', 'merge it'], ['Cara', 'merge PR #188'], ['Cara', 'fold it']]);
+  } finally {
+    await srv.stop();
+  }
+});
+
+test("through the routes: Delve #42's go in one minion lets the build minion merge that PR with no card, naming where it came from (#260)", async () => {
+  const { home, seed, env, git } = delveRepo('across');
+  const srv = await bootServer({ root: home, env });
+  procs.push(srv.proc);
+  try {
+    const project = (await srv.call('/api/projects', { name: 'Delve', source: 'folder', folder: seed })).data;
+    assert.equal((await srv.call(`/api/projects/${project.id}`, { approval_rules: 'Bash(gh pr merge:*)' }, 'PATCH')).status, 200);
+    const minion = async (message: string) => {
+      const created = (await srv.call(`/api/projects/${project.id}/tickets`, { message })).data;
+      return created.ticket ?? created;
+    };
+    const category = await minion('the enchanting category');
+    const build = await minion('build 7');
+    git(['remote', 'set-url', 'origin', 'https://github.com/cara/delve.git'], project.repo_dir);
+    const auth = { Authorization: `Bearer ${agentToken(srv.data, build.id)}`, 'Content-Type': 'application/json' };
+    await until('the build turn', async () => (await fetch(`${srv.base}/api/tickets/${build.id}/approvals?id=x`, { headers: auth })).ok);
+    const merge = async (command: string) => {
+      const r = await (await fetch(`${srv.base}/api/tickets/${build.id}/approvals`, { method: 'POST', headers: auth, body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Fold the PR' } }) })).json();
+      assert.ok(r.id, JSON.stringify(r));
+      const settled = (await srv.call(`/api/tickets/${build.id}/events?after=0`)).data.find((e: any) => e.kind === 'approval_result' && JSON.parse(e.data).id === r.id);
+      return settled && JSON.parse(settled.data);
+    };
+    assert.equal(await merge('gh pr merge 188 --repo cara/delve --merge'), undefined, 'no go yet: the card');
+    assert.equal((await srv.call(`/api/tickets/${category.id}/messages`, { text: 'you can fold 188' })).status, 202);
+    const said = await until('the go', async () => (await srv.call(`/api/tickets/${category.id}/events?after=0`)).data.find((e: any) => e.kind === 'user_message' && JSON.parse(e.data).text === 'you can fold 188'));
+    const r = await merge('gh pr merge 188 --repo cara/delve --merge --match-head-commit 2efe2fb20f139cc9e77834436066a504c2793977');
+    assert.deepEqual([r?.state, r?.by, r?.via], ['allowed', 'Cara', { message: said.id, text: 'you can fold 188', scheme: project.id, ticket: category.number }]);
+    assert.equal((await merge('gh pr merge 188 --repo cara/delve --merge --match-head-commit 7ff3d3e693550d12e4dabcdacc5db281fe382b7b'))?.state, 'allowed', 'a new head after the go');
+    assert.equal(await merge('gh pr merge 189 --repo cara/delve --merge'), undefined, 'another PR');
+    writeFileSync(join(home, 'merged-188'), '');
+    assert.equal(await merge('gh pr merge 188 --repo cara/delve --merge'), undefined, 'merged: the go has ended');
   } finally {
     await srv.stop();
   }

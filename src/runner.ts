@@ -251,8 +251,6 @@ interface TurnState {
   github?: string | null;
   /** The person's Claude container it runs in (#213); absent on the host. */
   container?: string;
-  /** A person's typed go to merge it read, kept here so a restart mid-turn doesn't drop it (#209). */
-  go?: Go;
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
@@ -322,6 +320,8 @@ export function unsentSteers(turn: Pick<TurnState, 'steered' | 'dir'>): QueuedMe
 }
 
 const turnKey = (ticketId: number) => `turn:${ticketId}`;
+// A scheme's standing gos to merge (#260), kept in settings so they outlive turns and restarts.
+const goesKey = (projectId: number) => `merge_goes:${projectId}`;
 /** Set when a person writes to a minion waiting in pending-deploy: its deploy then leaves it open. */
 const talkedKey = (ticketId: number) => `talked-since-deploy:${ticketId}`;
 
@@ -903,12 +903,7 @@ export class Runner {
       this.emit(ticketId, kind, data);
       // The threads list shows which threads are waiting on an approval.
       this.broadcastTicket(ticketId);
-    });
-    // A go is kept with its running turn; a turn's state that's already gone isn't brought back.
-    this.approvals.onGo = (ticketId) => {
-      const turn = this.isRunning(ticketId) && this.store.getSetting<TurnState>(turnKey(ticketId));
-      if (turn) this.store.setSetting(turnKey(ticketId), { ...turn, go: this.approvals.goOf(ticketId) });
-    };
+    }, { get: (p) => store.getSetting<Go[]>(goesKey(p)) ?? [], set: (p, goes) => store.setSetting(goesKey(p), goes) });
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
     this.turnsDir = join(dirname(store.path), 'run', 'turns');
@@ -1078,7 +1073,6 @@ export class Runner {
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
           // This turn's waiting cards come back: if it is still running, it still polls for them (#209).
           this.approvals.restore(t.id, this.store.listEvents(t.id), turn?.startedAt);
-          if (turn?.go) this.approvals.restoreGo(t.id, turn.go);
           try {
             if (turn?.dir && this.reattach(t.id, turn)) continue;
           } catch (err: any) {
@@ -1292,6 +1286,8 @@ export class Runner {
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}),
     });
     const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), asker };
+    // A person's typed "merge it" stands for the whole scheme until its PR merges (#260), whenever a turn reads it.
+    if (ticket) this.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, msg);
     // Anything said answers the one-tap replies; a steer or a held message starts no turn to clear them.
     if (this.store.getTicket(ticketId)?.replies) {
       this.store.updateTicket(ticketId, { replies: null });
@@ -1302,7 +1298,6 @@ export class Runner {
       const file = join(live!.dir, 'steer.jsonl');
       appendFileSync(file, line);
       this.saveTurn(ticketId, { steered: [...(turn!.steered ?? []), { end: statSync(file).size, msg }] });
-      this.approvals.heard(ticketId, [msg]);
       // A person steering in speaks after the relay, so what the turn starts now is theirs.
       if (person && !extra.from) this.turnFrom.delete(ticketId);
       return;
@@ -1558,7 +1553,6 @@ export class Runner {
       this.emit(ticket.id, 'note', { text: place.refused });
       return this.broadcastTicket(ticket.id);
     }
-    this.approvals.heard(ticket.id, batch, true);
     // deploy/prune.sh removes worktrees of long-closed minions; a reopened one gets its back.
     try {
       if (restoreTicketDir(ticket.cwd, project.repo_dir, ticket.branch)) this.emit(ticket.id, 'note', { text: `Recreated this minion's worktree from its branch ${ticket.branch}.` });
@@ -1740,7 +1734,7 @@ export class Runner {
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: place.host ? this.claudeBin : resolveClaude(this.claudeBin), args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, asker, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), go: this.approvals.goOf(ticket.id) };
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, asker, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     this.setStatus(ticket.id, 'running');

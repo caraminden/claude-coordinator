@@ -81,11 +81,12 @@ export function pluginDirArgs(dirs: string[], cwd: string): string[] {
 
 export type Decision =
   | { state: 'pending' }
-  | { state: 'allowed' | 'denied'; by: string; via?: { message?: number; text: string } }
+  // via: the typed go that let it through, and the chat it was typed in (#260): scheme, and minion number or null for the Taskmaster.
+  | { state: 'allowed' | 'denied'; by: string; via?: { message?: number; text: string; scheme: number; ticket: number | null } }
   | { state: 'expired'; reason: string };
 
-// A message that is only a go to merge (#201): "merge it", "ok, fold it", "yes merge PR #191", "ship it".
-const GO = /^(?:(?:ok|okay|yes|yep|great|lgtm|looks good|go ahead|go|please|pls|plz),? )?(?:and )?(?:merge|fold|land|squash|ship)(?: (?:it|this|the pr|pr #?(\d{1,7})|#(\d{1,7})|(\d{1,7})))?(?: in)?(?: (?:please|pls|plz|now))?$/;
+// A message that is only a go to merge (#201): "merge it", "ok, fold it", "yes merge PR #191", "ship it", "you can fold 196".
+const GO = /^(?:(?:ok|okay|yes|yep|great|lgtm|looks good|go ahead|go|please|pls|plz),? )?(?:and )?(?:you can )?(?:merge|fold|land|squash|ship)(?: (?:it|this|the pr|pr #?(\d{1,7})|#(\d{1,7})|(\d{1,7})))?(?: in)?(?: (?:please|pls|plz|now))?$/;
 
 /** The PR a message that says nothing but "merge it" means: its number, or null for the minion's own; null if it isn't one. */
 export function mergeGo(text: string): { pr: number | null } | null {
@@ -95,33 +96,54 @@ export function mergeGo(text: string): { pr: number | null } | null {
   return { pr: n ? Number(n) : null };
 }
 
-/** A person's go a turn read: who typed it, the PR it names (null: the minion's own) and the message. */
+/**
+ * A person's typed go to merge, kept for its whole scheme (#260): who typed it, where, and the PR it
+ * means: the one named, or with none named, the PR of the branch of the minion it was typed in.
+ */
 export interface Go {
   by: string;
   pr: number | null;
+  /** The minion it was typed in: its id, its number in the scheme (null: the Taskmaster) and its branch. */
+  ticket: number;
+  number: number | null;
+  branch: string | null;
   message?: number;
   text: string;
   /** A merge it covers was sent back once with the plain command to run (#209). */
   hinted?: boolean;
-  /** The PR a merge it let through named: retries of that PR pass while it is still open (#209). */
-  spent?: number;
+}
+
+/** The minion a message was typed in, as a go records it. */
+export interface GoPlace {
+  id: number;
+  number: number | null;
+  branch: string | null;
 }
 
 /**
- * Whether a go covers a merge's PR: the one they named or, with none named, the minion's own. Once it
- * has let a merge through, only that PR again, and only while it is open: a merge GitHub refused (a
- * short --match-head-commit, a check still running) left nothing merged, so the go isn't used up.
+ * Whether a go covers a merge's PR: the one named or, with none named, its minion's branch's PR, and
+ * only while it is open. Bound to the number, not the head: a fold that re-merges its build tip and
+ * pushes a new head is still what they meant; a merge GitHub refused left it open for the retry.
  */
 const covers = (go: Go, target: MergeTarget) =>
-  (go.pr === null ? target.own : target.number === go.pr) && (go.spent === undefined || (go.spent === target.number && target.open === true));
+  target.open === true && (go.pr === null ? !!go.branch && go.branch === target.head : target.number === go.pr);
 
-/** A merge call's PR as a go is checked against: its number, and whether it is the minion's own branch's PR. */
+/** A merge call's PR as a go is checked against: its number, its head branch, and whether it is open. */
 export interface MergeTarget {
   number: number;
-  own: boolean;
+  head: string;
   /** The lookup found it open, so no merge of it has gone through yet. */
   open?: boolean;
 }
+
+/** Where a scheme's standing gos are kept: the server keeps them in its settings, so a restart keeps them. */
+export interface GoStore {
+  get(scheme: number): Go[];
+  set(scheme: number, goes: Go[]): void;
+}
+
+// shortcut: a go whose PR merges or closes without any minion trying it again stays until newer gos push it out; add an age limit if that ever matters.
+const MAX_GOES = 50;
 
 // The gh pr merge switches a go lets through: squash or a merge commit, not rebase (nobody asked for it).
 // Any flag with free text or a file (--body-file) gets the card.
@@ -166,10 +188,10 @@ export function mcpMerge(tool: string, input: any): MergeCall | null {
 }
 
 /** The target of a merge call whose looked-up PR is in the scheme's repo; null otherwise. */
-export function mergeTarget(pr: PrInfo | null, schemeRepo: string | null, branch: string | null): MergeTarget | null {
+export function mergeTarget(pr: PrInfo | null, schemeRepo: string | null): MergeTarget | null {
   const repo = pr?.url.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/\d+/)?.[1];
   if (!pr || !repo || !schemeRepo || repo.toLowerCase() !== schemeRepo.toLowerCase()) return null;
-  return { number: pr.number, own: !!branch && pr.head === branch, open: pr.state === 'OPEN' };
+  return { number: pr.number, head: pr.head, open: pr.state === 'OPEN' };
 }
 
 interface Request {
@@ -194,14 +216,14 @@ export class Approvals {
   private requests = new Map<string, Request>();
   /** Outcomes of cards forgotten when their turn ended, for an asker that was between two polls then. */
   private ended = new Map<string, { ticketId: number; decision: Decision }>();
-  /** Each running turn's standing go to merge, from a message a person typed into that minion's chat (#201). */
-  private goes = new Map<number, Go>();
   private emit: Emit;
-  /** Called whenever a turn's go changes, so the runner can keep it with the turn through a restart (#209). */
-  onGo: (ticketId: number) => void = () => {};
+  /** Each scheme's standing gos to merge, from messages people typed into its chats (#201, #260). */
+  private goes: GoStore;
 
-  constructor(emit: Emit) {
+  constructor(emit: Emit, goes?: GoStore) {
     this.emit = emit;
+    const mem = new Map<number, Go[]>();
+    this.goes = goes ?? { get: (s) => mem.get(s) ?? [], set: (s, g) => mem.set(s, g) };
   }
 
   /** Post a card in the thread's chat for one tool call; returns its id. `merge` is the PR a `gh pr merge` names (src/merge-card.ts). */
@@ -227,22 +249,19 @@ export class Approvals {
     if (verdict && !verdict.ask) return { refused: `The tripwire blocks this. ${verdict.reason}` };
     if (!verdict) {
       if (!rules) return { refused: 'Nobody can answer a permission prompt in this turn, so this was not run.' };
+      const scheme = cfg.project;
       // A go's PR merged in another shape (chained, a cd, no --repo): send it back once with the plain
       // command, which nothing rides along with; asked again, it gets the card (#209).
-      const near = retry && this.goes.get(ticketId);
-      if (near && !near.hinted && covers(near, retry.target)) {
-        near.hinted = true;
-        this.onGo(ticketId);
-        return { refused: `${near.by}'s go to merge covers PR #${retry.target.number}, but only as a lone plain merge, so this was not run. Run exactly \`${retry.command}\` as its own Bash call, with nothing before or after it (no cd, 2>&1, pipe, $( ) or chained check); --match-head-commit with the full SHA written out, and --delete-branch, may go on it. Check the result in a separate call. If you need what this call added, run it again unchanged and it gets the approval card.` };
+      const near = retry && this.goFor(scheme, retry.target);
+      if (near && !near.go.hinted) {
+        near.go.hinted = true;
+        this.goes.set(scheme, near.goes);
+        return { refused: `${near.go.by}'s go to merge covers PR #${retry.target.number}, but only as a lone plain merge, so this was not run. Run exactly \`${retry.command}\` as its own Bash call, with nothing before or after it (no cd, 2>&1, pipe, $( ) or chained check); --match-head-commit with the full SHA written out, and --delete-branch, may go on it. Check the result in a separate call. If you need what this call added, run it again unchanged and it gets the approval card.` };
       }
       const id = this.request(ticketId, tool, input, undefined, merge);
-      // A person's go covers one merge: of the PR they named, or with none named, of this minion's own.
-      const go = target && this.goes.get(ticketId);
-      if (go && covers(go, target)) {
-        go.spent = target.number;
-        this.onGo(ticketId);
-        this.settle(id, this.requests.get(id)!, { state: 'allowed', by: go.by, via: { message: go.message, text: go.text } });
-      }
+      // A person's go typed in any of the scheme's chats covers its PR until that merges or closes (#260).
+      const go = target && this.goFor(scheme, target)?.go;
+      if (go) this.settle(id, this.requests.get(id)!, { state: 'allowed', by: go.by, via: { message: go.message, text: go.text, scheme, ticket: go.number } });
       return { id };
     }
     const why = explanation(input);
@@ -255,31 +274,31 @@ export class Approvals {
   }
 
   /**
-   * Messages a minion's turn read, in order (at its start or steered in). Only `typed` ones count: what a
-   * signed-in person sent from the chat, as the messages route marks it. A go stands until that turn's
-   * next typed message that isn't one, its PR no longer being open, or the turn's end. A turn's start (`start`) drops
-   * any go left from before, so a go never outlives the turn that read it.
+   * A message delivered to one of a scheme's chats. Only `typed` ones count: what a signed-in person sent
+   * from the chat, as the messages route marks it. A go stands for the whole scheme until its PR is seen
+   * merged or closed, or until a later typed message in the same chat that isn't one (newest word wins).
    */
-  heard(ticketId: number, msgs: { author: string; text: string; id?: number; typed?: boolean }[], start = false) {
-    if (start) this.goes.delete(ticketId);
-    for (const m of msgs) {
-      if (!m.typed) continue;
-      const go = mergeGo(m.text);
-      if (go) this.goes.set(ticketId, { by: m.author, pr: go.pr, message: m.id, text: m.text.trim().slice(0, 200) });
-      else this.goes.delete(ticketId);
+  said(scheme: number, where: GoPlace, m: { author: string; text: string; id?: number; typed?: boolean }) {
+    if (!m.typed) return;
+    const go = mergeGo(m.text);
+    const goes = this.goes.get(scheme).filter((g) => g.ticket !== where.id || go);
+    if (go) goes.push({ by: m.author, pr: go.pr, ticket: where.id, number: where.number, branch: where.branch, message: m.id, text: m.text.trim().slice(0, 200) });
+    this.goes.set(scheme, goes.slice(-MAX_GOES));
+  }
+
+  /**
+   * The newest go covering a merge's PR, with the scheme's list it sits in. A PR found merged or closed
+   * ends every go that meant it, so a reopened PR needs a new go.
+   */
+  private goFor(scheme: number, target: MergeTarget): { go: Go; goes: Go[] } | null {
+    const goes = this.goes.get(scheme);
+    if (target.open === false) {
+      const left = goes.filter((g) => !covers(g, { ...target, open: true }));
+      if (left.length !== goes.length) this.goes.set(scheme, left);
+      return null;
     }
-    this.onGo(ticketId);
-  }
-
-  /** A turn's go as it stands, to keep with the turn; undefined if none. */
-  goOf(ticketId: number): Go | undefined {
-    const go = this.goes.get(ticketId);
-    return go && { ...go };
-  }
-
-  /** After a restart, the go a surviving turn had read (#209). */
-  restoreGo(ticketId: number, go: Go) {
-    this.goes.set(ticketId, { ...go });
+    const go = goes.findLast((g) => covers(g, target));
+    return go ? { go, goes } : null;
   }
 
   /**
@@ -295,9 +314,9 @@ export class Approvals {
     }
   }
 
-  /** Whether a turn holds a go to merge, so a merge call is worth looking up. */
-  hasGo(ticketId: number): boolean {
-    return this.goes.has(ticketId);
+  /** Whether a scheme holds a go to merge, so a merge call is worth looking up. */
+  hasGo(scheme: number): boolean {
+    return this.goes.get(scheme).length > 0;
   }
 
   /** How many of a thread's cards are waiting on a person. */
@@ -353,8 +372,6 @@ export class Approvals {
 
   /** The thread's turn ended: expire its undecided cards and forget them all. */
   endTurn(ticketId: number, reason: string) {
-    this.goes.delete(ticketId);
-    this.onGo(ticketId);
     for (const [id, r] of this.requests) {
       if (r.ticketId !== ticketId) continue;
       if (r.decision.state === 'pending') this.settle(id, r, { state: 'expired', reason });

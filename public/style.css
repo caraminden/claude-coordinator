@@ -365,8 +365,7 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .composer .composer-note { margin: 0 0 0.4rem; }
 .composer .row { margin-top: 0.5rem; }
 .composer button.small { padding: 0.2rem 0.65rem; font-size: 0.85em; }
-/* Wide screens float Latest over the chat's bottom corner; phones keep it in the button row, where it covers no words (#212). */
-@media (min-width: 801px) { .composer .to-latest { position: absolute; right: 0; bottom: calc(100% + 0.5rem); background: var(--panel); box-shadow: 0 2px 8px rgb(0 0 0 / 0.15); } }
+/* Latest stays in the composer's button row at every width, so it never covers chat words (#212, #231). */
 .composer .to-latest[hidden] { display: none; }
 /* One-tap replies (public/replies.js): outlined pills that send their text, above the composer. */
 .replies { display: flex; flex-wrap: wrap; gap: 0.35rem; min-width: 0; }

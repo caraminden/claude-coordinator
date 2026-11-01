@@ -152,7 +152,7 @@ export function chatSection(chatId, ticket) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReadout(); }
   };
   // Opening at the first unread message leaves the newest out of sight; this takes you there.
-  // It sits in the composer's button row: phones keep it there, wide screens float it over the chat (style.css).
+  // It sits in the composer's button row at every width, where it covers no chat words.
   const latest = h('button', { type: 'button', class: 'small secondary to-latest', title: 'Jump to the latest', 'aria-label': 'Jump to the latest', hidden: true },
     h('span', { 'aria-hidden': 'true' }, '↓'), h('span', { class: 'wide-only' }, ' Latest'));
   latest.addEventListener('click', scrollToBottom);

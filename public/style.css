@@ -1238,6 +1238,9 @@ dialog.viewer .composer .picker { display: none; }
 .contraption-people .turns-toggle { display: inline-flex; gap: 0.3rem; align-items: center; margin: 0; }
 .contraption-people .turns-toggle input { width: auto; margin: 0; }
 .contraption details > summary { cursor: pointer; padding: 0.2rem 0; }
+.contraption-service { margin: 0.5rem 0; }
+.contraption-service .service-buttons { gap: 0.3rem; }
+.contraption-service pre { max-height: 20rem; overflow: auto; user-select: text; }
 .people-add[hidden] { display: none; }
 .people-add select { width: auto; flex: 1; max-width: 20rem; }
 .account-form { display: flex; flex-direction: column; gap: 0.5rem; max-width: 24rem; margin-top: 1rem; }

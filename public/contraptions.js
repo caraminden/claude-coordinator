@@ -7,7 +7,66 @@ import { showRail } from './rail.js';
 const fail = (err) => alert(err.message);
 const when = (ms) => new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 
-/** One contraption: who it's enabled for, its settings, and its keys. */
+/** A unit's state in a few words. */
+const unitState = (u) => (u.load === 'not-found' ? 'not installed' : `${u.active}${u.enabled ? `, ${u.enabled}` : ''}`);
+
+/**
+ * Its systemd user service, which Citadel writes and runs (#266): state, the buttons, and the journal on ask.
+ * Fetched once the card is drawn; a boot check or preview answers 409 and the panel says why.
+ */
+function servicePanel(c) {
+  const line = h('span', { class: 'small' }, 'Service: checking…');
+  const notes = h('div', { class: 'small muted' });
+  const log = h('pre', { hidden: true });
+  const status = h('span', { class: 'muted small', role: 'status' });
+  const buttons = h('span', { class: 'row service-buttons' });
+  const base = `api/contraptions/${c.name}/service`;
+  const show = (s) => {
+    line.textContent = `Service ${s.unit}: ${s.installed ? unitState(s.service) : 'not installed'}`
+      + (s.timers.length ? ` · timers ${s.timers.map((t) => `${t.unit.replace(/^citadel-app-/, '')} ${unitState(t)}`).join(', ')}` : '');
+    notes.replaceChildren(
+      ...(s.manifestError ? [h('div', {}, s.manifestError)] : []),
+      ...s.hand.map((u) => h('div', {}, `Hand-installed ${u.path}: ${unitState(u)} (${u.why}).`)));
+    const live = s.hand.some((u) => u.active === 'active' || u.active === 'activating' || /^enabled/.test(u.enabled));
+    const btn = (label, action, extra = {}, ask) => {
+      const b = h('button', { type: 'button', class: 'secondary small' }, label);
+      b.onclick = async () => {
+        if (ask && !confirm(ask)) return;
+        status.textContent = `${label}…`;
+        try {
+          const r = await api(base, { method: 'POST', body: { action, ...extra } });
+          status.textContent = r.said.join(' ');
+          show(r.status);
+        } catch (err) {
+          status.textContent = err.message;
+        }
+      };
+      return b;
+    };
+    const logs = h('button', { type: 'button', class: 'secondary small' }, 'Logs');
+    logs.onclick = async () => {
+      if (!log.hidden) return void (log.hidden = true);
+      try {
+        log.textContent = (await api(`${base}/logs?lines=100`)).log || 'No journal lines.';
+        log.hidden = false;
+      } catch (err) {
+        status.textContent = err.message;
+      }
+    };
+    buttons.replaceChildren(
+      live
+        ? btn('Install, replacing hand-installed', 'install', { replace: true }, `Stop and disable ${s.hand.map((u) => u.unit).join(', ')} and install ${s.unit} instead? Their files stay.`)
+        : btn(s.installed ? 'Reinstall' : 'Install', 'install'),
+      ...(s.installed ? [btn('Start', 'start'), btn('Restart', 'restart'), btn('Stop', 'stop', {}, `Stop ${c.title}? It stays down until started again (or the box restarts).`)] : []),
+      logs);
+  };
+  api(base).then(show).catch((err) => {
+    line.textContent = `Service: ${err.message}`;
+  });
+  return h('div', { class: 'contraption-service' }, h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), buttons), notes, status, log);
+}
+
+/** One contraption: who it's enabled for, its settings, its service and its keys. */
 function card(c, people, replace) {
   const field = (label, name, value, attrs = {}) => h('label', { class: attrs.wide ? 'wide' : '' }, label,
     h('input', { name, value: value ?? '', autocomplete: 'off', spellcheck: 'false', ...attrs, wide: undefined }));
@@ -60,6 +119,7 @@ function card(c, people, replace) {
             if (r && u.id === account?.id) showRail(); // enabling yourself: the rail appears now
           },
         }), u.name))),
+    servicePanel(c),
     h('details', {}, h('summary', { class: 'small' }, 'Settings'), form));
 }
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -8,7 +8,7 @@ import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
+import { bootServer, fakeSystemd, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 
 // Settings → Contraptions as coordinator tools (#246): only the Citadel scheme's Taskmaster, only on a
 // turn an admin asked for (#255), through the same routes the settings page calls, and never showing a key.
@@ -35,9 +35,13 @@ turnFor(DelveTM, cara.id);
 turnFor(Minion, cara.id);
 
 const tokens = new Auth(PASSWORD, SECRET);
+// Its services (#266) through a stand-in systemctl, a temp unit folder and a temp home for ~/apps.
+const home = join(root, 'home');
+const fake = fakeSystemd(join(root, 'systemd'));
+const serviceEnv = { HOME: home, XDG_CONFIG_HOME: join(home, '.config'), CITADEL_SYSTEMCTL: fake.bin, CITADEL_JOURNALCTL: fake.journal };
 let srv: Booted;
 before(async () => {
-  srv = await bootServer({ root });
+  srv = await bootServer({ root, env: serviceEnv });
 });
 after(() => srv?.proc.kill());
 
@@ -73,7 +77,7 @@ function noKeys(text: string, name: string) {
   assert.ok(!text.includes(pub.trim()) && !/BEGIN|PRIVATE/.test(text), 'no identity key');
 }
 const MANDATE = { title: 'Mandate', port: 7341, icon: '/icons/icon.svg', default_model: 'haiku', open_paths: [] };
-const ALL = ['list_contraptions', 'register_contraption', 'update_contraption', 'set_contraption_person', 'rotate_contraption_keys'];
+const ALL = ['list_contraptions', 'register_contraption', 'update_contraption', 'set_contraption_person', 'rotate_contraption_keys', 'contraption_service'];
 
 test('Citadel\'s Taskmaster registers and enables a contraption just as Settings → Contraptions does', async () => {
   const names = (await mcp(CitadelTM, 'tools/list', {})).tools.map((x: any) => x.name);
@@ -142,6 +146,7 @@ test('a turn someone who isn\'t an admin asked for is refused, and changes nothi
     for (const [name, args] of [
       ['list_contraptions', {}], ['register_contraption', { name: 'sneaky', ...MANDATE }], ['update_contraption', { name: 'twin', title: 'Mine' }],
       ['set_contraption_person', { name: 'twin', login: 'olive', enabled: true }], ['rotate_contraption_keys', { name: 'twin' }],
+      ['contraption_service', { name: 'twin', action: 'status' }], ['contraption_service', { name: 'twin', action: 'install' }],
     ] as const) {
       const r = await tool(CitadelTM, name, args);
       assert.equal(r.isError, true, name);
@@ -162,11 +167,63 @@ test('another scheme\'s Taskmaster isn\'t offered the tools, and the API refuses
   for (const n of ALL) assert.ok(!names.includes(n), n);
   assert.match((await tool(DelveTM, 'list_contraptions')).text, /Unknown tool/);
   for (const t of [DelveTM, Minion]) {
-    for (const [name, args] of [['list_contraptions', {}], ['register_contraption', { name: 'sneaky', ...MANDATE }], ['rotate_contraption_keys', { name: 'twin' }]] as const) {
+    for (const [name, args] of [['list_contraptions', {}], ['register_contraption', { name: 'sneaky', ...MANDATE }], ['rotate_contraption_keys', { name: 'twin' }], ['contraption_service', { name: 'twin', action: 'install' }]] as const) {
       const r = await tool(t, name, args, true);
       assert.equal(r.isError, true, `${name} as ${t === DelveTM ? 'Delve\'s Taskmaster' : 'a minion'}`);
       assert.match(r.text, t === DelveTM ? /Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster/ : /A minion may only update itself/, name);
     }
   }
   assert.equal(store.getContraption('sneaky'), undefined);
+});
+
+test('Citadel\'s Taskmaster installs and runs a contraption\'s service, as the Settings buttons do', async () => {
+  const folder = join(home, 'apps', 'twin');
+  const units = join(home, '.config', 'systemd', 'user');
+  mkdirSync(units, { recursive: true });
+  let r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'status' });
+  assert.equal(r.isError, false, r.text);
+  assert.match(r.text, /citadel-app-twin.service: not installed/);
+  assert.match(r.text, /manifest problem: No citadel-app.json in .*apps\/twin/);
+  assert.match((await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'install' })).text, /Error: No citadel-app.json/);
+
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'citadel-app.json'), JSON.stringify({ start: ['/usr/bin/node', 'server.ts'], health: '/health' }));
+  writeFileSync(join(units, 'twin.service'), '[Service]\nWorkingDirectory=%h/apps/twin\nEnvironment=PORT=7341\n');
+  writeFileSync(join(root, 'systemd', 'twin.service.active'), '');
+  r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'status' });
+  assert.match(r.text, /hand-installed: .*twin.service: active, disabled \(port 7341\)/);
+  assert.match((await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'install' })).text, /Error: Hand-installed units run twin already/);
+  r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'install', replace: true });
+  assert.equal(r.isError, false, r.text);
+  assert.match(r.text, /Stopped and disabled twin.service/);
+  assert.match(r.text, /citadel-app-twin.service: active \(running\), enabled/);
+  const unit = readFileSync(join(units, 'citadel-app-twin.service'), 'utf8');
+  assert.ok(unit.includes(`Environment="CITADEL_KEYS=${keysDir('twin')}"`), 'the key folder this server wrote');
+  assert.match(unit, /Environment="CITADEL_URL=http:\/\/127\.0\.0\.1:\d+"/);
+
+  r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'stop' });
+  assert.match(r.text, /Stopped citadel-app-twin.service/);
+  assert.match(r.text, /citadel-app-twin.service: inactive/);
+  assert.match((await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'logs', lines: 7 })).text, /^journal --user -u citadel-app-twin.service -n 7/);
+  // The settings page's route says the same.
+  const s = await srv.call('/api/contraptions/twin/service');
+  assert.equal(s.status, 200);
+  assert.equal(s.data.service.active, 'inactive');
+  assert.equal((await srv.call('/api/contraptions/twin/service', { action: 'reboot' })).status, 400);
+});
+
+test('a boot check never touches systemd, even with the stand-ins set', async () => {
+  const check = await bootServer({ env: { ...serviceEnv, BOOT_CHECK: '1' } });
+  try {
+    const before = fake.calls().length;
+    assert.equal((await check.call('/api/contraptions', { name: 'mandate', ...MANDATE })).status, 201);
+    for (const [path, body] of [['/api/contraptions/mandate/service', undefined], ['/api/contraptions/mandate/service', { action: 'install' }], ['/api/contraptions/mandate/service/logs', undefined]] as const) {
+      const r = await check.call(path, body);
+      assert.equal(r.status, 409, path);
+      assert.match(r.data.error, /boot check or a preview never touches app services/);
+    }
+    assert.equal(fake.calls().length, before);
+  } finally {
+    await check.stop();
+  }
 });

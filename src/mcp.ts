@@ -521,7 +521,33 @@ const CONTRAPTION_TOOLS = [
     description: `Replace a contraption's identity key pair and contraption key: both files in its key folder are rewritten and the old keys stop working at once, so its service must restart to read the new ones. Only on a turn a ${APP_NAME} admin asked for.`,
     inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
   },
+  {
+    name: 'contraption_service',
+    description: `A contraption's systemd user service, which ${APP_NAME} writes and runs itself as citadel-app-<name> (plus citadel-app-<name>-<job> for timers its citadel-app.json names). status: its state, its manifest's problems and any hand-installed unit for it. install: write its units from the manifest in its folder, reload, enable and (re)start them; refused while a hand-installed unit for it runs or is enabled, unless replace is true, which stops and disables those first (their files stay). start, stop, restart: its service. logs: the last lines of its journal. Only on a turn a ${APP_NAME} admin asked for.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        action: { type: 'string', enum: ['status', 'install', 'start', 'stop', 'restart', 'logs'] },
+        replace: { type: 'boolean', description: 'install only: stop and disable hand-installed units for it first.' },
+        lines: { type: 'integer', description: 'logs only: how many lines, default 100, at most 1000.' },
+      },
+      required: ['name', 'action'],
+    },
+  },
 ];
+
+/** A service's state as the tools show it. */
+function serviceText(s: any): string {
+  const state = (u: any) => `${u.unit}: ${u.load === 'not-found' ? 'not installed' : `${u.active}${u.sub ? ` (${u.sub})` : ''}, ${u.enabled || 'no unit file'}`}`;
+  return [
+    s.installed ? state(s.service) : `${s.unit}: not installed`,
+    ...s.timers.map(state),
+    `folder ${s.folder}`,
+    s.manifestError ? `manifest problem: ${s.manifestError}` : `manifest OK${s.health ? `, health ${s.health}` : ''}`,
+    ...s.hand.map((u: any) => `hand-installed: ${u.path}: ${u.active}, ${u.enabled || 'no file state'} (${u.why})`),
+  ].join('\n');
+}
 
 /** A contraption as the tools show it: never a key, only where its key files are. */
 function contraptionText(c: any): string {
@@ -920,6 +946,13 @@ async function runTool(name: string, args: any): Promise<string> {
       if (typeof args.login !== 'string' || !args.login) throw new Error('login is required');
       const c = await call('PUT', `${contraptionPath(args)}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
       return `${args.enabled ? 'Enabled' : 'Disabled'} for ${args.login}.\n${contraptionText(c)}`;
+    }
+    case 'contraption_service': {
+      const path = `${contraptionPath(args)}/service`;
+      if (args.action === 'status') return serviceText(await call('GET', path));
+      if (args.action === 'logs') return (await call('GET', `${path}/logs?lines=${Number(args.lines) || 100}`)).log || 'No journal lines.';
+      const r = await call('POST', path, { action: args.action, replace: args.replace === true });
+      return `${r.said.join('\n')}\n${serviceText(r.status)}`;
     }
     case 'rotate_contraption_keys':
       return `New keys written; the old ones stopped working. Restart its service so it reads them.\n${contraptionText(await call('POST', `${contraptionPath(args)}/keys`, {}))}`;

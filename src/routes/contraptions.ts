@@ -9,6 +9,7 @@ import { AGENT_NAME } from '../auth.ts';
 import { ASK_FILES_MAX, askFiles, askMessage, saveAskFiles } from '../contraption-asks.ts';
 import { parseTurn, TurnError } from '../contraption-turns.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
+import { ServiceError } from '../app-services.ts';
 import { relay } from '../relay.ts';
 import type { ContraptionRow } from '../db.ts';
 import { HttpError, json, oneOf, readJson, str, type App, type Ctx, type Route } from '../http.ts';
@@ -99,6 +100,16 @@ const admin = (route: Pick<Route, 'method' | 'path' | 'handler'>): Route => ({
     return route.handler(ctx);
   },
 });
+
+/** A service call (src/app-services.ts), its refusals as HTTP errors. */
+async function service<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (err) {
+    if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
+    throw err;
+  }
+}
 
 /** Asks per contraption and person: ASK_LIMIT in ASK_WINDOW_MS, then 429. shortcut: kept in memory, so a restart forgets it; fine as a loop backstop. */
 const ASK_LIMIT = 10;
@@ -229,6 +240,30 @@ export const contraptionRoutes: Route[] = [
       app.contraptions.rotate(c.name);
       return json(res, 200, view(app, contraption(app, c.name)));
     },
+  }),
+  // Its systemd user service (#266): what it is doing, install (writes its units from its manifest), start, stop, restart, and its journal.
+  admin({
+    method: 'GET', path: '/api/contraptions/:name/service',
+    handler: async ({ res, app, params }) => json(res, 200, await service(() => app.services.status(contraption(app, params.name)))),
+  }),
+  admin({
+    method: 'POST', path: '/api/contraptions/:name/service',
+    async handler({ req, res, app, params }) {
+      const c = contraption(app, params.name);
+      const body = await readJson(req);
+      const action = oneOf(body.action, ['install', 'start', 'stop', 'restart'], 'Action');
+      if (!action) throw new HttpError(400, 'Action is required: install, start, stop or restart');
+      const said = await service(async () => {
+        if (action === 'install') return app.services.install(c, { replace: body.replace === true, all: app.store.listContraptions() });
+        await app.services.act(c, action as 'start' | 'stop' | 'restart');
+        return [`${{ start: 'Started', stop: 'Stopped', restart: 'Restarted' }[action]} ${app.services.unitOf(c)}.`];
+      });
+      return json(res, 200, { said, status: await service(() => app.services.status(c)) });
+    },
+  }),
+  admin({
+    method: 'GET', path: '/api/contraptions/:name/service/logs',
+    handler: async ({ res, app, params, url }) => json(res, 200, { log: await service(() => app.services.logs(contraption(app, params.name), Number(url.searchParams.get('lines')) || 100)) }),
   }),
   {
     // A bug report or feature ask from a contraption's server, as one of its people: files into the home

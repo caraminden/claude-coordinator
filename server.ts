@@ -34,6 +34,7 @@ import { pushRoutes } from './src/routes/push.ts';
 import { peopleRoutes } from './src/routes/people.ts';
 import { Credentials } from './src/credentials.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
+import { AppServices, serviceOptions } from './src/app-services.ts';
 import { contraptionRoutes } from './src/routes/contraptions.ts';
 import { ContraptionTurns } from './src/contraption-turns.ts';
 import { GithubLink } from './src/github-link.ts';
@@ -122,6 +123,11 @@ const credentials = new Credentials(store, process.env.SESSION_SECRET ?? '');
 // Only the live data dir writes the real key folders: a dev copy registering "mandate" mustn't overwrite the live one's files.
 const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '',
   process.env.CITADEL_CONTRAPTIONS_DIR || (DATA_DIR === DEFAULT_DATA_DIR ? DEFAULT_CONTRAPTIONS_DIR : join(DATA_DIR, 'contraptions')));
+// Contraptions' systemd user services (#266): only the live server touches systemd, never a boot check or preview.
+const services = new AppServices(serviceOptions(process.env, DATA_DIR === DEFAULT_DATA_DIR, BOOT_CHECK, {
+  keysDir: (name) => contraptions.folder(name),
+  citadelUrl: () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`,
+}));
 const githubLink = new GithubLink(store, credentials, process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '');
 // People's own Claude plans (#213). A dev copy tags its containers so it never shares the live server's.
 const claudeLink = new ClaudeLink(store, credentials, DATA_DIR, process.env.CLAUDE_BIN ?? 'claude', undefined, DATA_DIR === DEFAULT_DATA_DIR ? 'citadel-claude-' : `citadel-claude-${createHash('sha256').update(DATA_DIR).digest('hex').slice(0, 6)}-`);
@@ -607,7 +613,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink, contraptions, contraptionTurns, landings,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink, contraptions, contraptionTurns, landings, services,
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {
     return ASSET_VERSION;

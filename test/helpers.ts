@@ -1,6 +1,6 @@
 // Shared test plumbing: boot the real server.ts on a scratch data dir and the port it picks.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -120,4 +120,31 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
     return { status: res.status, data };
   };
   return { base, port, root, data, proc, cookie, call, stop };
+}
+
+/** A stand-in systemctl: logs each call to $FAKE_SYSTEMD/calls and keeps units' states as files there. */
+export function fakeSystemd(dir: string) {
+  mkdirSync(dir, { recursive: true });
+  const bin = join(dir, 'systemctl');
+  writeFileSync(bin, `#!/bin/sh
+d="${dir}"; echo "$*" >> "$d/calls"; shift; verb=$1; shift
+case $verb in
+  show) u=$1; a=inactive; s=dead; e=disabled; l=loaded
+    [ -f "$d/$u.active" ] && a=active && s=running; [ -f "$d/$u.enabled" ] && e=enabled
+    printf 'LoadState=%s\\nActiveState=%s\\nSubState=%s\\nUnitFileState=%s\\n' $l $a $s $e;;
+  enable|disable|start|restart|stop) now=; for u; do
+      [ "$u" = --now ] && now=1 && continue
+      case $verb in enable) touch "$d/$u.enabled"; [ -n "$now" ] && touch "$d/$u.active";;
+        disable) rm -f "$d/$u.enabled"; [ -n "$now" ] && rm -f "$d/$u.active";;
+        start|restart) touch "$d/$u.active";; stop) rm -f "$d/$u.active";; esac; done;;
+  daemon-reload) ;;
+  *) echo "unknown $verb" >&2; exit 1;;
+esac
+exit 0
+`);
+  chmodSync(bin, 0o755);
+  const journal = join(dir, 'journalctl');
+  writeFileSync(journal, '#!/bin/sh\necho "journal $*"\n');
+  chmodSync(journal, 0o755);
+  return { bin, journal, calls: () => (existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n') : []), state: (f: string) => existsSync(join(dir, f)) };
 }

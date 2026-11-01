@@ -749,7 +749,7 @@ function loadPrs() {
   }).catch(() => {});
 }
 /** Where a GitHub PR link should go instead (see prOwnerRoute); null until api/prs has loaded. */
-const prUrlRoute = (href) => prOwnerRoute(prRepos, href, view?.id ?? null);
+const prUrlRoute = (href) => prOwnerRoute(prRepos, href);
 /** Where "PR #n" said in scheme `projectId` goes (see prNumberRoute); one not known yet looks again, at most every 5 minutes. */
 function prRefRoute(projectId, n) {
   const to = prNumberRoute(prList, projectId, n);
@@ -766,9 +766,9 @@ function linkPrRefs() {
   }
 }
 function pointPrLink(a) {
-  if (!a.href.startsWith('https://github.com/')) return;
+  if (!a.href.startsWith('https://github.com/') || a.dataset.github != null) return;
   loadPrs();
-  const to = prOwnerRoute(prRepos, a.getAttribute('href'), view?.id ?? null);
+  const to = prOwnerRoute(prRepos, a.getAttribute('href'));
   if (!to) return;
   a.dataset.prUrl = a.getAttribute('href');
   a.setAttribute('href', to.hash);

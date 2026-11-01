@@ -142,13 +142,12 @@ test('bare URLs into this app switch view in place; previews and the API open a 
   }
 });
 
-test('a PR link routes to the minion that owns it, not the one on screen', () => {
+test('a PR link routes to the minion that owns it, even the one on screen (#272)', () => {
   const repos = new Map([['o/r', { projectId: 1, scheme: 'Delve', repo: 'o/r', prs: { 186: { id: 162, number: 68, title: 'Laptop scripts' } } }]]);
-  assert.deepEqual(prOwnerRoute(repos, 'https://github.com/O/R/pull/186', 5), { hash: '#/p/1/t/68', title: 'Delve #68 Laptop scripts (owns PR #186)' });
-  assert.equal(prOwnerRoute(repos, 'https://github.com/o/r/pull/186', 162), null);
-  assert.equal(prOwnerRoute(repos, 'https://github.com/o/r/pull/7', 5), null);
-  assert.equal(prOwnerRoute(null, 'https://github.com/o/r/pull/186', 5), null);
-  assert.equal(prOwnerRoute(repos, 'https://example.com/', 5), null);
+  assert.deepEqual(prOwnerRoute(repos, 'https://github.com/O/R/pull/186'), { hash: '#/p/1/t/68', title: 'Delve #68 Laptop scripts (owns PR #186)' });
+  assert.equal(prOwnerRoute(repos, 'https://github.com/o/r/pull/7'), null);
+  assert.equal(prOwnerRoute(null, 'https://github.com/o/r/pull/186'), null);
+  assert.equal(prOwnerRoute(repos, 'https://example.com/'), null);
 });
 
 // Delve (scheme 1) owns o/r, where minion #68 (id 162) opened PR #186.
@@ -192,14 +191,13 @@ test('"PR #N" links to the minion owning the PR in the scheme on screen', () => 
 });
 
 test('bare PR URLs go to their owner from the start, GitHub otherwise', () => {
-  const route = (url) => prOwnerRoute(delveRepos, url.replace(/&amp;/g, '&'), 5);
+  const route = (url) => prOwnerRoute(delveRepos, url.replace(/&amp;/g, '&'));
   const owned = 'https://github.com/o/r/pull/186';
   assert.equal(linkUrls(`see ${owned}.`, null, route),
     `see <a href="#/p/1/t/68" title="Delve #68 Laptop &quot;scripts&quot; (owns PR #186)" data-pr-url="${owned}">${owned}</a>.`);
   for (const url of ['https://github.com/o/r/pull/7', `${owned}/files`, 'https://github.com/x/y/pull/186']) {
     assert.equal(linkUrls(url, null, route), tab(url), url);
   }
-  assert.equal(linkUrls(owned, null, (url) => prOwnerRoute(delveRepos, url, 162)), tab(owned), 'its own PR opens GitHub');
 });
 
 test('jumpParts: a chat address asking to open at one event, or its latest reply (#236)', () => {

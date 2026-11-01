@@ -154,20 +154,20 @@ export function prLinkOpen(url, to) {
   return to ? `<a href="${escapeAttr(to.hash)}" title="${escapeAttr(to.title)}" data-pr-url="${url}">` : null;
 }
 
-/** Where PR `number` of `repo` (one entry of GET api/prs) should go: its owner, unless that's the minion on screen. */
-function ownerRoute(repo, number, hereId) {
+/** Where PR `number` of `repo` (one entry of GET api/prs) should go: its owner, even the minion on screen (#272). */
+function ownerRoute(repo, number) {
   const owner = repo?.prs[number];
-  if (!owner || owner.id === hereId) return null;
+  if (!owner) return null;
   return { hash: threadNumberHref(repo.projectId, owner.number), title: `${repo.scheme} #${owner.number} ${owner.title} (owns PR #${number})` };
 }
 
 /**
  * Where a link to a PR should go instead: the minion that owns it, from `repos` (GET api/prs as a
- * Map by repo). Null for other links, PRs no minion owns, and the PR of the minion on screen (`hereId`).
+ * Map by repo). Null for other links and PRs no minion owns.
  */
-export function prOwnerRoute(repos, href, hereId = null) {
+export function prOwnerRoute(repos, href) {
   const pr = prUrlParts(href);
-  return pr ? ownerRoute(repos?.get(pr.repo), pr.number, hereId) : null;
+  return pr ? ownerRoute(repos?.get(pr.repo), pr.number) : null;
 }
 
 /**
@@ -179,7 +179,7 @@ export function prOwnerRoute(repos, href, hereId = null) {
 export function prNumberRoute(repos, projectId, number) {
   for (const repo of repos?.values() ?? []) {
     if (repo.projectId !== projectId) continue;
-    if (repo.prs[number]) return ownerRoute(repo, number, null);
+    if (repo.prs[number]) return ownerRoute(repo, number);
     if (repo.pulls?.includes(number)) return { url: `https://github.com/${repo.repo}/pull/${number}`, title: `No minion owns this PR: opens ${repo.repo} PR #${number} on GitHub` };
     return repo.issues?.includes(number) ? { url: `https://github.com/${repo.repo}/issues/${number}`, title: `${repo.repo} issue #${number} on GitHub` } : null;
   }

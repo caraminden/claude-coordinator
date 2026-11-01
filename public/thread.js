@@ -277,7 +277,8 @@ export function renderBranch(status) {
     const { pr } = status;
     const state = pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : pr.draft ? 'draft' : 'open';
     parts.push(
-      h('a', { href: pr.url, target: '_blank', rel: 'noopener', title: pr.title, onclick: (e) => e.stopPropagation() }, `PR #${pr.number}`),
+      // data-github: this chip is the way to the PR on GitHub, so pointPrLink leaves it be (as the merge card's).
+      h('a', { href: pr.url, target: '_blank', rel: 'noopener', title: pr.title, 'data-github': '', onclick: (e) => e.stopPropagation() }, `PR #${pr.number}`),
       h('span', { class: `state ${state}` }, state));
     if (pr.state === 'OPEN' && status.merged) parts.push(h('span', { title: `Merged into ${status.base}` }, '✓ in main'));
   } else if (status && !status.empty) {
@@ -1096,7 +1097,7 @@ function mergeHead(m, desc, call) {
   return [
     h('div', { class: 'who' }, speaker('asks to merge')),
     h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Merge'),
-      pr?.url ? h('a', { class: 'mnum', href: pr.url, target: '_blank', rel: 'noopener' }, name) : h('span', { class: 'mnum' }, name),
+      pr?.url ? h('a', { class: 'mnum', href: pr.url, target: '_blank', rel: 'noopener', 'data-github': '' }, name) : h('span', { class: 'mnum' }, name),
       pr ? ` ${pr.title}` : m.repo ? h('span', { class: 'muted' }, ` in ${m.repo}`) : ''),
     pr?.head ? h('div', { class: 'mbranch' }, h('code', {}, pr.head), ' → ', h('code', {}, pr.base)) : '',
     h('div', { class: 'mmeta' },

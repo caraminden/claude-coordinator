@@ -3,10 +3,14 @@
 # file changes. claude itself isn't in it: the host's install is mounted read-only, so every
 # payer runs the same version (same tools, same prompt-cache prefix).
 FROM docker.io/library/node:26-bookworm
-# Turns' hook and MCP commands name the host's node by its path.
+# Turns' hook and MCP commands name the host's node by its path. graphviz, xvfb (with xauth, which
+# xvfb-run needs), ffmpeg and socat stand in for the host's: a turn's PATH puts this image's bin
+# folders first, so these win over host wrappers that can't run in here (#247). Godot's OpenGL under
+# Xvfb renders with the Mesa that chromium already brings.
 RUN ln -s /usr/local/bin/node /usr/bin/node \
  && apt-get update \
  && apt-get install -y --no-install-recommends chromium ripgrep jq python3 sqlite3 \
+    graphviz xvfb xauth ffmpeg socat zip unzip \
  && curl -fsSL https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz | tar -xz -C /opt \
  && ln -s /opt/gh_2.103.3_linux_amd64/bin/gh /usr/local/bin/gh \
  && rm -rf /var/lib/apt/lists/* \

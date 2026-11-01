@@ -16,8 +16,22 @@ import { claudeConfigDir, projectSlug } from './sessions.ts';
 
 const IMAGE_REPO = 'localhost/citadel-claude';
 const CONTAINERFILE_DIR = join(import.meta.dirname, '..', 'deploy', 'claude-container');
-/** Host tool folders a turn may need (Delve's dotnet and Godot, mise toolchains), mounted read-only where they exist. */
-const TOOL_DIRS = ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot'];
+/**
+ * Host tool folders a turn may need, mounted read-only where they exist: Delve's dotnet and Godot, mise and its
+ * toolchains (its rust is rustup's, in ~/.cargo/bin and ~/.rustup; the rest of ~/.cargo, the crate cache, stays
+ * the person's own), and the Chromium Playwright downloads (Mandate's tools/shot.mjs).
+ */
+export const TOOL_DIRS = ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.cargo/bin', '.rustup', '.cache/ms-playwright'];
+/**
+ * The image's bin folders, first on a container turn's PATH: a tool the image installs wins over a host
+ * wrapper in ~/.local/bin that can't run in a container (dot and xvfb-run there start a podman image, #247).
+ */
+export const IMAGE_PATH = ['/usr/local/bin', '/usr/bin', '/bin'];
+
+/** A container turn's PATH: the image's folders, then the host's others (dotnet, ~/.local/bin) in their order. */
+export function containerPath(hostPath = ''): string {
+  return [...IMAGE_PATH, ...hostPath.split(delimiter).filter((d) => d && !IMAGE_PATH.includes(d))].join(delimiter);
+}
 
 /** Variables that would win over the container's own sign-in (Claude Code's auth precedence), so a container turn never gets the server's. */
 export const AUTH_VARS = ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY'];
@@ -191,7 +205,7 @@ export class ClaudeLink {
     if (!c || c.failed) return null;
     return {
       host: false, container: c.meta.container, configDir: join(c.meta.home, '.claude'), turnsDir: this.turnsDir(user.id),
-      env: { HOME: this.home, CLAUDE_CONFIG_DIR: join(this.home, '.claude'), DISABLE_AUTOUPDATER: '1' },
+      env: { HOME: this.home, PATH: containerPath(process.env.PATH), CLAUDE_CONFIG_DIR: join(this.home, '.claude'), DISABLE_AUTOUPDATER: '1' },
       ensure: () => this.ensure(user.id, true),
     };
   }

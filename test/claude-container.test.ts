@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ClaudeLink, signInOutcome, signInUrl } from '../src/claude-link.ts';
+import { ClaudeLink, containerPath, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
 import { Containers, runArgs, specHash, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
@@ -245,6 +245,39 @@ test("a person's container mounts their own turns' files, never another person's
   assert.ok(!sees(ben.id, annDir), "Ben's container can't reach Ann's turn files");
   // A turn on the host (the server login's) keeps its folder straight under run/turns.
   assert.ok(!sees(ann.id, join(r.turnsDir, `${a}-1`)), "no container reaches the host's turn files");
+});
+
+test("a container turn has the host's tools: the image installs what schemes' scripts call, host toolchains are mounted, the image's own win (#247)", () => {
+  // Tools Delve's, Peek Auras' and Mandate's scripts and the kit call, by the image package that brings each.
+  const containerfile = readFileSync(join(import.meta.dirname, '..', 'deploy', 'claude-container', 'Containerfile'), 'utf8');
+  const apt = containerfile.match(/apt-get install -y --no-install-recommends ([^&]+)/)![1].split(/[\s\\]+/).filter(Boolean);
+  for (const pkg of ['graphviz', 'xvfb', 'xauth', 'ffmpeg', 'chromium', 'sqlite3', 'socat', 'jq', 'ripgrep', 'python3']) assert.ok(apt.includes(pkg), `the image installs ${pkg}`);
+  assert.match(containerfile, /bin\/gh \/usr\/local\/bin\/gh/);
+  // Host toolchains sit in the person's home, read-only: dotnet, Godot, mise and rustup's rust, Playwright's Chromium.
+  const home = mkdtempSync(join(root, 'tools-home-'));
+  for (const d of [...TOOL_DIRS, '.cargo/registry', '.ssh']) mkdirSync(join(home, d), { recursive: true });
+  const saved = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const creds = new Credentials(store, 'x'.repeat(40));
+    const link = new ClaudeLink(store, creds, join(root, 'data'), fake, new Containers(async () => ({ code: 0, stdout: '', stderr: '' })), 'citadel-claude-tools-');
+    const mounts = link.spec(josh.id).mounts;
+    for (const d of ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.cargo/bin', '.rustup', '.cache/ms-playwright']) {
+      assert.ok(mounts.some((m) => m.src === join(home, d) && m.dst === join(home, d) && m.ro), `${d} is mounted read-only`);
+    }
+    // The crate cache and the rest of the home stay the person's own.
+    assert.ok(!mounts.some((m) => !m.volume && (m.src === join(home, '.cargo') || m.src === join(home, '.ssh') || m.src === home)));
+    // The host's dot and xvfb-run in ~/.local/bin start a podman image: in a container the image's own come first.
+    creds.put(josh.id, 'claude_runner', link.name(josh.id), { container: link.name(josh.id), home: volume, linkedAt: 1 });
+    const place = link.place(josh.id);
+    assert.ok(place && !place.host);
+    assert.equal(place.env.PATH, containerPath(process.env.PATH));
+    creds.remove(josh.id, 'claude_runner');
+  } finally {
+    process.env.HOME = saved;
+  }
+  assert.equal(containerPath('/h/.dotnet:/h/.local/bin:/usr/local/bin:/usr/bin:/bin'), '/usr/local/bin:/usr/bin:/bin:/h/.dotnet:/h/.local/bin');
+  assert.equal(containerPath(''), IMAGE_PATH.join(':'));
 });
 
 test("a restart sweeps container turns' dead folders in each person's folder, and keeps live ones", () => {

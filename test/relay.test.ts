@@ -1,7 +1,7 @@
 // The relay between contraptions (src/relay.ts): Peek calls a stub Mandate for a person, through Citadel.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createServer, type IncomingHttpHeaders } from 'node:http';
+import { createServer, request, type IncomingHttpHeaders } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { verifyIdentity } from '../src/contraptions.ts';
@@ -21,6 +21,7 @@ const stub = createServer((req, res) => {
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     seen.push({ method: req.method!, path: req.url!, headers: req.headers, body });
+    if (req.url!.startsWith('/apps/mandate/app-api/hang')) return;
     if (req.url!.startsWith('/apps/mandate/app-api/teapot')) return void res.writeHead(418, { 'Content-Type': 'application/vnd.teapot+json', 'X-Other': 'dropped' }).end('{"short":"and stout"}');
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true }));
   });
@@ -99,9 +100,16 @@ test('refusals, in order: key, route, person, path, body', async () => {
   const big = JSON.stringify({ text: 'x'.repeat(64 * 1024) });
   assert.equal((await relay('mandate/app-api/items', { method: 'PUT', body: big, headers: { 'Content-Type': 'application/json' } })).status, 413);
   assert.equal((await relay('mandate/app-api/items', { method: 'PUT', body: 'title=x', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })).status, 415);
+  const getWithBody = await new Promise<number>((done, fail) => {
+    const req = request(`${srv.base}/api/contraptions/relay/mandate/app-api/items`, {
+      method: 'GET', headers: { Authorization: `Bearer ${peekKey}`, 'X-Citadel-Person': String(cara), 'Content-Type': 'application/json', 'Content-Length': '2' },
+    }, (res) => done(res.resume().statusCode!));
+    req.on('error', fail).end('{}');
+  });
+  assert.equal(getWithBody, 400);
   const patch = await relay('mandate/app-api/items', { method: 'PATCH', body: '{}', headers: { 'Content-Type': 'application/json' } });
   assert.ok(patch.status >= 400, 'only GET, PUT, POST and DELETE are relayed');
-  assert.equal(seen.length, n, 'none of these reached the target');
+  assert.equal(seen.length, n, `none of these reached the target: ${JSON.stringify(seen.slice(n).map((s) => [s.method, s.path]))}`);
 });
 
 test("a relay through Caddy or from a browser is refused before the key is looked at", async () => {
@@ -117,4 +125,12 @@ test('relay paths are edited like open paths', async () => {
   assert.equal((await srv.call('/api/contraptions/peek', { relay_paths: '/mandate-hook' }, 'PATCH')).status, 400);
   assert.equal((await srv.call('/api/contraptions/peek', { relay_paths: ['no-slash'] }, 'PATCH')).status, 400);
   assert.equal((await srv.call('/api/contraptions', { name: 'relay', title: 'Relay', port: 9999 })).status, 400, 'relay is a reserved name');
+});
+
+test('a target that is down is a 502, one that never answers a 504 after 10 s', { timeout: 30_000 }, async () => {
+  assert.equal((await relay('mandate/app-api/hang')).status, 504);
+  const down = await srv.call('/api/contraptions', { name: 'down', title: 'Down', port: await freePort(), relay_paths: ['/'] });
+  assert.equal((await srv.call(`/api/contraptions/down/people/${cara}`, { enabled: true }, 'PUT')).status, 200);
+  assert.equal(down.status, 201);
+  assert.deepEqual(await error(await relay('down/anything')), [502, 'Down is not answering']);
 });

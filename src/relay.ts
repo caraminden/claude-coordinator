@@ -6,8 +6,8 @@
 // API's reachability rule and Bearer key: Contraptions.caller), naming the person in X-Citadel-Person.
 // Checks, in order: <to> registered and not the caller (404 no_route); the person enabled for both
 // (403 not_enabled); /<path> under one of <to>'s relay_paths (404 no_route); a JSON body of at most
-// 64 KiB (415, 413). Then it goes to <to>'s service under /apps/<to>/ with only Content-Type, Accept and a
-// fresh X-Citadel-Identity signed with <to>'s key, whose `from` and `fromTitle` claims name the caller;
+// 64 KiB, none on a GET (415, 413, 400). Then it goes to <to>'s service under /apps/<to>/ with only
+// Content-Type, Accept and a fresh X-Citadel-Identity signed with <to>'s key, whose `from` and `fromTitle` claims name the caller;
 // nothing else the caller sent (its key, its X-Citadel-* headers) reaches <to>. <to>'s status,
 // Content-Type and body come back untouched; no answer in 10 s is a 504. No body is kept or logged.
 import { isOpenPath } from './apps.ts';
@@ -26,6 +26,7 @@ async function jsonBody(req: Ctx['req']): Promise<Buffer | undefined> {
     chunks.push(chunk);
   }
   if (!size) return undefined;
+  if (req.method === 'GET') throw new HttpError(400, 'A GET carries no body');
   if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) throw new HttpError(415, 'The relay carries JSON bodies only (Content-Type: application/json)');
   const body = Buffer.concat(chunks);
   try {

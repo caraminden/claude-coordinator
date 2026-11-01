@@ -42,6 +42,7 @@ writeFileSync(
   `#!${process.execPath}
 const args = process.argv.slice(2);
 require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(['systemd-run', ...args]) + '\\n');
+if (process.env.FAKE_SYSTEMD_RUN_FAILS) process.exit(1);
 const [cmd, ...rest] = args.slice(args.findIndex((a) => !a.startsWith('-')));
 process.exit(require('node:child_process').spawnSync(cmd, rest, { stdio: 'inherit' }).status ?? 1);
 `,
@@ -140,10 +141,30 @@ test("a container turn's exec runs in a scope of its own under the turns slice, 
   const execs = readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const scope = execs.findLast((c) => c[0] === 'systemd-run');
   assert.ok(scope, 'the exec starts through systemd-run');
-  assert.ok(scope.includes('--user') && scope.includes('--scope') && scope.includes(`--slice=${TURN_SLICE}`), scope.join(' '));
+  assert.ok(scope.includes('--user') && scope.includes('--scope') && scope.includes('--collect') && scope.includes(`--slice=${TURN_SLICE}`), scope.join(' '));
+  assert.ok(scope.some((a: string) => new RegExp(`^--unit=citadel-turn-[0-9a-f]{8}-${id}-\\d+$`).test(a)), scope.join(' '));
   const cmd = scope.slice(scope.findIndex((a: string) => a === 'podman'));
   assert.deepEqual(cmd.slice(0, 4), ['podman', 'exec', '-d', 'citadel-claude-test-2']);
   assert.ok(notes(id).every((n) => !/citadel-claude-test-2:/.test(n)));
+});
+
+test("a container turn still runs when systemd-run fails, with a plain podman exec (#258)", async () => {
+  const id = newTicket();
+  const r = runner(inContainer);
+  r.units = true;
+  process.env.FAKE_SYSTEMD_RUN_FAILS = '1';
+  try {
+    const before = readFileSync(calls, 'utf8').trim().split('\n').length;
+    r.send(id, 'Josh', 'build it');
+    await until(() => status(id) === 'idle');
+    const execs = readFileSync(calls, 'utf8').trim().split('\n').slice(before).map((l) => JSON.parse(l));
+    const failed = execs.findIndex((c) => c[0] === 'systemd-run');
+    assert.ok(failed >= 0, 'it tried the scope first');
+    assert.ok(execs.slice(failed + 1).some((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === 'citadel-claude-test-2'), 'then ran podman exec itself');
+    assert.ok(notes(id).every((n) => !/citadel-claude-test-2:/.test(n)));
+  } finally {
+    delete process.env.FAKE_SYSTEMD_RUN_FAILS;
+  }
 });
 
 test("a person who can't run turns gets the reason as a note and no turn", async () => {

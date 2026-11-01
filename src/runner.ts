@@ -1755,12 +1755,14 @@ export class Runner {
     beat();
     // Starting the container (building its image, the first time) can take minutes; it counts as running meanwhile.
     const starting = setInterval(beat, 5_000);
+    const run = ([cmd, ...args]: string[]) => new Promise<void>((resolve, reject) => {
+      execFile(cmd, args, (err, _out, stderr) => (err ? reject(new Error(String(stderr).trim() || err.message)) : resolve()));
+    });
+    const exec = ['podman', 'exec', '-d', place.container, 'node', wrapper, dir];
+    const scoped = ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${TURN_SLICE}`, ...exec];
     place.ensure()
-      .then(() => new Promise<void>((resolve, reject) => {
-        const exec = ['podman', 'exec', '-d', place.container, 'node', wrapper, dir];
-        const [cmd, ...args] = this.units ? ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${TURN_SLICE}`, ...exec] : exec;
-        execFile(cmd, args, (err, _out, stderr) => (err ? reject(new Error(String(stderr).trim() || err.message)) : resolve()));
-      }))
+      // As with host turns, a failed systemd-run still runs the turn, though a restart then SIGKILLs its conmon.
+      .then(() => (this.units ? run(scoped).catch((err) => (console.error(`${place.container}: systemd-run failed (${err.message}), so this turn's exec runs in the server's cgroup.`), run(exec))) : run(exec)))
       .catch((err) => writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${place.container}: ${err.message}` })))
       .finally(() => clearInterval(starting));
   }

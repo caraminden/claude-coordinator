@@ -34,6 +34,12 @@ test('parked minions leave their build or type for a Parked section at the botto
   ]), [['build-8', true, [4]], ['bug', false, [2]], ['design', false, [7]], ['ideation', false, [6]], ['build-9', false, [5]], ['parked', false, [1, 3]]]);
 });
 
+test('a minion parked on start_after counts as parked before it ever runs; a new one without a chain does not (#261)', () => {
+  assert.deepEqual(shape([
+    m(1, 'bug', { state: 'parked', status: 'new', held: "#3 Leader's work is merged" }), m(2, 'bug', { state: 'parked', status: 'new' }),
+  ]), [['bug', false, [2]], ['parked', false, [1]]]);
+});
+
 test("promoted groups come after the current build, in the scheme's order, the first match winning", () => {
   const groups = ['area: balance', 'area: ui'];
   assert.deepEqual(shape([

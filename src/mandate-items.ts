@@ -20,7 +20,8 @@ const TIMEOUT_MS = 10_000;
 const FIELDS = ['title', 'day', 'time', 'at', 'alert'] as const;
 
 /** Settings key for an item's title, which a hook (carrying only the key) quotes back to the minion. */
-export const titleKey = (projectId: number, key: string) => `mandate-title:${projectId}:${key}`;
+// shortcut: a ticked or deleted item's row stays until the minion clears its key; prune if settings ever grows from it.
+export const titleKey = (projectId: number, person: number, key: string) => `mandate-title:${projectId}:${person}:${key}`;
 
 export async function mandateItem({ req, res, app, params, caller }: Ctx) {
   const { store, contraptions, runner } = app;
@@ -65,7 +66,8 @@ export async function mandateItem({ req, res, app, params, caller }: Ctx) {
     if (err?.name === 'TimeoutError') throw new HttpError(504, `${mandate.title} didn't answer within ${TIMEOUT_MS / 1000} s`);
     throw new HttpError(502, `${mandate.title} is not answering`);
   }
-  if (status === 200 && body && typeof body.title === 'string') store.setSetting(titleKey(project.id, key), body.title);
-  if (status === 200 && !body) store.deleteSetting(titleKey(project.id, key));
+  // A put on a ticked or deleted item changes nothing in Mandate, so neither does it here.
+  if (status === 200 && body && typeof body.title === 'string' && (answer as any)?.state === 'open') store.setSetting(titleKey(project.id, user.id, key), body.title);
+  if (status === 200 && !body) store.deleteSetting(titleKey(project.id, user.id, key));
   json(res, 200, { status, answer });
 }

@@ -250,7 +250,8 @@ interface TurnState {
   asker?: number | null;
   /**
    * The one person whose own typed message it answers (#268): the only person mandate_item may post for.
-   * null for a turn no one typed for (GitHub, a relay, a wake, a resume, a contraption's ask) or several did.
+   * null for a turn no one typed for (GitHub, a relay, a wake, a resume, a contraption's ask), 0 once
+   * several people did, which a later steer can't undo.
    */
   typedBy?: number | null;
   /** Their GitHub login it pushes as; null when they haven't linked, absent with GitHub linking not set up. */
@@ -1370,7 +1371,7 @@ export class Runner {
       const file = join(live!.dir, 'steer.jsonl');
       appendFileSync(file, line);
       // A typed steer is a message the turn now answers too; a second person's leaves it no one's (#268).
-      const typedBy = msg.typed && person && !extra.from ? (turn!.typedBy && turn!.typedBy !== person ? null : person) : turn!.typedBy;
+      const typedBy = msg.typed && person && !extra.from ? (turn!.typedBy == null || turn!.typedBy === person ? person : 0) : turn!.typedBy;
       this.saveTurn(ticketId, { steered: [...(turn!.steered ?? []), { end: statSync(file).size, msg }], typedBy });
       // A person steering in speaks after the relay, so what the turn starts now is theirs.
       if (person && !extra.from) this.turnFrom.delete(ticketId);
@@ -1776,7 +1777,7 @@ export class Runner {
       if (ticket.person_id && name) this.emit(ticket.id, 'note', { text: place.host ? `Turns now run for ${name}, on the server's Claude login.` : `Turns now run on ${name}'s Claude plan.` });
     }
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
-    const typedBy = typers.size === 1 ? [...typers][0] : null;
+    const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     const from = batch.find((m) => m.from || this.personOf?.(m.author))?.from;
     if (from) this.turnFrom.set(ticket.id, from);
     else this.turnFrom.delete(ticket.id);

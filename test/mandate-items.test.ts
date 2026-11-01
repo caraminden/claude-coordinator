@@ -208,9 +208,11 @@ setInterval(() => {
   const store = new Store(join(dir, 'coordinator.db'));
   const Cara = store.createUser({ name: 'Cara', login: 'cara', admin: true, server_login: true });
   const Josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const Rachel = store.createUser({ name: 'Rachel', login: 'rachel' });
   const p = store.createProject('P', null);
   store.adoptOwnerless(Cara.id);
   store.addMember(p.id, Josh.id);
+  store.addMember(p.id, Rachel.id);
   const t = store.createTicket({ project_id: p.id, kind: 'ticket', title: 'M', permission_mode: 'default', created_by: 'Cara' });
   const tm = store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
   const cwd = join(dir, 'm');
@@ -224,17 +226,17 @@ setInterval(() => {
   const turn = (k: number) => until(`turn ${k}`, () => count() === k && r.isRunning(t.id));
   const release = (k: number) => writeFileSync(join(cwd, `release-${k}`), '');
   const idle = () => until('the end', () => !r.isRunning(t.id) && r.queued(t.id) === 0);
-  /** typedBy while a turn on `msgs` runs; `queue` waits behind it and makes the next turn, whose typedBy it is then. */
+  /** typedBy while a turn on `msgs` runs; `queue` waits behind it and makes the next turn, whose typedBy it is then; `steer` goes into the last. */
   const during = async (msgs: [string, object][], opts: { steer?: [string, object]; queue?: [string, object][] } = {}) => {
     let k = count() + 1;
     for (const [author, extra] of msgs) r.send(t.id, author, 'hi', [], extra);
     await turn(k);
-    if (opts.steer) r.send(t.id, opts.steer[0], 'and', [], opts.steer[1], true);
     if (opts.queue) {
       for (const [author, extra] of opts.queue) r.send(t.id, author, 'next', [], extra);
       release(k++);
       await turn(k);
     }
+    if (opts.steer) r.send(t.id, opts.steer[0], 'and', [], opts.steer[1], true);
     const who = r.typedBy(t.id);
     release(k);
     // The stand-in never reads a steer, so it comes back as a turn of its own.
@@ -252,4 +254,5 @@ setInterval(() => {
   assert.equal(await during([['Contraption Peek, for Josh', { asker: Josh.id }]]), null, "a contraption's ask");
   assert.equal(await during([['GitHub', {}]], { queue: [['Cara', { typed: true }], ['GitHub', {}]] }), Cara.id, 'Cara typed, with GitHub in the same turn');
   assert.equal(await during([['GitHub', {}]], { queue: [['Cara', { typed: true }], ['Josh', { typed: true }]] }), null, 'two people typed');
+  assert.equal(await during([['GitHub', {}]], { queue: [['Josh', { typed: true }], ['Rachel', { typed: true }]], steer: ['Josh', { typed: true }] }), null, 'a steer after two typists leaves it no one\'s');
 });

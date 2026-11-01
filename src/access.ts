@@ -1,7 +1,7 @@
 // Who sees what: a person sees the schemes they own or are a member of (an admin sees all), the
 // live stream only carries a scheme's news to its people, and a Taskmaster writes only to schemes its person is in (and Citadel).
 import type { Session } from './auth.ts';
-import type { Project, Store, Ticket, User } from './db.ts';
+import { askerKey, type Project, type Store, type Ticket, type User } from './db.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 
 /** Stream messages only admins get: the Machines page and Citadel-wide instructions. */
@@ -82,3 +82,15 @@ export function taskmasterTargets(store: Store, from: number, personId: number |
     || (inFrom && store.canSee(who, p.id))
     || (from === GLOBAL_OWNER && now - (store.getSetting<number>(askedCitadelKey(p.id)) ?? -Infinity) < CITADEL_REPLY_MS)));
 }
+
+/** Who asked for a ticket's current (or last) turn: the person whose ask it carries on, not whom it runs as. */
+export function turnAsker(store: Store, ticketId: number): number | null {
+  return store.getSetting<number>(askerKey(ticketId)) ?? store.getTicket(ticketId)?.person_id ?? null;
+}
+
+/** Whose ask a message is (src/runner.ts personOf): a person by name, or for a relay the person of the turn that sent it. */
+export const messagePerson = (store: Store) => (author: string, from?: number): number | null => {
+  if (from) return store.getTicket(from)?.person_id ?? null;
+  const u = store.findUser('name', author);
+  return u && !u.disabled_at ? u.id : null;
+};

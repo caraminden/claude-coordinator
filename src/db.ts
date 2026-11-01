@@ -4,6 +4,9 @@ import { NOT_PEOPLE } from './auth.ts';
 import { Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
 
+/** Settings key: who asked for a ticket's turns, when that isn't whom they run as (src/access.ts turnAsker). */
+export const askerKey = (ticketId: number) => `asker:${ticketId}`;
+
 export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
 /** Each project has one long-lived coordinator ticket that manages the others. */
 export type TicketKind = 'ticket' | 'coordinator';
@@ -1134,6 +1137,7 @@ export class Store {
   }
 
   deleteTicket(id: number) {
+    this.deleteSetting(askerKey(id));
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);

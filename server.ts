@@ -9,7 +9,7 @@ import { homedir } from 'node:os';
 import { fileType, findArtifacts, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
-import { claudeRefusal, lendsMachines, mayReceive, messageScope, turnRefusal } from './src/access.ts';
+import { claudeRefusal, lendsMachines, mayReceive, messagePerson, messageScope, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
 import { Landings } from './src/land.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
@@ -200,11 +200,7 @@ const landings = new Landings();
 // Contraption turns run as the server's children: a restart waits for them like landings.
 runner.hostJobs = () => landings.running() + contraptionTurns.running();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
-runner.personOf = (author, from) => {
-  if (from) return store.getTicket(from)?.person_id ?? null;
-  const u = store.findUser('name', author);
-  return u && !u.disabled_at ? u.id : null;
-};
+runner.personOf = messagePerson(store);
 runner.githubFor = (person, dir) => githubLink.forTurn(person ? store.getUser(person) ?? null : null, dir);
 
 // ---------- push notifications ----------

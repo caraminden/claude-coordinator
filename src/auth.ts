@@ -10,7 +10,7 @@ import { GITHUB_NAME } from './github.ts';
 const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 const INVITE_DAYS = 7;
 
-const COOKIE = 'cc_session';
+export const COOKIE = 'cc_session';
 const SESSION_DAYS = 30;
 const MAX_FAILURES = 10;
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;

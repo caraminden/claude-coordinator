@@ -21,6 +21,7 @@ import { MachineRelay } from './src/machines.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { Previews, previewPath } from './src/previews.ts';
+import { AppProxy } from './src/apps.ts';
 import { type Chain, LiveWaiters } from './src/wake.ts';
 import { errorText } from './src/scheme-repo.ts';
 import { catchUpTicketDir, createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
@@ -612,13 +613,19 @@ const app: App = {
 };
 const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes, ...contraptionRoutes]);
 
-const server = createServer(async (req, res) => {
+// Contraptions' own services under /apps/<name>/ (src/apps.ts).
+const apps = new AppProxy(store, contraptions, auth);
+
+// Only /apps/ requests are upgraded (contraptions' websockets); anything else asking is served as usual.
+const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').startsWith('/apps/') }, async (req, res) => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   try {
     const url = requestUrl(req);
     const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
     if (url.pathname.startsWith('/api/')) {
       await routes(app, req, res, url, auth.session(req));
+    } else if (url.pathname.startsWith('/apps/')) {
+      apps.serve(req, res);
     } else if (preview) {
       const session = auth.session(req);
       // An HTML page's files under its file token come from a frame that sends no cookies; the preview checks the token.
@@ -643,6 +650,15 @@ const server = createServer(async (req, res) => {
     // An HttpError's words were written for the caller, a 500 too; only an unexpected throw stays vague.
     if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
     else res.end();
+  }
+});
+
+server.on('upgrade', (req, socket, head) => {
+  try {
+    apps.upgrade(req, socket, head);
+  } catch (err) {
+    console.error(err);
+    socket.destroy();
   }
 });
 

@@ -781,6 +781,9 @@ function renderLogin() {
     try {
       await api('api/login', { method: 'POST', body: { login: form.login.value, password: form.password.value } });
       try { localStorage.setItem('cc-login', form.login.value.trim()); } catch {}
+      // A contraption's page sent here by /apps/'s login gate (src/apps.ts) goes back to it.
+      const next = new URLSearchParams(location.search).get('next');
+      if (next && /^\/apps\/[a-z0-9-]+\//.test(next)) return void location.assign(next);
       start(await api('api/me'));
     } catch (ex) {
       err.textContent = ex.message;

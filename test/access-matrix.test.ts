@@ -4,12 +4,14 @@
 // UPDATE_ACCESS_MATRIX=1 rewrites the snapshot.
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, PASSWORD, SECRET } from './helpers.ts';
+import { Contraptions } from '../src/contraptions.ts';
+import { bootServer, freePort, PASSWORD, SECRET } from './helpers.ts';
 
 const SNAPSHOT = join(import.meta.dirname, 'access-matrix.snapshot.json');
 const root = mkdtempSync(join(tmpdir(), 'access-matrix-'));
@@ -40,6 +42,11 @@ const MX = machine('mx');
 store.syncArtifacts(M1, [{ path: 'report.md', size: 1, mtime: 1 }]);
 const ART = store.listArtifacts(A.id)[0];
 store.setArtifactPinned(ART.id, 'Cara');
+
+const servicePort = await freePort();
+const CX = new Contraptions(store, SECRET, join(data, 'contraptions')).register({
+  name: 'cx', title: 'CX', port: servicePort, icon: null, home_scheme: null, open_paths: '["/link"]', default_model: null, turn_cap: null,
+});
 
 const tokens = new Auth(PASSWORD, SECRET);
 const bearer = (id: number) => ({ Authorization: `Bearer ${tokens.agentToken(id)}` });
@@ -98,6 +105,8 @@ const OTHER_ROUTES: Probe[] = [
   // Wrong methods and unknown paths.
   P('DELETE', '/api/projects/:p'), P('PUT', '/api/projects/:p/properties'), P('GET', '/api/push/subscription'),
   P('POST', '/api/machines/:m'), P('GET', '/api/nonsense'),
+  // A contraption's proxied paths (src/apps.ts): cx is enabled for the admin only, /link is open.
+  P('GET', '/apps/cx/x'), P('POST', '/apps/cx/x'), P('GET', '/apps/cx/link'), P('GET', '/apps/nope/'),
 ];
 
 test('every route answers each kind of caller as recorded', { timeout: 120_000 }, async () => {
@@ -111,6 +120,11 @@ test('every route answers each kind of caller as recorded', { timeout: 120_000 }
   };
   const [member, outsider] = [await invited('Max'), await invited('Olive')];
   store.addMember(A.id, member.id);
+  // A contraption whose service answers everything, enabled for the admin.
+  const service = createServer((_req, res) => res.end('ok'));
+  await new Promise<void>((r) => service.listen(servicePort, '127.0.0.1', r));
+  after(() => service.close());
+  store.setContraptionUser(CX.id, store.findUser('name', 'Cara')!.id, true, null);
   const callers: Record<string, Record<string, string>> = {
     anon: {}, person: { Cookie: srv.cookie }, member: { Cookie: member.cookie }, outsider: { Cookie: outsider.cookie },
     tmA: bearer(TA.id), tmB: bearer(TB.id), m1: bearer(M1.id), m2: bearer(M2.id),

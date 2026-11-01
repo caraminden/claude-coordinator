@@ -8,13 +8,14 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, rmSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
-import { request, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { Auth, type Session } from './auth.ts';
 import type { Store, Ticket } from './db.ts';
 import { HttpError } from './http.ts';
 import { freePort } from './ports.ts';
+import { forward } from './proxy.ts';
 
 /** The setting that says a minion offers a preview (its view shows the Open preview button). */
 export const previewKey = (ticketId: number) => `preview:${ticketId}`;
@@ -213,19 +214,7 @@ export class Previews {
     // The live cookie means nothing to the preview; it gets its own, for the same person (none for a file token's request).
     if (session) headers.cookie = r.auth.issueCookie({ id: session.uid ?? -1, name: session.name }, false).split(';')[0];
     else delete headers.cookie;
-    const upstream = request({ host: '127.0.0.1', port: r.port, method: req.method, path: rest, headers }, (up) => {
-      const out = { ...up.headers };
-      // Never let the preview set or clear the live session cookie.
-      delete out['set-cookie'];
-      res.writeHead(up.statusCode ?? 502, out);
-      up.pipe(res);
-    });
-    upstream.on('error', () => {
-      if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain' }).end('The preview is not answering');
-      else res.destroy();
-    });
-    // A closed tab ends its long-lived stream on the preview too.
-    res.on('close', () => upstream.destroy());
-    req.pipe(upstream);
+    // Never let the preview set or clear the live session cookie.
+    forward(req, res, r.port, rest, headers, { what: 'The preview', answer: (h) => delete h['set-cookie'] });
   }
 }

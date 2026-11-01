@@ -464,6 +464,11 @@ a.file-chip:hover { border-color: var(--muted); }
 .shelf .sub { margin-top: 0.6rem; }
 .shelf .sub h4 { margin: 0 0 0.3rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); display: flex; gap: 0.4rem; align-items: center; }
 .shelf .sub h4 .count { font-weight: normal; }
+.shelf .sub.fold > summary { cursor: pointer; list-style: none; margin: 0 0 0.3rem; padding: 0.15rem 0; font-size: 0.8rem; font-weight: 600; color: var(--muted); display: flex; gap: 0.4rem; align-items: center; user-select: none; }
+.shelf .sub.fold > summary::-webkit-details-marker { display: none; }
+.shelf .sub.fold > summary::before { content: '▸'; }
+.shelf .sub.fold[open] > summary::before { content: '▾'; }
+.shelf .sub.fold > summary .count { font-weight: normal; }
 .view-all { display: flex; justify-content: space-between; text-decoration: none; color: var(--accent); font-size: 0.9em; padding: 0.3rem 0.5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 .view-all:hover, .view-all.active { border-color: var(--accent); }
 .view-all .count, .chip .count { color: var(--muted); }

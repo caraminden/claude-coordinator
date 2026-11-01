@@ -1,5 +1,5 @@
 // Artifacts and files: the shelf, the browser, and viewers for artifacts and linked or shared files.
-import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, followChat, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
+import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, followChat, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, loadPanelState, markdownDoc, reloadWhenIdle, routeSeq, savePanelState, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
 import { addBriefButtons } from './briefstart.js';
 import { attachBridge } from './bridge-host.js';
 import { loadDraft, saveDraft } from './composer.js';
@@ -135,11 +135,16 @@ export function renderShelf() {
   const sub = (title, count, items, empty, render = item) => h('div', { class: 'sub' },
     h('h4', {}, title, count ? h('span', { class: 'count' }, count) : ''),
     items.length ? items.map(render) : h('p', { class: 'muted small' }, empty));
+  // Recent starts folded; opening it is remembered with the panels' own open state.
+  const recentFold = h('details', { class: 'sub fold', open: loadPanelState().recent === true },
+    h('summary', {}, 'Recent', recent.length ? h('span', { class: 'count' }, recent.length) : ''),
+    recent.length ? recent.map(item) : h('p', { class: 'muted small' }, 'Documents, pages and canvases that minions create show up here.'));
+  recentFold.addEventListener('toggle', () => savePanelState({ ...loadPanelState(), recent: recentFold.open }));
   el.replaceChildren(h('section', { class: 'column' },
     h('h3', {}, 'Artifacts', h('span', { class: 'spacer' }),
       h('a', { class: `browse${view.main === 'artifacts' ? ' active' : ''}`, href: `#/p/${view.projectId}/artifacts`, title: `Browse all ${all.length} artifacts` }, 'Browse')),
     sub('Pinned', pinned.length, pinned, 'Pin artifacts with ☆ to keep them here.'),
-    sub('Recent', 0, recent, 'Documents, pages and canvases that minions create show up here.'),
+    recentFold,
     // The shared folder gets one link, not a list: its files are listed on their own page.
     h('a', { class: `shared-link${view.main === 'sharedList' ? ' active' : ''}`, href: `#/p/${view.projectId}/shared`, title: 'Handoffs and notes in the scheme\'s shared folder' }, 'Shared files')));
 }

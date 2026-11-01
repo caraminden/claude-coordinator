@@ -118,6 +118,8 @@ test("each minion's and Taskmaster's turn gets its own private temp folder in it
     for (const name of ['TMPDIR', 'TMP', 'TEMP', 'CLAUDE_CODE_TMPDIR']) assert.equal(t.env[name], tmp, name);
     assert.equal(statSync(tmp).mode & 0o777, 0o700);
     assert.equal(statSync(dirname(tmp)).mode & 0o777, 0o700);
+    // A working directory, or Claude Code asks before `cd $TMPDIR/x && rm out/*` even in bypassPermissions (#242).
+    assert.ok(t.args.slice(t.args.indexOf('--add-dir') + 1).includes(tmp), kind);
   }
 });
 

@@ -591,6 +591,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     '- replies: when the obvious next step only needs a go from people ("Merge it", "Make it live", "Build it this way"), offer it as 1 to 3 short replies (at most 40 characters each); each shows as a button that sends its text as the tapper\'s message, so word it as their instruction to you. They go once anyone writes or the next turn starts. For a real choice between options, ask with a question card instead, and offer no replies while a card or plan waits.',
     'When your branch has an open GitHub pull request, the app watches it and messages you as "[GitHub]: ..." when CI on its head commit passes or fails, someone reviews or comments, or it is merged or closed, so you need not wait on CI in a turn; act on those messages as the scheme expects (fix a red build, answer a review).',
     'Give every Bash call a short plain-English description (like "Run the test suite").',
+    'Scratch files go in $TMPDIR (your own temp folder, also a working directory) or your worktree. Claude Code asks a person before an `rm` whose target it cannot pin down (a glob after `cd`, `rm -rf *`, a bare `$d/*`), whatever the permission mode, so give `rm` absolute paths in a call with no `cd`: `rm -rf "$TMPDIR/out" && mkdir -p "$TMPDIR/out"`, and `"${d:?}"/*` for a variable.',
     'While your own background job runs (tests, a build, a dev server), wait for it inside the turn with one blocking command, up to 10 minutes per call, repeated until it ends, and no polling loops of short checks: the minions list shows you idle once your turn ends, and the job may not outlive it.',
     ...(deploys ? ['After you deploy with tools/deploy.sh, set state pending-deploy and do not call close_self: a successful deploy dismisses the minion once it is live and your turn has ended (the restart does not interrupt your turn), and a failed one leaves it open with the error. pending-deploy means the deploy is all that is left: in a later turn, when someone still needs you (helping them use the change, an open question, more work), set another state or null, even while the deploy is still waiting.'] : []),
     'When the minion\'s work is done and should be dismissed with nothing to deploy, call the `close_self` tool (mcp__thread) near the end of your turn: the minion is dismissed once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not dismiss a minion whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can be dismissed, even if its brief says to dismiss.',
@@ -1595,8 +1596,17 @@ export class Runner {
       // Taskmaster's prompts, so those are denied instead of waiting.
       ...permissionArgs(ticket.kind !== 'coordinator'),
     ];
-    // Lets edit-only sessions write there too, not just in their working directory.
-    const addDirs = [filesDir, sharedDir].filter((d): d is string => !!d);
+    // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
+    // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
+    let tmp: string | null = null;
+    try {
+      tmp = makeTmpDir(this.tmpRoot(project.id), ticket.id);
+    } catch (err: any) {
+      this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${err.message}` });
+    }
+    // Lets edit-only sessions write there too, not just in their working directory. The temp folder too:
+    // Claude Code asks before `cd <dir> && rm <glob>` outside the working directories, even in bypassPermissions.
+    const addDirs = [filesDir, sharedDir, tmp].filter((d): d is string => !!d);
     // One --settings per turn: the tripwire hook and the shared settings, plus approval rules or the Taskmaster's access rules.
     const deny = credentialDenies(homedir(), claudeConfigDir(process.env), dirname(this.store.path));
     // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
@@ -1636,15 +1646,7 @@ export class Runner {
     if (effort) args.push('--effort', effort);
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
     let env: Record<string, string> = { ...turnEnv(process.env), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
-    // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
-    // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
-    let tmp: string | null = null;
-    try {
-      tmp = makeTmpDir(this.tmpRoot(project.id), ticket.id);
-      env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
-    } catch (err: any) {
-      this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${err.message}` });
-    }
+    if (tmp) env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
     // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
     args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', 'AskUserQuestion', ...UNUSED_TOOLS);
     env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };

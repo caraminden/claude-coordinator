@@ -152,6 +152,7 @@ Configuration comes from the environment:
 | `COORDINATOR_PASSWORD` | (required, 12+ chars) | The admin's master password: it signs in as the admin whose login is typed (or the first admin for any other login). Never hand it out; invite people instead |
 | `COORDINATOR_ADMIN` | `Cara` | Name of the admin made on first start, when the database has no people yet; their login is the name in lower case |
 | `SESSION_SECRET` | (required, 32+ chars) | Signs session cookies, and encrypts people's linked accounts: changing it unlinks everyone's GitHub |
+| `CITADEL_CONTRAPTIONS_DIR` | `~/.config/citadel/contraptions` | Where each contraption's key folder goes (`<name>/identity.pub`, `<name>/contraption.key`), which its own service reads |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | (unset: turns use the box's gh login) | The OAuth App people link their own GitHub through (below) |
 | `HOST` / `PORT` | `127.0.0.1` / `8573` | Listen address |
 | `DATA_DIR` | `~/.local/share/claude-coordinator` | Database, clones, worktrees |

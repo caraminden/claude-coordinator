@@ -1,5 +1,6 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
 import type { ClaudeLink } from './claude-link.ts';
+import type { Contraptions } from './contraptions.ts';
 import type { Landings } from './land.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { gzip } from 'node:zlib';
@@ -160,6 +161,8 @@ export interface App {
   github: GithubLink;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */
   claude: ClaudeLink;
+  /** Contraptions' keys and who each is enabled for (src/contraptions.ts). */
+  contraptions: Contraptions;
   /** land.sh runs for container turns' land tool (src/land.ts). */
   landings: Landings;
   /** Open event streams (GET /api/stream), with whose they are. */

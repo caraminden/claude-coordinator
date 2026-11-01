@@ -32,6 +32,8 @@ import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
 import { peopleRoutes } from './src/routes/people.ts';
 import { Credentials } from './src/credentials.ts';
+import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
+import { contraptionRoutes } from './src/routes/contraptions.ts';
 import { GithubLink } from './src/github-link.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
@@ -115,6 +117,7 @@ if (!store.listUsers().some((u) => u.admin)) {
 }
 store.adoptOwnerless(store.listUsers().find((u) => u.admin)!.id);
 const credentials = new Credentials(store, process.env.SESSION_SECRET ?? '');
+const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '', process.env.CITADEL_CONTRAPTIONS_DIR || DEFAULT_CONTRAPTIONS_DIR);
 const githubLink = new GithubLink(store, credentials, process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '');
 // People's own Claude plans (#213). A dev copy tags its containers so it never shares the live server's.
 const claudeLink = new ClaudeLink(store, credentials, DATA_DIR, process.env.CLAUDE_BIN ?? 'claude', undefined, DATA_DIR === DEFAULT_DATA_DIR ? 'citadel-claude-' : `citadel-claude-${createHash('sha256').update(DATA_DIR).digest('hex').slice(0, 6)}-`);
@@ -598,14 +601,14 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink, landings,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink, contraptions, landings,
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {
     return ASSET_VERSION;
   },
   broadcast, notify, newMinion, startChained, ticketBranch, sharedFiles, sharedDir, registryChanged,
 };
-const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes]);
+const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes, ...contraptionRoutes]);
 
 const server = createServer(async (req, res) => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);

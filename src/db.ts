@@ -238,6 +238,24 @@ export interface SavedView {
   created_at: number;
 }
 
+/** A contraption's row (src/contraptions.ts). open_paths is a JSON array of paths. */
+export interface ContraptionRow {
+  id: number;
+  name: string;
+  title: string;
+  icon: string | null;
+  port: number;
+  home_scheme: number | null;
+  open_paths: string;
+  default_model: string | null;
+  turn_cap: number | null;
+  identity_public: string;
+  identity_private: string;
+  key_hash: string;
+  keys_at: number;
+  created_at: number;
+}
+
 /** People's own note on a minion (#146): who last wrote it and when. Never shown to agents. */
 export const PERSON_NOTE_MAX = 200; // public/thread.js keeps the same limit on its input
 export interface PersonNote {
@@ -470,6 +488,33 @@ CREATE TABLE IF NOT EXISTS credentials (
   failed_at INTEGER,
   PRIMARY KEY (user_id, kind)
 );
+-- Contraptions (src/contraptions.ts): personal apps with their own service, reached through Citadel.
+-- identity_private is the Ed25519 private key, sealed like credentials but kept out of that table, which
+-- turns can reach; key_hash is the sha256 of the bearer contraption key, which only the key files hold.
+CREATE TABLE IF NOT EXISTS contraptions (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  icon TEXT,
+  port INTEGER NOT NULL,
+  home_scheme INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  open_paths TEXT NOT NULL DEFAULT '[]',
+  default_model TEXT,
+  turn_cap INTEGER,
+  identity_public TEXT NOT NULL,
+  identity_private TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE,
+  keys_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+-- Who a contraption is enabled for: its own list, like project_members. Being in its home scheme grants nothing.
+CREATE TABLE IF NOT EXISTS contraption_users (
+  contraption_id INTEGER NOT NULL REFERENCES contraptions(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  added_at INTEGER NOT NULL,
+  added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  PRIMARY KEY (contraption_id, user_id)
+);
 `;
 
 /**
@@ -525,7 +570,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 18; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides
+export const SCHEMA_VERSION = 19; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -890,6 +935,54 @@ export class Store {
   canSee(who: { uid?: number; admin?: boolean }, projectId: number): boolean {
     return !!who.admin || !!this.db.prepare(`SELECT 1 FROM projects WHERE id = ?1 AND owner_id = ?2
       UNION SELECT 1 FROM project_members WHERE project_id = ?1 AND user_id = ?2`).get(projectId, who.uid ?? -1);
+  }
+
+  listContraptions(): ContraptionRow[] {
+    return this.db.prepare('SELECT * FROM contraptions ORDER BY title COLLATE NOCASE').all() as unknown as ContraptionRow[];
+  }
+
+  getContraption(name: string): ContraptionRow | undefined {
+    return this.db.prepare('SELECT * FROM contraptions WHERE name = ?').get(name) as unknown as ContraptionRow | undefined;
+  }
+
+  /** The contraption a bearer key's hash belongs to. */
+  contraptionByKeyHash(hash: string): ContraptionRow | undefined {
+    return this.db.prepare('SELECT * FROM contraptions WHERE key_hash = ?').get(hash) as unknown as ContraptionRow | undefined;
+  }
+
+  createContraption(c: Omit<ContraptionRow, 'id' | 'created_at'>): ContraptionRow {
+    const keys = Object.keys(c) as (keyof typeof c)[];
+    this.db.prepare(`INSERT INTO contraptions (${keys.join(', ')}, created_at) VALUES (${keys.map(() => '?').join(', ')}, ?)`)
+      .run(...keys.map((k) => c[k] ?? null), Date.now());
+    return this.getContraption(c.name)!;
+  }
+
+  updateContraption(name: string, fields: Partial<Omit<ContraptionRow, 'id' | 'name' | 'created_at'>>) {
+    const keys = Object.keys(fields) as (keyof typeof fields)[];
+    if (!keys.length) return;
+    this.db.prepare(`UPDATE contraptions SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE name = ?`).run(...keys.map((k) => fields[k] ?? null), name);
+  }
+
+  /** The ids of the people a contraption is enabled for. */
+  contraptionUsers(contraptionId: number): number[] {
+    return (this.db.prepare('SELECT user_id FROM contraption_users WHERE contraption_id = ? ORDER BY added_at').all(contraptionId) as { user_id: number }[]).map((r) => r.user_id);
+  }
+
+  setContraptionUser(contraptionId: number, userId: number, enabled: boolean, by: number | null) {
+    if (enabled) this.db.prepare('INSERT OR IGNORE INTO contraption_users (contraption_id, user_id, added_at, added_by) VALUES (?, ?, ?, ?)').run(contraptionId, userId, Date.now(), by);
+    else this.db.prepare('DELETE FROM contraption_users WHERE contraption_id = ? AND user_id = ?').run(contraptionId, userId);
+  }
+
+  /** Whether a contraption is enabled for a person who can still sign in. Read fresh each call, so a change takes at once. */
+  contraptionEnabled(name: string, userId: number): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM contraption_users cu JOIN contraptions c ON c.id = cu.contraption_id
+      JOIN users u ON u.id = cu.user_id WHERE c.name = ? AND cu.user_id = ? AND u.disabled_at IS NULL`).get(name, userId);
+  }
+
+  /** The contraptions enabled for a person, for their app rail. */
+  contraptionsFor(userId: number): Pick<ContraptionRow, 'name' | 'title' | 'icon'>[] {
+    return this.db.prepare(`SELECT c.name, c.title, c.icon FROM contraptions c JOIN contraption_users cu ON cu.contraption_id = c.id
+      JOIN users u ON u.id = cu.user_id WHERE cu.user_id = ? AND u.disabled_at IS NULL ORDER BY c.title COLLATE NOCASE`).all(userId) as unknown as Pick<ContraptionRow, 'name' | 'title' | 'icon'>[];
   }
 
   /** The schemes this person hid for themselves (#226). */

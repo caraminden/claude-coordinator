@@ -26,6 +26,7 @@ function view(app: App, c: ContraptionRow) {
     name: c.name, title: c.title, icon: c.icon, port: c.port, home_scheme: c.home_scheme, open_paths: JSON.parse(c.open_paths) as string[],
     relay_paths: JSON.parse(c.relay_paths) as string[],
     default_model: c.default_model, turn_cap: c.turn_cap, keys_at: c.keys_at, keys_dir: app.contraptions.folder(c.name),
+    repo: c.repo, branch: c.branch ?? 'main', folder: app.services.folder(c),
     people: app.store.contraptionUsers(c.id),
     logins: app.store.contraptionUsers(c.id).map((id) => app.store.getUser(id)?.login).filter(Boolean),
   };
@@ -79,6 +80,16 @@ function fields(app: App, body: any, creating: boolean) {
     out.default_model = m || null;
   }
   if (body.turn_cap !== undefined) out.turn_cap = int(body.turn_cap, 'Turn cap', 1, 100_000);
+  // Where it deploys from (#266): only an admin sets these, so only a repo an admin chose is ever built.
+  const optional = (key: 'repo' | 'branch' | 'folder', ok: RegExp, says: string) => {
+    if (body[key] === undefined) return;
+    const v = typeof body[key] === 'string' ? body[key].trim() : body[key];
+    if (v !== null && v !== '' && (typeof v !== 'string' || !ok.test(v) || v.split('/').includes('..'))) throw new HttpError(400, says);
+    out[key] = v || null;
+  };
+  optional('repo', /^[\w.-]{1,100}\/[\w.-]{1,100}$/, 'Repo must be a GitHub owner/name, like caraminden/mandate');
+  optional('branch', /^(?!-)[\w.\/-]{1,100}$/, 'Branch must be a branch name, like main');
+  optional('folder', /^~?\/[\w.+\/-]{1,200}$/, 'Folder must be an absolute path or one under ~/, like ~/apps/mandate');
   return out;
 }
 
@@ -102,13 +113,34 @@ const admin = (route: Pick<Route, 'method' | 'path' | 'handler'>): Route => ({
 });
 
 /** A service call (src/app-services.ts), its refusals as HTTP errors. */
-async function service<T>(work: () => Promise<T>): Promise<T> {
+async function service<T>(work: () => Promise<T> | T): Promise<T> {
   try {
     return await work();
   } catch (err) {
     if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
     throw err;
   }
+}
+
+/**
+ * The contraption a deploy call names, if the caller may deploy it: an admin; Citadel's Taskmaster on a
+ * turn an admin asked for; or a Taskmaster or minion of its home scheme. Anyone else learns nothing of it.
+ */
+function deployable(app: App, name: string, caller: Ctx['caller']): ContraptionRow {
+  const c = app.store.getContraption(name);
+  if (!caller) {
+    // A person is an admin by now (the route's access).
+    if (!c) throw new HttpError(404, 'No such contraption');
+    return c;
+  }
+  if (c && c.home_scheme !== null && caller.project_id === c.home_scheme) return c;
+  if (caller.kind === 'coordinator' && caller.project_id === GLOBAL_OWNER) {
+    const refused = adminAskRefusal(app.store, caller.id);
+    if (refused) throw new HttpError(403, refused);
+    if (!c) throw new HttpError(404, 'No such contraption');
+    return c;
+  }
+  throw new HttpError(403, `Only its home scheme's ${AGENT_NAME} and minions, or an admin, deploy a contraption`);
 }
 
 /** Asks per contraption and person: ASK_LIMIT in ASK_WINDOW_MS, then 429. shortcut: kept in memory, so a restart forgets it; fine as a loop backstop. */
@@ -203,7 +235,7 @@ export const contraptionRoutes: Route[] = [
       const f = fields(app, body, true);
       const c = app.contraptions.register({
         name, title: f.title!, port: f.port!, icon: f.icon ?? null, home_scheme: f.home_scheme ?? null, open_paths: f.open_paths ?? '[]', relay_paths: f.relay_paths ?? '[]',
-        default_model: f.default_model ?? null, turn_cap: f.turn_cap ?? null,
+        default_model: f.default_model ?? null, turn_cap: f.turn_cap ?? null, repo: f.repo ?? null, branch: f.branch ?? null, folder: f.folder ?? null,
       });
       return json(res, 201, view(app, c));
     },
@@ -265,6 +297,23 @@ export const contraptionRoutes: Route[] = [
     method: 'GET', path: '/api/contraptions/:name/service/logs',
     handler: async ({ res, app, params, url }) => json(res, 200, { log: await service(() => app.services.logs(contraption(app, params.name), Number(url.searchParams.get('lines')) || 100)) }),
   }),
+  // Deploy it from its repo (#266): admins, Citadel's Taskmaster on an admin's turn, and its home scheme's
+  // Taskmaster and minions, for that one contraption. Starts it and answers at once; GET follows it.
+  {
+    method: 'POST', path: '/api/contraptions/:name/deploy', who: ['person', 'taskmaster', 'minion'], access: 'admin',
+    handler({ res, app, params, session, caller }) {
+      const c = deployable(app, params.name, caller);
+      const by = caller ? (caller.kind === 'coordinator' ? `${app.store.getProject(caller.project_id)?.name ?? 'a'} Taskmaster` : `#${caller.number}`) : app.store.getUser(session.uid as number)?.name ?? 'an admin';
+      return service(async () => json(res, 202, app.services.deploy(c, by, app.store.listContraptions())));
+    },
+  },
+  {
+    method: 'GET', path: '/api/contraptions/:name/deploy', who: ['person', 'taskmaster', 'minion'], access: 'admin',
+    handler: async ({ res, app, params, caller }) => {
+      const c = deployable(app, params.name, caller);
+      return json(res, 200, await service(() => app.services.lastDeploy(c.name)));
+    },
+  },
   {
     // A bug report or feature ask from a contraption's server, as one of its people: files into the home
     // scheme's shared folder, the ask to its Taskmaster, waking it.

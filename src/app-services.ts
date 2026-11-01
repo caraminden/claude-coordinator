@@ -8,10 +8,12 @@
 // files that do. Units an app's people installed by hand before (same port, or run from its folder) are
 // reported, and stopped and disabled only when an admin asks with replace: their files stay.
 // A boot check, a preview or a dev copy without a stand-in systemctl gets `off`: it never touches systemd.
-import { execFile } from 'node:child_process';
-import { readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { execFile, spawn } from 'node:child_process';
+import { closeSync, existsSync, openSync } from 'node:fs';
+import { appendFile, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { connect } from 'node:net';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { ContraptionRow } from './db.ts';
 
 /** The manifest's file name, in the app's folder. */
@@ -29,6 +31,10 @@ export interface Manifest {
   timers: Record<string, { command: string[]; on_calendar: string; workdir: string }>;
   /** A path that answers 2xx once it is up, like /health; without one, an open port counts. */
   health: string | null;
+  /** Shell commands a deploy runs in the folder, in order, niced; any failing fails the deploy. */
+  build: string[];
+  /** Minutes the whole build may take (default 20, at most 60). */
+  build_timeout: number;
 }
 
 /** The environment Citadel sets on every app's units; a manifest can't. */
@@ -79,7 +85,9 @@ export function parseManifest(text: string): Manifest {
     }
   }
   if (m.health !== undefined && m.health !== null && !(typeof m.health === 'string' && /^\/[\x21-\x7e]{0,199}$/.test(m.health))) throw new Error('health must be a path starting with /, like /health');
-  return { start: command(m.start, 'start'), workdir: relDir(m.workdir, 'workdir'), env, timers, health: m.health ?? null };
+  if (m.build !== undefined && (!Array.isArray(m.build) || m.build.length > 20 || !m.build.every((b: unknown) => isText(b, 2000)))) throw new Error('build must be a list of at most 20 shell commands, like ["npm ci", "npm run build"]');
+  if (m.build_timeout !== undefined && !(Number.isInteger(m.build_timeout) && m.build_timeout >= 1 && m.build_timeout <= 60)) throw new Error('build_timeout must be whole minutes from 1 to 60');
+  return { start: command(m.start, 'start'), workdir: relDir(m.workdir, 'workdir'), env, timers, health: m.health ?? null, build: m.build ?? [], build_timeout: m.build_timeout ?? 20 };
 }
 
 /** The first line of every unit file Citadel writes; it touches no other. */
@@ -102,14 +110,16 @@ export interface UnitInputs {
   home: string;
 }
 
+/** Toolchains mise installs, then the usual: a user unit's PATH has neither ~/.local/bin nor mise's shims. */
+const toolPath = (home: string) => `${join(home, '.local/share/mise/shims')}:${join(home, '.local/bin')}:/usr/local/bin:/usr/bin:/bin`;
+
 /** The unit name for a contraption, or one of its jobs. */
 export const unitName = (name: string, job?: string) => `citadel-app-${name}${job ? `-${job}` : ''}`;
 
 /** Every unit file for an app, by file name. Pure: the tests check it as text. */
 export function unitFiles({ row, manifest, folder, keysDir, citadelUrl, home }: UnitInputs): Map<string, string> {
   const env = {
-    // Toolchains mise installs, then the usual: a user unit's PATH has neither ~/.local/bin nor mise's shims.
-    PATH: `${join(home, '.local/share/mise/shims')}:${join(home, '.local/bin')}:/usr/local/bin:/usr/bin:/bin`,
+    PATH: toolPath(home),
     ...Object.fromEntries(Object.entries(manifest.env).map(([k, v]) => [k, tilde(v, home)])),
     PORT: String(row.port),
     DATA_DIR: join(home, '.local/share', row.name),
@@ -175,6 +185,25 @@ export interface ServiceStatus {
   hand: HandUnit[];
 }
 
+/** A deploy as the tools and Settings show it. */
+export interface DeployView {
+  name: string;
+  state: 'running' | 'deployed' | 'failed' | 'rolled back';
+  /** Who asked: a person's name, or #N of a minion. */
+  by: string;
+  repo: string;
+  branch: string;
+  /** The commit it ran before, and the one it went to (null until known). */
+  from: string | null;
+  to: string | null;
+  started_at: number;
+  finished_at: number | null;
+  /** What it did, a line per step. */
+  said: string[];
+  /** Its whole log: git's and the build's output. */
+  log: string;
+}
+
 export class ServiceError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -199,10 +228,18 @@ export interface ServiceOptions {
   home: string;
   keysDir: (name: string) => string;
   citadelUrl: () => string;
+  /** Where deploys' logs go, a folder per app. */
+  logDir: string;
+  /** How long a started app has to answer its health check. */
+  healthMs: number;
+  /** A manifest's build_timeout minute, in ms (tests shorten it). */
+  minuteMs: number;
+  /** Where a repo is cloned from: GitHub, or CITADEL_GIT_BASE (tests). */
+  gitUrl: (repo: string) => string;
 }
 
 /** Defaults from the environment: CITADEL_SYSTEMCTL and CITADEL_JOURNALCTL stand in for the real ones (tests). */
-export function serviceOptions(env: NodeJS.ProcessEnv, liveData: boolean, bootCheck: boolean, rest: Pick<ServiceOptions, 'keysDir' | 'citadelUrl'>): ServiceOptions {
+export function serviceOptions(env: NodeJS.ProcessEnv, liveData: boolean, bootCheck: boolean, rest: Pick<ServiceOptions, 'keysDir' | 'citadelUrl' | 'logDir'>): ServiceOptions {
   const home = homedir();
   const stand = !!env.CITADEL_SYSTEMCTL && !!env.XDG_CONFIG_HOME;
   const off = bootCheck ? 'A boot check or a preview never touches app services.'
@@ -214,6 +251,9 @@ export function serviceOptions(env: NodeJS.ProcessEnv, liveData: boolean, bootCh
     systemctl: env.CITADEL_SYSTEMCTL || 'systemctl',
     journalctl: env.CITADEL_JOURNALCTL || 'journalctl',
     home,
+    healthMs: Number(env.CITADEL_HEALTH_MS) || 60_000,
+    minuteMs: 60_000,
+    gitUrl: (repo) => `${env.CITADEL_GIT_BASE || 'https://github.com'}/${repo}.git`,
     ...rest,
   };
 }
@@ -229,9 +269,9 @@ export class AppServices {
     this.opts = opts;
   }
 
-  /** The app's folder: where its repo is checked out. */
-  folder(row: Pick<ContraptionRow, 'name'>): string {
-    return join(this.opts.home, 'apps', row.name);
+  /** The app's folder: where its repo is checked out; default ~/apps/<name>. */
+  folder(row: Pick<ContraptionRow, 'name' | 'folder'>): string {
+    return row.folder ? tilde(row.folder, this.opts.home) : join(this.opts.home, 'apps', row.name);
   }
 
   unitOf(row: Pick<ContraptionRow, 'name'>): string {
@@ -253,7 +293,7 @@ export class AppServices {
   }
 
   /** The manifest in the app's folder, or an Error saying why not. */
-  async manifest(row: Pick<ContraptionRow, 'name'>, folder = this.folder(row)): Promise<Manifest> {
+  async manifest(row: Pick<ContraptionRow, 'name' | 'folder'>, folder = this.folder(row)): Promise<Manifest> {
     let text: string;
     try {
       text = await readFile(join(folder, MANIFEST), 'utf8');
@@ -290,7 +330,7 @@ export class AppServices {
   }
 
   /** Units in the unit folder that Citadel didn't write but run this app: the same port, or from its folder. */
-  async handInstalled(row: Pick<ContraptionRow, 'name' | 'port'>): Promise<HandUnit[]> {
+  async handInstalled(row: Pick<ContraptionRow, 'name' | 'port' | 'folder'>): Promise<HandUnit[]> {
     const folder = this.folder(row);
     const files = await readdir(this.opts.unitDir).catch(() => [] as string[]);
     const found: HandUnit[] = [];
@@ -404,6 +444,189 @@ export class AppServices {
     if (!(await this.owned(row.name)).includes(main)) throw new ServiceError(409, `${row.title} has no service yet: install it first.`);
     await this.must(action, main);
     return this.state(main);
+  }
+
+  /** Deploys running now, so a Citadel restart waits for them (runner.hostJobs). */
+  jobs(): number {
+    return [...this.deploys.values()].filter((d) => d.state === 'running').length;
+  }
+
+  private deploys = new Map<string, DeployView>();
+
+  /** Its last deploy since this server started, with the end of its log; null when none. */
+  async lastDeploy(name: string): Promise<(DeployView & { tail: string }) | null> {
+    const d = this.deploys.get(name);
+    if (!d) return null;
+    const text = await readFile(d.log, 'utf8').catch(() => '');
+    // Running until the lock is off, so "finished" always means a new deploy may start.
+    return { ...d, state: d.finished_at === null ? 'running' : d.state, said: [...d.said], tail: text.split('\n').slice(-60).join('\n') };
+  }
+
+  /**
+   * Deploy an app from its repo (#266): clone it, or fetch and fast-forward its branch (refused on local
+   * changes or a branch that isn't the registered one), build it niced with a time limit, write its units
+   * and restart it, then check its health. A failure after the fast-forward rolls back to the commit
+   * before, builds that, and restarts it. Starts it and returns at once; lastDeploy follows it.
+   */
+  deploy(row: ContraptionRow, by: string, all: ContraptionRow[] = []): DeployView {
+    this.guard();
+    if (!row.repo) throw new ServiceError(409, `${row.title} has no repo set: an admin sets one (owner/name) in Settings → Contraptions first.`);
+    if (this.busy.has(row.name)) throw new ServiceError(409, `${row.name} is being installed or deployed already: wait for that to finish.`);
+    this.busy.add(row.name);
+    const started = Date.now();
+    const log = join(this.opts.logDir, row.name, `${new Date(started).toISOString().replace(/[:.]/g, '-')}.log`);
+    const view: DeployView = { name: row.name, state: 'running', by, repo: row.repo, branch: row.branch ?? 'main', from: null, to: null, started_at: started, finished_at: null, said: [], log };
+    this.deploys.set(row.name, view);
+    void this.deployNow(row, view, all)
+      .catch((err) => {
+        view.said.push(`Failed: ${err.message}`);
+        view.state = 'failed';
+      })
+      .finally(async () => {
+        await appendFile(log, `== ${view.state} at ${new Date().toISOString()}\n`).catch(() => {});
+        this.busy.delete(row.name);
+        view.finished_at = Date.now();
+        await this.pruneLogs(row.name).catch(() => {});
+      });
+    return view;
+  }
+
+  private async pruneLogs(name: string) {
+    const dir = join(this.opts.logDir, name);
+    const old = (await readdir(dir)).filter((f) => f.endsWith('.log')).sort().slice(0, -20);
+    for (const f of old) await rm(join(dir, f), { force: true });
+  }
+
+  /** The environment builds and git run with: none of Citadel's own, mise's toolchains on PATH. */
+  private buildEnv(folder: string): NodeJS.ProcessEnv {
+    const keep = ['HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'SSH_AUTH_SOCK'];
+    const env: NodeJS.ProcessEnv = Object.fromEntries(keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
+    return { ...env, PATH: toolPath(this.opts.home), GIT_TERMINAL_PROMPT: '0', MISE_TRUSTED_CONFIG_PATHS: folder };
+  }
+
+  private async deployNow(row: ContraptionRow, view: DeployView, all: ContraptionRow[]) {
+    const folder = this.folder(row);
+    const env = this.buildEnv(folder);
+    await mkdir(dirname(view.log), { recursive: true });
+    const say = async (line: string) => {
+      view.said.push(line);
+      await appendFile(view.log, `== ${line}\n`);
+    };
+    /** Run a command, its output into the log; its exit code (124 when it ran out of time). */
+    const sh = (argv: string[], cwd: string, ms: number) => new Promise<number>((ok) => {
+      const fd = openSync(view.log, 'a');
+      const child = spawn(argv[0], argv.slice(1), { cwd, env, detached: true, stdio: ['ignore', fd, fd] });
+      closeSync(fd);
+      let late = false;
+      const timer = setTimeout(() => {
+        late = true;
+        try {
+          process.kill(-child.pid!, 'SIGTERM');
+          setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} }, 10_000).unref();
+        } catch {}
+      }, Math.max(1, ms));
+      child.once('error', () => { clearTimeout(timer); ok(127); });
+      child.once('close', (code) => { clearTimeout(timer); ok(late ? 124 : code ?? 1); });
+    });
+    const git = async (...args: string[]) => {
+      const r = await new Promise<Ran>((ok) => execFile('git', args, { cwd: folder, env, timeout: 120_000 }, (err: any, out, errText) => ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(errText) })));
+      if (r.code) throw new Error(`git ${args.join(' ')} failed: ${r.err.trim().slice(0, 500) || `exit ${r.code}`}`);
+      return r.out.trim();
+    };
+    const short = (sha: string | null) => sha?.slice(0, 9) ?? 'nothing';
+    const repo = row.repo!;
+    const live = (await this.handInstalled(row)).filter((u) => u.active === 'active' || u.active === 'activating' || /^enabled/.test(u.enabled));
+    if (live.length) throw new Error(`Hand-installed units run ${row.name}: ${live.map((u) => u.unit).join(', ')}. An admin installs it once with replace (contraption_service install, replace: true, or Settings → Contraptions) before it can deploy.`);
+
+    let prev: string | null = null;
+    if (!existsSync(folder)) {
+      await mkdir(dirname(folder), { recursive: true });
+      await say(`Cloning ${repo} (${view.branch}) into ${folder}.`);
+      if (await sh(['git', 'clone', '--quiet', '--branch', view.branch, '--', this.opts.gitUrl(repo), folder], dirname(folder), 600_000)) throw new Error(`Cloning ${repo} failed: see the log.`);
+    } else {
+      if ((await git('rev-parse', '--show-toplevel').catch(() => '')) !== (await realpath(folder))) throw new Error(`${folder} isn't a git checkout of its own: move it away, or set another folder.`);
+      const origin = await git('remote', 'get-url', 'origin').catch(() => '');
+      const slug = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(origin)?.[1];
+      const bare = (u: string) => u.replace(/(\.git)?\/?$/, '').toLowerCase();
+      if (slug?.toLowerCase() !== repo.toLowerCase() && bare(origin) !== bare(this.opts.gitUrl(repo))) throw new Error(`${folder}'s origin is ${origin || 'not set'}, not ${repo}: refusing to deploy over it.`);
+      const branch = await git('branch', '--show-current');
+      if (branch !== view.branch) throw new Error(`${folder} is on ${branch || 'a detached HEAD'}, not ${view.branch}: switch it back by hand first.`);
+      const dirty = await git('status', '--porcelain');
+      if (dirty) throw new Error(`${folder} has local changes, so nothing was fetched: commit or remove them first.\n${dirty.split('\n').slice(0, 10).join('\n')}`);
+      prev = await git('rev-parse', 'HEAD');
+      await say(`Fetching ${repo} ${view.branch}.`);
+      if (await sh(['git', 'fetch', '--quiet', 'origin', view.branch], folder, 600_000)) throw new Error(`Fetching ${repo} failed: see the log.`);
+      await git('merge', '--ff-only', '--quiet', 'FETCH_HEAD').catch(() => {
+        throw new Error(`${folder}'s ${view.branch} has commits ${repo} doesn't: it can only fast-forward, so nothing changed.`);
+      });
+    }
+    view.from = prev;
+    view.to = await git('rev-parse', 'HEAD');
+    await say(prev === view.to ? `Already at ${short(view.to)}: building and restarting it anyway.` : `Now at ${short(view.to)}${prev ? ` (was ${short(prev)})` : ''}.`);
+
+    const buildAndStart = async () => {
+      const m = await this.manifest(row, folder);
+      const deadline = Date.now() + m.build_timeout * this.opts.minuteMs;
+      for (const step of m.build) {
+        await say(`Build: ${step}`);
+        const code = await sh(['nice', '-n', '10', 'sh', '-c', step], folder, deadline - Date.now());
+        if (code === 124) throw new Error(`The build ran past its ${m.build_timeout} minutes at: ${step}`);
+        if (code) throw new Error(`Build step failed (exit ${code}): ${step}`);
+      }
+      for (const line of await this.installNow(row, { all })) await say(line);
+      await this.healthy(row, m.health);
+      await say(`Healthy: ${m.health ? `${m.health} answered` : `port ${row.port} open`}.`);
+    };
+    try {
+      await buildAndStart();
+      view.state = 'deployed';
+      await say(`Deployed ${short(view.to)}.`);
+    } catch (err: any) {
+      await say(`Failed: ${err.message}`);
+      if (!prev || prev === view.to) {
+        view.state = 'failed';
+        if (!prev) await say('Nothing to roll back to: this was its first deploy.');
+        return;
+      }
+      await say(`Rolling back to ${short(prev)}.`);
+      try {
+        await git('reset', '--hard', '--quiet', prev);
+        await buildAndStart();
+        view.state = 'rolled back';
+        await say(`Rolled back: ${short(prev)} runs again.`);
+      } catch (again: any) {
+        view.state = 'failed';
+        await say(`Rolling back failed too: ${again.message}`);
+      }
+    }
+  }
+
+  /** Wait for its service to be active and its health path (or port) to answer, twice, a few seconds apart. */
+  private async healthy(row: ContraptionRow, health: string | null) {
+    const main = `${unitName(row.name)}.service`;
+    const until = Date.now() + this.opts.healthMs;
+    const probe = async () => (health
+      ? fetch(`http://127.0.0.1:${row.port}${health}`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok, () => false)
+      : new Promise<boolean>((ok) => {
+        const sock = connect({ host: '127.0.0.1', port: row.port, timeout: 1000 });
+        const done = (v: boolean) => { sock.destroy(); ok(v); };
+        sock.once('connect', () => done(true)).once('error', () => done(false)).once('timeout', () => done(false));
+      }));
+    let seen = '';
+    for (let first = true; Date.now() < until; await new Promise((r) => setTimeout(r, 1000))) {
+      const state = (await this.state(main)).active;
+      const ok = state === 'active' && await probe();
+      seen = `${main} ${state}${state === 'active' ? `, ${health ?? `port ${row.port}`} not answering` : ''}`;
+      if (!ok) {
+        first = true;
+        continue;
+      }
+      // Once more after a pause, so a service that starts and then crashes doesn't pass.
+      if (!first) return;
+      first = false;
+      await new Promise((r) => setTimeout(r, Math.min(3000, this.opts.healthMs / 10)));
+    }
+    throw new Error(`Not healthy after ${Math.round(this.opts.healthMs / 1000)}s: ${seen || 'no answer'}. Its journal: contraption_service logs.`);
   }
 
   /** The last lines of its units' journal. */

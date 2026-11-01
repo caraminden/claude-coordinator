@@ -88,7 +88,7 @@ export class Contraptions {
   }
 
   /** Register a contraption with fresh keys. The key files are written first, so a failed write registers nothing. */
-  register(fields: Omit<ContraptionRow, 'id' | 'created_at' | 'identity_public' | 'identity_private' | 'key_hash' | 'keys_at'>): ContraptionRow {
+  register(fields: Omit<ContraptionRow, 'id' | 'created_at' | 'identity_public' | 'identity_private' | 'key_hash' | 'keys_at' | 'repo' | 'branch' | 'folder'> & Partial<Pick<ContraptionRow, 'repo' | 'branch' | 'folder'>>): ContraptionRow {
     return this.store.createContraption({ ...fields, ...this.newKeys(fields.name) });
   }
 

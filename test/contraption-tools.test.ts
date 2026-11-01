@@ -46,12 +46,12 @@ before(async () => {
 after(() => srv?.proc.kill());
 
 /** One tools/list or tools/call through the real MCP server, as `ticket`; `citadel` is the env the runner sets for Citadel's Taskmaster. */
-async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, citadel = ticket.project_id === GLOBAL_OWNER): Promise<any> {
+async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, citadel = ticket.project_id === GLOBAL_OWNER, home?: string, role = 'coordinator'): Promise<any> {
   const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
       ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(ticket.project_id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: 'coordinator',
-      COORDINATOR_APP_INSTRUCTIONS: citadel ? '1' : undefined,
+      COORDINATOR_PROJECT: String(ticket.project_id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: role,
+      COORDINATOR_APP_INSTRUCTIONS: citadel ? '1' : undefined, COORDINATOR_HOME_CONTRAPTIONS: home,
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -226,4 +226,40 @@ test('a boot check never touches systemd, even with the stand-ins set', async ()
   } finally {
     await check.stop();
   }
+});
+
+test('deploy_contraption: its home scheme\'s Taskmaster and minions, and Citadel\'s Taskmaster on an admin\'s turn; no one else', async () => {
+  const DelveMinion = thread(Delve.id, 'ticket');
+  turnFor(DelveMinion, olive.id);
+  store.updateContraption('twin', { home_scheme: Delve.id, repo: null });
+  const offered = async (t: any, citadel: boolean, home?: string) => (await mcp(t, 'tools/list', {}, citadel, home, t.kind === 'ticket' ? 'thread' : 'coordinator')).tools.some((x: any) => x.name === 'deploy_contraption');
+  assert.equal(await offered(DelveTM, false, 'twin'), true, 'home Taskmaster');
+  assert.equal(await offered(DelveMinion, false, 'twin'), true, 'home minion');
+  assert.equal(await offered(DelveTM, false), false, 'a scheme home to none');
+  assert.equal(await offered(Minion, false), false, 'a minion of a scheme home to none');
+  assert.equal(await offered(CitadelTM, true), true, 'Citadel\'s Taskmaster');
+
+  const call = async (t: any, citadel = false) => {
+    const child = await mcp(t, 'tools/call', { name: 'deploy_contraption', arguments: { name: 'twin' } }, citadel, 'twin', t.kind === 'ticket' ? 'thread' : 'coordinator');
+    return child.content[0].text as string;
+  };
+  // Allowed through: it gets as far as the repo nobody set.
+  for (const t of [DelveTM, DelveMinion]) assert.match(await call(t), /Twin has no repo set|Mandate has no repo set/);
+  assert.match(await call(CitadelTM, true), /has no repo set/);
+  // Refused: a minion of another scheme, and Citadel's Taskmaster on a non-admin's turn.
+  assert.match(await call(Minion), /Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption/);
+  turnFor(CitadelTM, olive.id);
+  try {
+    assert.match(await call(CitadelTM, true), /Only a turn a Citadel admin asked for/);
+  } finally {
+    turnFor(CitadelTM, cara.id);
+  }
+  // Only an admin sets the repo: the update route stays admin-only.
+  const set = await srv.call('/api/contraptions/twin', { repo: 'caraminden/twin', branch: 'main', folder: '~/apps/twin' }, 'PATCH');
+  assert.equal(set.status, 200);
+  assert.deepEqual([set.data.repo, set.data.branch, set.data.folder], ['caraminden/twin', 'main', join(home, 'apps/twin')]);
+  for (const bad of [{ repo: 'not a repo' }, { repo: 'a/../b' }, { branch: '-x' }, { folder: 'relative/path' }, { folder: '~/../etc' }]) {
+    assert.equal((await srv.call('/api/contraptions/twin', bad, 'PATCH')).status, 400, JSON.stringify(bad));
+  }
+  assert.equal((await srv.call('/api/contraptions/twin/deploy')).status, 200, 'an admin reads the last deploy');
 });

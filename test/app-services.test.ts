@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { createServer, type Server } from 'node:net';
 import { after, beforeEach, test } from 'node:test';
 import { AppServices, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
 import type { ContraptionRow } from '../src/db.ts';
@@ -77,7 +79,10 @@ let home: string;
 let unitDir: string;
 let fake: ReturnType<typeof fakeSystemd>;
 let services: AppServices;
-const opts = (): ServiceOptions => ({ off: null, unitDir, systemctl: fake.bin, journalctl: fake.journal, home, keysDir: (x) => join(home, 'keys', x), citadelUrl: () => 'http://127.0.0.1:8573' });
+const opts = (): ServiceOptions => ({
+  off: null, unitDir, systemctl: fake.bin, journalctl: fake.journal, home, keysDir: (x) => join(home, 'keys', x), citadelUrl: () => 'http://127.0.0.1:8573',
+  logDir: join(home, 'deploy-logs'), healthMs: 1500, minuteMs: 300, gitUrl: (repo) => `file://${join(root, 'remotes', repo)}.git`,
+});
 const appFolder = (name: string, manifest: object = MANIFEST) => {
   mkdirSync(join(home, 'apps', name), { recursive: true });
   writeFileSync(join(home, 'apps', name, 'citadel-app.json'), JSON.stringify(manifest));
@@ -197,4 +202,174 @@ test('without a manifest, status says so and install refuses', async () => {
   const m = row('mandate', 7341);
   assert.match((await services.status(m)).manifestError!, /No citadel-app.json/);
   await assert.rejects(services.install(m), /No citadel-app.json/);
+});
+
+// ---------- deploy (land 2) ----------
+
+const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main', ...args], { cwd, encoding: 'utf8' }).trim();
+/** A "GitHub" repo for owner/name: a bare repo under root/remotes, and a work tree to commit to it from. */
+function remote(repo: string) {
+  const bare = join(root, 'remotes', `${repo}.git`);
+  const work = join(root, 'work', repo);
+  mkdirSync(bare, { recursive: true });
+  mkdirSync(work, { recursive: true });
+  git(bare, 'init', '--bare', '--quiet');
+  git(work, 'init', '--quiet');
+  git(work, 'remote', 'add', 'origin', bare);
+  return {
+    /** Commit these files and push them; the new commit. */
+    push(files: Record<string, string>, msg = 'change') {
+      for (const [f, text] of Object.entries(files)) writeFileSync(join(work, f), text);
+      git(work, 'add', '-A');
+      git(work, 'commit', '--quiet', '-m', msg);
+      git(work, 'push', '--quiet', 'origin', 'HEAD:main');
+      return git(work, 'rev-parse', 'HEAD');
+    },
+  };
+}
+/** Something listening on a free port: the app's "service". */
+async function listening(): Promise<Server & { port: number }> {
+  const srv = createServer((s) => s.end());
+  await new Promise<void>((ok) => srv.listen(0, '127.0.0.1', ok));
+  return Object.assign(srv, { port: (srv.address() as any).port });
+}
+async function done(name: string) {
+  for (;;) {
+    const d = await services.lastDeploy(name);
+    if (d && d.state !== 'running') return d;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+const appManifest = (build: string[], extra = {}) => JSON.stringify({ start: ['/usr/bin/node', 'server.ts'], build, ...extra });
+let repoN = 0;
+
+test('a first deploy clones, builds without Citadel\'s environment, installs and checks it is up', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  const head = r.push({ '.gitignore': 'out.txt\nenv.txt\n', 'citadel-app.json': appManifest(['echo built > out.txt', 'env > env.txt', 'echo to the log']) });
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    const started = services.deploy(c, 'Cara');
+    assert.equal(started.state, 'running');
+    assert.throws(() => services.deploy(c, 'Cara'), /being installed or deployed already/);
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.equal(d.to, head);
+    assert.equal(d.from, null);
+    const folder = join(home, 'apps', name);
+    assert.equal(git(folder, 'rev-parse', 'HEAD'), head);
+    assert.equal(readFileSync(join(folder, 'out.txt'), 'utf8'), 'built\n');
+    const env = readFileSync(join(folder, 'env.txt'), 'utf8');
+    assert.match(env, new RegExp(`^PATH=${join(home, '.local/share/mise/shims')}:`, 'm'), 'mise\'s toolchains on PATH');
+    for (const v of ['PORT', 'DATA_DIR', 'SESSION_SECRET', 'COORDINATOR_TOKEN', 'NODE_TEST_CONTEXT']) assert.doesNotMatch(env, new RegExp(`^${v}=`, 'm'), v);
+    assert.match(d.tail, /to the log/);
+    assert.ok(existsSync(join(unitDir, `citadel-app-${name}.service`)));
+    assert.ok(fake.calls().includes(`--user restart citadel-app-${name}.service`));
+  } finally {
+    svc.close();
+  }
+});
+
+test('a deploy whose build fails rolls back to the commit before, builds it and restarts it', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  const good = r.push({ '.gitignore': 'out.txt\n', 'citadel-app.json': appManifest(['echo good > out.txt']) });
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    services.deploy(c, 'Cara');
+    assert.equal((await done(name)).state, 'deployed');
+    const bad = r.push({ 'citadel-app.json': appManifest(['echo bad > out.txt', 'exit 3']) });
+    services.deploy(c, '#12');
+    const d = await done(name);
+    assert.equal(d.state, 'rolled back', d.said.join('\n'));
+    assert.deepEqual([d.from, d.to, d.by], [good, bad, '#12']);
+    assert.ok(d.said.some((l) => /Build step failed \(exit 3\): exit 3/.test(l)));
+    const folder = join(home, 'apps', name);
+    assert.equal(git(folder, 'rev-parse', 'HEAD'), good);
+    assert.equal(readFileSync(join(folder, 'out.txt'), 'utf8'), 'good\n', 'the good commit built again');
+    assert.equal(fake.calls().filter((x) => x === `--user restart citadel-app-${name}.service`).length, 2, 'restarted on its first deploy and on the roll back');
+  } finally {
+    svc.close();
+  }
+});
+
+test('a deploy that doesn\'t come up healthy rolls back, and says so when the roll back doesn\'t either', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest([]) });
+  const svc = await listening();
+  const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+  services.deploy(c, 'Cara');
+  assert.equal((await done(name)).state, 'deployed');
+  svc.close();
+  r.push({ 'citadel-app.json': appManifest(['true']) });
+  services.deploy(c, 'Cara');
+  const d = await done(name);
+  assert.equal(d.state, 'failed');
+  assert.ok(d.said.some((l) => /Not healthy after/.test(l)), d.said.join('\n'));
+  assert.ok(d.said.some((l) => /Rolling back failed too: Not healthy/.test(l)), d.said.join('\n'));
+});
+
+test('a build past its time is stopped, and counts as failing', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest(['sleep 30'], { build_timeout: 1 }) });
+  const c = { ...row(name, 1), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+  const t = Date.now();
+  services.deploy(c, 'Cara');
+  const d = await done(name);
+  assert.ok(Date.now() - t < 10_000, 'not the whole sleep');
+  assert.equal(d.state, 'failed');
+  assert.ok(d.said.some((l) => /ran past its 1 minutes at: sleep 30/.test(l)), d.said.join('\n'));
+  assert.ok(d.said.some((l) => /Nothing to roll back to/.test(l)));
+});
+
+test('a deploy refuses a folder with local changes, another origin or branch, or no repo, and changes nothing', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  const first = r.push({ 'citadel-app.json': appManifest([]) });
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    assert.throws(() => services.deploy({ ...c, repo: null }, 'Cara'), /has no repo set/);
+    services.deploy(c, 'Cara');
+    assert.equal((await done(name)).state, 'deployed');
+    const folder = join(home, 'apps', name);
+    r.push({ 'later.txt': 'x' });
+    writeFileSync(join(folder, 'mine.txt'), 'local work');
+    services.deploy(c, 'Cara');
+    let d = await done(name);
+    assert.equal(d.state, 'failed');
+    assert.match(d.said.join('\n'), /has local changes, so nothing was fetched[\s\S]*mine\.txt/);
+    assert.equal(git(folder, 'rev-parse', 'HEAD'), first);
+    rmSync(join(folder, 'mine.txt'));
+
+    services.deploy({ ...c, branch: 'release' }, 'Cara');
+    assert.match((await done(name)).said.join('\n'), /is on main, not release/);
+    services.deploy({ ...c, repo: 'cara/other' }, 'Cara');
+    assert.match((await done(name)).said.join('\n'), /origin is .*, not cara\/other: refusing/);
+    // A commit of its own on the folder's branch: it can only fast-forward.
+    git(folder, 'commit', '--quiet', '--allow-empty', '-m', 'local');
+    const local = git(folder, 'rev-parse', 'HEAD');
+    services.deploy(c, 'Cara');
+    d = await done(name);
+    assert.match(d.said.join('\n'), /has commits cara\/.* doesn't: it can only fast-forward/);
+    assert.equal(git(folder, 'rev-parse', 'HEAD'), local);
+  } finally {
+    svc.close();
+  }
+});
+
+test('a deploy won\'t run over a hand-installed unit until an admin replaces it', async () => {
+  const name = `app${++repoN}`;
+  remote(`cara/${name}`).push({ 'citadel-app.json': appManifest([]) });
+  writeFileSync(join(unitDir, `${name}.service`), `[Service]\nWorkingDirectory=%h/apps/${name}\n`);
+  writeFileSync(join(root, `systemd${n}`, `${name}.service.enabled`), '');
+  services.deploy({ ...row(name, 1), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow, 'Cara');
+  const d = await done(name);
+  assert.equal(d.state, 'failed');
+  assert.match(d.said.join('\n'), new RegExp(`Hand-installed units run ${name}: ${name}.service. An admin installs it once with replace`));
+  assert.ok(!existsSync(join(home, 'apps', name)), 'nothing cloned');
 });

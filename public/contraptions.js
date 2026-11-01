@@ -62,10 +62,32 @@ function servicePanel(c) {
       ...(s.installed ? [btn('Start', 'start'), btn('Restart', 'restart'), btn('Stop', 'stop', {}, `Stop ${c.title}? It stays down until started again (or the box restarts).`)] : []),
       logs);
   };
+  // Its last deploy, followed while it runs.
+  const deployLine = h('div', { class: 'small' });
+  const deployLog = h('pre', { hidden: true });
+  const deployBtn = h('button', { type: 'button', class: 'secondary small', hidden: !c.repo, title: c.repo ? `Fetch ${c.repo} ${c.branch}, build, restart; rolls back if it fails` : '' }, 'Deploy');
+  const showDeploy = (d) => {
+    deployBtn.disabled = d?.state === 'running';
+    if (!d) return;
+    deployLine.textContent = `Deploy by ${d.by}: ${d.state}${d.to ? ` at ${d.to.slice(0, 9)}` : ''} · ${d.said.at(-1) ?? ''}`;
+    deployLog.textContent = d.tail ?? '';
+    deployLog.hidden = d.state === 'running' || d.state === 'deployed' || !d.tail;
+    if (d.state === 'running') setTimeout(() => deployLine.isConnected && api(`api/contraptions/${c.name}/deploy`).then(showDeploy).catch(() => {}), 3000);
+    else api(base).then(show).catch(() => {});
+  };
+  deployBtn.onclick = async () => {
+    if (!confirm(`Deploy ${c.title} from ${c.repo} ${c.branch}? It builds and restarts it, and rolls back if that fails.`)) return;
+    try {
+      showDeploy(await api(`api/contraptions/${c.name}/deploy`, { method: 'POST' }));
+    } catch (err) {
+      deployLine.textContent = err.message;
+    }
+  };
   api(base).then(show).catch((err) => {
     line.textContent = `Service: ${err.message}`;
   });
-  return h('div', { class: 'contraption-service' }, h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), buttons), notes, status, log);
+  if (c.repo) api(`api/contraptions/${c.name}/deploy`).then(showDeploy).catch(() => {});
+  return h('div', { class: 'contraption-service' }, h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), buttons, deployBtn), notes, status, log, deployLine, deployLog);
 }
 
 /** One contraption: who it's enabled for, its settings, its service and its keys. */
@@ -84,6 +106,9 @@ function card(c, people, replace) {
     field('Turns per person per day', 'turn_cap', c.turn_cap, { type: 'number', min: 1, placeholder: 'no cap' }),
     field('Open paths (no login)', 'open_paths', c.open_paths.join(', '), { placeholder: '/link', wide: true }),
     field('Relay paths (apps may call)', 'relay_paths', c.relay_paths.join(', '), { placeholder: '/app-api/', wide: true, title: 'Path prefixes other contraptions may call for a person. Their code must check the from claim.' }),
+    field('Repo (deploys from)', 'repo', c.repo, { placeholder: 'owner/name' }),
+    field('Branch', 'branch', c.branch, { placeholder: 'main' }),
+    field('Folder', 'folder', c.folder, { placeholder: `~/apps/${c.name}`, wide: true }),
     h('button', { type: 'submit' }, 'Save'), status);
   form.onsubmit = async (e) => {
     e.preventDefault();

@@ -1768,6 +1768,9 @@ export class Runner {
     else this.turnFrom.delete(ticket.id);
     // Only the Citadel scheme's Taskmaster is offered the app instruction and contraption tools (the API checks too).
     if (ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER) env.COORDINATOR_APP_INSTRUCTIONS = '1';
+    // A contraption's home scheme may deploy it (#266): its Taskmaster and minions are offered deploy_contraption for it.
+    const homeOf = this.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => c.name);
+    if (homeOf.length) env.COORDINATOR_HOME_CONTRAPTIONS = homeOf.join(',');
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
     // outlasts a stray turn (a GitHub ping), so the deploy still dismisses the minion unless the turn
     // sets another state or a person wrote to it (personWrote).

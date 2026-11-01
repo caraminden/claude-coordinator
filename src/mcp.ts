@@ -18,6 +18,8 @@ const DEPLOYS = process.env.COORDINATOR_DEPLOYS === '1';
 const IN_CONTAINER = process.env.COORDINATOR_CONTAINER === '1';
 // Set for the Citadel scheme's Taskmaster: it alone edits the Citadel-wide instructions and the contraptions.
 const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
+// The contraptions whose home is this scheme (#266): it may deploy them.
+const HOME_CONTRAPTIONS = (process.env.COORDINATOR_HOME_CONTRAPTIONS ?? '').split(',').filter(Boolean);
 const MAX_TEXT = 4000;
 /** What message_ticket and message_coordinator say when the loop guard holds a message. */
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
@@ -484,6 +486,9 @@ const CONTRAPTION_FIELDS = {
   },
   home_scheme: { type: ['integer', 'null'], description: "The id of the scheme its people's bug reports and feature asks go to." },
   turn_cap: { type: ['integer', 'null'], description: 'Most turns a day across its people; null for no cap.' },
+  repo: { type: ['string', 'null'], description: 'The GitHub repo deploy_contraption builds it from, as owner/name, like caraminden/mandate. Only a repo set here is ever built.' },
+  branch: { type: ['string', 'null'], description: 'The branch it deploys; null for main.' },
+  folder: { type: ['string', 'null'], description: 'Where its repo is checked out; null for ~/apps/<name>.' },
 };
 
 // Settings → Contraptions as tools (#246): the same admin routes, for this Taskmaster on a turn an admin asked for (#255).
@@ -537,6 +542,27 @@ const CONTRAPTION_TOOLS = [
   },
 ];
 
+/** Deploying a contraption from its repo: for Citadel's Taskmaster on an admin's turn, and a contraption's home scheme. */
+const DEPLOY_CONTRAPTION = {
+  name: 'deploy_contraption',
+  description: `Deploy a contraption from its GitHub repo, as ${APP_NAME} runs it: clone its folder, or fetch and fast-forward its branch (refused if the folder has local changes or other commits), run the build steps in its citadel-app.json (niced, with a time limit), rewrite its units and restart it, then check its health. If anything after the fast-forward fails, it rolls back to the commit before, builds that and restarts it. Waits for the outcome (builds can take minutes) and returns what it did and the end of the log. Push the commit to the registered branch first: it deploys what is on GitHub, not a worktree.${HOME_CONTRAPTIONS.length ? ` This scheme may deploy: ${HOME_CONTRAPTIONS.join(', ')}.` : ` Only on a turn a ${APP_NAME} admin asked for.`}`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', ...(HOME_CONTRAPTIONS.length && !APP_INSTRUCTIONS ? { enum: HOME_CONTRAPTIONS } : {}) },
+      follow: { type: 'boolean', description: 'true: start nothing, just wait for the deploy already running (after this tool said it was still running).' },
+    },
+    required: ['name'],
+  },
+};
+
+/** A deploy as the tools show it. */
+function deployText(d: any): string {
+  if (!d) return 'No deploy since the server started.';
+  const head = `${d.name}: ${d.state}${d.state === 'running' ? '' : ` after ${Math.round(((d.finished_at ?? Date.now()) - d.started_at) / 1000)}s`} (${d.repo} ${d.branch}, asked by ${d.by}${d.from || d.to ? `; ${d.from?.slice(0, 9) ?? 'new'} → ${d.to?.slice(0, 9) ?? '?'}` : ''})`;
+  return [head, ...d.said.map((l: string) => `- ${l}`), `Log: ${d.log}`, ...(d.state === 'running' ? [] : ['Last lines of the log:', d.tail ?? ''])].join('\n');
+}
+
 /** A service's state as the tools show it. */
 function serviceText(s: any): string {
   const state = (u: any) => `${u.unit}: ${u.load === 'not-found' ? 'not installed' : `${u.active}${u.sub ? ` (${u.sub})` : ''}, ${u.enabled || 'no unit file'}`}`;
@@ -562,6 +588,7 @@ function contraptionText(c: any): string {
     `turn cap ${c.turn_cap ?? 'none'}`,
     `enabled for ${c.logins.length ? c.logins.join(', ') : 'nobody'}`,
     `key folder ${c.keys_dir} (identity.pub, contraption.key)`,
+    `repo ${c.repo ? `${c.repo} ${c.branch}` : 'none'}, folder ${c.folder}`,
   ].join(' | ');
 }
 
@@ -947,6 +974,18 @@ async function runTool(name: string, args: any): Promise<string> {
       const c = await call('PUT', `${contraptionPath(args)}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
       return `${args.enabled ? 'Enabled' : 'Disabled'} for ${args.login}.\n${contraptionText(c)}`;
     }
+    case 'deploy_contraption': {
+      const path = `${contraptionPath(args)}/deploy`;
+      if (args.follow !== true) await call('POST', path, {});
+      // Builds take minutes: wait up to an hour here, then hand back so the turn can follow again.
+      const until = Date.now() + 60 * 60_000;
+      let d = await call('GET', path);
+      while (d?.state === 'running' && Date.now() < until) {
+        await sleep(5000);
+        d = await call('GET', path);
+      }
+      return d?.state === 'running' ? `${deployText(d)}\nStill running after an hour: call deploy_contraption again with follow: true to keep waiting.` : deployText(d);
+    }
     case 'contraption_service': {
       const path = `${contraptionPath(args)}/service`;
       if (args.action === 'status') return serviceText(await call('GET', path));
@@ -1098,8 +1137,9 @@ function scheduleLine(s: any): string {
 }
 
 function toolList() {
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS] : TOOLS;
-  return APPROVALS ? [...THREAD_TOOLS, APPROVE] : THREAD_TOOLS;
+  const deploy = APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : [];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy] : [...TOOLS, ...deploy];
+  return [...THREAD_TOOLS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

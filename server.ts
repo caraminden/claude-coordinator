@@ -127,6 +127,7 @@ const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '',
 const services = new AppServices(serviceOptions(process.env, DATA_DIR === DEFAULT_DATA_DIR, BOOT_CHECK, {
   keysDir: (name) => contraptions.folder(name),
   citadelUrl: () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`,
+  logDir: join(DATA_DIR, 'contraption-deploys'),
 }));
 const githubLink = new GithubLink(store, credentials, process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '');
 // People's own Claude plans (#213). A dev copy tags its containers so it never shares the live server's.
@@ -203,8 +204,8 @@ const contraptionTurns = new ContraptionTurns(store, contraptions, claudeLink, {
 contraptionTurns.noTurns = PREVIEW;
 claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container);
 const landings = new Landings();
-// Contraption turns run as the server's children: a restart waits for them like landings.
-runner.hostJobs = () => landings.running() + contraptionTurns.running();
+// Contraption turns and app deploys run as the server's children: a restart waits for them like landings.
+runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = messagePerson(store);
 runner.githubFor = (person, dir) => githubLink.forTurn(person ? store.getUser(person) ?? null : null, dir);

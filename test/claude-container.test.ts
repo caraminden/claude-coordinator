@@ -72,7 +72,7 @@ function runner(place: NonNullable<Runner['placeFor']>) {
   r.placeFor = place;
   return r;
 }
-const inContainer = () => ({ host: false as const, container: 'citadel-claude-test-2', configDir: join(volume, '.claude'), env: { HOME: volume, CLAUDE_CONFIG_DIR: join(volume, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} });
+const inContainer = () => ({ host: false as const, container: 'citadel-claude-test-2', configDir: join(volume, '.claude'), turnsDir: join(root, 'run', 'turns', 'person-2'), env: { HOME: volume, CLAUDE_CONFIG_DIR: join(volume, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} });
 
 function newTicket() {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Josh' });
@@ -210,6 +210,58 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   assert.ok(log.some((c) => c.join(' ').includes(`volume rm -f citadel-claude-t-${josh.id}`)));
   const cara = store.createUser({ name: 'Cara2', login: 'cara2', admin: true, server_login: true });
   assert.deepEqual(link.place(cara.id), { host: true });
+});
+
+test("a person's container mounts their own turns' files, never another person's or the host's (#241)", async () => {
+  const fakeRun: RunCmd = async (_cmd, args) => {
+    if (args[0] === 'container' && args[1] === 'inspect') return { code: 0, stdout: 'true deadbeef', stderr: '' };
+    if (args[0] === 'volume' && args[1] === 'inspect') return { code: 0, stdout: join(root, 'iso-vol') + '\n', stderr: '' };
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const creds = new Credentials(store, 'x'.repeat(40));
+  // Claude Code's folder is mounted read-only, so the fake one sits apart from the data dir, as the real one does.
+  const bin = join(root, 'claude-versions');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'claude'), '');
+  const link = new ClaudeLink(store, creds, root, join(bin, 'claude'), new Containers(fakeRun), 'citadel-claude-iso-');
+  const ann = store.createUser({ name: 'Ann', login: 'ann' });
+  const ben = store.createUser({ name: 'Ben', login: 'ben' });
+  for (const u of [ann, ben]) creds.put(u.id, 'claude_runner', link.name(u.id), { container: link.name(u.id), home: volume, linkedAt: 1 });
+  const r = runner((uid) => link.place(uid) ?? { refused: 'not linked' });
+  r.personOf = (author) => (author === 'Ann' ? ann.id : ben.id);
+  const a = newTicket();
+  const b = newTicket();
+  r.send(a, 'Ann', 'go');
+  r.send(b, 'Ben', 'go');
+  await until(() => status(a) === 'idle' && status(b) === 'idle');
+  // The wrapper's folder, from each container's `podman exec -d <container> node <wrapper> <dir>`.
+  const execs = readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const dirOf = (container: string) => execs.findLast((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === container).at(-1) as string;
+  const annDir = dirOf(link.name(ann.id));
+  const benDir = dirOf(link.name(ben.id));
+  const sees = (uid: number, path: string) => link.spec(uid).mounts.some((m) => !m.volume && (path === m.src || path.startsWith(m.src + '/')));
+  assert.ok(sees(ann.id, annDir) && sees(ben.id, benDir), 'each container sees its own turns');
+  assert.ok(!sees(ann.id, benDir), "Ann's container can't reach Ben's turn files");
+  assert.ok(!sees(ben.id, annDir), "Ben's container can't reach Ann's turn files");
+  // A turn on the host (the server login's) keeps its folder straight under run/turns.
+  assert.ok(!sees(ann.id, join(r.turnsDir, `${a}-1`)), "no container reaches the host's turn files");
+});
+
+test("a restart sweeps container turns' dead folders in each person's folder, and keeps live ones", () => {
+  const person = join(root, 'run', 'turns', 'person-9');
+  const turn = (name: string, beatAgo: number) => {
+    mkdirSync(join(person, name), { recursive: true });
+    writeFileSync(join(person, name, 'container'), 'citadel-claude-test-9');
+    writeFileSync(join(person, name, 'beat'), '');
+    const t = new Date(Date.now() - beatAgo);
+    utimesSync(join(person, name, 'beat'), t, t);
+  };
+  turn('8-1', 60_000);
+  turn('8-2', 0);
+  runner(inContainer).recover();
+  assert.ok(!existsSync(join(person, '8-1')), 'a dead turn goes');
+  assert.ok(existsSync(join(person, '8-2')), 'a running one stays');
+  assert.ok(existsSync(person), "the person's folder stays mounted");
 });
 
 test("the sign-in link is read from the terminal's output", () => {

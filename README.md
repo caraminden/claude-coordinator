@@ -236,7 +236,8 @@ link, signs in with Anthropic and pastes the one-time code back into the card, a
 the login stays in the volume. Citadel never sees a password or token. The
 container runs `sleep infinity` under a transient `systemd-run --user` unit (no
 unit file to install), with the host network, `--userns=keep-id`, 6 GB and 4 CPUs.
-It mounts the data dir's `projects/` and `run/turns/`, the schemes' memory folders,
+It mounts the data dir's `projects/`, its own turns' folder `run/turns/person-<user id>/`
+(never the host's turns or another person's), the schemes' memory folders,
 Claude Code's versions folder and the tool folders (read-only), and never `~/.ssh`,
 `~/.config/gh`, the server's `~/.claude`, the database or the user bus. A turn goes
 in with `podman exec -d … node src/turn-wrapper.ts`; its liveness is a heartbeat

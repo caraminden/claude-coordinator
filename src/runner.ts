@@ -1116,10 +1116,12 @@ export class Runner {
     // Folders of turns nobody follows any more and whose process is gone.
     try {
       const followed = new Set([...this.turns.values()].map((t) => t.dir));
-      for (const name of readdirSync(this.turnsDir)) {
+      // Container turns' folders sit one deeper, in their person's folder (ClaudeLink.turnsDir).
+      const dirs = readdirSync(this.turnsDir).flatMap((name) => {
         const dir = join(this.turnsDir, name);
-        if (!followed.has(dir) && !wrapperAlive(dir)) rmSync(dir, { recursive: true, force: true });
-      }
+        return /^person-\d+$/.test(name) ? readdirSync(dir).map((n) => join(dir, n)) : [dir];
+      });
+      for (const dir of dirs) if (!followed.has(dir) && !wrapperAlive(dir)) rmSync(dir, { recursive: true, force: true });
     } catch {
       // No turns yet.
     }
@@ -1573,7 +1575,7 @@ export class Runner {
     const rules = ticket.kind === 'coordinator' ? [] : [...new Set([...MERGE_ASKS, ...lines(project.approval_rules)])];
     // The turn's folder, with its own copy of the pinned files: a restart sweeps the server's copy, and
     // the tripwire hook must still be there for a turn that outlives it.
-    const dir = join(this.turnsDir, `${ticket.id}-${Date.now()}`);
+    const dir = join(place.host ? this.turnsDir : place.turnsDir, `${ticket.id}-${Date.now()}`);
     const pin = join(dir, 'pin');
     mkdirSync(dir, { recursive: true });
     cpSync(MCP_DIR, pin, { recursive: true });

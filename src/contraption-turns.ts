@@ -242,7 +242,7 @@ export class ContraptionTurns {
 
   /**
    * A turn's private folder (its prompt, the contraption's system prompt and MCP tokens), as this server
-   * sees it and as claude does. Never under run/turns, which every person's container mounts.
+   * sees it and as claude does. Never under run/turns, whose person folders the containers mount.
    */
   private turnDir(id: number, place: TurnPlace) {
     if (place.host) {

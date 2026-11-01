@@ -48,8 +48,11 @@ export interface ClaudeStatus {
   error?: string;
 }
 
-/** Where a turn runs: the host, or a person's container (with its config folder as the host sees it). */
-export type TurnPlace = { host: true } | { host: false; container: string; configDir: string; env: Record<string, string>; ensure: () => Promise<void> };
+/**
+ * Where a turn runs: the host, or a person's container (with its config folder as the host sees it, and
+ * the folder its turns' files go in, the only part of run/turns that container mounts).
+ */
+export type TurnPlace = { host: true } | { host: false; container: string; configDir: string; turnsDir: string; env: Record<string, string>; ensure: () => Promise<void> };
 
 interface Login {
   child: ChildProcess | null;
@@ -123,6 +126,14 @@ export class ClaudeLink {
     return `${IMAGE_REPO}:${createHash('sha256').update(readFileSync(join(CONTAINERFILE_DIR, 'Containerfile'))).digest('hex').slice(0, 12)}`;
   }
 
+  /**
+   * The folder a person's container turns keep their files in (prompt, settings, spec.json with the turn's
+   * tokens): their own, inside run/turns, which holds the host's turns and so is never mounted whole (#241).
+   */
+  turnsDir(uid: number): string {
+    return join(this.dataDir, 'run', 'turns', `person-${uid}`);
+  }
+
   /** What a person's container is made of. Every mount sits at its host path, so worktrees, session folders and prompts match. */
   spec(uid: number): ContainerSpec {
     const name = this.name(uid);
@@ -130,7 +141,7 @@ export class ClaudeLink {
     const mounts: Mount[] = [
       { src: name, dst: this.home, volume: true },
       { src: join(this.dataDir, 'projects'), dst: join(this.dataDir, 'projects') },
-      { src: join(this.dataDir, 'run', 'turns'), dst: join(this.dataDir, 'run', 'turns') },
+      { src: this.turnsDir(uid), dst: this.turnsDir(uid) },
       { src: dirname(resolveClaude(this.claudeBin)), dst: dirname(resolveClaude(this.claudeBin)), ro: true },
     ];
     for (const d of TOOL_DIRS) if (existsSync(join(this.home, d))) mounts.push({ src: join(this.home, d), dst: join(this.home, d), ro: true });
@@ -179,7 +190,7 @@ export class ClaudeLink {
     const c = this.credentials.get<ClaudeMeta>(user.id, 'claude_runner');
     if (!c || c.failed) return null;
     return {
-      host: false, container: c.meta.container, configDir: join(c.meta.home, '.claude'),
+      host: false, container: c.meta.container, configDir: join(c.meta.home, '.claude'), turnsDir: this.turnsDir(user.id),
       env: { HOME: this.home, CLAUDE_CONFIG_DIR: join(this.home, '.claude'), DISABLE_AUTOUPDATER: '1' },
       ensure: () => this.ensure(user.id, true),
     };

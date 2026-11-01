@@ -106,7 +106,7 @@ const places = {
   place(uid: number | null) {
     if (uid === cara.id) return { host: true as const };
     if (uid === josh.id) {
-      return { host: false as const, container: 'citadel-claude-t-2', configDir: join(vol, '.claude'), env: { HOME: homedir(), CLAUDE_CONFIG_DIR: join(vol, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} };
+      return { host: false as const, container: 'citadel-claude-t-2', configDir: join(vol, '.claude'), turnsDir: join(root, 'run', 'turns', 'person-2'), env: { HOME: homedir(), CLAUDE_CONFIG_DIR: join(vol, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} };
     }
     return null;
   },

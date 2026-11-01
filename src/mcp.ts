@@ -556,6 +556,25 @@ const DEPLOY_CONTRAPTION = {
   },
 };
 
+/** Putting an item in the asking person's Mandate (#268): every minion and Taskmaster; the server checks whom for. */
+const MANDATE_ITEM = {
+  name: 'mandate_item',
+  description: `Put an item in Mandate (the to-do app) for the person whose own message this turn answers, or clear one. Only that person: it is refused on a turn started by GitHub, a system message, a Taskmaster or minion relay, a wake or a resume, and for someone not on this scheme or without Mandate. It shows on their Today with this scheme's name and links back to this chat. Put the same key again to update it, and clear it when the thing is done. When they tick, untick, delete or restore it, a "[Mandate]: …" message arrives in this chat. Returns Mandate's answer: 200 { key, state, mine } (state open, ticked, deleted, cleared or none; mine lists fields they edited, which your puts no longer change), or 400 bad_request, 403 off (they switched this scheme's items off) or 429 limit.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      key: { type: 'string', description: "Your name for the item, unique in this chat: letters, digits and . _ : - (e.g. pr-13). The same key updates the same item." },
+      title: { type: 'string', description: 'What to do, 1 to 500 characters. Required unless clear.' },
+      day: { type: ['string', 'null'], description: 'YYYY-MM-DD in their time zone; leave out for Anytime.' },
+      time: { type: ['string', 'null'], description: 'HH:MM, only with day; they get a push an hour before.' },
+      at: { type: ['string', 'null'], description: 'Instead of day and time: an ISO 8601 instant with offset.' },
+      alert: { type: 'boolean', description: 'true: it matters now. Shows first on Today and pushes to their phone at once. No day, time or at.' },
+      clear: { type: 'boolean', description: 'true: remove the item from Mandate (the key is freed). Everything but key is ignored.' },
+    },
+    required: ['key'],
+  },
+};
+
 /** A deploy as the tools show it. */
 function deployText(d: any): string {
   if (!d) return 'No deploy since the server started.';
@@ -974,6 +993,14 @@ async function runTool(name: string, args: any): Promise<string> {
       const c = await call('PUT', `${contraptionPath(args)}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
       return `${args.enabled ? 'Enabled' : 'Disabled'} for ${args.login}.\n${contraptionText(c)}`;
     }
+    case 'mandate_item': {
+      if (typeof args.key !== 'string' || !/^[A-Za-z0-9._:-]{1,120}$/.test(args.key)) throw new Error('key is required: letters, digits and . _ : - only, like pr-13');
+      const path = `/api/mandate/items/${args.key}`;
+      if (args.clear !== true && (typeof args.title !== 'string' || !args.title.trim())) throw new Error('title is required (or clear: true)');
+      const { key, clear, ...fields } = args;
+      const r = await call(clear === true ? 'DELETE' : 'PUT', path, clear === true ? undefined : fields);
+      return `Mandate answered ${r.status}: ${typeof r.answer === 'string' ? r.answer : JSON.stringify(r.answer)}`;
+    }
     case 'deploy_contraption': {
       const path = `${contraptionPath(args)}/deploy`;
       if (args.follow !== true) await call('POST', path, {});
@@ -1138,8 +1165,8 @@ function scheduleLine(s: any): string {
 
 function toolList() {
   const deploy = APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy] : [...TOOLS, ...deploy];
-  return [...THREAD_TOOLS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), ...(APPROVALS ? [APPROVE] : [])];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM] : [...TOOLS, ...deploy, MANDATE_ITEM];
+  return [...THREAD_TOOLS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), MANDATE_ITEM, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

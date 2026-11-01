@@ -248,6 +248,11 @@ interface TurnState {
   person?: number | null;
   /** Who asked for it (Store.turnAsker), which a non-member's relay keeps apart from `person`. */
   asker?: number | null;
+  /**
+   * The one person whose own typed message it answers (#268): the only person mandate_item may post for.
+   * null for a turn no one typed for (GitHub, a relay, a wake, a resume, a contraption's ask) or several did.
+   */
+  typedBy?: number | null;
   /** Their GitHub login it pushes as; null when they haven't linked, absent with GitHub linking not set up. */
   github?: string | null;
   /** The person's Claude container it runs in (#213); absent on the host. */
@@ -1364,7 +1369,9 @@ export class Runner {
       const line = promptMessage([msg]);
       const file = join(live!.dir, 'steer.jsonl');
       appendFileSync(file, line);
-      this.saveTurn(ticketId, { steered: [...(turn!.steered ?? []), { end: statSync(file).size, msg }] });
+      // A typed steer is a message the turn now answers too; a second person's leaves it no one's (#268).
+      const typedBy = msg.typed && person && !extra.from ? (turn!.typedBy && turn!.typedBy !== person ? null : person) : turn!.typedBy;
+      this.saveTurn(ticketId, { steered: [...(turn!.steered ?? []), { end: statSync(file).size, msg }], typedBy });
       // A person steering in speaks after the relay, so what the turn starts now is theirs.
       if (person && !extra.from) this.turnFrom.delete(ticketId);
       return;
@@ -1596,6 +1603,11 @@ export class Runner {
     });
   }
 
+  /** The one person whose own typed message a ticket's running turn answers (TurnState.typedBy), else null. */
+  typedBy(ticketId: number): number | null {
+    return (this.turns.has(ticketId) && this.store.getSetting<TurnState>(turnKey(ticketId))?.typedBy) || null;
+  }
+
   /** The minion that relayed the message the ticket's current (or last) turn answers, if a relay came before any person's message: whose minion a Taskmaster's new minion belongs to. */
   relayedBy(ticketId: number): number | null {
     return this.turnFrom.get(ticketId) ?? null;
@@ -1763,6 +1775,8 @@ export class Runner {
       const name = person && this.store.getUser(person)?.name;
       if (ticket.person_id && name) this.emit(ticket.id, 'note', { text: place.host ? `Turns now run for ${name}, on the server's Claude login.` : `Turns now run on ${name}'s Claude plan.` });
     }
+    const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
+    const typedBy = typers.size === 1 ? [...typers][0] : null;
     const from = batch.find((m) => m.from || this.personOf?.(m.author))?.from;
     if (from) this.turnFrom.set(ticket.id, from);
     else this.turnFrom.delete(ticket.id);
@@ -1817,7 +1831,7 @@ export class Runner {
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: place.host ? this.claudeBin : resolveClaude(this.claudeBin), args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, asker, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }) };
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     live.had = had;

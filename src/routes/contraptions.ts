@@ -10,6 +10,7 @@ import { ASK_FILES_MAX, askFiles, askMessage, saveAskFiles } from '../contraptio
 import { parseTurn, TurnError } from '../contraption-turns.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 import { ServiceError } from '../app-services.ts';
+import { mandateItem, SCHEME_CALLER } from '../mandate-items.ts';
 import { relay } from '../relay.ts';
 import type { ContraptionRow } from '../db.ts';
 import { HttpError, json, oneOf, readJson, str, type App, type Ctx, type Route } from '../http.ts';
@@ -173,6 +174,8 @@ function eventStream(req: IncomingMessage, res: Ctx['res']) {
 export const contraptionRoutes: Route[] = [
   // First, so a relayed path like /people/5 never reads as an admin route on a contraption called relay (reserved anyway).
   { method: ['GET', 'PUT', 'POST', 'DELETE'], path: '/api/contraptions/relay/:to/*rest', who: 'contraption', handler: (ctx) => relay(ctx, ctx.contraption) },
+  // mandate_item (#268): a minion or Taskmaster puts or clears an item in its asker's Mandate.
+  { method: ['PUT', 'DELETE'], path: '/api/mandate/items/:key', who: ['taskmaster', 'minion'], refuse: 'Only a minion or Taskmaster puts items for its scheme', handler: mandateItem },
   fromContraption('POST', '/api/contraptions/turns', async ({ req, res, app }, c) => {
     const body = await readJson(req, 4_000_000);
     const emit = eventStream(req, res);
@@ -231,6 +234,8 @@ export const contraptionRoutes: Route[] = [
       const body = await readJson(req);
       const name = typeof body.name === 'string' ? body.name.trim() : '';
       if (!CONTRAPTION_NAME.test(name) || RESERVED.has(name)) throw new HttpError(400, 'Name must be a short slug: lowercase letters, digits and dashes, like mandate');
+      // Mandate takes a scheme-<id> caller as Citadel speaking for that scheme (src/mandate-items.ts).
+      if (SCHEME_CALLER.test(name)) throw new HttpError(400, `${name} is reserved: scheme-<number> names stand for ${APP_NAME}'s schemes`);
       if (app.store.getContraption(name)) throw new HttpError(409, `There is already a contraption called ${name}`);
       const f = fields(app, body, true);
       const c = app.contraptions.register({

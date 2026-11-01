@@ -1942,6 +1942,16 @@ export class Runner {
 
   /** A turn's process has exited (exit is null when it was killed without recording how). */
   private finish(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string } | null) {
+    try {
+      this.wrapUp(ticketId, live, exit);
+    } catch (err) {
+      // Whatever failed, the turn is over: its lane must free up, or no message starts a turn again.
+      live.end();
+      throw err;
+    }
+  }
+
+  private wrapUp(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string } | null) {
     clearInterval(live.timer);
     clearTimeout(live.stopTimer);
     this.turns.delete(ticketId);

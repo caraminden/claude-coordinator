@@ -237,6 +237,35 @@ for (const when of ['during the turn', 'during the save']) {
   });
 }
 
+test("a dismissal's cleanup waits for the last turn's save, and a turn's end that throws still frees the lane", async () => {
+  reset();
+  const r = makeRunner();
+  const save = heldSaves(r);
+  const { id } = minion();
+  writeFileSync(go, '');
+  r.send(id, 'Cara', 'one');
+  await until(() => save.saves() === 1, 'the turn to end and start saving');
+  const tmp = join(r.tmpRoot(project.id), String(id));
+  assert.ok(existsSync(tmp));
+  const closed = r.close(id, 'Dismissed.');
+  await sleep(50);
+  assert.ok(existsSync(tmp), 'the temp folder stays until the save is in');
+  save.open();
+  await closed;
+  assert.ok(!existsSync(tmp));
+  // Something after the turn's exit fails (a callback, a store write): the next message still runs.
+  let thrown = false;
+  r.onTurnEnd = () => {
+    if (thrown) return;
+    thrown = true;
+    throw new Error('onTurnEnd broke');
+  };
+  r.send(id, 'Cara', 'two');
+  await until(() => thrown && !r.isRunning(id), 'the turn whose end throws to end');
+  r.send(id, 'Cara', 'three');
+  await until(() => turnsRun() === 3 && !r.isRunning(id), 'the next message to run');
+});
+
 test("a restart's sweep keeps a turn folder whose wrapper hasn't started yet, and removes one that never will", () => {
   const r = makeRunner();
   const starting = join(r.turnsDir, '999-1');

@@ -15,13 +15,19 @@ const fake = join(root, 'claude-fake');
 writeFileSync(
   fake,
   `#!${process.execPath}
-const { existsSync, readFileSync } = require('node:fs');
+const { readFileSync, renameSync } = require('node:fs');
 process.stdin.resume();
 const wait = setInterval(() => {
   const release = ${JSON.stringify(join(root, 'release'))};
-  if (!existsSync(release)) return;
+  // Taken, so one release ends one turn: a queued turn starting right after can't end on the same one.
+  const taken = release + '.' + process.pid;
+  try {
+    renameSync(release, taken);
+  } catch {
+    return;
+  }
   clearInterval(wait);
-  const outcome = readFileSync(release, 'utf8');
+  const outcome = readFileSync(taken, 'utf8');
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: outcome === 'error', result: 'done' }));
   process.exit(0);
 }, 20);
@@ -135,10 +141,9 @@ test('a message queued behind the turn defers the dismissal to the end of that t
   runner.send(id, 'Cara', 'first');
   runner.deployLive(id);
   runner.send(id, 'Josh', 'second');
-  rmSync(join(root, 'release'), { force: true });
-  writeFileSync(join(root, 'release'), 'ok');
-  // The first turn ends and the queued one starts.
-  while (store.listEvents(id).filter((e) => e.kind === 'user_message').length < 2 || !runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
+  await endTurn(id, 'ok');
+  // The first turn has ended; the queued one starts once the first one's session is saved (#250).
+  while (!runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
   assert.notEqual(status(id), 'closed');
   await endTurn(id, 'ok');
   assert.equal(status(id), 'closed');

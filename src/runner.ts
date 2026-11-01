@@ -15,7 +15,7 @@ import type { TripwireConfig } from './tripwire.ts';
 import type { TurnGithub } from './github-link.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import type { Ship } from './branch.ts';
-import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession } from './sessions.ts';
+import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, transcriptPath } from './sessions.ts';
 import { projectDir, restoreTicketDir } from './workspace.ts';
 import { previewKey } from './previews.ts';
 import { GLOBAL_OWNER } from './properties.ts';
@@ -804,6 +804,8 @@ export function turnSettings(ticket: Pick<Ticket, 'kind' | 'model' | 'effort'>, 
 
 export class Runner {
   private turns = new Map<number, LiveTurn>();
+  /** Tickets whose last turn's session is still being saved to the database; their next turn waits for it (#250). */
+  private saving = new Set<number>();
   private queues = new Map<number, QueuedMessage[]>();
   /** Tickets that asked to close when their current turn ends, with the reason they gave. */
   private closing = new Map<number, string | null>();
@@ -1505,6 +1507,9 @@ export class Runner {
     if (!q?.length) return;
     // Waiting for the usage limit to reset: the messages go into the resume, not a turn that would fail at once.
     if (this.holdForLimit(ticketId)) return;
+    // The last turn's save calls next() when it's done: a turn on another login restores from that save.
+    // shortcut: messages queued in that gap (usually well under a second) live only in memory, so a restart right then leaves them unanswered in the chat; persist the queue if that ever bites.
+    if (this.saving.has(ticketId)) return;
     // Everything queued while the last turn ran goes into one turn.
     const batch = q.splice(0);
     const ticket = this.store.getTicket(ticketId);
@@ -1642,7 +1647,6 @@ export class Runner {
     if (addDirs.length) args.push('--add-dir', ...addDirs);
     if (existsSync(pinned(KIT))) args.push('--plugin-dir', pinned(KIT));
     if (ticket.kind !== 'coordinator') args.push(...pluginDirArgs(lines(project.plugin_dirs), ticket.cwd));
-    if (ticket.session_id) args.push('--resume', ticket.session_id);
     const { model, effort } = turnSettings(ticket, project);
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
@@ -1697,6 +1701,12 @@ export class Runner {
       if (restored) console.log(`Ticket ${ticket.id}: restored the Claude session from the database (${restored} file${restored === 1 ? '' : 's'}).`);
     } catch (err: any) {
       this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${err.message}` });
+    }
+    // With no copy of its transcript on this login or in the database, --resume would fail every turn from now on.
+    if (ticket.session_id && existsSync(transcriptPath(configDir, ticket.cwd, ticket.session_id))) args.push('--resume', ticket.session_id);
+    else if (ticket.session_id) {
+      this.emit(ticket.id, 'note', { text: `This minion's conversation (session ${ticket.session_id}) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here, but Claude doesn't remember the earlier turns.` });
+      this.store.updateTicket(ticket.id, { session_id: null });
     }
     // The Taskmaster's auto-memory moved to the repo memory (#98); bring its old notes along once.
     if (memoryDir) {
@@ -1901,11 +1911,15 @@ export class Runner {
       this.store.updateTicketQuietly(ticketId, { last_effort: effort });
       this.broadcastTicket(ticketId);
     }
-    if (after && project) {
-      saveSession(this.store, after, project, live.configDir, true)
-        .catch((err) => console.error(`Saving the session of ticket ${ticketId} failed:`, err));
-    }
-    this.next(ticketId);
+    if (!after || !project) return this.next(ticketId);
+    // The next turn may run on another person's login, which only has the session once this lands (#250).
+    this.saving.add(ticketId);
+    saveSession(this.store, after, project, live.configDir, true)
+      .catch((err) => console.error(`Saving the session of ticket ${ticketId} failed:`, err))
+      .finally(() => {
+        this.saving.delete(ticketId);
+        this.next(ticketId);
+      });
   }
 
   /**

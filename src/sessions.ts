@@ -154,13 +154,18 @@ export function restoreSession(store: Store, ticket: Ticket, project: Project, c
   return written;
 }
 
+/** Where Claude Code keeps a session's transcript, for a turn run in `cwd`. */
+export function transcriptPath(configDir: string, cwd: string, sessionId: string): string {
+  return join(configDir, 'projects', projectSlug(cwd), `${sessionId}.jsonl`);
+}
+
 /**
  * The effort level the session's latest reply ran at, read from the end of its transcript (the
  * stream Claude Code prints doesn't report it). Null if there is no transcript or no effort in it.
  */
 export function lastEffort(ticket: Ticket, configDir: string): string | null {
   if (!ticket.session_id || !ticket.cwd) return null;
-  const path = join(configDir, 'projects', projectSlug(ticket.cwd), `${ticket.session_id}.jsonl`);
+  const path = transcriptPath(configDir, ticket.cwd, ticket.session_id);
   let fd;
   try {
     fd = openSync(path, 'r');

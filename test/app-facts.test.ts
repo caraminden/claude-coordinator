@@ -59,3 +59,9 @@ test("a minion's MCP tools mention deploys and offer previews only when the serv
     assert.equal(state.description.includes('pending-deploy'), deploys);
   }
 });
+
+test('a minion parked on start_after hears its brief is held and to stay parked', () => {
+  const held = systemPrompt(project, minion, null, null, '/tickets', null, [], false, '', "#3 Leader's work is merged");
+  assert.match(held, /You are parked: your brief is held until #3 Leader's work is merged/);
+  assert.doesNotMatch(systemPrompt(project, minion, null, null, '/tickets', null), /You are parked/);
+});

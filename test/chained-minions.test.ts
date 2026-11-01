@@ -375,7 +375,7 @@ test('a dismissed follower is dropped; release hands back the held brief once', 
   assert.equal(started.length, 0);
 });
 
-test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or a message starts it; a brief is marked as one', async () => {
+test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or Start now starts it, a message only gets an answer; a brief is marked as one', async () => {
   const { base, cookie, proc } = await bootServer({ root });
   procs.push(proc);
   const call = async (path: string, body?: unknown) => {
@@ -421,15 +421,28 @@ test('through the server: start_after parks the minion with its brief held; the 
   assert.deepEqual(await said(next.data.id), ['brief for Next']);
   assert.deepEqual(await briefs(next.data.id), [true]);
 
-  // Writing to a chained minion before its leader is done starts it, brief first.
+  // #261: writing to a chained minion before its leader is done gets an answer, and it stays parked
+  // with its brief held (Cara, 2026-11-01: "Answer, keep it parked"); Start now starts it, brief and all.
   const later = (await create('Later', { start_after: next.data.number })).data;
   assert.equal(later.note, `starts when #${next.data.number} is live`);
-  await call(`/api/tickets/${later.id}/messages`, { text: 'go now' });
-  assert.deepEqual(await said(later.id), ['brief for Later', 'go now']);
-  assert.deepEqual(await briefs(later.id), [true, false]);
+  assert.equal(later.held, `#${next.data.number} Next's work is live`);
+  assert.equal((await call(`/api/tickets/${leader.id}/start`, {})).status, 409, 'only a parked chained minion starts early');
+  await call(`/api/tickets/${later.id}/messages`, { text: 'what is this?' });
+  assert.deepEqual(await said(later.id), ['what is this?'], 'its brief is still held');
+  await idle(later.id);
+  const parked = (await call(`/api/tickets/${later.id}`)).data.ticket;
+  assert.equal(parked.state, 'parked', 'its turn left it parked');
+  assert.equal(parked.note, `starts when #${next.data.number} is live`);
+  assert.equal(parked.held, `#${next.data.number} Next's work is live`);
+  const started = await call(`/api/tickets/${later.id}/start`, {});
+  assert.equal(started.status, 200);
+  assert.equal(started.data.held, null);
+  assert.deepEqual(await said(later.id), ['what is this?', 'brief for Later']);
+  assert.deepEqual(await briefs(later.id), [false, true]);
+  assert.equal((await call(`/api/tickets/${later.id}/start`, {})).status, 409, 'started once');
   await idle(later.id);
   await idle(next.data.id);
   await call(`/api/tickets/${next.data.id}/status`, { status: 'closed' });
   await new Promise((r) => setTimeout(r, 200));
-  assert.deepEqual(await said(later.id), ['brief for Later', 'go now'], 'started once');
+  assert.deepEqual(await said(later.id), ['what is this?', 'brief for Later'], 'its leader shipping later sends nothing more');
 });

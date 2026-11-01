@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cardEvent, countMoved, otherSchemes, rowTarget } from '../public/schemecounts.js';
+import { cardEvent, countMoved, otherSchemes, rowTarget, turnMoved } from '../public/schemecounts.js';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -11,20 +11,24 @@ test('another scheme\'s minion: news that can move its Needs-you count refetches
   assert.equal(fetches, 1, 'a minion new to this page may already count');
   watch.ticket(minion({ status: 'running', activity: 'Reading files' }));
   assert.equal(fetches, 1, 'activity alone moves nothing');
+  watch.ticket(minion({ status: 'idle', activity: 'Reading files' }));
+  assert.equal(fetches, 2, 'its turn ended: the spinner may stop (#248)');
+  watch.ticket(minion({ status: 'running', activity: 'Reading files' }));
+  assert.equal(fetches, 3, 'a turn started');
   watch.ticket(minion({ status: 'idle', state: 'ready' }));
-  assert.equal(fetches, 2, 'ready counts');
+  assert.equal(fetches, 4, 'ready counts');
   watch.ticket(minion({ status: 'idle', state: 'ready', replies: ['Merge it'] }));
-  assert.equal(fetches, 3, 'offering replies counts');
+  assert.equal(fetches, 5, 'offering replies counts');
   watch.ticket(minion({ status: 'closed', state: 'ready', replies: ['Merge it'] }));
-  assert.equal(fetches, 4, 'dismissing it stops it counting');
+  assert.equal(fetches, 6, 'dismissing it stops it counting');
 
   watch.event({ ticket_id: 7, kind: 'question', data: '{}' });
-  assert.equal(fetches, 5, 'a card raised');
+  assert.equal(fetches, 7, 'a card raised');
   watch.event({ ticket_id: 7, kind: 'user_message', data: '{"answer":{"id":1}}' });
-  assert.equal(fetches, 6, 'a card answered by typing');
+  assert.equal(fetches, 8, 'a card answered by typing');
   watch.event({ ticket_id: 7, kind: 'user_message', data: '{"text":"hi"}' });
   watch.event({ ticket_id: 7, kind: 'assistant_text', data: '{}' });
-  assert.equal(fetches, 6, 'chat that settles no card moves nothing');
+  assert.equal(fetches, 8, 'chat that settles no card moves nothing');
 });
 
 test('cardEvent and countMoved, as the open scheme\'s badge uses them too', () => {
@@ -34,9 +38,9 @@ test('cardEvent and countMoved, as the open scheme\'s badge uses them too', () =
   assert.equal(countMoved(minion(), minion({ activity: 'x' })), false);
   assert.equal(countMoved(minion({ state: 'try' }), minion({ state: 'ready' })), true);
   assert.equal(countMoved(minion({ properties: { assigned: 'Cara' } }), minion({ properties: { assigned: 'Josh' } })), true, 'it changed hands (#197)');
-  assert.equal(countMoved(minion(), minion({ status: 'running' })), true, 'a turn started: the spinner (#248)');
-  assert.equal(countMoved(minion({ status: 'running' }), minion({ status: 'idle' })), true, 'a turn ended');
-  assert.equal(countMoved(minion({ status: 'idle' }), minion({ status: 'error' })), false, 'neither running');
+  assert.equal(turnMoved(minion(), minion({ status: 'running' })), true, 'a turn started: the spinner (#248)');
+  assert.equal(turnMoved(minion({ status: 'running' }), minion({ status: 'idle' })), true, 'a turn ended');
+  assert.equal(turnMoved(minion({ status: 'idle' }), minion({ status: 'error' })), false, 'neither running');
 });
 
 test('forget: after the counts are fetched afresh, a minion the watcher last saw before then refetches on its next change', () => {

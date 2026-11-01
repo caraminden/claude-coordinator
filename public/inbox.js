@@ -1,7 +1,7 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './core.js';
-import { cardEvent, countMoved, otherSchemes, rowTarget } from './schemecounts.js';
+import { cardEvent, countMoved, otherSchemes, rowTarget, turnMoved } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
@@ -53,9 +53,10 @@ export function inboxEvent(event) {
   else if (cardEvent(event)) refreshSoon();
 }
 
-/** One of this scheme's minions changed: refetch when that can move the count. */
+/** One of this scheme's minions changed: refetch when that can move the count; a turn starting or ending only redraws the spinner. */
 export function inboxTicket(before, after) {
   if (countMoved(before, after)) refreshSoon();
+  else if (turnMoved(before, after)) renderInbox();
 }
 
 /** The counts came afresh with the page (or after the stream dropped): news the watcher missed meanwhile mustn't hide the next change. */

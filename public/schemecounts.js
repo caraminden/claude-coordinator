@@ -7,9 +7,12 @@ const CARD_EVENTS = new Set(['question', 'question_result', 'plan', 'plan_result
 /** A chat event that opens or settles a card (a typed answer settles one too). */
 export const cardEvent = (event) => CARD_EVENTS.has(event.kind) || (event.kind === 'user_message' && !!JSON.parse(event.data).answer);
 
-/** A minion moved into or out of ready/try, offered or lost its replies, was dismissed or reopened, changed hands, or started or ended a turn (the spinner, #248) (or is new to us). */
+/** A minion moved into or out of ready/try, offered or lost its replies, was dismissed or reopened, or changed hands (or is new to us). */
 export const countMoved = (before, after) => !before || before.state !== after.state || !before.replies?.length !== !after.replies?.length || (before.status === 'closed') !== (after.status === 'closed')
-  || before.properties?.assigned !== after.properties?.assigned || (before.status === 'running') !== (after.status === 'running');
+  || before.properties?.assigned !== after.properties?.assigned;
+
+/** A minion started or ended a turn: the spinner in place of a zero count (#248). */
+export const turnMoved = (before, after) => (before?.status === 'running') !== (after.status === 'running');
 
 /**
  * Other schemes' minions as the stream last showed them: `ticket` and `event` call `refetch` when
@@ -22,7 +25,7 @@ export function otherSchemes(refetch) {
     ticket(t) {
       const before = last.get(t.id);
       last.set(t.id, t);
-      if (countMoved(before, t)) refetch();
+      if (countMoved(before, t) || turnMoved(before, t)) refetch();
     },
     event(event) {
       if (cardEvent(event)) refetch();

@@ -371,6 +371,11 @@ async function scanShared(projectId: number) {
   sharedSeen.set(projectId, sig);
 }
 
+// The file a broken link's name finds (findByName), kept a while: a scan runs every few seconds, and
+// broken links stay in the replies for good.
+const NAME_FIX_MS = 10 * 60_000;
+const nameFixes = new Map<string, { match: string | null; at: number }>();
+
 async function scanArtifacts(ticketId: number) {
   // One scan per ticket at a time; a request during a scan waits for it, then rescans.
   while (scanning.has(ticketId)) await scanning.get(ticketId);
@@ -388,10 +393,13 @@ async function scanArtifacts(ticketId: number) {
     const linked = linkedPaths(store.replyTexts(ticketId), ticket.cwd);
     // A link with the wrong folders counts for the one file of its name, as the chat opens it (#281).
     for (const abs of [...linked]) {
-      if (isArtifact(abs) && !(await realpath(abs).catch(() => null))) {
-        const match = await findByName(abs, [ticket.cwd, shared, projectSharedDir(DATA_DIR, ticket.project_id)]);
-        if (match) linked.add(match);
+      if (!isArtifact(abs) || (await realpath(abs).catch(() => null))) continue;
+      const key = `${ticketId}\0${abs}`;
+      let fix = nameFixes.get(key);
+      if (!fix || Date.now() - fix.at > NAME_FIX_MS) {
+        nameFixes.set(key, fix = { match: await findByName(abs, [ticket.cwd, shared, projectSharedDir(DATA_DIR, ticket.project_id)]), at: Date.now() });
       }
+      if (fix.match) linked.add(fix.match);
     }
     const pinned = new Set(store.pinnedArtifactPaths(ticketId));
     const shown = found.filter((f) => linked.has(isAbsolute(f.path) ? f.path : join(ticket.cwd, f.path)) || pinned.has(f.path));

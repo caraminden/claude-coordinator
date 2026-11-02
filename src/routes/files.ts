@@ -53,9 +53,9 @@ function displayPath(app: App, ticket: Ticket, path: string): string {
 /** The folders a ticket may show files from: its working directory, its shared folder and the project's. */
 export const ticketRoots = (app: App, ticket: Ticket) => [ticket.cwd, app.sharedDir(ticket), projectSharedDir(app.dataDir, ticket.project_id)];
 
-/** A file a ticket may show (see resolveLink: a link with the wrong folders finds the one file of its name), or null. */
+/** A file a ticket may show (see resolveFile), or null. */
 export function resolveTicketFile(app: App, ticket: Ticket, path: string) {
-  return resolveLink(path, ticket.cwd, ticketRoots(app, ticket));
+  return resolveFile(path, ticket.cwd, ticketRoots(app, ticket));
 }
 
 /**
@@ -512,10 +512,11 @@ export const fileRoutes: Route[] = [
     method: ['GET', 'HEAD'], path: '/api/tickets/:ticket/file', who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { res, url, app, ticket } = ctx;
-      // A file the ticket linked in its reply: ?path= as written there; ?info for its details.
+      // A file the ticket linked in its reply: ?path= as written there; ?info for its details. With &fix,
+      // the chat checking a link it shows: one with the wrong folders gets the one file of its name (#281).
       const path = url.searchParams.get('path') ?? '';
       if (!url.searchParams.has('info')) return serveFound(ctx, await resolveTicketFile(app, ticket, path), path, ticketScopes(app, ticket));
-      const found = await resolveTicketFile(app, ticket, path);
+      const found = url.searchParams.has('fix') ? await resolveLink(path, ticket.cwd, ticketRoots(app, ticket)) : await resolveTicketFile(app, ticket, path);
       if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
       const relPath = found.abs.startsWith(ticket.cwd + sep) ? found.abs.slice(ticket.cwd.length + 1) : found.abs;
       const artifact = app.store.findArtifact(ticket.id, [relPath, found.abs]);

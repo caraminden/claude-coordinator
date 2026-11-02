@@ -195,16 +195,17 @@ function filePreviewHtml(ticketId, path, caption) {
     + `${caption ? `<span class="caption">${caption}</span>` : ''}</a>`;
 }
 
-// What the server found for each file a thread links, by "<thread> <path>": its details, or null (#281).
+// What the server found for each file a thread links, by "<thread> <path>": its details, null when
+// there's no such file, or undefined when it couldn't say (offline, a restart) (#281).
 const linkInfo = new Map();
 function fileLinkInfo(ticketId, path) {
   const key = `${ticketId} ${path}`;
   let info = linkInfo.get(key);
   if (!info) {
-    info = api(`${fileUrl(ticketId, path)}&info`).catch(() => null);
+    info = fetch(`${fileUrl(ticketId, path)}&info&fix`).then((res) => (res.ok ? res.json() : res.status === 404 ? null : undefined)).catch(() => undefined);
     linkInfo.set(key, info);
-    // A file that isn't there may be written soon, so the next render asks again.
-    info.then((found) => found || linkInfo.delete(key));
+    // A file that isn't there may be written soon, so ask again after a while.
+    info.then((found) => found || setTimeout(() => linkInfo.delete(key), 30_000));
   }
   return info;
 }
@@ -222,7 +223,7 @@ function checkFileLinks(root, ticketId) {
     fileLinkInfo(ticketId, path).then((info) => {
       const t = document.createElement('template');
       if (info?.fixed) t.innerHTML = card ? fileCardHtml(ticketId, info.abs, title) : filePreviewHtml(ticketId, info.abs, title);
-      else if (!info) t.innerHTML = `<span class="file-missing" title="${escapeHtml(`Not found: ${path}`)}">${title || escapeHtml(baseName(path))} <span class="mark">(file not found)</span></span>`;
+      else if (info === null) t.innerHTML = `<span class="file-missing" title="${escapeHtml(`Not found: ${path}`)}">${title || escapeHtml(baseName(path))} <span class="mark">(file not found)</span></span>`;
       const fresh = t.content.firstElementChild ?? el;
       fresh.classList.remove('checking');
       if (fresh !== el) el.replaceWith(fresh);

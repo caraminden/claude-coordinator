@@ -201,6 +201,7 @@ export async function findByName(path: string, roots: string[]): Promise<string 
   const name = basename(path);
   if (!fileType(name)) return null;
   const hits = new Map<string, string>(); // real path → path found, so overlapping roots count a file once
+  let capped = false; // a tree too big to search whole may hold a second one
   for (const root of roots) {
     let seen = 0;
     const visit = async (dir: string): Promise<void> => {
@@ -211,7 +212,8 @@ export async function findByName(path: string, roots: string[]): Promise<string 
         return;
       }
       for (const e of entries) {
-        if (++seen > MAX_SEARCH || hits.size > 1) return;
+        if (++seen > MAX_SEARCH) capped = true;
+        if (capped || hits.size > 1) return;
         if (e.name.startsWith('.')) continue;
         const p = join(dir, e.name);
         if (e.isDirectory()) {
@@ -223,7 +225,7 @@ export async function findByName(path: string, roots: string[]): Promise<string 
     };
     await visit(root);
   }
-  return hits.size === 1 ? [...hits.values()][0] : null;
+  return hits.size === 1 && !capped ? [...hits.values()][0] : null;
 }
 
 /**

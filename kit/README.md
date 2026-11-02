@@ -11,8 +11,8 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
   only checks `COORDINATOR_ROLE` (`thread`), since Taskmasters load the kit too. Today's hooks:
   - `job-check.ts` (Stop, minions only): refuses to end the turn while the session's own
     background job runs, at most twice per prompt.
-  - `retro-log.ts`: one line per tripwire or guard.sh refusal, red test, failed push or refused
-    stop in `$COORDINATOR_SHARED_DIR/retro-log/<date>/<session>.md`, for the retro skill.
+  - `retro-log.ts`: one line per tripwire or guard.sh refusal, red test (a test runner the command
+    runs, counted from that runner's own summary), failed push or refused stop in `$COORDINATOR_SHARED_DIR/retro-log/<date>/<session>.md`, for the retro skill.
   - `after-compact.sh` (SessionStart, compact): the branch, head and uncommitted files, and a
     reminder to re-read the record rather than the summary.
 - A plugin can't carry `.claude/rules`: per-repo rules stay in each repo.

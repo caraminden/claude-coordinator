@@ -55,15 +55,115 @@ function header(session: string, cwd: string | undefined): string {
   return `# Retro log: ${session}\n\nWritten by the Citadel kit's hooks (kit/hooks). One line per tripwire or guard.sh refusal, red test, failed push or refused stop.${where ? `\n${where}.` : ''}\n\n`;
 }
 
-/** How many tests a run's output says failed (node --test, dotnet, pytest and jest summaries), or 0. */
-export function failedTests(text: string): number {
-  const counts = [
-    ...[...text.matchAll(/^\s*(?:ℹ|#) fail (\d+)\s*$/gm)].map((m) => m[1]),
-    ...[...text.matchAll(/\bFailed:\s+(\d+)/g)].map((m) => m[1]),
-    ...[...text.matchAll(/\b(\d+) failed\b/g)].map((m) => m[1]),
-  ].map(Number);
-  return counts.reduce((a, b) => a + b, 0);
+/** The test runners whose summaries it reads; `any` is a wrapper (npm test, a check script) that could run any of them. */
+export type Runner = 'node' | 'dotnet' | 'pytest' | 'jest' | 'mocha' | 'cargo' | 'go' | 'any';
+
+/** Each runner's own summary line, as [pattern, how to read its count]. */
+const SUMMARIES: Record<Exclude<Runner, 'any'>, (text: string) => number> = {
+  node: (t) => sum(t, /^\s*(?:ℹ|#) fail (\d+)\s*$/gm),
+  // `dotnet test` prints one "Failed!" line per test project; newer SDKs add one overall "Test summary".
+  dotnet: (t) => sum(t, /^\s*Test summary: total: \d+, failed: (\d+)/gim) || sum(t, /\bFailed!\s+-\s+Failed:\s+(\d+)/g),
+  pytest: (t) => sum(t, /^[=\s]*(?:\d+ \w+, )*(\d+) failed\b.* in [\d.]+s\b/gm),
+  jest: (t) => sum(t, /^\s*Tests:?\s+(\d+) failed\b/gm),
+  mocha: (t) => sum(t, /^\s*(\d+) failing\s*$/gm),
+  cargo: (t) => sum(t, /^test result: FAILED\. \d+ passed; (\d+) failed;/gm),
+  go: (t) => [...t.matchAll(/^--- FAIL: /gm)].length,
+};
+
+const sum = (text: string, re: RegExp) => [...text.matchAll(re)].reduce((n, m) => n + Number(m[1]), 0);
+
+/** How many tests a run's output says failed, read from the given runners' summaries (all of them by default), or 0. */
+export function failedTests(text: string, runners: Runner[] = ['any']): number {
+  const kinds = runners.includes('any') ? (Object.keys(SUMMARIES) as (keyof typeof SUMMARIES)[]) : [...new Set(runners)] as (keyof typeof SUMMARIES)[];
+  return kinds.reduce((n, k) => n + SUMMARIES[k](text), 0);
 }
+
+/** What a simple command starts with when it runs tests, after env assignments and wrappers like `timeout 300`. */
+const RUNNERS: [RegExp, Runner][] = [
+  [/^node\b[^|]*\s--test\b/, 'node'],
+  [/^dotnet\s+test\b/, 'dotnet'],
+  [/^(?:(?:python3?|py)\s+-m\s+|(?:uv|poetry|pipenv)\s+run\s+)?(?:pytest|py\.test)\b/, 'pytest'],
+  [/^(?:(?:npx|pnpm\s+exec|yarn|bunx)\s+)?(?:\S*\/)?(?:jest|vitest)\b/, 'jest'],
+  [/^(?:(?:npx|pnpm\s+exec|yarn|bunx)\s+)?(?:\S*\/)?mocha\b/, 'mocha'],
+  [/^cargo\s+(?:test|nextest)\b/, 'cargo'],
+  [/^go\s+test\b/, 'go'],
+  [/^(?:npm|pnpm|yarn|bun)\s+(?:t|test|(?:run(?:-script)?\s+)?(?:test|check)[\w:-]*)(?:\s|$)/, 'any'],
+  [/^make\s+(?:test|check)\w*\b/, 'any'],
+  // A check script: its name says test or check (tools/check.sh, run-tests.py), or Citadel's land.sh, which runs npm test.
+  [/^(?:(?:bash|sh|node|python3?)\s+)?(?:\S*\/)?(?:[\w.-]*(?:test|check)[\w.-]*|land)\.(?:sh|ts|js|mjs|py)\b/i, 'any'],
+];
+
+/** Wrappers and keywords a simple command can start with before the program it runs. */
+const PREFIX = /^(?:(?:\w+=(?:'[^']*'|"[^"]*"|\S*)|then|do|else|time|exec|env|nice|command|!|timeout(?:\s+-\S+)*\s+\S+)\s+)*/;
+
+/**
+ * A copy of a shell command with quoted text, comments and heredoc bodies blanked out (same length, so
+ * positions still match), so a runner's name inside a string or an edit script never reads as a run.
+ */
+export function mask(command: string): string {
+  const out = command.split('');
+  const blank = (from: number, to: number) => {
+    for (let k = from; k < to; k++) out[k] = '_';
+  };
+  const pending: { word: string; tabs: boolean }[] = [];
+  let i = 0;
+  while (i < command.length) {
+    const c = command[i];
+    if (c === '\\') {
+      i += 2;
+    } else if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < command.length && command[j] !== c) j += c === '"' && command[j] === '\\' ? 2 : 1;
+      blank(i + 1, Math.min(j, command.length));
+      i = j + 1;
+    } else if (c === '#' && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
+      const end = command.indexOf('\n', i);
+      const stop = end < 0 ? command.length : end;
+      blank(i, stop);
+      i = stop;
+    } else if (command.startsWith('<<<', i)) {
+      i += 3;
+    } else if (command.startsWith('<<', i)) {
+      const m = command.slice(i).match(/^<<(-?)\s*(['"]?)(\w+)\2/);
+      if (m) pending.push({ word: m[3], tabs: m[1] === '-' });
+      i += m ? m[0].length : 2;
+    } else if (c === '\n' && pending.length) {
+      // The heredoc bodies start on the next line, one after another, each ending at its delimiter alone on a line.
+      let at = i + 1;
+      for (const { word, tabs } of pending.splice(0)) {
+        const end = new RegExp(`^${tabs ? '\\t*' : ''}${word}[ \\t]*$`, 'gm');
+        end.lastIndex = at;
+        const close = end.exec(command);
+        at = close ? close.index + close[0].length : command.length;
+      }
+      blank(i + 1, at);
+      i = at;
+    } else {
+      i++;
+    }
+  }
+  return out.join('');
+}
+
+/** The simple commands in a shell command that run tests, as written, with the runner each is. */
+export function testRuns(command: string): [string, Runner][] {
+  const masked = mask(command);
+  const runs: [string, Runner][] = [];
+  // Command separators; the "&" of a redirection (2>&1, &>log) is not one.
+  const sep = /&&|\|\||(?<![<>&])&(?![>&])|[;|\n()`{}]|\$\(/g;
+  let from = 0;
+  for (const m of [...masked.matchAll(sep), { index: masked.length, 0: '' } as unknown as RegExpMatchArray]) {
+    const body = masked.slice(from, m.index).trim();
+    const prefix = body.match(PREFIX)?.[0].length ?? 0;
+    const runner = RUNNERS.find(([re]) => re.test(body.slice(prefix)))?.[1];
+    if (runner) runs.push([command.slice(from, m.index).trim(), runner]);
+    from = m.index! + m[0].length;
+  }
+  return runs;
+}
+
+/** True when a command touches a retro log folder: its output holds old "N failed" lines, never a run's. */
+const readsRetroLog = (command: string) => /retro-log(?:\/|['"\s;|&)]|$)/.test(command);
 
 /** A Bash call's output, from PostToolUse (tool_response) or PostToolUseFailure (error). */
 function outputOf(input: any): string {
@@ -79,8 +179,9 @@ export function bashLines(input: any): [string, string][] {
   if (!command || input?.tool_input?.run_in_background) return [];
   const out = outputOf(input);
   const lines: [string, string][] = [];
-  const failed = failedTests(out);
-  if (failed > 0) lines.push(['red test', `${failed} failed: ${command.slice(0, 160)}`]);
+  const runs = readsRetroLog(command) ? [] : testRuns(command);
+  const failed = runs.length ? failedTests(out, runs.map(([, r]) => r)) : 0;
+  if (failed > 0) lines.push(['red test', `${failed} failed: ${runs.map(([c]) => c).join('; ').slice(0, 160)}`]);
   if (input.hook_event_name === 'PostToolUseFailure' && /\bgit(?:\s+-C\s+\S+|\s+-\S+)*\s+push\b/.test(command)) {
     lines.push(['failed push', `${command.slice(0, 120)}: ${out.trim().split('\n').slice(-3).join(' ')}`]);
   }

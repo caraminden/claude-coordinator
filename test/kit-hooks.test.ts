@@ -60,13 +60,56 @@ test('job check script prints the block for Claude Code, and fails open on bad i
   assert.equal(bad.stdout, '');
 });
 
-test('retro log: counts red tests from node, dotnet and pytest summaries', () => {
+test('retro log: counts red tests from each runner\'s own summary line', () => {
   assert.equal(failedTests('ℹ tests 600\nℹ pass 598\nℹ fail 2\n'), 2);
   assert.equal(failedTests('# fail 1'), 1);
   assert.equal(failedTests('ℹ fail 0'), 0);
-  assert.equal(failedTests('Failed!  - Failed:     3, Passed:    10'), 3);
-  assert.equal(failedTests('=== 4 failed, 10 passed in 2.1s ==='), 4);
+  assert.equal(failedTests('Failed!  - Failed:     3, Passed:    10', ['dotnet']), 3);
+  assert.equal(failedTests('Failed!  - Failed:     1, Passed: 4\nFailed!  - Failed:     2, Passed: 9', ['dotnet']), 3, 'one line per test project');
+  assert.equal(failedTests('Failed!  - Failed:     1, Passed: 4\nTest summary: total: 15, failed: 3, succeeded: 12', ['dotnet']), 3, 'the overall summary wins');
+  assert.equal(failedTests('=== 4 failed, 10 passed in 2.1s ===', ['pytest']), 4);
+  assert.equal(failedTests('2 failed, 1 passed, 1 warning in 0.12s', ['pytest']), 2);
+  assert.equal(failedTests('Tests:       2 failed, 10 passed, 12 total', ['jest']), 2);
+  assert.equal(failedTests(' Tests  5 failed | 10 passed (15)', ['jest']), 5, 'vitest');
+  assert.equal(failedTests('test result: FAILED. 10 passed; 2 failed; 0 ignored\ntest result: FAILED. 1 passed; 1 failed;', ['cargo']), 3);
+  assert.equal(failedTests('--- FAIL: TestA (0.00s)\n    --- FAIL: TestA/sub (0.00s)\n--- FAIL: TestB (0.01s)\nFAIL', ['go']), 2, 'top-level tests only');
+  assert.equal(failedTests('  3 failing', ['mocha']), 3);
   assert.equal(failedTests('all green'), 0);
+  assert.equal(failedTests('the PR says 3 failed before the fix'), 0, 'prose is not a summary');
+});
+
+test('retro log: only a test runner in the command counts, and the line names that command', () => {
+  const ran = (command: string, stdout: string) => bashLines({ hook_event_name: 'PostToolUse', tool_input: { command }, tool_response: { stdout, stderr: '' } });
+  const failure = (command: string, error: string) => bashLines({ hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command }, error });
+  // Delve #5's log, 2026-11-02: a cat of two PR descriptions that say "failed".
+  assert.deepEqual(ran('cd /p/tmp/37/prs && cat 219.md 207.md', '## Fix\nBefore this, 1 failed on CI.\nFailed: 2 runs'), []);
+  // Reading the retro log fed its own "N failed" lines back into it.
+  const logText = '- 05:32:17Z · red test · 4 failed: dotnet test tests/X\n- 05:51:24Z · red test · 1 failed: npm test\nℹ fail 2\n';
+  assert.deepEqual(ran("cd /p/shared/project/retro-log && ls 2026-11-0*/ | head; grep -l 'auniv6\\|b7-final\\|b7-' */*.md 2>/dev/null | head", logText), []);
+  assert.deepEqual(ran("cd /p/shared/project/retro-log && grep '^- ' 2026-11-02/b388.md | cut -c1-230", logText), []);
+  assert.deepEqual(ran('D=/p/shared/project/retro-log; for f in $D/2026-11-01/s.md; do node --test x; cat $f; done', logText), [], 'never log a command that reads the retro log');
+  // A heredoc edit whose script prints "failed" is not a test run, even if the heredoc body names one.
+  const edit = "cd /p/b7-seams && python3 - <<'EOF'\np='tests/SeamTests.cs'\ns=open(p).read()\n# then: dotnet test tests/X\nprint('2 failed asserts rewritten')\nEOF";
+  assert.deepEqual(ran(edit, '2 failed asserts rewritten\nFailed!  - Failed:     2, Passed: 1'), []);
+  // An edit chained with a real, red test run: the line names the test command, not the edit.
+  const dotnet = 'Failed!  - Failed:     2, Passed:    40, Skipped:     0, Total:    42';
+  assert.deepEqual(ran(`${edit}\ndotnet test tests/Delve.Sim.Tests --no-build --filter "A|B" 2>&1 | tail -5`, dotnet), [['red test', '2 failed: dotnet test tests/Delve.Sim.Tests --no-build --filter "A|B" 2>&1']]);
+  assert.deepEqual(ran("cd /p && python3 - <<'E' && dotnet test x.sln\nprint(1)\nE", dotnet), [['red test', '2 failed: dotnet test x.sln']]);
+  // A runner named inside quotes is an argument, not a run.
+  assert.deepEqual(ran("grep -n 'npm test; dotnet test' notes.md", 'ℹ fail 4\n' + dotnet), []);
+  assert.deepEqual(ran('git commit -m "pytest: 3 failed before"', '=== 3 failed in 1.0s ==='), []);
+  // Runners and wrappers it recognises.
+  assert.deepEqual(failure('cd /w && npm test 2>&1 | tail -20', 'Exit code 1\nℹ fail 1'), [['red test', '1 failed: npm test 2>&1']]);
+  assert.deepEqual(ran('FOO=1 timeout 300 node --test test/a.test.ts', 'ℹ fail 3'), [['red test', '3 failed: FOO=1 timeout 300 node --test test/a.test.ts']]);
+  assert.deepEqual(ran('python3 -m pytest -q tests/', '2 failed, 1 passed in 0.12s'), [['red test', '2 failed: python3 -m pytest -q tests/']]);
+  assert.deepEqual(ran('cargo test --all', 'test result: FAILED. 1 passed; 1 failed;'), [['red test', '1 failed: cargo test --all']]);
+  assert.deepEqual(ran('go test ./...', '--- FAIL: TestA (0.00s)\nFAIL'), [['red test', '1 failed: go test ./...']]);
+  assert.deepEqual(ran('npx vitest run', ' Tests  5 failed | 10 passed (15)'), [['red test', '5 failed: npx vitest run']]);
+  assert.deepEqual(ran('bash tools/check.sh && tools/land.sh', 'ℹ fail 1'), [['red test', '1 failed: bash tools/check.sh; tools/land.sh']]);
+  assert.deepEqual(ran('dotnet test a && dotnet test b', 'Failed!  - Failed:     1, Passed: 1\nFailed!  - Failed:     1, Passed: 1'), [['red test', '2 failed: dotnet test a; dotnet test b']]);
+  assert.deepEqual(ran('node --test test/retro-log.test.ts', 'ℹ fail 1'), [['red test', '1 failed: node --test test/retro-log.test.ts']], 'a file named retro-log is not the log');
+  // A runner's own summary only: dotnet's count never comes from a pytest-style line.
+  assert.deepEqual(ran('dotnet test', 'Some prose: 3 failed earlier'), []);
 });
 
 test('retro log: a red test or a failed push earns a line; a green run, a background run or a good push none', () => {

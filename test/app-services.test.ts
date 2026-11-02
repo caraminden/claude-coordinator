@@ -64,6 +64,21 @@ test('the units come from the registry and the manifest, quoted so nothing is a 
   assert.match(files.get('citadel-app-mandate-backup.timer')!, /^OnCalendar=\*-\*-\* 03:30:00$/m);
 });
 
+test('units run with the build\'s toolchain: the app\'s .mise.toml trusted and a bare program found on mise\'s shims first', () => {
+  const manifest = parseManifest(JSON.stringify({ start: ['node', 'server.ts'], timers: { tick: { command: ['/usr/bin/true'], on_calendar: 'daily' } } }));
+  const files = unitFiles({ row: row('toc', 22255), manifest, folder: '/h/apps/toc', keysDir: '/h/keys/toc', citadelUrl: 'http://127.0.0.1:8573', home: '/h' });
+  const search = 'ExecSearchPath=/h/.local/share/mise/shims:/h/.local/bin:/usr/local/bin:/usr/bin:/bin';
+  for (const unit of ['citadel-app-toc.service', 'citadel-app-toc-tick.service']) {
+    const text = files.get(unit)!;
+    assert.ok(text.includes('Environment="MISE_TRUSTED_CONFIG_PATHS=/h/apps/toc"'), unit);
+    assert.ok(text.split('\n').includes(search), unit);
+  }
+  assert.match(files.get('citadel-app-toc.service')!, /^ExecStart=node "server.ts"$/m, 'a bare name stays bare for ExecSearchPath to find');
+  assert.match(files.get('citadel-app-toc-tick.service')!, /^ExecStart=\/usr\/bin\/true$/m, 'an absolute path stays as it is');
+  const own = unitFiles({ row: row('toc', 22255), manifest: parseManifest(JSON.stringify({ start: ['node'], env: { MISE_TRUSTED_CONFIG_PATHS: '/h/other' } })), folder: '/h/apps/toc', keysDir: '', citadelUrl: '', home: '/h' });
+  assert.ok(own.get('citadel-app-toc.service')!.includes('Environment="MISE_TRUSTED_CONFIG_PATHS=/h/apps/toc:/h/other"'), 'an app\'s own trusted paths are kept');
+});
+
 test('only the live server, or a dev copy with stand-ins for both systemctl and the unit folder, touches systemd', () => {
   const rest = { keysDir: () => '', citadelUrl: () => '' };
   assert.equal(serviceOptions({}, true, false, rest).off, null);

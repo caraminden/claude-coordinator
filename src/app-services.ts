@@ -126,7 +126,11 @@ export function unitFiles({ row, manifest, folder, keysDir, citadelUrl, home }: 
     CITADEL_KEYS: keysDir,
     CITADEL_URL: citadelUrl,
     BASE_PATH: `/apps/${row.name}`,
+    // The build trusts the app's .mise.toml, so its units do too; an app's own trusted paths are kept after it.
+    MISE_TRUSTED_CONFIG_PATHS: [folder, manifest.env.MISE_TRUSTED_CONFIG_PATHS].filter(Boolean).join(':'),
   };
+  // systemd finds a bare program name on its own path, not the unit's PATH: point it at the build's, so `node` is mise's shim.
+  const search = `ExecSearchPath=${toolPath(home).replace(/%/g, '%%')}`;
   const envLines = Object.entries(env).map(([k, v]) => `Environment=${quote(`${k}=${v}`)}`);
   // WorkingDirectory takes the rest of the line as the path, unquoted.
   const dir = (rel: string) => `WorkingDirectory=${(rel === '.' ? folder : join(folder, rel)).replace(/%/g, '%%')}`;
@@ -135,14 +139,14 @@ export function unitFiles({ row, manifest, folder, keysDir, citadelUrl, home }: 
   files.set(`${unitName(row.name)}.service`, [
     ...head,
     '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')} (Citadel contraption)`, 'After=network.target', 'StartLimitIntervalSec=0', '',
-    '[Service]', dir(manifest.workdir), `ExecStart=${execLine(manifest.start, home)}`, ...envLines, 'Restart=on-failure', 'RestartSec=5', '',
+    '[Service]', dir(manifest.workdir), `ExecStart=${execLine(manifest.start, home)}`, search, ...envLines, 'Restart=on-failure', 'RestartSec=5', '',
     '[Install]', 'WantedBy=default.target', '',
   ].join('\n'));
   for (const [job, t] of Object.entries(manifest.timers)) {
     files.set(`${unitName(row.name, job)}.service`, [
       ...head,
       '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')}: ${job} (Citadel contraption job)`, '',
-      '[Service]', 'Type=oneshot', dir(t.workdir), `ExecStart=${execLine(t.command, home)}`, ...envLines, '',
+      '[Service]', 'Type=oneshot', dir(t.workdir), `ExecStart=${execLine(t.command, home)}`, search, ...envLines, '',
     ].join('\n'));
     files.set(`${unitName(row.name, job)}.timer`, [
       ...head,

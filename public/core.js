@@ -16,6 +16,7 @@ import { uploadsRunning } from './composer.js';
 import { renderMarkdown } from './markdown.js';
 import { iconSrc } from './schemes.js';
 import { hideRail, showRail } from './rail.js';
+import { dropFrames, framed, hideFrames, showFrame } from './frames.js';
 
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
@@ -679,15 +680,19 @@ async function route() {
     pendingJump = jump;
     return replaceHash(jump.hash);
   }
-  saveScroll();
+  // Under a contraption's frame the page keeps its scroll; it's saved when you left it for the frame.
+  if (!framed()) saveScroll();
   const seq = ++routeSeq;
   const hash = location.hash || '#/';
+  let m;
+  // A contraption in Citadel's window (frames.js): Citadel's page stays as it was underneath.
+  if ((m = hash.match(/^#\/apps\/([a-z0-9][a-z0-9-]{0,31})$/))) return showFrame(m[1]);
+  hideFrames();
   // A jump left by a route that never opened its chat mustn't fire on a later, ordinary visit.
   if (pendingJump?.hash !== hash) pendingJump = null;
   // Answer the click straight away: highlight the thread being opened and dim the old view.
   for (const a of document.querySelectorAll('#coordinator-row .thread-row, #threads .thread-row')) a.classList.toggle('active', a.getAttribute('href') === hash);
   document.body.classList.add('navigating');
-  let m;
   try {
     // Leaving the file viewer for the chat under it just closes it; anywhere else goes on from there.
     if (!hash.startsWith('#/f/') && closeViewer() === hash) {
@@ -784,6 +789,7 @@ for (const type of ['pointerover', 'focusin']) {
 function renderLogin() {
   view = null;
   hideRail();
+  dropFrames();
   crumbs.replaceChildren();
   meEl.replaceChildren();
   app.replaceChildren(document.getElementById('login-tpl').content.cloneNode(true));

@@ -224,6 +224,7 @@ export const projectRoutes: Route[] = [
     // icon: the version of the scheme's favicon (#222) for its URL, or null when it has none.
     // hidden: this person hid it (#226); its badge stays at zero.
     // running: a minion or its Taskmaster has a turn running (#248), for the spinner; false when hidden.
+    // working: how many minions (not the Taskmaster) have a turn running, the number beside the spinner (#278); 0 when hidden.
     handler: async ({ res, app: { store, runner }, session }) => {
       const hidden = store.hiddenProjects(session.uid ?? -1);
       json(res, 200, await Promise.all(visibleSchemes(store, session).map(async (p) => {
@@ -233,6 +234,7 @@ export const projectRoutes: Route[] = [
           hidden: hidden.has(p.id),
           inbox: hidden.has(p.id) ? 0 : inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id)),
           running: !hidden.has(p.id) && tickets.some((t) => t.status === 'running'),
+          working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && t.status === 'running').length,
           icon: await iconVersion(p.repo_dir),
         };
       })));

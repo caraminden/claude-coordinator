@@ -80,9 +80,12 @@ export function inboxStrip() {
   return strip;
 }
 
-/** A scheme's Needs-you count (`inbox` from api/projects) as a pill for the scheme lists; at zero, a spinner while a turn runs in it (#248), else hidden. */
+/** A scheme's Needs-you count (`inbox` from api/projects) as a pill for the scheme lists; at zero, a spinner while a turn runs in it (#248) with how many minions are working (#278; none shown when only the Taskmaster is), else hidden. */
 export function schemeCount(p) {
-  if (!p.inbox && p.running) return h('span', { class: 'scheme-count busy', 'data-scheme-inbox': p.id, role: 'img', title: 'Minions working', 'aria-label': 'Minions working' }, h('i'));
+  if (!p.inbox && p.running) {
+    const label = p.working ? `${p.working} minion${p.working === 1 ? '' : 's'} working` : 'Taskmaster working';
+    return h('span', { class: 'scheme-count busy', 'data-scheme-inbox': p.id, role: 'img', title: label, 'aria-label': label }, h('i'), p.working ? h('b', { 'aria-hidden': 'true' }, p.working) : null);
+  }
   return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !p.inbox, title: 'Waiting on you' }, p.inbox || '');
 }
 
@@ -96,7 +99,8 @@ export function renderInbox() {
   // A scheme you hid (#226) keeps its strip but no pill.
   const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
   const running = !hidden && [view.coordinator, ...view.tickets.values()].some((t) => t?.status === 'running');
-  for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running }));
+  const working = hidden ? 0 : [...view.tickets.values()].filter((t) => t.kind !== 'coordinator' && t.status === 'running').length;
+  for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running, working }));
   strip.hidden = !items.length;
   if (!items.length) return strip.replaceChildren();
   let open = false;

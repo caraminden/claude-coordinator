@@ -19,7 +19,7 @@ import { claudeConfigDir } from '../sessions.ts';
 import type { Chain } from '../wake.ts';
 import { cloneProject, projectDir, removeProjectDir } from '../workspace.ts';
 import { ICON_HEADERS, iconVersion, readIcon } from '../scheme-icon.ts';
-import { HttpError, json, oneOf, readJson, send, str, ticketView, type App, type Ctx, type Route } from '../http.ts';
+import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, type App, type Ctx, type Route } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
@@ -116,6 +116,20 @@ function scheduleView(app: App, s: Schedule) {
   return { ...s, when: describeCron(s.cron), last_number: s.last_ticket_id ? (app.store.getTicket(s.last_ticket_id)?.number ?? null) : null };
 }
 
+/** A new minion's `parent` (#N in this scheme), or null for none; a number with no minion here is refused. */
+function parentMinion(store: App['store'], projectId: number, n: unknown): Ticket | null {
+  if (n === null) return null;
+  const t = Number.isInteger(n) ? store.listTickets(projectId).find((t) => t.kind === 'ticket' && t.number === n) : undefined;
+  if (!t) throw new HttpError(400, `parent must be a minion number in this scheme; there is no #${String(n).slice(0, 20)} here`);
+  return t;
+}
+
+/** The minion with this id, if it is one of this scheme's (not its Taskmaster). */
+function sameScheme(store: App['store'], projectId: number, id: number | null): Ticket | null {
+  const t = id === null ? undefined : store.getTicket(id);
+  return t && t.project_id === projectId && t.kind === 'ticket' ? t : null;
+}
+
 /** A stand-in title from the start of a first message, cut at a word near 40 characters. */
 function provisionalTitle(message: string): string {
   const line = message.split('\n').find((l) => l.trim())!.replace(/\s+/g, ' ').trim();
@@ -201,7 +215,7 @@ function visibleSchemes(store: App['store'], who: { uid?: number; admin?: boolea
 }
 
 // What one line of list_tickets shows (ticketLine in src/mcp.ts), and all a minion gets of another.
-const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'last_activity'] as const;
+const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'parent', 'last_activity'] as const;
 
 export const projectRoutes: Route[] = [
   {
@@ -567,10 +581,13 @@ export const projectRoutes: Route[] = [
       // shortcut: an old session's retired tag (#254) becomes its type through type's aliases (process → chore, idea → ideation); remove after a release.
       if (body.tag && !given('type')) props.type = body.tag;
       if (!caller && !given('requestedBy')) props.requestedBy = session.name;
+      // The minion it is started for (#273): `parent` (#N, null for none), else the minion whose relay the Taskmaster's turn answers.
+      const parent = body.parent !== undefined ? parentMinion(store, project.id, body.parent) : caller ? sameScheme(store, project.id, runner.relayedBy(caller.id)) : null;
+      // It rides its parent's build unless the create sets one (null: none), as `build` or the build property.
+      const build = body.build !== undefined ? buildNumber(body.build) : given('build') ? undefined : parent?.build ?? null;
       // A new minion is its starter's: the person, or for the Taskmaster the minion that asked for it, else the person of its turn.
       if (!given('assigned')) {
-        const parent = caller && runner.relayedBy(caller.id);
-        const assigned = !caller ? session.name : (parent && store.props.forTarget('minion', parent).assigned) || (caller.person_id && store.getUser(caller.person_id)?.name);
+        const assigned = !caller ? session.name : (parent && store.props.forTarget('minion', parent.id).assigned) || (caller.person_id && store.getUser(caller.person_id)?.name);
         if (assigned) props.assigned = assigned;
       }
       const planned = store.props.check(project.id, props);
@@ -593,7 +610,11 @@ export const projectRoutes: Route[] = [
       const { id, notes } = await app.newMinion(project, { title, props, model, effort }, session.name)
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
-      store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null });
+      store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null });
+      if (build) {
+        store.updateTicket(id, { build });
+        store.props.setBuild(id, build, session.name);
+      }
       // And it is that turn's asker's ask (#255), so its messages back count as theirs.
       const asker = caller && store.turnAsker(caller.id);
       if (asker && asker !== caller!.person_id) store.setSetting(askerKey(id), asker);

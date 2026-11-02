@@ -249,6 +249,11 @@ const TOOLS = [
           description: "Optional: a minion number (#N) to chain this one after. It is created now but parked, with its message held until #N's work is live (or merged, see start_when), then starts by itself on a branch caught up to main. If #N is dismissed without its work merged, it stays parked and you and people hear about it. A message to it gets an answer and it stays parked; message_ticket with start_now starts it early.",
         },
         start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it is on main, for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means merged.' },
+        parent: {
+          type: ['integer', 'null'],
+          description: "The minion number (#N, in this scheme) this one is started for: pass it whenever a minion asked for it, in its message or a handoff it wrote. The new minion shows as from #N and gets #N's build unless build is given. Left out, it is the minion whose message you are answering, if any; null for none.",
+        },
+        build: { ...BUILD, description: `${BUILD.description} Left out, it is the parent's build, if any.` },
         model: MODEL,
         effort: EFFORT,
       },
@@ -685,6 +690,7 @@ function ticketLine(t: any): string {
     t.note ? `note: ${t.note}` : '',
     t.branch ? `branch: ${t.branch}` : '',
     `by ${t.created_by}`,
+    t.parent ? `from #${t.parent}` : '',
     t.last_activity ? `latest: ${t.last_activity}` : '',
   ].filter(Boolean).join(' | ');
 }
@@ -908,6 +914,8 @@ async function runTool(name: string, args: any): Promise<string> {
         message: args.message,
         start_after: args.start_after ?? null,
         start_when: args.start_when ?? null,
+        parent: args.parent,
+        build: args.build,
         model: args.model ?? null,
         effort: args.effort ?? null,
       });

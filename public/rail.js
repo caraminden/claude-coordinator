@@ -56,11 +56,12 @@ let shown = 0; // bumped by each show and hide, so a fetch that finishes after s
 let opener = null; // where focus was before the switcher opened
 let slot = null; // the contraption's own container for it (mountRail), else it is fixed to the left edge
 let edgeTaken = false; // drawers.js has a left drawer, so the left edge is its (leaveEdge)
-const narrow = typeof matchMedia === 'function' ? matchMedia(NARROW) : null;
+// Framed, it's Citadel's window that is narrow or not: the frame is the rail's width narrower.
+const narrow = typeof matchMedia === 'function' ? (host ? window.parent : window).matchMedia(NARROW) : null;
 const installed = typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches;
 
 /** Whether the rail is showing (so the phone's swipe past the left panel has somewhere to go). */
-export const hasRail = () => (host ? host.hasRail() : !!nav);
+export const hasRail = () => (host ? host.hasRail() && narrow.matches : !!nav);
 
 /** drawers.js: a swipe from the left edge pulls out its left drawer, and only past that the switcher (false: not any more). */
 export function leaveEdge(taken = true) {
@@ -78,6 +79,7 @@ function addHandle() {
   handle.className = 'citadel-rail-handle';
   handle.title = 'Apps';
   handle.setAttribute('aria-label', 'Open apps');
+  handle.hidden = !!host && !narrow?.matches;
   handle.addEventListener('click', openRail);
   document.body.append(handle);
 }
@@ -126,7 +128,7 @@ let lastView = ''; // Citadel's own view before a frame, where its entry goes ba
 function syncRail() {
   if (inContraption || !nav) return;
   const now = showing();
-  if (!now) lastView = location.hash;
+  if (!now) lastView = location.hash || '#/'; // never a bare root: that link would reload Citadel, frames and all
   for (const a of nav.querySelectorAll('a')) {
     const here = (a.dataset.app || null) === now;
     a.classList.toggle('current', here);
@@ -154,6 +156,13 @@ function makeBackdrop() {
 
 /** Fetch your contraptions and draw the rail, or take it away when there are none. */
 export async function showRail() {
+  if (host) {
+    // Framed in Citadel: no rail of its own, just the phone's way to Citadel's switcher.
+    hideRail();
+    addStyles();
+    addHandle();
+    return false;
+  }
   const mark = ++shown;
   let mine = [];
   try {
@@ -163,12 +172,6 @@ export async function showRail() {
   if (mark !== shown) return false;
   const items = railItems(mine, showing(), root.pathname, !inContraption);
   hideRail();
-  if (host) {
-    // Framed in Citadel: no rail of its own, just the phone's way to Citadel's switcher.
-    addStyles();
-    addHandle();
-    return false;
-  }
   if (!items.length) return false;
   addStyles();
   nav = document.createElement('nav');
@@ -250,6 +253,7 @@ if (typeof document !== 'undefined') {
   // A framed contraption's rail.js reaches Citadel's rail through this.
   if (!inContraption) window.citadelRail = { openRail, closeRail, hasRail };
   narrow?.addEventListener('change', () => {
+    if (host && handle) handle.hidden = !narrow.matches;
     closeRail();
     // Lent out from its slot on a phone: back into the slot on a wide screen.
     if (!narrow.matches && slot && nav && nav.parentElement !== slot) {
@@ -257,11 +261,6 @@ if (typeof document !== 'undefined') {
       slot.append(nav);
     }
   });
-  // <html data-citadel-rail="slot">: the contraption calls mountRail itself.
-  if (inContraption && document.documentElement.dataset.citadelRail !== 'slot') {
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showRail);
-    else showRail();
-  }
 }
 
 /** The switcher as a list (a phone, or a wide slot), for the rail matched by `r`. */
@@ -297,6 +296,7 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
 .citadel-rail .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .citadel-rail hr { flex: none; width: 26px; border: 0; border-top: 1px solid #5a534c; margin: 2px 0; }
 .citadel-rail-backdrop, .citadel-rail-handle { display: none; }
+.citadel-rail-handle[hidden] { display: none !important; }
 /* Placed in a contraption's slot: it fills the slot, and the slot's width picks column or list below. */
 .citadel-rail.placed { position: static; width: auto; min-height: 100%; height: 100%; z-index: auto; visibility: visible; transform: none; box-shadow: none; transition: none; }
 @container (min-width: 120px) { ${list('.citadel-rail.placed')} }
@@ -313,4 +313,11 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
 }
 @media (prefers-reduced-motion: reduce) { .citadel-rail { transition: none; } }`);
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+}
+
+// Last, so the styles above are defined when a framed page draws its handle straight away.
+// <html data-citadel-rail="slot">: the contraption calls mountRail itself.
+if (typeof document !== 'undefined' && inContraption && document.documentElement.dataset.citadelRail !== 'slot') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showRail);
+  else showRail();
 }

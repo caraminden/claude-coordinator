@@ -110,6 +110,16 @@ if (pushSupported) {
   });
 }
 
+// A link into the installed app while it's open (the rail's way back from a contraption, a thread link
+// opened elsewhere) focuses the open window instead of opening another (manifest launch_handler,
+// focus-existing), and lands here: show a thread or view it names; a bare /c/ leaves you where you were.
+if ('launchQueue' in window) {
+  window.launchQueue.setConsumer(({ targetURL }) => {
+    const hash = targetURL && new URL(targetURL).hash;
+    if (hash) openHash(hash);
+  });
+}
+
 // ---------- project instructions ----------
 
 const MAX_INSTRUCTIONS = 16000;

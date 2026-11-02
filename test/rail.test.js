@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { railItems } from '../public/rail.js';
+import { opensApart, railItems } from '../public/rail.js';
 
 test('no contraption enabled: no rail at all', () => {
   assert.deepEqual(railItems([], '/'), []);
@@ -20,4 +20,13 @@ test('the rail lists Citadel, then each contraption, and marks where you are', (
   assert.deepEqual(down.map((i) => [i.icon, i.down]), [['/icon.svg', undefined], [null, true], [null, false]]);
   // In a preview, Citadel is its preview's root.
   assert.equal(railItems(mine, '/preview/4/', '/preview/4/')[0].href, '/preview/4/');
+});
+
+test("in an installed app, another app's entry opens apart so Chrome hands it to that app; in a tab, same tab", () => {
+  const items = railItems([{ name: 'mandate', title: 'Mandate' }], '/c/', '/c/');
+  assert.deepEqual(items.map((i) => opensApart(i, true)), [false, true]); // Citadel is where you are
+  assert.deepEqual(items.map((i) => opensApart(i, false)), [false, false]);
+  // The way back from a contraption's own app hands off to Citadel's.
+  const inMandate = railItems([{ name: 'mandate', title: 'Mandate' }], '/apps/mandate/', '/c/');
+  assert.deepEqual(inMandate.map((i) => opensApart(i, true)), [true, false]);
 });

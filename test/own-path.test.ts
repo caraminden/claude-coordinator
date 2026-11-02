@@ -26,4 +26,6 @@ test("Citadel's manifest keeps its id and its scope leaves /apps/ to contraption
   assert.ok(new URL(m.start_url, 'https://x/').pathname.startsWith(scope.pathname));
   // Chrome won't offer to install a contraption whose start_url is inside an installed app's scope.
   assert.ok(!'/apps/mandate/'.startsWith(scope.pathname), `scope ${m.scope} covers /apps/`);
+  // The rail's way back from a contraption focuses the open window instead of opening another (#274).
+  assert.deepEqual(m.launch_handler?.client_mode, ['focus-existing', 'auto']);
 });

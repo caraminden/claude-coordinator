@@ -32,6 +32,15 @@ export function railItems(mine, here, citadel = '/') {
   return [{ name: null, title: 'Citadel', href: citadel, icon: `${citadel}icon.svg`, current: inCitadel }, ...items];
 }
 
+/**
+ * Whether an entry opens apart, as a new window (#274). In an installed app's window, a same-window link
+ * to another app loads it inside this window under Chrome's out-of-scope strip; a new-window link is
+ * handed by Chrome to that app's own installed app instead ("Open supported links", on by default), or
+ * opens a normal tab when it isn't installed. In a browser tab it stays a same-tab link, as ever.
+ * Findings: shared/project/reports/rail-handoff-to-installed-apps-2026-11-02.md.
+ */
+export const opensApart = (item, installed) => installed && !item.current;
+
 let nav = null;
 let backdrop = null;
 let handle = null;
@@ -40,6 +49,7 @@ let opener = null; // where focus was before the switcher opened
 let slot = null; // the contraption's own container for it (mountRail), else it is fixed to the left edge
 let edgeTaken = false; // drawers.js has a left drawer, so the left edge is its (leaveEdge)
 const narrow = typeof matchMedia === 'function' ? matchMedia(NARROW) : null;
+const installed = typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches;
 
 /** Whether the rail is showing (so the phone's swipe past the left panel has somewhere to go). */
 export const hasRail = () => !!nav;
@@ -135,6 +145,8 @@ export async function showRail() {
     if (i === 1) nav.append(document.createElement('hr'));
     const a = document.createElement('a');
     a.href = item.href;
+    // No opener: Chrome hands only a window without one to another app.
+    if (opensApart(item, installed)) Object.assign(a, { target: '_blank', rel: 'noopener' });
     a.title = item.down ? `${item.title} (unavailable)` : item.title;
     if (item.current) { a.className = 'current'; a.setAttribute('aria-current', 'page'); }
     if (item.down) a.classList.add('down');

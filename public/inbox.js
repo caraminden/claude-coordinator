@@ -80,11 +80,11 @@ export function inboxStrip() {
   return strip;
 }
 
-/** A scheme's Needs-you count (`inbox` from api/projects) as a pill for the scheme lists; at zero, a spinner while a turn runs in it (#248) with how many minions are working (#278; none shown when only the Taskmaster is), else hidden. */
+/** A scheme's Needs-you count (`inbox` from api/projects) as a pill for the scheme lists; at zero, a spinner while a turn runs in it (#248) with how many minions are working when that's more than one (#278; Cara, 2026-11-02: "Only show if number > 1"), else hidden. */
 export function schemeCount(p) {
   if (!p.inbox && p.running) {
     const label = p.working ? `${p.working} minion${p.working === 1 ? '' : 's'} working` : 'Taskmaster working';
-    return h('span', { class: 'scheme-count busy', 'data-scheme-inbox': p.id, role: 'img', title: label, 'aria-label': label }, h('i'), p.working ? h('b', { 'aria-hidden': 'true' }, p.working) : null);
+    return h('span', { class: 'scheme-count busy', 'data-scheme-inbox': p.id, role: 'img', title: label, 'aria-label': label }, h('i'), p.working > 1 ? h('b', { 'aria-hidden': 'true' }, p.working) : null);
   }
   return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !p.inbox, title: 'Waiting on you' }, p.inbox || '');
 }

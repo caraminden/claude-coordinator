@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { basename, extname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
-import { fileType, findArtifacts, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
+import { fileType, findArtifacts, findByName, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
 import { claudeRefusal, lendsMachines, mayReceive, messagePerson, messageScope, turnRefusal } from './src/access.ts';
@@ -386,6 +386,13 @@ async function scanArtifacts(ticketId: number) {
     // Only files a reply linked are meant for people; the rest are the ticket's own working files.
     // A pinned file stays listed either way.
     const linked = linkedPaths(store.replyTexts(ticketId), ticket.cwd);
+    // A link with the wrong folders counts for the one file of its name, as the chat opens it (#281).
+    for (const abs of [...linked]) {
+      if (isArtifact(abs) && !(await realpath(abs).catch(() => null))) {
+        const match = await findByName(abs, [ticket.cwd, shared, projectSharedDir(DATA_DIR, ticket.project_id)]);
+        if (match) linked.add(match);
+      }
+    }
     const pinned = new Set(store.pinnedArtifactPaths(ticketId));
     const shown = found.filter((f) => linked.has(isAbsolute(f.path) ? f.path : join(ticket.cwd, f.path)) || pinned.has(f.path));
     if (store.syncArtifacts(ticket, shown)) broadcast({ type: 'artifacts', projectId: ticket.project_id });

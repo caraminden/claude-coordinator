@@ -24,6 +24,20 @@ test('a wrong-depth ../shared link blocks the stop, naming where it landed', asy
   assert.ok(v.reason.includes(join(root, 'projects/2/tickets/shared/268/people-desktop.png')), v.reason);
   assert.match(v.reason, /no such file/);
   assert.ok(v.reason.includes(work), 'says what relative links resolve against');
+  // The one file of that name the chat can show is named, so the rewrite gets it right (#281).
+  assert.ok(v.reason.includes(`Did you mean ${join(mine, 'people-desktop.png')}?`), v.reason);
+});
+
+test('with no file of that name, or several, the send-back names no guess (#281)', async () => {
+  assert.doesNotMatch((await reply('![x](gone/nothing.png)'))?.reason ?? '', /Did you mean/);
+  writeFileSync(join(work, 'docs/handoff.md'), 'x');
+  try {
+    const v = await reply('[h](../handoff.md)');
+    assert.equal(v?.decision, 'block');
+    assert.doesNotMatch(v.reason, /Did you mean/);
+  } finally {
+    rmSync(join(work, 'docs/handoff.md'));
+  }
 });
 
 test('absolute links and correct relative ones pass', async () => {

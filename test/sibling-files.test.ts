@@ -176,6 +176,19 @@ test("the viewer's details of a linked or shared file load, and a file that's go
   }
 });
 
+test('a link with the wrong folders opens the one file of its name, and says it was fixed (#281)', async () => {
+  const headers = { Cookie: srv.cookie };
+  const info = await get(`/api/tickets/${M.id}/file?path=${encodeURIComponent(join(root, 'nowhere/clip.mp4'))}&info`, headers);
+  assert.equal(info.status, 200);
+  assert.deepEqual((({ abs, fixed }) => ({ abs, fixed }))(await info.json()), { abs: join(work, 'clip.mp4'), fixed: true });
+  assert.equal((await (await get(`/api/tickets/${M.id}/file?path=clip.mp4&info`, headers)).json()).fixed, false);
+  const file = await get(`/api/tickets/${M.id}/file?path=wrong/clip.mp4`, headers);
+  assert.equal(file.status, 200);
+  assert.equal(Buffer.from(await file.arrayBuffer()).length, clip.length);
+  // Nothing of that name: still a 404, which the chat shows as "file not found".
+  assert.equal((await get(`/api/tickets/${M.id}/file?path=wrong/nothing.mp4&info`, headers)).status, 404);
+});
+
 test('a linked script, stylesheet or data file opens as text in the viewer; other source still does not (#202)', async () => {
   const headers = { Cookie: srv.cookie };
   writeFileSync(join(shared, 'page.js'), 'document.body.textContent = 1');

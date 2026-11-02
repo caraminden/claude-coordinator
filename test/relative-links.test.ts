@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import type { App } from '../src/http.ts';
 import type { Ticket } from '../src/db.ts';
+import { resolveFile } from '../src/artifacts.ts';
 import { resolveTicketFile } from '../src/routes/files.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 
@@ -28,8 +29,10 @@ test('relative links resolve from a minion worktree, including into the scheme s
   assert.equal(await opens(minion, '../../shared/project/reports/shots.png'), join(reports, 'shots.png'));
   assert.equal(await opens(minion, '../../shared/349/take.png'), join(P, 'shared/349/take.png'));
   assert.equal(await opens(minion, join(reports, 'shots.png')), join(reports, 'shots.png'));
-  // The Peek Auras link: one ../ short, so it lands in tickets/shared and opens nothing.
-  assert.equal(await opens(minion, '../shared/project/reports/shots.png'), null);
+  // The Peek Auras link: one ../ short, so it lands in tickets/shared. Its path opens nothing, but the
+  // chat finds the one file of its name in the roots instead (#281).
+  assert.equal(await resolveFile('../shared/project/reports/shots.png', minion.cwd, [minion.cwd, reports]), null);
+  assert.equal(await opens(minion, '../shared/project/reports/shots.png'), join(reports, 'shots.png'));
 });
 
 test('relative links resolve from the Taskmaster folder', async () => {

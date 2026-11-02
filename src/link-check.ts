@@ -6,7 +6,7 @@
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { fileType, linkedPaths, resolveFile } from './artifacts.ts';
+import { fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
 
 export interface LinkCheckConfig {
   /** The turn's working directory, which relative links resolve against (not the hook's cwd, which follows a `cd`). */
@@ -56,7 +56,11 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
       if (input.stop_hook_active) return null;
     }
   }
-  const lines = broken.map((abs) => `- ${abs}: ${existsSync(abs) ? 'outside the folders the chat can show' : 'no such file'}`);
+  const lines = await Promise.all(broken.map(async (abs) => {
+    // The one file of its name the chat can show, which the rewrite most likely meant (#281).
+    const match = await findByName(abs, cfg.roots);
+    return `- ${abs}: ${existsSync(abs) ? 'outside the folders the chat can show' : 'no such file'}${match ? `. Did you mean ${match}?` : ''}`;
+  }));
   return {
     decision: 'block',
     reason: `These file links in your reply won't open in the chat:\n${lines.join('\n')}\n`

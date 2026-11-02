@@ -176,7 +176,7 @@ function fileCardHtml(ticketId, path, title) {
   if (!kind) return null;
   // An archive has nothing to preview: the card saves it.
   const href = kind === 'download' ? `${fileUrl(ticketId, path)}&download` : fileHref(ticketId, path);
-  return `<a class="file-card" href="${escapeHtml(href)}"${kind === 'download' ? ' download' : ''} title="${escapeHtml(path)}">`
+  return `<a class="file-card checking" data-file="${escapeHtml(path)}" href="${escapeHtml(href)}"${kind === 'download' ? ' download' : ''} title="${escapeHtml(path)}">`
     + (kind === 'image' ? `<img src="${escapeHtml(fileUrl(ticketId, path))}" alt="" loading="lazy">` : `<span class="badge k-${kind}">${escapeHtml(fileExt(path))}</span>`)
     + `<span class="text"><span class="name">${title}</span><span class="meta">${escapeHtml(shortPath(path))}</span></span></a>`;
 }
@@ -191,8 +191,43 @@ function filePreviewHtml(ticketId, path, caption) {
   // Muted and looping like a GIF; the file view has the controls.
   else if (kind === 'video') media = `<video src="${src}" muted autoplay loop playsinline preload="metadata"></video>`;
   else return fileCardHtml(ticketId, path, caption || escapeHtml(baseName(path)));
-  return `<a class="file-preview" href="${escapeHtml(fileHref(ticketId, path))}" title="${escapeHtml(path)}">${media}`
+  return `<a class="file-preview checking" data-file="${escapeHtml(path)}" href="${escapeHtml(fileHref(ticketId, path))}" title="${escapeHtml(path)}">${media}`
     + `${caption ? `<span class="caption">${caption}</span>` : ''}</a>`;
+}
+
+// What the server found for each file a thread links, by "<thread> <path>": its details, or null (#281).
+const linkInfo = new Map();
+function fileLinkInfo(ticketId, path) {
+  const key = `${ticketId} ${path}`;
+  let info = linkInfo.get(key);
+  if (!info) {
+    info = api(`${fileUrl(ticketId, path)}&info`).catch(() => null);
+    linkInfo.set(key, info);
+    // A file that isn't there may be written soon, so the next render asks again.
+    info.then((found) => found || linkInfo.delete(key));
+  }
+  return info;
+}
+
+/**
+ * Settle a message's file cards and previews, which can't be clicked until the server has found
+ * their file (#281): one with the wrong folders points at the one file of its name the server found
+ * instead, and one with no file becomes plain text marked "file not found".
+ */
+function checkFileLinks(root, ticketId) {
+  for (const el of root.querySelectorAll('[data-file]')) {
+    const path = el.dataset.file;
+    const card = el.classList.contains('file-card');
+    const title = card ? el.querySelector('.name').innerHTML : el.querySelector('.caption')?.innerHTML ?? '';
+    fileLinkInfo(ticketId, path).then((info) => {
+      const t = document.createElement('template');
+      if (info?.fixed) t.innerHTML = card ? fileCardHtml(ticketId, info.abs, title) : filePreviewHtml(ticketId, info.abs, title);
+      else if (!info) t.innerHTML = `<span class="file-missing" title="${escapeHtml(`Not found: ${path}`)}">${title || escapeHtml(baseName(path))} <span class="mark">(file not found)</span></span>`;
+      const fresh = t.content.firstElementChild ?? el;
+      fresh.classList.remove('checking');
+      if (fresh !== el) el.replaceWith(fresh);
+    });
+  }
 }
 
 /** Resolve `rel` against the folder `dir` (both "/"-separated), as a document's relative links are. */
@@ -271,6 +306,7 @@ export function markdownDoc(src, opts = {}) {
   const div = document.createElement('div');
   div.className = 'md';
   div.innerHTML = renderMarkdown(src, { link, image, text, breaks });
+  if (ticketId != null) checkFileLinks(div, ticketId);
   // "#a-heading" would change the app's route, so scroll to the heading instead.
   div.addEventListener('click', (e) => {
     const a = e.target.closest?.('a.anchor');

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { commentMessage, linkedPaths, optionImageProblem } from '../src/artifacts.ts';
+import { commentMessage, findByName, linkedPaths, optionImageProblem, resolveLink } from '../src/artifacts.ts';
 import { promptMessage } from '../src/runner.ts';
 
 const cwd = '/work/t1';
@@ -43,6 +43,30 @@ test('option images: only images and videos that exist as files', async () => {
   assert.match(String(await problem('notes.md')), /must be an image/);
   assert.match(String(await problem('art/a')), /must be an image/);
   for (const p of ['art/missing.png', 'dir.png', 'art/a.png\0.png']) assert.match(String(await problem(p)), /working directory or shared folder/, p);
+});
+
+test('a link with the wrong folders finds the one file of its name; none or several is no guess (#281)', async () => {
+  // As Mandate #34 wrote it: an absolute path missing a folder.
+  const typo = join(root, 'shared-typo/9/take.mp4');
+  assert.equal(await findByName(typo, [work, shared]), join(shared, 'take.mp4'));
+  const fixed = await resolveLink(typo, work, [work, shared]);
+  assert.deepEqual([fixed?.abs, fixed && 'fixed' in fixed], [join(shared, 'take.mp4'), true]);
+  // A link that resolves is not marked fixed.
+  const plain = await resolveLink('art/a.png', work, [work, shared]);
+  assert.deepEqual([plain?.abs, plain && 'fixed' in plain], [join(work, 'art/a.png'), false]);
+  // No file of that name, or only one outside the roots or behind a symlink: no guess.
+  for (const p of ['nope/missing.png', 'secret.png', 'link.png']) assert.equal(await resolveLink(p, work, [work, shared]), null, p);
+  // Two files of that name: no guess.
+  mkdirSync(join(shared, 'old'));
+  writeFileSync(join(shared, 'old/a.png'), 'x');
+  assert.equal(await resolveLink('wrong/a.png', work, [work, shared]), null);
+  // The same file reached through two roots is one file.
+  assert.equal(await findByName('x/walk.gif', [work, join(work, 'art')]), join(work, 'art/walk.gif'));
+  // Hidden folders are not searched, and nor are names the chat can't show.
+  mkdirSync(join(work, '.cache'));
+  writeFileSync(join(work, '.cache/only.png'), 'x');
+  writeFileSync(join(work, 'main.ts'), 'x');
+  assert.deepEqual([await findByName('only.png', [work]), await findByName('src/main.ts', [work])], [null, null]);
 });
 
 test('a comment is a message labelled with its file, with a quote leading it', () => {

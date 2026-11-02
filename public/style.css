@@ -661,6 +661,9 @@ body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .md .file-preview img, .md .file-preview video { display: block; max-width: 100%; max-height: 22rem; border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); }
 .md .file-preview:hover img, .md .file-preview:hover video { border-color: var(--accent); }
 .md .file-preview .caption { display: block; font-size: 0.82em; color: var(--muted); margin-top: 0.2rem; }
+/* Not clickable until the server has found the file (checkFileLinks in core.js). */
+.md .checking { pointer-events: none; }
+.md .file-missing .mark { font-size: 0.82em; color: var(--muted); }
 .artifact-media { display: block; max-width: 100%; max-height: 75vh; border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); }
 
 /* Threads list, after Delve's Custom view: sections by kind of work, one compact row per thread

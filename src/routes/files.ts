@@ -7,7 +7,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { cleanEntries, entriesView, injectBridge, LIMITS, storeId, writeStore } from '../artifact-data.ts';
-import { fileTitle, fileType, listable, resolveFile, siblingType } from '../artifacts.ts';
+import { fileTitle, fileType, listable, resolveFile, resolveLink, siblingType } from '../artifacts.ts';
 import type { Session } from '../auth.ts';
 import type { Artifact, Project, Ticket } from '../db.ts';
 import type { MessageFile } from '../runner.ts';
@@ -53,9 +53,9 @@ function displayPath(app: App, ticket: Ticket, path: string): string {
 /** The folders a ticket may show files from: its working directory, its shared folder and the project's. */
 export const ticketRoots = (app: App, ticket: Ticket) => [ticket.cwd, app.sharedDir(ticket), projectSharedDir(app.dataDir, ticket.project_id)];
 
-/** A file a ticket may show (see resolveFile), or null. */
+/** A file a ticket may show (see resolveLink: a link with the wrong folders finds the one file of its name), or null. */
 export function resolveTicketFile(app: App, ticket: Ticket, path: string) {
-  return resolveFile(path, ticket.cwd, ticketRoots(app, ticket));
+  return resolveLink(path, ticket.cwd, ticketRoots(app, ticket));
 }
 
 /**
@@ -521,7 +521,7 @@ export const fileRoutes: Route[] = [
       const artifact = app.store.findArtifact(ticket.id, [relPath, found.abs]);
       return json(res, 200, {
         path, name: basename(found.abs), display_path: displayPath(app, ticket, found.abs), abs: found.abs,
-        kind: found.type.kind, size: found.size, mtime: found.mtime,
+        kind: found.type.kind, size: found.size, mtime: found.mtime, fixed: 'fixed' in found,
         artifact: artifact ? artifactView(app, artifact) : null,
       });
     },

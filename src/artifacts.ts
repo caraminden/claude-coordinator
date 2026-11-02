@@ -1,7 +1,7 @@
 // Artifacts: documents and pages that tickets create in their working directories.
 import { execFile } from 'node:child_process';
 import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
-import { extname, isAbsolute, join, normalize, sep } from 'node:path';
+import { basename, extname, isAbsolute, join, normalize, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -187,6 +187,55 @@ export async function resolveFile(path: string, cwd: string, roots: string[], ty
     }
   } catch {}
   return null;
+}
+
+// How many folder entries a name search reads per root before giving up, so a huge tree can't stall it.
+const MAX_SEARCH = 20_000;
+
+/**
+ * The one file named like `path` (its last segment) under `roots`, for a link whose folders are wrong
+ * (#281): its path, or null when there are none or several. Hidden and dependency folders and
+ * symlinks are skipped, like the artifact scan.
+ */
+export async function findByName(path: string, roots: string[]): Promise<string | null> {
+  const name = basename(path);
+  if (!fileType(name)) return null;
+  const hits = new Map<string, string>(); // real path → path found, so overlapping roots count a file once
+  for (const root of roots) {
+    let seen = 0;
+    const visit = async (dir: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (++seen > MAX_SEARCH || hits.size > 1) return;
+        if (e.name.startsWith('.')) continue;
+        const p = join(dir, e.name);
+        if (e.isDirectory()) {
+          if (!SKIP_DIRS.has(e.name)) await visit(p);
+        } else if (e.isFile() && e.name === name) {
+          hits.set(await realpath(p).catch(() => p), p);
+        }
+      }
+    };
+    await visit(root);
+  }
+  return hits.size === 1 ? [...hits.values()][0] : null;
+}
+
+/**
+ * A file a link names (see resolveFile), or else the one file with its name in `roots` (findByName),
+ * marked `fixed`; null if neither.
+ */
+export async function resolveLink(path: string, cwd: string, roots: string[]) {
+  const found = await resolveFile(path, cwd, roots);
+  if (found || !cwd || !fileType(path)) return found;
+  const match = await findByName(path, roots);
+  const fixed = match ? await resolveFile(match, cwd, roots) : null;
+  return fixed && { ...fixed, fixed: true as const };
 }
 
 /** A document's own title, from the start of the file: an HTML page's <title> or a Markdown file's first heading. */

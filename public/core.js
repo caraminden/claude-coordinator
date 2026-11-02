@@ -456,10 +456,13 @@ export function reloadWhenIdle() {
   if (!reloadPending) return;
   if (!hasUnsentWork()) return reloadNow();
   if (!document.getElementById('update-banner')) {
-    document.querySelector('.topbar').after(h('div', { class: 'update-banner', id: 'update-banner' },
+    const banner = h('div', { class: 'update-banner', id: 'update-banner' },
       'A new version is ready and will load once you have sent or cleared what you are writing. ',
       h('button', { class: 'secondary small', onclick: reloadNow }, 'Refresh now'),
-      h('span', { class: 'muted' }, ' (drafts are kept)')));
+      h('span', { class: 'muted' }, ' (drafts are kept)'));
+    document.querySelector('.topbar').after(banner);
+    // Sticky bars and panels sit below the banner (style.css, --banner-h); it wraps on narrow screens.
+    new ResizeObserver(() => document.documentElement.style.setProperty('--banner-h', `${banner.getBoundingClientRect().height}px`)).observe(banner);
   }
 }
 

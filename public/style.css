@@ -217,7 +217,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .ticket-head {
   position: sticky;
   /* Tuck 1px under the top bar so pixel rounding can never open a gap between them. */
-  top: max(0px, calc(var(--topbar-h, 3rem) - 1px));
+  top: max(0px, calc(var(--topbar-h, 3rem) + var(--banner-h, 0px) - 1px));
   z-index: 4;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
@@ -407,14 +407,14 @@ a.file-chip:hover { border-color: var(--muted); }
 .panels { display: contents; }
 /* Both collapsed: one sticky column with the two tabs stacked, and the main panel takes the rest. */
 .split:not(:has(> .panels > details[open])) { grid-template-columns: auto minmax(0, 1fr); }
-.panels:not(:has(> details[open])) { display: flex; flex-direction: column; gap: 0.5rem; position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); }
+.panels:not(:has(> details[open])) { display: flex; flex-direction: column; gap: 0.5rem; position: sticky; top: calc(var(--topbar-h, 3rem) + var(--banner-h, 0px) + 1rem); }
 .panels:not(:has(> details[open])) > details { position: static; }
 .shelf[open] { width: clamp(220px, 18vw, 270px); }
 .sidebar[open] { width: clamp(230px, 20vw, 300px); }
 /* Sticky can't move past the bottom of .split, which ends main's 3rem bottom padding above the
    page end. Keep the side panels short enough (1rem top gap + 3rem) that the chat reaching the bottom
    never drags them up, and keep wheel/touch scrolls inside them from chaining to the page. */
-.sidebar, .shelf { position: sticky; top: calc(var(--topbar-h, 3rem) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
+.sidebar, .shelf { position: sticky; top: calc(var(--topbar-h, 3rem) + var(--banner-h, 0px) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - var(--banner-h, 0px) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
 /* Panel headers double as collapse toggles: a row with ‹ when open, a slim vertical tab with › when closed. */
 .sidebar > summary, .shelf > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; list-style: none; display: flex; align-items: center; gap: 0.4rem; user-select: none; }
 .sidebar > summary::-webkit-details-marker, .shelf > summary::-webkit-details-marker { display: none; }
@@ -582,7 +582,8 @@ button.pin.on { color: var(--accent); }
 .update-banner {
   position: sticky;
   top: var(--topbar-h, 3rem);
-  z-index: 4;
+  /* Above the thread bar, which tucks 1px under it. */
+  z-index: 5;
   padding: 0.4rem 1rem;
   background: var(--code-bg);
   border-bottom: 1px solid var(--line);
@@ -645,7 +646,7 @@ button.pin.on { color: var(--accent); }
 body:has(.split) .topbar { display: none; }
 body:has(.split)::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); z-index: 6; background: var(--bg); }
 body:has(.split) main { padding-top: calc(1.25rem + env(safe-area-inset-top, 0px)); }
-body:has(.split) .ticket-head { top: max(0px, calc(env(safe-area-inset-top, 0px) - 1px)); }
+body:has(.split) .ticket-head { top: max(0px, calc(env(safe-area-inset-top, 0px) + var(--banner-h, 0px) - 1px)); }
 body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .msg.user.pending { opacity: 0.7; }
 
@@ -1259,7 +1260,9 @@ dialog.viewer .composer .picker { display: none; }
 /* A contraption inside Citadel's window (frames.js): over the page, right of the rail, under the switcher. */
 #frames { display: none; }
 html.framed { overflow: hidden; }
-html.framed #frames { display: block; position: fixed; top: 0; right: 0; bottom: 0; left: var(--citadel-rail, 0px); z-index: 45; background: var(--bg); }
-@media (max-width: 800px) { html.framed #frames { left: 0; } }
+html.framed #frames { display: block; position: fixed; top: var(--banner-h, 0px); right: 0; bottom: 0; left: var(--citadel-rail, 0px); z-index: 45; background: var(--bg); }
+/* Citadel's update banner stays above the frame, which starts below it. */
+html.framed .update-banner { position: fixed; top: 0; left: var(--citadel-rail, 0px); right: 0; z-index: 46; }
+@media (max-width: 800px) { html.framed #frames, html.framed .update-banner { left: 0; } }
 #frames iframe { display: block; width: 100%; height: 100%; border: 0; }
 #frames iframe[hidden] { display: none; }

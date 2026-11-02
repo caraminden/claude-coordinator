@@ -108,6 +108,13 @@ test('retro log: only a test runner in the command counts, and the line names th
   assert.deepEqual(ran('bash tools/check.sh && tools/land.sh', 'ℹ fail 1'), [['red test', '1 failed: bash tools/check.sh; tools/land.sh']]);
   assert.deepEqual(ran('dotnet test a && dotnet test b', 'Failed!  - Failed:     1, Passed: 1\nFailed!  - Failed:     1, Passed: 1'), [['red test', '2 failed: dotnet test a; dotnet test b']]);
   assert.deepEqual(ran('node --test test/retro-log.test.ts', 'ℹ fail 1'), [['red test', '1 failed: node --test test/retro-log.test.ts']], 'a file named retro-log is not the log');
+  assert.deepEqual(ran('if npm test; then echo ok; fi', 'ℹ fail 2'), [['red test', '2 failed: if npm test']]);
+  assert.deepEqual(ran('timeout -k 5 300 npm --prefix web test', 'ℹ fail 2'), [['red test', '2 failed: timeout -k 5 300 npm --prefix web test']]);
+  assert.deepEqual(ran('pnpm --filter app test', 'ℹ fail 1')[0][0], 'red test');
+  assert.deepEqual(ran('echo $((1<<2))\nnpm test', 'ℹ fail 1'), [['red test', '1 failed: npm test']], 'a shift is not a heredoc');
+  assert.deepEqual(ran('node scripts/latest.js', 'ℹ fail 2'), [], 'a name that merely contains "test"');
+  assert.deepEqual(ran('npm install test-utils', 'ℹ fail 2'), []);
+  assert.deepEqual(ran('python3 tools/run-tests.py', 'ℹ fail 2')[0][0], 'red test');
   // A runner's own summary only: dotnet's count never comes from a pytest-style line.
   assert.deepEqual(ran('dotnet test', 'Some prose: 3 failed earlier'), []);
 });

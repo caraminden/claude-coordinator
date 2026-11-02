@@ -87,14 +87,14 @@ const RUNNERS: [RegExp, Runner][] = [
   [/^(?:(?:npx|pnpm\s+exec|yarn|bunx)\s+)?(?:\S*\/)?mocha\b/, 'mocha'],
   [/^cargo\s+(?:test|nextest)\b/, 'cargo'],
   [/^go\s+test\b/, 'go'],
-  [/^(?:npm|pnpm|yarn|bun)\s+(?:t|test|(?:run(?:-script)?\s+)?(?:test|check)[\w:-]*)(?:\s|$)/, 'any'],
+  [/^(?:npm|pnpm|yarn|bun)(?:\s+--?[\w-]+(?:[= ](?!test\b|t\b|run\b)[^\s-]\S*)?)*\s+(?:t|test|(?:run(?:-script)?\s+)?(?:test|check)[\w:-]*)(?:\s|$)/, 'any'],
   [/^make\s+(?:test|check)\w*\b/, 'any'],
   // A check script: its name says test or check (tools/check.sh, run-tests.py), or Citadel's land.sh, which runs npm test.
-  [/^(?:(?:bash|sh|node|python3?)\s+)?(?:\S*\/)?(?:[\w.-]*(?:test|check)[\w.-]*|land)\.(?:sh|ts|js|mjs|py)\b/i, 'any'],
+  [/^(?:(?:bash|sh|node|python3?)\s+)?(?:\S*\/)?(?:(?:[\w.-]*[-_.])?(?:test|check)s?(?:[-_.][\w.-]*)?|land)\.(?:sh|ts|js|mjs|py)\b/i, 'any'],
 ];
 
 /** Wrappers and keywords a simple command can start with before the program it runs. */
-const PREFIX = /^(?:(?:\w+=(?:'[^']*'|"[^"]*"|\S*)|then|do|else|time|exec|env|nice|command|!|timeout(?:\s+-\S+)*\s+\S+)\s+)*/;
+const PREFIX = /^(?:(?:\w+=(?:'[^']*'|"[^"]*"|\S*)|if|elif|while|until|then|do|else|time|exec|env|nice|command|!|timeout(?:\s+-[ks](?:\s+|=)\S+|\s+-\S+)*\s+\S+)\s+)*/;
 
 /**
  * A copy of a shell command with quoted text, comments and heredoc bodies blanked out (same length, so
@@ -124,7 +124,7 @@ export function mask(command: string): string {
     } else if (command.startsWith('<<<', i)) {
       i += 3;
     } else if (command.startsWith('<<', i)) {
-      const m = command.slice(i).match(/^<<(-?)\s*(['"]?)(\w+)\2/);
+      const m = command.slice(i).match(/^<<(-?)\s*(['"]?)([A-Za-z_]\w*)\2/);
       if (m) pending.push({ word: m[3], tabs: m[1] === '-' });
       i += m ? m[0].length : 2;
     } else if (c === '\n' && pending.length) {
@@ -153,7 +153,8 @@ export function testRuns(command: string): [string, Runner][] {
   const sep = /&&|\|\||(?<![<>&])&(?![>&])|[;|\n()`{}]|\$\(/g;
   let from = 0;
   for (const m of [...masked.matchAll(sep), { index: masked.length, 0: '' } as unknown as RegExpMatchArray]) {
-    const body = masked.slice(from, m.index).trim();
+    // shortcut: a simple command is read from its first 500 characters, enough for any runner and its wrappers.
+    const body = masked.slice(from, m.index).trim().slice(0, 500);
     const prefix = body.match(PREFIX)?.[0].length ?? 0;
     const runner = RUNNERS.find(([re]) => re.test(body.slice(prefix)))?.[1];
     if (runner) runs.push([command.slice(from, m.index).trim(), runner]);

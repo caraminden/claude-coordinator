@@ -40,6 +40,7 @@ function ticket(p: { id: number }, kind: 'coordinator' | 'ticket', build: number
 const DelveTM = ticket(Delve, 'coordinator');
 const withBuild = ticket(Delve, 'ticket', 8); // Delve #1
 ticket(Delve, 'ticket'); // Delve #2, no build
+ticket(Delve, 'ticket', 5); // Delve #3, a leader to chain after
 ticket(Citadel, 'coordinator');
 for (let i = 0; i < 30; i++) ticket(Citadel, 'ticket', 3); // Citadel #1-#30, so #30 is only Citadel's
 
@@ -81,6 +82,17 @@ test('a new minion rides its parent\'s build unless the create sets one', async 
   // A parent with no build leaves it without one.
   t = await made({ parent: 2 });
   assert.deepEqual([t.parent, t.build], [2, null]);
+
+  // A start_after follower rides its leader's build, without the leader becoming its parent.
+  t = await made({ start_after: 3 });
+  assert.deepEqual([t.parent, t.build, t.props.build], [null, 5, 5]);
+  t = await made({ start_after: 3, build: null });
+  assert.deepEqual([t.parent, t.build], [null, null]);
+  // A parent's build beats the leader's; a parent with none leaves the leader's.
+  t = await made({ parent: 1, start_after: 3 });
+  assert.deepEqual([t.parent, t.build], [1, 8]);
+  t = await made({ parent: 2, start_after: 3 });
+  assert.deepEqual([t.parent, t.build], [2, 5]);
 
   // Another scheme's minion (Citadel #30) is no parent here: refused, and nothing is made.
   const before = store.listTickets(Delve.id).length;

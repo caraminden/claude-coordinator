@@ -253,7 +253,7 @@ const TOOLS = [
           type: ['integer', 'null'],
           description: "The minion number (#N, in this scheme) this one is started for: pass it whenever a minion asked for it, in its message or a handoff it wrote. The new minion shows as from #N and gets #N's build unless build is given. Left out, it is the minion whose message you are answering, if any; null for none.",
         },
-        build: { ...BUILD, description: `${BUILD.description} Left out, it is the parent's build, if any.` },
+        build: { ...BUILD, description: `${BUILD.description} Left out, it is the parent's build, else the start_after minion's, if any.` },
         model: MODEL,
         effort: EFFORT,
       },

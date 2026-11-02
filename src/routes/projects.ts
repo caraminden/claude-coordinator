@@ -583,8 +583,6 @@ export const projectRoutes: Route[] = [
       if (!caller && !given('requestedBy')) props.requestedBy = session.name;
       // The minion it is started for (#273): `parent` (#N, null for none), else the minion whose relay the Taskmaster's turn answers.
       const parent = body.parent !== undefined ? parentMinion(store, project.id, body.parent) : caller ? sameScheme(store, project.id, runner.relayedBy(caller.id)) : null;
-      // It rides its parent's build unless the create sets one (null: none), as `build` or the build property.
-      const build = body.build !== undefined ? buildNumber(body.build) : given('build') ? undefined : parent?.build ?? null;
       // A new minion is its starter's: the person, or for the Taskmaster the minion that asked for it, else the person of its turn.
       if (!given('assigned')) {
         const assigned = !caller ? session.name : (parent && store.props.forTarget('minion', parent.id).assigned) || (caller.person_id && store.getUser(caller.person_id)?.name);
@@ -596,14 +594,17 @@ export const projectRoutes: Route[] = [
       }
       // Chained: start_after #N holds the brief until #N's work is live (or merged, with start_when).
       let follow: { leader: Ticket; when: Chain['when']; base: string | null; since: number } | null = null;
+      let leader: Ticket | undefined;
       if (body.start_after != null) {
         const when = (oneOf(body.start_when ?? null, ['live', 'merged'], 'start_when') ?? 'live') as Chain['when'];
-        const leader = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.number === Number(body.start_after));
+        leader = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.number === Number(body.start_after));
         if (!leader) throw new HttpError(400, `No minion #${String(body.start_after).slice(0, 20)} in this scheme to start after`);
         const f = waiters.follow(leader.id, when);
         if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work being merged, so nothing can start after it`);
         if (f.state === 'wait') follow = { leader, when, base: f.base, since: f.since };
       }
+      // Its build: the one the create sets (null: none), as `build` or the build property; else its parent's, else its start_after leader's.
+      const build = body.build !== undefined ? buildNumber(body.build) : given('build') ? undefined : parent?.build ?? leader?.build ?? null;
       // Started from a brief in a file (#129): one minion per brief, so a second start is refused.
       const brief = body.brief == null ? null : { path: str(body.brief.path, 'Brief path', 1000), heading: typeof body.brief.heading === 'string' ? body.brief.heading.trim().slice(0, 500) : '' };
       if (brief && !store.claimBrief(project.id, brief.path, brief.heading, session.name)) throw new HttpError(409, 'That brief has been started already');

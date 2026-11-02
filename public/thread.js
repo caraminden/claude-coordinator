@@ -744,6 +744,9 @@ export function appendEvent(event, scroll = true) {
       el.closest('.coord')?.querySelector('summary .preview')?.replaceChildren(...previewNodes(el.source, data.strikes));
       el.replaceWith(messageBody(el.source, data.strikes, el.ticketId, data.event));
     }
+  } else if (event.kind === 'replaced') {
+    // A reply the link check sent back gives way to its rewrite (#281): the bubble, or its line in a fold.
+    for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) (el.closest('.note-text') ?? el.closest('.msg') ?? el).remove();
   } else if (event.kind === 'plan_result') {
     view.cards.get(data.id)?.settle(data);
   } else if (event.kind === 'loop_paused') {
@@ -773,7 +776,8 @@ export function appendEvent(event, scroll = true) {
       view.sawInit = true;
     } else if (data.type === 'assistant') {
       for (const block of data.message?.content ?? []) {
-        if (block.type === 'text' && block.text.trim()) {
+        // A reply the link check sent back, which its rewrite replaced (#281).
+        if (block.type === 'text' && block.text.trim() && !data.replaced) {
           const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
           const msg = stamped(h('div', { class: 'msg' }, h('div', { class: 'who' }, speaker()), body), event);
           nodes.push(msg);

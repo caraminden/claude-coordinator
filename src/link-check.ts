@@ -17,6 +17,9 @@ export interface LinkCheckConfig {
   nudged?: string;
 }
 
+/** How a send-back starts, which the runner looks for to swap the reply for its rewrite (Runner.replaceSentBack). */
+export const SENT_BACK = "These file links in your reply won't open in the chat:";
+
 /** Text the chat renders as code, where a "[x](y)" is not a link. */
 const CODE = /^ {0,3}(```|~~~)[\s\S]*?(?:^ {0,3}\1|(?![\s\S]))|(`+)(?!`)[\s\S]*?[^`]\2(?!`)/gm;
 
@@ -63,7 +66,7 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   }));
   return {
     decision: 'block',
-    reason: `These file links in your reply won't open in the chat:\n${lines.join('\n')}\n`
+    reason: `${SENT_BACK}\n${lines.join('\n')}\n`
       + `Relative links resolve against your working directory ${cfg.cwd}; absolute paths are safest. `
       + `Files must be inside ${cfg.roots.length > 1 ? `it or ${cfg.roots.slice(1).join(' or ')}` : 'it'}. `
       + 'Fix the paths (or drop links to files that are gone) and write the reply again in full.',

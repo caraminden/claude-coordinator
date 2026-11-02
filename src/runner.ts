@@ -13,6 +13,7 @@ import { WS_SUFFIX, type MachineServer } from './machines.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, type Go } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
 import type { TurnGithub } from './github-link.ts';
+import { SENT_BACK } from './link-check.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import type { Ship } from './branch.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath } from './sessions.ts';
@@ -2160,6 +2161,7 @@ export class Runner {
       this.broadcastTicket(ticketId);
     }
     const row = this.emit(ticketId, 'claude', slim);
+    if (ev.type === 'result') this.replaceSentBack(ticketId, row.id);
     if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
       const turn = this.store.recordTurn(ticketId, {
         event_id: row.id, session_id: typeof ev.session_id === 'string' ? ev.session_id : null, ended_at: row.created_at,
@@ -2171,6 +2173,37 @@ export class Runner {
       this.onFilesMayChange(ticketId);
     }
     this.notePushes(ticketId, ev);
+  }
+
+  /**
+   * A reply the link check sent back gives way to its rewrite once the turn ends (#281, Cara's pick
+   * "Replace in place"): it's marked `replaced` in the stored history, which the chat skips, and a
+   * `replaced` event takes it out of open chats. The rewrite is the last words after the send-back,
+   * so narration on the way there doesn't count; with no words after it, the first version stays.
+   */
+  private replaceSentBack(ticketId: number, resultId: number) {
+    const words = (data: any) => data.type === 'assistant' && (data.message?.content ?? []).some((b: any) => b?.type === 'text' && b.text?.trim());
+    const sentBack = (data: any) => data.type === 'user' && Array.isArray(data.message?.content)
+      && data.message.content.some((b: any) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(SENT_BACK));
+    const swaps: { original: EventRow; rewrite?: EventRow }[] = [];
+    let last: EventRow | null = null;
+    for (const e of this.store.eventsPage(ticketId, resultId, 1).events) {
+      if (e.kind !== 'claude') continue;
+      const data = JSON.parse(e.data);
+      if (sentBack(data)) {
+        if (last) swaps.push({ original: last });
+      } else if (words(data)) {
+        last = e;
+        const open = swaps.at(-1);
+        if (open && open.original !== e) open.rewrite = e;
+      }
+    }
+    for (const { original, rewrite } of swaps) {
+      const data = JSON.parse(original.data);
+      if (!rewrite || data.replaced) continue;
+      this.store.setEventData(original.id, { ...data, replaced: rewrite.id });
+      this.emit(ticketId, 'replaced', { event: original.id, by: rewrite.id });
+    }
   }
 
   /** The running turn's latest context size, saved when it ends (contextKey). */

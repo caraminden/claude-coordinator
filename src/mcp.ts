@@ -705,7 +705,8 @@ function transcript(events: any[]): string[] {
     else if (ev.kind === 'error') out.push(`(error) ${clip(data.text)}`);
     else if (ev.kind === 'approval') out.push(`(asked for approval) ${data.tool}: ${clip(JSON.stringify(data.input))}`);
     else if (ev.kind === 'approval_result') out.push(data.state === 'expired' ? '(approval expired)' : data.via?.scheme ? `(allowed on ${data.by}'s go "${clip(data.via.text)}"${data.via.ticket == null ? ' in the Taskmaster chat' : ` in #${data.via.ticket}`})` : `(${data.state} by ${data.by})`);
-    else if (ev.kind === 'claude' && data.type === 'assistant') {
+    // A reply the link check sent back that its rewrite replaced (#281) shows only as the rewrite.
+    else if (ev.kind === 'claude' && data.type === 'assistant' && !data.replaced) {
       const text = (data.message?.content ?? [])
         .filter((b: any) => b.type === 'text' && b.text.trim())
         .map((b: any) => b.text.trim())

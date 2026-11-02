@@ -37,7 +37,9 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = new URL(event.notification.data?.url || '/c/', self.location.origin).href;
   event.waitUntil((async () => {
-    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    // Citadel's own windows only: a contraption's (its own installed app since #274) can't show a thread.
+    const windows = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
+      .filter((w) => !new URL(w.url).pathname.startsWith('/apps/'));
     const win = windows.find((w) => w.focused) ?? windows[0];
     if (!win) return self.clients.openWindow(url);
     win.postMessage({ type: 'open', url });

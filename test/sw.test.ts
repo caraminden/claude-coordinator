@@ -20,3 +20,23 @@ test('the service worker answers Citadel\'s page loads but no /apps/ request', (
   assert.equal(answered('https://citadel.example/apps/peek-auras/link?x=1'), false);
   assert.equal(answered('https://citadel.example/apps/mandate/app.js', 'no-cors'), false);
 });
+
+test("a notification click opens the thread in Citadel's window, not a focused contraption's (#274)", async () => {
+  const listeners: Record<string, (e: any) => void> = {};
+  const win = (url: string, focused: boolean) => ({ url, focused, sent: [] as unknown[], postMessage(m: unknown) { this.sent.push(m); }, focus: async () => {} });
+  const mandate = win('https://citadel.example/apps/mandate/', true);
+  const citadel = win('https://citadel.example/c/#/p/2', false);
+  let opened = '';
+  const self = {
+    addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn),
+    location: { origin: 'https://citadel.example' },
+    clients: { matchAll: async () => [mandate, citadel], openWindow: async (url: string) => { opened = url; } },
+  };
+  new Function('self', 'fetch', readFileSync(join(import.meta.dirname, '..', 'public', 'sw.js'), 'utf8'))(self, () => new Promise(() => {}));
+  let done: Promise<unknown> = Promise.resolve();
+  listeners.notificationclick({ notification: { close() {}, data: { url: '/c/#/p/2/t/9' } }, waitUntil: (p: Promise<unknown>) => (done = p) });
+  await done;
+  assert.deepEqual(citadel.sent, [{ type: 'open', url: 'https://citadel.example/c/#/p/2/t/9' }]);
+  assert.deepEqual(mandate.sent, []);
+  assert.equal(opened, '');
+});

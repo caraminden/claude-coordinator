@@ -409,7 +409,14 @@ export class AppServices {
       const old = await readFile(path, 'utf8').catch(() => null);
       if (old !== null && ownedBy(old) !== row.name) throw new ServiceError(409, `${path} exists and Citadel didn't write it for ${row.name}: move it away first.`);
     }
-    const said: string[] = [];
+    // The one thing Citadel does in an app's DATA_DIR: make it when missing (an existing one is never touched), so a service that opens its database there can start.
+    const data = join(this.opts.home, '.local/share', row.name);
+    let created = '';
+    if (!existsSync(data)) {
+      await mkdir(data, { recursive: true, mode: 0o700 });
+      created = `Created ${data}.`;
+    }
+    const said: string[] = created ? [created] : [];
     const live = (await this.handInstalled(row)).filter((u) => u.active === 'active' || u.active === 'activating' || /^enabled/.test(u.enabled));
     if (live.length && !opts.replace) {
       throw new ServiceError(409, `Hand-installed units run ${row.name} already: ${live.map((u) => `${u.unit} (${u.active}, ${u.enabled || 'no file state'}; ${u.why})`).join('; ')}. Install again with replace to stop and disable them first; their files stay.`);
@@ -425,12 +432,6 @@ export class AppServices {
       await this.systemctl('disable', '--now', ...stale);
       for (const f of stale) await rm(join(this.opts.unitDir, f), { force: true });
       said.push(`Removed ${stale.join(', ')}, which the manifest no longer names.`);
-    }
-    // The one thing Citadel does in an app's DATA_DIR: make it when missing (an existing one is never touched), so a service that opens its database there can start.
-    const data = join(this.opts.home, '.local/share', row.name);
-    if (!existsSync(data)) {
-      await mkdir(data, { recursive: true, mode: 0o700 });
-      said.push(`Created ${data}.`);
     }
     for (const [f, text] of files) {
       const path = join(this.opts.unitDir, f);

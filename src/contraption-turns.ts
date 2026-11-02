@@ -361,34 +361,36 @@ export class ContraptionTurns {
     const said = new Map<string, string>();
     let message = '';
     const handle = (ev: any) => {
+      // A Grunt's events name the Agent call that started it; the top level's name none.
+      const parent = ev.parent_tool_use_id ? String(ev.parent_tool_use_id) : null;
       if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.session_id === 'string' && ev.session_id !== claudeSession) {
         this.store.putContraptionSession(c.id, req.person, req.session, ev.session_id);
       } else if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
         emit('compacted', {});
-      } else if (ev.type === 'stream_event' && !ev.parent_tool_use_id) {
+      } else if (ev.type === 'stream_event' && !parent) {
         const e = ev.event;
         if (e?.type === 'message_start') message = String(e.message?.id ?? '');
         else if (e?.type === 'content_block_delta' && e.delta?.type === 'text_delta' && typeof e.delta.text === 'string') {
           streamed.set(message, (streamed.get(message) ?? '') + e.delta.text);
-          emit('text', { delta: e.delta.text });
+          emit('text', { delta: e.delta.text, parent: null });
         }
       } else if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
         const mid = String(ev.message.id ?? '');
         for (const b of ev.message.content) {
-          if (b?.type === 'tool_use') emit('tool', { id: b.id, name: b.name, input: b.input });
-          else if (b?.type === 'text' && !ev.parent_tool_use_id && typeof b.text === 'string') {
+          if (b?.type === 'tool_use') emit('tool', { id: b.id, name: b.name, input: b.input, parent });
+          else if (b?.type === 'text' && !parent && typeof b.text === 'string') {
             // Text the partial stream missed (it is off, or cut short): the rest of it, once.
             const all = (said.get(mid) ?? '') + b.text;
             said.set(mid, all);
             const sent = streamed.get(mid) ?? '';
             if (all.length > sent.length && all.startsWith(sent)) {
-              emit('text', { delta: all.slice(sent.length) });
+              emit('text', { delta: all.slice(sent.length), parent: null });
               streamed.set(mid, all);
             }
           }
         }
       } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
-        for (const b of ev.message.content) if (b?.type === 'tool_result') emit('tool_result', { id: b.tool_use_id, ok: !b.is_error });
+        for (const b of ev.message.content) if (b?.type === 'tool_result') emit('tool_result', { id: b.tool_use_id, ok: !b.is_error, parent });
       } else if (ev.type === 'result') {
         result = ev;
       }

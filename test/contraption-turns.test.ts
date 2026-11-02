@@ -50,6 +50,22 @@ process.stdin.on('end', () => {
   if (prompt.includes('plan limit')) { out({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 3pm" }); process.exit(1); }
   if (prompt.includes('expired')) { out({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 401 authentication_error OAuth token has expired' }); process.exit(1); }
   if (prompt.includes('crash')) { process.stderr.write('boom\\n'); process.exit(3); }
+  if (prompt.includes('grunts')) {
+    // As Claude Code 2.1.316 streams it: a Grunt's events carry its Agent call's id; one it starts shows only as its Agent call.
+    const g = 'ag1', p = { parent_tool_use_id: g };
+    out({ type: 'assistant', parent_tool_use_id: null, message: { id: 'm1', content: [{ type: 'text', text: 'Asking. ' }, { type: 'tool_use', id: g, name: 'Agent', input: { prompt: 'look' } }] } });
+    out({ type: 'user', ...p, message: { content: [{ type: 'text', text: 'GRUNT PROMPT' }] } });
+    out({ type: 'stream_event', ...p, event: { type: 'message_start', message: { id: 'g1' } } });
+    out({ type: 'stream_event', ...p, event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'GRUNT STREAMED' } } });
+    out({ type: 'assistant', ...p, message: { id: 'g1', content: [{ type: 'text', text: 'GRUNT SAID' }, { type: 'tool_use', id: 'gt1', name: 'mcp__mandate__list', input: {} }] } });
+    out({ type: 'user', ...p, message: { content: [{ type: 'tool_result', tool_use_id: 'gt1', is_error: true, content: 'x' }] } });
+    out({ type: 'assistant', ...p, message: { id: 'g2', content: [{ type: 'tool_use', id: 'ag2', name: 'Agent', input: { prompt: 'deeper' } }] } });
+    out({ type: 'user', ...p, message: { content: [{ type: 'tool_result', tool_use_id: 'ag2', content: 'x' }] } });
+    out({ type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: g, content: 'x' }] } });
+    out({ type: 'assistant', parent_tool_use_id: null, message: { id: 'm2', content: [{ type: 'text', text: 'Done.' }] } });
+    out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: 'Done.', usage: {} });
+    return;
+  }
   out({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm1' } } });
   out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Moved ' } } });
   out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'it' } } });
@@ -174,8 +190,8 @@ test('a turn has only the contraption\'s MCP and no built-in tools, settings, CL
   assert.match(start.data.claudeSession, /^[0-9a-f-]{36}$/);
   assert.equal(evs.filter((e) => e.event === 'text').map((e) => e.data.delta).join(''), 'Moved it to Thursday.');
   assert.deepEqual(evs.filter((e) => e.event !== 'start' && e.event !== 'text'), [
-    { event: 'tool', data: { id: 'tu1', name: 'mcp__mandate__move', input: { to: 'Thursday' } } },
-    { event: 'tool_result', data: { id: 'tu1', ok: true } },
+    { event: 'tool', data: { id: 'tu1', name: 'mcp__mandate__move', input: { to: 'Thursday' }, parent: null } },
+    { event: 'tool_result', data: { id: 'tu1', ok: true, parent: null } },
     { event: 'compacted', data: {} },
     { event: 'end', data: { stop: 'end_turn', usage: { input: 10, output: 5, cacheRead: 100, cacheWrite: 20 } } },
   ]);
@@ -204,6 +220,21 @@ test('with agents allowed, the turn gets Agent and nothing more, its model, and 
     assert.match(settings.hooks[on][0].hooks[0].command, / '2'$/);
   }
   assert.deepEqual(Object.keys(settings.hooks).sort(), ['PostToolUse', 'PostToolUseFailure', 'PreToolUse']);
+});
+
+test('a Grunt\'s tool calls and results carry its Agent call\'s id, the top level\'s carry null, and its words never stream', async () => {
+  const evs = await turn(mandate, { session: 'grunts', prompt: 'Use grunts.', agents: { max: 2 }, mcp: [{ name: 'mandate', path: '/mcp' }] });
+  assert.deepEqual(evs.filter((e) => e.event === 'tool' || e.event === 'tool_result' || e.event === 'text'), [
+    { event: 'text', data: { delta: 'Asking. ', parent: null } },
+    { event: 'tool', data: { id: 'ag1', name: 'Agent', input: { prompt: 'look' }, parent: null } },
+    { event: 'tool', data: { id: 'gt1', name: 'mcp__mandate__list', input: {}, parent: 'ag1' } },
+    { event: 'tool_result', data: { id: 'gt1', ok: false, parent: 'ag1' } },
+    { event: 'tool', data: { id: 'ag2', name: 'Agent', input: { prompt: 'deeper' }, parent: 'ag1' } },
+    { event: 'tool_result', data: { id: 'ag2', ok: true, parent: 'ag1' } },
+    { event: 'tool_result', data: { id: 'ag1', ok: true, parent: null } },
+    { event: 'text', data: { delta: 'Done.', parent: null } },
+  ]);
+  assert.ok(!JSON.stringify(evs).includes('GRUNT'), 'no Grunt prompt or words');
 });
 
 test('the Agent cap lets `max` agents run at once, nested ones included, and frees a slot when one ends', () => {

@@ -38,6 +38,11 @@ test('the sent-back reply is marked replaced by the rewrite, even with narration
   assert.ok(swap, 'open chats are told to drop it');
 });
 
+test("a Grunt's words before the send-back are not taken for the reply", () => {
+  const grunt = { ...say('Grunt: all good'), parent_tool_use_id: 't9' };
+  assert.deepEqual(turn([say('Done: ![x](a.png)'), grunt, feedback(), say('Done: ![x](/r/a.png)'), result]).map(([, r]) => r), [true, false, false]);
+});
+
 test('with no words after the send-back, or another hook\'s feedback, the first version stays', () => {
   assert.deepEqual(turn([say('Done: ![x](a.png)'), feedback(), tool('Bash'), result]), [['Done: ![x](a.png)', false]]);
   assert.deepEqual(turn([say('Done.'), feedback('Stop hook feedback:\nYour task list has open tasks'), say('Done, tasks ticked.'), result]), [

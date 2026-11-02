@@ -2161,7 +2161,9 @@ export class Runner {
       this.broadcastTicket(ticketId);
     }
     const row = this.emit(ticketId, 'claude', slim);
-    if (ev.type === 'result') this.replaceSentBack(ticketId, row.id);
+    if (ev.type === 'user' && (ev.message?.content ?? []).some?.((b: any) => typeof b?.text === 'string' && b.text.includes(SENT_BACK))) this.sentBack.add(ticketId);
+    // shortcut: a turn stopped, or the server restarted, before the result keeps both versions; rare, so left.
+    if (ev.type === 'result' && this.sentBack.delete(ticketId)) this.replaceSentBack(ticketId, row.id);
     if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
       const turn = this.store.recordTurn(ticketId, {
         event_id: row.id, session_id: typeof ev.session_id === 'string' ? ev.session_id : null, ended_at: row.created_at,
@@ -2181,8 +2183,11 @@ export class Runner {
    * `replaced` event takes it out of open chats. The rewrite is the last words after the send-back,
    * so narration on the way there doesn't count; with no words after it, the first version stays.
    */
+  private sentBack = new Set<number>(); // tickets whose running turn had a reply sent back
+
   private replaceSentBack(ticketId: number, resultId: number) {
-    const words = (data: any) => data.type === 'assistant' && (data.message?.content ?? []).some((b: any) => b?.type === 'text' && b.text?.trim());
+    // A Grunt's words aren't the reply.
+    const words = (data: any) => data.type === 'assistant' && !data.parent_tool_use_id && (data.message?.content ?? []).some((b: any) => b?.type === 'text' && b.text?.trim());
     const sentBack = (data: any) => data.type === 'user' && Array.isArray(data.message?.content)
       && data.message.content.some((b: any) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(SENT_BACK));
     const swaps: { original: EventRow; rewrite?: EventRow }[] = [];

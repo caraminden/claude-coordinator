@@ -746,7 +746,13 @@ export function appendEvent(event, scroll = true) {
     }
   } else if (event.kind === 'replaced') {
     // A reply the link check sent back gives way to its rewrite (#281): the bubble, or its line in a fold.
-    for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) (el.closest('.note-text') ?? el.closest('.msg') ?? el).remove();
+    for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) {
+      const fold = el.closest('details.narration');
+      (el.closest('.note-text') ?? el.closest('.msg') ?? el).remove();
+      const n = fold?.querySelector('.notes').childElementCount;
+      if (n === 0) fold.remove();
+      else if (fold) fold.querySelector('summary').replaceChildren(h('span', { class: 'st' }, '⋯'), ` ${n} update${n === 1 ? '' : 's'} along the way`);
+    }
   } else if (event.kind === 'plan_result') {
     view.cards.get(data.id)?.settle(data);
   } else if (event.kind === 'loop_paused') {

@@ -174,7 +174,8 @@ function approvedSetupPlan(app: App, project: Project, t: Ticket): string | unde
 /** What people and Claude said in an event, for searching (not tool calls or their output). */
 function spokenText(kind: string, data: any): string {
   if (kind === 'user_message') return typeof data?.text === 'string' ? data.text : '';
-  if (data?.type !== 'assistant') return '';
+  // A reply the link check sent back that its rewrite replaced (#281) isn't in the chat to jump to.
+  if (data?.type !== 'assistant' || data.replaced) return '';
   return (data.message?.content ?? []).filter((b: any) => b?.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
 }
 

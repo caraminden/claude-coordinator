@@ -175,8 +175,8 @@ async function pageCheck(url: string, cookie: string) {
     if ((m.method === 'Network.loadingFinished' || m.method === 'Network.loadingFailed') && loading.delete(m.params.requestId)) lastLoad = Date.now();
     if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text);
     if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(`console.error: ${m.params.args.map((a: any) => a.value ?? a.description).join(' ')}`);
-    // The copy has the database but not the data folder's files (chat images): an API 404 is that.
-    const missingData = (e: any) => / 404 /.test(e.text) && new URL(e.url ?? url, url).pathname.startsWith('/api/');
+    // The copy has the database but not the data folder's files (chat images): an API 404 (/api/ or the app's /c/api/) is that.
+    const missingData = (e: any) => / 404 /.test(e.text) && /^(?:\/c)?\/api\//.test(new URL(e.url ?? url, url).pathname);
     if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error' && !missingData(m.params.entry)) errors.push(`${m.params.entry.text}${m.params.entry.url ? ` (${m.params.entry.url})` : ''}`);
   };
   let buf = '';

@@ -118,16 +118,17 @@ export const unitName = (name: string, job?: string) => `citadel-app-${name}${jo
 
 /** Every unit file for an app, by file name. Pure: the tests check it as text. */
 export function unitFiles({ row, manifest, folder, keysDir, citadelUrl, home }: UnitInputs): Map<string, string> {
+  const own = Object.fromEntries(Object.entries(manifest.env).map(([k, v]) => [k, tilde(v, home)]));
   const env = {
     PATH: toolPath(home),
-    ...Object.fromEntries(Object.entries(manifest.env).map(([k, v]) => [k, tilde(v, home)])),
+    ...own,
     PORT: String(row.port),
     DATA_DIR: join(home, '.local/share', row.name),
     CITADEL_KEYS: keysDir,
     CITADEL_URL: citadelUrl,
     BASE_PATH: `/apps/${row.name}`,
     // The build trusts the app's .mise.toml, so its units do too; an app's own trusted paths are kept after it.
-    MISE_TRUSTED_CONFIG_PATHS: [folder, manifest.env.MISE_TRUSTED_CONFIG_PATHS].filter(Boolean).join(':'),
+    MISE_TRUSTED_CONFIG_PATHS: [folder, own.MISE_TRUSTED_CONFIG_PATHS].filter(Boolean).join(':'),
   };
   // systemd finds a bare program name on its own path, not the unit's PATH: point it at the build's, so `node` is mise's shim.
   const search = `ExecSearchPath=${toolPath(home).replace(/%/g, '%%')}`;

@@ -75,7 +75,7 @@ test('units run with the build\'s toolchain: the app\'s .mise.toml trusted and a
   }
   assert.match(files.get('citadel-app-toc.service')!, /^ExecStart=node "server.ts"$/m, 'a bare name stays bare for ExecSearchPath to find');
   assert.match(files.get('citadel-app-toc-tick.service')!, /^ExecStart=\/usr\/bin\/true$/m, 'an absolute path stays as it is');
-  const own = unitFiles({ row: row('toc', 22255), manifest: parseManifest(JSON.stringify({ start: ['node'], env: { MISE_TRUSTED_CONFIG_PATHS: '/h/other' } })), folder: '/h/apps/toc', keysDir: '', citadelUrl: '', home: '/h' });
+  const own = unitFiles({ row: row('toc', 22255), manifest: parseManifest(JSON.stringify({ start: ['node'], env: { MISE_TRUSTED_CONFIG_PATHS: '~/other' } })), folder: '/h/apps/toc', keysDir: '', citadelUrl: '', home: '/h' });
   assert.ok(own.get('citadel-app-toc.service')!.includes('Environment="MISE_TRUSTED_CONFIG_PATHS=/h/apps/toc:/h/other"'), 'an app\'s own trusted paths are kept');
 });
 

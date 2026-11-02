@@ -426,6 +426,12 @@ export class AppServices {
       for (const f of stale) await rm(join(this.opts.unitDir, f), { force: true });
       said.push(`Removed ${stale.join(', ')}, which the manifest no longer names.`);
     }
+    // The one thing Citadel does in an app's DATA_DIR: make it when missing (an existing one is never touched), so a service that opens its database there can start.
+    const data = join(this.opts.home, '.local/share', row.name);
+    if (!existsSync(data)) {
+      await mkdir(data, { recursive: true, mode: 0o700 });
+      said.push(`Created ${data}.`);
+    }
     for (const [f, text] of files) {
       const path = join(this.opts.unitDir, f);
       await writeFile(`${path}.tmp`, text, { mode: 0o644 });

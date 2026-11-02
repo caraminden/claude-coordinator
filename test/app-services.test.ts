@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -132,6 +132,31 @@ test('install writes its units, reloads, enables and (re)starts them; start, sto
   assert.equal((await services.act(m, 'stop')).active, 'inactive');
   assert.equal((await services.act(m, 'restart')).active, 'active');
   assert.match(await services.logs(m, 5), /^journal --user -u citadel-app-mandate-backup.service -u citadel-app-mandate-backup.timer -u citadel-app-mandate.service -n 5 --no-pager/);
+});
+
+test('install creates a missing DATA_DIR at 0700 and leaves an existing one exactly as it is', async () => {
+  appFolder('fresh');
+  const data = join(home, '.local/share/fresh');
+  await services.install(row('fresh', 7342));
+  assert.equal(statSync(data).mode & 0o777, 0o700);
+  assert.deepEqual(readdirSync(data), []);
+
+  appFolder('old');
+  const old = join(home, '.local/share/old');
+  mkdirSync(old, { recursive: true, mode: 0o755 });
+  chmodSync(old, 0o755);
+  writeFileSync(join(old, 'app.db'), 'data');
+  await services.install(row('old', 7343));
+  assert.equal(statSync(old).mode & 0o777, 0o755);
+  assert.equal(readFileSync(join(old, 'app.db'), 'utf8'), 'data');
+  assert.deepEqual(readdirSync(old), ['app.db']);
+
+  // An install refused for another reason (here: no manifest) creates nothing; a boot check or preview never gets this far.
+  await assert.rejects(services.install(row('none', 7344)), /citadel-app.json/);
+  assert.equal(existsSync(join(home, '.local/share/none')), false);
+  const off = new AppServices({ ...opts(), off: 'preview' });
+  await assert.rejects(off.install(row('fresh2', 7345)), /preview/);
+  assert.equal(existsSync(join(home, '.local/share/fresh2')), false);
 });
 
 test('a timer the manifest drops is removed; a unit Citadel didn\'t write is never rewritten or removed', async () => {

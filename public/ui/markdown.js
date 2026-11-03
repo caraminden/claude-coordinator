@@ -289,8 +289,12 @@ export function markdownLine(src, { streaming = false } = {}) {
 
 // ---- In the page: an element that draws markdown, with the styles it needs. ----
 
-/** Citadel's markdown look, on theme.css's variables. Moved from Citadel's style.css (.md) in #283. */
+/** Citadel's markdown look, on theme.css's variables. Moved from Citadel's style.css (.md) in #283. The first three
+    rules are fully :where(), so Citadel's own .msg margins and link colour still win in Citadel. */
 const CSS = `
+:where(.cui-md > :first-child) { margin-top: 0; }
+:where(.cui-md > :last-child) { margin-bottom: 0; }
+:where(.cui-md a) { color: inherit; }
 :where(.cui-md) { overflow-wrap: anywhere; }
 :where(.cui-md) :is(code, pre) { font-family: var(--citadel-mono); font-size: 0.88em; }
 :where(.cui-md) pre { background: var(--citadel-code-bg); padding: 0.6rem; border-radius: var(--citadel-radius-sm); overflow-x: auto; white-space: pre-wrap; margin: 0.4rem 0; }

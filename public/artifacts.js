@@ -529,7 +529,7 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
   } else if (kind === 'html') {
     // Sandboxed (here and by the server's CSP) so a page a thread wrote can't act as the app.
     // Its page reaches the app only through the artifact bridge (bridge-host.js), as the person viewing it.
-    const frame = h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals allow-downloads', allow: 'clipboard-write *', title: name });
+    const frame = h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals allow-downloads', allow: 'clipboard-write *; fullscreen *', allowfullscreen: true, title: name });
     // A page's send fills a box outside the frame: leave full screen first so it's in view.
     if (bridge) attachBridge(frame, { ...bridge, name, api, onSend: bridge.onSend && ((text) => (isFullScreen(frame) ? leaveFullScreen(frame).then(() => bridge.onSend(text)) : bridge.onSend(text))) });
     body.append(frame);

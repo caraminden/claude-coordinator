@@ -169,7 +169,7 @@ window.COLOURS = [
 .cui-scope label:has(> .cui-switch) { display: inline-flex; align-items: center; gap: var(--citadel-space-3); margin: 0; color: var(--citadel-text); font-size: 15px; cursor: pointer; }
 .cui-scope label:has(> .cui-switch:disabled) { color: var(--citadel-muted); cursor: default; }
 @media (max-width: 800px) { .cui-scope .cui-switch { --cui-switch-h: 24px; } }
-@media (forced-colors: active) { .cui-scope .cui-switch { appearance: auto; padding: 0; margin: 0; } }
+@media (forced-colors: active) { .cui-scope .cui-switch { appearance: auto; --cui-switch-pad: 0px; width: auto; height: auto; } }
 
 /* Spinner (a ring) and the working line. */
 .cui-scope .cui-spin {

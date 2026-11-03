@@ -127,8 +127,9 @@ test('every ui file keeps the rules: standalone, no inline styles, cui-* classes
       }
       const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
       // What CSP's default-src 'self' refuses: style="" in markup, <style>, setAttribute('style'). A CSSOM
-      // write (el.style.height = …) is not refused, and the composer's autogrow needs one.
+      // write (el.style.height = …) is not refused; only the composer's autogrow (and its caret measure) needs one.
       assert.doesNotMatch(code, /\bstyle\s*=\s*["'`]|<style\b|\.setAttribute\(\s*['"]style/, `${f} writes no inline style`);
+      if (f !== 'composer.js') assert.doesNotMatch(code, /\.style\./, `${f} writes no CSSOM style either`);
     }
     const css = cssOf(f).replace(/\/\*[\s\S]*?\*\//g, '');
     // Each selector (outside @media and @keyframes) is wholly inside :where() groups, so it weighs nothing and an

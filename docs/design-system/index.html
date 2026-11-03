@@ -154,8 +154,8 @@ window.COLOURS = [
 .cui-scope .cui-switch {
   --cui-switch-h: 20px; --cui-switch-pad: calc((44px - var(--cui-switch-h)) / 2);
   --cui-knob: var(--citadel-surface);
-  appearance: none; flex: none; box-sizing: content-box; display: inline-block; vertical-align: middle;
-  width: calc(var(--cui-switch-h) * 1.8); height: var(--cui-switch-h);
+  appearance: none; flex: none; box-sizing: border-box; display: inline-block; vertical-align: middle;
+  width: calc(var(--cui-switch-h) * 1.8 + 2 * var(--cui-switch-pad)); height: calc(var(--cui-switch-h) + 2 * var(--cui-switch-pad));
   padding: var(--cui-switch-pad); margin: calc(0px - var(--cui-switch-pad));
   border: 0; border-radius: var(--citadel-radius-pill); cursor: pointer;
   background:

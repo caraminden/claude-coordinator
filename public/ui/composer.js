@@ -30,7 +30,7 @@ const CSS = `
 :where(.cui-composer-error) { flex-basis: 100%; }
 /* No border of its own, so one line is control-h tall, level with Send. */
 :where(.cui-composer-input) {
-  flex: 1; min-width: 0; border: 0; background: transparent; outline: none;
+  flex: 1; min-width: 0; box-sizing: border-box; border: 0; background: transparent; outline: none;
   resize: none; overflow-y: auto; max-height: 40vh; padding: calc((var(--citadel-control-h) - 1.25em) / 2) var(--citadel-space-1);
 }
 :where(.cui-composer-row) { display: flex; align-items: center; gap: var(--citadel-space-2); }

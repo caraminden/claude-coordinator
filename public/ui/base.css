@@ -103,13 +103,14 @@
 /* Switch: a native checkbox drawn as a pill track (background-clip: content-box) with a round knob (a
    radial gradient) that slides right when on. The transparent padding makes the box 44px tall, a phone's
    touch target (in a label it overlaps the gap to the text), and the negative margin hands that room back,
-   so the switch lays out at the track's size.
+   so the switch lays out at the track's size. Sized in border-box, the value a page's box-sizing reset
+   (* { box-sizing: border-box }) sets anyway: :where() weighs nothing, so a reset ties and may win.
    Forced colours drop backgrounds, so there it falls back to the native checkbox. */
 :where(.cui-switch) {
   --cui-switch-h: 20px; --cui-switch-pad: calc((44px - var(--cui-switch-h)) / 2);
   --cui-knob: var(--citadel-surface);
-  appearance: none; flex: none; box-sizing: content-box; display: inline-block; vertical-align: middle;
-  width: calc(var(--cui-switch-h) * 1.8); height: var(--cui-switch-h);
+  appearance: none; flex: none; box-sizing: border-box; display: inline-block; vertical-align: middle;
+  width: calc(var(--cui-switch-h) * 1.8 + 2 * var(--cui-switch-pad)); height: calc(var(--cui-switch-h) + 2 * var(--cui-switch-pad));
   padding: var(--cui-switch-pad); margin: calc(0px - var(--cui-switch-pad));
   border: 0; border-radius: var(--citadel-radius-pill); cursor: pointer;
   background:

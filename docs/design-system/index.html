@@ -1,0 +1,977 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Citadel UI: the shared look and parts for apps built on Citadel</title>
+<link rel="stylesheet" href="mockkit.css">
+<script src="mockkit.js"></script>
+<script>
+// Citadel's colours, one row each: name after --citadel-, use, light, dark, Citadel's own name in
+// public/style.css (null: new), alias. The token CSS below is built from this list, so the swatches
+// and the specimens can never disagree.
+window.COLOURS = [
+  ['bg', 'page background', '#f6f5f2', '#161514', '--bg'],
+  ['surface', 'panels, cards, inputs', '#ffffff', '#201f1d', '--panel'],
+  ['text', 'body text', '#1d1c1a', '#ecebe7', '--ink'],
+  ['muted', 'secondary text, icons', '#6b6862', '#9b978f', '--muted'],
+  ['border', 'borders, dividers, hover fills', '#e2dfd8', '#34322e', '--line'],
+  ['accent', 'links, primary buttons, selection', '#c2410c', '#fb923c', '--accent'],
+  ['on-accent', 'text and icons on accent', '#ffffff', '#1d1c1a', null],
+  ['focus', 'focus ring (same as accent)', '#c2410c', '#fb923c', null, 'accent'],
+  ['danger', 'errors, destructive actions', '#b91c1c', '#f87171', '--error'],
+  ['ok', 'success, done', '#15803d', '#4ade80', '--done'],
+  ['warn', 'warnings; the notice bar', '#b45309', '#fbbf24', '--waiting'],
+  ['warn-tint', 'warning as a fill (a notice mixes 16%)', '#f5b40b', '#fbbf24', '--waiting-tint'],
+  ['info', 'running, in progress', '#2563eb', '#60a5fa', '--running'],
+  ['neutral', 'closed, inactive', '#6b7280', '#9ca3af', '--closed'],
+  ['violet', 'Citadel’s “held”; a fifth status colour', '#7c3aed', '#a78bfa', '--held'],
+  ['code-bg', 'code blocks, inline code', '#f1efe9', '#2a2926', '--code-bg'],
+];
+(function () {
+  const block = (i) => COLOURS.map((c) => `--citadel-${c[0]}: ${c[5] ? `var(--citadel-${c[5]})` : c[i]};`).join(' ');
+  const css = `.cui-scope { ${block(2)} color-scheme: light; }
+@media (prefers-color-scheme: dark) { .cui-scope:not([data-theme="light"]) { ${block(3)} color-scheme: dark; } }
+.cui-scope[data-theme="dark"] { ${block(3)} color-scheme: dark; }`;
+  const s = document.createElement('style');
+  s.id = 'cui-colours';
+  s.textContent = css;
+  document.head.append(s);
+})();
+</script>
+<style>
+/* ============ Tokens (besides colours): what theme.css would add, as --citadel-* ============ */
+.cui-scope {
+  --citadel-font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --citadel-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  --citadel-space-1: 4px; --citadel-space-2: 8px; --citadel-space-3: 12px;
+  --citadel-space-4: 16px; --citadel-space-5: 24px; --citadel-space-6: 32px;
+  --citadel-radius-sm: 6px; --citadel-radius: 8px; --citadel-radius-lg: 10px; --citadel-radius-pill: 999px;
+  --citadel-control-h: 32px;
+  --citadel-motion: 150ms ease-out;
+  --citadel-motion-slow: 250ms ease-out;
+}
+@media (max-width: 800px) { .cui-scope { --citadel-control-h: 40px; } }
+@media (prefers-reduced-motion: reduce) { .cui-scope { --citadel-motion: 0s; --citadel-motion-slow: 0s; } }
+
+/* The document itself wears the same tokens, so the toggle flips the whole page. */
+.cui-scope {
+  --mk-bg: var(--citadel-bg); --mk-panel: var(--citadel-surface); --mk-sunk: var(--citadel-code-bg);
+  --mk-ink: var(--citadel-text); --mk-muted: var(--citadel-muted); --mk-line: var(--citadel-border);
+  --mk-accent: var(--citadel-accent); --mk-on-accent: var(--citadel-on-accent);
+  --mk-good: var(--citadel-ok); --mk-warn: var(--citadel-warn); --mk-bad: var(--citadel-danger); --mk-info: var(--citadel-info);
+  min-height: 100vh; background: var(--citadel-bg); color: var(--citadel-text);
+}
+
+/* ============ Components. In the library each is prefixed cui- and ships in the file its specimen
+   names; here every selector starts with .cui-scope only so the mock kit's own button/code styles
+   don't win. ============ */
+.cui-scope [hidden] { display: none !important; }
+.cui-scope :focus { outline: none; }
+.cui-scope :focus-visible { outline: 2px solid var(--citadel-focus); outline-offset: 2px; }
+
+/* Buttons: every variant the same height, content centred, so room above and below is equal. */
+.cui-scope .cui-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--citadel-space-2);
+  min-height: var(--citadel-control-h); padding: var(--citadel-space-1) var(--citadel-space-3);
+  border: 1px solid transparent; border-radius: var(--citadel-radius-sm);
+  font: 500 15px/1.25 var(--citadel-font); white-space: nowrap; cursor: pointer;
+  background: var(--citadel-surface); color: var(--citadel-text); border-color: var(--citadel-border);
+  transition: background-color var(--citadel-motion), border-color var(--citadel-motion), color var(--citadel-motion);
+}
+.cui-scope .cui-btn:hover:not(:disabled) { border-color: color-mix(in srgb, var(--citadel-accent) 60%, var(--citadel-border)); }
+.cui-scope .cui-btn.cui-primary { background: var(--citadel-accent); border-color: var(--citadel-accent); color: var(--citadel-on-accent); font-weight: 600; }
+.cui-scope .cui-btn.cui-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--citadel-accent) 88%, var(--citadel-text)); }
+.cui-scope .cui-btn.cui-ghost { background: transparent; border-color: transparent; }
+.cui-scope .cui-btn.cui-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--citadel-text) 7%, transparent); border-color: transparent; }
+.cui-scope .cui-btn.cui-danger { color: var(--citadel-danger); border-color: color-mix(in srgb, var(--citadel-danger) 55%, var(--citadel-border)); background: color-mix(in srgb, var(--citadel-danger) 9%, var(--citadel-surface)); font-weight: 600; }
+.cui-scope .cui-btn.cui-danger:hover:not(:disabled) { border-color: var(--citadel-danger); }
+.cui-scope .cui-btn.cui-small { min-height: 26px; padding: 2px var(--citadel-space-2); font-size: 13px; }
+.cui-scope .cui-btn.cui-icon { width: var(--citadel-control-h); padding-inline: 0; font-size: 17px; }
+.cui-scope .cui-btn:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 800px) { .cui-scope .cui-btn.cui-small { min-height: var(--citadel-control-h); } }
+
+/* Inputs: one line is control-h tall; the block padding is worked out so it stays equal. 16px on phones. */
+.cui-scope .cui-input {
+  display: block; width: 100%; margin: 0;
+  font: 15px/1.25 var(--citadel-font); color: var(--citadel-text);
+  padding: calc((var(--citadel-control-h) - 2px - 1.25em) / 2) var(--citadel-space-3);
+  background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-sm);
+  transition: border-color var(--citadel-motion);
+}
+.cui-scope .cui-input:hover { border-color: color-mix(in srgb, var(--citadel-muted) 50%, var(--citadel-border)); }
+.cui-scope .cui-input::placeholder { color: var(--citadel-muted); }
+.cui-scope textarea.cui-input { resize: vertical; line-height: 1.25; }
+@media (max-width: 800px) { .cui-scope .cui-input { font-size: 16px; } }
+
+/* Chips: a pill. Neutral, a tone (tinted), or a choice you can tap. */
+.cui-scope .cui-chip {
+  display: inline-flex; align-items: center; gap: var(--citadel-space-1);
+  padding: 2px var(--citadel-space-2); border-radius: var(--citadel-radius-pill);
+  font: 600 12px/1.4 var(--citadel-font);
+  border: 1px solid var(--citadel-border); background: var(--citadel-surface); color: var(--citadel-muted);
+}
+.cui-scope .cui-chip[data-tone] {
+  background: color-mix(in srgb, var(--tone) 12%, var(--citadel-surface));
+  border-color: color-mix(in srgb, var(--tone) 40%, var(--citadel-border));
+  color: color-mix(in srgb, var(--tone) 80%, var(--citadel-text));
+}
+.cui-scope [data-tone="ok"] { --tone: var(--citadel-ok); }
+.cui-scope [data-tone="warn"] { --tone: var(--citadel-warn); }
+.cui-scope [data-tone="danger"] { --tone: var(--citadel-danger); }
+.cui-scope [data-tone="info"] { --tone: var(--citadel-info); }
+.cui-scope [data-tone="violet"] { --tone: var(--citadel-violet); }
+.cui-scope [data-tone="neutral"] { --tone: var(--citadel-neutral); }
+.cui-scope .cui-choice {
+  display: inline-flex; align-items: center; gap: var(--citadel-space-1); max-width: 100%;
+  min-height: var(--citadel-control-h); padding: var(--citadel-space-1) var(--citadel-space-3);
+  border-radius: var(--citadel-radius-pill); font: 600 13px/1.25 var(--citadel-font); cursor: pointer;
+  background: color-mix(in srgb, var(--citadel-accent) 8%, var(--citadel-surface));
+  border: 1px solid color-mix(in srgb, var(--citadel-accent) 55%, var(--citadel-border));
+  color: color-mix(in srgb, var(--citadel-accent) 82%, var(--citadel-text));
+  transition: background-color var(--citadel-motion);
+}
+.cui-scope .cui-choice:hover:not(:disabled) { background: color-mix(in srgb, var(--citadel-accent) 18%, var(--citadel-surface)); }
+.cui-scope .cui-choice.cui-rec, .cui-scope .cui-choice[aria-pressed="true"] { background: var(--citadel-accent); border-color: var(--citadel-accent); color: var(--citadel-on-accent); }
+.cui-scope .cui-choice:disabled { opacity: 0.5; cursor: default; }
+.cui-scope .cui-choice[aria-pressed="true"]:disabled { opacity: 1; }
+.cui-scope .cui-choices { display: flex; flex-wrap: wrap; gap: var(--citadel-space-2); }
+
+/* Notice: a tint of the tone over the surface, body text, a bar in the tone. Readable in both modes. */
+.cui-scope .cui-notice {
+  --tint: var(--citadel-warn-tint); --bar: var(--citadel-warn);
+  padding: var(--citadel-space-2) var(--citadel-space-3); border-radius: var(--citadel-radius-sm);
+  background: color-mix(in srgb, var(--tint) 16%, var(--citadel-surface)); color: var(--citadel-text);
+  border-left: 3px solid var(--bar); font: 15px/1.45 var(--citadel-font);
+}
+.cui-scope .cui-notice[data-tone="danger"] { --tint: var(--citadel-danger); --bar: var(--citadel-danger); }
+.cui-scope .cui-notice[data-tone="info"] { --tint: var(--citadel-info); --bar: var(--citadel-info); }
+.cui-scope .cui-notice b { font-weight: 600; }
+
+/* Spinner (a ring) and the working line. */
+.cui-scope .cui-spin {
+  display: inline-block; flex: none; width: 0.95em; height: 0.95em; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--citadel-info) 25%, transparent); border-top-color: var(--citadel-info);
+  animation: cui-spin 0.8s linear infinite;
+}
+@keyframes cui-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cui-scope .cui-spin { animation: none; } }
+.cui-scope .cui-working { display: flex; align-items: center; gap: var(--citadel-space-2); padding: var(--citadel-space-1) 0; color: var(--citadel-muted); font: 13px/1.4 var(--citadel-font); }
+.cui-scope .cui-working .cui-time { font-variant-numeric: tabular-nums; }
+
+/* Markdown (ui/markdown.js). */
+.cui-scope .cui-md { font: 15px/1.5 var(--citadel-font); color: var(--citadel-text); overflow-wrap: anywhere; min-width: 0; }
+.cui-scope .cui-md > :first-child { margin-top: 0; }
+.cui-scope .cui-md > :last-child { margin-bottom: 0; }
+.cui-scope .cui-md p { margin: var(--citadel-space-2) 0; max-width: 72ch; }
+.cui-scope .cui-md :is(h1, h2, h3, h4) { font-family: var(--citadel-font); font-weight: 600; line-height: 1.3; margin: var(--citadel-space-5) 0 var(--citadel-space-2); }
+.cui-scope .cui-md h1 { font-size: 22px; }
+.cui-scope .cui-md h2 { font-size: 18px; }
+.cui-scope .cui-md h3 { font-size: 16px; }
+.cui-scope .cui-md h4 { font-size: 15px; }
+.cui-scope .cui-md :is(ul, ol) { margin: var(--citadel-space-2) 0; padding-left: var(--citadel-space-5); }
+.cui-scope .cui-md li { margin: var(--citadel-space-1) 0; padding-left: 2px; }
+.cui-scope .cui-md li > :is(ul, ol) { margin: var(--citadel-space-1) 0; }
+.cui-scope .cui-md ul ul { list-style-type: circle; }
+.cui-scope .cui-md li::marker { color: var(--citadel-muted); font-variant-numeric: tabular-nums; }
+.cui-scope .cui-md code { font-family: var(--citadel-mono); font-size: 0.88em; background: var(--citadel-code-bg); border-radius: var(--citadel-radius-sm); padding: 0.1em 0.35em; }
+.cui-scope .cui-md pre { margin: var(--citadel-space-3) 0; padding: var(--citadel-space-3); overflow-x: auto; background: var(--citadel-code-bg); border-radius: var(--citadel-radius); font: 0.88em/1.5 var(--citadel-mono); }
+.cui-scope .cui-md pre code { background: none; padding: 0; font-size: inherit; border-radius: 0; }
+.cui-scope .cui-md blockquote { margin: var(--citadel-space-3) 0; padding: var(--citadel-space-1) var(--citadel-space-3); border-left: 3px solid var(--citadel-border); color: var(--citadel-muted); }
+.cui-scope .cui-md blockquote p { margin: 0; }
+.cui-scope .cui-md a { color: var(--citadel-accent); text-underline-offset: 2px; }
+.cui-scope .cui-md .cui-table { margin: var(--citadel-space-3) 0; overflow-x: auto; border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); background: var(--citadel-surface); }
+.cui-scope .cui-md table { border-collapse: collapse; width: 100%; }
+.cui-scope .cui-md :is(th, td) { text-align: left; padding: 6px var(--citadel-space-3); border-bottom: 1px solid var(--citadel-border); white-space: nowrap; }
+.cui-scope .cui-md th { background: var(--citadel-code-bg); font-weight: 600; }
+.cui-scope .cui-md tr:last-child > td { border-bottom: 0; }
+
+/* Chat (ui/chat.js). */
+.cui-scope .cui-chat { display: flex; flex-direction: column; gap: var(--citadel-space-3); font: 15px/1.5 var(--citadel-font); min-width: 0; }
+.cui-scope .cui-chat .cui-md :is(h1, h2, h3, h4) { font-size: 16px; margin-top: var(--citadel-space-4); }
+.cui-scope .cui-you {
+  align-self: flex-end; max-width: 85%; padding: var(--citadel-space-2) var(--citadel-space-3);
+  background: color-mix(in srgb, var(--citadel-accent) 9%, var(--citadel-surface));
+  border: 1px solid color-mix(in srgb, var(--citadel-accent) 30%, var(--citadel-border));
+  border-radius: var(--citadel-radius-lg); overflow-wrap: anywhere;
+}
+.cui-scope .cui-fold {
+  display: flex; align-items: center; gap: var(--citadel-space-2); width: 100%; min-height: var(--citadel-control-h);
+  padding: var(--citadel-space-1) var(--citadel-space-2); border: 1px solid transparent; border-radius: var(--citadel-radius);
+  background: none; color: var(--citadel-muted); font: 13px/1.4 var(--citadel-font); text-align: left; cursor: pointer;
+  transition: background-color var(--citadel-motion);
+}
+.cui-scope .cui-fold:hover { background: color-mix(in srgb, var(--citadel-text) 5%, transparent); }
+.cui-scope .cui-fold .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cui-scope .cui-fold .caret { flex: none; transition: transform var(--citadel-motion); }
+.cui-scope .cui-fold[aria-expanded="true"] .caret { transform: rotate(90deg); }
+.cui-scope .ic-ok { color: var(--citadel-ok); font-weight: 700; }
+.cui-scope .ic-bad { color: var(--citadel-danger); font-weight: 700; }
+.cui-scope .cui-steps { list-style: none; margin: 0; padding: var(--citadel-space-1) 0 var(--citadel-space-1) var(--citadel-space-5); font: 13px/1.4 var(--citadel-font); color: var(--citadel-muted); }
+.cui-scope .cui-steps li { display: flex; gap: var(--citadel-space-2); align-items: center; padding: 2px 0; max-width: none; }
+.cui-scope .cui-steps li.bad { color: var(--citadel-danger); }
+.cui-scope .cui-steps li.now { color: var(--citadel-text); }
+.cui-scope .cui-steps li > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.cui-scope .cui-grunts { border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); background: var(--citadel-surface); }
+.cui-scope .cui-grunts > .cui-fold { border-radius: var(--citadel-radius); padding-inline: var(--citadel-space-3); }
+.cui-scope .cui-grunt { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: var(--citadel-space-2);
+  padding: var(--citadel-space-2) var(--citadel-space-3); border-top: 1px solid var(--citadel-border); font: 13px/1.4 var(--citadel-font); }
+.cui-scope .cui-grunt .task { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--citadel-text); }
+.cui-scope .cui-grunt .el { font-variant-numeric: tabular-nums; color: var(--citadel-muted); }
+
+/* Composer (ui/composer.js). */
+.cui-scope .cui-composer {
+  display: flex; align-items: flex-end; gap: var(--citadel-space-2); padding: var(--citadel-space-2);
+  background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-lg);
+}
+.cui-scope .cui-composer:has(textarea:focus-visible) { outline: 2px solid var(--citadel-focus); outline-offset: 2px; }
+.cui-scope .cui-composer textarea.cui-input { flex: 1; min-width: 0; border: 0; background: transparent; resize: none; max-height: 40vh; outline: none;
+  padding: calc((var(--citadel-control-h) - 1.25em) / 2) var(--citadel-space-1); } /* no border here, so one line = control-h */
+.cui-scope .cui-hint { font: 12px/1.4 var(--citadel-font); color: var(--citadel-muted); padding: var(--citadel-space-1) var(--citadel-space-2); }
+
+/* ============ The page's own bits (doc-*): not part of the library. ============ */
+.doc-bar {
+  position: sticky; top: 0; z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem;
+  margin: 0 0 1.25rem; padding: 0.5rem 0.75rem; border: 1px solid var(--mk-line); border-radius: var(--mk-radius-sm);
+  background: color-mix(in srgb, var(--mk-panel) 92%, transparent); backdrop-filter: blur(6px); font-size: 0.88rem;
+}
+.doc-bar .seg { display: inline-flex; gap: 0.25rem; }
+.doc-bar .mk-btn[aria-pressed="true"] { border-color: var(--mk-accent); background: color-mix(in srgb, var(--mk-accent) 12%, var(--mk-panel)); font-weight: 600; }
+.doc-bar .now { color: var(--mk-muted); }
+.mk-specimen > .mk-show.doc-block { display: block; }
+.mk-specimen > .mk-show.doc-col { flex-direction: column; align-items: stretch; }
+.doc-new { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mk-accent); }
+.mk-swatch .mk-chipcolor { display: flex; }
+.mk-swatch .mk-chipcolor > span { flex: 1; }
+.mk-swatch .use { color: var(--mk-muted); }
+.mk-swatch.new { border-color: var(--mk-accent); }
+.doc-why { color: var(--mk-muted); font-size: 0.92rem; }
+.doc-why b { color: var(--mk-ink); }
+.doc-rw { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 0.75rem; margin: 0.75rem 0 1.5rem; }
+.doc-rw > * { min-width: 0; }
+.doc-case { border: 1px solid var(--mk-line); border-top: 3px solid var(--mk-good); border-radius: var(--mk-radius-sm); background: var(--mk-panel); padding: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.doc-case.wrong { border-top-color: var(--mk-bad); }
+.doc-case > .tag { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mk-good); }
+.doc-case.wrong > .tag { color: var(--mk-bad); }
+.doc-case > .stage { background: var(--mk-bg); border-radius: var(--mk-radius-sm); padding: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; min-width: 0; }
+.doc-case > p { margin: 0; font-size: 0.88rem; color: var(--mk-muted); }
+.doc-case pre { margin: 0; font-size: 0.78rem; }
+.doc-ratio { font: 600 0.75rem/1.3 var(--mk-mono); padding: 0.15rem 0.45rem; border-radius: 999px; border: 1px solid var(--mk-line); }
+.doc-ratio.ok { color: var(--mk-good); }
+.doc-ratio.bad { color: var(--mk-bad); }
+.doc-rule h3 { margin-top: 1.75rem; }
+.doc-type { display: grid; grid-template-columns: minmax(8rem, 12rem) 1fr; gap: 0.25rem 1rem; align-items: baseline; padding: 0.6rem 0; border-bottom: 1px solid var(--mk-line); }
+.doc-type:last-child { border-bottom: 0; }
+.doc-type .k { font-size: 0.8rem; color: var(--mk-muted); }
+.doc-type .k code { font-size: 0.75rem; }
+.doc-type .v { min-width: 0; overflow-wrap: anywhere; }
+.doc-t-h1 { font: 600 22px/1.3 var(--citadel-font); }
+.doc-t-h2 { font: 600 18px/1.3 var(--citadel-font); }
+.doc-t-h3 { font: 600 16px/1.3 var(--citadel-font); }
+.doc-t-body { font: 15px/1.5 var(--citadel-font); }
+.doc-t-small { font: 13px/1.45 var(--citadel-font); }
+.doc-t-meta { font: 12px/1.4 var(--citadel-font); color: var(--citadel-muted); }
+.doc-t-mono { font: 15px/1.5 var(--citadel-font); }
+.doc-t-mono code { font-family: var(--citadel-mono); font-size: 0.88em; background: var(--citadel-code-bg); border-radius: var(--citadel-radius-sm); padding: 0.1em 0.35em; }
+.doc-faces { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 0.75rem; width: 100%; }
+.doc-face { background: var(--mk-panel); border: 1px solid var(--mk-line); border-radius: var(--mk-radius-sm); padding: 0.75rem; min-width: 0; }
+.doc-face .big { font-size: 28px; line-height: 1.2; }
+.doc-face .mono { font-family: var(--citadel-mono); }
+.doc-face p { margin: 0.25rem 0 0; font-size: 0.8rem; color: var(--mk-muted); overflow-wrap: anywhere; }
+.doc-space { display: grid; grid-template-columns: 11rem 3rem 1fr; gap: 0.75rem; align-items: center; width: 100%; font-size: 0.85rem; }
+.doc-space code { font-size: 0.78rem; }
+.doc-space i { display: block; height: 14px; background: var(--citadel-accent); border-radius: 2px; }
+.doc-space i.s1 { width: var(--citadel-space-1); } .doc-space i.s2 { width: var(--citadel-space-2); } .doc-space i.s3 { width: var(--citadel-space-3); }
+.doc-space i.s4 { width: var(--citadel-space-4); } .doc-space i.s5 { width: var(--citadel-space-5); } .doc-space i.s6 { width: var(--citadel-space-6); }
+.doc-radii { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.75rem; width: 100%; }
+.doc-radii > div { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.8rem; color: var(--mk-muted); }
+.doc-radii b { display: block; height: 56px; background: color-mix(in srgb, var(--citadel-accent) 14%, var(--citadel-surface)); border: 2px solid var(--citadel-accent); }
+.doc-radii .r-sm b { border-radius: var(--citadel-radius-sm); } .doc-radii .r-md b { border-radius: var(--citadel-radius); }
+.doc-radii .r-lg b { border-radius: var(--citadel-radius-lg); } .doc-radii .r-pill b { border-radius: var(--citadel-radius-pill); }
+.doc-radii code { font-size: 0.75rem; color: var(--mk-ink); }
+.doc-heights { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; }
+.doc-heights > div { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.8rem; color: var(--mk-muted); }
+.doc-heights .h32, .doc-heights .h40 { display: flex; align-items: center; justify-content: center; padding: 0 0.75rem; border: 1px dashed var(--citadel-accent); border-radius: var(--citadel-radius-sm); color: var(--citadel-text); }
+.doc-heights .h32 { height: 32px; } .doc-heights .h40 { height: 40px; }
+.doc-measure { font-size: 0.8rem; color: var(--mk-muted); width: 100%; }
+.doc-measure b { color: var(--mk-ink); font-variant-numeric: tabular-nums; }
+.doc-sheet-wrap { position: relative; width: 100%; height: 92px; overflow: hidden; border-radius: var(--citadel-radius); border: 1px solid var(--citadel-border); background: var(--citadel-surface); }
+.doc-sheet { position: absolute; inset: 0 auto 0 0; width: 60%; padding: 0.6rem 0.75rem; background: color-mix(in srgb, var(--citadel-accent) 12%, var(--citadel-surface)); border-right: 1px solid var(--citadel-border); font-size: 0.85rem; transform: translateX(-101%); transition: transform var(--citadel-motion-slow); }
+.doc-sheet.open { transform: none; }
+.doc-sheet.wrong { transition: transform 600ms ease-in-out; }
+.doc-reduced { --citadel-motion: 0s; --citadel-motion-slow: 0s; }
+.doc-reduced .cui-spin { animation: none; }
+.doc-flip { display: inline-flex; align-items: center; min-height: 32px; padding: 4px 12px; border-radius: var(--citadel-radius-sm); border: 1px solid var(--citadel-border); background: var(--citadel-surface); transition: background-color var(--citadel-motion), color var(--citadel-motion); cursor: pointer; font: inherit; color: var(--citadel-text); }
+.doc-flip.on { background: var(--citadel-accent); color: var(--citadel-on-accent); border-color: var(--citadel-accent); }
+.doc-flip.wrong { transition: background-color 600ms, color 600ms; }
+.doc-pad { --pad: color-mix(in srgb, var(--citadel-info) 30%, transparent); --content: color-mix(in srgb, var(--citadel-ok) 22%, transparent);
+  background: linear-gradient(var(--content), var(--content)) content-box, var(--pad) !important; }
+.doc-pad-wrong.cui-chip { padding: 0 var(--citadel-space-2) 5px; }
+.doc-pad-wrong.cui-btn { padding: 1px var(--citadel-space-3) 9px; align-items: flex-start; }
+.doc-padrow { display: flex; align-items: center; gap: 0.5rem; padding: 8px 12px; border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); background: var(--citadel-surface); font-size: 0.85rem; width: 100%; }
+.doc-padrow.wrong { padding: 2px 12px 12px; align-items: flex-start; }
+.doc-wrong-note { color: var(--citadel-warn); background: var(--citadel-warn-tint); padding: 8px 12px; border-radius: 6px; font: 15px/1.45 var(--citadel-font); }
+.doc-small-in { font-size: 13.5px !important; }
+.doc-focus-wrong:focus { outline: 2px solid var(--citadel-focus) !important; outline-offset: 2px; }
+.doc-said { font-size: 0.85rem; color: var(--mk-muted); min-height: 1.3em; width: 100%; margin: 0; }
+.doc-chat { max-width: 640px; margin: 0 auto; }
+/* The kit's pick bar leaves extra room under a callout; keep it even. */
+.mk-callout > .mk-pickbar { padding-bottom: 0; }
+.mk-pickbar .mk-who:empty { display: none; }
+.doc-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mk-muted); margin: 1rem 0 0.4rem; }
+.doc-label:first-child { margin-top: 0; }
+.doc-sent { font-size: 0.85rem; color: var(--mk-muted); margin: 0.4rem 0 0; }
+.doc-sent:empty { display: none; }
+@media (max-width: 640px) {
+  .doc-type { grid-template-columns: 1fr; }
+  .doc-space { grid-template-columns: 8.5rem 2.5rem 1fr; }
+}
+</style>
+</head>
+<body class="mk">
+<div class="cui-scope" id="scope" data-theme="auto">
+<main class="mk-page">
+  <div class="doc-bar" role="group" aria-label="Theme for the page and every specimen">
+    <span>Theme</span>
+    <span class="seg">
+      <button type="button" class="mk-btn" data-theme-set="auto" aria-pressed="true">Auto</button>
+      <button type="button" class="mk-btn" data-theme-set="light" aria-pressed="false">Light</button>
+      <button type="button" class="mk-btn" data-theme-set="dark" aria-pressed="false">Dark</button>
+    </span>
+    <span class="now" id="theme-now" aria-live="polite"></span>
+  </div>
+
+  <header class="mk-head">
+    <div class="mk-kicker">Citadel · design-system home · #472</div>
+    <h1>Citadel UI</h1>
+    <div class="mk-meta">
+      <span class="mk-status" data-status="living">Living: the code wins</span>
+      <span>2026-11-02</span>
+      <span>Builds on the survey of the four apps (shared <code>specs/ui-library/survey-2026-11.md</code>) and theme.css (#269)</span>
+      <span>Checked against Citadel <code>4d99ace</code> + #283</span>
+    </div>
+    <p class="mk-lede">The look and the parts Citadel serves at <code>/apps/_citadel/ui/</code> for Mandate, Theory of Crafting and Peek Auras, and use itself, so the four stop drifting apart. Every token and part below is drawn live; flip the theme at the top to see both modes. This is the living home (#283): when it and the code disagree, the code wins, and a change to a token, part or rule updates this page in the same commit. The tokens live in <code>public/style.css</code> (served as <code>theme.css</code> by <code>src/theme.ts</code>), the parts in <code>public/ui/</code>, and <code>test/ui-contract.test.ts</code> holds what apps rely on. How apps use it: the <code>citadel:contraption-ui</code> kit skill.</p>
+    <p class="mk-banner info">Built so far (#283): the tokens, <code>ui/base.css</code> and <code>ui/markdown.js</code>. The chat kit (<code>ui/chat.js</code>) and the composer (<code>ui/composer.js</code>) below are still specimens until their minions land. <code>ui/markdown.js</code> ships Citadel's existing markdown look, moved from its <code>style.css</code>; the restyle in the Markdown specimen (tables in a box, 22/18/16 headings) isn't built yet.</p>
+    <nav class="mk-toc" aria-label="Contents"></nav>
+  </header>
+
+  <section>
+    <h2>Where it lives</h2>
+    <div class="mk-table-wrap"><table class="mk-table">
+      <thead><tr><th>File (under <code>/apps/_citadel/</code>)</th><th>Holds</th><th>How an app takes it</th></tr></thead>
+      <tbody>
+        <tr><td><code>theme.css</code></td><td>Every token below, as <code>--citadel-*</code>. Built from Citadel's own <code>public/style.css</code> by <code>src/theme.ts</code>, so Citadel and the apps read one source.</td><td><code>&lt;link rel="stylesheet"&gt;</code>, as today</td></tr>
+        <tr><td><code>ui/base.css</code></td><td>Buttons, inputs, chips, notices, the spinner, the focus ring: class-only parts (<code>cui-*</code>).</td><td><code>&lt;link&gt;</code> after theme.css</td></tr>
+        <tr><td><code>ui/markdown.js</code></td><td>Markdown to safe DOM, one link rule, a streaming mode.</td><td>ES module import</td></tr>
+        <tr><td><code>ui/chat.js</code> (coming)</td><td>Your message, the reply, tool-run rows, Grunt rows, suggested replies, the working line.</td><td>ES module; brings its own constructed stylesheet</td></tr>
+        <tr><td><code>ui/composer.js</code> (coming)</td><td>The message box: autogrow, Enter rules, Send that turns into Stop.</td><td>ES module; brings its own constructed stylesheet</td></tr>
+        <tr><td><code>drawers.js</code></td><td><code>NARROW</code> = 800: the phone breakpoint, exported once.</td><td>ES module, as today</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Colours</h2>
+    <p class="doc-why">The 15 Citadel already serves, unchanged, plus <b>one new</b>: <code>--citadel-on-accent</code>. Each swatch shows light (left) and dark (right). <span class="mk-lives">Lives in: <code>public/style.css:1-34</code> → <code>/apps/_citadel/theme.css</code> via <code>src/theme.ts</code>.</span></p>
+    <div class="mk-swatches" id="swatches"></div>
+
+    <h3>New: text on accent</h3>
+    <p class="doc-why"><b>Why:</b> white on dark mode's <code>#fb923c</code> is about 2.3:1; near-black is about 7.5:1. Today Citadel, Mandate and ToC give three different answers.</p>
+    <div class="doc-rw">
+      <div class="doc-case"><span class="tag">✓ --citadel-on-accent</span>
+        <div class="stage"><button type="button" class="cui-btn cui-primary" id="oa-right">Send</button><span class="doc-ratio" data-for="oa-right"></span></div>
+        <p>#fff in light, #1d1c1a in dark.</p></div>
+      <div class="doc-case wrong"><span class="tag">✕ #fff in both modes (Citadel today)</span>
+        <div class="stage"><button type="button" class="cui-btn cui-primary doc-white" id="oa-wrong">Send</button><span class="doc-ratio" data-for="oa-wrong"></span></div>
+        <p>Fine in light; fails in dark.</p></div>
+    </div>
+
+    <h3>New: the notice pair</h3>
+    <p class="doc-why"><b>Why:</b> ToC's note sets <code>--citadel-warn</code> text on <code>--citadel-warn-tint</code>; in dark both are <code>#fbbf24</code>, so the words vanish. A notice mixes the tint 16% into the surface, keeps body text, and carries the tone in a 3px bar.</p>
+    <div class="doc-rw">
+      <div class="doc-case"><span class="tag">✓ Tint 16% + text + bar</span>
+        <div class="stage"><div class="cui-notice" id="nt-right">Couldn't reach Citadel. Your message is still in the box.</div><span class="doc-ratio" data-for="nt-right"></span></div>
+        <pre><code>background: color-mix(in srgb, var(--citadel-warn-tint) 16%, var(--citadel-surface));
+color: var(--citadel-text);
+border-left: 3px solid var(--citadel-warn);</code></pre></div>
+      <div class="doc-case wrong"><span class="tag">✕ ToC's .chat-note today</span>
+        <div class="stage"><div class="doc-wrong-note" id="nt-wrong">Couldn't reach Citadel. Your message is still in the box.</div><span class="doc-ratio" data-for="nt-wrong"></span></div>
+        <pre><code>color: var(--citadel-warn);
+background: var(--citadel-warn-tint);</code></pre></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Type</h2>
+    <p class="doc-why"><b>Why:</b> one body size for chat and docs alike. ToC's 13.5px chat is the outlier; it uses eight text sizes between 11 and 16px. <span class="mk-lives">Lives in: <code>theme.css</code> (<code>--citadel-font</code>, <code>--citadel-mono</code>); sizes in <code>ui/base.css</code> and the components.</span></p>
+    <div class="mk-specimen"><div class="mk-show">
+      <div class="doc-faces">
+        <div class="doc-face"><div class="big">Aa Gg 0123</div><p><code>--citadel-font</code>: system-ui, -apple-system, "Segoe UI", sans-serif</p></div>
+        <div class="doc-face"><div class="big mono">{ } 0O 1lI</div><p><code>--citadel-mono</code>: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace</p></div>
+      </div>
+    </div></div>
+    <div class="mk-specimen"><div class="mk-show doc-block">
+      <div class="doc-type"><div class="k">Doc h1 · 22px · 600</div><div class="v doc-t-h1">Moving Citadel onto shared tokens</div></div>
+      <div class="doc-type"><div class="k">Doc h2 · 18px · 600</div><div class="v doc-t-h2">What changes for Mandate</div></div>
+      <div class="doc-type"><div class="k">Doc h3 · 16px · 600<br>and every heading in a chat reply</div><div class="v doc-t-h3">The composer</div></div>
+      <div class="doc-type"><div class="k">Body · 15px / 1.5<br>chat and docs alike</div><div class="v doc-t-body">The Acolyte moved Tuesday's run to Thursday and left a note on the calendar.</div></div>
+      <div class="doc-type"><div class="k">Small · 13px</div><div class="v doc-t-small">Tool rows, Grunt rows, the working line, suggested replies, small buttons.</div></div>
+      <div class="doc-type"><div class="k">Meta · 12px</div><div class="v doc-t-meta">Chips, timestamps, hints under the composer · 2m ago</div></div>
+      <div class="doc-type"><div class="k">Code · 0.88em of its text</div><div class="v doc-t-mono">Run <code>npm test</code> before you land.</div></div>
+      <div class="doc-type"><div class="k">Inputs on phones · 16px</div><div class="v doc-t-small">At ≤800px every input and textarea is 16px, so iOS Safari doesn't zoom in on focus.</div></div>
+    </div></div>
+  </section>
+
+  <section>
+    <h2>Spacing and radii</h2>
+    <p class="doc-why"><b>Why:</b> a 4px grid ends the <code>.45rem .6rem</code> / <code>5px 10px</code> / <code>.4rem .9rem</code> spread. Four radii by what the thing is; today ToC alone uses nine. <span class="mk-lives">Lives in: <code>theme.css</code>.</span></p>
+    <div class="mk-specimen"><div class="mk-show doc-col">
+      <div class="doc-space"><code>--citadel-space-1</code><span>4px</span><i class="s1"></i></div>
+      <div class="doc-space"><code>--citadel-space-2</code><span>8px</span><i class="s2"></i></div>
+      <div class="doc-space"><code>--citadel-space-3</code><span>12px</span><i class="s3"></i></div>
+      <div class="doc-space"><code>--citadel-space-4</code><span>16px</span><i class="s4"></i></div>
+      <div class="doc-space"><code>--citadel-space-5</code><span>24px</span><i class="s5"></i></div>
+      <div class="doc-space"><code>--citadel-space-6</code><span>32px</span><i class="s6"></i></div>
+    </div></div>
+    <div class="mk-specimen"><div class="mk-show">
+      <div class="doc-radii">
+        <div class="r-sm"><b></b><code>--citadel-radius-sm</code> 6px<span>buttons, inputs, inline code</span></div>
+        <div class="r-md"><b></b><code>--citadel-radius</code> 8px<span>cards, rows, menus, code blocks</span></div>
+        <div class="r-lg"><b></b><code>--citadel-radius-lg</code> 10px<span>chat messages, dialogs</span></div>
+        <div class="r-pill"><b></b><code>--citadel-radius-pill</code> 999px<span>chips</span></div>
+      </div>
+    </div></div>
+  </section>
+
+  <section>
+    <h2>Controls, focus and motion</h2>
+    <h3>Control height</h3>
+    <p class="doc-why"><b>Why:</b> <code>--citadel-control-h</code> is 32px on desktop and 40px at ≤800px, and every button variant is that tall. Today Citadel's secondary button is 2px taller than its primary; touch targets on phones are at least 40px.</p>
+    <div class="mk-specimen"><div class="mk-show">
+      <div class="doc-heights">
+        <div><span class="h32">32px</span>desktop</div>
+        <div><span class="h40">40px</span>phone (≤800px)</div>
+      </div>
+      <p class="doc-measure">This window: <b id="ctl-now">…</b></p>
+    </div></div>
+
+    <h3>Focus</h3>
+    <p class="doc-why"><b>Why:</b> <code>:focus-visible</code> only, <code>2px solid var(--citadel-focus)</code>, offset 2px: a ring for the keyboard, none for a mouse click. Citadel styles none today; the three apps use two different offsets. <span class="mk-lives">Lives in: <code>ui/base.css</code>.</span></p>
+    <div class="mk-specimen"><div class="mk-show">
+      <button type="button" class="cui-btn">Click me, then press Tab</button>
+      <button type="button" class="cui-btn cui-primary">Then me</button>
+      <input class="cui-input" aria-label="Sample field" placeholder="And this field">
+    </div></div>
+
+    <h3>Motion</h3>
+    <p class="doc-why"><b>Why:</b> <code>--citadel-motion</code> 150ms ease-out for state changes; <code>--citadel-motion-slow</code> 250ms for drawers and sheets; both 0s under <code>prefers-reduced-motion</code>, and the spinner stops (the working line's timer still ticks).</p>
+    <div class="mk-specimen"><div class="mk-show doc-col">
+      <div><button type="button" class="doc-flip" id="mo-flip">State change · 150ms</button> <button type="button" class="cui-btn" id="mo-sheet-btn">Open a sheet · 250ms</button></div>
+      <div class="doc-sheet-wrap"><div class="doc-sheet" id="mo-sheet">A drawer slides in over 250ms.</div></div>
+    </div></div>
+
+    <h3>Breakpoint</h3>
+    <p class="doc-why"><b>Why:</b> one phone width, 800px, already used by all four apps. It's a constant, not a variable (media queries can't read variables), exported as <code>NARROW</code> from <code>drawers.js</code>. <span class="mk-lives">This window: <b id="bp-now">…</b></span></p>
+  </section>
+
+  <section>
+    <h2>Basic parts</h2>
+    <h3>Buttons</h3>
+    <div class="mk-specimen">
+      <div class="mk-show" id="btn-row">
+        <button type="button" class="cui-btn cui-primary">Send</button>
+        <button type="button" class="cui-btn">Cancel</button>
+        <button type="button" class="cui-btn cui-ghost">Show all</button>
+        <button type="button" class="cui-btn cui-danger">Stop</button>
+        <button type="button" class="cui-btn cui-icon" aria-label="Menu">☰</button>
+        <button type="button" class="cui-btn cui-primary" disabled>Sending…</button>
+        <button type="button" class="cui-btn" disabled>Disabled</button>
+        <button type="button" class="cui-btn cui-small">Small</button>
+        <p class="doc-measure">Measured now: <b id="btn-heights">…</b></p>
+      </div>
+      <div class="mk-about">
+        <p>Primary (one per screen), secondary (outline), ghost (quiet), danger (tinted, like Citadel's Stop), icon-only (a square), disabled (half opacity). All the same height. Small is 26px on desktop; on phones it grows to 40px like the rest, for the thumb.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> · <code>.cui-btn</code> + <code>.primary</code> <code>.ghost</code> <code>.danger</code> <code>.small</code> <code>.icon</code></p>
+      </div>
+    </div>
+
+    <h3>Input and textarea</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <input class="cui-input" aria-label="Aura name" placeholder="Name the aura">
+        <textarea class="cui-input" rows="3" aria-label="Notes" placeholder="Notes"></textarea>
+        <p class="doc-measure">Font size now: <b id="in-size">…</b></p>
+      </div>
+      <div class="mk-about">
+        <p>One line is exactly a control tall, with the block padding worked out from it, so text sits in the middle. 15px on desktop, 16px at ≤800px.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> · <code>.cui-input</code> on <code>input</code> or <code>textarea</code></p>
+      </div>
+    </div>
+
+    <h3>Chips</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <div class="cui-choices">
+          <span class="cui-chip">draft</span>
+          <span class="cui-chip" data-tone="ok">done</span>
+          <span class="cui-chip" data-tone="warn">waiting</span>
+          <span class="cui-chip" data-tone="danger">failed</span>
+          <span class="cui-chip" data-tone="info">running</span>
+          <span class="cui-chip" data-tone="violet">held</span>
+          <span class="cui-chip" data-tone="neutral">closed</span>
+        </div>
+        <div class="cui-choices">
+          <button type="button" class="cui-choice cui-rec">Yes, ship it</button>
+          <button type="button" class="cui-choice">Show me first</button>
+        </div>
+      </div>
+      <div class="mk-about">
+        <p>A label chip: neutral, or tinted by a status tone (<code>data-tone</code>). A choice chip is a button: accent-tinted, the recommended one filled.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> · <code>.cui-chip[data-tone]</code>, <code>.cui-choice</code> (<code>.rec</code>)</p>
+      </div>
+    </div>
+
+    <h3>Notices</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <div class="cui-notice"><b>Not sent.</b> Couldn't reach Citadel; your message is still in the box.</div>
+        <div class="cui-notice" data-tone="danger"><b>The turn failed.</b> The agent stopped with an error after 4 steps.</div>
+        <div class="cui-notice" data-tone="info"><b>Reconnecting…</b> You'll see what you missed when it's back.</div>
+      </div>
+      <div class="mk-about">
+        <p>A message about the app, not from the agent: warn, danger, info. Body text on a 16% tint, the tone in the bar.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> · <code>.cui-notice[data-tone]</code> (warn is the default)</p>
+      </div>
+    </div>
+
+    <h3>Spinner and working line</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <div class="cui-working"><span class="cui-spin" aria-hidden="true"></span><span role="status">Thinking… · <span class="cui-time" data-tick="12">12s</span></span></div>
+      </div>
+      <div class="mk-about">
+        <p>A ring in the info colour, and the line that says the agent is busy and for how long. Only the line is a live region; the log is not.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> (<code>.cui-spin</code>) and <code>/apps/_citadel/ui/chat.js</code> (<code>.cui-working</code>)</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Markdown</h2>
+    <div class="mk-specimen">
+      <div class="mk-show doc-block"><div class="cui-md">
+        <h2>Moving Citadel onto the shared tokens</h2>
+        <p>Three steps, each its own commit. The colour names stay; only <code>--citadel-on-accent</code> is new. Background reading: <a href="https://developer.mozilla.org/en-US/docs/Web/CSS/color_value/color-mix" target="_blank" rel="noopener">color-mix() on MDN</a>.</p>
+        <h3>Steps</h3>
+        <ol>
+          <li>Add the tokens to <code>public/style.css</code>
+            <ul><li>colours in both <code>:root</code> blocks</li><li>space, radii and control heights once</li></ul>
+          </li>
+          <li>Replace the 13 hard-coded <code>#fff</code> with <code>var(--citadel-on-accent)</code></li>
+          <li>Serve <code>ui/</code> beside <code>theme.css</code></li>
+        </ol>
+        <div class="cui-table"><table>
+          <thead><tr><th>App</th><th>Chat text</th><th>Mono</th><th>Radii in use</th><th>Focus ring</th><th>Text on accent (dark)</th></tr></thead>
+          <tbody>
+            <tr><td>Citadel</td><td>15px</td><td>ui-monospace .88em</td><td>6, 8, 10, 999, 4</td><td>none styled</td><td>#fff</td></tr>
+            <tr><td>Mandate</td><td>15px</td><td>none set</td><td>8, 6, 1rem, 4, 3</td><td>2px, offset 2</td><td>#1d1c1a</td></tr>
+            <tr><td>ToC</td><td>13.5px</td><td>12.5px</td><td>nine values</td><td>2px, offset 1</td><td>surface</td></tr>
+            <tr><td>Peek Auras</td><td>15px</td><td>11.5px</td><td>8, 6, 999, 4, 5, 3</td><td>2px, offset 1</td><td>#fff</td></tr>
+          </tbody>
+        </table></div>
+        <pre><code>button.primary {
+  background: var(--citadel-accent);
+  color: var(--citadel-on-accent);
+}</code></pre>
+        <blockquote><p>Can we build a library of UI features and design decisions that are used and shared by default by all apps developed by citadel?</p></blockquote>
+      </div></div>
+      <div class="mk-about">
+        <p>The agent's words as safe DOM: headings 22/18/16 in a doc (16 at most in a chat reply), lists with their markers and a nested indent, a table that scrolls in its own box, code blocks, quotes. External links open a new tab.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/markdown.js</code> · <code>.cui-md</code></p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Chat</h2>
+    <div class="mk-specimen">
+      <div class="mk-show doc-block"><div class="doc-chat">
+        <div class="cui-chat">
+          <div class="cui-you">The error note in the build chat is unreadable in dark mode. Can you fix it?</div>
+          <div class="cui-run">
+            <button type="button" class="cui-fold" aria-expanded="false" data-fold="run-done"><span class="ic-ok" aria-hidden="true">✓</span><span class="lbl">9 steps</span><span class="caret" aria-hidden="true">▸</span></button>
+            <ol class="cui-steps" id="run-done" hidden></ol>
+          </div>
+          <div class="cui-md">
+            <h2>Fixed: the note uses the shared notice</h2>
+            <p>The note was warn text on a warn fill, and in dark mode both are <code>#fbbf24</code>. It now uses <code>.cui-notice</code>: body text on a light tint with a warn bar.</p>
+            <ul><li>Checked in light and dark at 390px</li><li><code>npm test</code> passes</li></ul>
+          </div>
+          <div class="cui-choices" id="choices">
+            <button type="button" class="cui-choice cui-rec">Land it</button>
+            <button type="button" class="cui-choice">Show me a screenshot first</button>
+            <button type="button" class="cui-choice">Also fix Peek's</button>
+          </div>
+          <p class="doc-sent" id="choice-said" aria-live="polite"></p>
+        </div>
+
+        <div class="doc-label">A run in progress</div>
+        <div class="cui-chat">
+          <div class="cui-run">
+            <button type="button" class="cui-fold" aria-expanded="false" data-fold="run-live"><span class="cui-spin" aria-hidden="true"></span><span class="lbl">Editing <code>src/theme.ts</code> · 5 steps</span><span class="caret" aria-hidden="true">▸</span></button>
+            <ol class="cui-steps" id="run-live" hidden></ol>
+          </div>
+        </div>
+
+        <div class="doc-label">A run with a failed step</div>
+        <div class="cui-chat">
+          <div class="cui-run">
+            <button type="button" class="cui-fold" aria-expanded="false" data-fold="run-bad"><span class="ic-bad" aria-hidden="true">✕</span><span class="lbl">9 steps · 1 failed</span><span class="caret" aria-hidden="true">▸</span></button>
+            <ol class="cui-steps" id="run-bad" hidden></ol>
+          </div>
+        </div>
+
+        <div class="doc-label">Grunts</div>
+        <div class="cui-chat">
+          <div class="cui-grunts">
+            <button type="button" class="cui-fold" aria-expanded="true" data-fold="grunt-rows"><span class="cui-spin" aria-hidden="true"></span><span class="lbl">2 Grunts · 1 running</span><span class="caret" aria-hidden="true">▸</span></button>
+            <div id="grunt-rows">
+              <div class="cui-grunt"><span class="ic-ok" aria-hidden="true">✓</span><span class="task">Survey Mandate's composer and Enter rules</span><span class="el">1m 04s</span><span class="cui-chip" data-tone="ok">done</span></div>
+              <div class="cui-grunt"><span class="cui-spin" aria-hidden="true"></span><span class="task">Check ToC's drawers in dark mode at 390px</span><span class="el" data-tick="38">38s</span><span class="cui-chip" data-tone="info">running</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="doc-label">Working</div>
+        <div class="cui-working"><span class="cui-spin" aria-hidden="true"></span><span role="status">Thinking… · <span class="cui-time" data-tick="12">12s</span></span></div>
+      </div></div>
+      <div class="mk-about">
+        <p>Your message: a bubble on the right, accent tint 9%, <code>radius-lg</code>. The reply: unboxed text, so long answers read like a page. A run of tool steps folds into one row (done ✓, running with its current step, failed ✕); Grunts get their own rows with task, time and state, never mixed into the agent's steps. Suggested replies sit under the reply; tapping one sends it and greys the rest. Tap any row to open it.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/chat.js</code> · <code>.cui-chat</code> <code>.cui-you</code> <code>.cui-run</code> <code>.cui-grunts</code> <code>.cui-choices</code></p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Composer</h2>
+    <div class="mk-specimen">
+      <div class="mk-show doc-block"><div class="doc-chat">
+        <div class="cui-working" id="cmp-working" hidden><span class="cui-spin" aria-hidden="true"></span><span role="status">Thinking… · <span class="cui-time" id="cmp-t">0s</span></span></div>
+        <div class="cui-composer">
+          <textarea class="cui-input" id="cmp-ta" rows="1" aria-label="Message" placeholder="Message the build agent…"></textarea>
+          <button type="button" class="cui-btn cui-primary" id="cmp-send" disabled>Send</button>
+        </div>
+        <div class="cui-hint" id="cmp-hint"></div>
+        <p class="doc-sent" id="cmp-said" aria-live="polite"></p>
+      </div></div>
+      <div class="mk-about">
+        <p>The box grows with what you type (up to 40% of the screen). Enter sends on desktop and adds a line on a phone; Shift+Enter always adds a line; a half-composed word (IME) never sends. Send becomes Stop while a turn runs, and a failed send puts your words back. Try it: send something, then Stop.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/composer.js</code> · <code>.cui-composer</code></p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Rules</h2>
+    <p class="doc-why">What every screen of every app is held to. Each shows the right way (green) beside the wrong way (red).</p>
+
+    <div class="doc-rule">
+      <h3>1. Equal, non-zero room above and below</h3>
+      <p class="doc-why">In every box, bar, button, row and chip (Cara's standing rule). Blue is padding, green is content.</p>
+      <div class="doc-rw">
+        <div class="doc-case"><span class="tag">✓ Even</span>
+          <div class="stage"><span class="cui-chip doc-pad">waiting</span><button type="button" class="cui-btn doc-pad">Retry</button><div class="doc-padrow doc-pad">Row with 8px above and below</div></div>
+          <p>Fixed control height and centred content, or the same block padding top and bottom.</p></div>
+        <div class="doc-case wrong"><span class="tag">✕ Top-heavy text</span>
+          <div class="stage"><span class="cui-chip doc-pad doc-pad-wrong">waiting</span><button type="button" class="cui-btn doc-pad doc-pad-wrong">Retry</button><div class="doc-padrow wrong doc-pad">Row with 2px above, 12px below</div></div>
+          <p>The text rides high; a zero on either side looks cut off.</p></div>
+      </div>
+    </div>
+
+    <div class="doc-rule">
+      <h3>2. Text on accent uses --citadel-on-accent</h3>
+      <div class="doc-rw">
+        <div class="doc-case"><span class="tag">✓ var(--citadel-on-accent)</span>
+          <div class="stage"><span class="cui-choice cui-rec" id="r2-right">Land it</span><span class="doc-ratio" data-for="r2-right"></span></div>
+          <p>Readable in both modes.</p></div>
+        <div class="doc-case wrong"><span class="tag">✕ #fff (or var(--citadel-surface))</span>
+          <div class="stage"><span class="cui-choice cui-rec doc-white" id="r2-wrong">Land it</span><span class="doc-ratio" data-for="r2-wrong"></span></div>
+          <p>Flip to dark: white on orange drops to about 2.3:1.</p></div>
+      </div>
+    </div>
+
+    <div class="doc-rule">
+      <h3>3. Inputs are 16px on phones</h3>
+      <div class="doc-rw">
+        <div class="doc-case"><span class="tag">✓ .cui-input</span>
+          <div class="stage"><input class="cui-input" id="r3-right" aria-label="Right-size input" placeholder="16px at ≤800px"></div>
+          <p>Now <b data-fs="r3-right">…</b>. iOS Safari leaves the page alone on focus.</p></div>
+        <div class="doc-case wrong"><span class="tag">✕ 13.5px (ToC) or 15px (Citadel, Mandate)</span>
+          <div class="stage"><input class="cui-input doc-small-in" id="r3-wrong" aria-label="Small input" placeholder="13.5px everywhere"></div>
+          <p>Now <b data-fs="r3-wrong">…</b>. On an iPhone, tapping it zooms the whole page in.</p></div>
+      </div>
+    </div>
+
+    <div class="doc-rule">
+      <h3>4. Focus is visible on keyboard focus only</h3>
+      <div class="doc-rw">
+        <div class="doc-case"><span class="tag">✓ :focus-visible</span>
+          <div class="stage"><button type="button" class="cui-btn">Click me</button><button type="button" class="cui-btn">Then Tab</button></div>
+          <p>No ring after a click; a clear ring when you Tab in.</p></div>
+        <div class="doc-case wrong"><span class="tag">✕ :focus</span>
+          <div class="stage"><button type="button" class="cui-btn doc-focus-wrong">Click me</button><button type="button" class="cui-btn doc-focus-wrong">Then Tab</button></div>
+          <p>A ring stays on every clicked button. (The other wrong, <code>outline: none</code>, loses keyboard users.)</p></div>
+      </div>
+    </div>
+
+    <div class="doc-rule">
+      <h3>5. Motion respects reduced motion</h3>
+      <p class="doc-why"><label><input type="checkbox" id="r5-sim"> Pretend this device asks for reduced motion</label></p>
+      <div class="doc-rw">
+        <div class="doc-case" id="r5-right"><span class="tag">✓ var(--citadel-motion-slow)</span>
+          <div class="stage"><button type="button" class="cui-btn" data-sheet="r5-s1">Open</button><span class="cui-spin" aria-hidden="true"></span><div class="doc-sheet-wrap"><div class="doc-sheet" id="r5-s1">Sheet</div></div></div>
+          <p>With reduced motion: the sheet just appears; the spinner holds still.</p></div>
+        <div class="doc-case wrong"><span class="tag">✕ A fixed 600ms, no media query</span>
+          <div class="stage"><button type="button" class="cui-btn" data-sheet="r5-s2">Open</button><span class="cui-spin doc-spin-always" aria-hidden="true"></span><div class="doc-sheet-wrap"><div class="doc-sheet wrong" id="r5-s2">Sheet</div></div></div>
+          <p>Slides and spins whatever the person asked for (Mandate and Peek today).</p></div>
+      </div>
+    </div>
+
+    <div class="doc-rule">
+      <h3>6. External links open a new tab</h3>
+      <div class="doc-rw">
+        <div class="doc-case"><span class="tag">✓ target="_blank" rel="noopener"</span>
+          <div class="stage cui-md"><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/a#target" target="_blank" rel="noopener">MDN on link targets</a></div>
+          <pre><code>&lt;a href="…" target="_blank" rel="noopener"&gt;</code></pre></div>
+        <div class="doc-case wrong"><span class="tag">✕ target="_top" (ToC today)</span>
+          <div class="stage cui-md"><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/a#target" target="_top" id="r6-wrong">MDN on link targets</a></div>
+          <p id="r6-said">When the app is framed in Citadel, this replaces Citadel's whole window. (Click it: this page stops it.)</p></div>
+      </div>
+    </div>
+
+    <div class="doc-rule">
+      <h3>7. No inline styles in what a component writes</h3>
+      <p class="doc-why">Citadel's CSP is <code>default-src 'self'</code>, so <code>style=""</code> and <code>&lt;style&gt;</code> in markup are blocked there. Components bring a constructed stylesheet (as <code>drawers.js</code> does) or use <code>ui/base.css</code> classes.</p>
+      <div class="doc-rw">
+        <div class="doc-case"><span class="tag">✓ Classes + a constructed sheet</span>
+          <pre><code>const sheet = new CSSStyleSheet();
+sheet.replaceSync(CSS);
+document.adoptedStyleSheets =
+  [...document.adoptedStyleSheets, sheet];
+row.innerHTML =
+  '&lt;span class="cui-chip" data-tone="warn"&gt;waiting&lt;/span&gt;';</code></pre></div>
+        <div class="doc-case wrong"><span class="tag">✕ style="" in an HTML string</span>
+          <pre><code>row.innerHTML =
+  '&lt;span style="color:#b45309"&gt;waiting&lt;/span&gt;';
+// Citadel: "Refused to apply inline style
+// because it violates … default-src 'self'"</code></pre></div>
+      </div>
+    </div>
+
+    <div class="doc-rule">
+      <h3>8. Use the variables, never copied hex</h3>
+      <div class="doc-rw">
+        <div class="doc-case"><span class="tag">✓ var(--citadel-accent)</span>
+          <div class="stage"><button type="button" class="cui-btn cui-primary">Follows the theme</button></div>
+          <p>Flip to dark: it turns the lighter orange with everything else.</p></div>
+        <div class="doc-case wrong"><span class="tag">✕ #c2410c</span>
+          <div class="stage"><button type="button" class="cui-btn cui-primary doc-hex-wrong">Stuck in light</button></div>
+          <p>Stays light mode's orange in dark, and misses Citadel's next colour change.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="questions">
+    <h2>Detail calls made</h2>
+    <p class="mk-muted">The minion's picks on details (#282, 2026-11-02); say if any should go the other way.</p>
+    <ul>
+      <li><b>Type sizes get names too</b> (<code>--citadel-size-body</code> 15, <code>-small</code> 13, <code>-meta</code> 12, <code>-h1</code>…<code>-h3</code>), so apps stop picking their own.</li>
+      <li><b>The class-only parts ship as one linked <code>ui/base.css</code></b> (buttons, inputs, chips, notices, spinner, focus ring); the script components keep constructed sheets. A linked file is CSP-clean and needs no import.</li>
+      <li><b>Small buttons are 40px on phones like the rest</b>; "small" only shrinks them on desktop.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Decisions log</h2>
+    <ol class="mk-log">
+      <li><time>2026-11-02</time> · Cara: <q>Can we build a library of UI features and design decisions that are used and shared by default by all apps developed by citadel?</q></li>
+      <li><time>2026-11-02</time> · Cara, on the #282 question card: Enter on a phone: <q>Adds a new line</q></li>
+      <li><time>2026-11-02</time> · Cara, on the #282 question card: text on the accent colour in dark mode: <q>Dark text</q></li>
+    </ol>
+  </section>
+</main>
+</div>
+<style>
+/* After the components, and specific enough, so these wrongs win. */
+.cui-scope .cui-btn.cui-primary.doc-white, .cui-scope .cui-choice.cui-rec.doc-white { color: #fff; }
+.cui-scope .cui-btn.cui-primary.doc-hex-wrong { background: #c2410c; border-color: #c2410c; color: #fff; }
+.cui-scope .doc-spin-always { animation: cui-spin 0.8s linear infinite; }
+</style>
+<script>
+(function () {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const scope = $('#scope');
+  const darkMq = matchMedia('(prefers-color-scheme: dark)');
+  const narrowMq = matchMedia('(max-width: 800px)');
+
+  // Swatches, from the same list as the tokens.
+  const sw = $('#swatches');
+  for (const [name, use, light, dark, theirs, alias] of COLOURS) {
+    const card = document.createElement('div');
+    card.className = 'mk-swatch' + (theirs === null && !alias ? ' new' : '');
+    const chip = document.createElement('div');
+    chip.className = 'mk-chipcolor';
+    for (const hex of [light, dark]) {
+      const half = document.createElement('span');
+      half.style.background = hex;
+      chip.append(half);
+    }
+    const body = document.createElement('div');
+    body.innerHTML = `<code>--citadel-${name}</code>${theirs === null && !alias ? ' <span class="doc-new">New</span>' : ''}<br>`
+      + `<span class="use">${use}</span><br>`
+      + `<code>${alias ? `var(--citadel-${alias})` : `${light} · ${dark}`}</code>`
+      + (theirs ? `<br><span class="use">style.css <code>${theirs}</code></span>` : '');
+    card.append(chip, body);
+    sw.append(card);
+  }
+
+  // Contrast, measured from what the browser actually drew.
+  const rgb = (s) => {
+    let m = s.match(/^rgba?\(([^)]+)\)/);
+    if (m) { const p = m[1].split(/[\s,/]+/).filter(Boolean).map(Number); return p.length > 3 && p[3] === 0 ? null : p.slice(0, 3); }
+    m = s.match(/^color\(srgb ([^)]+)\)/);
+    if (m) { const p = m[1].split(/[\s/]+/).filter(Boolean).map(Number); return p.length > 3 && p[3] === 0 ? null : p.slice(0, 3).map((v) => v * 255); }
+    return null;
+  };
+  const lum = ([r, g, b]) => [r, g, b].map((c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; })
+    .reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
+  const bgOf = (el) => { for (let n = el; n; n = n.parentElement) { const c = rgb(getComputedStyle(n).backgroundColor); if (c) return c; } return [255, 255, 255]; };
+  function ratios() {
+    for (const badge of $$('.doc-ratio')) {
+      const el = document.getElementById(badge.dataset.for);
+      const fg = rgb(getComputedStyle(el).color);
+      const [a, b] = [lum(fg), lum(bgOf(el))].sort((x, y) => y - x);
+      const r = (a + 0.05) / (b + 0.05);
+      badge.textContent = `${r.toFixed(1)}:1`;
+      badge.className = `doc-ratio ${r >= 4.5 ? 'ok' : 'bad'}`;
+      badge.title = r >= 4.5 ? 'Passes AA for body text' : 'Fails AA for body text (4.5:1)';
+    }
+  }
+
+  function measures() {
+    $('#ctl-now').textContent = `${getComputedStyle(scope).getPropertyValue('--citadel-control-h').trim()} (${innerWidth}px wide)`;
+    $('#bp-now').textContent = `${innerWidth}px, ${narrowMq.matches ? 'phone layout' : 'desktop layout'}`;
+    const hs = $$('#btn-row .cui-btn').map((b) => `${b.textContent.trim() || b.getAttribute('aria-label')} ${Math.round(b.getBoundingClientRect().height)}`);
+    $('#btn-heights').textContent = hs.join(' · ');
+    $('#in-size').textContent = getComputedStyle($('.cui-input')).fontSize;
+    for (const b of $$('[data-fs]')) b.textContent = getComputedStyle(document.getElementById(b.dataset.fs)).fontSize;
+  }
+
+  // Theme toggle: Auto follows the device; Light and Dark force it on the wrapper.
+  function applyTheme(t) {
+    scope.dataset.theme = t;
+    for (const b of $$('[data-theme-set]')) b.setAttribute('aria-pressed', String(b.dataset.themeSet === t));
+    const shown = t === 'auto' ? (darkMq.matches ? 'dark' : 'light') : t;
+    $('#theme-now').textContent = t === 'auto' ? `follows this device: ${shown}` : `forced ${shown}`;
+    document.documentElement.style.background = getComputedStyle(scope).backgroundColor;
+    requestAnimationFrame(ratios);
+    setTimeout(ratios, 400); // after the 150ms colour transitions settle
+  }
+  for (const b of $$('[data-theme-set]')) b.addEventListener('click', () => applyTheme(b.dataset.themeSet));
+  darkMq.addEventListener('change', () => applyTheme(scope.dataset.theme));
+  addEventListener('resize', measures);
+
+  // Folds: tool runs and Grunt rows.
+  const STEPS = [
+    'Read survey-2026-11.md', 'Searched for "chat-note" in app/web', 'Read app/web/style.css',
+    'Read /apps/_citadel/theme.css', 'Edited app/web/style.css', 'Edited app/web/chat.ts',
+    'Ran npm test', 'Took screenshots at 390px, light and dark', 'Read the screenshots',
+  ];
+  const step = (icon, text, cls) => `<li${cls ? ` class="${cls}"` : ''}>${icon}<span>${text}</span></li>`;
+  const ok = '<span class="ic-ok" aria-hidden="true">✓</span>';
+  $('#run-done').innerHTML = STEPS.map((s) => step(ok, s)).join('');
+  $('#run-live').innerHTML = STEPS.slice(0, 4).map((s) => step(ok, s)).join('') + step('<span class="cui-spin" aria-hidden="true"></span>', 'Editing src/theme.ts', 'now');
+  $('#run-bad').innerHTML = STEPS.map((s, i) => i === 6 ? step('<span class="ic-bad" aria-hidden="true">✕</span>', 'Ran npm test · 1 failing: test/theme.test.ts', 'bad') : step(ok, s)).join('');
+  for (const b of $$('[data-fold]')) {
+    const body = document.getElementById(b.dataset.fold);
+    body.hidden = b.getAttribute('aria-expanded') !== 'true';
+    b.addEventListener('click', () => {
+      const open = b.getAttribute('aria-expanded') !== 'true';
+      b.setAttribute('aria-expanded', String(open));
+      body.hidden = !open;
+    });
+  }
+
+  // Timers tick in place, one text node each.
+  const fmt = (s) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`);
+  setInterval(() => { for (const t of $$('[data-tick]')) { t.dataset.tick = String(+t.dataset.tick + 1); t.textContent = fmt(+t.dataset.tick); } }, 1000);
+
+  // Suggested replies: one tap sends, the rest grey out.
+  for (const c of $$('#choices .cui-choice')) c.addEventListener('click', () => {
+    for (const o of $$('#choices .cui-choice')) { o.disabled = true; o.classList.remove('cui-rec'); }
+    c.setAttribute('aria-pressed', 'true');
+    c.textContent = `${c.textContent} ✓`;
+    $('#choice-said').textContent = 'Sent. (In the library, the next turn would start here.)';
+  });
+
+  // Composer: autogrow, Enter rules, Send becomes Stop.
+  const ta = $('#cmp-ta'), send = $('#cmp-send'), working = $('#cmp-working'), said = $('#cmp-said');
+  let running = null, secs = 0, last = '';
+  const fit = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight + ta.offsetHeight - ta.clientHeight}px`; };
+  const paint = () => {
+    send.textContent = running ? '■ Stop' : 'Send';
+    send.classList.toggle('cui-primary', !running);
+    send.classList.toggle('cui-danger', !!running);
+    send.disabled = !running && !ta.value.trim();
+    working.hidden = !running;
+    $('#cmp-hint').textContent = narrowMq.matches ? 'Enter adds a line · tap Send' : 'Enter sends · Shift+Enter adds a line';
+  };
+  const finish = (how) => { clearInterval(running); running = null; said.textContent = how; paint(); };
+  function submit() {
+    if (running) return finish('Stopped.');
+    const text = ta.value.trim();
+    if (!text) return;
+    last = text; ta.value = ''; fit(); secs = 0; $('#cmp-t').textContent = '0s';
+    said.textContent = `Sent: "${text.length > 60 ? text.slice(0, 60) + '…' : text}"`;
+    running = setInterval(() => { secs++; $('#cmp-t').textContent = fmt(secs); if (secs >= 8) finish('Done. (A real turn would end with the reply above.)'); }, 1000);
+    paint();
+  }
+  ta.addEventListener('input', () => { fit(); paint(); });
+  ta.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+    if (narrowMq.matches) return; // a phone's Enter adds a line
+    e.preventDefault();
+    if (!running) submit();
+  });
+  send.addEventListener('click', submit);
+  narrowMq.addEventListener('change', () => { paint(); measures(); });
+  paint();
+
+  // Motion demos.
+  $('#mo-flip').addEventListener('click', (e) => e.currentTarget.classList.toggle('on'));
+  $('#mo-sheet-btn').addEventListener('click', () => $('#mo-sheet').classList.toggle('open'));
+  for (const b of $$('[data-sheet]')) b.addEventListener('click', () => document.getElementById(b.dataset.sheet).classList.toggle('open'));
+  $('#r5-sim').addEventListener('change', (e) => $('#r5-right').classList.toggle('doc-reduced', e.target.checked));
+
+  // Rule 6: stop the wrong link from doing the wrong thing here.
+  $('#r6-wrong').addEventListener('click', (e) => {
+    e.preventDefault();
+    $('#r6-said').textContent = 'Stopped here. In a framed app, that click would have navigated Citadel itself away to MDN.';
+  });
+
+  // Contents: the page's own h2s only, not the headings inside the specimens.
+  for (const h of $$('.mk-page > section > h2')) {
+    h.id ||= h.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const a = document.createElement('a');
+    a.href = `#${h.id}`;
+    a.textContent = h.textContent.trim();
+    $('.mk-toc').append(a);
+  }
+  applyTheme('auto');
+  measures();
+})();
+</script>
+</body>
+</html>

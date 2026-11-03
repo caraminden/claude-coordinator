@@ -35,7 +35,9 @@ quoted whole from your system prompt) plus:
 > Review branch `<branch>` in `<worktree>`, read-only: edit no files, no checkout, stash or reset.
 > The change is `git diff main...HEAD`. Follow `<kit>/skills/ponytail-review/SKILL.md`, reading
 > the code the diff connects to. Before reporting, re-check each finding against the code and
-> drop any without a concrete failing case. Return at most 25 lines: numbered findings (Must fix /
+> drop any without a concrete failing case. In a contraption (an app under `/apps/<name>/`), front-end
+> code that hand-rolls what Citadel UI serves (markdown rendering, a chat log, a composer) or copies a
+> Citadel hex colour instead of its `--citadel-*` variable is a Should-fix finding (`citadel:contraption-ui`). Return at most 25 lines: numbered findings (Must fix /
 > Should fix / Nice to have, file:line, one or two lines each), then
 > `Risk: low|medium|high: <reason>` using the rubric in `<kit>/skills/self-review/SKILL.md` §4
 > and the "Project facts" section of the repo's CLAUDE.md. This cap and format override

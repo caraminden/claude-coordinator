@@ -38,7 +38,12 @@ skill step is skipped or uses its default.
   (`kit/skills/scheme-setup/templates/`). `src/db.ts` holds every query: judge an
   edit there by what it does.
 - **How a change ships:** the scheme instructions, "Shipping fixes" (`tools/land.sh`).
-- **UI rules:** the scheme instructions, "UI checks".
+- **UI rules:** the scheme instructions, "UI checks"; tokens, parts and design rules in the living
+  design-system home, `docs/design-system/index.html` (a token or part change updates it in the same
+  commit). Citadel UI (`public/ui/`, served to apps at `/apps/_citadel/ui/`) follows the
+  `citadel:contraption-ui` kit skill.
+- **Medium risk at least (self-review):** a change to `test/ui-contract.json`, Citadel UI's contract
+  with every app: it means an app-visible change to `public/ui/` or theme.css. Additive only.
 - **Glossary:** none. The names people read (Scheme, Taskmaster, Minion, Grunt) are in the scheme
   instructions; code keeps the old identifiers.
 - **Decisions log (ADRs):** none yet; the first goes in `docs/adr/`.

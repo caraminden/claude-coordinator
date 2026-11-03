@@ -7,7 +7,7 @@
 // it's wide; a slot hidden on a phone leaves the switcher to slide out as above.
 // Citadel imports this; a contraption's page loads it as /apps/_citadel/rail.js, which draws the rail
 // by itself. Every contraption opens inside Citadel's window (#/apps/<name>, frames.js; #274): there a
-// contraption's rail.js draws nothing and lends Citadel's rail instead. What a contraption includes and leaves free: shared/project/specs/contraptions/app-rail.md.
+// contraption's rail.js draws nothing and lends Citadel's rail instead. What a contraption includes and leaves free: kit/skills/contraption-ui/rail-and-drawers.md.
 // Standalone on purpose (no imports, its own styles), since contraptions load it from outside Citadel's pages.
 
 const NARROW = '(max-width: 800px)'; // drawers.js's breakpoint

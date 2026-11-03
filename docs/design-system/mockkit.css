@@ -1,0 +1,226 @@
+/* Citadel mock kit, styles (v1). Copy beside the page with mockkit.js; a scheme's theme.css, linked after
+   this file, overrides the --mk-* tokens. Classes are mk-*; everything else on the page is the page's own. */
+
+:root {
+  --mk-bg: #f6f5f2;
+  --mk-panel: #ffffff;
+  --mk-sunk: #f1efe9;
+  --mk-ink: #1d1c1a;
+  --mk-muted: #6b6862;
+  --mk-line: #e2dfd8;
+  --mk-accent: #c2410c;
+  --mk-on-accent: #ffffff;
+  --mk-good: #15803d;
+  --mk-warn: #b45309;
+  --mk-bad: #b91c1c;
+  --mk-info: #2563eb;
+  --mk-font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mk-display: var(--mk-font);
+  --mk-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --mk-radius: 10px;
+  --mk-radius-sm: 6px;
+  --mk-shadow: none;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-mk-light]) {
+    --mk-bg: #161514;
+    --mk-panel: #201f1d;
+    --mk-sunk: #2a2926;
+    --mk-ink: #ecebe7;
+    --mk-muted: #9b978f;
+    --mk-line: #34322e;
+    --mk-accent: #fb923c;
+    --mk-on-accent: #1d1c1a;
+    --mk-good: #4ade80;
+    --mk-warn: #fbbf24;
+    --mk-bad: #f87171;
+    --mk-info: #60a5fa;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html { background: var(--mk-bg); }
+body.mk {
+  margin: 0;
+  background: var(--mk-bg);
+  color: var(--mk-ink);
+  font: 15px/1.55 var(--mk-font);
+  -webkit-text-size-adjust: 100%;
+}
+.mk a { color: var(--mk-accent); }
+.mk button, .mk input, .mk textarea, .mk select { font: inherit; color: inherit; }
+.mk code, .mk kbd { font-family: var(--mk-mono); font-size: 0.86em; background: var(--mk-sunk); border-radius: 4px; padding: 0.1em 0.35em; }
+.mk pre { font-family: var(--mk-mono); font-size: 0.85em; background: var(--mk-sunk); border-radius: var(--mk-radius-sm); padding: 0.75rem 0.9rem; overflow-x: auto; }
+.mk pre code { background: none; padding: 0; }
+.mk img { max-width: 100%; }
+.mk .pixel, .mk img.pixel { image-rendering: pixelated; }
+.mk :focus-visible { outline: 2px solid var(--mk-accent); outline-offset: 2px; }
+
+/* The page: a reading column for documents, wide for canvases. */
+.mk-page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2rem max(1rem, env(safe-area-inset-right)) 5rem max(1rem, env(safe-area-inset-left));
+}
+.mk-page.wide { max-width: 1680px; }
+.mk-page > section { margin-top: 2.5rem; }
+.mk h1, .mk h2, .mk h3 { font-family: var(--mk-display); line-height: 1.25; text-wrap: balance; }
+.mk h1 { font-size: 1.9rem; margin: 0.15rem 0 0.4rem; }
+.mk h2 { font-size: 1.3rem; margin: 0 0 0.6rem; scroll-margin-top: 1rem; }
+.mk h3 { font-size: 1.05rem; margin: 1.4rem 0 0.4rem; }
+.mk p, .mk li { max-width: 72ch; }
+.mk .mk-muted { color: var(--mk-muted); }
+
+/* Header: kicker, title, meta line (status, who, when), lede. */
+.mk-head { border-bottom: 1px solid var(--mk-line); padding-bottom: 1.25rem; }
+.mk-kicker { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mk-muted); }
+.mk-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.9rem; color: var(--mk-muted); font-size: 0.88rem; }
+.mk-lede { font-size: 1.08rem; color: var(--mk-ink); margin: 0.9rem 0 0; }
+
+/* Chips: status and plain. Even room above and below. */
+.mk-chip, .mk-status {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.2rem 0.6rem; border-radius: 999px; line-height: 1.3;
+  font-size: 0.78rem; font-weight: 600;
+  border: 1px solid var(--mk-line); background: var(--mk-panel); color: var(--mk-muted);
+}
+.mk-status::before { content: ''; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: currentColor; }
+.mk-status[data-status="draft"] { color: var(--mk-muted); }
+.mk-status[data-status="review"] { color: var(--mk-warn); border-color: color-mix(in srgb, var(--mk-warn) 45%, var(--mk-line)); }
+.mk-status[data-status="decided"] { color: var(--mk-good); border-color: color-mix(in srgb, var(--mk-good) 45%, var(--mk-line)); }
+.mk-status[data-status="living"] { color: var(--mk-info); border-color: color-mix(in srgb, var(--mk-info) 45%, var(--mk-line)); }
+.mk-status[data-status="superseded"] { color: var(--mk-bad); border-color: color-mix(in srgb, var(--mk-bad) 45%, var(--mk-line)); }
+
+/* A banner across the top: superseded, or not saved outside Citadel. */
+.mk-banner {
+  margin: 0 0 1.25rem; padding: 0.7rem 0.95rem; border-radius: var(--mk-radius-sm);
+  background: color-mix(in srgb, var(--mk-bad) 10%, var(--mk-panel)); border: 1px solid color-mix(in srgb, var(--mk-bad) 40%, var(--mk-line));
+}
+.mk-banner.info { background: color-mix(in srgb, var(--mk-info) 9%, var(--mk-panel)); border-color: color-mix(in srgb, var(--mk-info) 35%, var(--mk-line)); }
+
+/* Contents, built by mock.toc() from the h2s. Sticky down the side on a wide screen. */
+.mk-toc { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 1.1rem; }
+.mk-toc a { text-decoration: none; color: var(--mk-ink); font-size: 0.85rem; padding: 0.2rem 0.6rem; border: 1px solid var(--mk-line); border-radius: 999px; background: var(--mk-panel); line-height: 1.3; }
+.mk-toc a:hover { border-color: var(--mk-accent); }
+
+/* Callouts: the recommendation, a decision, an open question, a risk, a plain note. */
+.mk-callout {
+  margin: 1rem 0; padding: 0.85rem 1rem; border-radius: var(--mk-radius-sm);
+  border: 1px solid var(--mk-line); border-left: 4px solid var(--mk-muted); background: var(--mk-panel);
+}
+.mk-callout > :first-child { margin-top: 0; }
+.mk-callout > :last-child { margin-bottom: 0; }
+.mk-callout[data-label]::before { content: attr(data-label); display: block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; margin-bottom: 0.3rem; color: var(--mk-muted); }
+.mk-callout.rec { border-left-color: var(--mk-accent); }
+.mk-callout.rec::before { color: var(--mk-accent); }
+.mk-callout.decision { border-left-color: var(--mk-good); }
+.mk-callout.decision::before { color: var(--mk-good); }
+.mk-callout.question { border-left-color: var(--mk-warn); }
+.mk-callout.question::before { color: var(--mk-warn); }
+.mk-callout.risk { border-left-color: var(--mk-bad); }
+.mk-callout.risk::before { color: var(--mk-bad); }
+
+/* Options side by side: each with its picture, one-line idea, what it costs; the recommended one ringed. */
+.mk-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 1rem; margin: 1rem 0; }
+.mk-option { background: var(--mk-panel); border: 1px solid var(--mk-line); border-radius: var(--mk-radius); padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.mk-option.rec { border-color: var(--mk-accent); box-shadow: 0 0 0 1px var(--mk-accent); }
+.mk-option h3 { margin: 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.mk-option ul { margin: 0; padding-left: 1.1rem; font-size: 0.92rem; }
+.mk-option .mk-figure { margin: 0; }
+.mk-tag { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mk-muted); }
+.mk-tag.rec { color: var(--mk-accent); }
+
+/* Figures: a picture or a live mini screen, with a caption. */
+.mk-figure { margin: 1rem 0; }
+.mk-figure > .mk-frame, .mk-figure > img { display: block; border: 1px solid var(--mk-line); border-radius: var(--mk-radius-sm); background: var(--mk-panel); }
+.mk-figure figcaption { font-size: 0.85rem; color: var(--mk-muted); margin-top: 0.4rem; }
+.mk-frame { overflow: hidden; }
+
+/* Tables: comparisons. Scroll sideways on a phone rather than squash. */
+.mk-table-wrap { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--mk-line); border-radius: var(--mk-radius-sm); background: var(--mk-panel); }
+.mk-table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+.mk-table th, .mk-table td { text-align: left; padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--mk-line); vertical-align: top; }
+.mk-table thead th { font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mk-muted); background: var(--mk-sunk); }
+.mk-table tr:last-child > * { border-bottom: 0; }
+.mk-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.mk-yes { color: var(--mk-good); font-weight: 600; }
+.mk-no { color: var(--mk-bad); font-weight: 600; }
+.mk-meh { color: var(--mk-warn); font-weight: 600; }
+
+/* The decisions log: newest first, each with the person's own words and the date. */
+.mk-log { list-style: none; padding: 0; margin: 1rem 0; border-left: 2px solid var(--mk-line); }
+.mk-log li { position: relative; padding: 0 0 1rem 1.1rem; max-width: none; }
+.mk-log li::before { content: ''; position: absolute; left: -6px; top: 0.45rem; width: 10px; height: 10px; border-radius: 50%; background: var(--mk-good); }
+.mk-log time { font-size: 0.8rem; color: var(--mk-muted); font-variant-numeric: tabular-nums; }
+.mk-log q { font-style: italic; }
+
+/* The canvas: one board per take, in a row that wraps. Each board: label, title, note, the screen, a pick bar. */
+.mk-boards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--mk-board-w, 420px)), 1fr)); gap: 1.25rem; margin: 1.25rem 0; align-items: start; }
+.mk-board { background: var(--mk-panel); border: 1px solid var(--mk-line); border-radius: var(--mk-radius); display: flex; flex-direction: column; min-width: 0; box-shadow: var(--mk-shadow); }
+.mk-board.rec { border-color: color-mix(in srgb, var(--mk-accent) 60%, var(--mk-line)); }
+.mk-board.picked { border-color: var(--mk-good); box-shadow: 0 0 0 1px var(--mk-good); }
+.mk-board > header { padding: 0.8rem 0.95rem 0.6rem; display: grid; gap: 0.2rem; }
+.mk-board > header .mk-board-title { display: flex; align-items: center; gap: 0.5rem; font-weight: 650; font-family: var(--mk-display); }
+.mk-board > header p { margin: 0; font-size: 0.88rem; color: var(--mk-muted); }
+.mk-board-id { display: inline-grid; place-items: center; min-width: 1.6rem; height: 1.6rem; padding: 0 0.4rem; border-radius: 6px; background: var(--mk-sunk); font-size: 0.8rem; font-weight: 700; color: var(--mk-ink); }
+.mk-board.rec .mk-board-id { background: var(--mk-accent); color: var(--mk-on-accent); }
+.mk-stage { margin: 0 0.95rem; border-radius: var(--mk-radius-sm); background: var(--mk-sunk); overflow: auto; min-height: 3rem; }
+.mk-stage > .mk-screen { transform-origin: 0 0; }
+.mk-stage.fixed > .mk-screen { width: var(--mk-w); height: var(--mk-h); zoom: var(--mk-zoom, 1); margin-inline: auto; }
+
+/* The pick bar under a board or an item: the choice buttons, a note, who chose and when. */
+.mk-pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.75rem 0.95rem 0.85rem; }
+.mk-pickbar .mk-opts { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; }
+.mk-btn, .mk-pickbar button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem;
+  padding: 0.35rem 0.75rem; line-height: 1.3; border-radius: var(--mk-radius-sm);
+  border: 1px solid var(--mk-line); background: var(--mk-panel); color: var(--mk-ink); cursor: pointer; font-size: 0.88rem;
+}
+.mk-btn:hover, .mk-pickbar button:hover:not(:disabled) { border-color: var(--mk-accent); }
+.mk-btn.primary { background: var(--mk-accent); border-color: var(--mk-accent); color: var(--mk-on-accent); font-weight: 600; }
+.mk-pickbar button[aria-pressed="true"] { background: var(--mk-good); border-color: var(--mk-good); color: var(--mk-panel); font-weight: 600; }
+.mk-pickbar button[aria-pressed="true"][data-v="cut"], .mk-pickbar button[aria-pressed="true"][data-v="no"] { background: var(--mk-bad); border-color: var(--mk-bad); }
+.mk-pickbar button[aria-pressed="true"][data-v="rework"], .mk-pickbar button[aria-pressed="true"][data-v="maybe"] { background: var(--mk-warn); border-color: var(--mk-warn); }
+.mk-pickbar button:disabled { opacity: 0.55; cursor: default; }
+.mk-pickbar input {
+  flex: 1 1 12rem; min-width: 0; padding: 0.35rem 0.6rem; line-height: 1.3; font-size: 0.88rem;
+  border: 1px solid var(--mk-line); border-radius: var(--mk-radius-sm); background: var(--mk-bg);
+}
+.mk-pickbar .mk-who { flex-basis: 100%; font-size: 0.78rem; color: var(--mk-muted); min-height: 1em; }
+.mk-item { position: relative; }
+.mk-item > .mk-pickbar { padding-inline: 0; }
+
+/* The dock: how many are picked, and Send. Sits at the end of the page; sticks to the bottom once anything is picked. */
+.mk-dock.stuck { position: sticky; bottom: 0; z-index: 5; }
+.mk-dock { margin: 2rem calc(-1 * max(1rem, env(safe-area-inset-left))) -5rem;
+  padding: 0.7rem max(1rem, env(safe-area-inset-right)) calc(0.7rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem;
+  background: color-mix(in srgb, var(--mk-panel) 92%, transparent); backdrop-filter: blur(6px);
+  border-top: 1px solid var(--mk-line); font-size: 0.9rem;
+}
+.mk-dock .mk-dock-text { flex: 1 1 14rem; color: var(--mk-muted); }
+.mk-dock .mk-dock-text b { color: var(--mk-ink); }
+.mk-dock .mk-sent { font-size: 0.85rem; color: var(--mk-good); }
+
+/* Design-system home: token swatches and component specimens, each saying where it lives in the code. */
+.mk-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; margin: 1rem 0; }
+.mk-swatch { border: 1px solid var(--mk-line); border-radius: var(--mk-radius-sm); overflow: hidden; background: var(--mk-panel); font-size: 0.82rem; }
+.mk-swatch .mk-chipcolor { height: 3.25rem; border-bottom: 1px solid var(--mk-line); }
+.mk-swatch div + div { padding: 0.45rem 0.6rem; }
+.mk-swatch code { background: none; padding: 0; font-size: 0.8rem; }
+.mk-specimen { border: 1px solid var(--mk-line); border-radius: var(--mk-radius); background: var(--mk-panel); margin: 1rem 0; overflow: hidden; }
+.mk-specimen > .mk-show { padding: 1.25rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; background: var(--mk-bg); }
+.mk-specimen > .mk-about { padding: 0.75rem 1rem; border-top: 1px solid var(--mk-line); font-size: 0.9rem; }
+.mk-specimen > .mk-about p { margin: 0.25rem 0; }
+.mk-lives { font-size: 0.8rem; color: var(--mk-muted); }
+.mk-lives code { font-size: 0.78rem; }
+
+/* Phones: tighter edges, boards full width. */
+@media (max-width: 640px) {
+  body.mk { font-size: 14.5px; }
+  .mk-page { padding-top: 1.25rem; }
+  .mk h1 { font-size: 1.5rem; }
+  .mk-boards { gap: 1rem; }
+}

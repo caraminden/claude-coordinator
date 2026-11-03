@@ -1,0 +1,24 @@
+/* The page's own layout, on Citadel's tokens (theme.css). No hex values: use the --citadel-* variables. */
+html { background: var(--citadel-bg); }
+body {
+  margin: 0; display: flex; min-height: 100vh;
+  background: var(--citadel-bg); color: var(--citadel-text);
+  font: var(--citadel-size-body)/1.5 var(--citadel-font);
+}
+#sections {
+  flex: none; width: 220px; padding: var(--citadel-space-4);
+  background: var(--citadel-surface); border-right: 1px solid var(--citadel-border);
+}
+#sections h2 { margin: 0 0 var(--citadel-space-2); font-size: var(--citadel-size-small); color: var(--citadel-muted); }
+#sections a { display: block; padding: var(--citadel-space-1) 0; color: var(--citadel-accent); }
+main { flex: 1; min-width: 0; max-width: 60rem; padding: var(--citadel-space-4); }
+.bar { display: flex; align-items: center; gap: var(--citadel-space-3); margin-bottom: var(--citadel-space-4); }
+.bar h1 { flex: 1; margin: 0; font-size: var(--citadel-size-h1); }
+.reply {
+  margin-top: var(--citadel-space-3); padding: var(--citadel-space-3) var(--citadel-space-4);
+  background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-lg);
+}
+/* On a phone the sections are a drawer (drawers.js hides and slides them); the page takes the width. */
+@media (max-width: 800px) {
+  main { padding: var(--citadel-space-3); }
+}

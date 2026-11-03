@@ -1,7 +1,7 @@
 // Phones: drawers pulled in from the screen edges, over the page. Citadel's own page passes its
 // overview (left) and threads (right) panels; a contraption imports this as /apps/_citadel/drawers.js
 // and passes its own elements, so the gesture lives in one place (Cara, 2026-11-01: "Share it, served
-// by Citadel"). How a contraption calls it: shared/project/specs/contraptions/app-rail.md.
+// by Citadel"). How a contraption calls it: kit/skills/contraption-ui/rail-and-drawers.md.
 // The elements stay where the page's CSS puts them on wider screens; on phones they are hidden until
 // one is pulled out as a drawer, and go back when closed. Slim handles on the edges open them with a
 // tap too, since in a Safari tab the edges belong to the browser's back and forward swipes.

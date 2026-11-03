@@ -4,7 +4,8 @@
 
 /** Citadel's variable (in style.css) → the name contraptions see, after `--citadel-`. A role name
  * where the colour has one outside Citadel; Citadel's own name otherwise. A variable missing here is
- * still served, as `--citadel-<its name>`, but test/theme.test.ts fails until it gets a chosen name. */
+ * still served, as `--citadel-<its name>`, but test/theme.test.ts fails until it gets a chosen name.
+ * Names are an API apps depend on: add, never rename. */
 export const THEME_NAMES: Record<string, string> = {
   bg: 'bg',
   panel: 'surface',
@@ -20,6 +21,33 @@ export const THEME_NAMES: Record<string, string> = {
   closed: 'neutral',
   held: 'violet',
   'code-bg': 'code-bg',
+  'on-accent': 'on-accent',
+  // The same in both modes (#283): type, spacing, radii, controls, focus, motion, the notice.
+  font: 'font',
+  mono: 'mono',
+  'size-body': 'size-body',
+  'size-small': 'size-small',
+  'size-meta': 'size-meta',
+  'size-h1': 'size-h1',
+  'size-h2': 'size-h2',
+  'size-h3': 'size-h3',
+  'space-1': 'space-1',
+  'space-2': 'space-2',
+  'space-3': 'space-3',
+  'space-4': 'space-4',
+  'space-5': 'space-5',
+  'space-6': 'space-6',
+  'radius-sm': 'radius-sm',
+  radius: 'radius',
+  'radius-lg': 'radius-lg',
+  'radius-pill': 'radius-pill',
+  'control-h': 'control-h',
+  'focus-ring': 'focus-ring',
+  'focus-offset': 'focus-offset',
+  motion: 'motion',
+  'motion-slow': 'motion-slow',
+  'notice-bg': 'notice-bg',
+  'notice-bar': 'notice-bar',
 };
 
 /** Names that stand for another colour rather than one of their own. */
@@ -45,20 +73,35 @@ export function citadelPalette(styleCss: string): { light: Block; dark: Block } 
   return { light: parseBlock(light[1]), dark: parseBlock(dark[1]) };
 }
 
-function render(block: Block, indent: string) {
-  const lines = block.vars.map(([name, value]) => `${indent}--citadel-${THEME_NAMES[name] ?? name}: ${value};`);
-  for (const [alias, of] of Object.entries(ALIASES)) lines.push(`${indent}--citadel-${alias}: var(--citadel-${of});`);
+/**
+ * Every `:root { … }` in style.css, in order: at the top level, or alone inside an `@media` (the dark
+ * colours, the phone control height, reduced motion). A `:root` beside other rules in a media block
+ * isn't one of these.
+ */
+export function rootBlocks(styleCss: string): { media: string | null; block: Block }[] {
+  const re = /^:root\s*\{([^}]*)\}|^@media\s*([^{]+?)\s*\{\s*:root\s*\{([^}]*)\}\s*\}/gm;
+  return [...styleCss.matchAll(re)].map((m) => ({ media: m[2] ?? null, block: parseBlock(m[1] ?? m[3]) }));
+}
+
+/** A value with Citadel's own variables renamed to the ones theme.css serves. */
+const rename = (value: string) => value.replace(/var\(--([\w-]+)/g, (_, n) => `var(--citadel-${THEME_NAMES[n] ?? n}`);
+
+function render(block: Block, indent: string, aliases: boolean) {
+  const lines = block.vars.map(([name, value]) => `${indent}--citadel-${THEME_NAMES[name] ?? name}: ${rename(value)};`);
+  if (aliases) for (const [alias, of] of Object.entries(ALIASES)) lines.push(`${indent}--citadel-${alias}: var(--citadel-${of});`);
   if (block.colorScheme) lines.push(`${indent}color-scheme: ${block.colorScheme};`);
   return lines.join('\n');
 }
 
 /** theme.css, from style.css's text. */
 export function themeCss(styleCss: string): string {
-  const { light, dark } = citadelPalette(styleCss);
+  citadelPalette(styleCss); // refuses a style.css without its colours
+  const blocks = rootBlocks(styleCss).map(({ media, block }, i) => (media
+    ? `@media ${media} {\n  :root {\n${render(block, '    ', /prefers-color-scheme/.test(media))}\n  }\n}`
+    : `:root {\n${render(block, '  ', i === 0)}\n}`));
   return [
-    "/* Citadel's colours, from its own style.css. Variable names: specs/contraptions/app-rail.md, \"Citadel's colours\". */",
-    `:root {\n${render(light, '  ')}\n}`,
-    `@media (prefers-color-scheme: dark) {\n  :root {\n${render(dark, '    ')}\n  }\n}`,
+    "/* Citadel's colours and design tokens, from its own style.css. What each is for: kit/skills/contraption-ui/SKILL.md and docs/design-system/. */",
+    ...blocks,
     '',
   ].join('\n');
 }

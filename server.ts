@@ -70,7 +70,9 @@ let ASSET_VERSION = '';
 let DARK_MANIFEST = Buffer.alloc(0);
 async function loadAssets() {
   const assets = new Map<string, Buffer>();
-  for (const f of (await readdir(PUBLIC_DIR, { withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name).sort()) {
+  // public/ and its ui/ folder (Citadel UI, the modules apps import from /apps/_citadel/ui/).
+  const files = async (sub: string) => (await readdir(join(PUBLIC_DIR, sub), { withFileTypes: true })).filter((e) => e.isFile()).map((e) => sub + e.name);
+  for (const f of [...(await files('')), ...(await files('ui/'))].sort()) {
     const body = await readFile(join(PUBLIC_DIR, f));
     assets.set(f, /\.(html|js|webmanifest)$/.test(f) ? Buffer.from(body.toString('utf8').replaceAll('%APP_NAME%', SHOWN_NAME)) : body);
   }
@@ -607,6 +609,7 @@ const MIME: Record<string, string> = {
   '.png': 'image/png',
   '.webmanifest': 'application/manifest+json',
   '.mjs': 'text/javascript; charset=utf-8',
+  '.ts': 'text/plain; charset=utf-8', // public/ui/*.d.ts, the types apps read
 };
 
 // Android colours an installed app's status and navigation bars from the manifest, which can't vary
@@ -662,8 +665,8 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
     if (url.pathname.startsWith('/api/')) {
       await routes(app, req, res, url, auth.session(req));
-    } else if (/^\/apps\/_citadel\/(rail\.js|drawers\.js|theme\.css)$/.test(url.pathname)) {
-      // The app rail, phone drawers and colours for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
+    } else if (/^\/apps\/_citadel\/(rail\.js|drawers\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/.test(url.pathname)) {
+      // The app rail, phone drawers, colours and Citadel UI (public/ui/) for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
       await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length), true);
     } else if (url.pathname.startsWith('/apps/')) {
       apps.serve(req, res);

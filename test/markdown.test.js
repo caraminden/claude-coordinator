@@ -2,7 +2,7 @@
 // shared/project/markdown-parity-audit-2026-10.md), plus what chat relies on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderMarkdown, slug } from '../public/markdown.js';
+import { renderMarkdown, slug } from '../public/ui/markdown.js';
 import { linkThreadRefs, linkUrls } from '../public/threadrefs.js';
 import { struckSource } from '../public/strike.js';
 

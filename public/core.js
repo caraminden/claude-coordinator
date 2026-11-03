@@ -13,7 +13,7 @@ import { onSchedulesChanged } from './schedules.js';
 import { onHiddenChanged } from './hidden.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { uploadsRunning } from './composer.js';
-import { renderMarkdown } from './markdown.js';
+import { renderMarkdown } from './ui/markdown.js';
 import { iconSrc } from './schemes.js';
 import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, showFrame } from './frames.js';

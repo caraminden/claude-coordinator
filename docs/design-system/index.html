@@ -351,7 +351,7 @@ window.COLOURS = [
       <span>Checked against Citadel <code>4d99ace</code> + #283</span>
     </div>
     <p class="mk-lede">The look and the parts Citadel serves at <code>/apps/_citadel/ui/</code> for Mandate, Theory of Crafting and Peek Auras, and use itself, so the four stop drifting apart. Every token and part below is drawn live; flip the theme at the top to see both modes. This is the living home (#283): when it and the code disagree, the code wins, and a change to a token, part or rule updates this page in the same commit. The tokens live in <code>public/style.css</code> (served as <code>theme.css</code> by <code>src/theme.ts</code>), the parts in <code>public/ui/</code>, and <code>test/ui-contract.test.ts</code> holds what apps rely on. How apps use it: the <code>citadel:contraption-ui</code> kit skill.</p>
-    <p class="mk-banner info">Built so far (#283): the tokens, <code>ui/base.css</code> and <code>ui/markdown.js</code>. The composer (<code>ui/composer.js</code>, #285) is live; the chat kit (<code>ui/chat.js</code>) below is still a specimen until its minion lands. <code>ui/markdown.js</code> ships Citadel's existing markdown look, moved from its <code>style.css</code>; the restyle in the Markdown specimen (tables in a box, 22/18/16 headings) isn't built yet.</p>
+    <p class="mk-banner info">Built so far (#283): the tokens, <code>ui/base.css</code> and <code>ui/markdown.js</code>. The composer (<code>ui/composer.js</code>, #285) and the chat kit (<code>ui/chat.js</code>, #284) are live; their specimens below copy the look, and the code is <code>mountComposer</code> and <code>mountChat</code>. <code>ui/markdown.js</code> ships Citadel's existing markdown look, moved from its <code>style.css</code>; the restyle in the Markdown specimen (tables in a box, 22/18/16 headings) isn't built yet.</p>
     <nav class="mk-toc" aria-label="Contents"></nav>
   </header>
 
@@ -363,7 +363,7 @@ window.COLOURS = [
         <tr><td><code>theme.css</code></td><td>Every token below, as <code>--citadel-*</code>. Built from Citadel's own <code>public/style.css</code> by <code>src/theme.ts</code>, so Citadel and the apps read one source.</td><td><code>&lt;link rel="stylesheet"&gt;</code>, as today</td></tr>
         <tr><td><code>ui/base.css</code></td><td>Buttons, inputs, chips, notices, the spinner, the focus ring: class-only parts (<code>cui-*</code>).</td><td><code>&lt;link&gt;</code> after theme.css</td></tr>
         <tr><td><code>ui/markdown.js</code></td><td>Markdown to safe DOM, one link rule, a streaming mode.</td><td>ES module import</td></tr>
-        <tr><td><code>ui/chat.js</code> (coming)</td><td>Your message, the reply, tool-run rows, Grunt rows, suggested replies, the working line.</td><td>ES module; brings its own constructed stylesheet</td></tr>
+        <tr><td><code>ui/chat.js</code></td><td>Your message, the reply, tool-run rows, Grunt rows, suggested replies, the working line, fed the turn API's events as they come. Citadel's own action, phase and Grunt rows draw their marks with it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/composer.js</code></td><td>The message box: autogrow, Enter rules, IME-safe, list continuation, a failed send back in the box, Send that turns into Stop, drafts. Citadel's own composer is built on it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>drawers.js</code></td><td><code>NARROW</code> = 800: the phone breakpoint, exported once.</td><td>ES module, as today</td></tr>
       </tbody>
@@ -551,7 +551,7 @@ background: var(--citadel-warn-tint);</code></pre></div>
       </div>
       <div class="mk-about">
         <p>A ring in the info colour, and the line that says the agent is busy and for how long. Only the line is a live region; the log is not.</p>
-        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> (<code>.cui-spin</code>) and <code>/apps/_citadel/ui/chat.js</code> (<code>.cui-working</code>)</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> (<code>.cui-spin</code>, <code>.cui-working</code>); <code>ui/chat.js</code> draws it under the reply</p>
       </div>
     </div>
   </section>
@@ -646,8 +646,8 @@ background: var(--citadel-warn-tint);</code></pre></div>
         <div class="cui-working"><span class="cui-spin" aria-hidden="true"></span><span role="status">Thinking… · <span class="cui-time" data-tick="12">12s</span></span></div>
       </div></div>
       <div class="mk-about">
-        <p>Your message: a bubble on the right, accent tint 9%, <code>radius-lg</code>. The reply: unboxed text, so long answers read like a page. A run of tool steps folds into one row (done ✓, running with its current step, failed ✕); Grunts get their own rows with task, time and state, never mixed into the agent's steps. Suggested replies sit under the reply; tapping one sends it and greys the rest. Tap any row to open it.</p>
-        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/chat.js</code> · <code>.cui-chat</code> <code>.cui-you</code> <code>.cui-run</code> <code>.cui-grunts</code> <code>.cui-choices</code></p>
+        <p>Your message: a bubble on the right, accent tint 9%, <code>radius-lg</code>. The reply: unboxed text, so long answers read like a page. A run of tool steps folds into one row (done ✓, running with its current step, failed ✕); Grunts get their own rows with task, time and state, never mixed into the agent's steps; as built, a running Grunt shows under its run's row and the rest sit in the row when it opens. Suggested replies sit under the reply; tapping one sends it and greys the rest. Tap any row to open it. (This specimen copies the look; the code is <code>mountChat</code>, and <code>test/ui-contract.json</code> holds a recorded turn's real HTML.)</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/chat.js</code> · <code>.cui-chat</code> <code>.cui-ask</code> <code>.cui-run</code> <code>.cui-grunt</code> <code>.cui-choices</code></p>
       </div>
     </div>
   </section>

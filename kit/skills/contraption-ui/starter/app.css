@@ -11,15 +11,15 @@ body {
 }
 #sections h2 { margin: 0 0 var(--citadel-space-2); font-size: var(--citadel-size-small); color: var(--citadel-muted); }
 #sections a { display: block; padding: var(--citadel-space-1) 0; color: var(--citadel-accent); }
-main { flex: 1; min-width: 0; max-width: 60rem; padding: var(--citadel-space-4); }
+/* A column the height of the screen: the bar, the chat (which scrolls itself) and the box under it. */
+main {
+  flex: 1; min-width: 0; max-width: 60rem; height: 100dvh; box-sizing: border-box;
+  display: flex; flex-direction: column; padding: var(--citadel-space-4);
+}
 .bar { display: flex; align-items: center; gap: var(--citadel-space-3); margin-bottom: var(--citadel-space-4); }
 .bar h1 { flex: 1; margin: 0; font-size: var(--citadel-size-h1); }
-.reply {
-  margin-top: var(--citadel-space-3); padding: var(--citadel-space-3) var(--citadel-space-4);
-  background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-lg);
-}
-/* The composer stays at the bottom of the page as the reply grows. */
-.compose { position: sticky; bottom: 0; padding: var(--citadel-space-3) 0; background: var(--citadel-bg); }
+.chat { flex: 1; min-height: 0; }
+.compose { flex: none; padding-top: var(--citadel-space-3); }
 /* On a phone the sections are a drawer (drawers.js hides and slides them); the page takes the width. */
 @media (max-width: 800px) {
   main { padding: var(--citadel-space-3); }

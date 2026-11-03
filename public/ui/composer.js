@@ -158,7 +158,6 @@ export function mountComposer(el, opts) {
   const stopping = () => busy && !!opts.stop;
   const render = () => {
     const stop = stopping();
-    sendButton.type = stop ? 'button' : 'submit';
     sendButton.textContent = stop ? 'Stop' : 'Send';
     sendButton.classList.toggle('cui-primary', !stop);
     sendButton.classList.toggle('cui-danger', stop);
@@ -166,7 +165,12 @@ export function mountComposer(el, opts) {
     sendButton.disabled = !stop && sending > 0;
     form.toggleAttribute('data-busy', busy);
   };
-  sendButton.addEventListener('click', () => stopping() && opts.stop());
+  sendButton.addEventListener('click', (e) => {
+    if (!stopping()) return;
+    // Cancelled first: stop() may end busy at once, and this click would then submit as Send.
+    e.preventDefault();
+    opts.stop();
+  });
 
   const fit = () => fitHeight(textarea);
   const save = () => draftKey && saveDraft(draftKey, textarea.value);

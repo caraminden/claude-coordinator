@@ -1,5 +1,6 @@
 // Citadel UI: markdown. Types for /apps/_citadel/ui/markdown.js. A stable API: names and options are
 // only ever added (test/ui-contract.test.ts checks this file against the module's exports).
+// Like every file in public/ui/, standalone: apps fetch it from /apps/_citadel/ui/ beside the module.
 
 export interface MarkdownOptions {
   /** Keep single line breaks as typed, as chat does (default false: a document's soft wraps join). */

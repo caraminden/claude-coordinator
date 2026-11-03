@@ -65,10 +65,9 @@ function mendStreaming(src) {
   line = line.replace(/\[([^\]]*)\]\([^)\s]*$/, '$1').replace(/\[([^\]]*)$/, '$1');
   // A trailing run of delimiters with nothing after it yet ("- **", "see `").
   line = line.replace(/(^|\s)[*_`]+$/, '$1');
-  const ticks = line.split('`').length - 1;
-  if (ticks % 2) line += '`';
+  if ((line.split('`').length - 1) % 2) line += '`';
   // Half of a closing "**" ("**9:59 pm:*") completes it rather than showing a stray "*".
-  else if (/[^*\s]\*$/.test(line) && line.slice(0, -1).replace(/`[^`]*`/g, '').split('**').length % 2 === 0) line += '*';
+  if (/[^*\s]\*$/.test(line) && line.slice(0, -1).replace(/`[^`]*`/g, '').split('**').length % 2 === 0) line += '*';
   else {
     const bare = line.replace(/`[^`]*`/g, '');
     // The closer goes before any trailing space ("**9:59 " mid-word), since a closer can't follow one.

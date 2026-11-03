@@ -1484,6 +1484,14 @@ export class Store {
       start = i > 0 ? recent[i - 1].id : this.turnStart(ticketId, recent[0].id);
     }
     if (from != null) start = Math.min(start, this.turnStart(ticketId, from));
+    // Notes after a long last turn (dismissed, deployed) aren't a turn: they come with the turn before them,
+    // so a minion never opens on nothing but "Load earlier" (#288).
+    const hasTurn = this.db.prepare(`
+      SELECT 1 FROM events WHERE ticket_id = ? AND id >= ? AND id < ? AND (kind = 'user_message'
+        OR (kind = 'claude' AND json_extract(data, '$.type') = 'system' AND json_extract(data, '$.subtype') = 'init')) LIMIT 1`)
+      .get(ticketId, start, before);
+    const prev = !hasTurn && this.db.prepare('SELECT MAX(id) AS id FROM events WHERE ticket_id = ? AND id < ?').get(ticketId, start) as { id: number | null };
+    if (prev && prev.id != null) start = this.turnStart(ticketId, prev.id);
     const events = this.db
       .prepare('SELECT * FROM events WHERE ticket_id = ? AND id >= ? AND id < ? ORDER BY id')
       .all(ticketId, start, before) as unknown as EventRow[];

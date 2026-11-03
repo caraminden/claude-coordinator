@@ -31,7 +31,37 @@ export function chatView(chatId, ticket) {
     cards: new Map(), // question card id -> { el, markAnswered }; plan card id -> { el, settle }; approval card id -> { settle }
     heldCards: [], // this turn's question and plan cards, kept below the words that explain them
     branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
+    scrolledByYou: false, // you've scrolled (or keyed, tapped) in this chat since it opened: see loadWhenReached
   };
+}
+
+/**
+ * Scrolling into "Load earlier" loads it, as a click would (#288). Only once you've scrolled yourself, so
+ * a chat that opens at the top, or a jump to an old message, doesn't load on its own. A wheel up with it
+ * already in sight counts too: there's nowhere left to scroll.
+ */
+function loadWhenReached(button) {
+  watchYourScrolling();
+  const seen = new IntersectionObserver(([e]) => {
+    if (!button.isConnected) return seen.disconnect();
+    button.inView = e.isIntersecting;
+    if (e.isIntersecting && view.scrolledByYou && !button.disabled) showEarlier(button);
+  });
+  seen.observe(button);
+}
+let watching = false;
+// On first use, not at load: core.js imports this module before its own USER_SCROLL is set.
+function watchYourScrolling() {
+  if (watching) return;
+  watching = true;
+  for (const type of USER_SCROLL) {
+    addEventListener(type, (e) => {
+      if (!view?.page) return;
+      view.scrolledByYou = true;
+      const button = document.querySelector('#log > .load-earlier > button');
+      if (type === 'wheel' && e.deltaY < 0 && button?.inView && !button.disabled) showEarlier(button);
+    }, { capture: true, passive: true });
+  }
 }
 
 /** Fill in a chat section just put on the page: its head, its history, and where you were in it. */
@@ -84,8 +114,9 @@ function renderHistory() {
     sawInit: page.more, latestReply: null, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, pendingRequest: [], turnRequest: undefined,
     pendingMessages: [],
   });
-  log.replaceChildren(...(page.more ? [h('div', { class: 'load-earlier' },
-    h('button', { type: 'button', class: 'small secondary', onclick: (e) => showEarlier(e.currentTarget) }, 'Load earlier'))] : []));
+  const earlier = page.more && h('button', { type: 'button', class: 'small secondary', onclick: (e) => showEarlier(e.currentTarget) }, 'Load earlier');
+  log.replaceChildren(...(earlier ? [h('div', { class: 'load-earlier' }, earlier)] : []));
+  if (earlier) loadWhenReached(earlier);
   if (isCoordinator(view.ticket) && !page.events.length) {
     log.append(h('div', { class: 'note' },
       'This is the Taskmaster for this scheme. It keeps track of the minions on the left and can create, message, rename and dismiss them for you.'));

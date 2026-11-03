@@ -64,6 +64,17 @@ test('a turn longer than the limit comes whole, running or not', () => {
   assert.ok(old.length);
 });
 
+test('notes after a long last turn come with that turn, so the newest page is never just them (#288)', () => {
+  const { store, t } = setup('tail');
+  turn(store, t.id, 2);
+  const long = turn(store, t.id, 40);
+  const notes = [store.addEvent(t.id, 'note', { text: 'The deploy is live, so it dismissed this minion.' }).id,
+    store.addEvent(t.id, 'note', { text: 'Deployed abc1234' }).id];
+  const page = historyPage(store, t.id, { limit: 20 });
+  assert.deepEqual(page.events.map((e) => e.id), [...long, ...notes]);
+  assert.equal(page.more, true);
+});
+
 test('a short history is one page with nothing more', () => {
   const { store, t } = setup('short');
   const ids = [...turn(store, t.id, 1), ...turn(store, t.id, 1)];

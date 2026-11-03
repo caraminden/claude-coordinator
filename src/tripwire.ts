@@ -1003,6 +1003,9 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   if (name === 'ps' && args.some(bsdE)) return hard(`This \`ps\` prints processes' environments. ${ENVIRON_WHY}`);
   const sub = args.filter((w) => !w.text.startsWith('-')).map((w) => w.text);
   if (name === 'gh' && sub[0] === 'auth' && /^(login|logout|refresh|switch)$/.test(sub[1] ?? '')) return hard(`\`gh auth ${sub[1]}\` would change which GitHub login gh uses. ${GH_ENV_WHY}`);
+  // Every turn, Citadel, its contraptions and other people's dev servers run as the one account, so a
+  // pattern kill reaches them all: a turn's `pkill -u cara -f app/dev/dev.ts` took Citadel down (2026-11-03).
+  if (name === 'pkill' || name === 'killall') return hard(`\`${name}\` kills by name across the whole account: other minions' shells and dev servers, Citadel and its contraptions. Stop your own process by pid: \`$!\` when you start it, or the pid from \`ss -ltnp 'sport = :<your port>'\`, checked with \`readlink /proc/<pid>/cwd\`.`);
   if (name === 'printenv') return hard(`\`printenv\` prints the environment. ${ENV_WHY}`);
   // Anywhere among the plain words: an option's value (`--model haiku`) comes before the subcommand.
   const print = args.some((w) => w.text === '-p' || w.text === '--print');

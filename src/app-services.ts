@@ -140,7 +140,7 @@ export function unitFiles({ row, manifest, folder, keysDir, citadelUrl, home }: 
   files.set(`${unitName(row.name)}.service`, [
     ...head,
     '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')} (Citadel contraption)`, 'After=network.target', 'StartLimitIntervalSec=0', '',
-    '[Service]', dir(manifest.workdir), `ExecStart=${execLine(manifest.start, home)}`, search, ...envLines, 'Restart=on-failure', 'RestartSec=5', '',
+    '[Service]', dir(manifest.workdir), `ExecStart=${execLine(manifest.start, home)}`, search, ...envLines, 'Restart=always', 'RestartSec=5', '',
     '[Install]', 'WantedBy=default.target', '',
   ].join('\n'));
   for (const [job, t] of Object.entries(manifest.timers)) {

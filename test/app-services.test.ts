@@ -54,7 +54,7 @@ test('the units come from the registry and the manifest, quoted so nothing is a 
     assert.ok(main.includes(`Environment="${env}"`), env);
   }
   assert.ok(main.includes('Environment="ODD=50%% \\"quoted\\" \\\\ back"'), 'quotes, backslashes and % escaped');
-  assert.match(main, /^Restart=on-failure$/m);
+  assert.match(main, /^Restart=always$/m);
   assert.match(main, /^RestartSec=5$/m);
   assert.match(main, /^WantedBy=default.target$/m);
   const job = files.get('citadel-app-mandate-backup.service')!;

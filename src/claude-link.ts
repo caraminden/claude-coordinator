@@ -19,9 +19,10 @@ const CONTAINERFILE_DIR = join(import.meta.dirname, '..', 'deploy', 'claude-cont
 /**
  * Host tool folders a turn may need, mounted read-only where they exist: Delve's dotnet and Godot, mise and its
  * toolchains (its rust is rustup's, in ~/.cargo/bin and ~/.rustup; the rest of ~/.cargo, the crate cache, stays
- * the person's own), and the Chromium Playwright downloads (Mandate's tools/shot.mjs).
+ * the person's own), the Chromium Playwright downloads (Mandate's tools/shot.mjs), and Godot's export templates
+ * (Delve's tools/windows-build.sh, #290; the rest of ~/.local/share/godot is editor state, the person's own).
  */
-export const TOOL_DIRS = ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.cargo/bin', '.rustup', '.cache/ms-playwright'];
+export const TOOL_DIRS = ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright'];
 /**
  * The image's bin folders, first on a container turn's PATH: a tool the image installs wins over a host
  * wrapper in ~/.local/bin that can't run in a container (dot and xvfb-run there start a podman image, #247).

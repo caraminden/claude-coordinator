@@ -313,7 +313,7 @@ test("a container turn has the host's tools: the image installs what schemes' sc
     const creds = new Credentials(store, 'x'.repeat(40));
     const link = new ClaudeLink(store, creds, join(root, 'data'), fake, new Containers(async () => ({ code: 0, stdout: '', stderr: '' })), 'citadel-claude-tools-');
     const mounts = link.spec(josh.id).mounts;
-    for (const d of ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.cargo/bin', '.rustup', '.cache/ms-playwright']) {
+    for (const d of ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright']) {
       assert.ok(mounts.some((m) => m.src === join(home, d) && m.dst === join(home, d) && m.ro), `${d} is mounted read-only`);
     }
     // The crate cache and the rest of the home stay the person's own.
@@ -329,6 +329,23 @@ test("a container turn has the host's tools: the image installs what schemes' sc
   }
   assert.equal(containerPath('/h/.dotnet:/h/.local/bin:/usr/local/bin:/usr/bin:/bin'), '/usr/local/bin:/usr/bin:/bin:/h/.dotnet:/h/.local/bin');
   assert.equal(containerPath(''), IMAGE_PATH.join(':'));
+});
+
+test("Godot's export templates are mounted only where the host has them, and the rest of its data folder stays the person's own (#290)", () => {
+  const home = mkdtempSync(join(root, 'godot-home-'));
+  mkdirSync(join(home, '.local/share/godot/app_userdata'), { recursive: true });
+  const saved = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), fake, new Containers(async () => ({ code: 0, stdout: '', stderr: '' })), 'citadel-claude-godot-');
+    const godot = (mounts: { src: string }[]) => mounts.filter((m) => m.src.startsWith(join(home, '.local/share/godot')));
+    assert.deepEqual(godot(link.spec(josh.id).mounts), [], 'no templates on the host: nothing mounted');
+    const templates = join(home, '.local/share/godot/export_templates');
+    mkdirSync(join(templates, '4.7.2.stable.mono'), { recursive: true });
+    assert.deepEqual(godot(link.spec(josh.id).mounts), [{ src: templates, dst: templates, ro: true }]);
+  } finally {
+    process.env.HOME = saved;
+  }
 });
 
 test("a restart sweeps container turns' dead folders in each person's folder, and keeps live ones", () => {

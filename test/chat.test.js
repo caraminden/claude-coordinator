@@ -75,7 +75,11 @@ test('a call the app claims as a card leaves the step run and takes its result',
   const events = [tool('g', 'get'), tool('v', 'mcp__pob__show_viability', { odds: 4 }), result('v'), tool('h', 'get')];
   const blocks = reply(chatModel([{ events }], { card }));
   assert.deepEqual(blocks.map((b) => b.kind), ['steps', 'card', 'steps']);
-  assert.deepEqual(blocks[1], { id: '0.1', kind: 'card', tool: 'v', name: 'mcp__pob__show_viability', input: { odds: 4 }, result: { ok: true } });
+  assert.deepEqual(blocks[1], { id: '0.1', kind: 'card', tool: 'v', name: 'mcp__pob__show_viability', input: { odds: 4 }, result: { id: 'v', ok: true, parent: null } });
+  // The result is the tool_result's data as it came, ok a boolean: an app's own fields reach its card (#287, Theory of Crafting).
+  const rich = { type: 'tool_result', data: { id: 7, ok: 1, parent: null, output: { odds: 0.4 } } };
+  const [c] = reply(chatModel([{ events: [tool('7', 'mcp__pob__show_viability'), rich] }], { card }));
+  assert.deepEqual(c.result, { id: '7', ok: true, parent: null, output: { odds: 0.4 } });
   // Agent calls are always Grunts, whatever the app claims.
   assert.equal(reply(chatModel([{ events: [tool('a', 'Agent')] }], { card: () => true }))[0].kind, 'steps');
 });

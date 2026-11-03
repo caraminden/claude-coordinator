@@ -90,7 +90,8 @@ function turnModel(turn, k, last, card) {
       const step = byId.get(id);
       if (step) Object.assign(step, { state: d.ok ? 'done' : 'failed', end: at });
       const c = cards.get(id);
-      if (c) c.result = { ok: !!d.ok };
+      // All of the event's data (an app may add its own fields), with the id as the call's and ok a boolean.
+      if (c) c.result = { ...d, id, ok: !!d.ok };
     } else if (e?.type === 'error') {
       ended = true;
       if (d.code === 'canceled') add({ kind: 'stopped' });

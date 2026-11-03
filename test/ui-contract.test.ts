@@ -77,7 +77,7 @@ const LINES: [string, string, object?][] = [
 
 // A recorded turn, as an app's chat draws it: text, a run of calls with a failed one, a Grunt with two steps, then an
 // error; once folded and once with its run open, and the same turn mid-flight.
-const { renderChat } = await import('../public/ui/chat.js');
+const { chatModel, renderChat } = await import('../public/ui/chat.js');
 const at = (s: number) => Date.UTC(2026, 10, 2, 12, 0, s);
 const ev = (type: string, data: object, s?: number) => ({ type, data, at: s === undefined ? undefined : at(s) });
 const RECORDED = [
@@ -129,6 +129,8 @@ function current() {
       markdown: Object.fromEntries(SAMPLES.map(([name, src, opts]) => [name, renderMarkdown(src, opts)])),
       markdownLine: Object.fromEntries(LINES.map(([name, src, opts]) => [name, markdownLine(src, opts)])),
       chat: Object.fromEntries(CHATS.map(([name, turns, opts]) => [name, renderChat(turns, opts)])),
+      // What mountChat's block(name, input, result) gets as `result` (#287): the tool_result's data, an app's own fields included.
+      blockResult: chatModel([{ events: [ev('tool', { id: 'v', name: 'viability', input: {}, parent: null }), ev('tool_result', { id: 'v', ok: true, parent: null, output: { odds: 0.4 } })] }], { card: () => true }).items[0].blocks[0].result,
     };
   });
 }
@@ -167,6 +169,7 @@ test('fixed markdown samples render to the stored HTML', () => {
 
 test('a recorded chat turn renders to the stored HTML', () => {
   assert.deepEqual(now.chat, stored.chat, why);
+  assert.deepEqual(now.blockResult, stored.blockResult, why);
 });
 
 test('every ui file keeps the rules: standalone, no inline styles, cui-* classes inside :where()', () => {

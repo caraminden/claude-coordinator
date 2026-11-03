@@ -38,7 +38,7 @@ export type Block =
   /** A run of top-level calls between texts, drawn as one row that folds. */
   | { id: string; kind: 'steps'; steps: Step[] }
   /** A call the app draws as its own card (mountChat's `block`); `result` once it has one. */
-  | { id: string; kind: 'card'; tool: string; name: string; input: Record<string, unknown>; result?: { ok: boolean } }
+  | { id: string; kind: 'card'; tool: string; name: string; input: Record<string, unknown>; result?: BlockResult }
   /** The turn was canceled: "Stopped." */
   | { id: string; kind: 'stopped' }
   /** The turn failed: a danger notice with the turn API's code and message. */
@@ -73,6 +73,16 @@ export interface RenderOptions {
 /** The chat as HTML, with no live parts (cards are empty slots, clocks read at `now`). For a server, a print view or a test. */
 export function renderChat(turns: Turn[], opts?: RenderOptions & { now?: number; open?: string[] }): string;
 
+/** A card's result: its tool_result event's data as it came (fields an app or relay added included), `ok` a boolean. */
+export interface BlockResult {
+  /** The call's id: the tool event's `id`. */
+  id: string;
+  ok: boolean;
+  /** The Grunt call it ran under; null for the reply's own calls (cards are top-level, so null). */
+  parent?: string | null;
+  [field: string]: unknown;
+}
+
 export interface ChatOptions extends RenderOptions {
   /**
    * Your own card for a top-level tool call (Theory of Crafting's viability card). Called when the call
@@ -80,7 +90,7 @@ export interface ChatOptions extends RenderOptions {
    * as that card where it fell in the reply (an empty one holds the place until the result), or null on
    * the first call to leave it a step.
    */
-  block?: (name: string, input: Record<string, unknown>, result: { ok: boolean } | undefined) => HTMLElement | null;
+  block?: (name: string, input: Record<string, unknown>, result: BlockResult | undefined) => HTMLElement | null;
   /** What an empty chat says ("Ask the Acolyte to do anything in Mandate."). */
   empty?: string;
   /** A reply chip was tapped: send `message` as the person's (then call ask()). */

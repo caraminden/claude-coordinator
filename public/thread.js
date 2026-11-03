@@ -8,6 +8,7 @@ import { recapEvent, showRecap } from './recap.js';
 import { noteStrike, struckSource } from './strike.js';
 import { narrationSorter } from './narration.js';
 import { gist, groupTitle, gruntName, gruntOf } from './grunts.js';
+import { stepMark } from './ui/chat.js';
 import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
 import { payerChip, payerLine } from './payer.js';
@@ -491,7 +492,7 @@ function actionEl(action) {
   const why = state === 'err' ? resultString(result).replace(/<\/?tool_use_error>/g, '').trim().split('\n')[0].slice(0, 120) : '';
   const el = h('details', { class: `act ${state}` },
     h('summary', {},
-      h('span', { class: 'st', title: { pending: 'In progress', err: 'Failed', ok: 'Done' }[state] }, state === 'pending' ? '…' : state === 'err' ? '✗' : '·'),
+      stepMark({ pending: 'running', err: 'failed', ok: 'done' }[state]),
       h('span', { class: 'what' }, threadRefs(actionLabel(block))),
       why ? h('span', { class: 'why' }, ` — failed: ${why}`) : '',
       ticketActionRef(action) ? [' → ', ...threadRefs(`#${ticketActionRef(action).number}`)] : ''));
@@ -557,7 +558,7 @@ function phaseRows(acts, running) {
   });
   return [
     h('ul', { class: 'phases' }, phases.map((ph) => h('li', { class: ph.ongoing ? 'ongoing' : '' },
-      h('span', { class: 'st' }, ph.ongoing ? '◐' : '✓'), ph.text,
+      stepMark(ph.ongoing ? 'running' : 'done'), ph.text,
       h('span', { class: 'muted' }, ` · ${ph.count} action${ph.count === 1 ? '' : 's'}${ph.failed ? `, ${ph.failed} failed along the way` : ''}`))),
       ticketActionLinks(acts)),
     cmds,
@@ -859,7 +860,7 @@ function addGruntText(log, id, text, data, event) {
   } else {
     const name = gruntName(view.actions.get(id)?.block.input);
     line = h('details', { class: 'msg coord grunt', 'data-grunt': id, 'data-at': event.created_at },
-      h('summary', {}, h('span', { class: 'who' }, `Grunt · ${name}`), h('span', { class: 'preview' }), h('span', { class: 'dur' })),
+      h('summary', {}, stepMark('done'), h('span', { class: 'who' }, `Grunt · ${name}`), h('span', { class: 'preview' }), h('span', { class: 'dur' })),
       h('div', { class: 'msg grunt-body' }, body));
     Object.assign(line, { start, name });
   }

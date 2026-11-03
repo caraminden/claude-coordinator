@@ -16,11 +16,8 @@ export function gist(text) {
   return line.length > 160 ? `${line.slice(0, 159)}…` : line;
 }
 
-/** Who a Grunt is, from the Agent call's input: its description, else its agent type. */
-export function gruntName(input) {
-  const name = [input?.description, input?.subagent_type].find((s) => typeof s === 'string' && s.trim());
-  return name ? name.trim() : 'Grunt';
-}
+// Who a Grunt is: the chat kit's rule, so a minion chat and an app's chat name it alike.
+export { gruntName } from './ui/chat.js';
 
 /** A fan-out block's title: "8 Grunts finished", with the span from the first start to the last report when known. */
 export function groupTitle(count, ms, duration) {

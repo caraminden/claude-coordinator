@@ -175,6 +175,7 @@ export function renderChat(turns, opts = {}) {
 
 /** A step's state as its mark: a spinner while running, else ✓, ✕ or – with its state as the label. */
 export function stepMark(state) {
+  adoptStyles();
   return fromHtml(markHtml(state));
 }
 
@@ -204,12 +205,13 @@ const CSS = `
 :where(.cui-run-head:focus) { outline: none; }
 :where(.cui-run-head:focus-visible) { outline: 2px solid var(--citadel-focus); outline-offset: -2px; }
 :where(.cui-chev) { flex: none; }
+@media (max-width: 800px) { :where(.cui-run-head) { min-height: var(--citadel-control-h); } }
 :where(.cui-steps) { list-style: none; margin: 0; padding: 0 var(--citadel-space-3) 6px; }
 :where(.cui-step, .cui-grunt-head) { display: flex; align-items: center; gap: var(--citadel-space-2); padding: 3px 0; line-height: 1.4; }
 :where(.cui-step-label, .cui-grunt-task) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 :where(.cui-grunt-task) { color: var(--citadel-text); }
 :where(.cui-run .cui-time) { flex: none; color: var(--citadel-muted); font-variant-numeric: tabular-nums; }
-:where(.cui-mark) { flex: none; width: 1em; text-align: center; color: var(--citadel-muted); }
+:where(.cui-mark) { display: inline-block; flex: none; width: 1em; text-align: center; color: var(--citadel-muted); }
 :where(.cui-mark[data-state="done"]) { color: var(--citadel-ok); }
 :where(.cui-mark[data-state="failed"]) { color: var(--citadel-danger); }
 :where(.cui-grunt) { margin: 0 var(--citadel-space-3) 6px; padding: 3px var(--citadel-space-2); border-radius: var(--citadel-radius-sm); background: var(--citadel-bg); }

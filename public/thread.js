@@ -42,13 +42,14 @@ export function chatView(chatId, ticket) {
  */
 function loadWhenReached(button) {
   watchYourScrolling();
-  const seen = new IntersectionObserver(([e]) => {
-    if (!button.isConnected) return seen.disconnect();
+  earlierSeen?.disconnect(); // the last redraw's button is gone
+  earlierSeen = new IntersectionObserver(([e]) => {
     button.inView = e.isIntersecting;
-    if (e.isIntersecting && view.scrolledByYou && !button.disabled) showEarlier(button);
+    if (e.isIntersecting && view.scrolledByYou && !button.disabled && button.isConnected) showEarlier(button);
   });
-  seen.observe(button);
+  earlierSeen.observe(button);
 }
+let earlierSeen = null;
 let watching = false;
 // On first use, not at load: core.js imports this module before its own USER_SCROLL is set.
 function watchYourScrolling() {
@@ -59,7 +60,7 @@ function watchYourScrolling() {
       if (!view?.page) return;
       view.scrolledByYou = true;
       const button = document.querySelector('#log > .load-earlier > button');
-      if (type === 'wheel' && e.deltaY < 0 && button?.inView && !button.disabled) showEarlier(button);
+      if (type === 'wheel' && e.deltaY < 0 && e.target.closest?.('#log') && button?.inView && !button.disabled) showEarlier(button);
     }, { capture: true, passive: true });
   }
 }

@@ -372,7 +372,7 @@ export class ContraptionTurns {
         if (e?.type === 'message_start') message = String(e.message?.id ?? '');
         else if (e?.type === 'content_block_delta' && e.delta?.type === 'text_delta' && typeof e.delta.text === 'string') {
           streamed.set(message, (streamed.get(message) ?? '') + e.delta.text);
-          emit('text', { delta: e.delta.text, parent: null });
+          emit('text', { delta: e.delta.text, parent: null, message });
         }
       } else if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
         const mid = String(ev.message.id ?? '');
@@ -384,7 +384,7 @@ export class ContraptionTurns {
             said.set(mid, all);
             const sent = streamed.get(mid) ?? '';
             if (all.length > sent.length && all.startsWith(sent)) {
-              emit('text', { delta: all.slice(sent.length), parent: null });
+              emit('text', { delta: all.slice(sent.length), parent: null, message: mid });
               streamed.set(mid, all);
             }
           }

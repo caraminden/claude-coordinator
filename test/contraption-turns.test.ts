@@ -189,6 +189,8 @@ test('a turn has only the contraption\'s MCP and no built-in tools, settings, CL
   assert.equal(start.data.session, 'acolyte');
   assert.match(start.data.claudeSession, /^[0-9a-f-]{36}$/);
   assert.equal(evs.filter((e) => e.event === 'text').map((e) => e.data.delta).join(''), 'Moved it to Thursday.');
+  // Each piece names its message, streamed or not, so an app can split "Moved it" from " to Thursday.".
+  assert.deepEqual(evs.filter((e) => e.event === 'text').map((e) => [e.data.message, e.data.delta]), [['m1', 'Moved '], ['m1', 'it'], ['m2', ' to Thursday.']]);
   assert.deepEqual(evs.filter((e) => e.event !== 'start' && e.event !== 'text'), [
     { event: 'tool', data: { id: 'tu1', name: 'mcp__mandate__move', input: { to: 'Thursday' }, parent: null } },
     { event: 'tool_result', data: { id: 'tu1', ok: true, parent: null } },
@@ -225,14 +227,14 @@ test('with agents allowed, the turn gets Agent and nothing more, its model, and 
 test('a Grunt\'s tool calls and results carry its Agent call\'s id, the top level\'s carry null, and its words never stream', async () => {
   const evs = await turn(mandate, { session: 'grunts', prompt: 'Use grunts.', agents: { max: 2 }, mcp: [{ name: 'mandate', path: '/mcp' }] });
   assert.deepEqual(evs.filter((e) => e.event === 'tool' || e.event === 'tool_result' || e.event === 'text'), [
-    { event: 'text', data: { delta: 'Asking. ', parent: null } },
+    { event: 'text', data: { delta: 'Asking. ', parent: null, message: 'm1' } },
     { event: 'tool', data: { id: 'ag1', name: 'Agent', input: { prompt: 'look' }, parent: null } },
     { event: 'tool', data: { id: 'gt1', name: 'mcp__mandate__list', input: {}, parent: 'ag1' } },
     { event: 'tool_result', data: { id: 'gt1', ok: false, parent: 'ag1' } },
     { event: 'tool', data: { id: 'ag2', name: 'Agent', input: { prompt: 'deeper' }, parent: 'ag1' } },
     { event: 'tool_result', data: { id: 'ag2', ok: true, parent: 'ag1' } },
     { event: 'tool_result', data: { id: 'ag1', ok: true, parent: null } },
-    { event: 'text', data: { delta: 'Done.', parent: null } },
+    { event: 'text', data: { delta: 'Done.', parent: null, message: 'm2' } },
   ]);
   assert.ok(!JSON.stringify(evs).includes('GRUNT'), 'no Grunt prompt or words');
 });

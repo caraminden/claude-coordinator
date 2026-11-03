@@ -31,10 +31,11 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | `ui/base.css` | Buttons, inputs, chips, notices, spinner, focus ring, as `cui-*` classes | `<link rel="stylesheet">` after theme.css |
 | `ui/markdown.js` (+ `ui/markdown.d.ts`) | An agent's markdown as safe HTML, streaming-aware | ES module import |
 | `rail.js`, `drawers.js` | The app rail; phone drawers (`NARROW`, the 800 px breakpoint) | See [rail-and-drawers.md](rail-and-drawers.md) |
-| `ui/chat.js`, `ui/composer.js` | Chat log and message box | Coming: until they land, keep your own and plan to move |
+| `ui/composer.js` (+ `ui/composer.d.ts`) | The message box under a chat | ES module import; needs base.css |
+| `ui/chat.js` | Chat log | Coming: until it lands, keep your own and plan to move |
 
 [starter/](starter/index.html) (`index.html`, `app.css`, `app.js`) wires theme.css, base.css, the
-rail, drawers and streaming markdown; start a new contraption's page from it.
+rail, drawers, streaming markdown and a composer; start a new contraption's page from it.
 
 The API is stable: names and options are only ever added, and Citadel's tests hold them. A real
 break would ship as a new file (`ui/chat2.js`) beside the old one. Types: point TypeScript at the
@@ -65,6 +66,33 @@ reply sits under your page's headings; a document passes 1), and hooks `link(hre
 - Styles come only through `markdownElement`/`updateMarkdown`; `renderMarkdown` alone is a string,
   for tests and servers. Preact: `updateMarkdown(ref.current, text, opts)` in a `useEffect`, with
   nothing rendered into that element.
+
+## Composer (`ui/composer.js`)
+
+```js
+import { mountComposer } from '/apps/_citadel/ui/composer.js';
+
+const box = mountComposer(document.getElementById('compose'), {
+  placeholder: 'Message the agent…',
+  draftKey: `draft:${chatId}`,           // optional: unsent text survives a reload, per chat
+  send: (text) => postMessage(text),     // resolve once accepted; reject and the text goes back in the box
+  stop: () => cancelTurn(),              // optional: Send shows as Stop while busy
+});
+box.busy(true);   // a turn is running (Send → Stop); box.busy(false) when it ends
+```
+
+What it does for you: grows with the text up to 40% of the screen; Enter sends on desktop and adds a
+line at 800 px and under (Shift+Enter always adds one, Cara's pick); a half-composed IME word never
+sends; a `1.` line continues the list; a failed send puts the words back and shows the error; Send is
+disabled while a message is on its way; 16 px on phones so iOS doesn't zoom; a margin for the home bar.
+
+- More options: `label` (the box's accessible name), `canSend(text)` (refuse, or allow an empty text
+  when something else rides along), `onError(err)` (show a failed send your own way).
+- It returns `form`, `textarea`, `row` and `sendButton` too: put your own buttons (attach, a model
+  picker) in `row` before Send, and restyle `.cui-composer` with your own selectors.
+- `fitHeight(textarea)` and `continueList(textarea, e, enterAddsLine)` from the same module give your
+  other text boxes the same autogrow and list continuation.
+- Preact: mount it once in a `useEffect` on an empty element and keep the returned object in a ref.
 
 ## Tokens (`theme.css`)
 

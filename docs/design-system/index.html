@@ -351,7 +351,7 @@ window.COLOURS = [
       <span>Checked against Citadel <code>4d99ace</code> + #283</span>
     </div>
     <p class="mk-lede">The look and the parts Citadel serves at <code>/apps/_citadel/ui/</code> for Mandate, Theory of Crafting and Peek Auras, and use itself, so the four stop drifting apart. Every token and part below is drawn live; flip the theme at the top to see both modes. This is the living home (#283): when it and the code disagree, the code wins, and a change to a token, part or rule updates this page in the same commit. The tokens live in <code>public/style.css</code> (served as <code>theme.css</code> by <code>src/theme.ts</code>), the parts in <code>public/ui/</code>, and <code>test/ui-contract.test.ts</code> holds what apps rely on. How apps use it: the <code>citadel:contraption-ui</code> kit skill.</p>
-    <p class="mk-banner info">Built so far (#283): the tokens, <code>ui/base.css</code> and <code>ui/markdown.js</code>. The chat kit (<code>ui/chat.js</code>) and the composer (<code>ui/composer.js</code>) below are still specimens until their minions land. <code>ui/markdown.js</code> ships Citadel's existing markdown look, moved from its <code>style.css</code>; the restyle in the Markdown specimen (tables in a box, 22/18/16 headings) isn't built yet.</p>
+    <p class="mk-banner info">Built so far (#283): the tokens, <code>ui/base.css</code> and <code>ui/markdown.js</code>. The composer (<code>ui/composer.js</code>, #285) is live; the chat kit (<code>ui/chat.js</code>) below is still a specimen until its minion lands. <code>ui/markdown.js</code> ships Citadel's existing markdown look, moved from its <code>style.css</code>; the restyle in the Markdown specimen (tables in a box, 22/18/16 headings) isn't built yet.</p>
     <nav class="mk-toc" aria-label="Contents"></nav>
   </header>
 
@@ -364,7 +364,7 @@ window.COLOURS = [
         <tr><td><code>ui/base.css</code></td><td>Buttons, inputs, chips, notices, the spinner, the focus ring: class-only parts (<code>cui-*</code>).</td><td><code>&lt;link&gt;</code> after theme.css</td></tr>
         <tr><td><code>ui/markdown.js</code></td><td>Markdown to safe DOM, one link rule, a streaming mode.</td><td>ES module import</td></tr>
         <tr><td><code>ui/chat.js</code> (coming)</td><td>Your message, the reply, tool-run rows, Grunt rows, suggested replies, the working line.</td><td>ES module; brings its own constructed stylesheet</td></tr>
-        <tr><td><code>ui/composer.js</code> (coming)</td><td>The message box: autogrow, Enter rules, Send that turns into Stop.</td><td>ES module; brings its own constructed stylesheet</td></tr>
+        <tr><td><code>ui/composer.js</code></td><td>The message box: autogrow, Enter rules, IME-safe, list continuation, a failed send back in the box, Send that turns into Stop, drafts. Citadel's own composer is built on it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>drawers.js</code></td><td><code>NARROW</code> = 800: the phone breakpoint, exported once.</td><td>ES module, as today</td></tr>
       </tbody>
     </table></div>
@@ -665,7 +665,7 @@ background: var(--citadel-warn-tint);</code></pre></div>
         <p class="doc-sent" id="cmp-said" aria-live="polite"></p>
       </div></div>
       <div class="mk-about">
-        <p>The box grows with what you type (up to 40% of the screen). Enter sends on desktop and adds a line on a phone; Shift+Enter always adds a line; a half-composed word (IME) never sends. Send becomes Stop while a turn runs, and a failed send puts your words back. Try it: send something, then Stop.</p>
+        <p>The box grows with what you type (up to 40% of the screen). Enter sends on desktop and adds a line on a phone; Shift+Enter always adds a line; a half-composed word (IME) never sends. Send becomes Stop while a turn runs, and a failed send puts your words back. It also continues a numbered list, keeps a draft per chat, and pads for a phone's home bar. Try it: send something, then Stop. (This specimen copies the look; the code is <code>mountComposer</code>.)</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/composer.js</code> · <code>.cui-composer</code></p>
       </div>
     </div>
@@ -921,7 +921,7 @@ row.innerHTML =
   let running = null, secs = 0, last = '';
   const fit = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight + ta.offsetHeight - ta.clientHeight}px`; };
   const paint = () => {
-    send.textContent = running ? '■ Stop' : 'Send';
+    send.textContent = running ? 'Stop' : 'Send';
     send.classList.toggle('cui-primary', !running);
     send.classList.toggle('cui-danger', !!running);
     send.disabled = !running && !ta.value.trim();

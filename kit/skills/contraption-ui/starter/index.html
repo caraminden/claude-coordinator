@@ -1,7 +1,7 @@
 <!doctype html>
 <!-- A contraption's page on Citadel UI (citadel:contraption-ui). Copy this folder as your app's web
      root and replace the sample content. Citadel's files come from /apps/_citadel/ on the same origin.
-     The chat kit and composer (ui/chat.js, ui/composer.js) join this page once Citadel ships them. -->
+     The chat kit (ui/chat.js) joins this page once Citadel ships it. -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -22,10 +22,10 @@
   <main id="main">
     <header class="bar">
       <h1>My app</h1>
-      <button class="cui-btn cui-primary" id="ask" type="button">Ask</button>
     </header>
     <div class="cui-notice" role="status" id="notice" hidden></div>
     <article class="reply" id="reply"></article>
+    <div class="compose" id="compose"></div>
   </main>
 </body>
 </html>

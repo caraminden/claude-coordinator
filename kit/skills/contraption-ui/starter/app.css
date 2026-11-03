@@ -18,6 +18,8 @@ main { flex: 1; min-width: 0; max-width: 60rem; padding: var(--citadel-space-4);
   margin-top: var(--citadel-space-3); padding: var(--citadel-space-3) var(--citadel-space-4);
   background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-lg);
 }
+/* The composer stays at the bottom of the page as the reply grows. */
+.compose { position: sticky; bottom: 0; padding: var(--citadel-space-3) 0; background: var(--citadel-bg); }
 /* On a phone the sections are a drawer (drawers.js hides and slides them); the page takes the width. */
 @media (max-width: 800px) {
   main { padding: var(--citadel-space-3); }

@@ -20,11 +20,19 @@ const NARROW = '(max-width: 800px)';
 const narrow = () => matchMedia(NARROW).matches;
 
 const CSS = `
-:where(.cui-composer) { padding-bottom: env(safe-area-inset-bottom, 0px); }
-:where(.cui-composer-input) { resize: none; overflow-y: auto; max-height: 40vh; }
-:where(.cui-composer-row) { display: flex; align-items: center; gap: var(--citadel-space-2); margin-top: var(--citadel-space-2); }
-:where(.cui-composer-send) { margin-left: auto; min-height: var(--citadel-control-h); }
-:where(.cui-composer-error) { margin-bottom: var(--citadel-space-2); }
+:where(.cui-composer) {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--citadel-space-2);
+  margin: 0 0 env(safe-area-inset-bottom, 0px); padding: var(--citadel-space-2);
+  background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-lg);
+}
+:where(.cui-composer:has(.cui-composer-input:focus-visible)) { outline: 2px solid var(--citadel-focus); outline-offset: 2px; }
+:where(.cui-composer-error) { flex-basis: 100%; }
+/* No border of its own, so one line is control-h tall, level with Send. */
+:where(.cui-composer-input) {
+  flex: 1; min-width: 0; border: 0; background: transparent; outline: none;
+  resize: none; overflow-y: auto; max-height: 40vh; padding: calc((var(--citadel-control-h) - 1.25em) / 2) var(--citadel-space-1);
+}
+:where(.cui-composer-row) { display: flex; align-items: center; gap: var(--citadel-space-2); }
 @media (max-width: 800px) { :where(.cui-composer-input) { font-size: 16px; } }
 `;
 let sheet = false;
@@ -127,13 +135,14 @@ const make = (tag, props, ...children) => {
 };
 
 /**
- * A message box appended to `el`: a form.cui-composer holding a textarea and a row with Send. Returns
+ * A message box appended to `el`: a form.cui-composer holding a one-line textarea and, beside it, a row
+ * with Send. Returns
  * its controls; see composer.d.ts for the options and what each does.
  */
 export function mountComposer(el, opts) {
   adoptStyles();
   const { draftKey } = opts;
-  const textarea = make('textarea', { className: 'cui-input cui-composer-input', placeholder: opts.placeholder ?? '' });
+  const textarea = make('textarea', { className: 'cui-input cui-composer-input', rows: 1, placeholder: opts.placeholder ?? '' });
   // Without a label the placeholder names the box, and follows it when the app changes it.
   if (opts.label || !opts.placeholder) textarea.setAttribute('aria-label', opts.label || 'Message');
   const sendButton = make('button', { type: 'submit', className: 'cui-btn cui-primary cui-composer-send' }, 'Send');

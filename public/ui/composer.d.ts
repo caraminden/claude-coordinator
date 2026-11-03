@@ -31,7 +31,7 @@ export interface Composer {
   form: HTMLFormElement;
   /** textarea.cui-input.cui-composer-input. */
   textarea: HTMLTextAreaElement;
-  /** div.cui-composer-row under the box: Send sits at its end; put your own buttons before it. */
+  /** div.cui-composer-row beside the box, holding Send: put your own buttons before it. */
   row: HTMLDivElement;
   /** Send (button.cui-btn.cui-primary.cui-composer-send), or Stop while busy with `stop`. */
   sendButton: HTMLButtonElement;

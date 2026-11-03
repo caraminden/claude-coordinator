@@ -78,8 +78,11 @@ export function composer(chatId, ticket) {
     onError: (ex) => alertNote(ex.message),
   });
   const { form, textarea, row, sendButton: sendBtn } = box;
-  form.classList.add('composer');
-  row.classList.add('row');
+  // Citadel keeps its own look (style.css .composer); the cui-* look is the apps'. Two rows tall when empty, as before.
+  form.className = 'composer';
+  row.className = 'row';
+  textarea.className = '';
+  textarea.rows = 2;
   textarea.setAttribute('data-draft', '');
   const menu = h('div', { class: 'send-menu', role: 'menu', hidden: true },
     h('button', { type: 'button', class: 'secondary', role: 'menuitem', onclick: () => {

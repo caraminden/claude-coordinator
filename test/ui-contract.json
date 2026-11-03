@@ -36,8 +36,7 @@
       "cui-composer",
       "cui-composer-error",
       "cui-composer-input",
-      "cui-composer-row",
-      "cui-composer-send"
+      "cui-composer-row"
     ],
     "markdown.js": [
       "cui-al-c",

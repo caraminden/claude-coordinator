@@ -128,8 +128,11 @@ the step in hand while running ("**Moving “Dry cleaning”…** · step 2") an
 · 1 Grunt · 1 failed"), and opens on a tap; Grunts (Agent calls) show as their own rows holding their
 calls, with a clock, while they run; `canceled` shows "Stopped.", any other error a danger notice.
 It updates in place (text through `updateMarkdown`), so a selection, focus and an open row survive
-streaming; it follows new output only within 24 px of the bottom, else shows "Latest ↓"; the
-working line is its only live region, so a screen reader hears progress without the whole log.
+streaming; it stays at the end while the log grows (a `block` card filling in later) or its box
+shrinks (an undo bar, a phone keyboard), and only a person scrolling up (wheel, touch, keys, the
+scrollbar) lets go of it, which shows "Latest ↓"; scrolling back to within 24 px of the end follows
+again. So don't add your own ResizeObserver or scroll pinning around it. The working line is its
+only live region, so a screen reader hears progress without the whole log.
 
 - `block(name, input, result)`: draw a top-level call as your own card (Theory of Crafting's
   viability card). Called when the call starts (`result` undefined) and once when its result comes;

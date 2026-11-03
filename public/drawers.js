@@ -131,6 +131,7 @@ export function initDrawers({ left, right, main } = {}) {
     setProgress(0);
     drawer.width = el.getBoundingClientRect().width || window.innerWidth;
     watch.observe(document.body, { childList: true, subtree: true });
+    announce('citadel-drawer-open', side, el);
     return true;
   }
 
@@ -187,9 +188,14 @@ export function initDrawers({ left, right, main } = {}) {
       if (d.returnFocus?.isConnected && d.returnFocus !== document.body) d.returnFocus.focus({ preventScroll: true });
       else document.activeElement?.blur?.();
     }
+    announce('citadel-drawer-close', d.side, el);
   }
 
   const close = (opts) => drawer && settle(false, opts);
+  // On document, which outlives a drawer element a new view replaced: citadel-drawer-open as the element
+  // is pulled out (before it slides in, so a page can move its composer into it), citadel-drawer-close once
+  // it is back in the page. Always in pairs. Names stay literal at each call: the contract test reads them.
+  const announce = (name, side, el) => document.dispatchEvent(new CustomEvent(name, { detail: { side, el } }));
 
   /** Slide a drawer out by itself (a handle, or the page's own button); the switcher for a left edge with only the rail. */
   function open(side, returnFocus = document.activeElement) {

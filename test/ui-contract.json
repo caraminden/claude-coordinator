@@ -145,6 +145,12 @@
     "--citadel-warn",
     "--citadel-warn-tint"
   ],
+  "events": {
+    "drawers.js": [
+      "citadel-drawer-close",
+      "citadel-drawer-open"
+    ]
+  },
   "markdown": {
     "paragraphs and emphasis": "<p>One <strong>bold</strong>, one <em>em</em>, one <code>code</code>, one <del>gone</del>. Same paragraph.</p><p>Next.</p>",
     "chat keeps line breaks": "<p>one<br>two</p>",

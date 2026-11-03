@@ -113,11 +113,19 @@ function current() {
       const c = classes(cssOf(f));
       if (c.length) css[f] = c;
     }
+    // The events a module or script fires (#287): apps listen for them by name.
+    const events: Record<string, string[]> = {};
+    for (const [f, src] of [...modules.map((f) => [f, read(f)]), ...SCRIPTS.map((f) => [f, readFileSync(join(pub, f), 'utf8')])]) {
+      // An event's name is written out where it is fired: new CustomEvent('name') or drawers.js's announce('name').
+      const names = [...new Set([...src.matchAll(/(?:new CustomEvent|announce)\(\s*['"`]([\w-]+)['"`]/g)].map((m) => m[1]))].sort();
+      if (names.length) events[f] = names;
+    }
     const theme = [...new Set([...themeCss(readFileSync(join(import.meta.dirname, '..', 'public', 'style.css'), 'utf8')).matchAll(/(--citadel-[\w-]+):/g)].map((m) => m[1]))].sort();
     return {
       exports,
       css,
       theme,
+      events,
       markdown: Object.fromEntries(SAMPLES.map(([name, src, opts]) => [name, renderMarkdown(src, opts)])),
       markdownLine: Object.fromEntries(LINES.map(([name, src, opts]) => [name, markdownLine(src, opts)])),
       chat: Object.fromEntries(CHATS.map(([name, turns, opts]) => [name, renderChat(turns, opts)])),
@@ -138,12 +146,18 @@ test('each ui module\'s exports match its .d.ts', async () => {
   }
   for (const f of files.filter((f) => f.endsWith('.d.ts'))) assert.ok(modules.includes(f.replace(/\.d\.ts$/, '.js')), `${f} types a module that exists`);
   for (const f of SCRIPTS) assert.deepEqual(now.exports[f], declared(readFileSync(join(pub, f.replace(/\.js$/, '.d.ts')), 'utf8')), `public/${f}'s exports and its .d.ts`);
+  // Every event a file fires is typed in its .d.ts too.
+  for (const [f, names] of Object.entries(now.events)) {
+    const dts = readFileSync(join(SCRIPTS.includes(f) ? pub : ui, f.replace(/\.js$/, '.d.ts')), 'utf8');
+    for (const n of names) assert.match(dts, new RegExp(`['"]${n}['"]\\s*:`), `${f} fires ${n}; its .d.ts types it`);
+  }
 });
 
 test('exports, classes and theme names are the stored contract', () => {
   assert.deepEqual(now.exports, stored.exports, why);
   assert.deepEqual(now.css, stored.css, why);
   assert.deepEqual(now.theme, stored.theme, why);
+  assert.deepEqual(now.events, stored.events, why);
 });
 
 test('fixed markdown samples render to the stored HTML', () => {

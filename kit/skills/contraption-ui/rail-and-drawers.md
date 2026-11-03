@@ -90,6 +90,12 @@ const drawers = initDrawers({
   - Background: `--citadel-drawer-bg` (default `Canvas`), or your own `background`, padding and border on the element.
   - Handle colour: `--citadel-drawer-handle`.
   - Placement and size win over your rules (`!important`): the script sets `position: fixed`, the full height, z-index 30, the backdrop at 29 and the handles at 28. If you have a header above z-index 30, drop it while `html:has(.citadel-drawer)`. Don't put a drawer element inside something with `transform`, `filter` or `contain`, which would pin `position: fixed` to that box instead of the screen.
+- **Events, on `document`:** `citadel-drawer-open` as a drawer's element is pulled out of the page (before it slides in, and as soon as a swipe starts pulling), and `citadel-drawer-close` once it is back in the page. `detail` is `{ side: 'left' | 'right', el }`. They always come in pairs, a swipe that lets go included. Use them to move one composer between a desktop panel and a phone drawer:
+  ```js
+  document.addEventListener('citadel-drawer-open', (e) => { if (e.detail.side === 'right') acolyteDrawerSlot.append(composer); });
+  document.addEventListener('citadel-drawer-close', (e) => { if (e.detail.side === 'right') desktopSlot.append(composer); });
+  ```
+  The app switcher (rail.js) fires neither.
 - **Preact:** call `initDrawers` once in a `useEffect` after the elements mount, with refs' elements or finder functions, and `destroy()` in the cleanup. The script only adds and removes classes and attributes on your elements; it never moves them in the DOM.
 
 ## Not here yet (the rail)

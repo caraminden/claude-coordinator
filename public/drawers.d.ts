@@ -36,3 +36,18 @@ export interface Drawers {
  * where your CSS puts them.
  */
 export function initDrawers(opts?: { left?: DrawerSide; right?: DrawerSide; main?: Element | Iterable<Element | null> | (() => Element | Iterable<Element | null> | null) }): Drawers;
+
+/** What citadel-drawer-open and citadel-drawer-close carry: which drawer, and its element. */
+export interface DrawerEventDetail {
+  side: 'left' | 'right';
+  el: HTMLElement;
+}
+
+declare global {
+  interface DocumentEventMap {
+    /** On document, as a drawer's element is pulled out of the page (before it slides in, and when a swipe starts pulling). */
+    'citadel-drawer-open': CustomEvent<DrawerEventDetail>;
+    /** On document, once the drawer's element is back in the page (also after a swipe that let go of it). Always follows its open. */
+    'citadel-drawer-close': CustomEvent<DrawerEventDetail>;
+  }
+}

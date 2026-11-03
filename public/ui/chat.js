@@ -341,7 +341,7 @@ export function mountChat(el, opts = {}) {
     for (const c of nodes.flatMap((n) => (n.choices ? [...n.choices.children] : []))) if (m.running) c.disabled = true;
     clearInterval(tick);
     if (m.running) tick = setInterval(ticks, 1000);
-    if (follow) el.scrollTop = el.scrollHeight;
+    stick();
   }
   let gone = false; // destroyed: a late push (an SSE still open) draws nothing and starts no clock
   const schedule = () => gone || (frame ||= requestAnimationFrame(draw));
@@ -350,10 +350,36 @@ export function mountChat(el, opts = {}) {
     for (const t of el.querySelectorAll('.cui-time[data-since]')) t.textContent = duration(Date.now() - Number(t.dataset.since));
   };
 
+  // Following the end: only a person can let go of it, by scrolling up with a gesture. Content that
+  // grows (a card filling in), a box that shrinks (an undo bar, a phone keyboard) and the scroll events
+  // of the kit's own moves, however late, keep it at the end (#287).
+  let lastTop = 0;
+  let pressed = false; // a finger or pointer is down on the log (a drag, the scrollbar)
+  let personUntil = 0; // scrolls before this are a person's: just after a gesture, and a fling's tail
+  const PERSON_MS = 500;
+  const stick = () => {
+    if (follow) el.scrollTop = el.scrollHeight;
+  };
   const onScroll = () => {
-    follow = el.scrollTop + el.clientHeight >= el.scrollHeight - BOTTOM_SLACK;
+    const now = performance.now();
+    const byPerson = pressed || now < personUntil;
+    if (byPerson) personUntil = Math.max(personUntil, now + 150);
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - BOTTOM_SLACK) follow = true;
+    else if (follow && byPerson && el.scrollTop < lastTop) follow = false;
+    else stick();
+    lastTop = el.scrollTop;
     latest.hidden = follow;
   };
+  const gesture = (e) => {
+    if (e.type === 'touchstart' || e.type === 'pointerdown') pressed = true;
+    personUntil = performance.now() + PERSON_MS;
+  };
+  const release = () => {
+    if (!pressed) return;
+    pressed = false;
+    personUntil = performance.now() + PERSON_MS; // a fling keeps going after the finger lifts
+  };
+  const sized = typeof ResizeObserver === 'function' ? new ResizeObserver(stick) : null;
   const onClick = (e) => {
     const head = e.target.closest('.cui-run-head');
     if (head && el.contains(head)) {
@@ -375,6 +401,10 @@ export function mountChat(el, opts = {}) {
     latest.hidden = true;
   };
   el.addEventListener('scroll', onScroll, { passive: true });
+  for (const type of ['wheel', 'touchstart', 'touchmove', 'pointerdown', 'keydown']) el.addEventListener(type, gesture, { passive: true });
+  for (const type of ['touchend', 'touchcancel', 'pointerup', 'pointercancel']) document.addEventListener(type, release, { passive: true });
+  sized?.observe(el);
+  sized?.observe(log);
   el.addEventListener('click', onClick);
   latest.addEventListener('click', toLatest);
 
@@ -424,7 +454,7 @@ export function mountChat(el, opts = {}) {
       n.choices = fromHtml(`<div class="cui-choices">${list.map((c) => `<button type="button" class="cui-choice${c.recommended ? ' cui-rec' : ''}" data-say="${esc(c.message ?? c.label)}"${c.message && c.message !== c.label ? ` title="${esc(c.message)}"` : ''}>${esc(c.label)}</button>`).join('')}</div>`);
       n.el.append(n.choices);
       if (chatModel(turns).running) for (const c of n.choices.children) c.disabled = true;
-      if (follow) el.scrollTop = el.scrollHeight;
+      stick();
     },
     destroy() {
       gone = true;
@@ -432,6 +462,9 @@ export function mountChat(el, opts = {}) {
       cancelAnimationFrame(frame);
       clearInterval(tick);
       el.removeEventListener('scroll', onScroll);
+      for (const type of ['wheel', 'touchstart', 'touchmove', 'pointerdown', 'keydown']) el.removeEventListener(type, gesture);
+      for (const type of ['touchend', 'touchcancel', 'pointerup', 'pointercancel']) document.removeEventListener(type, release);
+      sized?.disconnect();
       el.removeEventListener('click', onClick);
       el.replaceChildren();
       el.classList.remove('cui-chat');

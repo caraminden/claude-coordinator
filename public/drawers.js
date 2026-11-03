@@ -168,6 +168,9 @@ export function initDrawers({ left, right, main } = {}) {
   }
 
   function unmount(d) {
+    // A second close while the first still slides (a link, then its hashchange) ends in here twice.
+    if (d.back) return;
+    d.back = true;
     const { el } = d;
     keepPlace(() => {
       el.classList.remove('citadel-drawer', 'citadel-drawer-left', 'citadel-drawer-right', 'citadel-drawer-settling');

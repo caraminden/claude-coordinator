@@ -401,7 +401,9 @@ export function mountChat(el, opts = {}) {
     latest.hidden = true;
   };
   el.addEventListener('scroll', onScroll, { passive: true });
-  for (const type of ['wheel', 'touchstart', 'touchmove', 'pointerdown', 'keydown']) el.addEventListener(type, gesture, { passive: true });
+  for (const type of ['wheel', 'touchstart', 'touchmove', 'pointerdown']) el.addEventListener(type, gesture, { passive: true });
+  // Keys scroll the log with focus on the page's body (after a click in it), so they're heard on document.
+  document.addEventListener('keydown', gesture, { passive: true });
   for (const type of ['touchend', 'touchcancel', 'pointerup', 'pointercancel']) document.addEventListener(type, release, { passive: true });
   sized?.observe(el);
   sized?.observe(log);
@@ -462,7 +464,8 @@ export function mountChat(el, opts = {}) {
       cancelAnimationFrame(frame);
       clearInterval(tick);
       el.removeEventListener('scroll', onScroll);
-      for (const type of ['wheel', 'touchstart', 'touchmove', 'pointerdown', 'keydown']) el.removeEventListener(type, gesture);
+      for (const type of ['wheel', 'touchstart', 'touchmove', 'pointerdown']) el.removeEventListener(type, gesture);
+      document.removeEventListener('keydown', gesture);
       for (const type of ['touchend', 'touchcancel', 'pointerup', 'pointercancel']) document.removeEventListener(type, release);
       sized?.disconnect();
       el.removeEventListener('click', onClick);

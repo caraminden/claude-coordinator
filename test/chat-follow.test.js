@@ -39,7 +39,7 @@ class Scroller extends El {
   get atEnd() { return this.top === this.scrollHeight - this.clientHeight; }
   /** A person scrolling to `top`: their gesture first, then the scroll. */
   scrollBy(dy, gesture = { type: 'wheel', deltaY: dy }) {
-    this.dispatch(gesture.type, gesture);
+    (gesture.type === 'keydown' ? doc : this).dispatch(gesture.type, gesture); // keys reach document, focus being on body
     this.scrollTop = this.top + dy;
     flush();
   }
@@ -135,6 +135,11 @@ test('only a person\'s gesture lets go of the end; coming back to it follows aga
   assert.equal(box.top, 400);
   // Back at the end by hand, it follows again.
   clock += 5000;
+  box.scrollBy(800, { type: 'keydown', key: 'End' });
+  // PageUp, heard on document, lets go.
+  clock += 5000;
+  box.scrollBy(-300, { type: 'keydown', key: 'PageUp' });
+  assert.equal(latest.hidden, false);
   box.scrollBy(800, { type: 'keydown', key: 'End' });
   assert.equal(latest.hidden, true);
   box.content = 1800;

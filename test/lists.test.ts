@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { continueList, listEnter } from '../public/lists.js';
+import { continueList, listEnter } from '../public/ui/composer.js';
 
 // Applies Enter with the caret at `|`, the way continueList does.
 const enter = (s: string) => {

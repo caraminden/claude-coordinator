@@ -6,6 +6,12 @@
       "renderMarkdown",
       "slug",
       "updateMarkdown"
+    ],
+    "composer.js": [
+      "continueList",
+      "fitHeight",
+      "listEnter",
+      "mountComposer"
     ]
   },
   "css": {
@@ -25,6 +31,13 @@
       "cui-spin",
       "cui-time",
       "cui-working"
+    ],
+    "composer.js": [
+      "cui-composer",
+      "cui-composer-error",
+      "cui-composer-input",
+      "cui-composer-row",
+      "cui-composer-send"
     ],
     "markdown.js": [
       "cui-al-c",

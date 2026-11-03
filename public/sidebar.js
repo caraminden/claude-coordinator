@@ -9,7 +9,7 @@ import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { refreshSchemeCounts, renderInbox, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
-import { continueList } from './lists.js';
+import { continueList } from './ui/composer.js';
 
 // ---------- projects ----------
 

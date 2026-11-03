@@ -5,7 +5,7 @@ import { attachBridge } from './bridge-host.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { showProject } from './project.js';
 import { replaceHash } from './navstack.js';
-import { continueList } from './lists.js';
+import { continueList } from './ui/composer.js';
 
 /** A file a thread linked in its reply, shown full screen over its chat, which stays beside it. */
 export async function showFile(ticketId, path) {

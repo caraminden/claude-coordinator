@@ -1,7 +1,9 @@
-// The message box under a chat: drafts, pasted images, attached files, model and effort.
+// The message box under a chat, on Citadel UI's composer (public/ui/composer.js: autogrow, Enter rules,
+// IME guard, list continuation, the text back on a failed send, the text draft). Citadel's own around it:
+// pasted and dropped files with their drafts, the model and effort pickers, and steer or queue mid-turn.
 import { account, api, catchUpEvents, formatSize, h, isCoordinator, me, reloadWhenIdle, scrollToBottom, sending, setSending, uploadUrl, view } from './core.js';
 import { base64Url, renderTicketHead, renderTyping, userBubble } from './thread.js';
-import { continueList } from './lists.js';
+import { mountComposer } from './ui/composer.js';
 
 // ---------- drafts ----------
 
@@ -19,18 +21,8 @@ export function saveDraft(key, value) {
   } catch {}
 }
 
-/** Grow (or shrink) a message box to fit its text; CSS min-height and max-height bound it. */
-export function fitHeight(box) {
-  // Collapsing to 'auto' can shorten the page for a moment and move the scroll: put it back after,
-  // and keep a chat that was at its end there, so the growing box doesn't cover the last message.
-  const scrolled = [document.scrollingElement, box.closest('.chat')].filter(Boolean)
-    .map((el) => [el, el.scrollTop, el.scrollTop >= el.scrollHeight - el.clientHeight - 2]);
-  box.style.height = 'auto';
-  // Not laid out (a folded panel, or a phone's drawer still tucked away): keep the CSS height.
-  if (!box.scrollHeight) box.style.height = '';
-  else box.style.height = `${box.scrollHeight + box.offsetHeight - box.clientHeight}px`;
-  for (const [el, top, atEnd] of scrolled) el.scrollTop = atEnd ? el.scrollHeight : top;
-}
+// Shared with every app (public/ui/composer.js); the new-minion box uses it too.
+export { fitHeight } from './ui/composer.js';
 
 let draftDb = null;
 function draftStore(mode, fn) {
@@ -62,26 +54,42 @@ export function composerPlaceholder(ticket) {
 
 /** The message box under a chat: text, pasted images, model and effort, and Send. */
 export function composer(chatId, ticket) {
-  const textarea = h('textarea', {
-    placeholder: composerPlaceholder(ticket),
-    'data-draft': true,
-  });
-  const draftKey = `cc-draft:${chatId}`;
-  textarea.value = loadDraft(draftKey) ?? '';
-  const fit = () => fitHeight(textarea);
-  requestAnimationFrame(fit);
-  textarea.addEventListener('input', () => {
-    fit();
-    saveDraft(draftKey, textarea.value);
-  });
-  const sendBtn = h('button', { type: 'submit' }, 'Send');
+  const attachments = chatAttachments(chatId);
   // Mid-turn, Send steers the running turn; the ▾ (shown only then, style.css) offers queueing instead.
+  // The menu sets `after` around its submit, which calls send() at once (ui/composer.js), so it reads it there.
   let after = false;
+  const box = mountComposer(document.createDocumentFragment(), {
+    placeholder: composerPlaceholder(ticket),
+    draftKey: `cc-draft:${chatId}`,
+    canSend: (text) => {
+      if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.'), false;
+      if (attachments.uploading) return alertNote('Still uploading a file; send once it shows its size.'), false;
+      return !!text || attachments.items.length > 0;
+    },
+    send: (text) => {
+      const sent = attachments.items.slice();
+      attachments.remove(sent);
+      return send(text, sent, after).catch((ex) => {
+        // Not sent: the core puts the text back; the attachments come back here.
+        attachments.restore([...sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data })), ...sent.filter((i) => i.upload).map(({ upload }) => ({ upload }))]);
+        throw ex;
+      });
+    },
+    onError: (ex) => alertNote(ex.message),
+  });
+  const { form, textarea, row, sendButton: sendBtn } = box;
+  form.classList.add('composer');
+  row.classList.add('row');
+  textarea.setAttribute('data-draft', '');
   const menu = h('div', { class: 'send-menu', role: 'menu', hidden: true },
     h('button', { type: 'button', class: 'secondary', role: 'menuitem', onclick: () => {
       closeMenu();
       after = true;
-      form.requestSubmit();
+      try {
+        form.requestSubmit();
+      } finally {
+        after = false;
+      }
     } }, 'Send after this turn'));
   const moreBtn = h('button', { type: 'button', class: 'more', title: 'More ways to send', 'aria-label': 'More ways to send', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
     onclick: () => (menu.hidden ? openMenu() : closeMenu()) }, '▾');
@@ -102,22 +110,21 @@ export function composer(chatId, ticket) {
       moreBtn.focus();
     }
   });
-  const attachments = chatAttachments(chatId);
   // No accept filter, so a phone offers its files as well as the photo library.
   const picker = h('input', { type: 'file', multiple: true, hidden: true });
   picker.addEventListener('change', () => {
     attachments.add(picker.files);
     picker.value = '';
   });
-  const form = h('form', { class: 'composer' }, attachments.el,
-    account && !account.turns && h('p', { class: 'muted small composer-note' },
-      'Your messages don\'t start or steer turns yet: they wait here, unseen by Claude, until you can link your own Claude account.'),
-    textarea, picker,
-    h('div', { class: 'row' },
-      h('button', { type: 'button', class: 'secondary small add-image', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() },
-        h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach')),
-      h('span', { class: 'spacer' }),
-      modelPicker(chatId), sendGroup));
+  textarea.before(attachments.el,
+    account && !account.turns ? h('p', { class: 'muted small composer-note' },
+      'Your messages don\'t start or steer turns yet: they wait here, unseen by Claude, until you can link your own Claude account.') : '');
+  textarea.after(picker);
+  row.replaceChildren(
+    h('button', { type: 'button', class: 'secondary small add-image', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() },
+      h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach')),
+    h('span', { class: 'spacer' }),
+    modelPicker(chatId), sendGroup);
   textarea.addEventListener('paste', (e) => {
     const files = [...(e.clipboardData?.files ?? [])];
     if (!files.length) return;
@@ -132,37 +139,6 @@ export function composer(chatId, ticket) {
     if (!files.length) return;
     e.preventDefault();
     attachments.add(files);
-  });
-  textarea.addEventListener('keydown', (e) => {
-    if (continueList(textarea, e, matchMedia('(max-width: 800px)').matches)) return;
-    // Leave Enter alone while an IME is composing text, or it would send half a word.
-    // On a phone Enter adds a line; the Send button sends.
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(max-width: 800px)').matches) {
-      e.preventDefault();
-      form.requestSubmit();
-    }
-  });
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const queue = after;
-    after = false;
-    const text = textarea.value.trim();
-    if (attachments.busy) return alertNote('Still preparing an image; try again in a moment.');
-    if (attachments.uploading) return alertNote('Still uploading a file; send once it shows its size.');
-    if (!text && !attachments.items.length) return;
-    const sent = attachments.items.slice();
-    textarea.value = '';
-    fit();
-    saveDraft(draftKey, '');
-    attachments.remove(sent);
-    send(text, sent, queue).catch((ex) => {
-      // Not sent: put it back in the composer.
-      textarea.value = textarea.value.trim() ? `${text}\n${textarea.value}` : text;
-      fit();
-      saveDraft(draftKey, textarea.value);
-      attachments.restore([...sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data })), ...sent.filter((i) => i.upload).map(({ upload }) => ({ upload }))]);
-      alertNote(ex.message);
-    });
   });
   /** Send a message, showing it straight away; on failure it comes back out of the chat and the promise rejects. */
   const send = async (text, sent = [], queue = false) => {
@@ -210,9 +186,7 @@ export function composer(chatId, ticket) {
   /** A queued message taken back to edit (thread.js): its text goes in ahead of any draft, its attachments with it. */
   form.editBack = (text, saved = []) => {
     const draft = textarea.value.trim();
-    textarea.value = draft ? `${text}\n${draft}` : text;
-    fit();
-    saveDraft(draftKey, textarea.value);
+    box.value = draft ? `${text}\n${draft}` : text;
     attachments.restore(saved);
     textarea.focus();
     textarea.setSelectionRange(text.length, text.length);

@@ -1,6 +1,6 @@
 # The app rail and phone drawers
 
-Reference for `citadel:contraption-ui`: Citadel's app rail (`/apps/_citadel/rail.js`) and phone drawers (`/apps/_citadel/drawers.js`) in an app's page. Rail: Citadel #238, 2026-11-01. Phone drawers: Citadel #245, 2026-11-01. Moved here from the shared `specs/contraptions/app-rail.md` (#283), so every scheme can read it.
+Reference for `citadel:contraption-ui`: Citadel's app rail (`/apps/_citadel/rail.js`) and phone drawers (`/apps/_citadel/drawers.js`) in an app's page. Rail: Citadel #238, 2026-11-01. Phone drawers: Citadel #245, 2026-11-01. Moved here from the shared `specs/contraptions/app-rail.md` (#283), so every scheme can read it. Types: `/apps/_citadel/rail.d.ts` and `/apps/_citadel/drawers.d.ts`, beside the scripts.
 
 The rail is the icon column down the left edge that lists Citadel and the contraptions enabled for the person (Cara, 2026-11-01: "B · An app rail on the left edge", "Only shows if you have an app enabled"). Citadel draws it on its own pages; on yours, one script Citadel serves draws it.
 

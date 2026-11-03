@@ -13,8 +13,9 @@
 //
 // What it does: grows with its text up to 40% of the screen; Enter sends on desktop and adds a line on
 // a phone (Shift+Enter always adds one); never sends half an IME word; continues a numbered list; puts
-// the text back when a send fails; Send becomes Stop while busy; 16px text on phones so iOS doesn't
-// zoom; optional drafts in localStorage. Buttons and the box take base.css's cui-* classes.
+// the text back when a send fails; Send becomes Stop while busy (with whileBusy 'send', Stop shows
+// beside Send, which keeps sending: for a server that queues a message sent mid-turn, as Citadel's does);
+// 16px text on phones so iOS doesn't zoom; optional drafts in localStorage. Buttons and the box take base.css's cui-* classes.
 
 const NARROW = '(max-width: 800px)';
 const narrow = () => matchMedia(NARROW).matches;
@@ -149,13 +150,17 @@ export function mountComposer(el, opts) {
   const error = make('div', { className: 'cui-notice cui-composer-error', hidden: true });
   error.dataset.tone = 'danger';
   error.setAttribute('role', 'alert');
-  const row = make('div', { className: 'cui-composer-row' }, sendButton);
+  // whileBusy 'send': Stop is its own button, shown beside Send while busy, and Send keeps sending.
+  const stopBeside = !!opts.stop && opts.whileBusy === 'send';
+  const stopButton = stopBeside ? make('button', { type: 'button', className: 'cui-btn cui-danger cui-composer-stop', hidden: true }, 'Stop') : null;
+  stopButton?.addEventListener('click', () => opts.stop());
+  const row = make('div', { className: 'cui-composer-row' }, ...(stopButton ? [stopButton] : []), sendButton);
   const form = make('form', { className: 'cui-composer' }, error, textarea, row);
   el.append(form);
 
   let busy = false;
   let sending = 0;
-  const stopping = () => busy && !!opts.stop;
+  const stopping = () => busy && !!opts.stop && !stopBeside;
   const render = () => {
     const stop = stopping();
     sendButton.textContent = stop ? 'Stop' : 'Send';
@@ -164,6 +169,7 @@ export function mountComposer(el, opts) {
     // While a message is on its way Send waits (a second tap would find the box empty anyway); Stop never does.
     sendButton.disabled = !stop && sending > 0;
     form.toggleAttribute('data-busy', busy);
+    if (stopButton) stopButton.hidden = !busy;
   };
   sendButton.addEventListener('click', (e) => {
     if (!stopping()) return;
@@ -229,7 +235,7 @@ export function mountComposer(el, opts) {
   render();
 
   return {
-    form, textarea, row, sendButton, fit,
+    form, textarea, row, sendButton, stopButton, fit,
     busy(on) {
       busy = !!on;
       render();

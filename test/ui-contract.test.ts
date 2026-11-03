@@ -18,6 +18,10 @@ const contractFile = join(import.meta.dirname, 'ui-contract.json');
 const files = readdirSync(ui).sort();
 const modules = files.filter((f) => f.endsWith('.js'));
 const read = (f: string) => readFileSync(join(ui, f), 'utf8');
+// The app rail and phone drawers live in public/ (Citadel's own pages import them), served to apps as
+// /apps/_citadel/rail.js and drawers.js with their .d.ts beside them (#286): their exports are contract too.
+const pub = join(import.meta.dirname, '..', 'public');
+const SCRIPTS = ['drawers.js', 'rail.js'];
 
 /** The names a .d.ts exports as values (functions, consts, classes), not its types. */
 const declared = (dts: string) => [...dts.matchAll(/^export\s+(?:declare\s+)?(?:function|const|let|class)\s+([\w$]+)/gm)].map((m) => m[1]).sort();
@@ -92,6 +96,9 @@ const CHATS: [string, object[], object][] = [
   ['a recorded turn, folded', [{ ask: 'Move my errands', events: RECORDED }], { stepLabel, now: at(50) }],
   ['a recorded turn, its run open', [{ ask: 'Move my errands', events: RECORDED }], { stepLabel, now: at(50), open: ['0.1'] }],
   ['the same turn mid-flight', [{ ask: 'Move my errands', events: RECORDED.slice(0, 9) }], { stepLabel, now: at(7) }],
+  // An app's markdown hooks (#286): Peek Auras draws key combos as <kbd>; its link hook replaces the kit's; breaks stay.
+  ['a reply with the app\'s markdown hooks', [{ ask: 'Which keys?', events: [ev('text', { delta: 'Press Ctrl+Alt+P\nthen [the notes](notes.md)', parent: null, message: 'm1' }), ev('end', {})] }],
+    { markdown: { text: (html: string) => html.replace(/\b(?:Ctrl|Alt|Shift)\+[\w+]+/g, (k) => `<kbd>${k}</kbd>`), link: (href: string, html: string) => `<a class="doc" href="#${href}">${html}</a>` }, now: at(0) }],
 ];
 
 function current() {
@@ -99,7 +106,9 @@ function current() {
   const css: Record<string, string[]> = {};
   return Promise.all(modules.map(async (f) => {
     exports[f] = Object.keys(await import(join(ui, f))).sort();
-  })).then(() => {
+  }).concat(SCRIPTS.map(async (f) => {
+    exports[f] = Object.keys(await import(join(pub, f))).sort();
+  }))).then(() => {
     for (const f of files.filter((f) => /\.(js|css)$/.test(f))) {
       const c = classes(cssOf(f));
       if (c.length) css[f] = c;
@@ -128,6 +137,7 @@ test('each ui module\'s exports match its .d.ts', async () => {
     assert.deepEqual(now.exports[f], declared(read(dts)), `public/ui/${f}'s exports and ${dts}`);
   }
   for (const f of files.filter((f) => f.endsWith('.d.ts'))) assert.ok(modules.includes(f.replace(/\.d\.ts$/, '.js')), `${f} types a module that exists`);
+  for (const f of SCRIPTS) assert.deepEqual(now.exports[f], declared(readFileSync(join(pub, f.replace(/\.js$/, '.d.ts')), 'utf8')), `public/${f}'s exports and its .d.ts`);
 });
 
 test('exports, classes and theme names are the stored contract', () => {

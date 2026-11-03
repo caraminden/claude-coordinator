@@ -30,7 +30,7 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | `theme.css` | Every token below as `--citadel-*`, light and dark | `<link rel="stylesheet">`, first |
 | `ui/base.css` | Buttons, inputs, chips, notices, spinner, focus ring, as `cui-*` classes | `<link rel="stylesheet">` after theme.css |
 | `ui/markdown.js` (+ `ui/markdown.d.ts`) | An agent's markdown as safe HTML, streaming-aware | ES module import |
-| `rail.js`, `drawers.js` | The app rail; phone drawers (`NARROW`, the 800 px breakpoint) | See [rail-and-drawers.md](rail-and-drawers.md) |
+| `rail.js`, `drawers.js` (+ `rail.d.ts`, `drawers.d.ts`) | The app rail; phone drawers (`NARROW`, the 800 px breakpoint) | See [rail-and-drawers.md](rail-and-drawers.md) |
 | `ui/composer.js` (+ `ui/composer.d.ts`) | The message box under a chat | ES module import; needs base.css |
 | `ui/chat.js` (+ `ui/chat.d.ts`) | The chat log: your messages, replies, tool runs, Grunt rows, reply chips, the working line | ES module import; needs base.css |
 
@@ -77,6 +77,7 @@ const box = mountComposer(document.getElementById('compose'), {
   draftKey: `draft:${chatId}`,           // optional: unsent text survives a reload, per chat
   send: (text) => postMessage(text),     // resolve once accepted; reject and the text goes back in the box
   stop: () => cancelTurn(),              // optional: Send shows as Stop while busy
+  whileBusy: 'send',                     // optional: keep Send, with Stop beside it, while busy
 });
 box.busy(true);   // a turn is running (Send → Stop); box.busy(false) when it ends
 ```
@@ -86,6 +87,10 @@ line at 800 px and under (Shift+Enter always adds one, Cara's pick); a half-comp
 sends; a `1.` line continues the list; a failed send puts the words back and shows the error; Send is
 disabled while a message is on its way; 16 px on phones so iOS doesn't zoom; a margin for the home bar.
 
+- `whileBusy` (with `stop`): `'stop'` (default) turns Send into Stop while busy, so nothing sends
+  mid-turn; `'send'` keeps Send (and Enter) sending and shows Stop (`box.stopButton`,
+  `button.cui-btn.cui-danger.cui-composer-stop`) before it in the row while busy. Use `'send'` when
+  your server queues or steers a message sent mid-turn, as Citadel's own chat does.
 - More options: `label` (the box's accessible name), `canSend(text)` (refuse, or allow an empty text
   when something else rides along), `onError(err)` (show a failed send your own way).
 - It returns `form`, `textarea`, `row` and `sendButton` too: put your own buttons (attach, a model
@@ -103,6 +108,7 @@ const chat = mountChat(document.getElementById('chat'), {   // the element becom
   empty: 'Ask the Acolyte to do anything in Mandate.',
   stepLabel: (name, input) => (name === 'mcp__mandate__move_todo' ? `Moving “${input.title}”` : undefined),
   onReply: (message) => { chat.ask(message); post(message); },  // a reply chip was tapped
+  markdown: { text: (html) => html.replace(/\b(?:Ctrl|Alt|Shift)\+[\w+]+/g, (k) => `<kbd>${k}</kbd>`) },  // optional
 });
 chat.load(history);                 // [{ ask, events: [{ type, data, at }] }], e.g. from your own store
 chat.ask(text);                     // the person sent something: their message, then "Thinking…"
@@ -128,6 +134,11 @@ working line is its only live region, so a screen reader hears progress without 
 - `block(name, input, result)`: draw a top-level call as your own card (Theory of Crafting's
   viability card). Called when the call starts (`result` undefined) and once when its result comes;
   return an element for a card, null to leave it a step. Agent calls are always Grunt rows.
+- `markdown: { text, link, image }`: your markdown hooks (as in Markdown above) for every reply,
+  history included, and for `renderChat`. Each one you give replaces the kit's for that hook only; line
+  breaks and streaming stay the kit's. The kit leaves a link to your own paths (`/apps/<you>/...`) an
+  inert span: a `link` hook returning a real `<a href>` (escape the href, no `target="_top"`) makes it
+  open on a click or Enter.
 - Stop is the composer's: on Stop, call the turn API's cancel; the `error` event (`canceled`) that
   follows ends the turn in the chat.
 - `chatModel(turns)` is the same reading as plain data, and `renderChat(turns)` as an HTML string

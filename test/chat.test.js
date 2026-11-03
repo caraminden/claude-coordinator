@@ -92,6 +92,18 @@ test('renderChat: the folded row reads the step in hand while running and a coun
   assert.match(renderChat([{ events: [tool('a', 'list_todos'), result('a')] }], { open: ['0.0'] }), /<span class="cui-step-label">List todos<\/span>/);
 });
 
+test('renderChat: the app\'s markdown hooks reach every reply; the kit keeps breaks, streaming and the hooks it wasn\'t given', () => {
+  const markdown = { text: (html) => html.replace(/\b(?:Ctrl|Alt)\+[\w+]+/g, (k) => `<kbd>${k}</kbd>`), breaks: false, streaming: false };
+  const done = renderChat([{ events: [text('Press Ctrl+Alt+P\nthen [docs](https://x.y)'), { type: 'end', data: {} }] }], { markdown });
+  assert.match(done, /Press <kbd>Ctrl\+Alt\+P<\/kbd><br>then <a /, 'the text hook runs; line breaks stay');
+  assert.match(done, /<a [^>]*href="https:\/\/x\.y"[^>]*target="_blank"/, 'no link hook given: the kit\'s link handling stays');
+  const link = (href, html) => `<a class="mine" href="${href}">${html}</a>`;
+  // An app path the kit would leave inert (Theory of Crafting's /apps/.../api/... links) becomes a real link.
+  assert.match(renderChat([{ events: [text('[the build](/apps/toc/api/builds/7)')] }]), /<span class="cui-link"[^>]*>the build<\/span>/);
+  const streaming = renderChat([{ events: [text('Use **Ctrl+K and [the build](/apps/toc/api/builds/7)')] }], { markdown: { ...markdown, link } });
+  assert.match(streaming, /Use <strong><kbd>Ctrl\+K<\/kbd> and <a class="mine" href="\/apps\/toc\/api\/builds\/7">the build<\/a><\/strong>/, 'still streaming: the half bold closes; the link hook replaces the kit\'s');
+});
+
 test('renderChat: a running Grunt shows under its row with its steps and a ticking clock', () => {
   const html = renderChat([{ events: [tool('g', 'Agent', { description: 'Check' }, null, 1000), tool('g1', 'calendar', {}, 'g')] }], { now: 42000 });
   assert.match(html, /<span class="cui-grunt-task">Grunt · Check<\/span><span class="cui-time" data-since="1000">41s<\/span>/);

@@ -665,8 +665,8 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
     if (url.pathname.startsWith('/api/')) {
       await routes(app, req, res, url, auth.session(req));
-    } else if (/^\/apps\/_citadel\/(rail\.js|drawers\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/.test(url.pathname)) {
-      // The app rail, phone drawers, colours and Citadel UI (public/ui/) for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
+    } else if (/^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/.test(url.pathname)) {
+      // The app rail, phone drawers (and their types), colours and Citadel UI (public/ui/) for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
       await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length), true);
     } else if (url.pathname.startsWith('/apps/')) {
       apps.serve(req, res);

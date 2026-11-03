@@ -5,8 +5,14 @@
 export interface ComposerOptions {
   /** Called with the trimmed text when the person sends. The box empties at once; resolve once the message is accepted. Reject (or throw) when it wasn't: the text goes back in the box, ahead of anything typed since, and the error shows. */
   send(text: string): Promise<unknown> | unknown;
-  /** Given, Send becomes Stop while `busy(true)`, and Stop calls this. Typing still works; Enter doesn't send. */
+  /** Given, Send becomes Stop while `busy(true)`, and Stop calls this. Typing still works; Enter doesn't send. With `whileBusy: 'send'`, Stop shows beside Send instead. */
   stop?(): void;
+  /**
+   * What Send does while `busy(true)` with `stop` given. 'stop' (default): Send becomes Stop, and nothing
+   * sends until the turn ends. 'send': Send keeps sending (Enter too), and a Stop button shows before it
+   * in the row: for a server that queues or steers a message sent mid-turn, as Citadel's own chat does.
+   */
+  whileBusy?: 'stop' | 'send';
   /** The box's hint. */
   placeholder?: string;
   /** The box's accessible name (default: the placeholder, which names it as it changes; else "Message"). */
@@ -33,8 +39,10 @@ export interface Composer {
   textarea: HTMLTextAreaElement;
   /** div.cui-composer-row beside the box, holding Send: put your own buttons before it. */
   row: HTMLDivElement;
-  /** Send (button.cui-btn.cui-primary.cui-composer-send), or Stop while busy with `stop`. */
+  /** Send (button.cui-btn.cui-primary.cui-composer-send), or Stop while busy with `stop` (unless `whileBusy: 'send'`). */
   sendButton: HTMLButtonElement;
+  /** With `stop` and `whileBusy: 'send'`: Stop (button.cui-btn.cui-danger.cui-composer-stop) before Send in the row, hidden unless busy. Otherwise null. */
+  stopButton: HTMLButtonElement | null;
 }
 
 /**

@@ -156,7 +156,7 @@ function runHtml(b, o) {
 
 function blockHtml(b, o, streaming) {
   switch (b.kind) {
-    case 'text': return `<div class="cui-md">${renderMarkdown(b.text, { breaks: true, streaming })}</div>`;
+    case 'text': return `<div class="cui-md">${renderMarkdown(b.text, mdOpts(o.markdown, streaming))}</div>`;
     case 'steps': return runHtml(b, o);
     case 'card': return '<div class="cui-card"></div>';
     case 'stopped': return '<div class="cui-stopped">Stopped.</div>';
@@ -164,6 +164,12 @@ function blockHtml(b, o, streaming) {
   }
   return '';
 }
+
+/** The kit's markdown options with the app's hooks (`markdown`: text, link, image) over them; nothing else of the app's. */
+const mdOpts = (hooks, streaming) => {
+  const { text, link, image } = hooks ?? {};
+  return { ...(text && { text }), ...(link && { link }), ...(image && { image }), breaks: true, streaming };
+};
 
 const askHtml = (text) => (text == null ? '' : `<div class="cui-ask">${esc(text)}</div>`);
 
@@ -302,7 +308,7 @@ export function mountChat(el, opts = {}) {
       if (b.kind === 'text') {
         const streaming = t.running && i === t.blocks.length - 1;
         node ??= div('');
-        if (node.src !== b.text || node.streaming !== streaming) updateMarkdown(node, b.text, { breaks: true, streaming });
+        if (node.src !== b.text || node.streaming !== streaming) updateMarkdown(node, b.text, mdOpts(opts.markdown, streaming));
         Object.assign(node, { src: b.text, streaming });
       } else if (b.kind === 'card') {
         node ??= div('cui-card');

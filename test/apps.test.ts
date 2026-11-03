@@ -250,6 +250,12 @@ test('the rail and drawers: their scripts are served to contraptions, and lists 
   const js = await drawers.text();
   assert.match(js, /export function initDrawers/);
   assert.match(js, /from '\.\/rail\.js'/);
+  // With their types beside them (#286).
+  for (const f of ['rail', 'drawers']) {
+    const types = await get(`/apps/_citadel/${f}.d.ts`);
+    assert.equal(types.status, 200);
+    assert.match(await types.text(), /^export function/m);
+  }
   // And Citadel's colours (#269), with an ETag so a page load revalidates for a 304.
   const theme = await get('/apps/_citadel/theme.css');
   assert.equal(theme.status, 200);

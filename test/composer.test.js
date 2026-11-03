@@ -161,6 +161,33 @@ test('busy with stop: Send shows as Stop, typing stays, Enter waits, and Stop ne
   assert.deepEqual(sent, ['steer']);
 });
 
+test('whileBusy send: Stop shows beside Send while busy, Send and Enter keep sending, Stop never sends', async () => {
+  let stops = 0;
+  const sent = [];
+  const s = mountComposer(new El('div'), { send: (t) => sent.push(t), stop: () => { stops++; s.busy(false); }, whileBusy: 'send' });
+  assert.deepEqual(s.row.children, [s.stopButton, s.sendButton], 'Stop sits before Send');
+  assert.equal(s.stopButton.hidden, true, 'hidden until busy');
+  s.busy(true);
+  assert.equal(s.stopButton.hidden, false);
+  assert.equal(s.sendButton.textContent, 'Send');
+  assert.equal(s.sendButton.classList.contains('cui-primary'), true);
+  s.textarea.value = 'one more thing';
+  s.textarea.dispatch('keydown', { key: 'Enter', shiftKey: false, isComposing: false, keyCode: 13 });
+  await tick(); // Send waits while the first is on its way
+  s.textarea.value = 'and another';
+  s.sendButton.click(s.form);
+  assert.deepEqual(sent, ['one more thing', 'and another']);
+  s.textarea.value = 'kept';
+  s.stopButton.click(s.form);
+  assert.equal(stops, 1);
+  assert.deepEqual(sent, ['one more thing', 'and another']);
+  assert.equal(s.textarea.value, 'kept');
+  assert.equal(s.stopButton.hidden, true, 'gone once the turn ends');
+  // Without stop, or with the default, there is no separate Stop.
+  assert.equal(mountComposer(new El('div'), { send() {}, whileBusy: 'send' }).stopButton, null);
+  assert.equal(mountComposer(new El('div'), { send() {}, stop() {} }).stopButton, null);
+});
+
 test('drafts: saved as typed, back on mount, gone once sent', () => {
   store.clear();
   const a = mount({ draftKey: 'd:1' });

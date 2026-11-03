@@ -60,6 +60,12 @@ export interface ChatModel {
 export function chatModel(turns: Turn[], opts?: { card?: (name: string, input: Record<string, unknown>, id: string) => boolean }): ChatModel;
 
 export interface RenderOptions {
+  /**
+   * Your markdown hooks for every reply, history included (markdown.d.ts's `text`, `link` and `image`):
+   * `text: (html) => html.replace(/\b(?:Ctrl|Alt|Shift)\+\w+/g, (k) => `<kbd>${k}</kbd>`)`. Each one given replaces
+   * the kit's default for that hook only; line breaks and streaming stay the kit's.
+   */
+  markdown?: { text?: (html: string) => string; link?: (href: string, html: string) => string; image?: (href: string, alt: string, title: string | null) => string };
   /** A step's words, worded to read right both running and done: ("Moving “Dry cleaning”"). Default: the tool's short name ("Move todo"). */
   stepLabel?: (name: string, input: Record<string, unknown>) => string;
 }

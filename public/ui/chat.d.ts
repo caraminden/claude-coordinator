@@ -78,7 +78,7 @@ export interface BlockResult {
   /** The call's id: the tool event's `id`. */
   id: string;
   ok: boolean;
-  /** The Grunt call it ran under; null for the reply's own calls (cards are top-level, so null). */
+  /** The Grunt call it ran under: null or absent for a card, which is always top-level. */
   parent?: string | null;
   [field: string]: unknown;
 }

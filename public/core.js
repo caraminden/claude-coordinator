@@ -13,7 +13,7 @@ import { onSchedulesChanged } from './schedules.js';
 import { onHiddenChanged } from './hidden.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { uploadsRunning } from './composer.js';
-import { renderMarkdown } from './ui/markdown.js';
+import { markdownElement } from './ui/markdown.js';
 import { iconSrc } from './schemes.js';
 import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, showFrame } from './frames.js';
@@ -304,9 +304,10 @@ export function markdownDoc(src, opts = {}) {
       : `<span class="muted">[image: ${alt}]</span>`;
   };
   const text = (html) => threadRefsHtml(linkUrls(html, location, (url) => prUrlRoute(unescapeHtml(url))));
-  const div = document.createElement('div');
-  div.className = 'md';
-  div.innerHTML = renderMarkdown(src, { link, image, text, breaks });
+  // Citadel UI's element (ui/markdown.js), so Citadel and the apps draw markdown with one stylesheet;
+  // .md carries Citadel's own extras (file cards, chat headings in style.css). Headings as written.
+  const div = markdownElement(src, { link, image, text, breaks, headingBase: 1 });
+  div.classList.add('md');
   if (ticketId != null) checkFileLinks(div, ticketId);
   // "#a-heading" would change the app's route, so scroll to the heading instead.
   div.addEventListener('click', (e) => {

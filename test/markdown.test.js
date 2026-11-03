@@ -6,19 +6,20 @@ import { renderMarkdown, slug } from '../public/ui/markdown.js';
 import { linkThreadRefs, linkUrls } from '../public/threadrefs.js';
 import { struckSource } from '../public/strike.js';
 
-const md = (src, opts) => renderMarkdown(src, opts);
-const chat = (src) => renderMarkdown(src, { breaks: true, text: (h) => linkThreadRefs(linkUrls(h), 2) });
+// Headings as written, as Citadel draws documents and chat (core.js markdownDoc).
+const md = (src, opts) => renderMarkdown(src, { headingBase: 1, ...opts });
+const chat = (src) => renderMarkdown(src, { breaks: true, headingBase: 1, text: (h) => linkThreadRefs(linkUrls(h), 2) });
 
 test('a GFM table, with and without outer pipes', () => {
-  const want = '<div class="table-wrap"><table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table></div>';
+  const want = '<div class="cui-table"><table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table></div>';
   assert.equal(md('| a | b |\n|---|---|\n| 1 | 2 |'), want);
   assert.equal(md('a | b\n--- | ---\n1 | 2'), want);
 });
 
 test('table columns align as the delimiter row says', () => {
   const html = md('| n | name | mid |\n|---:|:---|:---:|\n| 1 | x | y |');
-  assert.match(html, /<th class="al-r">n<\/th><th>name<\/th><th class="al-c">mid<\/th>/);
-  assert.match(html, /<td class="al-r">1<\/td><td>x<\/td><td class="al-c">y<\/td>/);
+  assert.match(html, /<th class="cui-al-r">n<\/th><th>name<\/th><th class="cui-al-c">mid<\/th>/);
+  assert.match(html, /<td class="cui-al-r">1<\/td><td>x<\/td><td class="cui-al-c">y<\/td>/);
 });
 
 test('table cells: escaped pipes, inline code, <br>, missing cells', () => {
@@ -29,7 +30,7 @@ test('table cells: escaped pipes, inline code, <br>, missing cells', () => {
 
 test('a table inside a list item stays a table (heroes.md:83)', () => {
   const html = md('- **Moods** follow the outlook:\n\n  | Mood | Face |\n  |---|---|\n  | steady | a set mouth |\n- next');
-  assert.match(html, /<ul><li><p><strong>Moods<\/strong> follow the outlook:<\/p><div class="table-wrap"><table>/);
+  assert.match(html, /<ul><li><p><strong>Moods<\/strong> follow the outlook:<\/p><div class="cui-table"><table>/);
   assert.match(html, /<td>steady<\/td><td>a set mouth<\/td>/);
   assert.match(html, /<li><p>next<\/p><\/li><\/ul>$/);
 });
@@ -69,7 +70,7 @@ test('an ordered list then bullets are two lists', () => {
 
 test('task lists get checkboxes', () => {
   assert.equal(md('- [ ] todo\n- [x] done'),
-    '<ul><li class="task"><input type="checkbox" disabled> todo</li><li class="task"><input type="checkbox" disabled checked> done</li></ul>');
+    '<ul><li class="cui-task"><input type="checkbox" disabled> todo</li><li class="cui-task"><input type="checkbox" disabled checked> done</li></ul>');
 });
 
 test('fenced code keeps its language, and nothing inside is Markdown', () => {
@@ -90,7 +91,7 @@ test('raw HTML is escaped, all but <br>', () => {
 });
 
 test('images go through the hook; without one they show their alt text', () => {
-  assert.equal(md('![Six moods](../art/moods.png)'), '<p><span class="muted">[image: Six moods]</span></p>');
+  assert.equal(md('![Six moods](../art/moods.png)'), '<p><span class="cui-alt">[image: Six moods]</span></p>');
   const image = (href, alt) => `<img src="${href}" alt="${alt}">`;
   assert.equal(md('![a "b"](x.png "title")', { image }), '<p><img src="x.png" alt="a &quot;b&quot;"></p>');
 });
@@ -103,7 +104,7 @@ test('links go through the hook with their target unescaped and their text rende
   assert.deepEqual(seen, ['decisions.md', '../a/b.md#sec', 'https://x.io/?a=1&b=2']);
   // The default: web links open, anything else is inert.
   assert.equal(md('[w](https://a.b) [f](f.md)'),
-    '<p><a href="https://a.b" target="_blank" rel="noopener">w</a> <span class="link" title="f.md">f</span></p>');
+    '<p><a href="https://a.b" target="_blank" rel="noopener">w</a> <span class="cui-link" title="f.md">f</span></p>');
 });
 
 test('headings carry GitHub\'s slug, deduplicated', () => {
@@ -139,7 +140,7 @@ test('hard breaks: backslash or two spaces in a doc, every line in chat', () => 
 
 test('front matter in a doc shows apart; chat never reads it', () => {
   assert.equal(md('---\ntitle: Vocab\ngenerated: true\n---\n# Vocab'),
-    '<pre class="front-matter"><code>title: Vocab\ngenerated: true</code></pre><h1 data-slug="vocab">Vocab</h1>');
+    '<pre class="cui-front-matter"><code>title: Vocab\ngenerated: true</code></pre><h1 data-slug="vocab">Vocab</h1>');
   assert.equal(chat('---\nx: y\n---'), '<hr><p>x: y</p><hr>');
 });
 
@@ -166,4 +167,62 @@ test('a linked image keeps its picture, and alt text is plain', () => {
   assert.equal(md('[![badge](b.png)](https://x.io)', { image }),
     '<p><a href="https://x.io" target="_blank" rel="noopener"><img src="b.png" alt="badge"></a></p>');
   assert.equal(md('![a `x` b](u.png)', { image }), '<p><img src="u.png" alt="a x b"></p>');
+});
+
+// ---- Citadel UI additions (#283): what apps get from /apps/_citadel/ui/markdown.js. ----
+import { markdownLine } from '../public/ui/markdown.js';
+
+const live = (src) => renderMarkdown(src, { streaming: true, headingBase: 1 });
+
+test('streaming: a table is held back at every cut point, never shown as pipes (ToC\'s test)', () => {
+  const reply = 'Pieces:\n\n| Piece | Gives |\n|---|---|\n| Wand | Spell damage |\n| Ring | Mana |\n';
+  for (let n = 0; n <= reply.length; n++) assert.doesNotMatch(live(reply.slice(0, n)), /\|/, `cut at ${n}: ${JSON.stringify(reply.slice(0, n))}`);
+  // The header waits for its separator; then the table shows, with no row still arriving.
+  assert.equal(live(reply.slice(0, reply.indexOf('| Piece') + 4)), '<p>Pieces:</p>');
+  assert.equal(live(reply.slice(0, reply.indexOf('|---') + 5)), '<p>Pieces:</p>');
+  assert.match(live(reply.slice(0, reply.indexOf('| Wand') + 3)), /<thead>.*<tbody><\/tbody>/);
+  assert.equal(live(reply), md(reply));
+  // Once the reply is done, a lone pipe line is just text.
+  assert.equal(md('a | b'), '<p>a | b</p>');
+});
+
+test('streaming: half-written markup is closed or hidden (Mandate\'s mend)', () => {
+  const p = (html) => `<p>${html}</p>`;
+  assert.equal(live('**9:59'), p('<strong>9:59</strong>'));
+  assert.equal(live('- **9:59'), '<ul><li><strong>9:59</strong></li></ul>');
+  assert.equal(live('- **9:59 pm:*'), '<ul><li><strong>9:59 pm:</strong></li></ul>', 'half of the closer');
+  assert.equal(live('an *aside*'), p('an <em>aside</em>'));
+  assert.equal(live('Done. **'), p('Done.'));
+  assert.equal(live('see `item_add'), p('see <code>item_add</code>'));
+  assert.equal(live('fill in [the form](https://exa'), p('fill in the form'));
+  assert.equal(live('fill in [the fo'), p('fill in the fo'));
+  assert.equal(live('2 ** 3'), p('2 ** 3'));
+  assert.equal(live('```\nconst **x'), '<pre><code>const **x</code></pre>', 'inside an open fence nothing changes');
+  assert.equal(renderMarkdown('**a\n**b', { streaming: true, breaks: true }), p('**a<br><strong>b</strong>'), 'only the last line is mended');
+  // A list marker waits for its words, so the dash or number never flashes as text.
+  assert.equal(live('- a\n-'), '<ul><li>a</li></ul>');
+  assert.equal(live('1. a\n2.'), '<ol><li>a</li></ol>');
+  // Not streaming, nothing is mended.
+  assert.equal(md('**9:59'), p('**9:59'));
+});
+
+test('headingBase: a reply\'s # is an h3 by default, a document passes 1, and levels stop at 6', () => {
+  assert.equal(renderMarkdown('# A\n## B'), '<h3 data-slug="a">A</h3><h4 data-slug="b">B</h4>');
+  assert.equal(renderMarkdown('# A', { headingBase: 1 }), '<h1 data-slug="a">A</h1>');
+  assert.equal(renderMarkdown('##### A'), '<h6 data-slug="a">A</h6>');
+});
+
+test('default links: http(s) and mailto open a new tab, never _top; anything else is inert', () => {
+  assert.equal(renderMarkdown('[a](mailto:x@y.z)'), '<p><a href="mailto:x@y.z" target="_blank" rel="noopener">a</a></p>');
+  assert.equal(renderMarkdown('[a](javascript:alert)'), '<p><span class="cui-link" title="javascript:alert">a</span></p>');
+  assert.doesNotMatch(renderMarkdown('[a](https://x.y) https://z.w'), /_top/);
+});
+
+test('markdownLine: one line per block, "• " for items, no links, emphasis kept', () => {
+  assert.equal(markdownLine('# Done\nMoved **Tuesday** to [Thursday](https://x.y).\n\n- one\n  2. two\n- [x] three\n\n---\n> said'),
+    'Done<br>Moved <strong>Tuesday</strong> to Thursday.<br>• one<br>• two<br>• three<br>said');
+  assert.equal(markdownLine('```js\nconst a = 1;\n```'), 'const a = 1;');
+  assert.equal(markdownLine('| a | b |\n|---|---|\n| 1 | 2 |'), 'a · b<br>1 · 2');
+  assert.equal(markdownLine('<b>x</b> & y'), '&lt;b&gt;x&lt;/b&gt; &amp; y');
+  assert.equal(markdownLine('Working on **it', { streaming: true }), 'Working on <strong>it</strong>');
 });

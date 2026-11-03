@@ -1,0 +1,114 @@
+/* Citadel UI: base parts as classes. Served to apps as /apps/_citadel/ui/base.css; link it after
+   /apps/_citadel/theme.css, whose --citadel-* variables it reads. Docs: kit/skills/contraption-ui/SKILL.md;
+   each part shown right and wrong: docs/design-system/.
+
+   Every file in public/ui/ is standalone, because apps load it from outside Citadel's pages: no imports
+   from outside ui/, no inline styles, classes are cui-*, and every rule sits in :where(), so an app's own
+   selectors win. Class names are an API apps depend on: add, never rename (test/ui-contract.test.ts).
+
+   Buttons:  <button class="cui-btn">, plus cui-primary, cui-ghost, cui-danger, cui-small or cui-icon.
+   Inputs:   <input class="cui-input">, <textarea class="cui-input">.
+   Chips:    <span class="cui-chip" data-tone="ok|warn|danger|info|violet|neutral">; tappable choices:
+             <div class="cui-choices"><button class="cui-choice"> (cui-rec or aria-pressed="true": picked).
+   Notices:  <div class="cui-notice" role="status"> (warn), data-tone="danger" or "info".
+   Spinner:  <span class="cui-spin"></span>; a working line: <div class="cui-working"><span class="cui-spin"></span>
+             Working… <span class="cui-time">12s</span></div>. */
+
+/* Buttons: every variant the same height, content centred, so the room above and below is equal. */
+:where(.cui-btn) {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--citadel-space-2);
+  box-sizing: border-box; min-height: var(--citadel-control-h); margin: 0; padding: var(--citadel-space-1) var(--citadel-space-3);
+  border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-sm);
+  font: 500 var(--citadel-size-body)/1.25 var(--citadel-font); white-space: nowrap; cursor: pointer;
+  background: var(--citadel-surface); color: var(--citadel-text);
+  transition: background-color var(--citadel-motion), border-color var(--citadel-motion), color var(--citadel-motion);
+}
+:where(.cui-btn):hover:not(:disabled) { border-color: color-mix(in srgb, var(--citadel-accent) 60%, var(--citadel-border)); }
+:where(.cui-btn.cui-primary) { background: var(--citadel-accent); border-color: var(--citadel-accent); color: var(--citadel-on-accent); font-weight: 600; }
+:where(.cui-btn.cui-primary):hover:not(:disabled) { background: color-mix(in srgb, var(--citadel-accent) 88%, var(--citadel-text)); }
+:where(.cui-btn.cui-ghost) { background: transparent; border-color: transparent; }
+:where(.cui-btn.cui-ghost):hover:not(:disabled) { background: color-mix(in srgb, var(--citadel-text) 7%, transparent); border-color: transparent; }
+:where(.cui-btn.cui-danger) {
+  color: var(--citadel-danger); font-weight: 600;
+  border-color: color-mix(in srgb, var(--citadel-danger) 55%, var(--citadel-border));
+  background: color-mix(in srgb, var(--citadel-danger) 9%, var(--citadel-surface));
+}
+:where(.cui-btn.cui-danger):hover:not(:disabled) { border-color: var(--citadel-danger); }
+/* Small only shrinks on desktop: on a phone every control stays a 40px touch target. */
+:where(.cui-btn.cui-small) { min-height: 26px; padding: 2px var(--citadel-space-2); font-size: var(--citadel-size-small); }
+:where(.cui-btn.cui-icon) { width: var(--citadel-control-h); padding-inline: 0; font-size: 17px; }
+:where(.cui-btn):disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 800px) { :where(.cui-btn.cui-small) { min-height: var(--citadel-control-h); } }
+
+/* Inputs: one line is control-h tall, the block padding worked out so it stays equal. 16px on phones,
+   so iOS Safari doesn't zoom in on focus. */
+:where(.cui-input) {
+  display: block; box-sizing: border-box; width: 100%; margin: 0;
+  font: var(--citadel-size-body)/1.25 var(--citadel-font); color: var(--citadel-text);
+  padding: calc((var(--citadel-control-h) - 2px - 1.25em) / 2) var(--citadel-space-3);
+  background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-sm);
+  transition: border-color var(--citadel-motion);
+}
+:where(.cui-input):hover { border-color: color-mix(in srgb, var(--citadel-muted) 50%, var(--citadel-border)); }
+:where(.cui-input)::placeholder { color: var(--citadel-muted); }
+:where(textarea.cui-input) { resize: vertical; }
+@media (max-width: 800px) { :where(.cui-input) { font-size: 16px; } }
+
+/* Chips: a pill. Neutral, a tone (tinted), or a choice you can tap. */
+:where(.cui-chip) {
+  display: inline-flex; align-items: center; gap: var(--citadel-space-1);
+  padding: 2px var(--citadel-space-2); border-radius: var(--citadel-radius-pill);
+  font: 600 var(--citadel-size-meta)/1.4 var(--citadel-font);
+  border: 1px solid var(--citadel-border); background: var(--citadel-surface); color: var(--citadel-muted);
+}
+:where(.cui-chip[data-tone]) {
+  background: color-mix(in srgb, var(--cui-tone) 12%, var(--citadel-surface));
+  border-color: color-mix(in srgb, var(--cui-tone) 40%, var(--citadel-border));
+  color: color-mix(in srgb, var(--cui-tone) 80%, var(--citadel-text));
+}
+:where(.cui-choices) { display: flex; flex-wrap: wrap; gap: var(--citadel-space-2); }
+:where(.cui-choice) {
+  display: inline-flex; align-items: center; gap: var(--citadel-space-1); max-width: 100%;
+  box-sizing: border-box; min-height: var(--citadel-control-h); margin: 0; padding: var(--citadel-space-1) var(--citadel-space-3);
+  border-radius: var(--citadel-radius-pill); font: 600 var(--citadel-size-small)/1.25 var(--citadel-font); cursor: pointer;
+  background: color-mix(in srgb, var(--citadel-accent) 8%, var(--citadel-surface));
+  border: 1px solid color-mix(in srgb, var(--citadel-accent) 55%, var(--citadel-border));
+  color: color-mix(in srgb, var(--citadel-accent) 82%, var(--citadel-text));
+  transition: background-color var(--citadel-motion);
+}
+:where(.cui-choice):hover:not(:disabled) { background: color-mix(in srgb, var(--citadel-accent) 18%, var(--citadel-surface)); }
+:where(.cui-choice.cui-rec, .cui-choice[aria-pressed="true"]) { background: var(--citadel-accent); border-color: var(--citadel-accent); color: var(--citadel-on-accent); }
+:where(.cui-choice):disabled { opacity: 0.5; cursor: default; }
+:where(.cui-choice[aria-pressed="true"]):disabled { opacity: 1; }
+
+/* Notice: the tone mixed 16% into the surface, body text, and a bar in the tone, so it reads in both
+   modes (text in the tone on the tint vanishes in dark, where warn and warn-tint are one colour). */
+:where(.cui-notice) {
+  --cui-tint: var(--citadel-warn-tint); --cui-tone: var(--citadel-warn);
+  padding: var(--citadel-space-2) var(--citadel-space-3); border-radius: var(--citadel-radius-sm);
+  background: color-mix(in srgb, var(--cui-tint) 16%, var(--citadel-surface)); color: var(--citadel-text);
+  border-left: 3px solid var(--cui-tone); font: var(--citadel-size-body)/1.45 var(--citadel-font);
+}
+/* The tones, after the notice's warn default so they win at the same (zero) specificity. */
+:where(.cui-chip, .cui-notice):where([data-tone="ok"]) { --cui-tone: var(--citadel-ok); }
+:where(.cui-chip, .cui-notice):where([data-tone="warn"]) { --cui-tone: var(--citadel-warn); }
+:where(.cui-chip, .cui-notice):where([data-tone="danger"]) { --cui-tone: var(--citadel-danger); }
+:where(.cui-chip, .cui-notice):where([data-tone="info"]) { --cui-tone: var(--citadel-info); }
+:where(.cui-chip, .cui-notice):where([data-tone="violet"]) { --cui-tone: var(--citadel-violet); }
+:where(.cui-chip, .cui-notice):where([data-tone="neutral"]) { --cui-tone: var(--citadel-neutral); }
+:where(.cui-notice[data-tone]:not([data-tone="warn"])) { --cui-tint: var(--cui-tone); }
+
+/* Spinner (a ring) and the working line. Under reduced motion the ring stops; a timer still ticks. */
+:where(.cui-spin) {
+  display: inline-block; flex: none; box-sizing: border-box; width: 0.95em; height: 0.95em; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--citadel-info) 25%, transparent); border-top-color: var(--citadel-info);
+  animation: cui-spin 0.8s linear infinite;
+}
+@keyframes cui-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { :where(.cui-spin) { animation: none; } }
+:where(.cui-working) { display: flex; align-items: center; gap: var(--citadel-space-2); padding: var(--citadel-space-1) 0; color: var(--citadel-muted); font: var(--citadel-size-small)/1.4 var(--citadel-font); }
+:where(.cui-working .cui-time) { font-variant-numeric: tabular-nums; }
+
+/* Focus: a ring for the keyboard, none for a click. */
+:where(.cui-btn, .cui-input, .cui-choice):focus { outline: none; }
+:where(.cui-btn, .cui-input, .cui-choice):focus-visible { outline: 2px solid var(--citadel-focus); outline-offset: 2px; }

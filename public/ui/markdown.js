@@ -1,6 +1,18 @@
-// Markdown to HTML, for chat messages and the documents threads write: GitHub-flavoured where the
-// docs we show use it (audited against Delve's in #155). Pure string work, so it can be tested
-// without a browser; markdownDoc in core.js hangs the app's links, file cards and #N refs on it.
+// Citadel UI: markdown. Served to apps as /apps/_citadel/ui/markdown.js (types: markdown.d.ts beside
+// it) and imported by Citadel's own core.js, so both draw markdown the same way. Docs:
+// kit/skills/contraption-ui/SKILL.md.
+//
+// Every file in public/ui/ is standalone, because apps load it from outside Citadel's pages:
+// - no imports from outside ui/;
+// - styles come from a constructed sheet adopted on first use (Citadel's CSP is default-src 'self');
+// - nothing it writes carries style="" or <style>;
+// - classes are cui-*, and every rule sits in :where(), so an app's own selectors win;
+// - its exports and their behaviour are an API apps depend on: test/ui-contract.test.ts holds them.
+//   Add, never rename; a real break ships as a new file beside this one.
+//
+// Markdown to HTML, for chat messages and documents: GitHub-flavoured where the docs we show use it
+// (audited against Delve's in #155). renderMarkdown is pure string work, so it tests without a
+// browser; markdownDoc in Citadel's core.js hangs Citadel's links, file cards and #N refs on its hooks.
 // Raw HTML is escaped, all but <br>.
 
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -33,18 +45,58 @@ export function slug(html) {
   return unescapeHtml(html.replace(/<[^>]*>/g, '')).toLowerCase().trim().replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '').replace(/ /g, '-');
 }
 
+/** The default link: http(s) and mailto open a new tab, never `_top` (that would take Citadel's whole window); anything else is inert. */
+const defaultLink = (href, html) => (/^(https?:\/\/|mailto:)/i.test(href)
+  ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${html}</a>`
+  : `<span class="cui-link" title="${escapeHtml(href)}">${html}</span>`);
+
 /**
- * `src` as HTML. Hooks, each given the target unescaped and the text as HTML:
- * - `link(href, html)`: a link's HTML (default: http(s) opens a new tab, anything else is inert);
+ * While a reply is still arriving, its end may hold half of something: a table row or a header whose
+ * separator hasn't come, a "**" or "`" not yet closed, a "[link](" without its ")", a list marker
+ * without its words. Hold those back or close them, so the text never flashes pipes or asterisks that
+ * a moment later become a table or bold. Nothing changes inside an open code fence.
+ * Table rule from Theory of Crafting's app/web/markdown.ts; the rest is Mandate's mend (src/markdown.ts).
+ */
+function mendStreaming(src) {
+  const lines = src.replace(/\r\n?/g, '\n').split('\n');
+  if (lines.filter((l) => FENCE.test(l)).length % 2) return lines.join('\n');
+  let line = lines.pop();
+  // A partial link shows just its label until its address closes.
+  line = line.replace(/\[([^\]]*)\]\([^)\s]*$/, '$1').replace(/\[([^\]]*)$/, '$1');
+  // A trailing run of delimiters with nothing after it yet ("- **", "see `").
+  line = line.replace(/(^|\s)[*_`]+$/, '$1');
+  const ticks = line.split('`').length - 1;
+  if (ticks % 2) line += '`';
+  // Half of a closing "**" ("**9:59 pm:*") completes it rather than showing a stray "*".
+  else if (/[^*\s]\*$/.test(line) && line.slice(0, -1).replace(/`[^`]*`/g, '').split('**').length % 2 === 0) line += '*';
+  else {
+    const bare = line.replace(/`[^`]*`/g, '');
+    // The closer goes before any trailing space ("**9:59 " mid-word), since a closer can't follow one.
+    if ((bare.split('**').length - 1) % 2 && /\*\*\S/.test(bare.slice(bare.lastIndexOf('**')))) line = line.replace(/\s*$/, '**$&');
+  }
+  // A table row still arriving, and a list marker still waiting for its words.
+  if (!line.trimStart().startsWith('|') && !/^\s*([-*+]|\d{1,9}[.)])\s*$/.test(line)) lines.push(line);
+  // A table's header row whose separator hasn't come yet.
+  const last = lines.findLastIndex((l) => l.trim() !== '');
+  if (last >= 0 && lines[last].trimStart().startsWith('|') && !lines[last - 1]?.includes('|')) lines.length = last;
+  return lines.join('\n');
+}
+
+/**
+ * `src` as HTML. Options:
+ * - `breaks`: keep single line breaks as typed, as chat does;
+ * - `streaming`: the text is still arriving (see mendStreaming);
+ * - `headingBase`: the level a `#` is drawn as (default 3, so a reply's headings sit under the
+ *   page's own; a document passes 1);
+ * and hooks, each given the target unescaped and the text as HTML:
+ * - `link(href, html)`: a link's HTML (default: http(s) and mailto open a new tab, anything else is inert);
  * - `image(href, alt, title)`: an image's HTML (default: its alt text);
  * - `text(html)`: runs over the inline HTML outside code and links, e.g. to link bare URLs and #N.
- * `breaks` keeps single line breaks as typed, as chat does.
  */
-export function renderMarkdown(src, { link, image, text = (s) => s, breaks = false } = {}) {
-  link ??= (href, html) => (/^https?:\/\//i.test(href)
-    ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${html}</a>`
-    : `<span class="link" title="${escapeHtml(href)}">${html}</span>`);
-  image ??= (_href, alt) => `<span class="muted">[image: ${alt}]</span>`;
+export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s, breaks = false, streaming = false, headingBase = 3 } = {}) {
+  image ??= (_href, alt) => `<span class="cui-alt">[image: ${alt}]</span>`;
+  if (streaming) src = mendStreaming(src);
+  const base = Math.min(Math.max(Math.trunc(headingBase) || 1, 1), 6) - 1;
   const slugs = new Map();
 
   const emphasis = (s) => s
@@ -95,7 +147,7 @@ export function renderMarkdown(src, { link, image, text = (s) => s, breaks = fal
   const table = (rows) => {
     const cells = (r) => r.trim().replace(/^\||(?<!\\)\|$/g, '').split(/(?<!\\)\|/).map((c) => c.trim());
     const hasHead = rows.length > 1 && DELIM.test(rows[1]) && rows[1].includes('-');
-    const align = hasHead ? cells(rows[1]).map((c) => (/^:-+:$/.test(c) ? ' class="al-c"' : /-:$/.test(c) ? ' class="al-r"' : '')) : [];
+    const align = hasHead ? cells(rows[1]).map((c) => (/^:-+:$/.test(c) ? ' class="cui-al-c"' : /-:$/.test(c) ? ' class="cui-al-r"' : '')) : [];
     const row = (r, tag) => {
       let cs = cells(r);
       if (hasHead) cs = align.map((_, n) => cs[n] ?? '');
@@ -103,7 +155,7 @@ export function renderMarkdown(src, { link, image, text = (s) => s, breaks = fal
     };
     const head = hasHead ? `<thead>${row(rows[0], 'th')}</thead>` : '';
     const body = (hasHead ? rows.slice(2) : rows).map((r) => row(r, 'td')).join('');
-    return `<div class="table-wrap"><table>${head}<tbody>${body}</tbody></table></div>`;
+    return `<div class="cui-table"><table>${head}<tbody>${body}</tbody></table></div>`;
   };
 
   /** The list starting at lines[i]: its HTML and the line after it. */
@@ -144,7 +196,7 @@ export function renderMarkdown(src, { link, image, text = (s) => s, breaks = fal
       const task = /^\[([ xX])\]\s+/.exec(it.lines[0]);
       if (task) it.lines[0] = it.lines[0].slice(task[0].length);
       const box = task ? `<input type="checkbox" disabled${task[1] === ' ' ? '' : ' checked'}> ` : '';
-      return `<li${task ? ' class="task"' : ''}>${box}${blocks(it.lines, !loose)}</li>`;
+      return `<li${task ? ' class="cui-task"' : ''}>${box}${blocks(it.lines, !loose)}</li>`;
     });
     return { html: `<${tag}${start}>${lis.join('')}</${tag}>`, next: i };
   };
@@ -171,7 +223,8 @@ export function renderMarkdown(src, { link, image, text = (s) => s, breaks = fal
         const n = slugs.get(id) ?? 0;
         slugs.set(id, n + 1);
         if (n) id += `-${n}`;
-        out.push(`<h${m[1].length} data-slug="${escapeHtml(id)}">${html}</h${m[1].length}>`);
+        const level = Math.min(m[1].length + base, 6);
+        out.push(`<h${level} data-slug="${escapeHtml(id)}">${html}</h${level}>`);
         i++;
       } else if (HR.test(line)) {
         out.push('<hr>');
@@ -205,8 +258,87 @@ export function renderMarkdown(src, { link, image, text = (s) => s, breaks = fal
   // YAML front matter stays apart from the doc, as GitHub keeps it.
   const fm = !breaks && lines[0] === '---' ? lines.indexOf('---', 1) : -1;
   if (fm > 0 && lines.slice(1, fm).every((l) => !l.trim() || /^[\w-]+:|^\s|^-/.test(l))) {
-    front = `<pre class="front-matter"><code>${escapeHtml(lines.slice(1, fm).join('\n'))}</code></pre>`;
+    front = `<pre class="cui-front-matter"><code>${escapeHtml(lines.slice(1, fm).join('\n'))}</code></pre>`;
     lines = lines.slice(fm + 1);
   }
   return front + blocks(lines);
+}
+
+/**
+ * A reply squeezed into a line or two, for a preview or a button (Mandate's ReplyLine): no links
+ * (their labels stay), a list item is a "• " line, every other block is its text on a line of its
+ * own, joined with <br>. Bold, italics and code stay. HTML, escaped like renderMarkdown's.
+ */
+export function markdownLine(src, { streaming = false } = {}) {
+  if (streaming) src = mendStreaming(src);
+  const plain = { link: (_href, html) => html, image: (_href, alt) => alt, breaks: true };
+  const out = [];
+  for (const raw of src.replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '').split('\n')) {
+    if (!raw.trim() || FENCE.test(raw) || HR.test(raw) || (raw.includes('|') && DELIM.test(raw) && raw.includes('-'))) continue;
+    let l = raw.replace(/^(?: {0,3}>)+ ?/, '').trim();
+    const item = ITEM.exec(l);
+    const bullet = item ? '• ' : '';
+    if (item) l = (item[3] ?? '').replace(/^\[[ xX]\]\s+/, '');
+    else l = l.replace(/^#{1,6}\s+/, '').replace(/\s+#+$/, '');
+    if (/^\|.*\|$/.test(l)) l = l.slice(1, -1).split(/(?<!\\)\|/).map((c) => c.trim()).join(' · ');
+    // One paragraph of one line: its HTML is the line's, inside a single <p>.
+    const html = renderMarkdown(l, plain).replace(/^<p>([\s\S]*)<\/p>$/, '$1');
+    if (html || bullet) out.push(bullet + html);
+  }
+  return out.join('<br>');
+}
+
+// ---- In the page: an element that draws markdown, with the styles it needs. ----
+
+/** Citadel's markdown look, on theme.css's variables. Moved from Citadel's style.css (.md) in #283. */
+const CSS = `
+:where(.cui-md) { overflow-wrap: anywhere; }
+:where(.cui-md) :is(code, pre) { font-family: var(--citadel-mono); font-size: 0.88em; }
+:where(.cui-md) pre { background: var(--citadel-code-bg); padding: 0.6rem; border-radius: var(--citadel-radius-sm); overflow-x: auto; white-space: pre-wrap; margin: 0.4rem 0; }
+:where(.cui-md) :not(pre) > code { background: var(--citadel-code-bg); padding: 0.05rem 0.3rem; border-radius: 4px; }
+:where(.cui-md) blockquote { margin: 0.6rem 0; padding: 0.1rem 0.9rem; border-left: 3px solid var(--citadel-border); color: var(--citadel-muted); }
+:where(.cui-md) hr { border: 0; border-top: 1px solid var(--citadel-border); margin: 1.2rem 0; }
+:where(.cui-md) .cui-table { overflow-x: auto; margin: 0.75rem 0; }
+:where(.cui-md) table { border-collapse: collapse; font-size: 0.9em; }
+:where(.cui-md) :is(th, td) { border: 1px solid var(--citadel-border); padding: 0.3rem 0.55rem; text-align: left; vertical-align: top; overflow-wrap: normal; }
+:where(.cui-md) th { background: var(--citadel-code-bg); }
+:where(.cui-md) :is(th, td).cui-al-r { text-align: right; }
+:where(.cui-md) :is(th, td).cui-al-c { text-align: center; }
+:where(.cui-md) li.cui-task { list-style: none; }
+:where(.cui-md) li.cui-task > input { margin: 0 0.35rem 0 -1.2rem; vertical-align: middle; }
+:where(.cui-md) li > p { margin: 0.35rem 0; }
+:where(.cui-md) .cui-front-matter { color: var(--citadel-muted); font-size: 0.85em; }
+:where(.cui-md) .cui-link { text-decoration: underline dotted; }
+:where(.cui-md) .cui-alt { color: var(--citadel-muted); }
+`;
+let sheet = null;
+function adoptStyles() {
+  if (sheet) return;
+  sheet = new CSSStyleSheet();
+  sheet.replaceSync(CSS);
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+}
+
+/** A div.cui-md drawing `src` (options as renderMarkdown's), with its styles adopted. */
+export function markdownElement(src, opts) {
+  const el = document.createElement('div');
+  updateMarkdown(el, src, opts);
+  return el;
+}
+
+/**
+ * Draw `src` into `el` (made a .cui-md), as a reply streams in. Only what changed is replaced: the
+ * blocks that render the same are kept, so a selection or a text search in them survives.
+ */
+export function updateMarkdown(el, src, opts) {
+  adoptStyles();
+  el.classList.add('cui-md');
+  const t = document.createElement('template');
+  t.innerHTML = renderMarkdown(src, opts);
+  const next = [...t.content.childNodes];
+  const old = [...el.childNodes];
+  let same = 0;
+  while (same < next.length && same < old.length && old[same].isEqualNode(next[same])) same++;
+  for (const n of old.slice(same)) n.remove();
+  el.append(...next.slice(same));
 }

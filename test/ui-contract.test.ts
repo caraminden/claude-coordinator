@@ -201,7 +201,7 @@ test('every ui file keeps the rules: standalone, no inline styles, cui-* classes
 // A page's reset (* { box-sizing: border-box }) weighs the same as :where() and often comes later, so it
 // can win: a part sized in content-box then squashed (the switch's touch padding ate its track, ToC #33).
 // Every rule whose size depends on box-sizing (a width or height with padding or a border) declares
-// border-box, the value such a reset sets anyway, itself or on the base class it builds on (.cui-btn).
+// border-box, the value such a reset sets anyway, itself or on a base class of the same element (.cui-btn under .cui-btn.cui-small).
 test('every ui part keeps its size under a box-sizing reset: sized in border-box, never content-box', () => {
   const rules = files.flatMap((f) => [...cssOf(f).replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}@]+?)\{([^{}]*)\}/g)].map((m) => {
     const decl = new Map(m[2].split(';').map((d) => d.split(/:(.*)/s).map((x) => x?.trim() ?? '')).filter((d) => d[0]) as [string, string][]);
@@ -213,7 +213,7 @@ test('every ui part keeps its size under a box-sizing reset: sized in border-box
     const sized = [...decl].some(([k, v]) => /^(min-|max-)?(width|height|inline-size|block-size)$/.test(k) && !/^(auto|none|0)$/.test(v));
     const boxed = [...decl].some(([k, v]) => /^(padding|border)(-(top|right|bottom|left|block|inline)(-(start|end))?)?(-width)?$/.test(k) && !/^(0(px)?( 0(px)?)*|none)$/.test(v));
     if (!sized || !boxed) continue;
-    const bases = [...sel.matchAll(/\.(cui-[\w-]+)/g)].map((c) => `:where(.${c[1]})`);
+    const bases = [...(sel.split(/[\s>+~]+/).pop() ?? '').matchAll(/\.(cui-[\w-]+)/g)].map((c) => `:where(.${c[1]})`);
     assert.ok(decl.get('box-sizing') === 'border-box' || bases.some((b) => borderBox.has(b)), `${f}: "${sel}" has a size and padding or a border, so it declares box-sizing: border-box`);
   }
 });

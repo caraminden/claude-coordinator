@@ -62,6 +62,7 @@ function mendStreaming(src) {
   if (lines.filter((l) => FENCE.test(l)).length % 2) return lines.join('\n');
   let line = lines.pop();
   // A partial link shows just its label until its address closes.
+  line = line.replace(/!\[[^\]]*(\]\([^)\s]*)?$/, ''); // a half image waits whole: its alt text alone would flash
   line = line.replace(/\[([^\]]*)\]\([^)\s]*$/, '$1').replace(/\[([^\]]*)$/, '$1');
   // A trailing run of delimiters with nothing after it yet ("- **", "see `").
   line = line.replace(/(^|\s)[*_`]+$/, '$1');
@@ -296,30 +297,34 @@ const CSS = `
 :where(.cui-md > :last-child) { margin-bottom: 0; }
 :where(.cui-md a) { color: inherit; }
 :where(.cui-md) { overflow-wrap: anywhere; }
-:where(.cui-md) :is(code, pre) { font-family: var(--citadel-mono); font-size: 0.88em; }
-:where(.cui-md) pre { background: var(--citadel-code-bg); padding: 0.6rem; border-radius: var(--citadel-radius-sm); overflow-x: auto; white-space: pre-wrap; margin: 0.4rem 0; }
-:where(.cui-md) :not(pre) > code { background: var(--citadel-code-bg); padding: 0.05rem 0.3rem; border-radius: 4px; }
-:where(.cui-md) blockquote { margin: 0.6rem 0; padding: 0.1rem 0.9rem; border-left: 3px solid var(--citadel-border); color: var(--citadel-muted); }
-:where(.cui-md) hr { border: 0; border-top: 1px solid var(--citadel-border); margin: 1.2rem 0; }
-:where(.cui-md) .cui-table { overflow-x: auto; margin: 0.75rem 0; }
-:where(.cui-md) table { border-collapse: collapse; font-size: 0.9em; }
-:where(.cui-md) :is(th, td) { border: 1px solid var(--citadel-border); padding: 0.3rem 0.55rem; text-align: left; vertical-align: top; overflow-wrap: normal; }
-:where(.cui-md) th { background: var(--citadel-code-bg); }
-:where(.cui-md) :is(th, td).cui-al-r { text-align: right; }
-:where(.cui-md) :is(th, td).cui-al-c { text-align: center; }
-:where(.cui-md) li.cui-task { list-style: none; }
-:where(.cui-md) li.cui-task > input { margin: 0 0.35rem 0 -1.2rem; vertical-align: middle; }
-:where(.cui-md) li > p { margin: 0.35rem 0; }
-:where(.cui-md) .cui-front-matter { color: var(--citadel-muted); font-size: 0.85em; }
-:where(.cui-md) .cui-link { text-decoration: underline dotted; }
-:where(.cui-md) .cui-alt { color: var(--citadel-muted); }
+:where(.cui-md :is(code, pre)) { font-family: var(--citadel-mono); font-size: 0.88em; }
+:where(.cui-md pre) { background: var(--citadel-code-bg); padding: 0.6rem; border-radius: var(--citadel-radius-sm); overflow-x: auto; white-space: pre-wrap; margin: 0.4rem 0; }
+:where(.cui-md :not(pre) > code) { background: var(--citadel-code-bg); padding: 0.05rem 0.3rem; border-radius: 4px; }
+:where(.cui-md blockquote) { margin: 0.6rem 0; padding: 0.1rem 0.9rem; border-left: 3px solid var(--citadel-border); color: var(--citadel-muted); }
+:where(.cui-md hr) { border: 0; border-top: 1px solid var(--citadel-border); margin: 1.2rem 0; }
+:where(.cui-md .cui-table) { overflow-x: auto; margin: 0.75rem 0; }
+:where(.cui-md table) { border-collapse: collapse; font-size: 0.9em; }
+:where(.cui-md :is(th, td)) { border: 1px solid var(--citadel-border); padding: 0.3rem 0.55rem; text-align: left; vertical-align: top; overflow-wrap: normal; }
+:where(.cui-md th) { background: var(--citadel-code-bg); }
+:where(.cui-md :is(th, td).cui-al-r) { text-align: right; }
+:where(.cui-md :is(th, td).cui-al-c) { text-align: center; }
+:where(.cui-md li.cui-task) { list-style: none; }
+:where(.cui-md li.cui-task > input) { margin: 0 0.35rem 0 -1.2rem; vertical-align: middle; }
+:where(.cui-md li > p) { margin: 0.35rem 0; }
+:where(.cui-md .cui-front-matter) { color: var(--citadel-muted); font-size: 0.85em; }
+:where(.cui-md .cui-link) { text-decoration: underline dotted; }
+:where(.cui-md .cui-alt) { color: var(--citadel-muted); }
 `;
-let sheet = null;
+let sheet = false;
 function adoptStyles() {
   if (sheet) return;
-  sheet = new CSSStyleSheet();
-  sheet.replaceSync(CSS);
-  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  sheet = true;
+  // Safari before 16.4 can't construct sheets: there the markdown draws unstyled rather than not at all.
+  try {
+    const s = new CSSStyleSheet();
+    s.replaceSync(CSS);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, s];
+  } catch {}
 }
 
 /** A div.cui-md drawing `src` (options as renderMarkdown's), with its styles adopted. */

@@ -196,6 +196,8 @@ test('streaming: half-written markup is closed or hidden (Mandate\'s mend)', () 
   assert.equal(live('see `item_add'), p('see <code>item_add</code>'));
   assert.equal(live('fill in [the form](https://exa'), p('fill in the form'));
   assert.equal(live('fill in [the fo'), p('fill in the fo'));
+  assert.equal(live('see ![the chart](https://exa'), p('see'), 'a half image waits whole, not as its alt text');
+  assert.equal(live('see ![the ch'), p('see'));
   assert.equal(live('2 ** 3'), p('2 ** 3'));
   assert.equal(live('```\nconst **x'), '<pre><code>const **x</code></pre>', 'inside an open fence nothing changes');
   assert.equal(renderMarkdown('**a\n**b', { streaming: true, breaks: true }), p('**a<br><strong>b</strong>'), 'only the last line is mended');

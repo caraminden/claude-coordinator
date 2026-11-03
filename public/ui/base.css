@@ -23,21 +23,21 @@
   background: var(--citadel-surface); color: var(--citadel-text);
   transition: background-color var(--citadel-motion), border-color var(--citadel-motion), color var(--citadel-motion);
 }
-:where(.cui-btn):hover:not(:disabled) { border-color: color-mix(in srgb, var(--citadel-accent) 60%, var(--citadel-border)); }
+:where(.cui-btn:hover:not(:disabled)) { border-color: color-mix(in srgb, var(--citadel-accent) 60%, var(--citadel-border)); }
 :where(.cui-btn.cui-primary) { background: var(--citadel-accent); border-color: var(--citadel-accent); color: var(--citadel-on-accent); font-weight: 600; }
-:where(.cui-btn.cui-primary):hover:not(:disabled) { background: color-mix(in srgb, var(--citadel-accent) 88%, var(--citadel-text)); }
+:where(.cui-btn.cui-primary:hover:not(:disabled)) { background: color-mix(in srgb, var(--citadel-accent) 88%, var(--citadel-text)); }
 :where(.cui-btn.cui-ghost) { background: transparent; border-color: transparent; }
-:where(.cui-btn.cui-ghost):hover:not(:disabled) { background: color-mix(in srgb, var(--citadel-text) 7%, transparent); border-color: transparent; }
+:where(.cui-btn.cui-ghost:hover:not(:disabled)) { background: color-mix(in srgb, var(--citadel-text) 7%, transparent); border-color: transparent; }
 :where(.cui-btn.cui-danger) {
   color: var(--citadel-danger); font-weight: 600;
   border-color: color-mix(in srgb, var(--citadel-danger) 55%, var(--citadel-border));
   background: color-mix(in srgb, var(--citadel-danger) 9%, var(--citadel-surface));
 }
-:where(.cui-btn.cui-danger):hover:not(:disabled) { border-color: var(--citadel-danger); }
+:where(.cui-btn.cui-danger:hover:not(:disabled)) { border-color: var(--citadel-danger); }
 /* Small only shrinks on desktop: on a phone every control stays a 40px touch target. */
 :where(.cui-btn.cui-small) { min-height: 26px; padding: 2px var(--citadel-space-2); font-size: var(--citadel-size-small); }
 :where(.cui-btn.cui-icon) { width: var(--citadel-control-h); padding-inline: 0; font-size: 17px; }
-:where(.cui-btn):disabled { opacity: 0.5; cursor: default; }
+:where(.cui-btn:disabled) { opacity: 0.5; cursor: default; }
 @media (max-width: 800px) { :where(.cui-btn.cui-small) { min-height: var(--citadel-control-h); } }
 
 /* Inputs: one line is control-h tall, the block padding worked out so it stays equal. 16px on phones,
@@ -49,7 +49,7 @@
   background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-sm);
   transition: border-color var(--citadel-motion);
 }
-:where(.cui-input):hover { border-color: color-mix(in srgb, var(--citadel-muted) 50%, var(--citadel-border)); }
+:where(.cui-input:hover) { border-color: color-mix(in srgb, var(--citadel-muted) 50%, var(--citadel-border)); }
 :where(.cui-input)::placeholder { color: var(--citadel-muted); }
 :where(textarea.cui-input) { resize: vertical; }
 @media (max-width: 800px) { :where(.cui-input) { font-size: 16px; } }
@@ -76,10 +76,10 @@
   color: color-mix(in srgb, var(--citadel-accent) 82%, var(--citadel-text));
   transition: background-color var(--citadel-motion);
 }
-:where(.cui-choice):hover:not(:disabled) { background: color-mix(in srgb, var(--citadel-accent) 18%, var(--citadel-surface)); }
+:where(.cui-choice:hover:not(:disabled)) { background: color-mix(in srgb, var(--citadel-accent) 18%, var(--citadel-surface)); }
 :where(.cui-choice.cui-rec, .cui-choice[aria-pressed="true"]) { background: var(--citadel-accent); border-color: var(--citadel-accent); color: var(--citadel-on-accent); }
-:where(.cui-choice):disabled { opacity: 0.5; cursor: default; }
-:where(.cui-choice[aria-pressed="true"]):disabled { opacity: 1; }
+:where(.cui-choice:disabled) { opacity: 0.5; cursor: default; }
+:where(.cui-choice[aria-pressed="true"]:disabled) { opacity: 1; }
 
 /* Notice: the tone mixed 16% into the surface, body text, and a bar in the tone, so it reads in both
    modes (text in the tone on the tint vanishes in dark, where warn and warn-tint are one colour). */
@@ -110,5 +110,5 @@
 :where(.cui-working .cui-time) { font-variant-numeric: tabular-nums; }
 
 /* Focus: a ring for the keyboard, none for a click. */
-:where(.cui-btn, .cui-input, .cui-choice):focus { outline: none; }
-:where(.cui-btn, .cui-input, .cui-choice):focus-visible { outline: 2px solid var(--citadel-focus); outline-offset: 2px; }
+:where(.cui-btn:focus, .cui-input:focus, .cui-choice:focus) { outline: none; }
+:where(.cui-btn:focus-visible, .cui-input:focus-visible, .cui-choice:focus-visible) { outline: 2px solid var(--citadel-focus); outline-offset: 2px; }

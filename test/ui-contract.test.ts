@@ -23,6 +23,26 @@ const read = (f: string) => readFileSync(join(ui, f), 'utf8');
 const declared = (dts: string) => [...dts.matchAll(/^export\s+(?:declare\s+)?(?:function|const|let|class)\s+([\w$]+)/gm)].map((m) => m[1]).sort();
 /** The CSS a module brings: a .css file's text, or a .js module's constructed sheet (its `const CSS = `...``). */
 const cssOf = (f: string) => (f.endsWith('.css') ? read(f) : /\bconst CSS = `([\s\S]*?)`;/.exec(read(f))?.[1] ?? '');
+/** A selector list split at its top-level commas (not those inside :where(), :is() or :not()). */
+function splitTop(sel: string) {
+  const parts: string[] = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < sel.length; i++) {
+    if (sel[i] === '(') depth++;
+    else if (sel[i] === ')') depth--;
+    else if (sel[i] === ',' && depth === 0) { parts.push(sel.slice(start, i)); start = i + 1; }
+  }
+  return [...parts, sel.slice(start)];
+}
+/** What's left of a selector after its leading :where(...) groups: '' when it weighs nothing. */
+function outsideWhere(sel: string) {
+  while (sel.startsWith(':where(')) {
+    let depth = 0, i = ':where'.length;
+    for (; i < sel.length; i++) if (sel[i] === '(') depth++; else if (sel[i] === ')' && --depth === 0) break;
+    sel = sel.slice(i + 1);
+  }
+  return sel;
+}
 /** The cui-* classes a stylesheet defines. */
 const classes = (css: string) => [...new Set([...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/\.(cui-[\w-]+)/g)].map((m) => m[1]))].sort();
 
@@ -109,11 +129,12 @@ test('every ui file keeps the rules: standalone, no inline styles, cui-* classes
       assert.doesNotMatch(code, /\bstyle\s*=\s*["'`]|<style\b|\.style\.|\.setAttribute\(\s*['"]style/, `${f} writes no inline style`);
     }
     const css = cssOf(f).replace(/\/\*[\s\S]*?\*\//g, '');
-    // Each rule's selector list (outside @media and @keyframes) starts with :where( so an app's own selectors win.
+    // Each selector (outside @media and @keyframes) is wholly inside :where() groups, so it weighs nothing and an
+    // app's own selectors always win; only a pseudo-element (::placeholder) may follow, as :where() can't hold one.
     for (const m of css.matchAll(/(?:^|[}{])\s*([^{}@]+?)\s*\{/g)) {
       const sel = m[1].trim();
       if (!sel || /^(from|to|\d+%)$/.test(sel)) continue;
-      for (const part of sel.split(/,(?![^(]*\))/)) assert.match(part.trim(), /^:where\(/, `${f}: "${part.trim()}" sits in :where()`);
+      for (const part of splitTop(sel)) assert.match(outsideWhere(part.trim()), /^(::[\w-]+)?$/, `${f}: "${part.trim()}" sits wholly in :where()`);
     }
     for (const c of css.matchAll(/\.([a-z][\w-]*)/g)) assert.match(c[1], /^cui-/, `${f}: class .${c[1]} is cui-*`);
   }

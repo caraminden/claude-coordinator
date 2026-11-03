@@ -34,6 +34,8 @@ const CSS = `
   resize: none; overflow-y: auto; max-height: 40vh; padding: calc((var(--citadel-control-h) - 1.25em) / 2) var(--citadel-space-1);
 }
 :where(.cui-composer-row) { display: flex; align-items: center; gap: var(--citadel-space-2); }
+/* .cui-btn's display would beat [hidden]. */
+:where(.cui-composer-stop[hidden]) { display: none; }
 @media (max-width: 800px) { :where(.cui-composer-input) { font-size: 16px; } }
 `;
 let sheet = false;

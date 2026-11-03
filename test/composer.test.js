@@ -3,6 +3,7 @@
 // dev copy; listEnter has its own tests (lists.test.ts).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 class El {
   constructor(tag) {
@@ -183,6 +184,8 @@ test('whileBusy send: Stop shows beside Send while busy, Send and Enter keep sen
   assert.deepEqual(sent, ['one more thing', 'and another']);
   assert.equal(s.textarea.value, 'kept');
   assert.equal(s.stopButton.hidden, true, 'gone once the turn ends');
+  // The fake DOM has no styles: in a page, .cui-btn's display beats [hidden] unless the composer's sheet hides it.
+  assert.match(readFileSync(new URL('../public/ui/composer.js', import.meta.url), 'utf8'), /:where\(\.cui-composer-stop\[hidden\]\) \{ display: none; \}/);
   // Without stop, or with the default, there is no separate Stop.
   assert.equal(mountComposer(new El('div'), { send() {}, whileBusy: 'send' }).stopButton, null);
   assert.equal(mountComposer(new El('div'), { send() {}, stop() {} }).stopButton, null);

@@ -50,6 +50,7 @@ window.COLOURS = [
   --citadel-control-h: 32px;
   --citadel-motion: 150ms ease-out;
   --citadel-motion-slow: 250ms ease-out;
+  --citadel-focus-ring: 2px solid var(--citadel-accent); --citadel-focus-offset: 2px;
 }
 @media (max-width: 800px) { .cui-scope { --citadel-control-h: 40px; } }
 @media (prefers-reduced-motion: reduce) { .cui-scope { --citadel-motion: 0s; --citadel-motion-slow: 0s; } }
@@ -147,6 +148,28 @@ window.COLOURS = [
 .cui-scope .cui-notice[data-tone="danger"] { --tint: var(--citadel-danger); --bar: var(--citadel-danger); }
 .cui-scope .cui-notice[data-tone="info"] { --tint: var(--citadel-info); --bar: var(--citadel-info); }
 .cui-scope .cui-notice b { font-weight: 600; }
+
+/* Switch: a native checkbox, a pill track and a knob that slides; 44px touch target from padding the
+   negative margin hands back. */
+.cui-scope .cui-switch {
+  --cui-switch-h: 20px; --cui-switch-pad: calc((44px - var(--cui-switch-h)) / 2);
+  --cui-knob: var(--citadel-surface);
+  appearance: none; flex: none; box-sizing: content-box; display: inline-block; vertical-align: middle;
+  width: calc(var(--cui-switch-h) * 1.8); height: var(--cui-switch-h);
+  padding: var(--cui-switch-pad); margin: calc(0px - var(--cui-switch-pad));
+  border: 0; border-radius: var(--citadel-radius-pill); cursor: pointer;
+  background:
+    radial-gradient(circle closest-side, var(--cui-knob) calc(100% - 3px), transparent calc(100% - 2px)) left center / var(--cui-switch-h) var(--cui-switch-h) no-repeat content-box,
+    color-mix(in srgb, var(--citadel-muted) 85%, var(--citadel-surface)) content-box;
+  transition: background-color var(--citadel-motion), background-position var(--citadel-motion);
+}
+.cui-scope .cui-switch:checked { --cui-knob: var(--citadel-on-accent); background-color: var(--citadel-accent); background-position: right center, 0 0; }
+.cui-scope .cui-switch:disabled { opacity: 0.5; cursor: default; }
+.cui-scope .cui-switch:focus-visible { outline: var(--citadel-focus-ring); outline-offset: calc(var(--citadel-focus-offset) - var(--cui-switch-pad)); }
+.cui-scope label:has(> .cui-switch) { display: inline-flex; align-items: center; gap: var(--citadel-space-3); margin: 0; color: var(--citadel-text); font-size: 15px; cursor: pointer; }
+.cui-scope label:has(> .cui-switch:disabled) { color: var(--citadel-muted); cursor: default; }
+@media (max-width: 800px) { .cui-scope .cui-switch { --cui-switch-h: 24px; } }
+@media (forced-colors: active) { .cui-scope .cui-switch { appearance: auto; padding: 0; margin: 0; } }
 
 /* Spinner (a ring) and the working line. */
 .cui-scope .cui-spin {
@@ -541,6 +564,20 @@ background: var(--citadel-warn-tint);</code></pre></div>
       <div class="mk-about">
         <p>A message about the app, not from the agent: warn, danger, info. Body text on a 16% tint, the tone in the bar.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> · <code>.cui-notice[data-tone]</code> (warn is the default)</p>
+      </div>
+    </div>
+
+    <h3>Switch</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <label><input type="checkbox" role="switch" class="cui-switch" checked> Show overlays</label>
+        <label><input type="checkbox" role="switch" class="cui-switch"> Snap to grid</label>
+        <label><input type="checkbox" role="switch" class="cui-switch" checked disabled> Locked on</label>
+        <label><input type="checkbox" role="switch" class="cui-switch" disabled> Locked off</label>
+      </div>
+      <div class="mk-about">
+        <p>An on/off setting that takes effect at once. A native checkbox with <code>role="switch"</code>: off is a grey track, on is the accent with the knob in <code>on-accent</code>. Its touch target is 44px tall at every width; the track is 20px, 24px at ≤800px. The focus ring hugs the track.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> · <code>input[type=checkbox][role=switch].cui-switch</code>, in a <code>&lt;label&gt;</code> with its text</p>
       </div>
     </div>
 

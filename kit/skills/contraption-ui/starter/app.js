@@ -47,7 +47,7 @@ async function run(text) {
       finish();
       chat.replies([{ label: 'Add one more', recommended: true }, { label: 'That\'s all' }]);
     }
-  }, 400);
+  }, document.getElementById('quick').checked ? 100 : 400);
 }
 const box = mountComposer(document.getElementById('compose'), {
   placeholder: 'Ask something…',

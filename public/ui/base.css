@@ -11,6 +11,8 @@
    Chips:    <span class="cui-chip" data-tone="ok|warn|danger|info|violet|neutral">; tappable choices:
              <div class="cui-choices"><button class="cui-choice"> (cui-rec or aria-pressed="true": picked).
    Notices:  <div class="cui-notice" role="status"> (warn), data-tone="danger" or "info".
+   Switch:   <label><input type="checkbox" role="switch" class="cui-switch"> Show overlays</label>
+             (or aria-label on a switch with no label); read and set it as any checkbox (.checked, change).
    Spinner:  <span class="cui-spin"></span>; a working line: <div class="cui-working"><span class="cui-spin"></span>
              Working… <span class="cui-time">12s</span></div>. */
 
@@ -98,6 +100,33 @@
 :where(.cui-chip, .cui-notice):where([data-tone="neutral"]) { --cui-tone: var(--citadel-neutral); }
 :where(.cui-notice[data-tone]:not([data-tone="warn"])) { --cui-tint: var(--cui-tone); }
 
+/* Switch: a native checkbox drawn as a pill track (background-clip: content-box) with a round knob (a
+   radial gradient) that slides right when on. The transparent padding makes the box 44px tall, a phone's
+   touch target (in a label it overlaps the gap to the text), and the negative margin hands that room back,
+   so the switch lays out at the track's size.
+   Forced colours drop backgrounds, so there it falls back to the native checkbox. */
+:where(.cui-switch) {
+  --cui-switch-h: 20px; --cui-switch-pad: calc((44px - var(--cui-switch-h)) / 2);
+  --cui-knob: var(--citadel-surface);
+  appearance: none; flex: none; box-sizing: content-box; display: inline-block; vertical-align: middle;
+  width: calc(var(--cui-switch-h) * 1.8); height: var(--cui-switch-h);
+  padding: var(--cui-switch-pad); margin: calc(0px - var(--cui-switch-pad));
+  border: 0; border-radius: var(--citadel-radius-pill); cursor: pointer;
+  background:
+    radial-gradient(circle closest-side, var(--cui-knob) calc(100% - 3px), transparent calc(100% - 2px)) left center / var(--cui-switch-h) var(--cui-switch-h) no-repeat content-box,
+    color-mix(in srgb, var(--citadel-muted) 85%, var(--citadel-surface)) content-box;
+  transition: background-color var(--citadel-motion), background-position var(--citadel-motion);
+}
+:where(.cui-switch:checked) {
+  --cui-knob: var(--citadel-on-accent);
+  background-color: var(--citadel-accent); background-position: right center, 0 0;
+}
+:where(.cui-switch:disabled) { opacity: 0.5; cursor: default; }
+:where(label:has(> .cui-switch)) { display: inline-flex; align-items: center; gap: var(--citadel-space-3); cursor: pointer; }
+:where(label:has(> .cui-switch:disabled)) { color: var(--citadel-muted); cursor: default; }
+@media (max-width: 800px) { :where(.cui-switch) { --cui-switch-h: 24px; } }
+@media (forced-colors: active) { :where(.cui-switch) { appearance: auto; padding: 0; margin: 0; } }
+
 /* Spinner (a ring) and the working line. Under reduced motion the ring stops; a timer still ticks. */
 :where(.cui-spin) {
   display: inline-block; flex: none; box-sizing: border-box; width: 0.95em; height: 0.95em; border-radius: 50%;
@@ -110,5 +139,7 @@
 :where(.cui-working .cui-time) { font-variant-numeric: tabular-nums; }
 
 /* Focus: a ring for the keyboard, none for a click. */
-:where(.cui-btn:focus, .cui-input:focus, .cui-choice:focus) { outline: none; }
+:where(.cui-btn:focus, .cui-input:focus, .cui-choice:focus, .cui-switch:focus) { outline: none; }
 :where(.cui-btn:focus-visible, .cui-input:focus-visible, .cui-choice:focus-visible) { outline: 2px solid var(--citadel-focus); outline-offset: 2px; }
+/* The switch's ring hugs the track, not its padded touch area (an outline follows the border radius). */
+:where(.cui-switch:focus-visible) { outline: var(--citadel-focus-ring); outline-offset: calc(var(--citadel-focus-offset) - var(--cui-switch-pad)); }

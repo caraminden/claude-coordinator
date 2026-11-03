@@ -187,6 +187,16 @@ tint a part, set the base colour (`--citadel-accent`) on its container rather th
 Every rule sits in `:where()`, so any selector of yours wins: restyle by writing your own rule, no
 `!important`.
 
+**Switch** (an on/off setting that takes effect at once; a choice sent with a form stays a checkbox):
+
+```html
+<label><input type="checkbox" role="switch" class="cui-switch"> Show overlays</label>
+<input type="checkbox" role="switch" class="cui-switch" aria-label="Show overlays" checked>  <!-- no visible text -->
+```
+
+A native checkbox, so `.checked`, `change`, `disabled` and forms work as usual. Its touch target is 44 px
+tall and lays out at the track's size; a `<label>` around it lines up the text and makes it tappable too.
+
 ## The rules
 
 1. **Equal room above and below:** text or an icon in a box, bar, button, row or chip has equal,

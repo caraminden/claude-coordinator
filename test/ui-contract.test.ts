@@ -71,6 +71,29 @@ const LINES: [string, string, object?][] = [
   ['a streaming line', 'Working on **it', { streaming: true }],
 ];
 
+// A recorded turn, as an app's chat draws it: text, a run of calls with a failed one, a Grunt with two steps, then an
+// error; once folded and once with its run open, and the same turn mid-flight.
+const { renderChat } = await import('../public/ui/chat.js');
+const at = (s: number) => Date.UTC(2026, 10, 2, 12, 0, s);
+const ev = (type: string, data: object, s?: number) => ({ type, data, at: s === undefined ? undefined : at(s) });
+const RECORDED = [
+  ev('text', { delta: 'Let me **check** Thursday.', parent: null, message: 'm1' }),
+  ev('tool', { id: 'a', name: 'mcp__mandate__list_todos', input: {}, parent: null }, 1), ev('tool_result', { id: 'a', ok: true, parent: null }, 2),
+  ev('tool', { id: 'b', name: 'mcp__mandate__move_todo', input: { title: 'Dry cleaning' }, parent: null }, 2), ev('tool_result', { id: 'b', ok: false, parent: null }, 3),
+  ev('tool', { id: 'g', name: 'Agent', input: { description: 'Check the calendar' }, parent: null }, 3),
+  ev('tool', { id: 'g1', name: 'mcp__mandate__calendar', input: {}, parent: 'g' }, 4), ev('tool_result', { id: 'g1', ok: true, parent: 'g' }, 5),
+  ev('tool', { id: 'g2', name: 'mcp__mandate__search', input: {}, parent: 'g' }, 5), ev('tool_result', { id: 'g2', ok: true, parent: 'g' }, 9),
+  ev('tool_result', { id: 'g', ok: true, parent: null }, 44),
+  ev('text', { delta: 'Thursday is free.', parent: null, message: 'm2' }),
+  ev('error', { code: 'limit', message: 'You\'ve reached your usage limit.' }),
+];
+const stepLabel = (name: string, input: { title?: string }) => (name === 'mcp__mandate__move_todo' ? `Moving “${input.title}”` : undefined);
+const CHATS: [string, object[], object][] = [
+  ['a recorded turn, folded', [{ ask: 'Move my errands', events: RECORDED }], { stepLabel, now: at(50) }],
+  ['a recorded turn, its run open', [{ ask: 'Move my errands', events: RECORDED }], { stepLabel, now: at(50), open: ['0.1'] }],
+  ['the same turn mid-flight', [{ ask: 'Move my errands', events: RECORDED.slice(0, 9) }], { stepLabel, now: at(7) }],
+];
+
 function current() {
   const exports: Record<string, string[]> = {};
   const css: Record<string, string[]> = {};
@@ -88,6 +111,7 @@ function current() {
       theme,
       markdown: Object.fromEntries(SAMPLES.map(([name, src, opts]) => [name, renderMarkdown(src, opts)])),
       markdownLine: Object.fromEntries(LINES.map(([name, src, opts]) => [name, markdownLine(src, opts)])),
+      chat: Object.fromEntries(CHATS.map(([name, turns, opts]) => [name, renderChat(turns, opts)])),
     };
   });
 }
@@ -115,6 +139,10 @@ test('exports, classes and theme names are the stored contract', () => {
 test('fixed markdown samples render to the stored HTML', () => {
   assert.deepEqual(now.markdown, stored.markdown, why);
   assert.deepEqual(now.markdownLine, stored.markdownLine, why);
+});
+
+test('a recorded chat turn renders to the stored HTML', () => {
+  assert.deepEqual(now.chat, stored.chat, why);
 });
 
 test('every ui file keeps the rules: standalone, no inline styles, cui-* classes inside :where()', () => {

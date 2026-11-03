@@ -1,5 +1,13 @@
 {
   "exports": {
+    "chat.js": [
+      "chatModel",
+      "duration",
+      "gruntName",
+      "mountChat",
+      "renderChat",
+      "stepMark"
+    ],
     "markdown.js": [
       "markdownElement",
       "markdownLine",
@@ -30,6 +38,31 @@
       "cui-small",
       "cui-spin",
       "cui-time",
+      "cui-working"
+    ],
+    "chat.js": [
+      "cui-ask",
+      "cui-card",
+      "cui-chat",
+      "cui-chev",
+      "cui-empty",
+      "cui-grunt",
+      "cui-grunt-head",
+      "cui-grunt-task",
+      "cui-latest",
+      "cui-live",
+      "cui-log",
+      "cui-mark",
+      "cui-reply",
+      "cui-run",
+      "cui-run-head",
+      "cui-run-label",
+      "cui-step",
+      "cui-step-label",
+      "cui-steps",
+      "cui-stopped",
+      "cui-time",
+      "cui-turn",
       "cui-working"
     ],
     "composer.js": [
@@ -113,5 +146,10 @@
   "markdownLine": {
     "a reply as a line": "Done<br>Moved <strong>Tue</strong> to Thu.<br>• one<br>• two",
     "a streaming line": "Working on <strong>it</strong>"
+  },
+  "chat": {
+    "a recorded turn, folded": "<div class=\"cui-turn\"><div class=\"cui-ask\">Move my errands</div><div class=\"cui-reply\"><div class=\"cui-md\"><p>Let me <strong>check</strong> Thursday.</p></div><div class=\"cui-run\" data-state=\"failed\" data-key=\"0.1\"><button type=\"button\" class=\"cui-run-head\" aria-expanded=\"false\"><span class=\"cui-mark\" data-state=\"failed\" role=\"img\" aria-label=\"Failed\">✕</span><span class=\"cui-run-label\">3 steps · 1 Grunt · 1 failed</span><span class=\"cui-chev\" aria-hidden=\"true\">▸</span></button></div><div class=\"cui-md\"><p>Thursday is free.</p></div><div class=\"cui-notice\" data-tone=\"danger\"><b>Couldn't finish:</b> You&#39;ve reached your usage limit.</div></div></div>",
+    "a recorded turn, its run open": "<div class=\"cui-turn\"><div class=\"cui-ask\">Move my errands</div><div class=\"cui-reply\"><div class=\"cui-md\"><p>Let me <strong>check</strong> Thursday.</p></div><div class=\"cui-run\" data-state=\"failed\" data-key=\"0.1\"><button type=\"button\" class=\"cui-run-head\" aria-expanded=\"true\"><span class=\"cui-mark\" data-state=\"failed\" role=\"img\" aria-label=\"Failed\">✕</span><span class=\"cui-run-label\">3 steps · 1 Grunt · 1 failed</span><span class=\"cui-chev\" aria-hidden=\"true\">▾</span></button><ul class=\"cui-steps\"><li class=\"cui-step\" data-state=\"done\"><span class=\"cui-mark\" data-state=\"done\" role=\"img\" aria-label=\"Done\">✓</span><span class=\"cui-step-label\">List todos</span><span class=\"cui-time\">1s</span></li><li class=\"cui-step\" data-state=\"failed\"><span class=\"cui-mark\" data-state=\"failed\" role=\"img\" aria-label=\"Failed\">✕</span><span class=\"cui-step-label\">Moving “Dry cleaning”</span><span class=\"cui-time\">1s</span></li><li class=\"cui-step-grunt\"><div class=\"cui-grunt\" data-state=\"done\"><div class=\"cui-grunt-head\"><span class=\"cui-mark\" data-state=\"done\" role=\"img\" aria-label=\"Done\">✓</span><span class=\"cui-grunt-task\">Grunt · Check the calendar</span><span class=\"cui-time\">41s</span></div><ul class=\"cui-steps\"><li class=\"cui-step\" data-state=\"done\"><span class=\"cui-mark\" data-state=\"done\" role=\"img\" aria-label=\"Done\">✓</span><span class=\"cui-step-label\">Calendar</span><span class=\"cui-time\">1s</span></li><li class=\"cui-step\" data-state=\"done\"><span class=\"cui-mark\" data-state=\"done\" role=\"img\" aria-label=\"Done\">✓</span><span class=\"cui-step-label\">Search</span><span class=\"cui-time\">4s</span></li></ul></div></li></ul></div><div class=\"cui-md\"><p>Thursday is free.</p></div><div class=\"cui-notice\" data-tone=\"danger\"><b>Couldn't finish:</b> You&#39;ve reached your usage limit.</div></div></div>",
+    "the same turn mid-flight": "<div class=\"cui-turn\"><div class=\"cui-ask\">Move my errands</div><div class=\"cui-reply\"><div class=\"cui-md\"><p>Let me <strong>check</strong> Thursday.</p></div><div class=\"cui-run\" data-state=\"running\" data-key=\"0.1\"><button type=\"button\" class=\"cui-run-head\" aria-expanded=\"false\"><span class=\"cui-spin\" role=\"img\" aria-label=\"Running\"></span><span class=\"cui-run-label\"><b>Check the calendar…</b> · step 3</span><span class=\"cui-chev\" aria-hidden=\"true\">▸</span></button><div class=\"cui-grunt\" data-state=\"running\"><div class=\"cui-grunt-head\"><span class=\"cui-spin\" role=\"img\" aria-label=\"Running\"></span><span class=\"cui-grunt-task\">Grunt · Check the calendar</span><span class=\"cui-time\" data-since=\"1793620803000\">4s</span></div><ul class=\"cui-steps\"><li class=\"cui-step\" data-state=\"done\"><span class=\"cui-mark\" data-state=\"done\" role=\"img\" aria-label=\"Done\">✓</span><span class=\"cui-step-label\">Calendar</span><span class=\"cui-time\">1s</span></li><li class=\"cui-step\" data-state=\"running\"><span class=\"cui-spin\" role=\"img\" aria-label=\"Running\"></span><span class=\"cui-step-label\">Search</span><span class=\"cui-time\" data-since=\"1793620805000\">2s</span></li></ul></div></div></div></div>"
   }
 }

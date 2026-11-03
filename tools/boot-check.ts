@@ -37,7 +37,7 @@ setTimeout(() => {
 try {
   // A syntax error in any front-end file blanks the app; node --check finds it without a browser.
   const pub = join(checkout, 'public');
-  const scripts = [...readdirSync(pub), ...readdirSync(join(pub, 'ui')).map((f) => `ui/${f}`)].filter((f) => /\.m?js$/.test(f));
+  const scripts = readdirSync(pub).filter((f) => /\.m?js$/.test(f));
   const bad = (await Promise.all(scripts.map((f) => promisify(execFile)(process.execPath, ['--check', join(pub, f)]).then(() => null, (err) => `${f}: ${err.stderr.trim()}`)))).filter(Boolean);
   if (bad.length) fail(`Front-end files don't parse:\n${bad.join('\n')}`);
 

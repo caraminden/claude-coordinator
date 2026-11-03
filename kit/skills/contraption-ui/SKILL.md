@@ -112,7 +112,9 @@ chat.replies([{ label: 'Yes', recommended: true }, { label: 'No' }]);  // chips 
 
 Your server calls the turn API (`POST /api/contraptions/turns`) and relays its SSE events to the page
 as they come; hand each to `push` as `{ type: <event name>, data: <its JSON> }`, untouched. Store the
-same events per turn and `load` them to draw history.
+same events per turn and `load` them to draw history. A stored turn needs its `end` or `error`: one
+cut off (your server restarted mid-turn) draws as still running when it's the newest, so store an
+`error` for it.
 
 What it does for you: words split per model message (the turn API's `message`), so "Let me check."
 and "Done." never glue together; each run of tool calls between texts folds into one row that reads

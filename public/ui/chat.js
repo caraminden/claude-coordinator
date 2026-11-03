@@ -337,7 +337,8 @@ export function mountChat(el, opts = {}) {
     if (m.running) tick = setInterval(ticks, 1000);
     if (follow) el.scrollTop = el.scrollHeight;
   }
-  const schedule = () => (frame ||= requestAnimationFrame(draw));
+  let gone = false; // destroyed: a late push (an SSE still open) draws nothing and starts no clock
+  const schedule = () => gone || (frame ||= requestAnimationFrame(draw));
   // Timers tick their own text, nothing else redraws.
   const ticks = () => {
     for (const t of el.querySelectorAll('.cui-time[data-since]')) t.textContent = duration(Date.now() - Number(t.dataset.since));
@@ -373,7 +374,7 @@ export function mountChat(el, opts = {}) {
 
   const now = () => {
     cancelAnimationFrame(frame);
-    draw();
+    if (!gone) draw();
   };
   const lastEnded = () => turns.at(-1)?.events.some((e) => e.type === 'end' || e.type === 'error');
 
@@ -420,6 +421,8 @@ export function mountChat(el, opts = {}) {
       if (follow) el.scrollTop = el.scrollHeight;
     },
     destroy() {
+      gone = true;
+      nodes = [];
       cancelAnimationFrame(frame);
       clearInterval(tick);
       el.removeEventListener('scroll', onScroll);

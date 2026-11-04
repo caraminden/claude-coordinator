@@ -221,7 +221,8 @@ helper: it's CSS on the attribute.
 
 - The region is a block box: the ring is a float. Put a flex or grid layout on a child inside it.
 - Its direct children dim; any `cui-skeleton` or `cui-skeleton-card` among them stays as it is.
-- Clicks are blocked, keys aren't: disable a button whose action would go wrong on the stale content.
+- Clicks are blocked from the moment it goes busy (the dim follows 0.2 s later), keys aren't: disable a
+  button whose action would go wrong on the stale content.
 - Mark the region that changes (the list, the card, the panel), never the whole page.
 
 **Skeleton** (a first load, when there's nothing yet to dim):

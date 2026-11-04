@@ -214,6 +214,15 @@ test('a machine lent to chosen schemes reaches only their minions, and taking a 
   const reopened = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${inA.token}` } });
   assert.equal(reopened.status, 403);
   await reopened.body!.cancel();
+  // Granted, but with the scheme's machine tools off it still doesn't open, as its turns wouldn't get it.
+  await call(`/api/projects/${b.id}`, { method: 'PATCH', body: { machine_tools: false } });
+  const off = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${inB.token}` } });
+  assert.equal(off.status, 403);
+  await off.body!.cancel();
+  await call(`/api/projects/${b.id}`, { method: 'PATCH', body: { machine_tools: true } });
+  const nowB = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${inB.token}` } });
+  assert.equal(nowB.status, 200);
+  await nowB.body!.cancel();
 
   // Back to every scheme: lent as before, and its grants kept but unread.
   const unscoped = await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: null } });

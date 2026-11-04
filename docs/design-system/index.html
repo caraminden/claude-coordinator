@@ -418,6 +418,7 @@ window.COLOURS = [
         <tr><td><code>ui/markdown.js</code></td><td>Markdown to safe DOM, one link rule, a streaming mode.</td><td>ES module import</td></tr>
         <tr><td><code>ui/chat.js</code></td><td>Your message, the reply, tool-run rows, Grunt rows, suggested replies, the working line, fed the turn API's events as they come. Citadel's own action, phase and Grunt rows draw their marks with it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/composer.js</code></td><td>The message box: autogrow, Enter rules, IME-safe, list continuation, a failed send back in the box, Send that turns into Stop, drafts. Citadel's own composer is built on it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
+        <tr><td><code>ui/tip.js</code></td><td>Tooltips: <code>data-tip</code> on anything, one <code>mountTips()</code> call. Hover, keyboard focus, a tap or a long press opens it; it sits below or above the thing, never over it; a slow body shows skeleton lines. Ported from Theory of Crafting (#296).</td><td>ES module; its look is <code>.cui-tip</code> in base.css</td></tr>
         <tr><td><code>drawers.js</code></td><td><code>NARROW</code> = 800: the phone breakpoint, exported once.</td><td>ES module, as today</td></tr>
       </tbody>
     </table></div>
@@ -635,6 +636,21 @@ background: var(--citadel-warn-tint);</code></pre></div>
       <div class="mk-about">
         <p>No full-screen loading covers (Cara, 2026-11-03: "keep the screen visible and just have a spinner or grey out the changed thing"). The region that's reloading gets <code>aria-busy="true"</code>: after 0.2s its content dims to 0.45 and takes no clicks, and a ring sits in its corner, sticky, so scroll the list and it stays in view. A first load, with nothing to dim, shows skeleton lines and cards (<code>aria-hidden</code>) with a slow shine; both hold still under reduced motion.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> · <code>.cui-busy[aria-busy="true"]</code>, <code>.cui-skeleton</code> (<code>data-width="short|medium|long"</code>), <code>.cui-skeleton-card</code></p>
+      </div>
+    </div>
+
+    <h3>Tooltip</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <p class="doc-tip-demo">Life <span class="doc-tip-thing">4,812</span> · DPS 1.2M</p>
+        <div class="cui-tip doc-tip-static" role="tooltip"><span class="cui-tip-text">Life: 4,812
++12% from the tree, +80 from gear</span></div>
+        <div class="cui-tip doc-tip-static" aria-hidden="true"><div class="cui-tip-skel"><span class="cui-skeleton" data-width="medium"></span><span class="cui-skeleton"></span><span class="cui-skeleton" data-width="long"></span></div></div>
+      </div>
+      <div class="mk-about">
+        <p>Use tooltips to give extra detail on hover (Cara, 2026-11-04: "add useful additional details ... when things are moused over throughout the app, tooltips are great!"). A number, a stat, a short label or an icon button gets the line or breakdown behind it, so the screen stays short and the detail is one hover away.</p>
+        <p>Opens on hover after 250ms (60ms from one tip to the next), at once on keyboard focus, on a tap for things that don't act, and on a 450ms long press for buttons and links. Below the thing, or above when there's no room, never over it. A card on the surface in the top layer; a slow body shows skeleton lines first (the second box). Escape, a press outside or a scroll closes it.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/tip.js</code> (<code>mountTips</code>) · <code>[data-tip]</code> on the thing · <code>.cui-tip</code> in <code>ui/base.css</code></p>
       </div>
     </div>
   </section>
@@ -914,6 +930,13 @@ row.innerHTML =
 /* After the components, and specific enough, so these wrongs win. */
 .cui-scope .cui-btn.cui-primary.doc-white, .cui-scope .cui-choice.cui-rec.doc-white { color: #fff; }
 .cui-scope .cui-btn.cui-primary.doc-hex-wrong { background: #c2410c; border-color: #c2410c; color: #fff; }
+/* Tooltip (ui/tip.js): the open tip, drawn in place rather than in the top layer. */
+.cui-scope .cui-tip { box-sizing: border-box; width: max-content; max-width: min(420px, 100%); padding: var(--citadel-space-2) var(--citadel-space-3); font: var(--citadel-size-small)/1.4 var(--citadel-font); color: var(--citadel-text); background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); box-shadow: 0 6px 18px rgb(0 0 0 / 0.16); }
+.cui-scope .cui-tip-text { white-space: pre-line; }
+.cui-scope .cui-tip-skel { display: flex; flex-direction: column; gap: 6px; width: 240px; max-width: 100%; padding: 2px 0; }
+.cui-scope .cui-tip-skel > .cui-skeleton { margin: 0; }
+.cui-scope .doc-tip-demo { margin: 0; }
+.cui-scope .doc-tip-thing { border-bottom: 1px dotted var(--citadel-muted); }
 .cui-scope .doc-spin-always { animation: cui-spin 0.8s linear infinite; }
 .doc-covered { position: relative; }
 .doc-cover { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: var(--citadel-space-2); background: color-mix(in srgb, var(--citadel-bg) 92%, transparent); color: var(--citadel-muted); font-size: var(--citadel-size-small); }

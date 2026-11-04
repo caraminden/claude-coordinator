@@ -21,6 +21,11 @@
       "listEnter",
       "mountComposer"
     ],
+    "tip.js": [
+      "TipCache",
+      "mountTips",
+      "placeTip"
+    ],
     "rail.js": [
       "closeRail",
       "hasRail",
@@ -61,6 +66,10 @@
       "cui-spin",
       "cui-switch",
       "cui-time",
+      "cui-tip",
+      "cui-tip-error",
+      "cui-tip-skel",
+      "cui-tip-text",
       "cui-working"
     ],
     "chat.js": [

@@ -2,9 +2,13 @@
 import { initDrawers } from '/apps/_citadel/drawers.js';
 import { mountChat } from '/apps/_citadel/ui/chat.js';
 import { mountComposer } from '/apps/_citadel/ui/composer.js';
+import { mountTips } from '/apps/_citadel/ui/tip.js';
 
 // Phones: the sections slide in from the left edge; a swipe past them opens the app switcher.
 initDrawers({ left: { el: document.getElementById('sections'), label: 'Sections' }, main: document.getElementById('main') });
+
+// Every [data-tip] on the page gets its tooltip: hover, keyboard focus, a tap or a long press.
+mountTips(document.body);
 
 const chat = mountChat(document.getElementById('chat'), {
   empty: 'Send a message to see a sample reply.',

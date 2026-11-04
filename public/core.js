@@ -902,6 +902,7 @@ export function start(who) {
 }
 
 export async function logout() {
+  initAppSwitch(null);
   // Notifications on this device were for the person signing out.
   await pushOff().catch(() => {});
   await api('api/logout', { method: 'POST', body: {} });

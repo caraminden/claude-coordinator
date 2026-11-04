@@ -56,7 +56,8 @@ export function switchKey(state, e, order) {
 let person = null;
 let state = null;
 let box = null;
-const hooked = new WeakSet();
+let cancelled = false; // Esc while Alt is held: its release is still the switcher's
+const hooked = new WeakSet(); // documents: a frame's window object stays the same across its navigations
 
 const storeKey = () => `citadel-app-switch:${person}`;
 function recent() {
@@ -90,11 +91,15 @@ function entries() {
 
 function onKey(e) {
   if (!person) return;
+  if (cancelled && e.type === 'keyup' && !e.altKey) {
+    cancelled = false;
+    return e.preventDefault();
+  }
   if (!state && !(e.type === 'keydown' && e.code === KEY && e.altKey)) return;
   let order = state?.order ?? [];
   if (!state) {
     // A modal dialog owns the page until it's closed.
-    if (document.querySelector('dialog:modal')) return;
+    if (document.querySelector('dialog:modal') || e.view?.document.querySelector('dialog:modal')) return;
     const list = entries();
     const byName = new Map(list.map((x) => [x.name, x]));
     order = appOrder(recent(), list.map((x) => x.name), list.find((x) => x.current)?.name ?? '').map((n) => byName.get(n));
@@ -106,7 +111,10 @@ function onKey(e) {
   }
   state = r.state;
   if (r.act === 'open' || r.act === 'move') draw();
-  if (r.act === 'cancel') shut();
+  if (r.act === 'cancel') {
+    shut();
+    cancelled = e.altKey;
+  }
   if (r.act === 'commit') go(r.to);
 }
 
@@ -163,8 +171,8 @@ function draw() {
 
 /** Listen in a window: Citadel's, or a contraption frame's (again after each navigation in it). */
 function hook(win) {
-  if (!win || hooked.has(win)) return;
-  hooked.add(win);
+  if (!win || hooked.has(win.document)) return;
+  hooked.add(win.document);
   win.addEventListener('keydown', onKey, true);
   win.addEventListener('keyup', onKey, true);
   // Focus left the browser window mid-switch (the system's own Alt-Tab, say): no keyup will come.

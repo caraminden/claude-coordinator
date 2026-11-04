@@ -675,8 +675,8 @@ export function machinesPage() {
     e.preventDefault();
     status.textContent = 'Adding…';
     try {
-      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), ...(folder.value.trim() ? { workspace_tools: true } : {}), ...(mine?.checked ? { mine: true } : {}) } });
-      view.machineToken = { id: machine.id, name: machine.name, token, url: agent_url ?? location.origin };
+      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), kind: kind.value, command: command.value, ...(folder.value.trim() ? { workspace_tools: true } : {}), ...(mine?.checked ? { mine: true } : {}) } });
+      view.machineToken = setupFor(machine, token, agent_url);
       name.value = '';
       status.textContent = '';
       renderMachineSetup();
@@ -710,13 +710,19 @@ export function machinesPage() {
   return section;
 }
 
+/** A machine just added or given a new token, with the MCP server it was added with (#308), not whatever the form shows later. */
+function setupFor(machine, token, url) {
+  return { id: machine.id, name: machine.name, token, url: url ?? location.origin, kind: machine.mcp_kind, command: machine.mcp_command };
+}
+
 function renderMachineSetup() {
   const el = document.getElementById('machine-setup');
   if (!el) return;
   const t = view.machineToken;
   if (!t) return el.replaceChildren();
-  const kind = document.querySelector('.machine-add select[name=kind]')?.value;
-  const command = document.querySelector('.machine-add input[name=command]')?.value.trim();
+  // A machine added before its server was kept (kind null) follows the add form, live.
+  const kind = t.kind ?? document.querySelector('.machine-add select[name=kind]')?.value;
+  const command = t.kind ? t.command : document.querySelector('.machine-add input[name=command]')?.value.trim();
   const folder = document.querySelector('.machine-add input[name=folder]')?.value.trim();
   const block = (label, text) => {
     const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
@@ -729,6 +735,7 @@ function renderMachineSetup() {
   el.replaceChildren(h('div', { class: 'machine-setup' },
     h('strong', {}, `Connect ${t.name}`),
     h('p', { class: 'small' }, 'The token is shown only now; if you lose it, make a new one. Run one of these on that computer:'),
+    t.kind ? false : h('p', { class: 'small' }, `${t.name} was added before Citadel kept which MCP server it runs, so these lines use the one picked in the form above: check it before copying.`),
     folder ? h('p', { class: 'small' }, `It adds ${folder} to machine-agent.json there as workspace ${workspaceName(folder)}, keeping what the file already lists. `,
       'If the folder is a git repo it also gets a pull task (git pull --ff-only) with git sync off; pull uses the git sign-in saved on that computer, so check git pull works there first.',
       view.machines.find((m) => m.id === t.id)?.workspace_tools === false ? ' Workspace tools are off for this machine: switch them on below so minions get the folder.' : '') : false,
@@ -743,9 +750,9 @@ function renderMachineList() {
     const newToken = h('button', { type: 'button', class: 'secondary small', title: 'Make a new token; the old one stops working and the machine disconnects' }, 'New token');
     newToken.onclick = async () => {
       if (!confirm(`Make a new token for ${m.name}? Its current connection stops and it has to be set up again.`)) return;
-      const { token, agent_url } = await api(`api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
+      const { machine, token, agent_url } = await api(`api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
       if (!token) return;
-      view.machineToken = { id: m.id, name: m.name, token, url: agent_url ?? location.origin };
+      view.machineToken = setupFor(machine, token, agent_url);
       renderMachineSetup();
     };
     const remove = h('button', { type: 'button', class: 'secondary small' }, 'Remove');

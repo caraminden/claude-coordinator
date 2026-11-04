@@ -11,6 +11,19 @@ import { HttpError, json, readJson, type Ctx, type Route } from '../http.ts';
 const MAX_MACHINE_UPLOAD = 20_000_000;
 // Notes go into every thread's system prompt while the machine is online, so keep them short.
 const MAX_MACHINE_NOTES = 2000;
+const MCP_KINDS = ['claude', 'command', 'none'];
+
+/** What the add form says the machine runs (#308), kept so its setup lines say the same after a new token. */
+function machineMcp(body: { kind?: unknown; command?: unknown }) {
+  if (body.kind === undefined) return {};
+  if (!MCP_KINDS.includes(body.kind as string)) throw new HttpError(400, `kind must be one of ${MCP_KINDS.join(', ')}`);
+  const command = body.kind === 'none' ? '' : body.command ?? '';
+  // It goes on one line of a shell or PowerShell command the person pastes.
+  if (typeof command !== 'string' || command.length > 500 || /[\x00-\x1f]/.test(command)) throw new HttpError(400, 'command must be one line of text, up to 500 characters');
+  if (body.kind === 'command' && !command.trim()) throw new HttpError(400, 'Type the command the machine should run');
+  // An empty Claude Code server name stays '': the setup lines put in DEFAULT_CLAUDE_MCP, as the form suggests.
+  return { mcp_kind: body.kind as Machine['mcp_kind'], mcp_command: command.trim() };
+}
 
 function machineName(v: unknown): string {
   const name = typeof v === 'string' ? v.trim().toLowerCase() : '';
@@ -140,6 +153,7 @@ export const machineRoutes: Route[] = [
       const name = machineName(body.name);
       // On from the start for a machine added with a folder for minions (#305); off otherwise.
       if (body.workspace_tools !== undefined && typeof body.workspace_tools !== 'boolean') throw new HttpError(400, 'workspace_tools must be true or false');
+      const mcp = machineMcp(body);
       let machine;
       try {
         // The real hash goes in once the id (part of the token) is known.
@@ -149,7 +163,7 @@ export const machineRoutes: Route[] = [
         throw new HttpError(409, 'A machine with that name already exists');
       }
       const token = newToken(machine.id);
-      app.store.updateMachine(machine.id, { token_hash: hashToken(token), ...(body.workspace_tools ? { workspace_tools: 1 } : {}) });
+      app.store.updateMachine(machine.id, { token_hash: hashToken(token), ...mcp, ...(body.workspace_tools ? { workspace_tools: 1 } : {}) });
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       // The only time the token is shown; the app keeps just its hash.
       return json(res, 201, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? null });

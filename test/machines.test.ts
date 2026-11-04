@@ -125,6 +125,22 @@ test('a machine added with workspace_tools: true starts with the switch on', asy
   assert.equal(plain.workspace_tools, false);
 });
 
+test('a machine keeps the MCP server it was added with, through a new token (#308)', async () => {
+  await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'mcp-pc', kind: 'godot' } }), /400/);
+  await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'mcp-pc', kind: 'command', command: ' ' } }), /400/);
+  await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'mcp-pc', kind: 'command', command: 'a\nb' } }), /400/);
+  assert.ok(!(await call('/api/machines')).some((m: any) => m.name === 'mcp-pc'), 'a refused add leaves no machine behind');
+  const { machine } = await call('/api/machines', { method: 'POST', body: { name: 'mcp-pc', kind: 'none', command: 'godot-ai' } });
+  assert.deepEqual([machine.mcp_kind, machine.mcp_command], ['none', '']);
+  const renewed = await call(`/api/machines/${machine.id}/token`, { method: 'POST' });
+  assert.deepEqual([renewed.machine.mcp_kind, renewed.machine.mcp_command], ['none', '']);
+  const { machine: cmd } = await call('/api/machines', { method: 'POST', body: { name: 'cmd-pc', kind: 'command', command: ' npx -y x ' } });
+  assert.deepEqual([cmd.mcp_kind, cmd.mcp_command], ['command', 'npx -y x']);
+  const { machine: old } = await call('/api/machines', { method: 'POST', body: { name: 'old-pc' } });
+  assert.equal(old.mcp_kind, null, 'an add without kind (an older page) leaves it unknown');
+  for (const m of [machine, cmd, old]) await call(`/api/machines/${m.id}`, { method: 'DELETE' });
+});
+
 test('an agent can run a server from Claude Code\'s config, and threads get the machine\'s notes', async () => {
   const home = join(root, 'pc-home');
   const { mkdirSync } = await import('node:fs');

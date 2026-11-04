@@ -127,6 +127,8 @@ export class MachineRelay {
       connected_at: agent?.since ?? null,
       sessions: agent?.sessions.size ?? 0,
       workspace_tools: !!machine.workspace_tools,
+      mcp_kind: machine.mcp_kind,
+      mcp_command: machine.mcp_command,
       /** The schemes it is lent to, or null for every scheme an admin owns. */
       projects: machine.scoped ? this.store.machineProjects(machine.id) : null,
       servers: agent?.servers ?? [],

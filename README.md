@@ -228,6 +228,22 @@ systemctl --user daemon-reload
 systemctl --user enable --now claude-coordinator-backup.timer claude-coordinator-prune.timer
 ```
 
+**Down alerts.** Every 5 minutes `deploy/citadel-watchdog.timer` runs
+`tools/watchdog.ts` (`src/watchdog.ts`): it checks `claude-coordinator.service`
+and `/api/health`, and each contraption's `citadel-app-<name>.service` while it is
+enabled, with its manifest's health path or its port. Once one has been down or
+not answering for 10 minutes (`WATCHDOG_MINUTES`) it web-pushes the owner's devices
+(the first admin; `WATCHDOG_TO=admins` for every admin) straight from the script,
+reading the database read-only, and once more when it is back. It never restarts
+anything. Its state is in `~/.local/state/citadel-watchdog/`; `node
+tools/watchdog.ts --dry-run` shows a round without saving or sending.
+
+```sh
+ln -s ~/claude-coordinator/deploy/citadel-watchdog.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now citadel-watchdog.timer
+```
+
 Turns for the server login's owner run as the service's user on that user's
 Claude Code login. Everyone else's run in a Claude container of their own.
 

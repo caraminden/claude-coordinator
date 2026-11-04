@@ -202,24 +202,29 @@ export class Pusher {
 
   /** Send one message; a subscription the push service says is gone (404, 410) is deleted. */
   async send(sub: PushSubscriptionRow, msg: PushMessage): Promise<number> {
-    const body = encryptPayload(Buffer.from(JSON.stringify(msg)), sub.p256dh, sub.auth);
-    const jwt = vapidJwt(new URL(sub.endpoint).origin, this.subject, this.keys.privateKey);
-    const res = await this.fetch(sub.endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `vapid t=${jwt}, k=${this.keys.publicKey}`,
-        'Content-Encoding': 'aes128gcm',
-        'Content-Type': 'application/octet-stream',
-        TTL: String(TTL_SECONDS),
-        Urgency: 'high',
-        // The push service keeps only the newest undelivered message per topic (thread).
-        Topic: msg.tag,
-      },
-      body,
-      signal: AbortSignal.timeout(15_000),
-    });
+    const res = await postPush(sub, msg, this.keys, this.subject, this.fetch);
     if (res.status === 404 || res.status === 410) this.store.deletePushSubscription(sub.endpoint);
     else if (!res.ok) console.error(`Push service answered ${res.status} for ${sub.name}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
     return res.status;
   }
+}
+
+/** Encrypt, sign and POST one message to one subscription. No store: tools/watchdog.ts sends with the server down. */
+export function postPush(sub: Pick<PushSubscriptionRow, 'endpoint' | 'p256dh' | 'auth'>, msg: PushMessage, keys: VapidKeys, subject: string, fetchFn: typeof fetch = fetch): Promise<Response> {
+  const body = encryptPayload(Buffer.from(JSON.stringify(msg)), sub.p256dh, sub.auth);
+  const jwt = vapidJwt(new URL(sub.endpoint).origin, subject, keys.privateKey);
+  return fetchFn(sub.endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `vapid t=${jwt}, k=${keys.publicKey}`,
+      'Content-Encoding': 'aes128gcm',
+      'Content-Type': 'application/octet-stream',
+      TTL: String(TTL_SECONDS),
+      Urgency: 'high',
+      // The push service keeps only the newest undelivered message per topic (thread).
+      Topic: msg.tag,
+    },
+    body,
+    signal: AbortSignal.timeout(15_000),
+  });
 }

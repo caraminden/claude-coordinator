@@ -1,0 +1,11 @@
+[Unit]
+Description=Citadel down-alert watchdog: web-pushes the owner when Citadel or a contraption has been down 10 minutes (#302)
+
+[Service]
+Type=oneshot
+UMask=0077
+# ~/.local/state/citadel-watchdog: when each one was first seen down, and whether the push went out.
+StateDirectory=citadel-watchdog
+# Not in citadel.slice: it must still run when the server and turns are what's starving the box.
+ExecStart=/usr/bin/node %h/claude-coordinator/tools/watchdog.ts
+TimeoutStartSec=2min

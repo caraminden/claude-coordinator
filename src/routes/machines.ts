@@ -2,7 +2,7 @@
 // turn opens sessions to one and sends them messages.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { lendsMachine, machinesFor, managesMachine, personsMachine } from '../access.ts';
+import { lendsMachine, machinesFor, managesMachine } from '../access.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, hashToken, newToken } from '../machines.ts';
 import type { Machine } from '../db.ts';
 import { HttpError, json, readJson, type Ctx, type Route } from '../http.ts';
@@ -106,16 +106,19 @@ export const machineRoutes: Route[] = [
     method: 'POST', path: '/api/machines', ...people,
     async handler({ req, res, app, session }) {
       const body = await readJson(req);
+      // A person's machine is their own (#306). An admin's is shared, as before, unless they say it's theirs.
+      if (body.mine !== undefined && typeof body.mine !== 'boolean') throw new HttpError(400, 'mine must be true or false');
+      const mine = !session.admin || body.mine === true;
       // Someone signed in with the old shared password has no id to own it by.
-      if (!session.admin && session.uid === undefined) throw new HttpError(403, 'Sign in with your own login to add a machine');
+      if (mine && session.uid === undefined) throw new HttpError(403, 'Sign in with your own login to add a machine');
       const name = machineName(body.name);
       // On from the start for a machine added with a folder for minions (#305); off otherwise.
       if (body.workspace_tools !== undefined && typeof body.workspace_tools !== 'boolean') throw new HttpError(400, 'workspace_tools must be true or false');
       let machine;
       try {
         // The real hash goes in once the id (part of the token) is known.
-        // A person's machine goes to no scheme until they tick one; an admin's goes to every admin-owned scheme, as before.
-        machine = app.store.createMachine(name, '', session.name, session.uid ?? null, !session.admin);
+        // An owned one is scoped to no scheme too: if its owner is ever removed, it reaches no one's turns.
+        machine = app.store.createMachine(name, '', session.name, mine ? session.uid! : null, mine);
       } catch {
         throw new HttpError(409, 'A machine with that name already exists');
       }
@@ -143,16 +146,11 @@ export const machineRoutes: Route[] = [
       const body = await readJson(req);
       let projects: number[] | null | undefined;
       if (body.projects !== undefined) {
-        // Someone who isn't an admin ticks only schemes they're in (a scheme they aren't in answers as missing).
-        const seen = (id: number) => !!app.store.getProject(id) && app.store.canSee(session, id);
-        if (body.projects !== null && !(Array.isArray(body.projects) && body.projects.every((id: unknown) => Number.isInteger(id) && seen(id as number)))) {
+        if (machine.owner_id !== null) throw new HttpError(400, 'A person\'s own machine goes to the turns they ask for, not to schemes');
+        if (body.projects !== null && !(Array.isArray(body.projects) && body.projects.every((id: unknown) => Number.isInteger(id) && app.store.getProject(id as number)))) {
           throw new HttpError(400, 'projects must be null or a list of scheme ids');
         }
-        if (body.projects === null && personsMachine(app.store, machine)) {
-          throw new HttpError(400, 'A person\'s own machine goes only to the schemes ticked for it');
-        }
-        // Ticks they can't see (one an admin made, or a scheme they've left) stay as they were.
-        projects = body.projects && [...body.projects, ...(machine.scoped ? app.store.machineProjects(machine.id).filter((id) => !app.store.canSee(session, id)) : [])];
+        projects = body.projects;
       }
       const fields: { name?: string; notes?: string; workspace_tools?: number } = {};
       if (body.workspace_tools !== undefined) {
@@ -201,9 +199,14 @@ export const machineRoutes: Route[] = [
       const server = url.searchParams.get('server') === 'ws' ? 'ws' : 'mcp';
       const project = app.store.getProject(caller!.project_id);
       const machine = app.store.getMachine(Number(params.machineId));
-      // A machine lent to chosen schemes, or a person's own (#306), opens only for a minion that would have got
-      // it at its turn's start (src/runner.ts); any other still opens for a minion in any scheme, as before #303.
-      if (machine && (machine.scoped || personsMachine(app.store, machine)) && (!project || caller!.kind === 'coordinator' || !project.machine_tools || !lendsMachine(app.store, machine, project))) {
+      // A person's own (#306) opens only for a turn that got it at its start (src/runner.ts TurnState.owned),
+      // which its owner asked for: never mid-turn, never for someone else's.
+      if (machine && machine.owner_id !== null && !app.runner.ownedMachines(caller!.id).includes(machine.id)) {
+        throw new HttpError(403, 'That machine is someone else\'s, or this turn started without it');
+      }
+      // A machine lent to chosen schemes opens only for a minion that would have got it at its turn's start
+      // (src/runner.ts); any other still opens for a minion in any scheme, as before #303.
+      if (machine?.scoped && machine.owner_id === null && (!project || caller!.kind === 'coordinator' || !project.machine_tools || !lendsMachine(app.store, machine, project))) {
         throw new HttpError(403, 'That machine isn\'t lent to this scheme');
       }
       const who = `#${caller!.number} in ${project?.name ?? 'a scheme'}`;

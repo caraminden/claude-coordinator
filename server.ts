@@ -196,7 +196,7 @@ function liveOn(head: string | null) {
   for (const id of waiters.pendingLive()) runner.deployLive(id);
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
-runner.machines = (project) => machines.online().filter((m) => lendsMachine(store, m, project));
+runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
 runner.refuseTurn = (ticket, author) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid));
 // Sender pays (#213): the server login's owner runs on the host, everyone else in their own container.
 runner.placeFor = (person) => {

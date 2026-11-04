@@ -662,17 +662,20 @@ export function machinesPage() {
   const folder = h('input', { name: 'folder', placeholder: 'C:\\Users\\you\\Documents\\Vault', autocomplete: 'off', spellcheck: 'false' });
   folder.addEventListener('input', renderMachineSetup);
   const status = h('span', { class: 'muted', role: 'status' });
+  // Everyone else's machine is their own (#306); an admin's is shared unless they tick this.
+  const mine = account?.admin ? h('input', { type: 'checkbox', name: 'mine' }) : null;
   const form = h('form', { class: 'machine-add' },
     h('label', {}, 'Name', name),
     h('label', { class: 'wide' }, 'MCP server to run there', h('span', { class: 'row' }, kind, command)),
     h('label', { class: 'wide' }, 'Folder minions can use (optional)', folder),
+    mine ? h('label', { class: 'row small wide', title: 'Off: a shared machine, lent to schemes under Lend to. On: only turns you ask for get it, in schemes you are in.' }, mine, h('span', {}, 'Mine: only turns I ask for use it')) : '',
     h('button', { type: 'submit' }, 'Add machine'),
     status);
   form.onsubmit = async (e) => {
     e.preventDefault();
     status.textContent = 'Adding…';
     try {
-      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), ...(folder.value.trim() ? { workspace_tools: true } : {}) } });
+      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), ...(folder.value.trim() ? { workspace_tools: true } : {}), ...(mine?.checked ? { mine: true } : {}) } });
       view.machineToken = { id: machine.id, name: machine.name, token, url: agent_url ?? location.origin };
       name.value = '';
       status.textContent = '';
@@ -687,7 +690,7 @@ export function machinesPage() {
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       h('div', { class: 'meta' }, account?.admin
         ? 'Computers that lend their MCP tools to minions while they are connected: in every scheme an admin owns, or only in the schemes picked under Lend to. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.'
-        : 'Your computers, lending their MCP tools to minions while they are connected, in the schemes you tick under Lend to. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.')),
+        : 'Your computers, lending their MCP tools while they are connected to the minion turns you ask for, in any scheme you are in. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.')),
     form,
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
@@ -776,7 +779,8 @@ function renderMachineList() {
           h('span', { class: 'meta' }, [machineStatus(m), m.command, `added by ${m.created_by}`].filter(Boolean).join(' · '))),
         newToken, remove),
       machineWorkspaces(m),
-      machineLending(m),
+      // A person's own machine goes to the turns they ask for (#306): nothing to lend.
+      m.owner_id === null ? machineLending(m) : h('p', { class: 'muted small' }, `Only turns ${m.created_by} asks for use it, in schemes they are in.`),
       h('details', { class: 'machine-notes', 'data-id': m.id, open: editing },
         h('summary', {}, m.notes ? `Notes: ${m.notes.split('\n')[0]}` : 'Add notes for minions'),
         notes, h('div', { class: 'row' }, save, saved)));
@@ -834,7 +838,7 @@ function machineWorkspaces(m) {
     ...(m.problems ?? []).map((p) => h('p', { class: 'error small' }, p)));
 }
 
-/** Which schemes' minions get a machine: every admin-owned scheme (an admin's default), or only the ones ticked (#303; always for a person's own, #306). */
+/** Which schemes' minions get a shared machine: every admin-owned scheme (the default), or only the ones ticked (#303). */
 function machineLending(m) {
   const status = h('span', { class: 'muted small', role: 'status' });
   const save = async (projects) => {
@@ -861,9 +865,8 @@ function machineLending(m) {
   });
   return h('div', { class: 'machine-lending', 'data-id': m.id },
     h('div', { class: 'row small' }, h('span', { class: 'muted' }, 'Lend to'), status),
-    // A person's own machine only ever goes to ticked schemes (#306), so there is nothing to choose.
-    m.personal ? '' : choice(false, 'Every scheme an admin owns', 'Minions in every scheme an admin owns get it, as for every machine before'),
-    m.personal ? '' : choice(true, 'Only these schemes', 'Only the ticked schemes\' minions get it, whoever owns the scheme; Taskmasters never do'),
+    choice(false, 'Every scheme an admin owns', 'Minions in every scheme an admin owns get it, as for every machine before'),
+    choice(true, 'Only these schemes', 'Only the ticked schemes\' minions get it, whoever owns the scheme; Taskmasters never do'),
     m.projects === null ? '' : h('div', { class: 'schemes' }, ...schemes,
       m.projects.length ? '' : h('p', { class: 'muted small' }, 'No scheme gets it until you tick one.')));
 }

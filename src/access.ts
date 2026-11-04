@@ -64,14 +64,6 @@ export function lendsMachines(store: Store, project: Project): boolean {
   return !!store.getUser(project.owner_id ?? -1)?.admin;
 }
 
-/**
- * A machine a person who isn't an admin added (#306): it goes only to the schemes ticked for it, never to
- * "every scheme an admin owns", even if its scoped flag says otherwise. An owner who is gone counts as one.
- */
-export function personsMachine(store: Store, machine: Machine): boolean {
-  return machine.owner_id !== null && !store.getUser(machine.owner_id)?.admin;
-}
-
 /** Who may see and change a machine on the Machines page: its owner, and admins (all of them, ownerless ones too). */
 export function managesMachine(who: Pick<Session, 'uid' | 'admin'>, machine: Pick<Machine, 'owner_id'>): boolean {
   return !!who.admin || (machine.owner_id !== null && machine.owner_id === who.uid);
@@ -83,13 +75,21 @@ export function machinesFor<T extends Pick<Machine, 'owner_id'>>(who: Pick<Sessi
 }
 
 /**
- * Whether a scheme's minions get this machine. One lent to chosen schemes (#303, Josh's vault), and every
- * person's own (#306), goes to those only, whoever owns the scheme: the grant is the consent. Any other
- * follows lendsMachines.
+ * Whether a turn in this scheme, asked for by `askers`, gets this machine. A person's own (#306, Josh: "any
+ * scheme they are in ... can use their machine to do stuff on their behalf") goes only to a turn its owner
+ * asked for, in a scheme they're in. An ownerless one lent to chosen schemes (#303, Josh's vault) goes to
+ * those only, whoever owns them: the admin's grant is the consent. Any other follows lendsMachines.
  */
-export function lendsMachine(store: Store, machine: Machine, project: Project): boolean {
-  if (machine.scoped || personsMachine(store, machine)) return store.machineGranted(machine.id, project.id);
-  return lendsMachines(store, project);
+export function lendsMachine(store: Store, machine: Machine, project: Project, askers: readonly number[] = []): boolean {
+  if (machine.owner_id !== null) return ownerAsked(store, machine.owner_id, askers, project.id);
+  return machine.scoped ? store.machineGranted(machine.id, project.id) : lendsMachines(store, project);
+}
+
+/** Whether a machine's owner is among a turn's askers and, for a scheme's turn, in that scheme. */
+export function ownerAsked(store: Store, ownerId: number, askers: readonly number[], projectId: number | null): boolean {
+  const owner = store.getUser(ownerId);
+  if (!owner || owner.disabled_at || !askers.includes(owner.id)) return false;
+  return projectId === null || store.canSee({ uid: owner.id, admin: !!owner.admin }, projectId);
 }
 
 /** How long Citadel's Taskmaster may answer a scheme after that scheme's Taskmaster last wrote to it. */

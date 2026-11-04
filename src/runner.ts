@@ -259,6 +259,8 @@ interface TurnState {
   github?: string | null;
   /** The person's Claude container it runs in (#213); absent on the host. */
   container?: string;
+  /** The people's own machines it got at its start (#306): the only owned ones it may open (routes/machines.ts). */
+  owned?: number[];
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
@@ -884,7 +886,8 @@ export class Runner {
   /** The folder that holds a project's ticket folders, which the coordinator may read. */
   ticketsDir: (project: Project) => string = (project) => join(project.repo_dir ?? '.', '..', 'tickets');
   /** Machines online now and lent to this scheme (access.ts lendsMachine); a thread's turn gets each one's MCP tools. */
-  machines: (project: Project) => TurnMachine[] = () => [];
+  /** The online machines a turn in this scheme gets, for these askers (#306: their own machines). */
+  machines: (project: Project, askers: number[]) => TurnMachine[] = () => [];
   /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
   onFilesMayChange: (ticketId: number) => void = () => {};
   /** Where the minion's change is, branch to live (src/branch.ts), for its bar and its row's badge. */
@@ -1610,6 +1613,11 @@ export class Runner {
     return (this.turns.has(ticketId) && this.store.getSetting<TurnState>(turnKey(ticketId))?.typedBy) || null;
   }
 
+  /** The people's own machines a ticket's running turn got at its start (TurnState.owned), else none. */
+  ownedMachines(ticketId: number): number[] {
+    return (this.turns.has(ticketId) && this.store.getSetting<TurnState>(turnKey(ticketId))?.owned) || [];
+  }
+
   /** The minion that relayed the message the ticket's current (or last) turn answers, if a relay came before any person's message: whose minion a Taskmaster's new minion belongs to. */
   relayedBy(ticketId: number): number | null {
     return this.turnFrom.get(ticketId) ?? null;
@@ -1667,8 +1675,14 @@ export class Runner {
     } catch {
       memoryDir = null;
     }
-    // Threads (not the coordinator, which hands work off) get the tools of every machine online now and lent to the scheme.
-    const machines = ticket.kind === 'coordinator' || !project.machine_tools ? [] : this.machines(project);
+    // Who asked for it (#255): its messages' askers, any non-admin of them if several, since a ride-along
+    // ask is in the turn too; with none (GitHub, a notice), and on a resume, the last turn's carries on.
+    const before = this.store.turnAsker(ticket.id);
+    const askers = [...(resumes || limitTries ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
+    const asker = askers.find((a) => !this.store.getUser(a)?.admin) ?? askers[0] ?? before ?? person;
+    // Threads (not the coordinator, which hands work off) get the tools of every machine online now and lent
+    // to the scheme, and the askers' own (#306): only people in this batch, so a turn no one asked for gets none.
+    const machines = ticket.kind === 'coordinator' || !project.machine_tools ? [] : this.machines(project, askers);
     // Tool calls matching the merge asks or the project's approval rules wait for a person (threads only:
     // a Taskmaster can't show cards, so an ask would be a silent deny there).
     const rules = ticket.kind === 'coordinator' ? [] : [...new Set([...MERGE_ASKS, ...lines(project.approval_rules)])];
@@ -1765,11 +1779,6 @@ export class Runner {
     const github = this.githubFor?.(person, dir) ?? null;
     if (github) env = { ...env, ...github.env };
     const prompt = promptMessage(github ? [{ author: 'System', text: github.line, images: [] }, ...batch] : batch);
-    // Who asked for it (#255): its messages' askers, any non-admin of them if several, since a ride-along
-    // ask is in the turn too; with none (GitHub, a notice), and on a resume, the last turn's carries on.
-    const before = this.store.turnAsker(ticket.id);
-    const askers = [...(resumes || limitTries ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
-    const asker = askers.find((a) => !this.store.getUser(a)?.admin) ?? askers[0] ?? before ?? person;
     if (asker !== null && asker !== person) this.store.setSetting(askerKey(ticket.id), asker);
     else this.store.deleteSetting(askerKey(ticket.id));
     if (person !== ticket.person_id) {
@@ -1839,7 +1848,8 @@ export class Runner {
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: place.host ? this.claudeBin : resolveClaude(this.claudeBin), args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }) };
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }),
+      ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     live.had = had;

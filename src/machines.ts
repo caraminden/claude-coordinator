@@ -10,7 +10,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Machine, Store } from './db.ts';
-import { personsMachine } from './access.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
@@ -112,8 +111,6 @@ export class MachineRelay {
       connected_at: agent?.since ?? null,
       sessions: agent?.sessions.size ?? 0,
       workspace_tools: !!machine.workspace_tools,
-      /** A person's own machine (#306): lent only to the schemes ticked for it, never to every admin-owned one. */
-      personal: personsMachine(this.store, machine),
       /** The schemes it is lent to, or null for every scheme an admin owns. */
       projects: machine.scoped ? this.store.machineProjects(machine.id) : null,
       servers: agent?.servers ?? [],

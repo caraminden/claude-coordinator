@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { bootServer, until, stopProcs, stopTurns } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
+import { Store } from '../src/db.ts';
 
 // The whole path from a thread's turn to a machine and back: the real server, the real agent
 // (public/machine-agent.mjs) running a stand-in MCP server, and a stand-in `claude -p` that acts
@@ -240,7 +241,7 @@ test('a machine lent to chosen schemes reaches only their minions, and taking a 
   assert.deepEqual(again.results.vault.tools, ['whoami']);
 });
 
-test('a person adds their own machine: lent to nothing, ticks only their schemes, and only they and admins see it (#306)', async () => {
+test('a person\'s own machine goes only to turns they ask for, in schemes they\'re in, and only they and admins manage it (#306)', async () => {
   // Two people who aren't admins, signed in with their own logins.
   const person = async (name: string) => {
     const made = await call('/api/people', { method: 'POST', body: { name } });
@@ -276,57 +277,65 @@ test('a person adds their own machine: lent to nothing, ticks only their schemes
   };
   const josh = await person('Josh');
   const dana = await person('Dana');
-  const theirs = await call('/api/projects', { method: 'POST', body: { name: 'Joshs' } });
+  // Their turns run on the server's login here, as the first admin's do: a stand-in for linking their own Claude.
+  const store = new Store(join(root, 'data', 'coordinator.db'));
+  for (const p of [josh, dana]) store.updateUser(p.id, { server_login: 1 });
+  const shared = await call('/api/projects', { method: 'POST', body: { name: 'Shared' } });
   const notTheirs = await call('/api/projects', { method: 'POST', body: { name: 'Caras' } });
-  await call(`/api/projects/${theirs.id}/members`, { method: 'POST', body: { person: josh.id } });
+  for (const p of [josh, dana]) await call(`/api/projects/${shared.id}/members`, { method: 'POST', body: { person: p.id } });
 
   const added = await josh.as('/api/machines', { method: 'POST', body: { name: 'josh-box' } });
   assert.equal(added.status, 201);
   const { machine, token } = added.data;
-  assert.deepEqual(machine.projects, [], 'a person\'s machine starts lent to no scheme');
-  assert.equal(machine.personal, true);
+  assert.equal(machine.owner_id, josh.id);
   startAgent(token);
   await until('josh-box to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'josh-box' && m.online));
+  // Nothing to lend: it follows Josh.
+  assert.equal((await josh.as(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [shared.id] } })).status, 400);
+  assert.equal((await josh.as(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: 'Josh\'s box.' } })).status, 200);
 
-  // Only schemes they're in, and never "every scheme".
-  assert.equal((await josh.as(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [notTheirs.id] } })).status, 400);
-  assert.equal((await josh.as(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: null } })).status, 400);
-  assert.equal((await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: null } }).catch((e) => e.message)).slice(0, 3), '400', 'not even an admin unscopes it');
-  const ticked = await josh.as(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [theirs.id], notes: 'Josh\'s box.' } });
-  assert.equal(ticked.status, 200);
-  assert.deepEqual(ticked.data.projects, [theirs.id]);
-
-  // Another person can't see or change it; an admin can.
+  // Another person can't see or change it; an admin can, and the live list is cut the same way.
   assert.deepEqual((await josh.as('/api/machines')).data.map((m: any) => m.name), ['josh-box']);
   assert.deepEqual((await dana.as('/api/machines')).data, []);
   for (const [method, path] of [['PATCH', `/api/machines/${machine.id}`], ['POST', `/api/machines/${machine.id}/token`], ['DELETE', `/api/machines/${machine.id}`]]) {
     assert.equal((await dana.as(path, { method, body: method === 'PATCH' ? { notes: 'mine now' } : undefined })).status, 404, `${method} ${path}`);
   }
-  assert.ok((await call('/api/machines')).some((m: any) => m.name === 'josh-box'));
   const [joshHears, danaHears] = [await josh.nextMachines(), await dana.nextMachines()];
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: 'Josh\'s box, checked by an admin.' } });
-
-  assert.deepEqual(await joshHears(), ['josh-box'], 'the live list carries their own machines only');
+  assert.deepEqual(await joshHears(), ['josh-box']);
   assert.deepEqual(await danaHears(), []);
+  assert.ok((await call('/api/machines')).some((m: any) => m.name === 'josh-box'));
 
-  // An admin's tick in a scheme Josh isn't in survives Josh's own edits.
-  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [theirs.id, notTheirs.id] } });
-  assert.deepEqual((await josh.as(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [theirs.id] } })).data.projects, [theirs.id, notTheirs.id].sort((x, y) => x - y));
-  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [theirs.id] } });
-
-  // Turns in the ticked scheme get it; turns elsewhere don't.
-  const turnIn = async (project: any, message: string) => {
+  // Josh's turn gets it; Dana's in the same scheme doesn't, nor a turn in a scheme Josh isn't in.
+  const turnIn = async (as: typeof josh.as, project: any, message: string) => {
     const before = turns().length;
-    await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message } });
+    const res = await as(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message } });
+    assert.equal(res.status, 201, JSON.stringify(res.data));
     return (await until('a turn', () => turns().length > before && turns())).at(-1);
   };
-  const inTheirs = await turnIn(theirs, 'lent');
-  assert.deepEqual(inTheirs.results['josh-box'].tools, ['whoami']);
-  const elsewhere = await turnIn(notTheirs, 'not lent');
-  assert.equal(elsewhere.results['josh-box'], undefined);
-  const refused = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${elsewhere.token}` } });
+  const asCara = async (path: string, opts: { method?: string; body?: unknown } = {}) => ({ status: 201, data: await call(path, opts) });
+  const joshs = await turnIn(josh.as, shared, 'for josh');
+  assert.deepEqual(joshs.results['josh-box'].tools, ['whoami']);
+  assert.match(joshs.system, /Josh's box, checked by an admin/);
+  const danas = await turnIn(dana.as, shared, 'for dana');
+  assert.equal(danas.results['josh-box'], undefined);
+  assert.ok(!danas.allow.includes('mcp__josh-box'));
+  const caras = await turnIn(asCara, notTheirs, 'for cara');
+  assert.equal(caras.results['josh-box'], undefined);
+  // Nor can a turn that didn't get it open it by id.
+  const refused = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${danas.token}` } });
   assert.equal(refused.status, 403);
   await refused.body!.cancel();
 
+  // An admin's own: only Cara's turns. A shared machine (no owner) still goes everywhere an admin owns.
+  const mineMade = await call('/api/machines', { method: 'POST', body: { name: 'cara-own', mine: true } });
+  assert.equal(mineMade.machine.owner_id !== null, true);
+  assert.equal((await call('/api/machines', { method: 'POST', body: { name: 'shared-box' } })).machine.owner_id, null);
+  startAgent(mineMade.token);
+  await until('cara-own to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'cara-own' && m.online));
+  assert.deepEqual((await turnIn(asCara, notTheirs, 'cara again')).results['cara-own'].tools, ['whoami']);
+  assert.equal((await turnIn(josh.as, shared, 'josh again')).results['cara-own'], undefined);
+
   assert.equal((await josh.as(`/api/machines/${machine.id}`, { method: 'DELETE' })).status, 200);
+  await call(`/api/machines/${mineMade.machine.id}`, { method: 'DELETE' });
 });

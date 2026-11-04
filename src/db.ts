@@ -950,12 +950,13 @@ export class Store {
     this.db.prepare(`UPDATE users SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   }
 
-  /** Remove a person: their schemes and machines go to `heir`, their memberships with them. Their messages keep their name. */
+  /** Remove a person: their schemes go to `heir`, their memberships with them, and their machines to no one (#306). Their messages keep their name. */
   deleteUser(id: number, heir: number) {
     this.db.exec('BEGIN');
     try {
       this.db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id = ?').run(heir, id);
-      this.db.prepare('UPDATE machines SET owner_id = ? WHERE owner_id = ?').run(heir, id);
+      // Ownerless but still scoped to no scheme, so a gone person's computer reaches no one's turns; an admin removes it.
+      this.db.prepare('UPDATE machines SET owner_id = NULL, scoped = 1 WHERE owner_id = ?').run(id);
       this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
       this.db.exec('COMMIT');
     } catch (err) {
@@ -1745,7 +1746,7 @@ export class Store {
     return this.db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as unknown as Machine | undefined;
   }
 
-  /** A machine `ownerId` manages; `scoped` lends it to no scheme until some are ticked. */
+  /** A machine `ownerId` manages (#306), or a shared one with none; `scoped` lends it to no scheme until some are ticked. */
   createMachine(name: string, tokenHash: string, by: string, ownerId: number | null = null, scoped = false): Machine {
     const { lastInsertRowid } = this.db
       .prepare('INSERT INTO machines (name, token_hash, created_by, created_at, owner_id, scoped) VALUES (?, ?, ?, ?, ?, ?)')

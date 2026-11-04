@@ -123,7 +123,10 @@
   background-color: var(--citadel-accent); background-position: right center, 0 0;
 }
 :where(.cui-switch:disabled) { opacity: 0.5; cursor: default; }
-:where(label:has(> .cui-switch)) { display: inline-flex; align-items: center; gap: var(--citadel-space-3); cursor: pointer; }
+:where(label:has(> .cui-switch)) { display: inline-flex; align-items: center; gap: var(--citadel-space-3); vertical-align: middle; cursor: pointer; }
+/* A table cell clips its switch's touch target to itself: the target can't make a scroll wrapper scroll,
+   or reach into the next row, where a tap would flip the wrong switch. In a 35px row it's 35px tall. */
+:where(td:has(.cui-switch), th:has(.cui-switch)) { overflow: clip; }
 :where(label:has(> .cui-switch:disabled)) { color: var(--citadel-muted); cursor: default; }
 @media (max-width: 800px) { :where(.cui-switch) { --cui-switch-h: 24px; } }
 @media (forced-colors: active) { :where(.cui-switch) { appearance: auto; --cui-switch-pad: 0px; width: auto; height: auto; } }

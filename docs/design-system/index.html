@@ -166,7 +166,8 @@ window.COLOURS = [
 .cui-scope .cui-switch:checked { --cui-knob: var(--citadel-on-accent); background-color: var(--citadel-accent); background-position: right center, 0 0; }
 .cui-scope .cui-switch:disabled { opacity: 0.5; cursor: default; }
 .cui-scope .cui-switch:focus-visible { outline: var(--citadel-focus-ring); outline-offset: calc(var(--citadel-focus-offset) - var(--cui-switch-pad)); }
-.cui-scope label:has(> .cui-switch) { display: inline-flex; align-items: center; gap: var(--citadel-space-3); margin: 0; color: var(--citadel-text); font-size: 15px; cursor: pointer; }
+.cui-scope label:has(> .cui-switch) { display: inline-flex; align-items: center; gap: var(--citadel-space-3); vertical-align: middle; margin: 0; color: var(--citadel-text); font-size: 15px; cursor: pointer; }
+.cui-scope :is(td, th):has(.cui-switch) { overflow: clip; }
 .cui-scope label:has(> .cui-switch:disabled) { color: var(--citadel-muted); cursor: default; }
 @media (max-width: 800px) { .cui-scope .cui-switch { --cui-switch-h: 24px; } }
 @media (forced-colors: active) { .cui-scope .cui-switch { appearance: auto; --cui-switch-pad: 0px; width: auto; height: auto; } }

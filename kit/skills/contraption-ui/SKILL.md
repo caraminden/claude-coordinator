@@ -197,6 +197,8 @@ Every rule sits in `:where()`, so any selector of yours wins: restyle by writing
 A native checkbox, so `.checked`, `change`, `disabled` and forms work as usual. Its touch target is 44 px
 tall and lays out at the track's size, so stack switches at least `--citadel-space-3` apart or a tap
 near one's edge lands on its neighbour; a `<label>` around it lines up the text and makes it tappable too.
+In a table the cell clips the target to the row, so rows of any height work. In other scroll containers
+(`overflow: auto`), leave 12 px of padding past the edge switch, or its target makes the container scroll.
 
 ## The rules
 

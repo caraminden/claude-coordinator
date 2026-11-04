@@ -291,7 +291,7 @@ window.COLOURS = [
 .doc-bar .mk-btn[aria-pressed="true"] { border-color: var(--mk-accent); background: color-mix(in srgb, var(--mk-accent) 12%, var(--mk-panel)); font-weight: 600; }
 .doc-bar .now { color: var(--mk-muted); }
 .mk-specimen > .mk-show.doc-block { display: block; }
-.mk-specimen > .mk-show.doc-col { flex-direction: column; align-items: stretch; }
+.mk-specimen > .mk-show.doc-col { flex-direction: column; flex-wrap: nowrap; align-items: stretch; } /* one line, so a long nowrap line (a status) is cut to the width, not the width stretched to it */
 .doc-case .stage.doc-col { flex-direction: column; align-items: stretch; }
 .doc-new { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mk-accent); }
 .mk-swatch .mk-chipcolor { display: flex; }

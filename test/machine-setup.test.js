@@ -236,9 +236,15 @@ test('the Windows task runs hidden, logs, replaces a running copy and shows what
   assert.match(win, /\$log = "\$dir\\machine-agent-pc\.log"/);
   const at = (s) => win.indexOf(s);
   assert.ok(at('Stop-ScheduledTask -TaskName "Coordinator agent (pc)" -ErrorAction SilentlyContinue') < at('Register-ScheduledTask'));
+  // Restart-on-failure misses an agent that is killed: a 5-minute trigger starts it again, skipped while it runs.
+  assert.match(win, /-MultipleInstances IgnoreNew/);
+  assert.match(win, /\$triggers = \(New-ScheduledTaskTrigger -AtLogOn -User \$env:USERNAME\), \(New-ScheduledTaskTrigger -Once -At \(Get-Date\) -RepetitionInterval \(New-TimeSpan -Minutes 5\) -RepetitionDuration \(New-TimeSpan -Days 3650\)\)/);
+  assert.match(win, /Register-ScheduledTask -Force -TaskName "Coordinator agent \(pc\)" -Action \$action -Trigger \$triggers /);
+  // So stopping it disables the task too, and quotes inside the printed lines are doubled for PowerShell.
+  assert.match(win, /'Stop it: Disable-ScheduledTask -TaskName "Coordinator agent \(pc\)" \| Out-Null; Stop-ScheduledTask [^\n]*-Filter "Name=''node\.exe''" [^\n]*machine-agent-pc\.log[^\n]*'\n/);
   assert.ok(at('$skip = @(Get-Content $log') < at('Start-ScheduledTask -TaskName "Coordinator agent (pc)"'));
   assert.ok(at('Start-ScheduledTask -TaskName "Coordinator agent (pc)"') < at('foreach ($i in 1..40)'));
   assert.match(win, /'Its output: Get-Content -Wait -Encoding UTF8 "\$env:USERPROFILE\\coordinator-agent\\machine-agent-pc\.log"'/);
-  assert.match(win, /'Remove it: Unregister-ScheduledTask -TaskName "Coordinator agent \(pc\)" -Confirm:\$false'/);
+  assert.match(win, /'Remove it: Unregister-ScheduledTask -TaskName "Coordinator agent \(pc\)" -Confirm:\$false; Get-CimInstance /);
   assert.match(win, /\n}$/);
 });

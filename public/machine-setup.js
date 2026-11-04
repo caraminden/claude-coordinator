@@ -63,6 +63,7 @@ const MERGE = [
 ].join('\n');
 
 const posix = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
+const psq = (s) => `'${s.replace(/'/g, "''")}'`;
 
 /** The lines to run on a machine to connect it, for its token, what it should run and the folder minions may use. */
 export function machineSetup(url, token, kind, what, folder, install = '') {
@@ -82,29 +83,19 @@ export function machineSetupBackground(url, name, token, kind, what, folder) {
   return `mkdir -p ~/coordinator-agent && cd ~/coordinator-agent &&\n${machineSetup(url, token, kind, what, folder, ` --install ${name}`)}`;
 }
 
-/** How to see a background agent's output, and stop or remove it, as the page and the Windows lines say it. */
-export function backgroundHelp(os, name) {
-  if (os === 'windows') {
-    const task = taskName(name);
-    return {
-      watch: `Get-Content -Wait -Encoding UTF8 "$env:USERPROFILE\\coordinator-agent\\machine-agent-${name}.log"`,
-      stop: `Stop-ScheduledTask -TaskName "${task}"`,
-      start: `Start-ScheduledTask -TaskName "${task}"`,
-      remove: `Unregister-ScheduledTask -TaskName "${task}" -Confirm:$false`,
-    };
-  }
-  return {
-    watch: `tail -f ~/coordinator-agent/machine-agent-${name}.log`,
-    stop: `systemctl --user stop coordinator-agent-${name} on Linux, launchctl bootout gui/$(id -u)/coordinator-agent.${name} on macOS`,
-    remove: `systemctl --user disable --now coordinator-agent-${name} on Linux; on macOS the same bootout, then delete ~/Library/LaunchAgents/coordinator-agent.${name}.plist`,
-  };
+/** Where a background agent logs, as the page shows it. */
+export function agentLog(os, name) {
+  return os === 'windows' ? `%USERPROFILE%\\coordinator-agent\\machine-agent-${name}.log` : `~/coordinator-agent/machine-agent-${name}.log`;
 }
 
 const taskName = (name) => `Coordinator agent (${name})`;
+// This machine's agent by its log file, which no other agent on the computer has.
+const killAgent = (name) => `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object CommandLine -like "*machine-agent-${name}.log*" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
 
 /**
  * The same for Windows PowerShell, as a task that starts now and at every logon (in that person's
- * own session, so it can reach an open Godot editor), restarting if it ever stops. No reboot needed.
+ * own session, so it can reach an open Godot editor), started again within 5 minutes if it ever stops,
+ * with no window to close (#309). No reboot needed.
  * One script block, so a missing Node or failed download stops it before a broken task is registered.
  * The folder step's script goes through an environment variable from a literal here-string: Windows
  * PowerShell 5.1 drops the double quotes in arguments it passes to node, and paths keep their backslashes.
@@ -112,7 +103,14 @@ const taskName = (name) => `Coordinator agent (${name})`;
 export function machineSetupWindows(url, name, token, kind, what, folder) {
   const f = cleanFolder(folder);
   const task = taskName(name);
-  const help = backgroundHelp('windows', name);
+  // Disabled as well as stopped, or the 5-minute trigger starts it again; its node goes too, in case
+  // stopping its hidden console leaves it running.
+  const help = {
+    watch: `Get-Content -Wait -Encoding UTF8 "$env:USERPROFILE\\coordinator-agent\\machine-agent-${name}.log"`,
+    stop: `Disable-ScheduledTask -TaskName "${task}" | Out-Null; Stop-ScheduledTask -TaskName "${task}"; ${killAgent(name)}`,
+    start: `Enable-ScheduledTask -TaskName "${task}" | Out-Null; Start-ScheduledTask -TaskName "${task}"`,
+    remove: `Unregister-ScheduledTask -TaskName "${task}" -Confirm:$false; ${killAgent(name)}`,
+  };
   return [
     '& {',
     '$ErrorActionPreference = "Stop"',
@@ -134,19 +132,23 @@ export function machineSetupWindows(url, name, token, kind, what, folder) {
     // conhost --headless gives node a console nobody sees, so there is no window to close (a plain
     // node.exe gets one, in Windows Terminal on Windows 11 too); --log keeps what it prints.
     `$action = New-ScheduledTaskAction -Execute "$env:SystemRoot\\System32\\conhost.exe" -WorkingDirectory $dir -Argument "--headless \`"$node\`" \`"$dir\\machine-agent.mjs\`" ${url} ${token} --config \`"$dir\\machine-agent.json\`" --log \`"$log\`"${runArgs(kind, what).replace(/"/g, '`"')}"`,
-    '$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries',
+    '$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries',
+    // Restart-on-failure doesn't cover an agent that exits or is killed, so a second trigger tries every
+    // 5 minutes, which IgnoreNew skips while it runs. An explicit duration: some Windows 10 builds refuse none.
+    '$triggers = (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME), (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650))',
     // A running copy keeps its old arguments through Register -Force, and Start leaves it be.
-    `Stop-ScheduledTask -TaskName "${task}" -ErrorAction SilentlyContinue`,
-    `Register-ScheduledTask -Force -TaskName "${task}" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) -Settings $settings | Out-Null`,
+    `Stop-ScheduledTask -TaskName "${task}" -ErrorAction SilentlyContinue; ${killAgent(name)}`,
+    `Register-ScheduledTask -Force -TaskName "${task}" -Action $action -Trigger $triggers -Settings $settings | Out-Null`,
     '$skip = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue).Count',
     `Start-ScheduledTask -TaskName "${task}"`,
     '"Started. Waiting for it to connect..."',
     'foreach ($i in 1..40) { Start-Sleep -Milliseconds 500; $said = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue | Select-Object -Skip $skip); if ($said -match "Connected to |rejected|refused") { break } }',
     '$said',
     'if ($said -match "Connected to ") { "It runs in the background now, also after you close this window, and starts again at every logon." } else { "It has not connected yet: the lines above say why (nothing above means it did not start)." }',
-    `'Its output: ${help.watch}'`,
-    `'Stop it: ${help.stop}   (start it again: ${help.start})'`,
-    `'Remove it: ${help.remove}'`,
+    psq(`Its output: ${help.watch}`),
+    psq(`Stop it: ${help.stop}`),
+    psq(`Start it again: ${help.start}`),
+    psq(`Remove it: ${help.remove}`),
     '}',
   ].join('\n');
 }

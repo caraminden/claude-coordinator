@@ -1,6 +1,6 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
 import { account, ago, api, h, icon, listGroupsOf, openHash, schemeIcon, view } from './core.js';
-import { backgroundHelp, DEFAULT_CLAUDE_MCP, machineSetup, machineSetupBackground, machineSetupWindows, workspaceName } from './machine-setup.js';
+import { agentLog, DEFAULT_CLAUDE_MCP, machineSetup, machineSetupBackground, machineSetupWindows, workspaceName } from './machine-setup.js';
 import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
 
 // ---------- push notifications ----------
@@ -726,13 +726,18 @@ function renderMachineSetup() {
   const folder = document.querySelector('.machine-add input[name=folder]')?.value.trim();
   const ways = [
     { os: 'windows', tab: 'Windows', label: 'Windows PowerShell: runs in the background, also after you close the window, and starts at every logon. No reboot.',
-      text: machineSetupWindows(t.url, t.name, t.token, kind, command, folder), help: backgroundHelp('windows', t.name) },
+      text: machineSetupWindows(t.url, t.name, t.token, kind, command, folder), log: agentLog('windows', t.name) },
     { os: 'posix', tab: 'macOS or Linux', label: 'Terminal on macOS or Linux: runs in the background, also after you close the window, and starts at every login. No sudo.',
-      text: machineSetupBackground(t.url, t.name, t.token, kind, command, folder), help: backgroundHelp('posix', t.name) },
+      text: machineSetupBackground(t.url, t.name, t.token, kind, command, folder), log: agentLog('posix', t.name) },
     { os: 'window', tab: 'Just try it', label: 'Try it in a terminal window (stops when you close it)',
       text: machineSetup(t.url, t.token, kind, command, folder) },
   ];
   view.machineSetupOs ??= guessOs();
+  const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
+  copy.onclick = async () => {
+    await navigator.clipboard.writeText(ways.find((w) => w.os === view.machineSetupOs).text);
+    copy.textContent = 'Copied';
+  };
   const pick = (os) => {
     view.machineSetupOs = os;
     renderMachineSetup();
@@ -745,21 +750,16 @@ function renderMachineSetup() {
     folder ? h('p', { class: 'small' }, `It adds ${folder} to machine-agent.json there as workspace ${workspaceName(folder)}, keeping what the file already lists. `,
       'If the folder is a git repo it also gets a pull task (git pull --ff-only) with git sync off; pull uses the git sign-in saved on that computer, so check git pull works there first.',
       view.machines.find((m) => m.id === t.id)?.workspace_tools === false ? ' Workspace tools are off for this machine: switch them on below so minions get the folder.' : '') : false,
-    h('div', { class: 'row machine-setup-ways', role: 'group', 'aria-label': 'Which computer' },
-      ways.map((w) => h('button', { type: 'button', class: `chip${w.os === view.machineSetupOs ? ' on' : ''}`, 'aria-pressed': String(w.os === view.machineSetupOs), onclick: () => pick(w.os) }, w.tab))),
-    ways.map((w) => {
-      const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
-      copy.onclick = async () => {
-        await navigator.clipboard.writeText(w.text);
-        copy.textContent = 'Copied';
-      };
-      return h('div', { class: 'machine-setup-way', 'data-os': w.os, hidden: w.os !== view.machineSetupOs },
-        h('div', { class: 'row' }, h('span', { class: 'small' }, w.label), h('span', { class: 'spacer' }), copy),
+    h('div', { class: 'row machine-setup-ways' },
+      h('div', { class: 'row', role: 'group', 'aria-label': 'Which computer' },
+        ways.map((w) => h('button', { type: 'button', class: `chip${w.os === view.machineSetupOs ? ' on' : ''}`, 'aria-pressed': String(w.os === view.machineSetupOs), onclick: () => pick(w.os) }, w.tab))),
+      h('span', { class: 'spacer' }), copy),
+    ways.map((w) => h('div', { class: 'machine-setup-way', 'data-os': w.os, hidden: w.os !== view.machineSetupOs },
+        h('p', { class: 'small' }, w.label),
         h('pre', {}, w.text),
-        w.help
-          ? h('p', { class: 'small muted' }, 'It writes what it prints to a log. See it: ', h('code', {}, w.help.watch), '. Stop it: ', h('code', {}, w.help.stop), '. Remove it: ', h('code', {}, w.help.remove), '.')
-          : h('p', { class: 'small muted' }, 'Good for a first try: you see what it prints. Closing the window, logging out or restarting stops it, and the machine goes offline.'));
-    })));
+        w.log
+          ? h('p', { class: 'small muted' }, 'It writes what it prints to ', h('code', {}, w.log), ', and ends by printing how to watch that log, stop it and remove it.')
+          : h('p', { class: 'small muted' }, 'Good for a first try: you see what it prints. Closing the window, logging out or restarting stops it, and the machine goes offline.')))));
 }
 
 /** The setup to show first: the viewer's own kind of computer, as the browser says it (a phone gets Windows). */

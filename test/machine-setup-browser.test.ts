@@ -91,7 +91,7 @@ test('the setup shows the viewer\'s own kind of computer first, the others a cli
   await click('Windows');
   [only] = await shown();
   assert.match(only, /conhost\.exe/);
-  assert.match(await page.eval<string>('document.querySelector("#machine-setup .machine-setup-way:not([hidden])").textContent'), /Get-Content -Wait/);
+  assert.match(await page.eval<string>('document.querySelector("#machine-setup .machine-setup-way:not([hidden])").textContent'), /%USERPROFILE%\\coordinator-agent\\machine-agent-pick-box\.log/);
   // The pick holds while the form below changes the lines.
   await page.eval(`(() => { const f = document.querySelector('.machine-add [name=folder]'); f.value = '/tmp/vault'; f.dispatchEvent(new Event('input')); })()`);
   assert.equal(await pressed(), 'Windows');

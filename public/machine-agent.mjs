@@ -14,10 +14,13 @@
 // its own workspace tools (mcp__<name>-ws__…): git sync and the tasks listed there, in the folders
 // listed there, nothing else. Only this computer's owner edits that file; minions can't write to it.
 // It is re-read when it changes. A missing file just means no workspace tools.
+// --log <file> copies everything it prints to that file too. --install <machine name>, on macOS or
+// Linux, runs it with the same options in the background instead (a launchd agent or a systemd user
+// unit, logging next to this file), starting at login and again if it stops.
 // The token can come from CC_MACHINE_TOKEN instead. Needs Node 18 or newer; no other installs.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, watchFile } from 'node:fs';
+import { appendFileSync, chmodSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, watchFile, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -459,6 +462,152 @@ export async function workspaceReply(host, message, who, upload) {
   }
 }
 
+// ---------- running in the background ----------
+
+/** Copies everything the agent prints to a file as well, so a background agent's errors can be read. */
+function logTo(file) {
+  try {
+    if (statSync(file).size > 1_000_000) renameSync(file, `${file}.old`);
+  } catch {}
+  const add = (chunk) => {
+    try {
+      appendFileSync(file, chunk);
+    } catch {}
+  };
+  add(`--- started ${new Date().toISOString()} ---\n`);
+  for (const stream of [process.stdout, process.stderr]) {
+    const write = stream.write.bind(stream);
+    stream.write = (chunk, ...rest) => (add(chunk), write(chunk, ...rest));
+  }
+  // Node prints a crash straight to the console, past the copy above.
+  process.on('uncaughtException', (err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
+
+const xml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// systemd reads quotes and backslashes, and expands % and $ even inside quotes.
+const unitWord = (s) => `"${s.replace(/[\\"]/g, '\\$&').replace(/%/g, '%%').replace(/\$/g, '$$$$')}"`;
+
+/**
+ * What runs the agent in the background on macOS (a launchd agent) or Linux (a systemd user unit):
+ * the file to write and what to say about it. It starts at login, restarts if it stops, and keeps the
+ * PATH of the shell that installed it, so `claude`'s MCP servers, git and npx are found as in a terminal.
+ */
+export function backgroundService({ platform, home, uid, name, argv, env }) {
+  const dir = dirname(argv[1]);
+  const log = join(dir, `machine-agent-${name}.log`);
+  // Before any "--", where the agent reads its own options.
+  const dash = argv.indexOf('--');
+  const args = dash < 0 ? [...argv, '--log', log] : [...argv.slice(0, dash), '--log', log, ...argv.slice(dash)];
+  const vars = Object.fromEntries(['PATH', 'CLAUDE_CONFIG_DIR'].filter((k) => env[k]).map((k) => [k, env[k]]));
+  if (platform === 'darwin') {
+    const label = `coordinator-agent.${name}`;
+    const file = join(home, 'Library', 'LaunchAgents', `${label}.plist`);
+    const strings = (list) => list.map((a) => `    <string>${xml(a)}</string>`).join('\n');
+    const text = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${label}</string>
+  <key>ProgramArguments</key>
+  <array>
+${strings(args)}
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${xml(dir)}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+${Object.entries(vars).map(([k, v]) => `    <key>${k}</key>\n    <string>${xml(v)}</string>`).join('\n')}
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+</dict>
+</plist>
+`;
+    const target = `gui/${uid}`;
+    return {
+      file, log, text,
+      // bootout first so a new token takes; it fails when the agent wasn't loaded, which is fine.
+      before: [['launchctl', 'bootout', `${target}/${label}`]],
+      start: [['launchctl', 'bootstrap', target, file]],
+      stop: `launchctl bootout ${target}/${label}`,
+      remove: `launchctl bootout ${target}/${label}; rm ${file}`,
+      startAgain: `launchctl bootstrap ${target} ${file}`,
+    };
+  }
+  const unit = `coordinator-agent-${name}.service`;
+  const file = join(env.XDG_CONFIG_HOME || join(home, '.config'), 'systemd', 'user', unit);
+  const text = `[Unit]
+Description=Citadel machine agent (${name})
+After=network-online.target
+
+[Service]
+WorkingDirectory=${dir.replace(/%/g, '%%')}
+${Object.entries(vars).map(([k, v]) => `Environment=${unitWord(`${k}=${v}`)}`).join('\n')}
+ExecStart=${args.map(unitWord).join(' ')}
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
+`;
+  return {
+    file, log, text,
+    before: [],
+    start: [['systemctl', '--user', 'daemon-reload'], ['systemctl', '--user', 'enable', unit], ['systemctl', '--user', 'restart', unit]],
+    stop: `systemctl --user stop ${unit}`,
+    remove: `systemctl --user disable --now ${unit}; rm ${file}`,
+    startAgain: `systemctl --user start ${unit}`,
+    linger: 'It runs while you are logged in. To keep it running after you log out, and start it at boot, run: loginctl enable-linger',
+  };
+}
+
+/** Writes the background service, (re)starts it, and waits to see it connect, printing what it logged. */
+async function installService(name, argv) {
+  if (!/^[a-z0-9][a-z0-9-]{0,29}$/.test(name ?? '')) throw new Error('--install needs the machine\'s name, as the Machines page shows it');
+  if (process.platform !== 'darwin' && process.platform !== 'linux') throw new Error('--install sets up macOS and Linux; on Windows, use the PowerShell lines from the Machines page');
+  const s = backgroundService({ platform: process.platform, home: homedir(), uid: process.getuid(), name, argv, env: process.env });
+  mkdirSync(dirname(s.file), { recursive: true });
+  // It holds the token.
+  writeFileSync(s.file, s.text, { mode: 0o600 });
+  chmodSync(s.file, 0o600);
+  const from = existsSync(s.log) ? statSync(s.log).size : 0;
+  for (const [cmd, ...args] of s.before) spawnSync(cmd, args, { stdio: 'ignore' });
+  for (const [cmd, ...args] of s.start) {
+    const run = spawnSync(cmd, args, { encoding: 'utf8' });
+    if (run.status !== 0) {
+      throw new Error(`${cmd} ${args.join(' ')} failed${run.error ? `: ${run.error.message}` : `:\n${run.stderr.trim()}`}\n` +
+        (cmd === 'systemctl' ? 'This computer has no systemd user session: run the "in this window" lines from the Machines page in a terminal you leave open instead.' : ''));
+    }
+  }
+  console.log(`Installed ${s.file}. Waiting for the agent to connect…`);
+  let said = '';
+  for (const end = Date.now() + 20_000; Date.now() < end && !/Connected to |rejected|refused/.test(said); await new Promise((r) => setTimeout(r, 500))) {
+    try {
+      const text = readFileSync(s.log, 'utf8');
+      said = text.slice(text.length < from ? 0 : from);
+    } catch {}
+  }
+  if (said.trim()) console.log(said.trimEnd());
+  const ok = /Connected to /.test(said);
+  console.log([
+    '',
+    ok ? 'It runs in the background now, also after you close this window, and starts again at every login.' : 'It has not connected yet: the lines above say why (nothing above means it did not start).',
+    s.linger,
+    `Its output: tail -f ${s.log}`,
+    `Stop it: ${s.stop}   (start it again: ${s.startAgain})`,
+    `Remove it: ${s.remove}`,
+  ].filter(Boolean).join('\n'));
+  process.exit(ok ? 0 : 1);
+}
+
 // ---------- the agent ----------
 
 async function main() {
@@ -472,12 +621,15 @@ async function main() {
   };
   const claudeMcp = option('--claude-mcp');
   const configArg = option('--config');
+  const installName = opts.includes('--install') ? option('--install') ?? '' : null;
+  const logFile = option('--log');
   const [appUrl, argToken] = opts;
   const token = argToken ?? process.env.CC_MACHINE_TOKEN;
   if (!appUrl || !token || (!command.length && !claudeMcp && !configArg)) {
     console.error('Usage: node machine-agent.mjs <app url> <token> --claude-mcp <name> [--config machine-agent.json]');
     console.error('   or: node machine-agent.mjs <app url> <token> [--config machine-agent.json] -- <mcp server command> [args...]');
     console.error('   or: node machine-agent.mjs <app url> <token> --config machine-agent.json');
+    console.error('Add --log <file> to copy its output to a file, or --install <machine name> to run it in the background (macOS, Linux).');
     console.error('Example: node machine-agent.mjs https://example.net ccm_1_… --claude-mcp godot-ai');
     process.exit(2);
   }
@@ -516,6 +668,15 @@ async function main() {
       process.exit(2);
     }
   }
+  if (installName !== null) {
+    const agent = realpathSync(process.argv[1]);
+    const args = [appUrl, token, ...(configArg ? ['--config', resolve(configArg)] : []), ...(claudeMcp ? ['--claude-mcp', claudeMcp] : []), ...(command.length ? ['--', ...command] : [])];
+    return installService(installName, [process.execPath, agent, ...args]).catch((err) => {
+      console.error(err.message);
+      process.exit(1);
+    });
+  }
+  if (logFile) logTo(resolve(logFile));
   const auth = { Authorization: `Bearer ${token}` };
   const log = (...a) => console.log(new Date().toLocaleTimeString(), ...a);
 

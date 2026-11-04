@@ -73,9 +73,32 @@ test('a machine added with None gets setup lines without an MCP server, now and 
   await openMachines();
   await wait('the machine list', '!!document.querySelector(".machine-row")');
   await newToken('josh-laptop');
-  const [windows, terminal] = await snippets();
-  assert.doesNotMatch(windows, /--claude-mcp|-- /);
-  assert.doesNotMatch(terminal, /--claude-mcp|-- /);
+  const [windows, background, terminal] = await snippets();
+  for (const s of [windows, background, terminal]) assert.doesNotMatch(s, /--claude-mcp|-- /);
+});
+
+test('the setup shows the viewer\'s own kind of computer first, the others a click away (#309)', { skip }, async () => {
+  await openMachines();
+  await add('pick-box', 'claude');
+  const shown = () => page.eval<string[]>('[...document.querySelectorAll("#machine-setup .machine-setup-way:not([hidden]) pre")].map((p) => p.textContent)');
+  const pressed = () => page.eval<string>('document.querySelector("#machine-setup [aria-pressed=true]").textContent');
+  // Headless Chromium here says Linux.
+  assert.equal(await pressed(), 'macOS or Linux');
+  let [only] = await shown();
+  assert.equal((await shown()).length, 1);
+  assert.match(only, /^mkdir -p ~\/coordinator-agent && cd ~\/coordinator-agent &&\n[\s\S]* --install pick-box --claude-mcp godot-ai$/);
+  const click = (label: string) => page.eval(`[...document.querySelectorAll('#machine-setup .chip')].find((b) => b.textContent === ${JSON.stringify(label)}).click()`);
+  await click('Windows');
+  [only] = await shown();
+  assert.match(only, /conhost\.exe/);
+  assert.match(await page.eval<string>('document.querySelector("#machine-setup .machine-setup-way:not([hidden])").textContent'), /Get-Content -Wait/);
+  // The pick holds while the form below changes the lines.
+  await page.eval(`(() => { const f = document.querySelector('.machine-add [name=folder]'); f.value = '/tmp/vault'; f.dispatchEvent(new Event('input')); })()`);
+  assert.equal(await pressed(), 'Windows');
+  await click('Just try it');
+  [only] = await shown();
+  assert.match(only, /^curl -fsSLO /);
+  assert.match(await page.eval<string>('document.querySelector("#machine-setup .machine-setup-way:not([hidden])").textContent'), /stops when you close it/);
 });
 
 test('a machine\'s setup lines keep its own server when the form changes for the next one (#308)', { skip }, async () => {

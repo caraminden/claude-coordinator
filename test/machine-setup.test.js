@@ -1,11 +1,14 @@
-// The setup lines the Machines page drafts: the folder step really writes machine-agent.json (#305).
+// The setup lines the Machines page drafts: the folder step really writes machine-agent.json (#305), and
+// the background setups (#309) install a service that keeps running once the window is closed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanFolder, machineSetup, machineSetupWindows, workspaceName } from '../public/machine-setup.js';
+import { cleanFolder, machineSetup, machineSetupBackground, machineSetupWindows, workspaceName } from '../public/machine-setup.js';
+import { backgroundService } from '../public/machine-agent.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'machine-setup-'));
 let n = 0;
@@ -45,7 +48,7 @@ test('without a folder the snippets are what they were, and None lends no MCP se
   assert.match(machineSetup('https://a', 't', 'command', 'npx -y x'), / --config machine-agent\.json -- npx -y x$/);
   const win = machineSetupWindows('https://a', 'pc', 't', 'none', '');
   assert.doesNotMatch(win, /CC_WORKSPACE_SETUP|--claude-mcp/);
-  assert.match(win, /--config `"\$dir\\machine-agent\.json`""\n/);
+  assert.match(win, /--config `"\$dir\\machine-agent\.json`" --log `"\$log`""\n/);
 });
 
 test('the terminal folder step creates the file, with no pull task for a plain folder', () => {
@@ -116,7 +119,7 @@ test('the Windows folder step runs the same script from a literal here-string, b
   assert.ok(!lines.slice(open + 1, close).some((l) => l.startsWith("'@")), 'nothing ends the here-string early');
   assert.equal(lines[open + 1], 'const file = process.argv[1], { folder, name } = {"folder":"C:\\\\Users\\\\Jo O\'Neil\\\\Documents\\\\Vault","name":"vault"};');
   assert.ok(win.indexOf('if ($code) { throw') < win.indexOf('Register-ScheduledTask'));
-  assert.match(win, /-Argument "`"\$dir\\machine-agent\.mjs`" https:\/\/a ccm_1_x --config `"\$dir\\machine-agent\.json`""/);
+  assert.match(win, /-Argument "--headless `"\$node`" `"\$dir\\machine-agent\.mjs`" https:\/\/a ccm_1_x --config `"\$dir\\machine-agent\.json`" --log `"\$log`""/);
 
   // What node gets on Windows, run here against a local folder: the body through the environment.
   const { agent, vault, file } = dirs(true);
@@ -124,4 +127,118 @@ test('the Windows folder step runs the same script from a literal here-string, b
   const body = local.slice(local.indexOf("$env:CC_WORKSPACE_SETUP = @'") + 1, local.indexOf("'@")).join('\n');
   execFileSync(process.execPath, ['-e', 'eval(process.env.CC_WORKSPACE_SETUP)', file], { env: { ...process.env, CC_WORKSPACE_SETUP: body } });
   assert.deepEqual(read(file).workspaces[workspaceName(vault)].tasks.pull.run, ['git', 'pull', '--ff-only']);
+});
+
+/**
+ * Runs the macOS/Linux background lines in sh, as pasted, with HOME in a temp folder: curl hands over
+ * this repo's agent, and systemctl only notes what it was asked, writing `said` to the agent's log
+ * when asked to restart it, as the started agent would.
+ */
+function runBackground({ folder, said = 'Connected to app.example as "pc".', systemctl = 0, kind = 'claude', what = '' } = {}) {
+  const home = mkdtempSync(join(root, 'home-'));
+  const bin = join(home, 'bin');
+  mkdirSync(bin);
+  const agentFile = join(import.meta.dirname, '..', 'public', 'machine-agent.mjs');
+  writeFileSync(join(bin, 'curl'), `#!/bin/sh\ncp ${JSON.stringify(agentFile)} machine-agent.mjs\n`);
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh
+echo "$*" >> "$HOME/systemctl-calls"
+case "$*" in *restart*) echo ${posixQuote(said)} >> "$HOME/coordinator-agent/machine-agent-pc.log";; esac
+exit ${systemctl}
+`);
+  chmodSync(join(bin, 'curl'), 0o755);
+  chmodSync(join(bin, 'systemctl'), 0o755);
+  // A Claude Code config with godot-ai, as its dock's Configure button leaves it.
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'godot-ai': { command: 'uvx', args: ['godot-ai'] } } }));
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home };
+  const lines = machineSetupBackground('https://app.example', 'pc', 'ccm_1_x', kind, what, folder);
+  const run = spawnSync('sh', ['-c', lines], { cwd: root, env, encoding: 'utf8' });
+  const unit = join(home, '.config', 'systemd', 'user', 'coordinator-agent-pc.service');
+  return { run, home, unit, calls: existsSync(join(home, 'systemctl-calls')) ? readFileSync(join(home, 'systemctl-calls'), 'utf8') : '' };
+}
+const posixQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+test('the macOS/Linux lines install a systemd user unit that keeps running, with the folder step first', () => {
+  const { vault } = dirs(true);
+  const { run, home, unit, calls } = runBackground({ folder: vault });
+  assert.equal(run.status, 0, run.stderr + run.stdout);
+  const dir = join(home, 'coordinator-agent');
+  assert.equal(read(join(dir, 'machine-agent.json')).workspaces[workspaceName(vault)].path, vault, 'the folder step wrote the agent folder\'s file');
+  assert.equal(calls, '--user daemon-reload\n--user enable coordinator-agent-pc.service\n--user restart coordinator-agent-pc.service\n');
+  assert.equal(statSync(unit).mode & 0o777, 0o600, 'the unit holds the token');
+  const text = readFileSync(unit, 'utf8');
+  assert.match(text, new RegExp(`^ExecStart="${process.execPath}" "${dir}/machine-agent\\.mjs" "https://app\\.example" "ccm_1_x" "--config" "${dir}/machine-agent\\.json" "--claude-mcp" "godot-ai" "--log" "${dir}/machine-agent-pc\\.log"$`, 'm'));
+  assert.match(text, /^Restart=always$/m);
+  assert.match(text, /^WantedBy=default\.target$/m);
+  assert.ok(text.includes(`Environment="PATH=${home}/bin:`), 'the service finds what the shell that set it up found');
+  assert.match(run.stdout, /Connected to app\.example/);
+  assert.match(run.stdout, /runs in the background now/);
+  assert.match(run.stdout, /loginctl enable-linger/);
+  assert.ok(run.stdout.includes(`tail -f ${dir}/machine-agent-pc.log`));
+  assert.match(run.stdout, /Stop it: systemctl --user stop coordinator-agent-pc\.service/);
+});
+
+test('a lent command keeps its own arguments after the log option, quoted as systemd reads them', () => {
+  const { run, unit } = runBackground({ kind: 'command', what: 'npx -y some-mcp 100%' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(readFileSync(unit, 'utf8'), /"--log" "[^"]+machine-agent-pc\.log" "--" "npx" "-y" "some-mcp" "100%%"$/m);
+});
+
+test('the background lines say so when the agent is refused, or there is no systemd user session', () => {
+  let { run } = runBackground({ said: 'The app rejected this token. Make a new one in the Machines panel.' });
+  assert.equal(run.status, 1);
+  assert.match(run.stdout, /rejected this token[\s\S]*has not connected yet/);
+  ({ run } = runBackground({ systemctl: 1 }));
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /no systemd user session/);
+  // A server Claude Code doesn't have stops it before anything is installed.
+  const missing = runBackground({ what: 'nope' });
+  assert.equal(missing.run.status, 2);
+  assert.match(missing.run.stderr, /no stdio MCP server named "nope"/);
+  assert.equal(existsSync(missing.unit), false);
+});
+
+test('on macOS it is a launchd agent that starts at login and again if it stops', () => {
+  const s = backgroundService({
+    platform: 'darwin', home: '/Users/jo', uid: 501, name: 'mac', env: { PATH: '/opt/homebrew/bin:/usr/bin', HOME: '/Users/jo' },
+    argv: ['/opt/homebrew/bin/node', '/Users/jo/coordinator-agent/machine-agent.mjs', 'https://a', 't', '--', 'run', 'a&b<c>'],
+  });
+  assert.equal(s.file, '/Users/jo/Library/LaunchAgents/coordinator-agent.mac.plist');
+  assert.deepEqual(s.before, [['launchctl', 'bootout', 'gui/501/coordinator-agent.mac']]);
+  assert.deepEqual(s.start, [['launchctl', 'bootstrap', 'gui/501', s.file]]);
+  const args = [...s.text.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/)[1].matchAll(/<string>(.*)<\/string>/g)].map((m) => m[1]);
+  assert.deepEqual(args, ['/opt/homebrew/bin/node', '/Users/jo/coordinator-agent/machine-agent.mjs', 'https://a', 't', '--log', '/Users/jo/coordinator-agent/machine-agent-mac.log', '--', 'run', 'a&amp;b&lt;c&gt;']);
+  assert.match(s.text, /<key>KeepAlive<\/key>\s*<true\/>/);
+  assert.match(s.text, /<key>RunAtLoad<\/key>\s*<true\/>/);
+  assert.match(s.text, /<key>PATH<\/key>\s*<string>\/opt\/homebrew\/bin:\/usr\/bin<\/string>/);
+});
+
+test('--log copies what the agent prints to a file, a refusal included', async () => {
+  const server = createServer((req, res) => res.writeHead(401).end());
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    const log = join(mkdtempSync(join(root, 'log-')), 'agent.log');
+    const agent = join(import.meta.dirname, '..', 'public', 'machine-agent.mjs');
+    // Not spawnSync: this process answers the agent.
+    const code = await new Promise((r) => execFile(process.execPath, [agent, `http://127.0.0.1:${server.address().port}`, 't', '--config', join(root, 'none.json'), '--log', log], { timeout: 20_000 }, (err) => r(err?.code ?? 0)));
+    assert.equal(code, 1);
+    const text = readFileSync(log, 'utf8');
+    assert.match(text, /^--- started \d{4}-/);
+    assert.match(text, /No workspaces in /);
+    assert.match(text, /The app rejected this token/);
+  } finally {
+    server.close();
+  }
+});
+
+test('the Windows task runs hidden, logs, replaces a running copy and shows what it logged', () => {
+  const win = machineSetupWindows('https://a', 'pc', 'ccm_1_x', 'claude', '', '');
+  assert.match(win, /-Execute "\$env:SystemRoot\\System32\\conhost\.exe" -WorkingDirectory \$dir -Argument "--headless `"\$node`" `"\$dir\\machine-agent\.mjs`" https:\/\/a ccm_1_x --config `"\$dir\\machine-agent\.json`" --log `"\$log`" --claude-mcp godot-ai"/);
+  assert.match(win, /\$log = "\$dir\\machine-agent-pc\.log"/);
+  const at = (s) => win.indexOf(s);
+  assert.ok(at('Stop-ScheduledTask -TaskName "Coordinator agent (pc)" -ErrorAction SilentlyContinue') < at('Register-ScheduledTask'));
+  assert.ok(at('$skip = @(Get-Content $log') < at('Start-ScheduledTask -TaskName "Coordinator agent (pc)"'));
+  assert.ok(at('Start-ScheduledTask -TaskName "Coordinator agent (pc)"') < at('foreach ($i in 1..40)'));
+  assert.match(win, /'Its output: Get-Content -Wait -Encoding UTF8 "\$env:USERPROFILE\\coordinator-agent\\machine-agent-pc\.log"'/);
+  assert.match(win, /'Remove it: Unregister-ScheduledTask -TaskName "Coordinator agent \(pc\)" -Confirm:\$false'/);
+  assert.match(win, /\n}$/);
 });

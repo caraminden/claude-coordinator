@@ -65,14 +65,42 @@ const MERGE = [
 const posix = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /** The lines to run on a machine to connect it, for its token, what it should run and the folder minions may use. */
-export function machineSetup(url, token, kind, what, folder) {
+export function machineSetup(url, token, kind, what, folder, install = '') {
   const f = cleanFolder(folder);
   return [
-    `curl -fsSLO ${url}/machine-agent.mjs`,
+    `curl -fsSLO ${url}/machine-agent.mjs${install && ' &&'}`,
     ...(f ? [`node -e ${posix(`const [file, folder, name] = process.argv.slice(1);\n${MERGE}`)} machine-agent.json ${posix(f)} ${workspaceName(f)} &&`] : []),
-    `node machine-agent.mjs ${url} ${token} --config machine-agent.json${runArgs(kind, what)}`,
+    `node machine-agent.mjs ${url} ${token} --config machine-agent.json${install}${runArgs(kind, what)}`,
   ].join('\n');
 }
+
+/**
+ * The same for macOS and Linux, in the background: the agent installs itself as a launchd agent or a
+ * systemd user unit (machine-agent.mjs --install), from its own folder, logging there. Any shell: fish too.
+ */
+export function machineSetupBackground(url, name, token, kind, what, folder) {
+  return `mkdir -p ~/coordinator-agent && cd ~/coordinator-agent &&\n${machineSetup(url, token, kind, what, folder, ` --install ${name}`)}`;
+}
+
+/** How to see a background agent's output, and stop or remove it, as the page and the Windows lines say it. */
+export function backgroundHelp(os, name) {
+  if (os === 'windows') {
+    const task = taskName(name);
+    return {
+      watch: `Get-Content -Wait -Encoding UTF8 "$env:USERPROFILE\\coordinator-agent\\machine-agent-${name}.log"`,
+      stop: `Stop-ScheduledTask -TaskName "${task}"`,
+      start: `Start-ScheduledTask -TaskName "${task}"`,
+      remove: `Unregister-ScheduledTask -TaskName "${task}" -Confirm:$false`,
+    };
+  }
+  return {
+    watch: `tail -f ~/coordinator-agent/machine-agent-${name}.log`,
+    stop: `systemctl --user stop coordinator-agent-${name} on Linux, launchctl bootout gui/$(id -u)/coordinator-agent.${name} on macOS`,
+    remove: `systemctl --user disable --now coordinator-agent-${name} on Linux; on macOS the same bootout, then delete ~/Library/LaunchAgents/coordinator-agent.${name}.plist`,
+  };
+}
+
+const taskName = (name) => `Coordinator agent (${name})`;
 
 /**
  * The same for Windows PowerShell, as a task that starts now and at every logon (in that person's
@@ -83,7 +111,8 @@ export function machineSetup(url, token, kind, what, folder) {
  */
 export function machineSetupWindows(url, name, token, kind, what, folder) {
   const f = cleanFolder(folder);
-  const task = `Coordinator agent (${name})`;
+  const task = taskName(name);
+  const help = backgroundHelp('windows', name);
   return [
     '& {',
     '$ErrorActionPreference = "Stop"',
@@ -101,11 +130,23 @@ export function machineSetupWindows(url, name, token, kind, what, folder) {
       'Remove-Item Env:CC_WORKSPACE_SETUP',
       'if ($code) { throw "Could not add the folder to machine-agent.json (see above)." }',
     ] : []),
-    `$action = New-ScheduledTaskAction -Execute $node -WorkingDirectory $dir -Argument "\`"$dir\\machine-agent.mjs\`" ${url} ${token} --config \`"$dir\\machine-agent.json\`"${runArgs(kind, what).replace(/"/g, '`"')}"`,
+    `$log = "$dir\\machine-agent-${name}.log"`,
+    // conhost --headless gives node a console nobody sees, so there is no window to close (a plain
+    // node.exe gets one, in Windows Terminal on Windows 11 too); --log keeps what it prints.
+    `$action = New-ScheduledTaskAction -Execute "$env:SystemRoot\\System32\\conhost.exe" -WorkingDirectory $dir -Argument "--headless \`"$node\`" \`"$dir\\machine-agent.mjs\`" ${url} ${token} --config \`"$dir\\machine-agent.json\`" --log \`"$log\`"${runArgs(kind, what).replace(/"/g, '`"')}"`,
     '$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries',
+    // A running copy keeps its old arguments through Register -Force, and Start leaves it be.
+    `Stop-ScheduledTask -TaskName "${task}" -ErrorAction SilentlyContinue`,
     `Register-ScheduledTask -Force -TaskName "${task}" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) -Settings $settings | Out-Null`,
+    '$skip = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue).Count',
     `Start-ScheduledTask -TaskName "${task}"`,
-    `"Started ${task}; it also starts at every logon. It shows online on the Machines page once it connects."`,
+    '"Started. Waiting for it to connect..."',
+    'foreach ($i in 1..40) { Start-Sleep -Milliseconds 500; $said = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue | Select-Object -Skip $skip); if ($said -match "Connected to |rejected|refused") { break } }',
+    '$said',
+    'if ($said -match "Connected to ") { "It runs in the background now, also after you close this window, and starts again at every logon." } else { "It has not connected yet: the lines above say why (nothing above means it did not start)." }',
+    `'Its output: ${help.watch}'`,
+    `'Stop it: ${help.stop}   (start it again: ${help.start})'`,
+    `'Remove it: ${help.remove}'`,
     '}',
   ].join('\n');
 }

@@ -19,6 +19,18 @@ export const RESERVED_NAMES = new Set(['thread', 'coordinator']);
 /** A machine's workspace tools are the MCP server <name>-ws, so no machine may be named that way. */
 export const WS_SUFFIX = '-ws';
 
+/**
+ * What an agent says it runs (machine-agent.mjs `describe`), as a machine's mcp_kind and mcp_command (#308): for one
+ * added before the Machines page kept them. Null when it can't tell: a description cut at the route's 200 characters, or a
+ * command, which the agent joins with spaces and so loses its quoting (that machine's setup lines follow the form, saying so).
+ */
+export function mcpFromAgent(describe: string): Pick<Machine, 'mcp_kind' | 'mcp_command'> | null {
+  if (!describe || describe.length >= 200) return null;
+  if (describe === 'workspace tools only') return { mcp_kind: 'none', mcp_command: '' };
+  const claude = describe.match(/^(.+) \(from Claude Code's config\)$/);
+  return claude ? { mcp_kind: 'claude', mcp_command: claude[1] } : null;
+}
+
 /** The servers an agent can offer: the MCP server it lends, and its built-in workspace tools. */
 export type MachineServer = 'mcp' | 'ws';
 export type OnlineMachine = Machine & { servers: MachineServer[] };
@@ -161,6 +173,8 @@ export class MachineRelay {
     if (old) this.dropAgent(machine.id, old);
     res.writeHead(200, SSE_HEADERS);
     res.write(`data: ${JSON.stringify({ hello: machine.name })}\n\n`);
+    const mcp = machine.mcp_kind === null && mcpFromAgent(info.command);
+    if (mcp) this.store.updateMachine(machine.id, mcp);
     const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: ['mcp'], workspaces: [], problems: [], checked: null };
     this.agents.set(machine.id, agent);
     this.store.updateMachine(machine.id, { last_seen_at: agent.since });

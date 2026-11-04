@@ -152,6 +152,8 @@ test('an agent can run a server from Claude Code\'s config, and threads get the 
   startAgent(token, ['--claude-mcp', 'godot-ai'], { CLAUDE_CONFIG_DIR: home });
   const online = await until('desk to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'desk' && m.online));
   assert.match(online.command, /godot-ai/);
+  // Added without a kind (as before #308), it learns what it runs from its agent, for its next setup lines.
+  assert.deepEqual([online.mcp_kind, online.mcp_command], ['claude', 'godot-ai']);
   const before = turns().length;
   await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'play' } });
   const turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
@@ -478,4 +480,18 @@ test('a Taskmaster lists the machines its scheme can see and checks one through 
   const minion = await call(`/api/projects/${shared.id}/tickets`, { method: 'POST', body: { message: 'hi' } });
   const asMinion = await fetch(`${base}/api/projects/${shared.id}/machines`, { headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}` } });
   assert.equal(asMinion.status, 403);
+});
+
+test('an older machine learns what it runs from its agent, and a known one keeps its own (#308)', async () => {
+  const { mcpFromAgent } = await import('../src/machines.ts');
+  assert.deepEqual(mcpFromAgent('workspace tools only'), { mcp_kind: 'none', mcp_command: '' });
+  assert.deepEqual(mcpFromAgent('godot-ai (from Claude Code\'s config)'), { mcp_kind: 'claude', mcp_command: 'godot-ai' });
+  assert.equal(mcpFromAgent('npx -y some-mcp'), null, 'a command comes joined with spaces, its quoting lost');
+  assert.equal(mcpFromAgent(''), null);
+  assert.equal(mcpFromAgent('x'.repeat(200)), null, 'cut at the route\'s 200 characters');
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'kept-box', kind: 'none' } });
+  startAgent(token, ['--', process.execPath, mcpServer]);
+  const online = await until('kept-box to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'kept-box' && m.online));
+  assert.deepEqual([online.mcp_kind, online.mcp_command], ['none', ''], 'what it was added with wins');
+  await call(`/api/machines/${machine.id}`, { method: 'DELETE' });
 });

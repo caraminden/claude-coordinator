@@ -99,7 +99,7 @@ test('a machine added before its server was kept follows the form, and says so (
   await openMachines();
   await wait('the machine list', '!!document.querySelector(".machine-row")');
   await newToken('old-box');
-  assert.match(await page.eval<string>('document.querySelector("#machine-setup").textContent'), /added before Citadel kept which MCP server it runs/);
+  assert.match(await page.eval<string>('document.querySelector("#machine-setup").textContent'), /Citadel doesn't know what old-box runs.*godot-ai/);
   for (const s of await snippets()) assert.match(s, /--claude-mcp godot-ai/, 'the fresh form says godot-ai');
   await page.eval(`(() => { const k = document.querySelector('.machine-add [name=kind]'); k.value = 'none'; k.dispatchEvent(new Event('change')); })()`);
   for (const s of await snippets()) assert.doesNotMatch(s, /--claude-mcp|-- /, 'picking None in the form fixes its lines');

@@ -4,7 +4,9 @@
 // switches to the one highlighted, Esc cancels, a click on a tile switches at once. One quick Alt+`
 // flips to the app you were last in. The apps are the rail's (rail.js), so with no contraption enabled
 // there is no rail and Alt+` does nothing. Caught in Citadel's window and inside every contraption's
-// frame (frames.js; same origin), so it works wherever you are in Citadel. Tab is left alone.
+// frame (frames.js; same origin), so it works wherever you are in Citadel. A contraption's own page (its
+// installed window or a tab) gets it from the kit's rail.js too (#311, Josh 2026-11-04: "Yes, everywhere").
+// Tab is left alone.
 
 /** ` by where it sits on the keyboard, so every layout gets the key left of 1. */
 export const KEY = 'Backquote';
@@ -63,8 +65,10 @@ const storeKey = () => `citadel-app-switch:${person}`;
 function recent() {
   try { return JSON.parse(localStorage.getItem(storeKey())) ?? []; } catch { return []; }
 }
+// A contraption's own page (/apps/<name>/…), else Citadel's.
+const own = typeof location === 'undefined' ? null : location.pathname.match(/^\/apps\/([^/]+)\//)?.[1] ?? null;
 /** The app showing: a contraption's name, or '' for Citadel's own views. */
-const showing = () => location.hash.match(/^#\/apps\/([^/]+)$/)?.[1] ?? '';
+const showing = () => own ?? location.hash.match(/^#\/apps\/([^/]+)$/)?.[1] ?? '';
 function record() {
   if (!person) return;
   try { localStorage.setItem(storeKey(), JSON.stringify(remember(recent(), showing()))); } catch {}
@@ -129,7 +133,25 @@ function go(item) {
   if (item && !item.current) item.a.click(); // the rail's own link: Citadel's last view, or the contraption's frame
 }
 
+// Its own sheet, so a contraption's page gets it too: Citadel's colours as theme.css names them, else Citadel's own.
+let sheet = null;
+function addStyles() {
+  if (sheet) return;
+  sheet = new CSSStyleSheet();
+  sheet.replaceSync(`
+.app-switch { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1rem; background: rgb(0 0 0 / 0.25); }
+.app-switch-list { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; max-width: min(46rem, 100%); padding: 0.75rem; border: 1px solid var(--citadel-border, var(--line)); border-radius: 14px; background: var(--citadel-surface, var(--panel)); color: var(--citadel-text, var(--ink)); box-shadow: 0 12px 40px rgb(0 0 0 / 0.3); font-size: var(--citadel-size-small, var(--size-small)); }
+.app-switch-list [role=option] { box-sizing: border-box; width: 6.5rem; padding: 0.75rem 0.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; border-radius: var(--citadel-radius-lg, var(--radius-lg)); cursor: pointer; }
+.app-switch-list [role=option][aria-selected=true] { background: color-mix(in srgb, var(--citadel-accent, var(--accent)) 14%, var(--citadel-surface, var(--panel))); box-shadow: inset 0 0 0 2px var(--citadel-accent, var(--accent)); font-weight: 600; }
+.app-switch-pic { width: 48px; height: 48px; flex: none; border-radius: 12px; }
+span.app-switch-pic { display: flex; align-items: center; justify-content: center; background: var(--citadel-code-bg, var(--code-bg)); border: 1px solid var(--citadel-border, var(--line)); box-sizing: border-box; font-size: 1.3rem; font-weight: 650; }
+.app-switch-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.3; }
+.app-switch-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }`);
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+}
+
 function draw() {
+  addStyles();
   if (!box) {
     box = document.createElement('div');
     box.className = 'app-switch';

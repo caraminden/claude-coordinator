@@ -1318,12 +1318,4 @@ html.framed .update-banner { position: fixed; top: 0; left: var(--citadel-rail, 
 #frames iframe { display: block; width: 100%; height: 100%; border: 0; }
 #frames iframe[hidden] { display: none; }
 
-/* Alt+` app switcher (appswitch.js): centred tiles over everything, frames and rail included. */
-.app-switch { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1rem; background: rgb(0 0 0 / 0.25); }
-.app-switch-list { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; max-width: min(46rem, 100%); padding: 0.75rem; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); box-shadow: 0 12px 40px rgb(0 0 0 / 0.3); font-size: var(--size-small); }
-.app-switch-list [role=option] { box-sizing: border-box; width: 6.5rem; padding: 0.75rem 0.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; border-radius: var(--radius-lg); cursor: pointer; }
-.app-switch-list [role=option][aria-selected=true] { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); box-shadow: inset 0 0 0 2px var(--accent); font-weight: 600; }
-.app-switch-pic { width: 48px; height: 48px; flex: none; border-radius: 12px; }
-span.app-switch-pic { display: flex; align-items: center; justify-content: center; background: var(--code-bg); border: 1px solid var(--line); box-sizing: border-box; font-size: 1.3rem; font-weight: 650; }
-.app-switch-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.3; }
-.app-switch-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+/* Alt+` app switcher: its styles are in appswitch.js, which brings them to contraptions' pages too. */

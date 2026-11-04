@@ -250,6 +250,10 @@ test('the rail and drawers: their scripts are served to contraptions, and lists 
   const js = await drawers.text();
   assert.match(js, /export function initDrawers/);
   assert.match(js, /from '\.\/rail\.js'/);
+  // And the Alt+` switcher, which the rail loads from beside it in a contraption's own page (#311).
+  const sw = await get('/apps/_citadel/appswitch.js');
+  assert.equal(sw.status, 200);
+  assert.match(await sw.text(), /export function initAppSwitch/);
   // With their types beside them (#286).
   for (const f of ['rail', 'drawers']) {
     const types = await get(`/apps/_citadel/${f}.d.ts`);

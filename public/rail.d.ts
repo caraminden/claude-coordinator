@@ -26,7 +26,7 @@ export interface RailItem {
 /** The rail's entries for `mine`, with `current` the contraption showing (null: Citadel's own views). None when nothing is enabled. */
 export function railItems(mine: MyContraption[] | null | undefined, current: string | null, citadel?: string, inCitadel?: boolean): RailItem[];
 
-/** Whether an entry opens in a new window, from a contraption's own installed app (`installed`): every entry but its own. */
+/** Whether an entry opens apart from the page, from a contraption's own installed app (`installed`): every entry but its own, in Citadel's layer over the page, in the same window (#311). */
 export const opensApart: (item: RailItem, installed: boolean) => boolean;
 
 /** Whether the rail is showing (so a phone's swipe past the left panel has somewhere to go). */

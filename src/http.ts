@@ -30,8 +30,9 @@ export class HttpError extends Error {
 }
 
 export const SECURITY_HEADERS = {
-  // blob: lets the composer preview pasted images before they are sent.
-  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  // blob: lets the composer preview pasted images before they are sent. frame-ancestors 'self': a
+  // contraption's installed window shows Citadel's page in a frame over its own (rail.js, #311).
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
 };

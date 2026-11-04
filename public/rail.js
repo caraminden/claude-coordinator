@@ -8,7 +8,7 @@
 // Citadel imports this; a contraption's page loads it as /apps/_citadel/rail.js, which draws the rail
 // by itself. Every contraption opens inside Citadel's window (#/apps/<name>, frames.js; #274): there a
 // contraption's rail.js draws nothing and lends Citadel's rail instead. What a contraption includes and leaves free: kit/skills/contraption-ui/rail-and-drawers.md.
-// Standalone on purpose (no imports, its own styles), since contraptions load it from outside Citadel's pages.
+// Standalone on purpose (its own styles, and no imports but appswitch.js beside it), since contraptions load it from outside Citadel's pages.
 
 const NARROW = '(max-width: 800px)'; // drawers.js's breakpoint
 const EDGE = 44; // px from the left edge a contraption's swipe has to start in, as in drawers.js
@@ -42,11 +42,11 @@ export function railItems(mine, current, citadel = '/', inCitadel = false) {
 }
 
 /**
- * Whether an entry opens apart, as a new window (#274), from `installed`: a contraption's own installed
- * app, whose every other entry is Citadel's. A same-window link would load Citadel inside the
- * contraption's window under Chrome's out-of-scope strip; a new-window link is handed by Chrome to
- * Citadel's installed app (its open window, launch_handler focus-existing), or opens a normal tab.
- * Findings: shared/project/reports/rail-handoff-to-installed-apps-2026-11-02.md.
+ * Whether an entry opens apart from this page, from `installed`: a contraption's own installed app, whose
+ * every other entry is Citadel's. It opens in Citadel's layer over the page, in the same window (#311,
+ * Josh 2026-11-04: "Same window, as Citadel"). A link would leave the app's scope: Chrome's strip with a
+ * close X, a Custom Tab on Android, or a second window (#274's new-window handoff).
+ * Findings: shared/project/reports/app-switching-across-apps-2026-11-04.md.
  */
 export const opensApart = (item, installed) => installed && !item.current;
 
@@ -60,6 +60,50 @@ let edgeTaken = false; // drawers.js has a left drawer, so the left edge is its 
 // Framed, it's Citadel's window that is narrow or not: the frame is the rail's width narrower.
 const narrow = typeof matchMedia === 'function' ? (host ? window.parent : window).matchMedia(NARROW) : null;
 const installed = typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches;
+// Citadel's page in a contraption's layer (below): picking that contraption puts the layer away.
+const layerHost = (() => {
+  try { return !inContraption && window.parent !== window ? window.parent.citadelLayer ?? null : null; } catch { return null; }
+})();
+
+let layer = null; // a contraption's installed window: Citadel's page over it, kept once opened (#311)
+let layerOpener = null;
+
+/** In a contraption's installed window: show Citadel's page over this one at `item`, in the same window. */
+function openLayer(item) {
+  closeRail();
+  const frame = layer?.firstChild;
+  if (!frame) {
+    layer = document.createElement('div');
+    layer.className = 'citadel-layer';
+    const f = document.createElement('iframe');
+    f.title = 'Citadel';
+    f.src = item.href;
+    layer.append(f);
+    document.documentElement.append(layer); // beside <body>, which goes inert under it
+  } else {
+    let to = item.name ? `#/apps/${item.name}` : '#/';
+    try {
+      // Citadel's entry goes back to Citadel's last own view, as its own rail's does.
+      const back = !item.name && frame.contentDocument.querySelector('.citadel-rail a[data-app=""]');
+      if (back) to = new URL(back.href).hash || '#/';
+    } catch {}
+    frame.contentWindow.location.hash = to;
+    layer.hidden = false;
+  }
+  if (!document.body.inert) layerOpener = document.activeElement;
+  document.body.inert = true;
+  layer.firstChild.focus();
+}
+
+/** Back to the contraption's own page. */
+function closeLayer() {
+  if (!layer || layer.hidden) return;
+  layer.hidden = true;
+  document.body.inert = false;
+  if (layerOpener?.isConnected) layerOpener.focus({ preventScroll: true });
+  else layer.firstChild.blur();
+  layerOpener = null;
+}
 
 /** Whether the rail is showing (so the phone's swipe past the left panel has somewhere to go). */
 export const hasRail = () => (host ? host.hasRail() && narrow.matches : !!nav);
@@ -238,9 +282,20 @@ export async function showRail() {
   return drawRail(items ?? []);
 }
 
+let switching = false;
+/** A contraption's own page: Alt+` switches apps here too (appswitch.js, served beside this file). */
+function startSwitch() {
+  if (switching || !inContraption || host) return;
+  switching = true;
+  Promise.all([import('./appswitch.js'), fetch(new URL('api/me', root), { headers: { Accept: 'application/json' } }).then((r) => (r.ok ? r.json() : null))])
+    .then(([m, me]) => me?.name && m.initAppSwitch(me.name))
+    .catch(() => (switching = false));
+}
+
 function drawRail(items) {
   clearRail();
   if (!items.length) return false;
+  startSwitch();
   drawn = entries(items);
   if (items.some((i) => i.down)) recheckSoon();
   addStyles();
@@ -252,8 +307,6 @@ function drawRail(items) {
     const a = document.createElement('a');
     a.href = item.href;
     a.dataset.app = item.name ?? '';
-    // No opener: Chrome hands only a window without one to another app.
-    if (opensApart(item, installed && inContraption)) Object.assign(a, { target: '_blank', rel: 'noopener' });
     a.title = item.down ? `${item.title} (unavailable)` : item.title;
     if (item.current) { a.className = 'current'; a.setAttribute('aria-current', 'page'); }
     if (item.down) a.classList.add('down');
@@ -278,6 +331,14 @@ function drawRail(items) {
     a.addEventListener('click', (e) => {
       if (a.classList.contains('current')) e.preventDefault();
       closeRail();
+      if (e.defaultPrevented) return;
+      if (layerHost && (a.dataset.app || null) === layerHost.app) {
+        e.preventDefault();
+        layerHost.close();
+      } else if (inContraption && opensApart(item, installed)) {
+        e.preventDefault();
+        openLayer(item);
+      }
     });
     nav.append(a);
   });
@@ -326,6 +387,8 @@ if (typeof document !== 'undefined') {
   });
   // A framed contraption's rail.js reaches Citadel's rail through this.
   if (!inContraption) window.citadelRail = { openRail, closeRail, hasRail };
+  // Citadel's page in this contraption's layer reaches it through this.
+  else if (!host) window.citadelLayer = { app: showing(), close: closeLayer };
   narrow?.addEventListener('change', () => {
     if (host && handle) handle.hidden = !narrow.matches;
     closeRail();
@@ -374,6 +437,9 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
 .citadel-rail a.install:is(:hover, :focus-visible) .glyph { opacity: 1; }
 .citadel-rail hr { flex: none; width: 26px; border: 0; border-top: 1px solid #5a534c; margin: 2px 0; }
 .citadel-rail-backdrop, .citadel-rail-handle { display: none; }
+.citadel-layer { position: fixed; inset: 0; z-index: 2147483000; background: Canvas; }
+.citadel-layer[hidden] { display: none; }
+.citadel-layer iframe { display: block; width: 100%; height: 100%; border: 0; }
 .citadel-rail-handle[hidden] { display: none !important; }
 /* Placed in a contraption's slot: it fills the slot, and the slot's width picks column or list below. */
 .citadel-rail.placed { position: static; width: auto; min-height: 100%; height: 100%; z-index: auto; visibility: visible; transform: none; box-shadow: none; transition: none; }

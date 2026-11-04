@@ -257,8 +257,9 @@ tap opens a cut-off status's tip, as for anything a tap doesn't act on; inside a
 - **In a row** (a card's header, beside its title): add `cui-status-fill`. The slot takes what the row has
   left (`flex: 1 1 0`) and adds nothing to the row's narrowest width (`contain: inline-size`), so a long
   status is cut off instead of widening the card past a phone's edge; `justify-content: flex-end` puts its
-  text at the right. Not in a column: there `flex: 1 1 0` grows it down. Its children other than the
-  text (a chip, the spinner) keep their size.
+  text at the right. Not in a column: there `flex: 1 1 0` grows it down.
+- **Children:** in any slot, everything but a `cui-status-text` (a chip, the spinner, your own span) keeps
+  its size; only the text gives way, cut off with its ellipsis.
 - **A counter or a number that changes:** `font-variant-numeric: tabular-nums` and a `min-width` in `ch`
   for its widest value; a chip that comes and goes keeps its place with `visibility: hidden`.
 - **Something in passing** ("Copied", "Saved to the build"): `toast(text, { tone, ms })`. One at a time (a
@@ -377,8 +378,8 @@ helper: it's CSS on the attribute.
 
 A `cui-skeleton` is one line of the text around it (`1lh` tall, a 0.8 em grey bar inside), so a stack of
 them swapped for their text moves nothing; full width
-or `data-width="short"` (35%), `"medium"` (60%), `"long"` (85%); give one a height in your own CSS for an
-image or a block. `cui-skeleton-card` is a bordered card to hold a few. A slow shine runs across them and
+or `data-width="short"` (35%), `"medium"` (60%), `"long"` (85%); for an image or a block give one a height
+and `padding: 0` in your own CSS (the grey is its `::before`, so restyle that, not the box). `cui-skeleton-card` is a bordered card to hold a few. A slow shine runs across them and
 stops under reduced motion. `aria-hidden="true"` on each: the busy region around them is what a screen
 reader hears. Replace them with the real content and set `aria-busy="false"` in the same step.
 

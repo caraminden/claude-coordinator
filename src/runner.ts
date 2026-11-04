@@ -883,8 +883,8 @@ export class Runner {
   sharedDir: (project: Project) => string | null = () => null;
   /** The folder that holds a project's ticket folders, which the coordinator may read. */
   ticketsDir: (project: Project) => string = (project) => join(project.repo_dir ?? '.', '..', 'tickets');
-  /** Machines online now; a thread's turn, in any scheme, gets each one's MCP tools. */
-  machines: () => TurnMachine[] = () => [];
+  /** Machines online now and lent to this scheme (access.ts lendsMachine); a thread's turn gets each one's MCP tools. */
+  machines: (project: Project) => TurnMachine[] = () => [];
   /** Called after each tool result and at the end of each turn, when files on disk may have changed. */
   onFilesMayChange: (ticketId: number) => void = () => {};
   /** Where the minion's change is, branch to live (src/branch.ts), for its bar and its row's badge. */
@@ -895,8 +895,6 @@ export class Runner {
   heldFor: (ticketId: number) => string | null = () => null;
   /** Approve / Deny cards waiting on people, for projects with approval rules. */
   approvals: Approvals;
-  /** Whether a scheme's minions may use the connected machines (an admin's schemes only: they are the admin's). */
-  lendsMachines?: (project: Project) => boolean;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
   placeFor?: (person: number | null) => TurnPlace | { refused: string };
   /** A container turn's Claude sign-in was refused, so that person has to link again. */
@@ -1669,8 +1667,8 @@ export class Runner {
     } catch {
       memoryDir = null;
     }
-    // Threads (not the coordinator, which hands work off) get the tools of every machine online now.
-    const machines = ticket.kind === 'coordinator' || !project.machine_tools || this.lendsMachines?.(project) === false ? [] : this.machines();
+    // Threads (not the coordinator, which hands work off) get the tools of every machine online now and lent to the scheme.
+    const machines = ticket.kind === 'coordinator' || !project.machine_tools ? [] : this.machines(project);
     // Tool calls matching the merge asks or the project's approval rules wait for a person (threads only:
     // a Taskmaster can't show cards, so an ask would be a silent deny there).
     const rules = ticket.kind === 'coordinator' ? [] : [...new Set([...MERGE_ASKS, ...lines(project.approval_rules)])];

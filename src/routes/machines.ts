@@ -2,6 +2,7 @@
 // turn opens sessions to one and sends them messages.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { lendsMachine } from '../access.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, hashToken, newToken } from '../machines.ts';
 import type { Machine } from '../db.ts';
 import { HttpError, json, readJson, type Ctx, type Route } from '../http.ts';
@@ -125,8 +126,15 @@ export const machineRoutes: Route[] = [
   {
     method: 'PATCH', path: '/api/machines/:machine', ...people,
     async handler({ req, res, app, machine }) {
-      // Any of name, notes and workspace_tools.
+      // Any of name, notes, workspace_tools and projects (the schemes it is lent to, or null for every scheme).
       const body = await readJson(req);
+      let projects: number[] | null | undefined;
+      if (body.projects !== undefined) {
+        if (body.projects !== null && !(Array.isArray(body.projects) && body.projects.every((id: unknown) => Number.isInteger(id) && app.store.getProject(id as number)))) {
+          throw new HttpError(400, 'projects must be null or a list of scheme ids');
+        }
+        projects = body.projects;
+      }
       const fields: { name?: string; notes?: string; workspace_tools?: number } = {};
       if (body.workspace_tools !== undefined) {
         if (typeof body.workspace_tools !== 'boolean') throw new HttpError(400, 'workspace_tools must be true or false');
@@ -143,8 +151,16 @@ export const machineRoutes: Route[] = [
       } catch {
         throw new HttpError(409, 'A machine with that name already exists');
       }
-      // Switched off: minions mid-turn lose the tools now, not at their next turn.
+      if (projects !== undefined) app.store.setMachineProjects(machine.id, projects);
+      // Switched off or taken from a scheme: minions mid-turn lose the tools now, not at their next turn.
       if (fields.workspace_tools === 0) app.machines.endServer(machine.id, 'ws');
+      if (projects !== undefined) {
+        const now = app.store.getMachine(machine.id)!;
+        app.machines.endSessionsWhere(machine.id, (id) => {
+          const project = app.store.getProject(id);
+          return !project || !lendsMachine(app.store, now, project);
+        });
+      }
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       return json(res, 200, app.machines.view(app.store.getMachine(machine.id)!));
     },
@@ -164,8 +180,15 @@ export const machineRoutes: Route[] = [
     method: 'GET', path: '/api/machines/:machineId/session', ...turns,
     handler({ res, url, app, caller, params }) {
       const server = url.searchParams.get('server') === 'ws' ? 'ws' : 'mcp';
-      const who = `#${caller!.number} in ${app.store.getProject(caller!.project_id)?.name ?? 'a scheme'}`;
-      if (!app.machines.openSession(Number(params.machineId), caller!.id, server, who, res)) throw new HttpError(503, server === 'ws' ? 'That machine is offline, or its workspace tools are off' : 'That machine is offline');
+      const project = app.store.getProject(caller!.project_id);
+      const machine = app.store.getMachine(Number(params.machineId));
+      // A machine lent to chosen schemes opens only for a minion that would have got it at its turn's start
+      // (src/runner.ts); any other still opens for a minion in any scheme, as before #303.
+      if (machine?.scoped && (!project || caller!.kind === 'coordinator' || !project.machine_tools || !lendsMachine(app.store, machine, project))) {
+        throw new HttpError(403, 'That machine isn\'t lent to this scheme');
+      }
+      const who = `#${caller!.number} in ${project?.name ?? 'a scheme'}`;
+      if (!app.machines.openSession(Number(params.machineId), caller!, server, who, res)) throw new HttpError(503, server === 'ws' ? 'That machine is offline, or its workspace tools are off' : 'That machine is offline');
     },
   },
   {

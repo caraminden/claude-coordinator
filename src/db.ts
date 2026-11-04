@@ -183,6 +183,8 @@ export interface Machine {
   notes: string;
   /** 1 when minions get the workspace tools its agent offers (git sync, its owner's tasks); off until a person turns it on. */
   workspace_tools: number;
+  /** 1 when it is lent only to the schemes in machine_projects (#303); 0 lends it as access.ts lendsMachines says. */
+  scoped: number;
 }
 
 /** One browser of one signed-in person that wants Web Push notifications (src/push.ts). */
@@ -387,9 +389,11 @@ CREATE TABLE IF NOT EXISTS machines (
   created_at INTEGER NOT NULL,
   last_seen_at INTEGER,
   notes TEXT NOT NULL DEFAULT '',
-  workspace_tools INTEGER NOT NULL DEFAULT 0
+  workspace_tools INTEGER NOT NULL DEFAULT 0,
+  scoped INTEGER NOT NULL DEFAULT 0
 );
--- Unused since #89: machines serve every scheme. Kept, rows and all, so scoping machines to schemes (#62) is cheap to bring back.
+-- The schemes a scoped machine is lent to (#303). Read only where machines.scoped = 1: rows left from #62
+-- (Oct 27, unused since #89) stay put, and choosing "only these" for a machine replaces its rows.
 CREATE TABLE IF NOT EXISTS machine_projects (
   machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -625,6 +629,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'parent', 'ALTER TABLE tickets ADD COLUMN parent INTEGER'],
   ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
   ['machines', 'workspace_tools', 'ALTER TABLE machines ADD COLUMN workspace_tools INTEGER NOT NULL DEFAULT 0'],
+  ['machines', 'scoped', 'ALTER TABLE machines ADD COLUMN scoped INTEGER NOT NULL DEFAULT 0'],
   ['contraptions', 'relay_paths', "ALTER TABLE contraptions ADD COLUMN relay_paths TEXT NOT NULL DEFAULT '[]'"],
   ['contraptions', 'repo', 'ALTER TABLE contraptions ADD COLUMN repo TEXT'],
   ['contraptions', 'branch', 'ALTER TABLE contraptions ADD COLUMN branch TEXT'],
@@ -1746,6 +1751,32 @@ export class Store {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     this.db.prepare(`UPDATE machines SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
+  }
+
+  /** The schemes a scoped machine is lent to. */
+  machineProjects(machineId: number): number[] {
+    return (this.db.prepare('SELECT project_id FROM machine_projects WHERE machine_id = ? ORDER BY project_id').all(machineId) as { project_id: number }[]).map((r) => r.project_id);
+  }
+
+  machineGranted(machineId: number, projectId: number): boolean {
+    return !!this.db.prepare('SELECT 1 FROM machine_projects WHERE machine_id = ? AND project_id = ?').get(machineId, projectId);
+  }
+
+  /** Lend a machine to these schemes only, or (null) as before: its old grant rows stay, unread, until it is scoped again. */
+  setMachineProjects(machineId: number, projectIds: number[] | null) {
+    this.db.exec('BEGIN');
+    try {
+      if (projectIds) {
+        this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(machineId);
+        const add = this.db.prepare('INSERT OR IGNORE INTO machine_projects (machine_id, project_id) VALUES (?, ?)');
+        for (const id of projectIds) add.run(machineId, id);
+      }
+      this.db.prepare('UPDATE machines SET scoped = ? WHERE id = ?').run(projectIds ? 1 : 0, machineId);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   deleteMachine(id: number) {

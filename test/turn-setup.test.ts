@@ -212,7 +212,7 @@ test("minion and Taskmaster turns both keep the Read tool out of the logins, key
 });
 
 test("a scheme with machine tools off gives its minions no machine servers or notes", async () => {
-  runner.machines = () => [{ id: 1, name: 'perigee-godot', token_hash: '', created_by: 'Cara', created_at: 0, last_seen_at: 0, notes: 'Never restart it.', workspace_tools: 0 }];
+  runner.machines = () => [{ id: 1, name: 'perigee-godot', token_hash: '', created_by: 'Cara', created_at: 0, last_seen_at: 0, notes: 'Never restart it.', workspace_tools: 0, scoped: 0 }];
   try {
     const servers = (t: any) => Object.keys(t.mcp.mcpServers);
     const on = await turn('ticket', 'connected');

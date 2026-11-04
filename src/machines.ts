@@ -52,6 +52,8 @@ interface Agent {
 interface Session {
   machineId: number;
   ticketId: number;
+  /** The minion's scheme, so taking a scheme off a scoped machine ends its sessions. */
+  projectId: number;
   server: MachineServer;
   /** Which minion, for the agent's log and its workspace lock ("#90 in Citadel"). */
   who: string;
@@ -108,6 +110,8 @@ export class MachineRelay {
       connected_at: agent?.since ?? null,
       sessions: agent?.sessions.size ?? 0,
       workspace_tools: !!machine.workspace_tools,
+      /** The schemes it is lent to, or null for every scheme an admin owns. */
+      projects: machine.scoped ? this.store.machineProjects(machine.id) : null,
       servers: agent?.servers ?? [],
       workspaces: agent?.workspaces ?? [],
       problems: agent?.problems ?? [],
@@ -182,6 +186,11 @@ export class MachineRelay {
     for (const [id, s] of this.sessions) if (s.machineId === machineId && s.server === server) this.endSession(id, true);
   }
 
+  /** End a machine's sessions in schemes it is no longer lent to. */
+  endSessionsWhere(machineId: number, gone: (projectId: number) => boolean) {
+    for (const [id, s] of this.sessions) if (s.machineId === machineId && gone(s.projectId)) this.endSession(id, true);
+  }
+
   /** The thread a machine's workspace session serves, for a file its agent sends; null if none. */
   workspaceTicket(machine: Machine, sessionId: string): number | null {
     const s = this.sessions.get(sessionId);
@@ -198,11 +207,11 @@ export class MachineRelay {
   }
 
   /** A thread's proxy started: give it a session whose stream carries the machine's replies. */
-  openSession(machineId: number, ticketId: number, server: MachineServer, who: string, res: ServerResponse): boolean {
+  openSession(machineId: number, ticket: { id: number; project_id: number }, server: MachineServer, who: string, res: ServerResponse): boolean {
     const agent = this.agents.get(machineId);
     if (!agent || !this.online().some((m) => m.id === machineId && m.servers.includes(server))) return false;
     const id = randomBytes(12).toString('hex');
-    this.sessions.set(id, { machineId, ticketId, server, who, res });
+    this.sessions.set(id, { machineId, ticketId: ticket.id, projectId: ticket.project_id, server, who, res });
     agent.sessions.add(id);
     res.writeHead(200, SSE_HEADERS);
     res.write(`data: ${JSON.stringify({ session: id })}\n\n`);

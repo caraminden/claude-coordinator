@@ -173,3 +173,51 @@ test('workspace tools reach minions only once a person switches them on, and fet
   assert.ok(turn.allow.includes('mcp__wsbox-ws'));
   assert.match(turn.system, /wsbox \(mcp__wsbox, mcp__wsbox-ws\)[\s\S]*call its workspaces tool first/);
 });
+
+test('a machine lent to chosen schemes reaches only their minions, and taking a scheme away ends its sessions (#303)', async () => {
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'vault' } });
+  assert.equal(machine.projects, null, 'a new machine is lent to every scheme, as before');
+  startAgent(token);
+  await until('vault to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'vault' && m.online));
+  const a = await call('/api/projects', { method: 'POST', body: { name: 'Obsidian' } });
+  const b = await call('/api/projects', { method: 'POST', body: { name: 'Elsewhere' } });
+  await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [999999] } }), /400/);
+  await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: 'all' } }), /400/);
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: 'Josh\'s vault.' } });
+  const scoped = await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [a.id] } });
+  assert.deepEqual(scoped.projects, [a.id]);
+
+  const turnIn = async (project: any, message: string) => {
+    const before = turns().length;
+    await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message } });
+    return (await until('a turn', () => turns().length > before && turns())).at(-1);
+  };
+  const inA = await turnIn(a, 'lent');
+  assert.deepEqual(inA.results.vault.tools, ['whoami']);
+  assert.match(inA.system, /Notes on vault from its owner:\nJosh's vault\./);
+  const inB = await turnIn(b, 'not lent');
+  assert.equal(inB.results.vault, undefined);
+  assert.ok(!inB.allow.includes('mcp__vault'));
+  assert.doesNotMatch(inB.system, /vault/);
+
+  // B's minion can't open it by id; A's can, until A is taken off it.
+  const refused = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${inB.token}` } });
+  assert.equal(refused.status, 403);
+  await refused.body!.cancel();
+  const opened = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${inA.token}` } });
+  assert.equal(opened.status, 200);
+  const stream = opened.body!.getReader();
+  await stream.read(); // the session id
+  await until('the session to show', async () => (await call('/api/machines')).find((m: any) => m.name === 'vault').sessions >= 1);
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [b.id] } });
+  for (let r = await stream.read(); !r.done; r = await stream.read());
+  const reopened = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${inA.token}` } });
+  assert.equal(reopened.status, 403);
+  await reopened.body!.cancel();
+
+  // Back to every scheme: lent as before, and its grants kept but unread.
+  const unscoped = await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: null } });
+  assert.equal(unscoped.projects, null);
+  const again = await turnIn(a, 'every scheme again');
+  assert.deepEqual(again.results.vault.tools, ['whoami']);
+});

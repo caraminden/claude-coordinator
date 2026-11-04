@@ -9,7 +9,7 @@ import { homedir } from 'node:os';
 import { fileType, findArtifacts, findByName, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
-import { claudeRefusal, lendsMachines, mayReceive, messagePerson, messageScope, turnRefusal } from './src/access.ts';
+import { claudeRefusal, lendsMachine, mayReceive, messagePerson, messageScope, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
 import { Landings } from './src/land.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
@@ -194,8 +194,7 @@ function liveOn(head: string | null) {
   for (const id of waiters.pendingLive()) runner.deployLive(id);
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
-runner.machines = () => machines.online();
-runner.lendsMachines = (project) => lendsMachines(store, project);
+runner.machines = (project) => machines.online().filter((m) => lendsMachine(store, m, project));
 runner.refuseTurn = (ticket, author) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid));
 // Sender pays (#213): the server login's owner runs on the host, everyone else in their own container.
 runner.placeFor = (person) => {

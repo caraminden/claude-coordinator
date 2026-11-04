@@ -1,7 +1,7 @@
 // Who sees what: a person sees the schemes they own or are a member of (an admin sees all), the
 // live stream only carries a scheme's news to its people, and a Taskmaster writes only to schemes its person is in (and Citadel).
 import type { Session } from './auth.ts';
-import type { Project, Store, Ticket, User } from './db.ts';
+import type { Machine, Project, Store, Ticket, User } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 
@@ -62,6 +62,14 @@ export function claudeRefusal(who: User, linked: ClaudeLinked, asOwner = false):
 /** The connected machines (Cara's laptop, perigee's GPU) are an admin's: only their schemes' minions get them. */
 export function lendsMachines(store: Store, project: Project): boolean {
   return !!store.getUser(project.owner_id ?? -1)?.admin;
+}
+
+/**
+ * Whether a scheme's minions get this machine. One an admin lent to chosen schemes (#303, Josh's vault)
+ * goes to those only, whoever owns them: the admin's grant is the consent. Any other follows lendsMachines.
+ */
+export function lendsMachine(store: Store, machine: Machine, project: Project): boolean {
+  return machine.scoped ? store.machineGranted(machine.id, project.id) : lendsMachines(store, project);
 }
 
 /** How long Citadel's Taskmaster may answer a scheme after that scheme's Taskmaster last wrote to it. */

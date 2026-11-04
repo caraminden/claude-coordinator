@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { lendsMachines, mayReceive, messageScope, turnRefusal } from '../src/access.ts';
+import { lendsMachine, lendsMachines, mayReceive, messageScope, turnRefusal } from '../src/access.ts';
 import { Auth, hashPassword } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, PASSWORD, until, type Booted, stopTurns } from './helpers.ts';
@@ -118,6 +118,23 @@ test("turns run for people allowed on the server's login; anyone else's message 
   assert.match(turnRefusal(store, his, 'GitHub', () => null)!, /its owner, Josh, links/);
   // The connected machines are the admin's: only their schemes' minions get them.
   assert.ok(lendsMachines(store, citadel) && !lendsMachines(store, games));
+});
+
+test('a machine lent to chosen schemes goes to those, even a non-admin\'s, and an unscoped one follows lendsMachines (#303)', () => {
+  const { store, citadel, games } = world();
+  const vault = store.createMachine('vault', '', 'Cara');
+  assert.ok(lendsMachine(store, vault, citadel) && !lendsMachine(store, vault, games));
+  // #62's leftover rows don't count while the machine isn't scoped.
+  store.db.prepare('INSERT INTO machine_projects (machine_id, project_id) VALUES (?, ?)').run(vault.id, games.id);
+  assert.ok(!lendsMachine(store, store.getMachine(vault.id)!, games));
+  store.setMachineProjects(vault.id, [games.id]);
+  const scoped = store.getMachine(vault.id)!;
+  assert.ok(lendsMachine(store, scoped, games) && !lendsMachine(store, scoped, citadel));
+  assert.deepEqual(store.machineProjects(vault.id), [games.id]);
+  store.setMachineProjects(vault.id, null);
+  const back = store.getMachine(vault.id)!;
+  assert.ok(lendsMachine(store, back, citadel) && !lendsMachine(store, back, games));
+  assert.deepEqual(store.machineProjects(vault.id), [games.id], 'grants stay, unread');
 });
 
 // ---------- the real server ----------

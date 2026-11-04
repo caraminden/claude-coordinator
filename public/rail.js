@@ -182,20 +182,22 @@ function makeBackdrop() {
 }
 
 const RECHECK_MS = 15_000;
-let recheck = 0; // a timer while an app is greyed out or its icon failed, so it comes back once it's up (#311)
-let drawn = ''; // the entries drawn, to redraw only when a recheck finds them changed
-let iconFailed = false;
+const ICON_TRIES = 8; // about two minutes: a restart, not an icon that's gone
+let recheck = 0; // a timer while an app is greyed out, so it comes back once it's up (#311)
+let drawn = ''; // the entries drawn (but which is current, syncRail's), to redraw only when a recheck finds them changed
+const entries = (items) => JSON.stringify(items.map(({ current, ...i }) => i));
 
+/** The rail's entries, or null when Citadel didn't answer. */
 const fetchItems = async () => {
-  let mine = [];
   try {
     const res = await fetch(new URL('api/contraptions/mine', root), { headers: { Accept: 'application/json' } });
-    if (res.ok) mine = await res.json();
-  } catch {}
-  return railItems(mine, showing(), root.pathname, !inContraption);
+    return railItems(res.ok ? await res.json() : [], showing(), root.pathname, !inContraption);
+  } catch {
+    return null;
+  }
 };
 
-/** Ask again soon; an open switcher or a hidden page waits for the next round. */
+/** Ask again soon; an open switcher, a hidden page or no answer (Citadel restarting) waits for the next round. */
 function recheckSoon() {
   if (recheck) return;
   recheck = setTimeout(async () => {
@@ -205,9 +207,19 @@ function recheckSoon() {
     const mark = shown;
     const items = await fetchItems();
     if (mark !== shown || !nav) return;
-    if (nav.classList.contains('open')) return recheckSoon();
-    if (iconFailed || JSON.stringify(items) !== drawn) drawRail(items);
-    else recheckSoon();
+    if (!items || nav.classList.contains('open') || entries(items) === drawn) return recheckSoon();
+    drawRail(items);
+  }, RECHECK_MS);
+}
+
+/** An icon that failed (its app restarting): its letter for now, the icon back in place once it loads. */
+function retryIcon(pic, tile, tries = 1) {
+  setTimeout(() => {
+    if (!tile.isConnected) return;
+    const again = Object.assign(new Image(), { alt: '' });
+    again.onload = () => tile.isConnected && tile.replaceWith(again);
+    again.onerror = () => tries < ICON_TRIES && retryIcon(pic, tile, tries + 1);
+    again.src = pic.src;
   }, RECHECK_MS);
 }
 
@@ -223,14 +235,13 @@ export async function showRail() {
   const mark = ++shown;
   const items = await fetchItems();
   if (mark !== shown) return false;
-  return drawRail(items);
+  return drawRail(items ?? []);
 }
 
 function drawRail(items) {
   clearRail();
   if (!items.length) return false;
-  drawn = JSON.stringify(items);
-  iconFailed = false;
+  drawn = entries(items);
   if (items.some((i) => i.down)) recheckSoon();
   addStyles();
   nav = document.createElement('nav');
@@ -254,11 +265,9 @@ function drawRail(items) {
       pic = document.createElement('img');
       pic.src = item.icon;
       pic.alt = '';
-      // Went down since the list was fetched (a restart): a letter for now, the icon again once it loads.
       pic.addEventListener('error', () => {
         pic.replaceWith(tile);
-        iconFailed = true;
-        recheckSoon();
+        retryIcon(pic, tile);
       }, { once: true });
     }
     const label = document.createElement('span');

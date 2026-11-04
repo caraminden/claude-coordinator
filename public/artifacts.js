@@ -301,8 +301,11 @@ export function closeViewer() {
   const follow = followChat;
   viewer = null;
   placeholder.replaceWith(chat);
-  dialog.close();
-  dialog.remove();
+  // Gone once its close event has been out on the page, which puts the caret back in the chat's box (ui/composer.js).
+  if (dialog.open) {
+    dialog.addEventListener('close', () => dialog.remove(), { once: true });
+    dialog.close();
+  } else dialog.remove();
   if (follow) scrollToBottom();
   else window.scrollTo(0, scrollY);
   return threadHref(ticket);

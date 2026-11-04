@@ -21,6 +21,13 @@ export interface ComposerOptions {
   draftKey?: string;
   /** Whether a send may go, given the trimmed text (default: it isn't empty). For a message that can carry more than text, or to refuse while something is still getting ready. */
   canSend?(text: string): boolean;
+  /**
+   * Put the caret in the box by itself (default true; false opts out): when it comes up, when the window
+   * comes back, and when a dialog or drawer closes. Desktop only (not under `(pointer: coarse)` or at
+   * 800px and under, where it would pop the keyboard over the chat), and only when nothing else has the
+   * caret: never from another field, a menu or a dialog. With several boxes on the page, the newest shown one.
+   */
+  autofocus?: boolean;
   /** Shows a failed send's error (default: a cui-notice in the composer, gone on the next send). */
   onError?(error: unknown): void;
 }

@@ -15,7 +15,8 @@
 // a phone (Shift+Enter always adds one); never sends half an IME word; continues a numbered list; puts
 // the text back when a send fails; Send becomes Stop while busy (with whileBusy 'send', Stop shows
 // beside Send, which keeps sending: for a server that queues a message sent mid-turn, as Citadel's does);
-// 16px text on phones so iOS doesn't zoom; optional drafts in localStorage. Buttons and the box take base.css's cui-* classes.
+// 16px text on phones so iOS doesn't zoom; optional drafts in localStorage; the caret goes in the box by
+// itself on desktop (autofocus, below). Buttons and the box take base.css's cui-* classes.
 
 const NARROW = '(max-width: 800px)';
 const narrow = () => matchMedia(NARROW).matches;
@@ -129,6 +130,57 @@ function revealCaret(textarea) {
   if (caretBottom > textarea.scrollTop + textarea.clientHeight) textarea.scrollTop = caretBottom - textarea.clientHeight;
 }
 
+// ---------- autofocus ----------
+// Cara, 2026-11-04: "If I have a screen with a chat open in citadel, it should default focus so I dont
+// have to click on the chat box to type into it". A box mounted with autofocus (the default) takes the
+// caret when it comes up, when the window comes back, and when a dialog or drawer closes. Only where a
+// keyboard is the way in: not on a touch-first or phone-wide screen, where it would pop the on-screen
+// keyboard over the chat. And only when the caret is free: on the page itself or nowhere, or (as the
+// chat comes up) on the link or button just used to open it. Never from another field, a menu or a
+// dialog. Nothing else moves it: not a redraw, a new message or loading earlier ones.
+
+const COARSE = '(pointer: coarse)';
+const live = []; // boxes mounted with autofocus, oldest first
+let listening = false;
+
+function caretIsFree(opening) {
+  if (matchMedia(COARSE).matches || narrow()) return false;
+  const a = document.activeElement;
+  if (!a || a === document.body || a === document.documentElement) return true;
+  // What was clicked to open the chat keeps the caret otherwise: a link, or a button outside menus and dialogs.
+  return opening && !!a.matches?.('a[href], button') && !a.closest('dialog, [role=menu], [role=dialog], [contenteditable]');
+}
+
+const takesCaret = (t) => t.isConnected && !t.disabled && !t.closest('[inert]') && t.getClientRects().length > 0;
+
+/** Put the caret in the newest box that can take it, if it is free. */
+function autofocus(opening = false) {
+  for (let i = live.length - 1; i >= 0; i--) if (!live[i].isConnected && live[i].dataset.cuiSeen) live.splice(i, 1);
+  const box = live.findLast(takesCaret);
+  if (box && caretIsFree(opening)) box.focus({ preventScroll: true });
+}
+
+function listen() {
+  if (listening) return;
+  listening = true;
+  // After the browser has put back whatever had the caret before (a window coming back, a dialog closing).
+  const later = () => setTimeout(autofocus);
+  window.addEventListener('focus', later);
+  document.addEventListener('close', (e) => e.target?.tagName === 'DIALOG' && later(), true);
+  document.addEventListener('citadel-drawer-close', later);
+}
+
+/** Once `textarea` is on the page (a caller may build the box elsewhere first), focus it if the caret is free. */
+function focusOnceShown(textarea, frames = 60) {
+  if (textarea.isConnected) {
+    textarea.dataset.cuiSeen = '';
+    // A frame later, so a page laying out the chat around it has finished.
+    return requestAnimationFrame(() => live.at(-1) === textarea && autofocus(true));
+  }
+  if (frames) requestAnimationFrame(() => focusOnceShown(textarea, frames - 1));
+  else textarea.dataset.cuiSeen = ''; // never shown: dropped once it's off the page
+}
+
 // ---------- the composer ----------
 
 const make = (tag, props, ...children) => {
@@ -235,6 +287,11 @@ export function mountComposer(el, opts) {
     });
   });
   render();
+  if (opts.autofocus !== false) {
+    live.push(textarea);
+    listen();
+    focusOnceShown(textarea);
+  }
 
   return {
     form, textarea, row, sendButton, stopButton, fit,

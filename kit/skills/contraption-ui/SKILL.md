@@ -91,6 +91,11 @@ disabled while a message is on its way; 16 px on phones so iOS doesn't zoom; a m
   mid-turn; `'send'` keeps Send (and Enter) sending and shows Stop (`box.stopButton`,
   `button.cui-btn.cui-danger.cui-composer-stop`) before it in the row while busy. Use `'send'` when
   your server queues or steers a message sent mid-turn, as Citadel's own chat does.
+- `autofocus` (default `true`): the caret goes in the box when it comes up, when the window comes
+  back and when a dialog or drawer closes, so people type without clicking. Desktop only (not under
+  `(pointer: coarse)` or at 800 px and under), and only when nothing else has the caret: it never
+  takes it from another field, a menu or a dialog, and a redraw or new message never moves it. Pass
+  `false` for a box that isn't the page's main chat.
 - More options: `label` (the box's accessible name), `canSend(text)` (refuse, or allow an empty text
   when something else rides along), `onError(err)` (show a failed send your own way).
 - It returns `form`, `textarea`, `row` and `sendButton` too: put your own buttons (attach, a model
@@ -260,6 +265,10 @@ reader hears. Replace them with the real content and set `aria-busy="false"` in 
 10. **No full-screen loading covers.** Cara, 2026-11-03: "keep the screen visible and just have a spinner
     or grey out the changed thing". Mark the region that's changing busy (`cui-busy` with `aria-busy`),
     or show skeletons on a first load; the rest of the page stays visible and usable.
+11. **A chat's box has the caret on desktop.** Cara, 2026-11-04: "If I have a screen with a chat open in
+    citadel, it should default focus so I dont have to click on the chat box to type into it". The
+    composer does it (`autofocus`, on by default): don't turn it off for a page's main chat, and don't
+    focus anything yourself on a redraw. Never on a phone, never out of another field.
 
 A self-review of a contraption counts hand-rolled markdown, a chat log or composer the library
 has, and a copied Citadel hex colour as findings.

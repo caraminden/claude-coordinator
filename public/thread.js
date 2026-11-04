@@ -398,6 +398,8 @@ export function renderTicketHead() {
   // The title's line keeps who it is (and on wider screens the way out); the line under it takes the
   // state, where the change is, the tools and the buttons, and on phones ‹ › × after Find (#158), so the title has room.
   const phone = narrow.matches;
+  // Find's box is put back in the redrawn bar, which drops the caret from it: keep it there.
+  const had = el.contains(document.activeElement) ? document.activeElement : null;
   el.replaceChildren(
     h('div', { class: 'row' },
       h('span', { class: `dot ${t.status}` }),
@@ -410,6 +412,7 @@ export function renderTicketHead() {
     h('div', { class: 'head-sub' }, phone ? payerChip(t) : '', stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
       h('span', { class: 'spacer' }), ...actions, view.findEl ?? '', phone ? nav : ''),
     view.progressEl);
+  if (had?.isConnected && document.activeElement !== had) had.focus({ preventScroll: true });
   renderTyping();
   // While a turn runs, a sent message waits for it; said on hover rather than in a line of its own.
   const send = document.querySelector('.composer button[type=submit]');

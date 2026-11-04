@@ -875,6 +875,17 @@ row.innerHTML =
           <p>Everything vanishes behind it, even what didn't change, and nothing can be read or typed until it lifts.</p></div>
       </div>
     </div>
+
+    <div class="doc-rule">
+      <h3>11. A chat's box has the caret on desktop</h3>
+      <p class="doc-why">Cara, 2026-11-04: <q>If I have a screen with a chat open in citadel, it should default focus so I dont have to click on the chat box to type into it</q>. The composer does it: <code>mountComposer(el, { autofocus })</code>, on by default.</p>
+      <div class="doc-rw">
+        <div class="doc-case"><span class="tag">✓ When the chat comes up, the window comes back, or a dialog over it closes</span>
+          <p>On desktop, and only when nothing else has the caret (or, as the chat opens, the link or button that opened it). Open a chat and type: the words land in the box.</p></div>
+        <div class="doc-case wrong"><span class="tag">✕ On a redraw, a new message, or out of another field</span>
+          <p>Someone typing in search, a card or a setting loses their place. On a phone (<code>(pointer: coarse)</code> or 800px and under) it pops the keyboard over the chat on every open.</p></div>
+      </div>
+    </div>
   </section>
 
   <section id="questions">
@@ -894,6 +905,7 @@ row.innerHTML =
       <li><time>2026-11-02</time> · Cara, on the #282 question card: Enter on a phone: <q>Adds a new line</q></li>
       <li><time>2026-11-02</time> · Cara, on the #282 question card: text on the accent colour in dark mode: <q>Dark text</q></li>
       <li><time>2026-11-03</time> · Cara, in Theory of Crafting, on loading states: <q>keep the screen visible and just have a spinner or grey out the changed thing</q> (rule 10; <code>cui-busy</code> and <code>cui-skeleton</code>, #293)</li>
+      <li><time>2026-11-04</time> · Cara: <q>If I have a screen with a chat open in citadel, it should default focus so I dont have to click on the chat box to type into it</q> (rule 11; the composer's <code>autofocus</code>, desktop only, #294)</li>
     </ol>
   </section>
 </main>

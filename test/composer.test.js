@@ -23,8 +23,10 @@ class El {
     for (const fn of this.listeners[type] ?? []) fn(e);
     return e;
   }
-  closest() { return null; }
-  focus() {}
+  closest(sel) { return sel.includes('dialog') && this.inDialog ? {} : null; }
+  matches(sel) { return sel.split(', ').some((s) => s.replace(/\[.*\]/, '') === this.tag); }
+  getClientRects() { return this.isConnected ? [{}] : []; }
+  focus(opts) { this.focusedWith = opts; document.activeElement = this; }
   requestSubmit() { this.dispatch('submit'); }
   /** A click, then what the browser does after it: a submit button submits its form. */
   click(form) {
@@ -34,10 +36,27 @@ class El {
 }
 
 let narrow = false;
+let coarse = false;
 const store = new Map();
-globalThis.document = { createElement: (tag) => new El(tag), scrollingElement: null, adoptedStyleSheets: [] };
-globalThis.matchMedia = () => ({ matches: narrow });
-globalThis.requestAnimationFrame = () => {};
+const on = (target) => Object.assign(target, {
+  listeners: {},
+  addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); },
+  fire(type, e = {}) { for (const fn of this.listeners[type] ?? []) fn(e); },
+});
+const body = new El('body');
+globalThis.document = on({ createElement: (tag) => new El(tag), scrollingElement: null, adoptedStyleSheets: [], body, activeElement: body });
+globalThis.window = on({});
+globalThis.matchMedia = (q) => ({ matches: q === '(pointer: coarse)' ? coarse : narrow });
+let frames = [];
+globalThis.requestAnimationFrame = (fn) => frames.push(fn);
+/** Run the frames queued so far, and those they queue, `n` deep. */
+const flush = (n = 3) => {
+  for (let i = 0; i < n; i++) {
+    const now = frames;
+    frames = [];
+    for (const fn of now) fn();
+  }
+};
 globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
 const { mountComposer } = await import('../public/ui/composer.js');
 
@@ -200,4 +219,86 @@ test('drafts: saved as typed, back on mount, gone once sent', () => {
   assert.equal(b.box.value, 'unsent words');
   b.key();
   assert.equal(store.has('d:1'), false);
+});
+
+// ---------- autofocus (Cara, 2026-11-04: "it should default focus so I dont have to click on the chat box") ----------
+
+/** A box that is on the page, with the caret at `active` (the page body by default). */
+function shown(opts = {}, active = body) {
+  narrow = false;
+  coarse = false;
+  document.activeElement = active;
+  const m = mount(opts);
+  m.box.textarea.isConnected = true;
+  flush();
+  return m.box.textarea;
+}
+
+test('autofocus: the box takes the caret when it comes up on desktop, without scrolling', () => {
+  const t = shown();
+  assert.equal(document.activeElement, t);
+  assert.deepEqual(t.focusedWith, { preventScroll: true });
+});
+
+test('autofocus: as the chat opens, from the link or button that opened it, but never from a field', () => {
+  for (const opener of ['a', 'button']) {
+    const t = shown({}, new El(opener));
+    assert.equal(document.activeElement, t, `from the ${opener} just clicked`);
+  }
+  const search = new El('input');
+  shown({}, search);
+  assert.equal(document.activeElement, search, 'the search box keeps it');
+  const inCard = Object.assign(new El('button'), { inDialog: true });
+  shown({}, inCard);
+  assert.equal(document.activeElement, inCard, 'a button in a dialog keeps it');
+});
+
+test('autofocus: never on a phone-wide or touch-first screen, nor with autofocus: false', () => {
+  for (const [n, c] of [[true, false], [false, true]]) {
+    document.activeElement = body;
+    [narrow, coarse] = [n, c];
+    const { box } = mount();
+    box.textarea.isConnected = true;
+    flush();
+    assert.equal(document.activeElement, body, `narrow ${n}, coarse ${c}`);
+  }
+  shown({ autofocus: false });
+  assert.equal(document.activeElement, body);
+});
+
+test('autofocus: back in the window or after a dialog closes, only when nothing has the caret', async () => {
+  const t = shown();
+  for (const [target, type, e] of [[window, 'focus'], [document, 'close', { target: { tagName: 'DIALOG' } }], [document, 'citadel-drawer-close']]) {
+    document.activeElement = body;
+    target.fire(type, e);
+    await tick();
+    assert.equal(document.activeElement, t, type);
+    const field = new El('textarea');
+    document.activeElement = field;
+    target.fire(type, e);
+    await tick();
+    assert.equal(document.activeElement, field, `${type} leaves another field alone`);
+    const link = new El('a');
+    document.activeElement = link;
+    target.fire(type, e);
+    await tick();
+    assert.equal(document.activeElement, link, `${type} leaves a focused link alone`);
+  }
+});
+
+test('autofocus: the newest box on the page takes it; one taken off the page drops out', async () => {
+  const old = shown();
+  const t = shown();
+  assert.equal(document.activeElement, t);
+  t.isConnected = false;
+  document.activeElement = body;
+  window.fire('focus');
+  await tick();
+  assert.equal(document.activeElement, old, 'the one still on the page');
+  t.disabled = true;
+  t.isConnected = true;
+  document.activeElement = body;
+  window.fire('focus');
+  await tick();
+  assert.equal(document.activeElement, old, 'a disabled box is passed over');
 });

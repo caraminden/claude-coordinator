@@ -109,6 +109,8 @@ function taskmasterMachines({ app, caller, project }: Ctx) {
       owner_name: m.owner_id === null ? null : app.store.getUser(m.owner_id)?.name ?? null,
       project_names: view.projects?.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`) ?? null,
       checked: app.machines.lastCheck(m.id),
+      // Whether a minion turn its asker starts here gets it (src/runner.ts): an admin sees more than that.
+      minions_get_it: !!project.machine_tools && lendsMachine(app.store, m, project, asker === null ? [] : [asker]),
     };
   });
 }

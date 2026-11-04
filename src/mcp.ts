@@ -682,7 +682,7 @@ function machineText(m: any): string {
     `${m.name}: ${m.online ? `ONLINE, connected since ${ago(m.connected_at)}, host ${m.host || '?'}, ${m.sessions} session${m.sessions === 1 ? '' : 's'} open` : `OFFLINE, last seen ${ago(m.last_seen_at)}`}`,
     m.online ? `  agent runs: ${m.command || '?'}; offers ${m.servers.length ? m.servers.map((s: string) => (s === 'ws' ? 'workspace tools' : 'its MCP server')).join(' and ') : 'nothing'}` : '',
     `  workspace tools: ${m.workspace_tools ? 'on' : 'off'}${m.online && ws ? `; workspaces: ${ws}` : ''}`,
-    `  ${lent}`,
+    `  ${lent}; ${m.minions_get_it ? "this scheme's minions get it" : "this scheme's minions don't get it"}`,
     m.checked ? [`  last check ${ago(m.checked.at)}:`, ...checkLines(m.checked.results).map((l) => `  ${l}`)].join('\n') : m.online ? '  tools: not checked since it connected (check_machine lists them)' : '',
     m.problems.length ? `  agent reports problems: ${m.problems.join('; ')}` : '',
     m.notes ? `  notes: ${m.notes.replace(/\n+/g, ' ')}` : '',
@@ -1145,7 +1145,8 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!machine.online) return `${machine.name}: FAIL, offline (last seen ${ago(machine.last_seen_at)}). Its agent isn't connected: on that computer, check machine-agent.mjs is running and its token is current.`;
       if (!results.length) return `${machine.name}: online, but it offers nothing a turn would get (${machine.servers.includes('ws') ? 'workspace tools are switched off and it lends no MCP server' : 'no MCP server and no workspace tools'}).`;
       const pass = results.every((r: any) => r.ok);
-      return [`${machine.name}: ${pass ? 'PASS' : 'FAIL'}`, ...checkLines(results)].join('\n');
+      const reach = machine.minions_get_it ? '' : `Note: this scheme's minions don't get ${machine.name} (machine tools are off here, or it isn't lent to this scheme for this turn's asker), so a pass here doesn't mean they can use it.`;
+      return [`${machine.name}: ${pass ? 'PASS' : 'FAIL'}`, ...checkLines(results), reach].filter(Boolean).join('\n');
     }
     case 'list_catalogue': {
       const { items } = await call('GET', '/api/catalogue');

@@ -427,7 +427,7 @@ test('a Taskmaster lists the machines its scheme can see and checks one through 
   const asJosh = await tools(shared, josh.id);
   let list = await asJosh.use('list_machines');
   assert.match(list, /^tm-josh: ONLINE, connected since \d{4}-\d\d-\d\d \d\d:\d\d UTC \((just now|1 min ago)\), host /m);
-  assert.match(list, /Josh's own: goes to the turns they ask for/);
+  assert.match(list, /Josh's own: goes to the turns they ask for, in schemes they're in; this scheme's minions get it/);
   assert.match(list, /^tm-box: ONLINE/m);
   assert.match(list, /lent to every scheme an admin owns/);
   assert.match(list, /^sleepy: OFFLINE, last seen never/m);
@@ -453,7 +453,8 @@ test('a Taskmaster lists the machines its scheme can see and checks one through 
 
   // An admin's ask sees every machine, even one whose owner isn't in this scheme.
   const asCara = await tools(caras, cara.id);
-  assert.match(await asCara.use('list_machines'), /^tm-josh: ONLINE/m);
+  assert.match(await asCara.use('list_machines'), /^tm-josh: ONLINE[^]*?this scheme's minions don't get it/m);
+  assert.match(await asCara.use('check_machine', { name: 'tm-josh' }), /^tm-josh: PASS\n[^]*Note: this scheme's minions don't get tm-josh/);
   asCara.done();
 
   // Only a Taskmaster: not a person, not a minion.

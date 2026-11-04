@@ -210,10 +210,11 @@ export class MachineRelay {
    */
   async check(machineId: number, holder: SessionHolder, who: string, timeoutMs = CHECK_MS): Promise<CheckResult[]> {
     const servers = this.online().find((m) => m.id === machineId)?.servers ?? [];
+    const agent = this.agents.get(machineId);
     const results: CheckResult[] = [];
     for (const server of servers) results.push(await this.checkServer(machineId, holder, server, who, timeoutMs));
-    const agent = this.agents.get(machineId);
-    if (agent) agent.checked = { at: Date.now(), results };
+    // A reconnect mid-check is a new agent: the old connection's results aren't its.
+    if (agent && this.agents.get(machineId) === agent) agent.checked = { at: Date.now(), results };
     return results;
   }
 

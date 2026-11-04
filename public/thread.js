@@ -170,11 +170,22 @@ export async function jumpToEvent(target) {
 /** Load the page before what's shown (or back to event `from`) and redraw, keeping your place. */
 export async function showEarlier(button, from) {
   const { id, page } = view;
-  if (button) button.disabled = true;
+  const label = button?.textContent;
+  // A spinner in place of the button until the older messages are in (#288); the redraw replaces it.
+  if (button) {
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.replaceChildren(h('span', { class: 'cui-spin', 'aria-hidden': 'true' }), 'Loading earlier…');
+  }
   try {
-    await loadEarlier(id, page, from);
+    // Held a moment, so a quick load shows the spinner rather than a flash.
+    await Promise.all([loadEarlier(id, page, from), button && new Promise((r) => setTimeout(r, 300))]);
   } catch (err) {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      button.textContent = label;
+    }
     return alertNote(`Couldn't load earlier messages: ${err.message}`);
   }
   if (view.id !== id) return;

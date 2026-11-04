@@ -67,7 +67,7 @@ function within(root, target) {
 }
 
 /**
- * Reads machine-agent.json: { workspaces: { <name>: { path, read?: [folders], tasks: { <name>: { run: [argv], about?, hints? } } } } }.
+ * Reads machine-agent.json: { workspaces: { <name>: { path, read?: [folders], git_sync?: false, tasks: { <name>: { run: [argv], about?, hints? } } } } }.
  * A bad workspace or task is left out with a problem saying why, so one typo doesn't take the rest down.
  */
 export function loadConfig(file, env = process.env) {
@@ -100,6 +100,9 @@ export function loadConfig(file, env = process.env) {
         problems.push(`workspace ${name}, read folder ${r}: ${err.message}`);
       }
     }
+    // Off for a folder its owner keeps on a branch (an Obsidian vault with Obsidian Git): a detached checkout breaks that.
+    const gitSync = w.git_sync === undefined || w.git_sync === true;
+    if (w.git_sync !== undefined && typeof w.git_sync !== 'boolean') problems.push(`workspace ${name}: "git_sync" must be true or false, so it is off`);
     const tasks = new Map();
     for (const [tname, t] of Object.entries(w.tasks ?? {})) {
       const bad = (why) => problems.push(`workspace ${name}, task ${tname}: ${why}`);
@@ -117,7 +120,7 @@ export function loadConfig(file, env = process.env) {
         }
       }
     }
-    workspaces.set(name, { name, path, read, tasks });
+    workspaces.set(name, { name, path, read, gitSync, tasks });
   }
   return { workspaces, problems };
 }
@@ -126,7 +129,7 @@ const TOOLS = [
   { name: 'workspaces', description: 'The workspaces on this computer: folder, what is checked out, local changes, the tasks you can run, and whether a job holds it. Call this first.', inputSchema: { type: 'object', properties: {} } },
   {
     name: 'git_sync',
-    description: 'git fetch origin, then check out origin/<ref> (a pushed branch) or a commit, detached. Local changes that don\'t conflict carry over; if they would be overwritten it stops and changes nothing. Never resets, cleans, stashes or pushes.',
+    description: 'git fetch origin, then check out origin/<ref> (a pushed branch) or a commit, detached. Local changes that don\'t conflict carry over; if they would be overwritten it stops and changes nothing. Never resets, cleans, stashes or pushes. Refused in a workspace whose owner switched it off (the workspaces tool says so).',
     inputSchema: { type: 'object', properties: { workspace: { type: 'string' }, ref: { type: 'string', description: 'Branch name on origin, or a commit sha' } }, required: ['workspace', 'ref'] },
   },
   {
@@ -196,7 +199,7 @@ export class WorkspaceHost {
   /** What the app shows on the Machines page. */
   summary() {
     return {
-      workspaces: [...this.workspaces.values()].map((w) => ({ name: w.name, path: w.path, read: w.read, tasks: [...w.tasks].map(([name, t]) => ({ name, run: t.run, about: t.about })) })),
+      workspaces: [...this.workspaces.values()].map((w) => ({ name: w.name, path: w.path, read: w.read, git_sync: w.gitSync, tasks: [...w.tasks].map(([name, t]) => ({ name, run: t.run, about: t.about })) })),
       problems: this.problems,
     };
   }
@@ -280,6 +283,7 @@ export class WorkspaceHost {
         `Folder: ${w.path}`,
         w.read.length ? `Read folders: ${w.read.join(', ')}` : '',
         `Checked out: ${c.at}`,
+        w.gitSync ? '' : 'git_sync: off (its owner keeps it on a branch)',
         `Local changes:\n${c.changes}`,
         `Busy: ${b ? `${b.what} for ${b.who}, ${secondsSince(b.since)} s${b.job ? ` (job ${b.job.id})` : ''}` : 'no'}`,
         'Tasks:',
@@ -291,6 +295,7 @@ export class WorkspaceHost {
   }
 
   async sync(w, ref, who) {
+    if (!w.gitSync) throw new ToolError(`git_sync is off for workspace ${w.name}: its owner keeps it on a branch. Use its tasks instead.`);
     if (!REF.test(ref)) throw new ToolError(`"${ref}" isn't a branch name or commit sha`);
     const lock = this.take(w, `git_sync ${ref}`, who);
     try {
@@ -440,7 +445,8 @@ export async function workspaceReply(host, message, who, upload) {
     case 'ping':
       return reply({});
     case 'tools/list':
-      return reply({ tools: TOOLS });
+      // No workspace takes git_sync: don't offer it.
+      return reply({ tools: [...host.workspaces.values()].some((w) => w.gitSync) || !host.workspaces.size ? TOOLS : TOOLS.filter((t) => t.name !== 'git_sync') });
     case 'tools/call':
       try {
         const { text, isError } = await host.call(message.params?.name, message.params?.arguments ?? {}, who, upload);

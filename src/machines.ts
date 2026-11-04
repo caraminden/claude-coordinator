@@ -66,6 +66,7 @@ function cleanWorkspaces(v: unknown): unknown[] {
     name: text(w?.name, 40),
     path: text(w?.path),
     read: list(w?.read).map((r) => text(r)),
+    git_sync: w?.git_sync !== false,
     tasks: list(w?.tasks).map((t: any) => ({ name: text(t?.name, 40), run: list(t?.run).map((a) => text(a)), about: text(t?.about) })),
   }));
 }

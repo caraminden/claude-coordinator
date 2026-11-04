@@ -146,6 +146,7 @@ test('workspace tools reach minions only once a person switches them on, and fet
   const online = await until('wsbox to report its workspace', async () => (await call('/api/machines')).find((m: any) => m.name === 'wsbox' && m.workspaces.length));
   assert.deepEqual(online.servers, ['mcp', 'ws']);
   assert.equal(online.workspaces[0].tasks[0].name, 'hi');
+  assert.equal(online.workspaces[0].git_sync, true, 'a workspace without the key keeps git_sync on');
   const [project] = await call('/api/projects');
 
   // Off: the turn gets the machine's MCP server only, and can't open its workspace tools by hand.

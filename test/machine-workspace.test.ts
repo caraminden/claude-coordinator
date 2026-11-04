@@ -15,6 +15,7 @@ const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user
 const origin = join(root, 'origin.git');
 const seed = join(root, 'seed');
 const clone = join(root, 'clone');
+const vault = join(root, 'vault');
 const outside = join(root, 'outside');
 const logs = join(root, 'appdata-logs');
 mkdirSync(seed);
@@ -31,6 +32,7 @@ git(seed, 'commit', '-q', '-m', 'first');
 git(seed, 'remote', 'add', 'origin', origin);
 git(seed, 'push', '-q', 'origin', 'main');
 git(root, 'clone', '-q', origin, clone);
+git(root, 'clone', '-q', origin, vault);
 // The laptop's standing local change: a reorder of project.godot.
 writeFileSync(join(clone, 'project.godot'), 'b\na\n');
 symlinkSync(outside, join(clone, 'escape'));
@@ -53,6 +55,8 @@ writeFileSync(configFile, JSON.stringify({
       },
     },
     gone: { path: join(root, 'nowhere') },
+    vault: { path: vault, git_sync: false },
+    typo: { path: vault, git_sync: 'no' },
   },
 }));
 const host = new WorkspaceHost({ configFile, jobsDir: join(root, 'jobs') });
@@ -60,13 +64,16 @@ const call = (tool: string, args: object = {}) => host.call(tool, args, '#90 in 
 const refused = (p: Promise<unknown>, re: RegExp) => assert.rejects(p, (err: Error) => re.test(err.message));
 
 test('the config keeps good workspaces and tasks and says what it left out', () => {
-  assert.deepEqual([...host.workspaces.keys()], ['delve']);
+  assert.deepEqual([...host.workspaces.keys()], ['delve', 'vault', 'typo']);
+  assert.deepEqual([...host.workspaces.values()].map((w) => w.gitSync), [true, false, false]);
+  assert.deepEqual(host.summary().workspaces.map((w: any) => w.git_sync), [true, false, false]);
   assert.deepEqual([...host.workspaces.get('delve').tasks.keys()], ['ok', 'nogodot', 'locked', 'slow', 'unset']);
   const problems = host.problems.join('\n');
   assert.match(problems, /gone: .*does not exist/);
   assert.match(problems, /read folder .*missing/);
   assert.match(problems, /bad task!: names use/);
   assert.match(problems, /empty: "run" must be/);
+  assert.match(problems, /typo: "git_sync" must be true or false, so it is off/);
   assert.deepEqual(loadConfig(join(root, 'none.json')), { workspaces: new Map(), problems: [] });
   assert.match(loadConfig(seed + '/readme.txt').problems[0], /JSON/);
   assert.equal(expand('%Home%/x', { HOME: '/h' }), '/h/x');
@@ -107,7 +114,16 @@ test('git_sync checks out a pushed branch, carries local changes, and stops on a
 
   await refused(call('git_sync', { workspace: 'delve', ref: 'no-such' }), /origin has no branch no-such/);
   for (const ref of ['--upload-pack=x', 'a..b', 'x@{1}', '']) await refused(call('git_sync', { workspace: 'delve', ref }), /isn't a branch name/);
-  assert.match((await call('workspaces')).text, /Checked out: detached at \w+ seven[\s\S]*- ok: .* \(says hi\)/);
+  const listed = (await call('workspaces')).text;
+  assert.match(listed, /Checked out: detached at \w+ seven[\s\S]*- ok: .* \(says hi\)/);
+  assert.doesNotMatch(listed.split('## vault')[0], /git_sync: off/);
+  assert.match(listed.split('## vault')[1], /git_sync: off/);
+});
+
+test('git_sync refuses in a workspace that has it off and leaves its branch alone', async () => {
+  await refused(call('git_sync', { workspace: 'vault', ref: 'build-7' }), /git_sync is off for workspace vault: its owner keeps it on a branch\. Use its tasks instead\./);
+  assert.equal(git(vault, 'symbolic-ref', '--short', 'HEAD'), 'main');
+  assert.match(git(vault, 'log', '-1', '--format=%s'), /first/);
 });
 
 test('only configured tasks run, with hints, one at a time, and long ones become jobs', async () => {
@@ -139,4 +155,9 @@ test('the MCP side lists the tools and answers calls and unknown methods', async
   assert.equal(bad.result.isError, true);
   assert.equal((await workspaceReply(host, { jsonrpc: '2.0', id: 3, method: 'resources/list' }, 'x')).error.code, -32601);
   assert.equal(await workspaceReply(host, { jsonrpc: '2.0', method: 'notifications/initialized' }, 'x'), null);
+  // An agent whose every workspace has git_sync off doesn't offer it.
+  const vaultOnly = join(root, 'vault-only.json');
+  writeFileSync(vaultOnly, JSON.stringify({ workspaces: { vault: { path: vault, git_sync: false } } }));
+  const offered = await workspaceReply(new WorkspaceHost({ configFile: vaultOnly, jobsDir: join(root, 'jobs') }), { jsonrpc: '2.0', id: 4, method: 'tools/list' }, 'x');
+  assert.deepEqual(offered.result.tools.map((t: any) => t.name), ['workspaces', 'run_task', 'job', 'read_file', 'list_files', 'fetch_file']);
 });

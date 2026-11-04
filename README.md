@@ -94,6 +94,9 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   checkout; stops rather than overwrite local changes), `run_task`/`job` (one job per
   workspace, long ones return a job id), `read_file`, `list_files`, and `fetch_file`, which
   copies a file of up to 20 MB into the minion's shared files under `machine-files/<machine>/`.
+  A workspace its owner keeps on a branch (an Obsidian vault with Obsidian Git) sets
+  `"git_sync": false`: `git_sync` refuses there, `workspaces` and the Machines page say it's off,
+  and an agent whose workspaces all have it off doesn't offer the tool.
   The agent re-reads the file when it changes. Builds still run whatever the repo's project
   files say, so this limits what minions can ask for; it is not a sandbox.
 - **GitHub** wakes a minion about its pull request. `src/github.ts` polls each open

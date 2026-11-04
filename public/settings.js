@@ -820,7 +820,8 @@ const WORKSPACE_EXAMPLE = `{
         },
         "import": { "run": ["cmd.exe", "/c", "tools\\\\prepare.cmd"], "about": "imports new art" }
       }
-    }
+    },
+    "vault": { "path": "%USERPROFILE%\\\\Documents\\\\Vault", "git_sync": false }
   }
 }`;
 
@@ -843,12 +844,12 @@ function machineWorkspaces(m) {
     ? h('p', { class: 'muted small' }, 'Shows the workspaces its agent offers once it connects.')
     : workspaces.length
       ? workspaces.map((w) => h('div', { class: 'machine-workspace small' },
-        h('div', {}, h('strong', {}, w.name), ' ', h('code', {}, w.path)),
+        h('div', {}, h('strong', {}, w.name), ' ', h('code', {}, w.path), w.git_sync === false ? h('span', { class: 'muted' }, ' · git_sync off') : ''),
         w.read.length ? h('div', { class: 'muted' }, 'Also readable: ', w.read.join(', ')) : '',
         h('ul', {}, w.tasks.map((t) => h('li', {}, h('code', {}, t.name), ': ', t.run.join(' '), t.about ? h('span', { class: 'muted' }, ` (${t.about})`) : '')))))
       : h('details', { class: 'small' },
         h('summary', {}, 'No workspaces. Its owner lists them in machine-agent.json beside the agent'),
-        h('p', { class: 'muted' }, 'Minions can check out pushed branches there and run only the tasks listed, with no shell. The agent picks up changes to the file by itself (agents set up before workspaces need setting up again with a new token).'),
+        h('p', { class: 'muted' }, 'Minions can check out pushed branches there and run only the tasks listed, with no shell. "git_sync": false keeps them from checking anything out in a workspace you keep on a branch yourself (an Obsidian vault with Obsidian Git, say). The agent picks up changes to the file by itself (agents set up before workspaces need setting up again with a new token).'),
         h('pre', {}, WORKSPACE_EXAMPLE));
   return h('div', { class: 'machine-workspaces' },
     h('label', { class: 'row small', title: 'Lets minions in every scheme check out pushed branches and run the listed tasks on this computer' },

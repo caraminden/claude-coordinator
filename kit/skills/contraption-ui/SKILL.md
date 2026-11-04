@@ -35,7 +35,7 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | `ui/composer.js` (+ `ui/composer.d.ts`) | The message box under a chat | ES module import; needs base.css |
 | `ui/chat.js` (+ `ui/chat.d.ts`) | The chat log: your messages, replies, tool runs, Grunt rows, reply chips, the working line | ES module import; needs base.css |
 | `ui/tip.js` (+ `ui/tip.d.ts`) | Tooltips: `data-tip` on anything, opened on hover, focus, a tap or a long press | ES module import; needs base.css |
-| `ui/status.js` (+ `ui/status.d.ts`) | A status line that's always there and a button label that keeps its width, so a status change moves nothing | ES module import; needs base.css (and `mountTips` for a cut-off line's tip) |
+| `ui/status.js` (+ `ui/status.d.ts`) | A status line that's always there and a button label that keeps its width, and a toast in the top layer, so a status change moves nothing (plus HTML-string builders) | ES module import; needs base.css (and `mountTips` for a cut-off line's tip) |
 
 [starter/](starter/index.html) (`index.html`, `app.css`, `app.js`) wires theme.css, base.css, the
 rail, drawers, a status line, a chat and a composer; start a new contraption's page from it.
@@ -212,7 +212,7 @@ A status change (busy, saved, an error, a counter, a label swap) never moves any
 These parts reserve the room up front:
 
 ```js
-import { statusSlot, steadyLabel } from '/apps/_citadel/ui/status.js';
+import { statusSlot, steadyLabel, toast } from '/apps/_citadel/ui/status.js';
 
 const status = statusSlot(document.getElementById('status'));  // div.cui-status, role="status", always 22 px tall
 status.working('Saving…');                     // a spinner and the words
@@ -223,6 +223,19 @@ status.clear();                                // nothing to say: still there, e
 const save = steadyLabel(saveButton, { idle: 'Save', saving: 'Saving…', saved: 'Saved' });  // first key shows
 save.set('saving');                            // the button stays as wide as its widest label
 save.current;                                  // 'saving'
+
+toast('Copied the link');                      // in passing: the top layer, bottom centre, 4 s or a tap
+toast('Couldn\'t copy', { tone: 'danger', ms: 6000 });
+```
+
+Views that draw HTML strings get the same markup from builders, with the text escaped (`inner` is yours):
+
+```js
+import { statusSlotHtml, statusTextHtml, statusWorkingHtml, steadyLabelHtml } from '/apps/_citadel/ui/status.js';
+
+statusSlotHtml(statusWorkingHtml('Refreshing…'), { fill: true, className: 'mine' })  // span.cui-status; '' for empty
+statusSlotHtml('<span class="cui-chip">Draft</span>' + statusTextHtml('Couldn\'t sync', { tone: 'danger' }))
+steadyLabelHtml({ idle: 'Measure', busy: 'Measuring…' }, 'busy')                  // labels are text
 ```
 
 What it does for you: the line is drawn whether or not it says anything, at a fixed 22 px, so the first
@@ -230,16 +243,28 @@ message, a longer one or none never pushes the page; its text is one line, cut o
 the whole of it opens in the kit tooltip (`data-tip-overflow`: only while it's cut off) under your page's
 `mountTips`; it's a polite live region, so a screen reader hears each change. A steady label stacks every
 label in one grid cell and hides all but one (`visibility`, so the hidden ones keep their room and a screen
-reader hears only the one shown); a label is text or a Node (a `cui-spin` and words).
+reader hears only the one shown); a label is text or a Node (a `cui-spin` and words). On a touch screen a
+tap opens a cut-off status's tip, as for anything a tap doesn't act on; inside a button, a link or a
+`role="button"` header it's the long press, like every tip there.
 
 - **Markup instead of JS:** `<div class="cui-status" role="status"><span class="cui-spin" aria-hidden="true"></span><span class="cui-status-text" data-tip="…" data-tip-overflow>Saving…</span></div>`,
-  `data-tone` on the line; `<span class="cui-steady"><span>Save</span><span hidden>Saving…</span></span>`
+  `data-tone` on the line, or on one `cui-status-text` to colour that text alone (a chip and an error in one
+  slot); `<span class="cui-steady"><span>Save</span><span hidden>Saving…</span></span>`
   inside the button, toggling `hidden`. A page reset like `[hidden] { display: none !important }` breaks the
   steady label: scope it to leave `.cui-steady > [hidden]` alone.
 - **Where it goes:** one line per place a status belongs (under a form, beside a toolbar's buttons, in a
   card's footer), in the layout from the start. Don't create it when the status comes.
+- **In a row** (a card's header, beside its title): add `cui-status-fill`. The slot takes what the row has
+  left (`flex: 1 1 0`) and adds nothing to the row's narrowest width (`contain: inline-size`), so a long
+  status is cut off instead of widening the card past a phone's edge; `justify-content: flex-end` puts its
+  text at the right. Not in a column: there `flex: 1 1 0` grows it down. Its children other than the
+  text (a chip, the spinner) keep their size.
 - **A counter or a number that changes:** `font-variant-numeric: tabular-nums` and a `min-width` in `ch`
   for its widest value; a chip that comes and goes keeps its place with `visibility: hidden`.
+- **Something in passing** ("Copied", "Saved to the build"): `toast(text, { tone, ms })`. One at a time (a
+  new one replaces the last), in the top layer at the bottom centre, so it moves nothing; a tap sends it
+  away; a screen reader hears it from a live region. Not for an error someone has to act on: that stays
+  in the page's own status line until it's dealt with.
 - **Something that has to be big** (an error with a retry, a banner): overlay it (a `cui-tip`-style card in
   the top layer, `position: fixed`), never insert it into the flow.
 
@@ -326,7 +351,12 @@ region or the page scrolls. Back to `false` and it clears at once. The one attri
 the screen reader's "busy" together, so they can't drift; it isn't the composer's `data-busy`. No JS
 helper: it's CSS on the attribute.
 
-- The region is a block box: the ring is a float. Put a flex or grid layout on a child inside it.
+- **The region is a block box;** put a flex or grid layout on one child inside it. The ring is a sticky
+  float, which is what keeps it in view while the region scrolls and lets it take no room. In a flex or
+  grid box a float isn't one: the ring becomes an item, takes a gap in a flex column and a cell in a grid,
+  and moves the content. Pinning it with `position: absolute` instead would make it scroll away with the
+  content, and needs `position: relative` on the region, which changes what your own absolutely placed
+  children sit against.
 - Its direct children dim; any `cui-skeleton` or `cui-skeleton-card` among them stays as it is.
 - Clicks are blocked from the moment it goes busy (the dim follows 0.2 s later), keys aren't: disable a
   button whose action would go wrong on the stale content.
@@ -345,7 +375,8 @@ helper: it's CSS on the attribute.
 </section>
 ```
 
-A `cui-skeleton` is a grey line as tall as a line of text at the size around it (it's in `em`), full width
+A `cui-skeleton` is one line of the text around it (`1lh` tall, a 0.8 em grey bar inside), so a stack of
+them swapped for their text moves nothing; full width
 or `data-width="short"` (35%), `"medium"` (60%), `"long"` (85%); give one a height in your own CSS for an
 image or a block. `cui-skeleton-card` is a bordered card to hold a few. A slow shine runs across them and
 stops under reduced motion. `aria-hidden="true"` on each: the busy region around them is what a screen

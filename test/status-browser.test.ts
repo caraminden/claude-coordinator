@@ -19,7 +19,8 @@ const pub = join(import.meta.dirname, '..', 'public');
 const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/ui/base.css">
 <style>body{margin:0;padding:16px;font:15px var(--citadel-font);background:var(--citadel-bg);color:var(--citadel-text)}
-.box{width:min(320px,100%)} .row{display:flex;gap:8px;align-items:center} h1,p{margin:0}</style>
+.box{width:min(320px,100%)} .row{display:flex;gap:8px;align-items:center} h1,p{margin:0}
+.cards{display:grid;grid-template-columns:1fr;width:200px} .cards>div{border:1px solid var(--citadel-border)}</style>
 <h1 id="above">Above</h1>
 <div class="box"><div id="slot"></div></div>
 <div class="row"><span id="left">Left</span><span class="box" id="inline-slot"></span><span id="right">Right</span></div>
@@ -27,8 +28,16 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 <p id="below">Below</p>
 <p id="naive"></p>
 <p id="after-naive">After the naive line</p>
+<div class="cards"><div id="card"><div class="row" id="head"><b>Ascendancy</b><span id="head-slot" class="cui-status cui-status-fill"></span></div></div></div>
+<div class="cards"><div id="naive-card"><div class="row"><b>Ascendancy</b><span id="naive-head-slot" class="cui-status"></span></div></div></div>
+<div id="sk"><span class="cui-skeleton"></span><span class="cui-skeleton" data-width="short"></span></div>
+<p id="after-sk">After the skeletons</p>
+<div id="sk14" style="line-height:1.4"><span class="cui-skeleton"></span><span class="cui-skeleton" data-width="short"></span></div>
+<p id="after-sk14">After the 1.4 skeletons</p>
+<div role="button" tabindex="0" id="toggle"><span class="cui-status" style="width:120px"><span class="cui-status-text" data-tip="A long status inside a header that toggles" data-tip-overflow>A long status inside a header that toggles</span></span></div>
 <script type="module">
-  import { statusSlot, steadyLabel } from '/ui/status.js';
+  import { statusSlot, steadyLabel, statusSlotHtml, statusTextHtml, statusWorkingHtml, steadyLabelHtml, toast } from '/ui/status.js';
+  Object.assign(window, { statusSlotHtml, statusTextHtml, statusWorkingHtml, steadyLabelHtml, toast });
   import { mountTips } from '/ui/tip.js';
   mountTips(document.body);
   window.slot = statusSlot(document.getElementById('slot'));
@@ -154,4 +163,84 @@ test('the working state is a spinner and its words; a tone sets data-tone; role=
   await page.eval(`slot.text('Fine')`);
   assert.equal(await page.eval('document.querySelector("#slot").dataset.tone ?? null'), null);
   assert.equal(await page.eval('document.querySelector("#slot").getAttribute("role")'), 'status');
+});
+
+const LINES = `'<div>Line one</div><div>Line two</div>'`;
+
+for (const [label, opts] of [['desktop', { width: 900, height: 900 }], ['phone, dark', { width: 390, height: 900, touch: true, dark: true }]] as const) {
+  test(`${label}: a long status in a fill slot in a header row never widens its card`, { skip }, async () => {
+    const page = await browser.page(base, opts);
+    await page.eval(`document.getElementById('head-slot').innerHTML = statusWorkingHtml('Refreshing…')`);
+    const steps = [`document.getElementById('head-slot').innerHTML = statusTextHtml(${JSON.stringify(LONG)})`,
+      `document.getElementById('head-slot').innerHTML = statusTextHtml('Couldn\\'t refresh', { tone: 'danger' })`, `document.getElementById('head-slot').innerHTML = ''`];
+    assert.deepEqual(await moved(page, steps, ['naive-card', 'naive-head-slot']), []);
+    assert.equal(await page.eval('document.getElementById("card").getBoundingClientRect().width'), 200);
+    // The same slot without cui-status-fill: the long text widens its card (why the fill exists).
+    await page.eval(`document.getElementById('naive-head-slot').innerHTML = statusTextHtml(${JSON.stringify(LONG)})`);
+    assert.ok((await page.eval<number>('document.getElementById("naive-card").getBoundingClientRect().width')) > 200);
+  });
+
+  test(`${label}: skeleton lines swapped for their text move nothing`, { skip }, async () => {
+    const page = await browser.page(base, opts);
+    const steps = [`document.getElementById('sk').innerHTML = ${LINES}, document.getElementById('sk14').innerHTML = ${LINES}`];
+    assert.deepEqual(await moved(page, steps, ['sk', 'sk14']), []);
+    assert.deepEqual(await page.eval('window.shifts'), []);
+  });
+
+  test(`${label}: a toast takes no room and moves nothing`, { skip }, async () => {
+    const page = await browser.page(base, opts);
+    assert.deepEqual(await moved(page, [`toast('Copied the link')`, `toast('Couldn\\'t copy', { tone: 'danger' })`]), []);
+    assert.equal(await page.eval('document.querySelector(".cui-toast").matches(":popover-open")'), true);
+    assert.equal(await page.eval('document.querySelector(".cui-toast").dataset.tone'), 'danger');
+    assert.equal(await page.eval('window.frame().then(() => document.querySelector(".cui-toast-say").textContent)'), 'Couldn\'t copy', 'heard from the live region');
+    const box = await page.eval<{ bottom: number; left: number; right: number }>('document.querySelector(".cui-toast").getBoundingClientRect().toJSON()');
+    assert.ok(box.bottom <= opts.height && box.left >= 0 && box.right <= opts.width, 'inside the window');
+  });
+}
+
+test('a tone on one status text colours that text alone', { skip }, async () => {
+  const page = await browser.page(base);
+  await page.eval(`document.getElementById('slot').innerHTML = '<span class="cui-chip">Draft</span>' + statusTextHtml('Saved') + statusTextHtml('Couldn\\'t sync', { tone: 'danger' })`);
+  const colours = await page.eval<string[]>('[...document.querySelectorAll("#slot .cui-status-text")].map((t) => getComputedStyle(t).color)');
+  assert.notEqual(colours[0], colours[1]);
+  assert.equal(colours[0], await page.eval('getComputedStyle(document.getElementById("slot")).color'));
+});
+
+test('the HTML builders write what the DOM ones do, escaped', { skip }, async () => {
+  const page = await browser.page(base);
+  await page.eval(`slot.working()`);
+  assert.equal(await page.eval('document.getElementById("slot").innerHTML'), await page.eval('Object.assign(document.createElement("div"), { innerHTML: statusWorkingHtml() }).innerHTML'));
+  const nasty = `<img src=x onerror="window.pwned=1">'&"`;
+  await page.eval(`document.getElementById('slot').innerHTML = statusTextHtml(${JSON.stringify(nasty)}, { tone: 'nope' })`);
+  assert.equal(await page.eval('document.querySelector("#slot .cui-status-text").textContent'), nasty);
+  assert.equal(await page.eval('document.querySelector("#slot .cui-status-text").dataset.tip'), nasty);
+  assert.equal(await page.eval('document.querySelector("#slot img") === null && !document.querySelector("#slot [data-tone]")'), true);
+  assert.equal(await page.eval(`statusSlotHtml('', { fill: true, tone: 'ok', className: 'mine' })`), '<span class="cui-status cui-status-fill mine" role="status" data-tone="ok"></span>');
+  assert.equal(await page.eval(`steadyLabelHtml({ idle: 'Save', saving: 'Saving…' }, 'saving')`), '<span class="cui-steady"><span data-label="idle" hidden>Save</span><span data-label="saving">Saving…</span></span>');
+  await assert.rejects(page.eval(`steadyLabelHtml({ idle: 'Save' }, 'nope')`), /no label "nope"/);
+});
+
+test('on a phone, a tap reads a cut-off status; inside something a tap acts on, a long press does', { skip }, async () => {
+  const page = await browser.page(base, { width: 390, height: 700, touch: true });
+  const tip = () => page.eval<string | null>('[...document.querySelectorAll(".cui-tip")].find((p) => p.matches(":popover-open"))?.textContent ?? null');
+  await page.eval(`slot.text(${JSON.stringify(LONG)})`);
+  let c = await page.centre('#slot .cui-status-text');
+  await page.tap(c.x, c.y);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(await tip(), LONG);
+  c = await page.centre('#toggle .cui-status-text');
+  await page.touch('touchStart', c.x, c.y);
+  await new Promise((r) => setTimeout(r, 550));
+  await page.touch('touchEnd');
+  assert.equal(await tip(), 'A long status inside a header that toggles');
+});
+
+test('a toast goes on a tap', { skip }, async () => {
+  const page = await browser.page(base, { width: 390, height: 700, touch: true });
+  await page.eval(`toast('Copied')`);
+  const c = await page.centre('.cui-toast');
+  await page.tap(c.x, c.y);
+  await page.eval('window.frame()');
+  assert.equal(await page.eval('document.querySelector(".cui-toast").matches(":popover-open")'), false);
+  assert.equal(await page.eval('document.querySelector(".cui-toast-say").textContent'), '');
 });

@@ -23,7 +23,12 @@
     ],
     "status.js": [
       "statusSlot",
-      "steadyLabel"
+      "statusSlotHtml",
+      "statusTextHtml",
+      "statusWorkingHtml",
+      "steadyLabel",
+      "steadyLabelHtml",
+      "toast"
     ],
     "tip.js": [
       "TipCache",
@@ -69,6 +74,7 @@
       "cui-small",
       "cui-spin",
       "cui-status",
+      "cui-status-fill",
       "cui-status-text",
       "cui-steady",
       "cui-switch",
@@ -77,6 +83,8 @@
       "cui-tip-error",
       "cui-tip-skel",
       "cui-tip-text",
+      "cui-toast",
+      "cui-toast-say",
       "cui-working"
     ],
     "chat.js": [

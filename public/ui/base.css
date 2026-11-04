@@ -22,7 +22,9 @@
    Tooltip:  <span data-tip="Life: 1,234">…</span> with ui/tip.js's mountTips(); it draws div.cui-tip.
    Status:   <div class="cui-status" role="status"></div>, always drawn, 22px tall, empty when there's nothing to
              say; inside it <span class="cui-status-text"> (one line, cut off with …), after a cui-spin while working;
-             data-tone="ok|warn|danger|info|violet|neutral" colours it. ui/status.js's statusSlot() writes it.
+             data-tone="ok|warn|danger|info|violet|neutral" colours it, or one cui-status-text among others; in a
+             row, cui-status-fill takes what's left without widening it. ui/status.js's statusSlot() writes it.
+   Toast:    ui/status.js's toast("Copied") shows div.cui-toast (a popover at the bottom centre) for a few seconds.
    Steady:   <button class="cui-btn"><span class="cui-steady"><span>Save</span><span hidden>Saving…</span></span></button>:
              every label in one cell, one shown, so the button keeps its widest label's width (ui/status.js's steadyLabel()). */
 
@@ -102,12 +104,12 @@
   border-left: 3px solid var(--cui-tone); font: var(--citadel-size-body)/1.45 var(--citadel-font);
 }
 /* The tones, after the notice's warn default so they win at the same (zero) specificity. */
-:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="ok"]) { --cui-tone: var(--citadel-ok); }
-:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="warn"]) { --cui-tone: var(--citadel-warn); }
-:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="danger"]) { --cui-tone: var(--citadel-danger); }
-:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="info"]) { --cui-tone: var(--citadel-info); }
-:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="violet"]) { --cui-tone: var(--citadel-violet); }
-:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="neutral"]) { --cui-tone: var(--citadel-neutral); }
+:where(.cui-chip, .cui-notice, .cui-status, .cui-status-text, .cui-toast):where([data-tone="ok"]) { --cui-tone: var(--citadel-ok); }
+:where(.cui-chip, .cui-notice, .cui-status, .cui-status-text, .cui-toast):where([data-tone="warn"]) { --cui-tone: var(--citadel-warn); }
+:where(.cui-chip, .cui-notice, .cui-status, .cui-status-text, .cui-toast):where([data-tone="danger"]) { --cui-tone: var(--citadel-danger); }
+:where(.cui-chip, .cui-notice, .cui-status, .cui-status-text, .cui-toast):where([data-tone="info"]) { --cui-tone: var(--citadel-info); }
+:where(.cui-chip, .cui-notice, .cui-status, .cui-status-text, .cui-toast):where([data-tone="violet"]) { --cui-tone: var(--citadel-violet); }
+:where(.cui-chip, .cui-notice, .cui-status, .cui-status-text, .cui-toast):where([data-tone="neutral"]) { --cui-tone: var(--citadel-neutral); }
 :where(.cui-notice[data-tone]:not([data-tone="warn"])) { --cui-tint: var(--cui-tone); }
 
 /* Switch: a native checkbox drawn as a pill track (background-clip: content-box) with a round knob (a
@@ -160,9 +162,13 @@
   display: flex; align-items: center; gap: var(--citadel-space-2); box-sizing: border-box; height: 22px; min-width: 0;
   overflow: hidden; color: var(--citadel-muted); font: var(--citadel-size-small)/1.4 var(--citadel-font);
 }
-:where(.cui-status[data-tone]) { color: color-mix(in srgb, var(--cui-tone) 80%, var(--citadel-text)); }
+:where(.cui-status[data-tone], .cui-status-text[data-tone]) { color: color-mix(in srgb, var(--cui-tone) 80%, var(--citadel-text)); }
 :where(.cui-status-text) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :where(.cui-status .cui-time) { font-variant-numeric: tabular-nums; }
+/* In a row (a card's header): the slot takes what the row has left and adds nothing to the row's narrowest
+   width, so a long status can't widen a card past a phone's edge. Its children keep their own size. */
+:where(.cui-status.cui-status-fill) { flex: 1 1 0; contain: inline-size; }
+:where(.cui-status > :not(.cui-status-text)) { flex: none; }
 /* Steady label: every label in one grid cell, so the box is as wide (and tall) as the biggest; the others are
    hidden but keep their room (visibility, not display, so a screen reader hears only the one shown). */
 :where(.cui-steady) { display: inline-grid; justify-items: center; align-items: center; }
@@ -193,7 +199,12 @@
 :where(.cui-skeleton) {
   --cui-bone: color-mix(in srgb, var(--citadel-muted) 22%, var(--citadel-surface));
   --cui-shine: color-mix(in srgb, var(--citadel-muted) 8%, var(--citadel-surface));
-  display: block; box-sizing: border-box; height: 0.8em; margin: 0.35em 0; border-radius: var(--citadel-radius-sm);
+  display: block; box-sizing: border-box; height: 1lh; padding: calc((1lh - 0.8em) / 2) 0;
+}
+/* The bone is drawn inside the line, so stacked skeletons keep a line each (no margins to collapse) and one
+   swapped for its text moves nothing: 1lh is the line-height of the text around it. */
+:where(.cui-skeleton)::before {
+  content: ""; display: block; height: 100%; border-radius: var(--citadel-radius-sm);
   background: linear-gradient(90deg, var(--cui-bone) 35%, var(--cui-shine) 50%, var(--cui-bone) 65%) 100% 0 / 300% 100% var(--cui-bone);
   animation: cui-shimmer 1.6s ease-in-out infinite;
 }
@@ -206,8 +217,8 @@
 }
 :where(.cui-skeleton-card + .cui-skeleton-card) { margin-top: var(--citadel-space-2); }
 @keyframes cui-shimmer { to { background-position: 0 0; } }
-@media (prefers-reduced-motion: reduce) { :where(.cui-skeleton) { animation: none; } }
-@media (forced-colors: active) { :where(.cui-skeleton) { border: 1px solid GrayText; } }
+@media (prefers-reduced-motion: reduce) { :where(.cui-skeleton)::before { animation: none; } }
+@media (forced-colors: active) { :where(.cui-skeleton)::before { border: 1px solid GrayText; } }
 
 /* Tooltip (ui/tip.js's mountTips draws it; you write only data-tip on the thing): a card on the surface in
    the top layer, fixed, so opening it never moves the page. tip.js sets left, top and max-height so it stays
@@ -225,7 +236,22 @@
 :where(.cui-tip-text) { white-space: pre-line; overflow-wrap: anywhere; }
 :where(.cui-tip-error) { color: var(--citadel-muted); }
 :where(.cui-tip-skel) { display: flex; flex-direction: column; gap: 6px; box-sizing: border-box; width: 240px; max-width: 100%; padding: 2px 0; }
-:where(.cui-tip-skel > .cui-skeleton) { margin: 0; }
+:where(.cui-tip-skel > .cui-skeleton) { height: 0.8em; padding: 0; }
+/* Toast (ui/status.js's toast()): a passing word that takes no room, in the top layer at the bottom centre, so
+   it moves nothing (rule 13). One at a time; a tap or click sends it away. A bar in its tone, like a notice. */
+:where(.cui-toast) {
+  --cui-tone: var(--citadel-neutral);
+  position: fixed; inset: auto 0 max(var(--citadel-space-4), env(safe-area-inset-bottom)); margin: 0 auto; box-sizing: border-box;
+  width: max-content; max-width: min(420px, calc(100vw - 16px)); padding: var(--citadel-space-2) var(--citadel-space-3);
+  border: 1px solid var(--citadel-border); border-left: 3px solid var(--cui-tone); border-radius: var(--citadel-radius);
+  background: var(--citadel-surface); color: var(--citadel-text); font: var(--citadel-size-body)/1.45 var(--citadel-font);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.16); overflow-wrap: anywhere; cursor: default;
+}
+:where(.cui-toast:popover-open) { opacity: 1; transition: opacity var(--citadel-motion); }
+@starting-style { :where(.cui-toast:popover-open) { opacity: 0; } }
+/* What the toast says, again, for a screen reader: a live region that's always there, so it's announced. */
+:where(.cui-toast-say) { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
 /* A long press on a tipped link or button shows its tip, not the phone's own menu or a selection. */
 @media (pointer: coarse) { :where([data-tip]:is(a, button, [role="button"])) { -webkit-touch-callout: none; user-select: none; } }
 

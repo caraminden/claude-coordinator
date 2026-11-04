@@ -32,3 +32,20 @@ export function statusSlot(el: HTMLElement): StatusSlot;
  * the first), so it keeps the width of its widest label: "Save" → "Saving…" → "Saved" moves nothing.
  */
 export function steadyLabel(el: HTMLElement, labels: Record<string, string | Node>, current?: string): SteadyLabel;
+
+/** A status line as HTML, a span so it can sit in a heading. `inner` is statusTextHtml() and the like ('' for nothing);
+ * `fill` makes it cui-status-fill (in a row: takes what's left, never widens it); `className` adds your own classes. */
+export function statusSlotHtml(inner?: string, opts?: { tone?: StatusTone; fill?: boolean; className?: string }): string;
+
+/** One line of status text as HTML (escaped): cut off with an ellipsis, whole in its tip; `tone` colours this text alone. */
+export function statusTextHtml(text: string, opts?: { tone?: StatusTone }): string;
+
+/** A spinner and `text` (default "Working…") as HTML for a status line. */
+export function statusWorkingHtml(text?: string): string;
+
+/** steadyLabel()'s stack as HTML (labels are text, escaped), showing `current` (default the first). Throws on an unknown key. */
+export function steadyLabelHtml(labels: Record<string, string>, current?: string): string;
+
+/** Say `text` in passing: a toast (div.cui-toast) at the bottom centre, in the top layer, so it moves nothing, for
+ * `ms` (default 4000) or until tapped. One at a time; a screen reader hears it from a live region. */
+export function toast(text: string, opts?: { tone?: StatusTone; ms?: number }): void;

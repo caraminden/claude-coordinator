@@ -13,7 +13,9 @@
 // so saying something (or nothing) never moves what's around it. Its text stays one line, cut off with an
 // ellipsis, with the whole of it in the kit tooltip (data-tip-overflow: ui/tip.js shows it only while it's
 // cut off). steadyLabel() stacks every label a button can show in one grid cell and shows one, so the
-// button keeps the width of its widest label. Both work from plain markup too: this module only writes it.
+// button keeps the width of its widest label. Both work from plain markup too: this module only writes it,
+// and the *Html() builders write the same markup as strings, escaped, for views that draw HTML. toast()
+// says something in passing in the top layer, so it takes no room at all.
 
 const TONES = new Set(['ok', 'warn', 'danger', 'info', 'violet', 'neutral']);
 
@@ -74,4 +76,67 @@ export function steadyLabel(el, labels, current) {
       return shown;
     },
   };
+}
+
+// The same markup as strings, for views that draw HTML. Text is escaped here; `inner` is HTML you made.
+const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
+const toneAttr = (tone) => (TONES.has(tone) ? ` data-tone="${tone}"` : '');
+
+/** A status line as HTML (a span, so it can sit in a heading): `inner` is statusTextHtml() and the like, or ''. */
+export function statusSlotHtml(inner = '', opts = {}) {
+  const cls = ['cui-status', opts.fill && 'cui-status-fill', opts.className].filter(Boolean).join(' ');
+  return `<span class="${esc(cls)}" role="status"${toneAttr(opts.tone)}>${inner}</span>`;
+}
+
+/** One line of status text as HTML: cut off with an ellipsis, whole in its tip; a tone colours this text alone. */
+export const statusTextHtml = (text, opts = {}) =>
+  `<span class="cui-status-text"${toneAttr(opts.tone)} data-tip="${esc(text)}" data-tip-overflow>${esc(text)}</span>`;
+
+/** A spinner and what's running, as HTML for a status line. */
+export const statusWorkingHtml = (text = 'Working…') => `<span class="cui-spin" aria-hidden="true"></span>${statusTextHtml(text)}`;
+
+/** steadyLabel()'s stack as HTML: every label (text) in one cell, showing `current` (default the first). */
+export function steadyLabelHtml(labels, current) {
+  const keys = Object.keys(labels);
+  const show = current ?? keys[0];
+  if (!keys.includes(show)) throw new Error(`steadyLabel: no label "${show}"`);
+  const parts = keys.map((k) => `<span data-label="${esc(k)}"${k === show ? '' : ' hidden'}>${esc(labels[k])}</span>`);
+  return `<span class="cui-steady">${parts.join('')}</span>`;
+}
+
+let pop = null;
+let say = null;
+let timer = 0;
+
+function hideToast() {
+  clearTimeout(timer);
+  if (pop?.matches(':popover-open')) pop.hidePopover();
+  if (say) say.textContent = '';
+}
+
+/**
+ * Say `text` in passing: a toast at the bottom centre, in the top layer, for `ms` (default 4 s) or until it's
+ * tapped. One at a time: a new one replaces the last. A screen reader hears it from a live region.
+ */
+export function toast(text, opts = {}) {
+  if (!pop?.isConnected) {
+    pop = document.createElement('div');
+    pop.className = 'cui-toast';
+    pop.setAttribute('popover', 'manual');
+    pop.setAttribute('aria-hidden', 'true');
+    pop.addEventListener('click', hideToast);
+    say = document.createElement('div');
+    say.className = 'cui-toast-say';
+    say.setAttribute('role', 'status');
+    document.body.append(pop, say);
+  }
+  hideToast();
+  if (TONES.has(opts.tone)) pop.dataset.tone = opts.tone;
+  else delete pop.dataset.tone;
+  pop.textContent = text;
+  pop.showPopover();
+  // A frame later, so a live region made just now is in place before it changes and is heard.
+  requestAnimationFrame(() => pop.matches(':popover-open') && (say.textContent = text));
+  timer = setTimeout(hideToast, opts.ms ?? 4000);
 }

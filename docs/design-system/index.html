@@ -197,7 +197,10 @@ window.COLOURS = [
 .cui-scope .cui-skeleton {
   --cui-bone: color-mix(in srgb, var(--citadel-muted) 22%, var(--citadel-surface));
   --cui-shine: color-mix(in srgb, var(--citadel-muted) 8%, var(--citadel-surface));
-  display: block; box-sizing: border-box; height: 0.8em; margin: 0.35em 0; border-radius: var(--citadel-radius-sm);
+  display: block; box-sizing: border-box; height: 1lh; padding: calc((1lh - 0.8em) / 2) 0;
+}
+.cui-scope .cui-skeleton::before {
+  content: ""; display: block; height: 100%; border-radius: var(--citadel-radius-sm);
   background: linear-gradient(90deg, var(--cui-bone) 35%, var(--cui-shine) 50%, var(--cui-bone) 65%) 100% 0 / 300% 100% var(--cui-bone);
   animation: cui-shimmer 1.6s ease-in-out infinite;
 }
@@ -207,7 +210,7 @@ window.COLOURS = [
 .cui-scope .cui-skeleton-card { display: block; box-sizing: border-box; padding: var(--citadel-space-3); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); background: var(--citadel-surface); }
 .cui-scope .cui-skeleton-card + .cui-skeleton-card { margin-top: var(--citadel-space-2); }
 @keyframes cui-shimmer { to { background-position: 0 0; } }
-@media (prefers-reduced-motion: reduce) { .cui-scope .cui-skeleton { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .cui-scope .cui-skeleton::before { animation: none; } }
 .doc-busy-list { max-height: 150px; overflow: auto; padding: 0 var(--citadel-space-3); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); background: var(--citadel-surface); }
 .doc-busy-list > div { display: flex; justify-content: space-between; align-items: center; margin: 0; padding: var(--citadel-space-2) 0; border-bottom: 1px solid var(--citadel-border); }
 
@@ -419,7 +422,7 @@ window.COLOURS = [
         <tr><td><code>ui/chat.js</code></td><td>Your message, the reply, tool-run rows, Grunt rows, suggested replies, the working line, fed the turn API's events as they come. Citadel's own action, phase and Grunt rows draw their marks with it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/composer.js</code></td><td>The message box: autogrow, Enter rules, IME-safe, list continuation, a failed send back in the box, Send that turns into Stop, drafts. Citadel's own composer is built on it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/tip.js</code></td><td>Tooltips: <code>data-tip</code> on anything, one <code>mountTips()</code> call. Hover, keyboard focus, a tap or a long press opens it; it sits below or above the thing, never over it; a slow body shows skeleton lines. Ported from Theory of Crafting (#296).</td><td>ES module; its look is <code>.cui-tip</code> in base.css</td></tr>
-        <tr><td><code>ui/status.js</code></td><td>A steady status line (<code>statusSlot</code>: always drawn, 22px, one line cut off with an ellipsis and whole in a tooltip, a working spinner, a tone) and steady labels (<code>steadyLabel</code>: a button as wide as its widest label). A status change moves nothing (#298).</td><td>ES module; its look is <code>.cui-status</code> and <code>.cui-steady</code> in base.css</td></tr>
+        <tr><td><code>ui/status.js</code></td><td>A steady status line (<code>statusSlot</code>: always drawn, 22px, one line cut off with an ellipsis and whole in a tooltip, a working spinner, a tone), steady labels (<code>steadyLabel</code>: a button as wide as its widest label), a <code>toast</code> in the top layer, and the same markup as HTML strings (<code>statusSlotHtml</code> and the like). A status change moves nothing (#298).</td><td>ES module; its look is <code>.cui-status</code> and <code>.cui-steady</code> in base.css</td></tr>
         <tr><td><code>drawers.js</code></td><td><code>NARROW</code> = 800: the phone breakpoint, exported once.</td><td>ES module, as today</td></tr>
       </tbody>
     </table></div>
@@ -665,10 +668,13 @@ background: var(--citadel-warn-tint);</code></pre></div>
         </div>
         <div class="cui-status" role="status"><span class="cui-spin" aria-hidden="true"></span><span class="cui-status-text">Recalculating every skill against the new passive tree and the league's changes</span></div>
         <div class="cui-status" data-tone="danger" role="status"><span class="cui-status-text">Couldn't save: the build folder is read-only</span></div>
+        <div class="doc-cards"><div><h4 class="doc-card-head"><b>Ascendancy</b><span class="cui-status cui-status-fill" role="status"><span class="cui-chip" data-tone="neutral">Cached</span><span class="cui-status-text" data-tone="danger">Couldn't refresh: the trade site timed out after 30 seconds</span></span></h4></div></div>
+        <div class="doc-row"><button type="button" class="cui-btn" id="st-toast">Copy link</button><div class="cui-toast" data-tone="ok">Copied the link</div></div>
       </div>
       <div class="mk-about">
         <p>A status change moves nothing (Cara, 2026-11-04: "set up rules that make sure status changes like that dont move any UI elements"). The status line is always drawn, 22px tall, empty when there's nothing to say; its text stays on one line, cut off with an ellipsis and whole in a tooltip (only while it's cut off). Working is a spinner and its words in the same line; a tone colours it. A button whose label changes stacks every label in one cell, so it keeps its widest label's width. Press Save: "Save" → "Saving…" → "Saved", and nothing around it shifts.</p>
-        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/status.js</code> (<code>statusSlot</code>, <code>steadyLabel</code>) · <code>.cui-status</code>, <code>.cui-status-text</code>, <code>.cui-steady</code> in <code>ui/base.css</code></p>
+        <p>In a card's header the slot is <code>cui-status-fill</code>: it takes what the row has left and never widens the card, so a long error is cut off on a phone. A tone can sit on one text (the error beside a chip). Something said in passing is a toast (press Copy link): the top layer, bottom centre, gone after 4s or a tap, so it takes no room at all.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/status.js</code> (<code>statusSlot</code>, <code>steadyLabel</code>, <code>toast</code>, and <code>statusSlotHtml</code>, <code>statusTextHtml</code>, <code>statusWorkingHtml</code>, <code>steadyLabelHtml</code> for views that draw HTML) · <code>.cui-status</code>, <code>.cui-status-text</code>, <code>.cui-status-fill</code>, <code>.cui-steady</code>, <code>.cui-toast</code> in <code>ui/base.css</code></p>
       </div>
     </div>
   </section>
@@ -965,13 +971,22 @@ row.innerHTML =
 .cui-scope .cui-tip { box-sizing: border-box; width: max-content; max-width: min(420px, 100%); padding: var(--citadel-space-2) var(--citadel-space-3); font: var(--citadel-size-small)/1.4 var(--citadel-font); color: var(--citadel-text); background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); box-shadow: 0 6px 18px rgb(0 0 0 / 0.16); }
 .cui-scope .cui-tip-text { white-space: pre-line; }
 .cui-scope .cui-tip-skel { display: flex; flex-direction: column; gap: 6px; width: 240px; max-width: 100%; padding: 2px 0; }
-.cui-scope .cui-tip-skel > .cui-skeleton { margin: 0; }
+.cui-scope .cui-tip-skel > .cui-skeleton { height: 0.8em; padding: 0; }
 .cui-scope .doc-tip-demo { margin: 0; }
 .cui-scope .doc-tip-thing { border-bottom: 1px dotted var(--citadel-muted); }
 /* Status line and steady label (ui/status.js, base.css's cui-status and cui-steady). */
 .cui-scope .cui-status { display: flex; align-items: center; gap: var(--citadel-space-2); box-sizing: border-box; height: 22px; min-width: 0; overflow: hidden; color: var(--citadel-muted); font: var(--citadel-size-small)/1.4 var(--citadel-font); }
-.cui-scope .cui-status[data-tone] { color: color-mix(in srgb, var(--tone) 80%, var(--citadel-text)); }
+.cui-scope .cui-status[data-tone], .cui-scope .cui-status-text[data-tone] { color: color-mix(in srgb, var(--tone) 80%, var(--citadel-text)); }
 .cui-scope .cui-status-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cui-scope .cui-status.cui-status-fill { flex: 1 1 0; contain: inline-size; }
+.cui-scope .cui-status > :not(.cui-status-text) { flex: none; }
+.cui-scope .cui-toast { box-sizing: border-box; width: max-content; max-width: min(420px, 100%); padding: var(--citadel-space-2) var(--citadel-space-3); border: 1px solid var(--citadel-border); border-left: 3px solid var(--tone, var(--citadel-neutral)); border-radius: var(--citadel-radius); background: var(--citadel-surface); color: var(--citadel-text); font: var(--citadel-size-body)/1.45 var(--citadel-font); box-shadow: 0 6px 18px rgb(0 0 0 / 0.16); }
+.cui-scope .cui-toast[popover] { position: fixed; inset: auto 0 max(var(--citadel-space-4), env(safe-area-inset-bottom)); margin: 0 auto; }
+.cui-scope .doc-card-head { display: flex; align-items: center; gap: var(--citadel-space-2); margin: 0; font-size: var(--citadel-size-h3); }
+.cui-scope .doc-card-head > b { flex: none; }
+.cui-scope .doc-card-head > .cui-status { justify-content: flex-end; }
+.cui-scope .doc-cards { display: grid; grid-template-columns: 1fr; max-width: 340px; }
+.cui-scope .doc-cards > div { padding: var(--citadel-space-2) var(--citadel-space-3); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); background: var(--citadel-surface); }
 .cui-scope .cui-steady { display: inline-grid; justify-items: center; align-items: center; }
 .cui-scope .cui-steady > * { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: var(--citadel-space-2); white-space: nowrap; }
 .cui-scope .cui-steady > [hidden] { visibility: hidden; }
@@ -1110,6 +1125,15 @@ row.innerHTML =
     line.replaceChildren(...(working ? [sp, t] : [t]));
   };
   $('#st-save').addEventListener('click', (e) => cycle(e.currentTarget, steady(e.currentTarget), sayIn($('#st-line'))));
+  // Toast: status.js's toast() as a popover at the bottom centre, gone after 4s or a tap.
+  const toastPop = Object.assign(document.createElement('div'), { className: 'cui-toast', textContent: 'Copied the link' });
+  toastPop.setAttribute('popover', 'manual');
+  toastPop.dataset.tone = 'ok';
+  $('#st-save').closest('.cui-scope').append(toastPop);
+  let toastTimer = 0;
+  const hideToast = () => { clearTimeout(toastTimer); if (toastPop.matches(':popover-open')) toastPop.hidePopover(); };
+  toastPop.addEventListener('click', hideToast);
+  $('#st-toast').addEventListener('click', () => { hideToast(); toastPop.showPopover(); toastTimer = setTimeout(hideToast, 4000); });
   for (const b of $$('[data-shift-demo]')) b.addEventListener('click', () => {
     const col = b.closest('.stage');
     if (b.dataset.shiftDemo === 'right') return cycle(b, steady(b), sayIn(col.querySelector('.cui-status')));

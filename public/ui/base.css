@@ -19,7 +19,12 @@
              its content dims after 0.2s, takes no clicks, and a ring sits sticky in its top right corner.
    Skeleton: <span class="cui-skeleton" data-width="short|medium|long" aria-hidden="true"></span> lines for a
              first load, in a busy region; <div class="cui-skeleton-card" aria-hidden="true"> holds a card's lines.
-   Tooltip:  <span data-tip="Life: 1,234">…</span> with ui/tip.js's mountTips(); it draws div.cui-tip. */
+   Tooltip:  <span data-tip="Life: 1,234">…</span> with ui/tip.js's mountTips(); it draws div.cui-tip.
+   Status:   <div class="cui-status" role="status"></div>, always drawn, 22px tall, empty when there's nothing to
+             say; inside it <span class="cui-status-text"> (one line, cut off with …), after a cui-spin while working;
+             data-tone="ok|warn|danger|info|violet|neutral" colours it. ui/status.js's statusSlot() writes it.
+   Steady:   <button class="cui-btn"><span class="cui-steady"><span>Save</span><span hidden>Saving…</span></span></button>:
+             every label in one cell, one shown, so the button keeps its widest label's width (ui/status.js's steadyLabel()). */
 
 /* Buttons: every variant the same height, content centred, so the room above and below is equal. */
 :where(.cui-btn) {
@@ -97,12 +102,12 @@
   border-left: 3px solid var(--cui-tone); font: var(--citadel-size-body)/1.45 var(--citadel-font);
 }
 /* The tones, after the notice's warn default so they win at the same (zero) specificity. */
-:where(.cui-chip, .cui-notice):where([data-tone="ok"]) { --cui-tone: var(--citadel-ok); }
-:where(.cui-chip, .cui-notice):where([data-tone="warn"]) { --cui-tone: var(--citadel-warn); }
-:where(.cui-chip, .cui-notice):where([data-tone="danger"]) { --cui-tone: var(--citadel-danger); }
-:where(.cui-chip, .cui-notice):where([data-tone="info"]) { --cui-tone: var(--citadel-info); }
-:where(.cui-chip, .cui-notice):where([data-tone="violet"]) { --cui-tone: var(--citadel-violet); }
-:where(.cui-chip, .cui-notice):where([data-tone="neutral"]) { --cui-tone: var(--citadel-neutral); }
+:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="ok"]) { --cui-tone: var(--citadel-ok); }
+:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="warn"]) { --cui-tone: var(--citadel-warn); }
+:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="danger"]) { --cui-tone: var(--citadel-danger); }
+:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="info"]) { --cui-tone: var(--citadel-info); }
+:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="violet"]) { --cui-tone: var(--citadel-violet); }
+:where(.cui-chip, .cui-notice, .cui-status):where([data-tone="neutral"]) { --cui-tone: var(--citadel-neutral); }
 :where(.cui-notice[data-tone]:not([data-tone="warn"])) { --cui-tint: var(--cui-tone); }
 
 /* Switch: a native checkbox drawn as a pill track (background-clip: content-box) with a round knob (a
@@ -147,6 +152,22 @@
 @media (prefers-reduced-motion: reduce) { :where(.cui-spin) { animation: none; } }
 :where(.cui-working) { display: flex; align-items: center; gap: var(--citadel-space-2); padding: var(--citadel-space-1) 0; color: var(--citadel-muted); font: var(--citadel-size-small)/1.4 var(--citadel-font); }
 :where(.cui-working .cui-time) { font-variant-numeric: tabular-nums; }
+
+/* Status line: a status change never moves anything (Cara, 2026-11-04). The line is always drawn at a fixed
+   height, empty or not, and its text stays on one line, cut off with an ellipsis (the whole of it is in the
+   kit tooltip, data-tip-overflow). A tone colours the text the way a chip's does. */
+:where(.cui-status) {
+  display: flex; align-items: center; gap: var(--citadel-space-2); box-sizing: border-box; height: 22px; min-width: 0;
+  overflow: hidden; color: var(--citadel-muted); font: var(--citadel-size-small)/1.4 var(--citadel-font);
+}
+:where(.cui-status[data-tone]) { color: color-mix(in srgb, var(--cui-tone) 80%, var(--citadel-text)); }
+:where(.cui-status-text) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where(.cui-status .cui-time) { font-variant-numeric: tabular-nums; }
+/* Steady label: every label in one grid cell, so the box is as wide (and tall) as the biggest; the others are
+   hidden but keep their room (visibility, not display, so a screen reader hears only the one shown). */
+:where(.cui-steady) { display: inline-grid; justify-items: center; align-items: center; }
+:where(.cui-steady > *) { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: var(--citadel-space-2); white-space: nowrap; }
+:where(.cui-steady > [hidden]) { visibility: hidden; }
 
 /* Busy region: the content stays put, dimmed after 0.2s (a fast load never flashes) and closed to clicks, with
    a ring pinned to the top right corner. The ring is a zero-size float that is sticky, so it stays in view

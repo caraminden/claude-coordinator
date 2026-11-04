@@ -21,6 +21,10 @@
       "listEnter",
       "mountComposer"
     ],
+    "status.js": [
+      "statusSlot",
+      "steadyLabel"
+    ],
     "tip.js": [
       "TipCache",
       "mountTips",
@@ -64,6 +68,9 @@
       "cui-skeleton-card",
       "cui-small",
       "cui-spin",
+      "cui-status",
+      "cui-status-text",
+      "cui-steady",
       "cui-switch",
       "cui-time",
       "cui-tip",

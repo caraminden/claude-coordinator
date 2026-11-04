@@ -28,7 +28,8 @@
       <!-- data-tip gives anything a tooltip (ui/tip.js, mounted in app.js): extra detail on hover. -->
       <label data-tip="Sample replies come every 100 ms instead of 400"><input type="checkbox" role="switch" class="cui-switch" id="quick"> Quick replies</label>
     </header>
-    <div class="cui-notice" role="status" id="notice" hidden></div>
+    <!-- A status line, always there and 22 px tall even when empty, so a status never moves the page (ui/status.js). -->
+    <div id="status"></div>
     <div class="chat" id="chat"></div>
     <div class="compose" id="compose"></div>
   </main>

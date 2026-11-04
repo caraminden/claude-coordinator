@@ -2,10 +2,10 @@
 name: contraption-ui
 description: >
   Citadel UI: the components, tokens and design rules Citadel serves to every contraption (an app
-  under /apps/<name>/): markdown, buttons, inputs, chips, notices, tooltips, colours and type, the app
+  under /apps/<name>/): markdown, buttons, inputs, chips, notices, tooltips, status lines, colours and type, the app
   rail and phone drawers, and a starter page. Use for any front-end work in a contraption: a new page, a
-  chat or reply view, rendering an agent's text, a form, a tooltip or hover detail, a colour or spacing
-  choice, the phone layout.
+  chat or reply view, rendering an agent's text, a form, a tooltip or hover detail, a saving or busy status, a
+  colour or spacing choice, the phone layout.
 ---
 
 # Citadel UI in a contraption
@@ -35,9 +35,10 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | `ui/composer.js` (+ `ui/composer.d.ts`) | The message box under a chat | ES module import; needs base.css |
 | `ui/chat.js` (+ `ui/chat.d.ts`) | The chat log: your messages, replies, tool runs, Grunt rows, reply chips, the working line | ES module import; needs base.css |
 | `ui/tip.js` (+ `ui/tip.d.ts`) | Tooltips: `data-tip` on anything, opened on hover, focus, a tap or a long press | ES module import; needs base.css |
+| `ui/status.js` (+ `ui/status.d.ts`) | A status line that's always there and a button label that keeps its width, so a status change moves nothing | ES module import; needs base.css (and `mountTips` for a cut-off line's tip) |
 
 [starter/](starter/index.html) (`index.html`, `app.css`, `app.js`) wires theme.css, base.css, the
-rail, drawers, a chat and a composer; start a new contraption's page from it.
+rail, drawers, a status line, a chat and a composer; start a new contraption's page from it.
 
 The API is stable: names and options are only ever added, and Citadel's tests hold them. A real
 break would ship as a new file (`ui/chat2.js`) beside the old one. Types: point TypeScript at the
@@ -190,7 +191,9 @@ the same `id` and `data-tip*` attributes, else closes; the thing has `aria-descr
 - **Attributes:** `data-tip` opts an element in, and is its text when `body` gives `undefined` or there is
   no `body`; an empty `data-tip` with no body shows nothing. Put whatever else `body` needs in your own
   `data-tip-*` attributes (`data-tip-key`): they also tell a redraw's copy apart. Give a non-focusable
-  thing `tabindex="0"` so the keyboard reaches its tip.
+  thing `tabindex="0"` so the keyboard reaches its tip. `data-tip-overflow` shows the plain text only
+  while the element is cut off (an ellipsis or a line clamp): a name in a narrow column carries its whole
+  self in `data-tip` and tips only when it doesn't fit.
 - **Options:** `body(el)`, `selector` (default `[data-tip]`), `role` (`'dialog'` when the tip holds links or
   buttons: Tab from the thing goes into them; default `'tooltip'`), `label` (a dialog tip's name),
   `className` (more classes on `div.cui-tip`), `tapOpens` (a tap or click only toggles the tip, even on a
@@ -202,6 +205,58 @@ the same `id` and `data-tip*` attributes, else closes; the thing has `aria-descr
 - `placeTip(rect, w, h, vw, vh)` is the placement as a pure function and `TipCache` the cache, for tests.
 - Preact: call `mountTips` once in a `useEffect` on the page's root and `destroy()` on unmount; render
   `data-tip` attributes as usual.
+
+## Status line and steady labels (`ui/status.js`)
+
+A status change (busy, saved, an error, a counter, a label swap) never moves anything else (rule 13).
+These parts reserve the room up front:
+
+```js
+import { statusSlot, steadyLabel } from '/apps/_citadel/ui/status.js';
+
+const status = statusSlot(document.getElementById('status'));  // div.cui-status, role="status", always 22 px tall
+status.working('Saving…');                     // a spinner and the words
+status.text('Saved 3 files');                  // one line; cut off with … and whole in its tooltip
+status.text('Couldn\'t save: read-only', { tone: 'danger' });  // tones: ok warn danger info violet neutral
+status.clear();                                // nothing to say: still there, empty, at its height
+
+const save = steadyLabel(saveButton, { idle: 'Save', saving: 'Saving…', saved: 'Saved' });  // first key shows
+save.set('saving');                            // the button stays as wide as its widest label
+save.current;                                  // 'saving'
+```
+
+What it does for you: the line is drawn whether or not it says anything, at a fixed 22 px, so the first
+message, a longer one or none never pushes the page; its text is one line, cut off with an ellipsis, and
+the whole of it opens in the kit tooltip (`data-tip-overflow`: only while it's cut off) under your page's
+`mountTips`; it's a polite live region, so a screen reader hears each change. A steady label stacks every
+label in one grid cell and hides all but one (`visibility`, so the hidden ones keep their room and a screen
+reader hears only the one shown); a label is text or a Node (a `cui-spin` and words).
+
+- **Markup instead of JS:** `<div class="cui-status" role="status"><span class="cui-spin" aria-hidden="true"></span><span class="cui-status-text" data-tip="…" data-tip-overflow>Saving…</span></div>`,
+  `data-tone` on the line; `<span class="cui-steady"><span>Save</span><span hidden>Saving…</span></span>`
+  inside the button, toggling `hidden`. A page reset like `[hidden] { display: none !important }` breaks the
+  steady label: scope it to leave `.cui-steady > [hidden]` alone.
+- **Where it goes:** one line per place a status belongs (under a form, beside a toolbar's buttons, in a
+  card's footer), in the layout from the start. Don't create it when the status comes.
+- **A counter or a number that changes:** `font-variant-numeric: tabular-nums` and a `min-width` in `ch`
+  for its widest value; a chip that comes and goes keeps its place with `visibility: hidden`.
+- **Something that has to be big** (an error with a retry, a banner): overlay it (a `cui-tip`-style card in
+  the top layer, `position: fixed`), never insert it into the flow.
+
+**Check it in a headless browser.** Citadel's `test/status-browser.test.ts` cycles each part through its
+states and checks that nothing moved, two ways: every element's `getBoundingClientRect()` against the first
+state, and the page's `layout-shift` entries (a `PerformanceObserver`, cleared once the page has loaded),
+plus a naive status line that must fail, so the check is proven to catch a shift. Copy it for your own page:
+
+```js
+// In the page, before any change:
+window.shifts = [];
+new PerformanceObserver((l) => shifts.push(...l.getEntries().map((e) => e.value))).observe({ type: 'layout-shift', buffered: true });
+const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+const boxes = () => Object.fromEntries([...document.querySelectorAll('[id]')].map((el) => [el.id, el.getBoundingClientRect().toJSON()]));
+// Then, from the test: await frame(); shifts = []; const first = boxes(); for each state: change it, await frame(),
+// and assert every box equals first's and shifts is empty.
+```
 
 ## Tokens (`theme.css`)
 
@@ -336,15 +391,20 @@ Every deploy checks the above and logs `Warning (installing as its own app): …
     citadel, it should default focus so I dont have to click on the chat box to type into it". The
     composer does it (`autofocus`, on by default): don't turn it off for a page's main chat, and don't
     focus anything yourself on a redraw. Never on a phone, never out of another field.
-
 12. **Tooltips give extra detail on hover.** Cara, 2026-11-04: "add useful additional details ... when
     things are moused over throughout the app, tooltips are great!" A number, a stat, a short label or an
     icon button gets the line or breakdown behind it through `data-tip` and `ui/tip.js`, not `title=""`
     (no touch, no keyboard, no styling) and not a tooltip of your own. Nothing a person needs to act
     lives only in a tip: a phone shows it only on a tap or long press.
+13. **A status change moves nothing.** Cara, 2026-11-04: "set up rules that make sure status changes like
+    that dont move any UI elements". Busy, saved, an error, a counter, a label swap: nothing else on the
+    screen shifts. Reserve the room (`statusSlot` and `steadyLabel` from `ui/status.js`, a `min-width` for a
+    number) or overlay it; never insert a line into the flow or let a label widen its button. Prove it with
+    the headless check in "Status line and steady labels".
 
 A self-review of a contraption counts hand-rolled markdown, a chat log or composer the library
-has, a tooltip of its own, and a copied Citadel hex colour as findings.
+has, a tooltip of its own, a status change that moves other elements, and a copied Citadel hex colour as
+findings.
 
 Each rule shown right and wrong, with every part drawn live in both modes: Citadel's living
 design-system home, `docs/design-system/index.html` in Citadel's repo (Citadel's minions keep it

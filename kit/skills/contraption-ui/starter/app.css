@@ -18,6 +18,7 @@ main {
 }
 .bar { display: flex; align-items: center; gap: var(--citadel-space-3); margin-bottom: var(--citadel-space-4); }
 .bar h1 { flex: 1; margin: 0; font-size: var(--citadel-size-h1); }
+#status { margin-bottom: var(--citadel-space-2); }
 .chat { flex: 1; min-height: 0; }
 .compose { flex: none; padding-top: var(--citadel-space-3); }
 /* On a phone the sections are a drawer (drawers.js hides and slides them); the page takes the width. */

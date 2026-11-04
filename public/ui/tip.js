@@ -72,10 +72,13 @@ export class TipCache {
 /** A tip's body while it loads: a few skeleton lines, so it opens at once at about its size. */
 const LOADING = '<div class="cui-tip-skel" aria-busy="true"><span class="cui-skeleton" data-width="medium" aria-hidden="true"></span><span class="cui-skeleton" aria-hidden="true"></span><span class="cui-skeleton" data-width="long" aria-hidden="true"></span></div>';
 
-/** Without a `body`: the element's data-tip, as text (line breaks kept). */
+/** Its text doesn't fit: an ellipsis or a clamp cut it off. */
+const cutOff = (el) => el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight;
+
+/** Without a `body`: the element's data-tip, as text (line breaks kept); with data-tip-overflow, only while cut off. */
 const textBody = (el) => {
   const text = el.dataset.tip;
-  if (!text) return null;
+  if (!text || (el.hasAttribute('data-tip-overflow') && !cutOff(el))) return null;
   const span = document.createElement('span');
   span.className = 'cui-tip-text';
   span.textContent = text;

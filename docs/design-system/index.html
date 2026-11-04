@@ -419,6 +419,7 @@ window.COLOURS = [
         <tr><td><code>ui/chat.js</code></td><td>Your message, the reply, tool-run rows, Grunt rows, suggested replies, the working line, fed the turn API's events as they come. Citadel's own action, phase and Grunt rows draw their marks with it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/composer.js</code></td><td>The message box: autogrow, Enter rules, IME-safe, list continuation, a failed send back in the box, Send that turns into Stop, drafts. Citadel's own composer is built on it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/tip.js</code></td><td>Tooltips: <code>data-tip</code> on anything, one <code>mountTips()</code> call. Hover, keyboard focus, a tap or a long press opens it; it sits below or above the thing, never over it; a slow body shows skeleton lines. Ported from Theory of Crafting (#296).</td><td>ES module; its look is <code>.cui-tip</code> in base.css</td></tr>
+        <tr><td><code>ui/status.js</code></td><td>A steady status line (<code>statusSlot</code>: always drawn, 22px, one line cut off with an ellipsis and whole in a tooltip, a working spinner, a tone) and steady labels (<code>steadyLabel</code>: a button as wide as its widest label). A status change moves nothing (#298).</td><td>ES module; its look is <code>.cui-status</code> and <code>.cui-steady</code> in base.css</td></tr>
         <tr><td><code>drawers.js</code></td><td><code>NARROW</code> = 800: the phone breakpoint, exported once.</td><td>ES module, as today</td></tr>
       </tbody>
     </table></div>
@@ -651,6 +652,23 @@ background: var(--citadel-warn-tint);</code></pre></div>
         <p>Use tooltips to give extra detail on hover (Cara, 2026-11-04: "add useful additional details ... when things are moused over throughout the app, tooltips are great!"). A number, a stat, a short label or an icon button gets the line or breakdown behind it, so the screen stays short and the detail is one hover away.</p>
         <p>Opens on hover after 250ms (60ms from one tip to the next), at once on keyboard focus, on a tap for things that don't act, and on a 450ms long press for buttons and links. Below the thing, or above when there's no room, never over it. A card on the surface in the top layer; a slow body shows skeleton lines first (the second box). Escape, a press outside or a scroll closes it.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/tip.js</code> (<code>mountTips</code>) · <code>[data-tip]</code> on the thing · <code>.cui-tip</code> in <code>ui/base.css</code></p>
+      </div>
+    </div>
+
+    <h3>Status line and steady label</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <div class="doc-status-demo">
+          <div class="doc-row"><button type="button" class="cui-btn cui-primary" id="st-save"><span class="cui-steady"><span>Save</span><span hidden><span class="cui-spin" aria-hidden="true"></span>Saving…</span><span hidden>Saved</span></span></button><button type="button" class="cui-btn">Cancel</button></div>
+          <div class="cui-status" role="status" id="st-line"></div>
+          <p>The line under it never moves.</p>
+        </div>
+        <div class="cui-status" role="status"><span class="cui-spin" aria-hidden="true"></span><span class="cui-status-text">Recalculating every skill against the new passive tree and the league's changes</span></div>
+        <div class="cui-status" data-tone="danger" role="status"><span class="cui-status-text">Couldn't save: the build folder is read-only</span></div>
+      </div>
+      <div class="mk-about">
+        <p>A status change moves nothing (Cara, 2026-11-04: "set up rules that make sure status changes like that dont move any UI elements"). The status line is always drawn, 22px tall, empty when there's nothing to say; its text stays on one line, cut off with an ellipsis and whole in a tooltip (only while it's cut off). Working is a spinner and its words in the same line; a tone colours it. A button whose label changes stacks every label in one cell, so it keeps its widest label's width. Press Save: "Save" → "Saving…" → "Saved", and nothing around it shifts.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/status.js</code> (<code>statusSlot</code>, <code>steadyLabel</code>) · <code>.cui-status</code>, <code>.cui-status-text</code>, <code>.cui-steady</code> in <code>ui/base.css</code></p>
       </div>
     </div>
   </section>
@@ -902,6 +920,19 @@ row.innerHTML =
           <p>Someone typing in search, a card or a setting loses their place. On a phone (<code>(pointer: coarse)</code> or 800px and under) it pops the keyboard over the chat on every open.</p></div>
       </div>
     </div>
+
+    <div class="doc-rule">
+      <h3>13. A status change moves nothing</h3>
+      <p class="doc-why">Cara, 2026-11-04: <q>set up rules that make sure status changes like that dont move any UI elements</q>. Busy, saved, an error, a counter, a label swap: reserve the space (a status line, a steady label) or overlay it. Press each Save.</p>
+      <div class="doc-rw">
+        <div class="doc-case"><span class="tag">✓ A status line and a steady label</span>
+          <div class="stage doc-col doc-shift"><div class="doc-row"><button type="button" class="cui-btn" data-shift-demo="right"><span class="cui-steady"><span>Save</span><span hidden>Saving…</span><span hidden>Saved</span></span></button><button type="button" class="cui-btn">Next</button></div><div class="cui-status" role="status"></div><p>This line stays put.</p></div>
+          <p>The line is there, empty, before anything is said; the button is as wide as "Saving…" all along.</p></div>
+        <div class="doc-case wrong"><span class="tag">✕ Text that appears and a label that grows</span>
+          <div class="stage doc-col doc-shift"><div class="doc-row"><button type="button" class="cui-btn" data-shift-demo="wrong">Save</button><button type="button" class="cui-btn">Next</button></div><p class="doc-naive" role="status"></p><p>This line jumps.</p></div>
+          <p>"Next" slides right as the label grows; the page under the message drops a line when it shows and climbs back when it goes.</p></div>
+      </div>
+    </div>
   </section>
 
   <section id="questions">
@@ -937,6 +968,17 @@ row.innerHTML =
 .cui-scope .cui-tip-skel > .cui-skeleton { margin: 0; }
 .cui-scope .doc-tip-demo { margin: 0; }
 .cui-scope .doc-tip-thing { border-bottom: 1px dotted var(--citadel-muted); }
+/* Status line and steady label (ui/status.js, base.css's cui-status and cui-steady). */
+.cui-scope .cui-status { display: flex; align-items: center; gap: var(--citadel-space-2); box-sizing: border-box; height: 22px; min-width: 0; overflow: hidden; color: var(--citadel-muted); font: var(--citadel-size-small)/1.4 var(--citadel-font); }
+.cui-scope .cui-status[data-tone] { color: color-mix(in srgb, var(--tone) 80%, var(--citadel-text)); }
+.cui-scope .cui-status-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cui-scope .cui-steady { display: inline-grid; justify-items: center; align-items: center; }
+.cui-scope .cui-steady > * { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: var(--citadel-space-2); white-space: nowrap; }
+.cui-scope .cui-steady > [hidden] { visibility: hidden; }
+.cui-scope .doc-status-demo { display: flex; flex-direction: column; gap: var(--citadel-space-2); max-width: 340px; padding: var(--citadel-space-3); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); background: var(--citadel-surface); }
+.cui-scope .doc-row { display: flex; gap: var(--citadel-space-2); align-items: center; }
+.cui-scope .doc-status-demo p, .cui-scope .doc-shift p { margin: 0; }
+.cui-scope .doc-shift p.doc-naive:empty { display: none; }
 .cui-scope .doc-spin-always { animation: cui-spin 0.8s linear infinite; }
 .doc-covered { position: relative; }
 .doc-cover { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: var(--citadel-space-2); background: color-mix(in srgb, var(--citadel-bg) 92%, transparent); color: var(--citadel-muted); font-size: var(--citadel-size-small); }
@@ -1048,6 +1090,32 @@ row.innerHTML =
     $('#busy-demo').setAttribute('aria-busy', String(on));
     e.currentTarget.setAttribute('aria-pressed', String(on));
     e.currentTarget.textContent = on ? 'Busy: on' : 'Busy: off';
+  });
+
+  // Status line and steady label: Save goes Saving…, then Saved, as status.js's steadyLabel().set() and statusSlot() would.
+  const cycle = (btn, show, say) => {
+    btn.disabled = true;
+    show(1); say('Saving 3 files…', true);
+    setTimeout(() => { show(2); say('Saved 3 files to the build folder, just now'); }, 1200);
+    setTimeout(() => { show(0); say(''); btn.disabled = false; }, 3200);
+  };
+  const steady = (btn) => (i) => [...btn.querySelector('.cui-steady').children].forEach((c, j) => { c.hidden = j !== i; });
+  const sayIn = (line) => (text, working) => {
+    if (!text) return line.replaceChildren();
+    const t = document.createElement('span');
+    t.className = 'cui-status-text';
+    t.textContent = text;
+    const sp = document.createElement('span');
+    sp.className = 'cui-spin';
+    line.replaceChildren(...(working ? [sp, t] : [t]));
+  };
+  $('#st-save').addEventListener('click', (e) => cycle(e.currentTarget, steady(e.currentTarget), sayIn($('#st-line'))));
+  for (const b of $$('[data-shift-demo]')) b.addEventListener('click', () => {
+    const col = b.closest('.stage');
+    if (b.dataset.shiftDemo === 'right') return cycle(b, steady(b), sayIn(col.querySelector('.cui-status')));
+    const labels = ['Save', 'Saving…', 'Saved'];
+    const naive = col.querySelector('.doc-naive');
+    cycle(b, (i) => { b.textContent = labels[i]; }, (text) => { naive.textContent = text; });
   });
 
   // Suggested replies: one tap sends, the rest grey out.

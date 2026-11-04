@@ -2,6 +2,7 @@
 import { initDrawers } from '/apps/_citadel/drawers.js';
 import { mountChat } from '/apps/_citadel/ui/chat.js';
 import { mountComposer } from '/apps/_citadel/ui/composer.js';
+import { statusSlot } from '/apps/_citadel/ui/status.js';
 import { mountTips } from '/apps/_citadel/ui/tip.js';
 
 // Phones: the sections slide in from the left edge; a swipe past them opens the app switcher.
@@ -9,6 +10,9 @@ initDrawers({ left: { el: document.getElementById('sections'), label: 'Sections'
 
 // Every [data-tip] on the page gets its tooltip: hover, keyboard focus, a tap or a long press.
 mountTips(document.body);
+
+// The page's status line: what the app is doing, in a slot that's always drawn.
+const status = statusSlot(document.getElementById('status'));
 
 const chat = mountChat(document.getElementById('chat'), {
   empty: 'Send a message to see a sample reply.',
@@ -36,6 +40,7 @@ const SAMPLE = [
 let tick = null;
 const finish = (event) => {
   clearInterval(tick);
+  status.text(event ? 'Stopped.' : `Replied at ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
   if (event) chat.push(event);
   box.busy(false);
 };
@@ -43,6 +48,7 @@ const finish = (event) => {
 async function run(text) {
   chat.ask(text);
   box.busy(true);
+  status.working('Writing a sample reply…');
   let n = 0;
   tick = setInterval(() => {
     const [type, data] = SAMPLE[n++];

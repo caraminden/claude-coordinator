@@ -144,6 +144,7 @@ function draw() {
       tile.setAttribute('role', 'option');
       tile.dataset.i = i;
       tile.id = `app-switch-${i}`;
+      tile.title = item.title;
       const pic = item.a.querySelector('img, .tile')?.cloneNode(true) ?? document.createElement('span');
       pic.classList.add('app-switch-pic');
       const label = document.createElement('span');

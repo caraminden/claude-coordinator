@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer, type Server } from 'node:net';
 import { after, beforeEach, test } from 'node:test';
 import { AppServices, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
@@ -350,6 +351,34 @@ test('a deploy that doesn\'t come up healthy rolls back, and says so when the ro
   assert.equal(d.state, 'failed');
   assert.ok(d.said.some((l) => /Not healthy after/.test(l)), d.said.join('\n'));
   assert.ok(d.said.some((l) => /Rolling back failed too: Not healthy/.test(l)), d.said.join('\n'));
+});
+
+test("a deploy checks, as the person deploying, that the app installs as its own app, and warns when it wouldn't (#297)", async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest([]) });
+  const seen: (string | undefined)[] = [];
+  // Its page links Citadel's manifest by a root-absolute path, the way one app could claim to be Citadel.
+  const svc = createHttpServer((req, res) => {
+    seen.push(req.headers['x-citadel-identity'] as string | undefined);
+    res.end(req.url === `/apps/${name}/` ? '<link rel="manifest" href="/manifest.webmanifest">' : 'ok');
+  });
+  await new Promise<void>((ok) => svc.listen(0, '127.0.0.1', ok));
+  try {
+    const c = { ...row(name, (svc.address() as any).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    services.deploy(c, 'Cara', [], () => 'v1.signed.header');
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', 'a warning, never a failure');
+    assert.ok(d.said.some((l) => /^Warning \(installing as its own app\): .*points outside/.test(l)), d.said.join('\n'));
+    assert.ok(seen.includes('v1.signed.header'));
+    // Without an identity (no person to read its page as) it isn't checked.
+    seen.length = 0;
+    services.deploy(c, 'Cara');
+    assert.ok(!(await done(name)).said.some((l) => /^Warning/.test(l)));
+    assert.ok(!seen.includes('v1.signed.header'));
+  } finally {
+    svc.close();
+  }
 });
 
 test('a build past its time is stopped, and counts as failing', async () => {

@@ -296,6 +296,26 @@ image or a block. `cui-skeleton-card` is a bordered card to hold a few. A slow s
 stops under reduced motion. `aria-hidden="true"` on each: the busy region around them is what a screen
 reader hears. Replace them with the real content and set `aria-busy="false"` in the same step.
 
+## Installing as its own app
+
+Each contraption installs as its own app beside Citadel's, all on Citadel's one origin, so Chrome
+tells them apart only by the manifest (Cara, 2026-11-04: "I want each app to be able to install
+independently"). The starter's `manifest.webmanifest` has the shape; replace `my-app` and add the icons.
+
+- **`id` and `scope` are `/apps/<name>/`**, written root-absolute with the trailing slash. A relative
+  `id` resolves against the origin, not the manifest, so `"./"` is `/`: Citadel's id.
+- **`start_url` inside the scope**, and never a scope wider than yours: `/` or `/apps/` stops every
+  other app installing on that device.
+- **Link it relatively**: `<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">`.
+  `/manifest.webmanifest` is Citadel's. Without `crossorigin` the fetch has no login and fails.
+- A service worker is optional; if you have one, its scope is `/apps/<name>/`.
+
+Opened from Citadel's rail, your page is in a frame and Chrome only sees Citadel's page, so the rail
+has an **Install** link that opens your page on its own, where the browser offers your install.
+Every deploy checks the above and logs `Warning (installing as its own app): …` lines when it's wrong
+(Citadel's `src/pwa-check.ts`). Full detail and the Android caveats:
+`shared/project/specs/contraptions/app-rail.md`, "Installing your contraption as its own app".
+
 ## The rules
 
 1. **Equal room above and below:** text or an icon in a box, bar, button, row or chip has equal,

@@ -122,6 +122,19 @@ export function mountRail(el) {
   return showRail();
 }
 
+/**
+ * Citadel's link to the framed contraption's own page, in a new tab (#297): framed, the page Chrome sees
+ * is Citadel's, so its install menu offers Citadel; the contraption's page offers the contraption.
+ */
+function installLink() {
+  const a = document.createElement('a');
+  Object.assign(a, { className: 'install', target: '_blank', rel: 'noopener', hidden: true });
+  // A down arrow into a tray, drawn here since this file brings no icons.
+  a.innerHTML = '<span class="glyph"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span><span class="label"></span>';
+  a.addEventListener('click', closeRail);
+  return a;
+}
+
 let lastView = ''; // Citadel's own view before a frame, where its entry goes back to
 
 /** In Citadel: mark the view showing (Citadel or a framed contraption), and point Citadel's entry back at its last own view. */
@@ -129,13 +142,20 @@ function syncRail() {
   if (inContraption || !nav) return;
   const now = showing();
   if (!now) lastView = location.hash || '#/'; // never a bare root: that link would reload Citadel, frames and all
-  for (const a of nav.querySelectorAll('a')) {
+  for (const a of nav.querySelectorAll('a[data-app]')) {
     const here = (a.dataset.app || null) === now;
     a.classList.toggle('current', here);
     if (here) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   }
   nav.querySelector('a').href = root.pathname + lastView;
+  const install = nav.querySelector('a.install');
+  const title = now && nav.querySelector(`a[data-app="${CSS.escape(now)}"] .label`)?.textContent;
+  install.hidden = !title;
+  if (!title) return;
+  install.href = `/apps/${now}/`;
+  install.title = `Open ${title} on its own page, where your browser offers to install it as its own app`;
+  install.querySelector('.label').textContent = `Install ${title}`;
 }
 
 /** Take the rail away (signing out). */
@@ -208,6 +228,7 @@ export async function showRail() {
     });
     nav.append(a);
   });
+  if (!inContraption) nav.append(installLink());
   syncRail();
   if (slot) {
     slot.append(nav);
@@ -269,7 +290,7 @@ const list = (r) => `
     padding: calc(14px + env(safe-area-inset-top, 0px)) 12px calc(14px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px)); }
   ${r} a { width: auto; height: auto; padding: 10px; gap: 12px; justify-content: flex-start; border-radius: 10px; }
   ${r} a.current { box-shadow: none; background: #3b3631; font-weight: 600; }
-  ${r} :is(img, .tile) { width: 36px; height: 36px; opacity: 1; }
+  ${r} :is(img, .tile, .glyph) { width: 36px; height: 36px; opacity: 1; }
   ${r} .label { position: static; width: auto; height: auto; clip-path: none; overflow: hidden; text-overflow: ellipsis; }
   ${r} hr { width: auto; margin: 4px 10px; }`;
 
@@ -294,6 +315,10 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
 .citadel-rail a:is(.current, :hover, :focus-visible) :is(img, .tile) { opacity: 1; }
 .citadel-rail a.down .tile { opacity: 0.35; }
 .citadel-rail .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.citadel-rail a[hidden] { display: none; }
+.citadel-rail a.install { margin-top: auto; }
+.citadel-rail .glyph { flex: none; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; opacity: 0.65; }
+.citadel-rail a.install:is(:hover, :focus-visible) .glyph { opacity: 1; }
 .citadel-rail hr { flex: none; width: 26px; border: 0; border-top: 1px solid #5a534c; margin: 2px 0; }
 .citadel-rail-backdrop, .citadel-rail-handle { display: none; }
 .citadel-rail-handle[hidden] { display: none !important; }

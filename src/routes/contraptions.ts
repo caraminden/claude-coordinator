@@ -312,7 +312,11 @@ export const contraptionRoutes: Route[] = [
     handler({ res, app, params, session, caller }) {
       const c = deployable(app, params.name, caller);
       const by = caller ? (caller.kind === 'coordinator' ? `${app.store.getProject(caller.project_id)?.name ?? 'a'} Taskmaster` : `#${caller.number}`) : app.store.getUser(session.uid as number)?.name ?? 'an admin';
-      return service(async () => json(res, 202, app.services.deploy(c, by, app.store.listContraptions())));
+      // The install check reads the app's page as the person deploying (a turn's: whoever asked for it).
+      const uid = session.uid ?? (caller ? app.store.turnAsker(caller.id) : null);
+      const person = typeof uid === 'number' ? app.store.getUser(uid) : undefined;
+      const identity = person ? () => app.contraptions.signIdentity(c.name, person) : undefined;
+      return service(async () => json(res, 202, app.services.deploy(c, by, app.store.listContraptions(), identity)));
     },
   },
   {

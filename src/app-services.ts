@@ -15,6 +15,7 @@ import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { ContraptionRow } from './db.ts';
+import { installProblems } from './pwa-check.ts';
 
 /** The manifest's file name, in the app's folder. */
 export const MANIFEST = 'citadel-app.json';
@@ -478,9 +479,11 @@ export class AppServices {
    * Deploy an app from its repo (#266): clone it, or fetch and fast-forward its branch (refused on local
    * changes or a branch that isn't the registered one), build it niced with a time limit, write its units
    * and restart it, then check its health. A failure after the fast-forward rolls back to the commit
-   * before, builds that, and restarts it. Starts it and returns at once; lastDeploy follows it.
+   * before, builds that, and restarts it. Starts it and returns at once; lastDeploy follows it. With
+   * `identity` (a fresh X-Citadel-Identity header for the person deploying), a deployed app's page and
+   * manifest are checked for installing as its own app (src/pwa-check.ts), any problem logged as a warning.
    */
-  deploy(row: ContraptionRow, by: string, all: ContraptionRow[] = []): DeployView {
+  deploy(row: ContraptionRow, by: string, all: ContraptionRow[] = [], identity?: () => string | null): DeployView {
     this.guard();
     if (!row.repo) throw new ServiceError(409, `${row.title} has no repo set: an admin sets one (owner/name) in Settings → Contraptions first.`);
     if (this.busy.has(row.name)) throw new ServiceError(409, `${row.name} is being installed or deployed already: wait for that to finish.`);
@@ -489,7 +492,7 @@ export class AppServices {
     const log = join(this.opts.logDir, row.name, `${new Date(started).toISOString().replace(/[:.]/g, '-')}.log`);
     const view: DeployView = { name: row.name, state: 'running', by, repo: row.repo, branch: row.branch ?? 'main', from: null, to: null, started_at: started, finished_at: null, said: [], log };
     this.deploys.set(row.name, view);
-    void this.deployNow(row, view, all)
+    void this.deployNow(row, view, all, identity)
       .catch((err) => {
         view.said.push(`Failed: ${err.message}`);
         view.state = 'failed';
@@ -516,7 +519,7 @@ export class AppServices {
     return { ...env, PATH: toolPath(this.opts.home), GIT_TERMINAL_PROMPT: '0', MISE_TRUSTED_CONFIG_PATHS: folder };
   }
 
-  private async deployNow(row: ContraptionRow, view: DeployView, all: ContraptionRow[]) {
+  private async deployNow(row: ContraptionRow, view: DeployView, all: ContraptionRow[], identity?: () => string | null) {
     const folder = this.folder(row);
     const env = this.buildEnv(folder);
     await mkdir(dirname(view.log), { recursive: true });
@@ -593,6 +596,12 @@ export class AppServices {
       await buildAndStart();
       view.state = 'deployed';
       await say(`Deployed ${short(view.to)}.`);
+      const header = identity?.();
+      if (header) {
+        const get = (path: string) => fetch(`http://127.0.0.1:${row.port}${path}`, { headers: { 'x-citadel-identity': header, accept: 'text/html' }, signal: AbortSignal.timeout(5000) });
+        const problems = await installProblems(row.name, get).catch((err) => [`Couldn't check how it installs: ${err.message}`]);
+        for (const p of problems) await say(`Warning (installing as its own app): ${p}`);
+      }
     } catch (err: any) {
       await say(`Failed: ${err.message}`);
       if (!prev || prev === view.to) {

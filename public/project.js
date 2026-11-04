@@ -61,7 +61,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     api(`api/projects/${projectId}/artifacts`).catch(() => []),
     api(`api/projects/${projectId}/shared`).catch(() => []),
     api('api/projects').catch(() => []),
-    account?.admin ? api('api/machines').catch(() => []) : [],
+    // Each person's own machines; an admin's list has every machine (#306).
+    api('api/machines').catch(() => []),
   ]);
   let chatId = null;
   if (main.kind === 'chat') {

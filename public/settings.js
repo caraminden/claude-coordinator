@@ -631,7 +631,7 @@ function machineStatus(m) {
 /** Overview panel: people's computers lending threads their MCP tools, with live status. */
 export function renderMachinesShelf() {
   const el = document.getElementById('machines-shelf');
-  if (!el || !account?.admin) return;
+  if (!el) return;
   const href = `#/p/${view.projectId}/machines`;
   el.replaceChildren(h('section', { class: 'column' },
     h('h3', {}, 'Machines', h('span', { class: 'spacer' }),
@@ -685,7 +685,9 @@ export function machinesPage() {
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Machines'), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
-      h('div', { class: 'meta' }, 'Computers that lend their MCP tools to minions while they are connected: in every scheme an admin owns, or only in the schemes picked under Lend to. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.')),
+      h('div', { class: 'meta' }, account?.admin
+        ? 'Computers that lend their MCP tools to minions while they are connected: in every scheme an admin owns, or only in the schemes picked under Lend to. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.'
+        : 'Your computers, lending their MCP tools to minions while they are connected, in the schemes you tick under Lend to. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.')),
     form,
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
@@ -832,7 +834,7 @@ function machineWorkspaces(m) {
     ...(m.problems ?? []).map((p) => h('p', { class: 'error small' }, p)));
 }
 
-/** Which schemes' minions get a machine: every admin-owned scheme (the default), or only the ones ticked (#303). */
+/** Which schemes' minions get a machine: every admin-owned scheme (an admin's default), or only the ones ticked (#303; always for a person's own, #306). */
 function machineLending(m) {
   const status = h('span', { class: 'muted small', role: 'status' });
   const save = async (projects) => {
@@ -859,8 +861,9 @@ function machineLending(m) {
   });
   return h('div', { class: 'machine-lending', 'data-id': m.id },
     h('div', { class: 'row small' }, h('span', { class: 'muted' }, 'Lend to'), status),
-    choice(false, 'Every scheme an admin owns', 'Minions in every scheme an admin owns get it, as for every machine before'),
-    choice(true, 'Only these schemes', 'Only the ticked schemes\' minions get it, whoever owns the scheme; Taskmasters never do'),
+    // A person's own machine only ever goes to ticked schemes (#306), so there is nothing to choose.
+    m.personal ? '' : choice(false, 'Every scheme an admin owns', 'Minions in every scheme an admin owns get it, as for every machine before'),
+    m.personal ? '' : choice(true, 'Only these schemes', 'Only the ticked schemes\' minions get it, whoever owns the scheme; Taskmasters never do'),
     m.projects === null ? '' : h('div', { class: 'schemes' }, ...schemes,
       m.projects.length ? '' : h('p', { class: 'muted small' }, 'No scheme gets it until you tick one.')));
 }

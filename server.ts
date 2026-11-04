@@ -9,7 +9,7 @@ import { homedir } from 'node:os';
 import { fileType, findArtifacts, findByName, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
-import { claudeRefusal, lendsMachine, mayReceive, messagePerson, messageScope, turnRefusal } from './src/access.ts';
+import { claudeRefusal, lendsMachine, machinesFor, mayReceive, messagePerson, messageScope, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
 import { Landings } from './src/land.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
@@ -147,13 +147,15 @@ const clients = new Map<ServerResponse, Session>();
 function broadcast(msg: object) {
   const data = `data: ${JSON.stringify(msg)}\n\n`;
   const scope = messageScope(store, msg);
+  // The machines list goes to everyone, each person's cut to the machines they manage (#306).
+  const machineList = (msg as { type?: string }).type === 'machines' ? (msg as { machines: ReturnType<MachineRelay['list']> }).machines : null;
   for (const [res, who] of clients) {
     // Drop clients that stopped reading rather than buffering for them forever.
     if (res.writableLength > MAX_CLIENT_BACKLOG) {
       clients.delete(res);
       res.destroy();
     } else if (mayReceive(store, who, scope) && (!('payer' in msg) || runner.payerOf(who.uid) === (msg as { payer: number | null }).payer)) {
-      res.write(data);
+      res.write(machineList && !who.admin ? `data: ${JSON.stringify({ ...msg, machines: machinesFor(who, machineList) })}\n\n` : data);
     }
   }
 }

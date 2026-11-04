@@ -198,9 +198,9 @@ test('people make their own schemes, add others to them, and see nothing else', 
   assert.deepEqual((await as('Olive', '/api/projects')).data.map((p: any) => p.name), ['Joshs']);
   assert.equal((await as('Olive', `/api/projects/${josh.data.id}`, { instructions: 'x' }, 'PATCH')).status, 403);
   assert.equal((await as('Josh', `/api/projects/${josh.data.id}`, { instructions: 'Be kind' }, 'PATCH')).status, 200);
-  // Admin-only: People, Machines, the Citadel-wide instructions.
+  // Admin-only: People, the Citadel-wide instructions. Machines show each person their own (#306).
   assert.equal((await as('Josh', '/api/people', { name: 'Eve' })).status, 403);
-  assert.equal((await as('Josh', '/api/machines')).status, 403);
+  assert.deepEqual((await as('Josh', '/api/machines')).data, []);
   assert.equal((await as('Josh', '/api/app/instructions')).status, 403);
 });
 

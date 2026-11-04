@@ -5,8 +5,8 @@ import type { Machine, Project, Store, Ticket, User } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 
-/** Stream messages only admins get: the Machines page and Citadel-wide instructions. */
-const ADMIN_ONLY = new Set(['machines', 'app-instructions']);
+/** Stream messages only admins get: Citadel-wide instructions. (The machines list goes to each person filtered: server.ts broadcast.) */
+const ADMIN_ONLY = new Set(['app-instructions']);
 
 /** The scheme a stream message is about, 'admin' for admin-only news, or null for everyone's. */
 export function messageScope(store: Store, msg: any): number | 'admin' | null {
@@ -65,11 +65,31 @@ export function lendsMachines(store: Store, project: Project): boolean {
 }
 
 /**
- * Whether a scheme's minions get this machine. One an admin lent to chosen schemes (#303, Josh's vault)
- * goes to those only, whoever owns them: the admin's grant is the consent. Any other follows lendsMachines.
+ * A machine a person who isn't an admin added (#306): it goes only to the schemes ticked for it, never to
+ * "every scheme an admin owns", even if its scoped flag says otherwise. An owner who is gone counts as one.
+ */
+export function personsMachine(store: Store, machine: Machine): boolean {
+  return machine.owner_id !== null && !store.getUser(machine.owner_id)?.admin;
+}
+
+/** Who may see and change a machine on the Machines page: its owner, and admins (all of them, ownerless ones too). */
+export function managesMachine(who: Pick<Session, 'uid' | 'admin'>, machine: Pick<Machine, 'owner_id'>): boolean {
+  return !!who.admin || (machine.owner_id !== null && machine.owner_id === who.uid);
+}
+
+/** The machines a person's Machines page and stream list: an admin's all, anyone else's their own. */
+export function machinesFor<T extends Pick<Machine, 'owner_id'>>(who: Pick<Session, 'uid' | 'admin'>, machines: T[]): T[] {
+  return who.admin ? machines : machines.filter((m) => managesMachine(who, m));
+}
+
+/**
+ * Whether a scheme's minions get this machine. One lent to chosen schemes (#303, Josh's vault), and every
+ * person's own (#306), goes to those only, whoever owns the scheme: the grant is the consent. Any other
+ * follows lendsMachines.
  */
 export function lendsMachine(store: Store, machine: Machine, project: Project): boolean {
-  return machine.scoped ? store.machineGranted(machine.id, project.id) : lendsMachines(store, project);
+  if (machine.scoped || personsMachine(store, machine)) return store.machineGranted(machine.id, project.id);
+  return lendsMachines(store, project);
 }
 
 /** How long Citadel's Taskmaster may answer a scheme after that scheme's Taskmaster last wrote to it. */

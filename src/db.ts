@@ -185,6 +185,8 @@ export interface Machine {
   workspace_tools: number;
   /** 1 when it is lent only to the schemes in machine_projects (#303); 0 lends it as access.ts lendsMachines says. */
   scoped: number;
+  /** The person who added it and manages it (#306); null for one from before, which admins manage. */
+  owner_id: number | null;
 }
 
 /** One browser of one signed-in person that wants Web Push notifications (src/push.ts). */
@@ -390,7 +392,8 @@ CREATE TABLE IF NOT EXISTS machines (
   last_seen_at INTEGER,
   notes TEXT NOT NULL DEFAULT '',
   workspace_tools INTEGER NOT NULL DEFAULT 0,
-  scoped INTEGER NOT NULL DEFAULT 0
+  scoped INTEGER NOT NULL DEFAULT 0,
+  owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 -- The schemes a scoped machine is lent to (#303). Read only where machines.scoped = 1: rows left from #62
 -- (Oct 27, unused since #89) stay put, and choosing "only these" for a machine replaces its rows.
@@ -630,6 +633,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'notes', "ALTER TABLE machines ADD COLUMN notes TEXT NOT NULL DEFAULT ''"],
   ['machines', 'workspace_tools', 'ALTER TABLE machines ADD COLUMN workspace_tools INTEGER NOT NULL DEFAULT 0'],
   ['machines', 'scoped', 'ALTER TABLE machines ADD COLUMN scoped INTEGER NOT NULL DEFAULT 0'],
+  ['machines', 'owner_id', 'ALTER TABLE machines ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL'],
   ['contraptions', 'relay_paths', "ALTER TABLE contraptions ADD COLUMN relay_paths TEXT NOT NULL DEFAULT '[]'"],
   ['contraptions', 'repo', 'ALTER TABLE contraptions ADD COLUMN repo TEXT'],
   ['contraptions', 'branch', 'ALTER TABLE contraptions ADD COLUMN branch TEXT'],
@@ -642,7 +646,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 25; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths; 23: contraptions.repo, branch, folder; 24: tickets.parent; 25: machines.scoped (#303)
+export const SCHEMA_VERSION = 26; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths; 23: contraptions.repo, branch, folder; 24: tickets.parent; 25: machines.scoped (#303); 26: machines.owner_id (#306)
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -946,11 +950,12 @@ export class Store {
     this.db.prepare(`UPDATE users SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   }
 
-  /** Remove a person: their schemes go to `heir`, their memberships with them. Their messages keep their name. */
+  /** Remove a person: their schemes and machines go to `heir`, their memberships with them. Their messages keep their name. */
   deleteUser(id: number, heir: number) {
     this.db.exec('BEGIN');
     try {
       this.db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id = ?').run(heir, id);
+      this.db.prepare('UPDATE machines SET owner_id = ? WHERE owner_id = ?').run(heir, id);
       this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
       this.db.exec('COMMIT');
     } catch (err) {
@@ -1740,10 +1745,11 @@ export class Store {
     return this.db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as unknown as Machine | undefined;
   }
 
-  createMachine(name: string, tokenHash: string, by: string): Machine {
+  /** A machine `ownerId` manages; `scoped` lends it to no scheme until some are ticked. */
+  createMachine(name: string, tokenHash: string, by: string, ownerId: number | null = null, scoped = false): Machine {
     const { lastInsertRowid } = this.db
-      .prepare('INSERT INTO machines (name, token_hash, created_by, created_at) VALUES (?, ?, ?, ?)')
-      .run(name, tokenHash, by, Date.now());
+      .prepare('INSERT INTO machines (name, token_hash, created_by, created_at, owner_id, scoped) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(name, tokenHash, by, Date.now(), ownerId, scoped ? 1 : 0);
     return this.getMachine(Number(lastInsertRowid))!;
   }
 

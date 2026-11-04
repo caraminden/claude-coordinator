@@ -596,12 +596,6 @@ export class AppServices {
       await buildAndStart();
       view.state = 'deployed';
       await say(`Deployed ${short(view.to)}.`);
-      const header = identity?.();
-      if (header) {
-        const get = (path: string) => fetch(`http://127.0.0.1:${row.port}${path}`, { headers: { 'x-citadel-identity': header, accept: 'text/html' }, signal: AbortSignal.timeout(5000) });
-        const problems = await installProblems(row.name, get).catch((err) => [`Couldn't check how it installs: ${err.message}`]);
-        for (const p of problems) await say(`Warning (installing as its own app): ${p}`);
-      }
     } catch (err: any) {
       await say(`Failed: ${err.message}`);
       if (!prev || prev === view.to) {
@@ -619,7 +613,14 @@ export class AppServices {
         view.state = 'failed';
         await say(`Rolling back failed too: ${again.message}`);
       }
+      return;
     }
+    // After the try, so nothing here can roll back a deploy that worked.
+    const header = identity?.();
+    if (!header) return;
+    const get = (path: string) => fetch(`http://127.0.0.1:${row.port}${path}`, { headers: { 'x-citadel-identity': header, accept: 'text/html' }, signal: AbortSignal.timeout(5000) });
+    const problems = await installProblems(row.name, get).catch((err) => [`Couldn't check how it installs: ${err.message}`]);
+    for (const p of problems) await say(`Warning (installing as its own app): ${p}`);
   }
 
   /** Wait for its service to be active and its health path (or port) to answer, twice, a few seconds apart. */

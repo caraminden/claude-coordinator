@@ -183,6 +183,34 @@ window.COLOURS = [
 .cui-scope .cui-working { display: flex; align-items: center; gap: var(--citadel-space-2); padding: var(--citadel-space-1) 0; color: var(--citadel-muted); font: 13px/1.4 var(--citadel-font); }
 .cui-scope .cui-working .cui-time { font-variant-numeric: tabular-nums; }
 
+/* Busy region and skeletons: the content dims after 0.2s under a sticky ring; grey lines for a first load. */
+.cui-scope .cui-busy[aria-busy="true"] > :not(.cui-skeleton, .cui-skeleton-card) { opacity: 0.45; pointer-events: none; user-select: none; transition: opacity var(--citadel-motion) 0.2s; }
+.cui-scope .cui-busy[aria-busy="true"]::before {
+  content: ""; position: sticky; top: var(--citadel-space-2); z-index: 1; float: right;
+  box-sizing: border-box; width: 18px; height: 18px; margin: 0 0 -18px -18px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--citadel-info) 25%, var(--citadel-surface)); border-top-color: var(--citadel-info);
+  background: var(--citadel-surface); box-shadow: 0 0 0 3px var(--citadel-surface);
+  animation: cui-busy-in 0s 0.2s both, cui-spin 0.8s linear infinite;
+}
+@keyframes cui-busy-in { from { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .cui-scope .cui-busy[aria-busy="true"]::before { animation: cui-busy-in 0s 0.2s both; } }
+.cui-scope .cui-skeleton {
+  --cui-bone: color-mix(in srgb, var(--citadel-muted) 22%, var(--citadel-surface));
+  --cui-shine: color-mix(in srgb, var(--citadel-muted) 8%, var(--citadel-surface));
+  display: block; box-sizing: border-box; height: 0.8em; margin: 0.35em 0; border-radius: var(--citadel-radius-sm);
+  background: linear-gradient(90deg, var(--cui-bone) 35%, var(--cui-shine) 50%, var(--cui-bone) 65%) 100% 0 / 300% 100% var(--cui-bone);
+  animation: cui-shimmer 1.6s ease-in-out infinite;
+}
+.cui-scope .cui-skeleton[data-width="short"] { width: 35%; }
+.cui-scope .cui-skeleton[data-width="medium"] { width: 60%; }
+.cui-scope .cui-skeleton[data-width="long"] { width: 85%; }
+.cui-scope .cui-skeleton-card { display: block; box-sizing: border-box; padding: var(--citadel-space-3); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); background: var(--citadel-surface); }
+.cui-scope .cui-skeleton-card + .cui-skeleton-card { margin-top: var(--citadel-space-2); }
+@keyframes cui-shimmer { to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .cui-scope .cui-skeleton { animation: none; } }
+.doc-busy-list { max-height: 150px; overflow: auto; padding: 0 var(--citadel-space-3); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); background: var(--citadel-surface); }
+.doc-busy-list > div { display: flex; justify-content: space-between; align-items: center; margin: 0; padding: var(--citadel-space-2) 0; border-bottom: 1px solid var(--citadel-border); }
+
 /* Markdown (ui/markdown.js). */
 .cui-scope .cui-md { font: 15px/1.5 var(--citadel-font); color: var(--citadel-text); overflow-wrap: anywhere; min-width: 0; }
 .cui-scope .cui-md > :first-child { margin-top: 0; }
@@ -264,6 +292,7 @@ window.COLOURS = [
 .doc-bar .now { color: var(--mk-muted); }
 .mk-specimen > .mk-show.doc-block { display: block; }
 .mk-specimen > .mk-show.doc-col { flex-direction: column; align-items: stretch; }
+.doc-case .stage.doc-col { flex-direction: column; align-items: stretch; }
 .doc-new { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mk-accent); }
 .mk-swatch .mk-chipcolor { display: flex; }
 .mk-swatch .mk-chipcolor > span { flex: 1; }
@@ -385,7 +414,7 @@ window.COLOURS = [
       <thead><tr><th>File (under <code>/apps/_citadel/</code>)</th><th>Holds</th><th>How an app takes it</th></tr></thead>
       <tbody>
         <tr><td><code>theme.css</code></td><td>Every token below, as <code>--citadel-*</code>. Built from Citadel's own <code>public/style.css</code> by <code>src/theme.ts</code>, so Citadel and the apps read one source.</td><td><code>&lt;link rel="stylesheet"&gt;</code>, as today</td></tr>
-        <tr><td><code>ui/base.css</code></td><td>Buttons, inputs, chips, notices, the spinner, the focus ring: class-only parts (<code>cui-*</code>).</td><td><code>&lt;link&gt;</code> after theme.css</td></tr>
+        <tr><td><code>ui/base.css</code></td><td>Buttons, inputs, chips, notices, the spinner, busy regions and skeletons, the focus ring: class-only parts (<code>cui-*</code>).</td><td><code>&lt;link&gt;</code> after theme.css</td></tr>
         <tr><td><code>ui/markdown.js</code></td><td>Markdown to safe DOM, one link rule, a streaming mode.</td><td>ES module import</td></tr>
         <tr><td><code>ui/chat.js</code></td><td>Your message, the reply, tool-run rows, Grunt rows, suggested replies, the working line, fed the turn API's events as they come. Citadel's own action, phase and Grunt rows draw their marks with it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/composer.js</code></td><td>The message box: autogrow, Enter rules, IME-safe, list continuation, a failed send back in the box, Send that turns into Stop, drafts. Citadel's own composer is built on it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
@@ -590,6 +619,22 @@ background: var(--citadel-warn-tint);</code></pre></div>
       <div class="mk-about">
         <p>A ring in the info colour, and the line that says the agent is busy and for how long. Only the line is a live region; the log is not.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> (<code>.cui-spin</code>, <code>.cui-working</code>); <code>ui/chat.js</code> draws it under the reply</p>
+      </div>
+    </div>
+
+    <h3>Busy region and skeletons</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <div class="doc-busy-list cui-busy" aria-busy="true" id="busy-demo"><div><span>Recipe 1: iron ingot × 2</span><button type="button" class="cui-btn cui-small">Craft</button></div><div><span>Recipe 2: iron ingot × 3</span><button type="button" class="cui-btn cui-small">Craft</button></div><div><span>Recipe 3: iron ingot × 4</span><button type="button" class="cui-btn cui-small">Craft</button></div><div><span>Recipe 4: iron ingot × 5</span><button type="button" class="cui-btn cui-small">Craft</button></div><div><span>Recipe 5: iron ingot × 6</span><button type="button" class="cui-btn cui-small">Craft</button></div><div><span>Recipe 6: iron ingot × 7</span><button type="button" class="cui-btn cui-small">Craft</button></div><div><span>Recipe 7: iron ingot × 8</span><button type="button" class="cui-btn cui-small">Craft</button></div></div>
+        <button type="button" class="cui-btn cui-small" id="busy-toggle" aria-pressed="true">Busy: on</button>
+        <div class="cui-busy" aria-busy="true">
+          <div class="cui-skeleton-card" aria-hidden="true"><span class="cui-skeleton" data-width="medium"></span><span class="cui-skeleton"></span><span class="cui-skeleton" data-width="long"></span></div>
+          <div class="cui-skeleton-card" aria-hidden="true"><span class="cui-skeleton" data-width="short"></span><span class="cui-skeleton"></span></div>
+        </div>
+      </div>
+      <div class="mk-about">
+        <p>No full-screen loading covers (Cara, 2026-11-03: "keep the screen visible and just have a spinner or grey out the changed thing"). The region that's reloading gets <code>aria-busy="true"</code>: after 0.2s its content dims to 0.45 and takes no clicks, and a ring sits in its corner, sticky, so scroll the list and it stays in view. A first load, with nothing to dim, shows skeleton lines and cards (<code>aria-hidden</code>) with a slow shine; both hold still under reduced motion.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/base.css</code> · <code>.cui-busy[aria-busy="true"]</code>, <code>.cui-skeleton</code> (<code>data-width="short|medium|long"</code>), <code>.cui-skeleton-card</code></p>
       </div>
     </div>
   </section>
@@ -817,6 +862,19 @@ row.innerHTML =
           <p>Stays light mode's orange in dark, and misses Citadel's next colour change.</p></div>
       </div>
     </div>
+
+    <div class="doc-rule">
+      <h3>10. No full-screen loading covers</h3>
+      <p class="doc-why">Cara, 2026-11-03: <q>keep the screen visible and just have a spinner or grey out the changed thing</q>. Mark the region that's changing busy, or show skeletons on a first load.</p>
+      <div class="doc-rw">
+        <div class="doc-case"><span class="tag">✓ .cui-busy[aria-busy="true"] on the list</span>
+          <div class="stage doc-col"><input class="cui-input" aria-label="Search recipes" value="iron"><div class="doc-busy-list cui-busy" aria-busy="true"><div><span>Recipe 1</span><button type="button" class="cui-btn cui-small">Craft</button></div><div><span>Recipe 2</span><button type="button" class="cui-btn cui-small">Craft</button></div><div><span>Recipe 3</span><button type="button" class="cui-btn cui-small">Craft</button></div></div></div>
+          <p>The search box and the rest of the page stay usable; only the list that's reloading dims.</p></div>
+        <div class="doc-case wrong"><span class="tag">✕ A cover over the whole page</span>
+          <div class="stage doc-col doc-covered"><input class="cui-input" aria-label="Search recipes (covered)" value="iron"><div class="doc-busy-list"><div><span>Recipe 1</span><button type="button" class="cui-btn cui-small">Craft</button></div><div><span>Recipe 2</span><button type="button" class="cui-btn cui-small">Craft</button></div><div><span>Recipe 3</span><button type="button" class="cui-btn cui-small">Craft</button></div></div><div class="doc-cover"><span class="cui-spin" aria-hidden="true"></span> Loading…</div></div>
+          <p>Everything vanishes behind it, even what didn't change, and nothing can be read or typed until it lifts.</p></div>
+      </div>
+    </div>
   </section>
 
   <section id="questions">
@@ -835,6 +893,7 @@ row.innerHTML =
       <li><time>2026-11-02</time> · Cara: <q>Can we build a library of UI features and design decisions that are used and shared by default by all apps developed by citadel?</q></li>
       <li><time>2026-11-02</time> · Cara, on the #282 question card: Enter on a phone: <q>Adds a new line</q></li>
       <li><time>2026-11-02</time> · Cara, on the #282 question card: text on the accent colour in dark mode: <q>Dark text</q></li>
+      <li><time>2026-11-03</time> · Cara, in Theory of Crafting, on loading states: <q>keep the screen visible and just have a spinner or grey out the changed thing</q> (rule 10; <code>cui-busy</code> and <code>cui-skeleton</code>, #293)</li>
     </ol>
   </section>
 </main>
@@ -844,6 +903,8 @@ row.innerHTML =
 .cui-scope .cui-btn.cui-primary.doc-white, .cui-scope .cui-choice.cui-rec.doc-white { color: #fff; }
 .cui-scope .cui-btn.cui-primary.doc-hex-wrong { background: #c2410c; border-color: #c2410c; color: #fff; }
 .cui-scope .doc-spin-always { animation: cui-spin 0.8s linear infinite; }
+.doc-covered { position: relative; }
+.doc-cover { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: var(--citadel-space-2); background: color-mix(in srgb, var(--citadel-bg) 92%, transparent); color: var(--citadel-muted); font-size: var(--citadel-size-small); }
 </style>
 <script>
 (function () {
@@ -945,6 +1006,14 @@ row.innerHTML =
   // Timers tick in place, one text node each.
   const fmt = (s) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`);
   setInterval(() => { for (const t of $$('[data-tick]')) { t.dataset.tick = String(+t.dataset.tick + 1); t.textContent = fmt(+t.dataset.tick); } }, 1000);
+
+  // Busy region: the button flips aria-busy, the one attribute behind the look and the announcement.
+  $('#busy-toggle').addEventListener('click', (e) => {
+    const on = $('#busy-demo').getAttribute('aria-busy') !== 'true';
+    $('#busy-demo').setAttribute('aria-busy', String(on));
+    e.currentTarget.setAttribute('aria-pressed', String(on));
+    e.currentTarget.textContent = on ? 'Busy: on' : 'Busy: off';
+  });
 
   // Suggested replies: one tap sends, the rest grey out.
   for (const c of $$('#choices .cui-choice')) c.addEventListener('click', () => {

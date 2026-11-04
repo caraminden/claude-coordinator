@@ -28,7 +28,7 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | File | What | How |
 |---|---|---|
 | `theme.css` | Every token below as `--citadel-*`, light and dark | `<link rel="stylesheet">`, first |
-| `ui/base.css` | Buttons, inputs, chips, notices, spinner, focus ring, as `cui-*` classes | `<link rel="stylesheet">` after theme.css |
+| `ui/base.css` | Buttons, inputs, chips, notices, spinner, busy regions, skeletons, focus ring, as `cui-*` classes | `<link rel="stylesheet">` after theme.css |
 | `ui/markdown.js` (+ `ui/markdown.d.ts`) | An agent's markdown as safe HTML, streaming-aware | ES module import |
 | `rail.js`, `drawers.js` (+ `rail.d.ts`, `drawers.d.ts`) | The app rail; phone drawers (`NARROW`, the 800 px breakpoint) | See [rail-and-drawers.md](rail-and-drawers.md) |
 | `ui/composer.js` (+ `ui/composer.d.ts`) | The message box under a chat | ES module import; needs base.css |
@@ -202,6 +202,47 @@ height work; anything else in that cell taller than the row is cut off too. Else
 "table", a list in an `overflow: auto` box) leave 12 px of room past the edge switch, or its target makes
 the container scroll.
 
+**Busy region** (the part of the page that's reloading, while the rest stays usable):
+
+```html
+<section class="cui-busy" aria-busy="true">…the list as it was…</section>
+```
+
+```js
+list.setAttribute('aria-busy', 'true');   // the fetch starts
+list.setAttribute('aria-busy', 'false');  // the new content is in
+```
+
+While `aria-busy="true"`, the region's children dim to 0.45 after 0.2 s (a fast load never flashes),
+take no clicks, and an 18 px ring sits in its top right corner, sticky, so it stays in view while the
+region or the page scrolls. Back to `false` and it clears at once. The one attribute drives the look and
+the screen reader's "busy" together, so they can't drift; it isn't the composer's `data-busy`. No JS
+helper: it's CSS on the attribute.
+
+- The region is a block box: the ring is a float. Put a flex or grid layout on a child inside it.
+- Its direct children dim; any `cui-skeleton` or `cui-skeleton-card` among them stays as it is.
+- Clicks are blocked, keys aren't: disable a button whose action would go wrong on the stale content.
+- Mark the region that changes (the list, the card, the panel), never the whole page.
+
+**Skeleton** (a first load, when there's nothing yet to dim):
+
+```html
+<section class="cui-busy" aria-busy="true">
+  <div class="cui-skeleton-card" aria-hidden="true">
+    <span class="cui-skeleton" data-width="medium"></span>
+    <span class="cui-skeleton"></span>
+    <span class="cui-skeleton" data-width="long"></span>
+  </div>
+  <span class="cui-skeleton" data-width="short" aria-hidden="true"></span>
+</section>
+```
+
+A `cui-skeleton` is a grey line as tall as a line of text at the size around it (it's in `em`), full width
+or `data-width="short"` (35%), `"medium"` (60%), `"long"` (85%); give one a height in your own CSS for an
+image or a block. `cui-skeleton-card` is a bordered card to hold a few. A slow shine runs across them and
+stops under reduced motion. `aria-hidden="true"` on each: the busy region around them is what a screen
+reader hears. Replace them with the real content and set `aria-busy="false"` in the same step.
+
 ## The rules
 
 1. **Equal room above and below:** text or an icon in a box, bar, button, row or chip has equal,
@@ -215,6 +256,9 @@ the container scroll.
    yours refuse them. Use classes, or a constructed stylesheet adopted once.
 8. **Use the variables, never copied hex.**
 9. **Phone breakpoint is 800 px** (`NARROW` from `drawers.js` in script).
+10. **No full-screen loading covers.** Cara, 2026-11-03: "keep the screen visible and just have a spinner
+    or grey out the changed thing". Mark the region that's changing busy (`cui-busy` with `aria-busy`),
+    or show skeletons on a first load; the rest of the page stays visible and usable.
 
 A self-review of a contraption counts hand-rolled markdown, a chat log or composer the library
 has, and a copied Citadel hex colour as findings.

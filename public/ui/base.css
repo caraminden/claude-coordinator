@@ -14,7 +14,11 @@
    Switch:   <label><input type="checkbox" role="switch" class="cui-switch"> Show overlays</label>
              (or aria-label on a switch with no label); read and set it as any checkbox (.checked, change).
    Spinner:  <span class="cui-spin"></span>; a working line: <div class="cui-working"><span class="cui-spin"></span>
-             Working… <span class="cui-time">12s</span></div>. */
+             Working… <span class="cui-time">12s</span></div>.
+   Busy:     <section class="cui-busy" aria-busy="true"> while it loads (aria-busy="false" or none when done):
+             its content dims after 0.2s, takes no clicks, and a ring sits sticky in its top right corner.
+   Skeleton: <span class="cui-skeleton" data-width="short|medium|long" aria-hidden="true"></span> lines for a
+             first load, in a busy region; <div class="cui-skeleton-card" aria-hidden="true"> holds a card's lines. */
 
 /* Buttons: every variant the same height, content centred, so the room above and below is equal. */
 :where(.cui-btn) {
@@ -142,6 +146,46 @@
 @media (prefers-reduced-motion: reduce) { :where(.cui-spin) { animation: none; } }
 :where(.cui-working) { display: flex; align-items: center; gap: var(--citadel-space-2); padding: var(--citadel-space-1) 0; color: var(--citadel-muted); font: var(--citadel-size-small)/1.4 var(--citadel-font); }
 :where(.cui-working .cui-time) { font-variant-numeric: tabular-nums; }
+
+/* Busy region: the content stays put, dimmed after 0.2s (a fast load never flashes) and closed to clicks, with
+   a ring pinned to the top right corner. The ring is a zero-size float that is sticky, so it stays in view
+   while the region (or the page around it) scrolls, and moves nothing. Keyed on aria-busy, which a screen
+   reader needs anyway, so the look and the announcement can't drift; the composer's data-busy is separate.
+   The children dim, not the region, so the ring stays at full strength; skeletons stay as they are. */
+:where(.cui-busy[aria-busy="true"] > :not(.cui-skeleton, .cui-skeleton-card)) {
+  opacity: 0.45; pointer-events: none; user-select: none;
+  transition: opacity var(--citadel-motion) 0.2s;
+}
+:where(.cui-busy[aria-busy="true"])::before {
+  content: ""; position: sticky; top: var(--citadel-space-2); z-index: 1; float: right;
+  box-sizing: border-box; width: 18px; height: 18px; margin: 0 0 -18px -18px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--citadel-info) 25%, var(--citadel-surface)); border-top-color: var(--citadel-info);
+  background: var(--citadel-surface); box-shadow: 0 0 0 3px var(--citadel-surface);
+  animation: cui-busy-in 0s 0.2s both, cui-spin 0.8s linear infinite;
+}
+@keyframes cui-busy-in { from { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { :where(.cui-busy[aria-busy="true"])::before { animation: cui-busy-in 0s 0.2s both; } }
+
+/* Skeleton: grey lines for a first load, a line of body text tall at the size around it, with a slow shine
+   that stops under reduced motion. aria-hidden="true" on them; the busy region around them speaks. */
+:where(.cui-skeleton) {
+  --cui-bone: color-mix(in srgb, var(--citadel-muted) 22%, var(--citadel-surface));
+  --cui-shine: color-mix(in srgb, var(--citadel-muted) 8%, var(--citadel-surface));
+  display: block; box-sizing: border-box; height: 0.8em; margin: 0.35em 0; border-radius: var(--citadel-radius-sm);
+  background: linear-gradient(90deg, var(--cui-bone) 35%, var(--cui-shine) 50%, var(--cui-bone) 65%) 100% 0 / 300% 100% var(--cui-bone);
+  animation: cui-shimmer 1.6s ease-in-out infinite;
+}
+:where(.cui-skeleton[data-width="short"]) { width: 35%; }
+:where(.cui-skeleton[data-width="medium"]) { width: 60%; }
+:where(.cui-skeleton[data-width="long"]) { width: 85%; }
+:where(.cui-skeleton-card) {
+  display: block; box-sizing: border-box; padding: var(--citadel-space-3);
+  border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius); background: var(--citadel-surface);
+}
+:where(.cui-skeleton-card + .cui-skeleton-card) { margin-top: var(--citadel-space-2); }
+@keyframes cui-shimmer { to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { :where(.cui-skeleton) { animation: none; } }
+@media (forced-colors: active) { :where(.cui-skeleton) { border: 1px solid GrayText; } }
 
 /* Focus: a ring for the keyboard, none for a click. */
 :where(.cui-btn:focus, .cui-input:focus, .cui-choice:focus, .cui-switch:focus) { outline: none; }

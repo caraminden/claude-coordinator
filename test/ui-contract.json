@@ -44,6 +44,7 @@
   "css": {
     "base.css": [
       "cui-btn",
+      "cui-busy",
       "cui-chip",
       "cui-choice",
       "cui-choices",
@@ -54,6 +55,8 @@
       "cui-notice",
       "cui-primary",
       "cui-rec",
+      "cui-skeleton",
+      "cui-skeleton-card",
       "cui-small",
       "cui-spin",
       "cui-switch",

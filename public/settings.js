@@ -1,5 +1,6 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
 import { account, ago, api, h, icon, listGroupsOf, openHash, schemeIcon, view } from './core.js';
+import { DEFAULT_CLAUDE_MCP, machineSetup, machineSetupWindows, workspaceName } from './machine-setup.js';
 import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
 
 // ---------- push notifications ----------
@@ -614,10 +615,6 @@ export function instructionsEditor() {
 
 // ---------- machines ----------
 
-// What the add form suggests running: Delve's Godot MCP, as its dock's Configure button set it up
-// for Claude Code on that computer.
-const DEFAULT_CLAUDE_MCP = 'godot-ai';
-
 export function onMachinesUpdate(machines) {
   if (view?.kind !== 'project') return;
   view.machines = machines;
@@ -646,65 +643,36 @@ export function renderMachinesShelf() {
       : h('p', { class: 'muted small' }, 'Lend minions MCP tools from your own computers, like a Godot editor that runs builds.')));
 }
 
-/** The lines to run on a machine to connect it, for its token and what it should run. */
-function machineSetup(url, token, kind, what) {
-  const run = kind === 'command' ? `-- ${what}` : `--claude-mcp ${what || DEFAULT_CLAUDE_MCP}`;
-  return [
-    `curl -fsSLO ${url}/machine-agent.mjs`,
-    `node machine-agent.mjs ${url} ${token} --config machine-agent.json ${run}`,
-  ].join('\n');
-}
-
-/**
- * The same for Windows PowerShell, as a task that starts now and at every logon (in that person's
- * own session, so it can reach an open Godot editor), restarting if it ever stops. No reboot needed.
- * One script block, so a missing Node or failed download stops it before a broken task is registered.
- */
-function machineSetupWindows(url, name, token, kind, what) {
-  const run = kind === 'command' ? `-- ${what}` : `--claude-mcp ${what || DEFAULT_CLAUDE_MCP}`;
-  const task = `Coordinator agent (${name})`;
-  return [
-    '& {',
-    '$ErrorActionPreference = "Stop"',
-    '$node = (Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source',
-    'if (-not $node -or [version](& $node -v).TrimStart("v") -lt [version]"18.0") { throw "Node 18 or newer is not on this PowerShell\'s PATH. Install it (winget install OpenJS.NodeJS.LTS), open a new PowerShell window and paste this again." }',
-    '$dir = "$env:USERPROFILE\\coordinator-agent"; New-Item -ItemType Directory -Force $dir | Out-Null',
-    `curl.exe -fsSLo "$dir\\machine-agent.mjs" ${url}/machine-agent.mjs`,
-    'if ($LASTEXITCODE) { throw "Could not download machine-agent.mjs (curl exit $LASTEXITCODE)." }',
-    `$action = New-ScheduledTaskAction -Execute $node -WorkingDirectory $dir -Argument "\`"$dir\\machine-agent.mjs\`" ${url} ${token} --config \`"$dir\\machine-agent.json\`" ${run.replace(/"/g, '`"')}"`,
-    '$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries',
-    `Register-ScheduledTask -Force -TaskName "${task}" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) -Settings $settings | Out-Null`,
-    `Start-ScheduledTask -TaskName "${task}"`,
-    `"Started ${task}; it also starts at every logon. It shows online on the Machines page once it connects."`,
-    '}',
-  ].join('\n');
-}
-
 /** Main panel: add machines, show how to connect them, and remove them or replace their token. */
 export function machinesPage() {
   view.machineToken = null; // { id, name, token } just made, shown until you leave the page
   const name = h('input', { name: 'name', placeholder: 'godot-laptop', required: true, maxlength: 30, autocomplete: 'off', pattern: '[a-z0-9][a-z0-9\\-]*' });
   const kind = h('select', { name: 'kind' },
     h('option', { value: 'claude' }, 'Claude Code MCP server named'),
-    h('option', { value: 'command' }, 'Command'));
+    h('option', { value: 'command' }, 'Command'),
+    h('option', { value: 'none' }, 'None'));
   const command = h('input', { name: 'command', value: DEFAULT_CLAUDE_MCP, autocomplete: 'off', spellcheck: 'false' });
   kind.onchange = () => {
     command.value = kind.value === 'claude' ? DEFAULT_CLAUDE_MCP : '';
     command.placeholder = kind.value === 'claude' ? DEFAULT_CLAUDE_MCP : 'npx -y some-mcp-server';
+    command.hidden = kind.value === 'none';
     renderMachineSetup();
   };
   command.addEventListener('input', renderMachineSetup);
+  const folder = h('input', { name: 'folder', placeholder: 'C:\\Users\\you\\Documents\\Vault', autocomplete: 'off', spellcheck: 'false' });
+  folder.addEventListener('input', renderMachineSetup);
   const status = h('span', { class: 'muted', role: 'status' });
   const form = h('form', { class: 'machine-add' },
     h('label', {}, 'Name', name),
     h('label', { class: 'wide' }, 'MCP server to run there', h('span', { class: 'row' }, kind, command)),
+    h('label', { class: 'wide' }, 'Folder minions can use (optional)', folder),
     h('button', { type: 'submit' }, 'Add machine'),
     status);
   form.onsubmit = async (e) => {
     e.preventDefault();
     status.textContent = 'Adding…';
     try {
-      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase() } });
+      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), ...(folder.value.trim() ? { workspace_tools: true } : {}) } });
       view.machineToken = { id: machine.id, name: machine.name, token, url: agent_url ?? location.origin };
       name.value = '';
       status.textContent = '';
@@ -722,7 +690,8 @@ export function machinesPage() {
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
     h('p', { class: 'muted small' },
-      'Each machine runs one MCP server; add another machine for a second one. It needs Node 18 or newer. ',
+      'Each machine runs one MCP server, or none; add another machine for a second one. It needs Node 18 or newer. ',
+      'A folder typed when adding a machine goes into machine-agent.json by the setup lines, and the machine starts with workspace tools on. ',
       'With workspace tools switched on, minions also get mcp__<name>-ws__…: git sync and the tasks its owner lists in machine-agent.json on that computer, nothing else. ',
       '"Claude Code MCP server" runs one already set up for Claude Code on that computer, like godot-ai after its dock\'s Configure. ',
       'A minion gets the tools of every machine online and lent to its scheme when its turn starts, named mcp__<name>__…, plus the machine\'s notes, and the tools act on that computer, ',
@@ -742,6 +711,7 @@ function renderMachineSetup() {
   if (!t) return el.replaceChildren();
   const kind = document.querySelector('.machine-add select[name=kind]')?.value;
   const command = document.querySelector('.machine-add input[name=command]')?.value.trim();
+  const folder = document.querySelector('.machine-add input[name=folder]')?.value.trim();
   const block = (label, text) => {
     const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
     copy.onclick = async () => {
@@ -753,8 +723,10 @@ function renderMachineSetup() {
   el.replaceChildren(h('div', { class: 'machine-setup' },
     h('strong', {}, `Connect ${t.name}`),
     h('p', { class: 'small' }, 'The token is shown only now; if you lose it, make a new one. Run one of these on that computer:'),
-    ...block('Windows PowerShell: starts now and at every logon, no reboot', machineSetupWindows(t.url, t.name, t.token, kind, command)),
-    ...block('Any computer, in a terminal you leave open', machineSetup(t.url, t.token, kind, command))));
+    folder ? h('p', { class: 'small' }, `It adds ${folder} to machine-agent.json there as workspace ${workspaceName(folder)}, keeping what the file already lists. `,
+      'If the folder is a git repo it also gets a pull task (git pull --ff-only) with git sync off; pull uses the git sign-in saved on that computer, so check git pull works there first.') : false,
+    ...block('Windows PowerShell: starts now and at every logon, no reboot', machineSetupWindows(t.url, t.name, t.token, kind, command, folder)),
+    ...block('Any computer, in a terminal you leave open', machineSetup(t.url, t.token, kind, command, folder))));
 }
 
 function renderMachineList() {

@@ -98,7 +98,10 @@ export const machineRoutes: Route[] = [
   {
     method: 'POST', path: '/api/machines', ...people,
     async handler({ req, res, app, session }) {
-      const name = machineName((await readJson(req)).name);
+      const body = await readJson(req);
+      const name = machineName(body.name);
+      // On from the start for a machine added with a folder for minions (#305); off otherwise.
+      if (body.workspace_tools !== undefined && typeof body.workspace_tools !== 'boolean') throw new HttpError(400, 'workspace_tools must be true or false');
       let machine;
       try {
         // The real hash goes in once the id (part of the token) is known.
@@ -107,7 +110,7 @@ export const machineRoutes: Route[] = [
         throw new HttpError(409, 'A machine with that name already exists');
       }
       const token = newToken(machine.id);
-      app.store.updateMachine(machine.id, { token_hash: hashToken(token) });
+      app.store.updateMachine(machine.id, { token_hash: hashToken(token), ...(body.workspace_tools ? { workspace_tools: 1 } : {}) });
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       // The only time the token is shown; the app keeps just its hash.
       return json(res, 201, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? null });

@@ -113,6 +113,15 @@ test('threads skip offline machines, and only people manage machines', async () 
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'sleepy' } }), /409/);
 });
 
+test('a machine added with workspace_tools: true starts with the switch on', async () => {
+  await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'vault-pc', workspace_tools: 'yes' } }), /400/);
+  assert.ok(!(await call('/api/machines')).some((m: any) => m.name === 'vault-pc'), 'a refused add leaves no machine behind');
+  const { machine } = await call('/api/machines', { method: 'POST', body: { name: 'vault-pc', workspace_tools: true } });
+  assert.equal(machine.workspace_tools, true);
+  const { machine: plain } = await call('/api/machines', { method: 'POST', body: { name: 'plain-pc', workspace_tools: false } });
+  assert.equal(plain.workspace_tools, false);
+});
+
 test('an agent can run a server from Claude Code\'s config, and threads get the machine\'s notes', async () => {
   const home = join(root, 'pc-home');
   const { mkdirSync } = await import('node:fs');

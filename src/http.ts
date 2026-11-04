@@ -12,6 +12,7 @@ import type { BranchStatus } from './branch.ts';
 import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket } from './db.ts';
 import type { MachineRelay } from './machines.ts';
 import type { GithubLink } from './github-link.ts';
+import type { RepoAccess } from './repo-access.ts';
 import type { Previews } from './previews.ts';
 import type { Pusher, PushTrigger } from './push.ts';
 import type { Runner } from './runner.ts';
@@ -175,6 +176,8 @@ export interface App {
   pusher: Pusher;
   /** People's own GitHub links (src/github-link.ts). */
   github: GithubLink;
+  /** Scheme members' collaborator invites on the scheme's GitHub repo (src/repo-access.ts, #310). */
+  repoAccess: RepoAccess;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */
   claude: ClaudeLink;
   /** Contraptions' keys and who each is enabled for (src/contraptions.ts). */

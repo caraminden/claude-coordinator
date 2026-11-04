@@ -120,6 +120,18 @@ export interface Ticket {
 }
 
 /** One of a person's linked accounts (src/credentials.ts); `secret` is still encrypted. */
+/** A row of repo_collaborators: see its CREATE TABLE. */
+export interface RepoCollaborator {
+  project_id: number;
+  user_id: number;
+  slug: string;
+  login: string | null;
+  state: 'added' | 'invited' | 'existing' | 'waiting' | 'failed';
+  invitation_id: number | null;
+  error: string | null;
+  updated_at: number;
+}
+
 export interface CredentialRow {
   user_id: number;
   kind: string;
@@ -534,6 +546,20 @@ CREATE TABLE IF NOT EXISTS credentials (
   failed_at INTEGER,
   PRIMARY KEY (user_id, kind)
 );
+-- What Citadel did on GitHub for a scheme member (src/repo-access.ts, #310): state added or invited is
+-- Citadel's own doing, undone when they leave; existing was there before, so leaving leaves it. No foreign
+-- keys: the row outlives a removed person or scheme so the collaborator it made can still be taken off.
+CREATE TABLE IF NOT EXISTS repo_collaborators (
+  project_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  slug TEXT NOT NULL,
+  login TEXT,
+  state TEXT NOT NULL,
+  invitation_id INTEGER,
+  error TEXT,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, user_id)
+);
 -- Contraptions (src/contraptions.ts): personal apps with their own service, reached through Citadel.
 -- identity_private is the Ed25519 private key, sealed like credentials but kept out of that table, which
 -- turns can reach; key_hash is the sha256 of the bearer contraption key, which only the key files hold.
@@ -653,7 +679,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 27; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths; 23: contraptions.repo, branch, folder; 24: tickets.parent; 25: machines.scoped (#303); 26: machines.owner_id (#306); 27: machines.mcp_kind, mcp_command (#308)
+export const SCHEMA_VERSION = 28; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths; 23: contraptions.repo, branch, folder; 24: tickets.parent; 25: machines.scoped (#303); 26: machines.owner_id (#306); 27: machines.mcp_kind, mcp_command (#308); 28: repo_collaborators (#310)
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -1014,6 +1040,26 @@ export class Store {
 
   removeMember(projectId: number, userId: number) {
     this.db.prepare('DELETE FROM project_members WHERE project_id = ? AND user_id = ?').run(projectId, userId);
+  }
+
+  /** What Citadel did on GitHub for scheme members (src/repo-access.ts): one row, or all of them. */
+  getRepoCollaborator(projectId: number, userId: number): RepoCollaborator | undefined {
+    return this.db.prepare('SELECT * FROM repo_collaborators WHERE project_id = ? AND user_id = ?').get(projectId, userId) as unknown as RepoCollaborator | undefined;
+  }
+
+  listRepoCollaborators(): RepoCollaborator[] {
+    return this.db.prepare('SELECT * FROM repo_collaborators').all() as unknown as RepoCollaborator[];
+  }
+
+  putRepoCollaborator(r: Omit<RepoCollaborator, 'updated_at'>) {
+    this.db.prepare(`INSERT INTO repo_collaborators (project_id, user_id, slug, login, state, invitation_id, error, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (project_id, user_id) DO UPDATE SET slug = excluded.slug, login = excluded.login, state = excluded.state,
+        invitation_id = excluded.invitation_id, error = excluded.error, updated_at = excluded.updated_at`)
+      .run(r.project_id, r.user_id, r.slug, r.login, r.state, r.invitation_id, r.error, Date.now());
+  }
+
+  deleteRepoCollaborator(projectId: number, userId: number) {
+    this.db.prepare('DELETE FROM repo_collaborators WHERE project_id = ? AND user_id = ?').run(projectId, userId);
   }
 
   /** The schemes a person is in, as owner or member; null for an admin, who is in all of them. */

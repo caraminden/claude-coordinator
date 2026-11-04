@@ -34,6 +34,9 @@ function person(app: App, id: string): User {
   return user;
 }
 
+/** A scheme's people, each with what Citadel did for them on its GitHub repo (#310). */
+const members = (app: App, projectId: number) => app.store.listMembers(projectId).map((m) => ({ ...m, github: m.owner ? null : app.repoAccess.view(projectId, m.id) }));
+
 /** End a person's open streams, so a disabled or removed person stops getting news at once. */
 function dropStreams(app: App, userId: number) {
   for (const [res, who] of app.clients) if (who.uid === userId) res.end();
@@ -95,6 +98,8 @@ export const peopleRoutes: Route[] = [
       if (user.id === session.uid) throw new HttpError(400, 'You can\'t remove yourself');
       app.store.deleteUser(user.id, uidOf(session));
       dropStreams(app, user.id);
+      // Their collaborator invites go too (#310); a refusal stays on its row for the next boot's sweep.
+      void app.repoAccess.tidy();
       return json(res, 200, {});
     },
   },
@@ -126,6 +131,8 @@ export const peopleRoutes: Route[] = [
     method: 'GET', path: '/api/github/callback', who: ['person'],
     async handler({ req, res, app, url, session }) {
       const project = await app.github.finish(uidOf(session), url.searchParams, callbackUrl(req));
+      // Newly linked: their schemes' repos invite them, and as an owner their members (#310). The redirect doesn't wait.
+      void app.repoAccess.syncPerson(uidOf(session)).catch((err) => console.error('repo access after linking', err));
       res.writeHead(302, { Location: project === null ? '../../c/' : `../../c/#/p/${project}/account`, 'Cache-Control': 'no-store' }).end();
     },
   },
@@ -165,7 +172,7 @@ export const peopleRoutes: Route[] = [
       return json(res, 200, app.claude.status(uidOf(session)));
     },
   },
-  { method: 'GET', path: '/api/projects/:project/members', who: ['person'], handler: ({ res, app, project }) => json(res, 200, app.store.listMembers(project.id)) },
+  { method: 'GET', path: '/api/projects/:project/members', who: ['person'], handler: ({ res, app, project }) => json(res, 200, members(app, project.id)) },
   {
     method: 'POST', path: '/api/projects/:project/members', who: ['person'], access: 'owner',
     async handler({ req, res, app, project }) {
@@ -173,14 +180,19 @@ export const peopleRoutes: Route[] = [
       if (user.disabled_at) throw new HttpError(400, `${user.name} is disabled`);
       app.store.addMember(project.id, user.id);
       app.broadcast({ type: 'project', project: app.store.getProject(project.id) });
-      return json(res, 200, app.store.listMembers(project.id));
+      // Adding someone already in tries their GitHub invite again (#310).
+      await app.repoAccess.sync(project.id, user.id);
+      return json(res, 200, members(app, project.id));
     },
   },
   {
     method: 'DELETE', path: '/api/projects/:project/members/:person', who: ['person'], access: 'owner',
-    handler({ res, app, project, params }) {
+    async handler({ res, app, project, params }) {
       app.store.removeMember(project.id, Number(params.person));
-      return json(res, 200, app.store.listMembers(project.id));
+      // Only a collaborator Citadel added comes off the repo; the refusal is said, and the next boot tries again.
+      const error = await app.repoAccess.remove(project.id, Number(params.person));
+      if (error) throw new HttpError(502, `They're out of the scheme, but not off GitHub yet: ${error}`);
+      return json(res, 200, members(app, project.id));
     },
   },
 ];

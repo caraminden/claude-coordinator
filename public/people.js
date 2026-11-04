@@ -17,6 +17,19 @@ function head(title, meta) {
 const page = (...children) => h('section', { class: 'artifacts-main people-main' }, ...children);
 const fail = (err) => alert(err.message);
 
+/** What Citadel did for a member on the scheme's GitHub repo (#310), or nothing. */
+function githubLine(m) {
+  const g = m.github;
+  if (!g) return '';
+  const repo = h('a', { href: `https://github.com/${g.slug}`, target: '_blank', rel: 'noopener' }, g.slug);
+  const line = g.state === 'added' ? ['Can push to ', repo, ' (Citadel added them)']
+    : g.state === 'existing' ? ['Can push to ', repo]
+    : g.state === 'waiting' ? ['Gets push access to ', repo, ' once they link GitHub in Settings → Your account']
+    : g.state === 'invited' ? ['Invited to ', repo, ': they accept on ', h('a', { href: `https://github.com/${g.slug}/invitations`, target: '_blank', rel: 'noopener' }, 'GitHub')]
+    : ['No push access to ', repo];
+  return h('span', { class: 'meta' }, ...line, g.error ? h('span', { class: 'error' }, ` · ${g.error}`) : '');
+}
+
 /** Main panel: who is in this scheme. Its owner (or an admin) adds and removes people. */
 export function membersPage() {
   const p = view.project;
@@ -27,12 +40,13 @@ export function membersPage() {
   const render = (members, people) => {
     const inIt = new Set(members.map((m) => m.id));
     list.replaceChildren(...members.map((m) => h('div', { class: 'person-row' },
-      h('span', { class: 'text' }, h('span', { class: 'name' }, m.name), h('span', { class: 'meta' }, m.owner ? `${m.login} · owner` : m.login)),
+      h('span', { class: 'text' }, h('span', { class: 'name' }, m.name), h('span', { class: 'meta' }, m.owner ? `${m.login} · owner` : m.login), githubLine(m)),
       owns && !m.owner && h('button', {
         type: 'button', class: 'secondary small',
         onclick: async () => {
           if (!confirm(`Take ${m.name} out of ${p.name}? They stop seeing it at once.`)) return;
-          render(await api(`api/projects/${p.id}/members/${m.id}`, { method: 'DELETE' }).catch(fail) ?? members, people);
+          // A GitHub refusal still took them out of the scheme: show it, then the list as it is now.
+          render(await api(`api/projects/${p.id}/members/${m.id}`, { method: 'DELETE' }).catch((err) => (fail(err), api(`api/projects/${p.id}/members`))).catch(fail) ?? members, people);
         },
       }, 'Remove'))));
     const others = people.filter((x) => !inIt.has(x.id));

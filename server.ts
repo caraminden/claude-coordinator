@@ -38,6 +38,7 @@ import { AppServices, serviceOptions } from './src/app-services.ts';
 import { contraptionRoutes } from './src/routes/contraptions.ts';
 import { ContraptionTurns } from './src/contraption-turns.ts';
 import { GithubLink } from './src/github-link.ts';
+import { RepoAccess } from './src/repo-access.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
 import { fileRoutes } from './src/routes/files.ts';
@@ -135,6 +136,8 @@ const services = new AppServices(serviceOptions(process.env, DATA_DIR === DEFAUL
   logDir: join(DATA_DIR, 'contraption-deploys'),
 }));
 const githubLink = new GithubLink(store, credentials, process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '');
+// A boot check or preview runs on a copy of the data: it leaves GitHub alone.
+const repoAccess = new RepoAccess(store, githubLink, !BOOT_CHECK);
 // People's own Claude plans (#213). A dev copy tags its containers so it never shares the live server's.
 const claudeLink = new ClaudeLink(store, credentials, DATA_DIR, process.env.CLAUDE_BIN ?? 'claude', undefined, DATA_DIR === DEFAULT_DATA_DIR ? 'citadel-claude-' : `citadel-claude-${createHash('sha256').update(DATA_DIR).digest('hex').slice(0, 6)}-`);
 // Keep secrets out of the environment that claude and its tools inherit.
@@ -549,6 +552,8 @@ if (!BOOT_CHECK || PREVIEW) {
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
 const github = new GithubWatcher(store, (ticketId, text) => runner.send(ticketId, GITHUB_NAME, text));
 if (!BOOT_CHECK) github.start();
+// Members already in schemes get their invites, and leavers' are withdrawn (#310); it settles, so later boots only retry what failed.
+if (!BOOT_CHECK) void safely('repo access sweep', () => repoAccess.sweep());
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);
 // Then chains and commit waiters look again: a merged PR can be what they wait on (#229).
 github.onMerged = (repoDir) => void syncMain(repoDir)
@@ -645,7 +650,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, claude: claudeLink, contraptions, contraptionTurns, landings, services,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, claude: claudeLink, contraptions, contraptionTurns, landings, services,
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {
     return ASSET_VERSION;

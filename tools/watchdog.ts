@@ -27,14 +27,17 @@ try {
 
 const now = Date.now();
 const found = await check(targets(db, home), { unitState: (u) => unitState(u, systemctl), answer });
-const { message, sent, unsent } = step(prev, found, now, minutes * 60_000);
+const { messageFor, sent, unsent } = step(prev, found, now, minutes * 60_000);
+const message = messageFor(null);
 const down = [...found].filter(([, f]) => f.finding).map(([, f]) => `${f.title}: ${f.finding}`);
 console.log(`${found.size} watched, ${down.length ? `down: ${down.join('; ')}` : 'all up'}`);
 
 let next = sent;
 if (message) {
-  const subs = recipients(db);
-  console.log(`${dry ? 'Would push' : 'Pushing'} to ${subs.length} admin device(s): ${message.title}: ${message.body}`);
+  // Each device hears what's theirs: an admin everything, a contraption's owner only theirs.
+  const subs = recipients(db).map((s) => ({ ...s, msg: messageFor(s.only) })).filter((s) => s.msg);
+  for (const s of subs) console.log(`${dry ? 'Would push' : 'Pushing'} to ${s.name}${s.only ? ' (owner)' : ''}: ${s.msg!.title}: ${s.msg!.body}`);
+  if (!subs.length) console.log(`No device to push to: ${message.title}: ${message.body}`);
   // Never make a key pair here: loadVapidKeys would, and a new one orphans every subscription.
   const keyFile = join(dataDir, 'vapid.json');
   let delivered = false;
@@ -42,7 +45,7 @@ if (message) {
   else if (!existsSync(keyFile)) console.error(`No ${keyFile}: nothing to sign pushes with.`);
   else {
     const keys = loadVapidKeys(dataDir);
-    const results = await Promise.all(subs.map((s) => postPush(s, message, keys, 'https://localhost').then(
+    const results = await Promise.all(subs.map((s) => postPush(s, s.msg!, keys, 'https://localhost').then(
       async (res) => (res.ok || console.error(`Push to ${s.name} answered ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`), res.ok),
       (err) => (console.error(`Push to ${s.name} failed: ${err.message}`), false))));
     // One device that got it is enough: the alert is out (a phone that missed it hears the all-clear).

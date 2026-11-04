@@ -235,7 +235,8 @@ systemctl --user enable --now claude-coordinator-backup.timer claude-coordinator
 `tools/watchdog.ts` (`src/watchdog.ts`): it checks `claude-coordinator.service`
 and `/api/health`, and each contraption's `citadel-app-<name>.service` while it is
 enabled, with its manifest's health path or its port. Once one has been down or
-not answering for 10 minutes (`WATCHDOG_MINUTES`) it web-pushes every admin's devices straight from the script,
+not answering for 10 minutes (`WATCHDOG_MINUTES`) it web-pushes every admin's devices, and for a contraption its home scheme's
+owner's too while they have Mandate on, straight from the script,
 reading the database read-only, and once more when it is back. It never restarts
 anything. Its state is in `~/.local/state/citadel-watchdog/`; `node
 tools/watchdog.ts --dry-run` shows a round without saving or sending.

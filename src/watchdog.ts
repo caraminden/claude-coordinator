@@ -1,7 +1,7 @@
 // The down-alert watchdog (#302): tools/watchdog.ts runs this every 5 minutes from a user timer
 // (deploy/citadel-watchdog.timer). It checks Citadel's unit and /api/health, and each contraption's
 // enabled citadel-app-<name>.service and its health path (or port). Once one has been down for the
-// threshold it web-pushes every admin straight from here, since Citadel (and Mandate) may be the thing
+// threshold it web-pushes every admin (and a down contraption's owner: recipients) straight from here, since Citadel (and Mandate) may be the thing
 // that's down, and again when it's back. It reads the database read-only and never restarts anything:
 // that's systemd's job (Restart=always).
 import { execFile } from 'node:child_process';
@@ -49,9 +49,10 @@ const mins = (ms: number) => `${Math.max(1, Math.round(ms / 60_000))} min`;
 /**
  * Fold one round of findings (key → Finding, for every target watched now) into the state. Returns the
  * state to save if the push goes out (`sent`), the one to save if it doesn't (`unsent`, so the next run
- * tries again), and the push, or null when there's nothing new to say.
+ * tries again), and the push for someone who hears about the keys in `only` (everything when null), or
+ * null when there's nothing new to tell them.
  */
-export function step(prev: WatchState, found: Map<string, { title: string; finding: Finding }>, now: number, thresholdMs: number): { message: PushMessage | null; sent: WatchState; unsent: WatchState } {
+export function step(prev: WatchState, found: Map<string, { title: string; finding: Finding }>, now: number, thresholdMs: number): { messageFor: (only: Set<string> | null) => PushMessage | null; sent: WatchState; unsent: WatchState } {
   const unsent: WatchState = {};
   for (const [key, { title, finding }] of found) {
     const was = prev[key];
@@ -66,13 +67,18 @@ export function step(prev: WatchState, found: Map<string, { title: string; findi
   const fresh = entries.filter(([, e]) => !e.upAt && !e.alerted && now - e.since >= thresholdMs - SLACK_MS);
   const back = entries.filter(([, e]) => e.upAt);
   const sent: WatchState = Object.fromEntries(entries.filter(([, e]) => !e.upAt).map(([k, e]) => [k, fresh.some(([f]) => f === k) ? { ...e, alerted: true } : e]));
-  if (!fresh.length && !back.length) return { message: null, sent, unsent };
-  const down = Object.values(sent).filter((e) => e.alerted);
-  const parts: string[] = [];
-  if (down.length) parts.push(`Down: ${down.map((e) => `${e.title} ${mins(now - e.since)} (${e.why})`).join(', ')}.`);
-  if (back.length) parts.push(`${down.length ? 'Back' : 'All back'}: ${back.map(([, e]) => `${e.title} (${e.upWhy} after ${mins(e.upAt! - e.since)})`).join(', ')}.`);
-  const title = fresh.length ? `${fresh.map(([, e]) => e.title).join(', ')} down` : `${back.map(([, e]) => e.title).join(', ')} back up`;
-  return { message: { title, body: parts.join(' '), tag: 'citadel-watchdog', url: '/c/' }, sent, unsent };
+  const messageFor = (only: Set<string> | null): PushMessage | null => {
+    const theirs = <T>(list: [string, T][]) => (only ? list.filter(([k]) => only.has(k)) : list);
+    const [newDown, newBack] = [theirs(fresh), theirs(back)];
+    if (!newDown.length && !newBack.length) return null;
+    const down = theirs(Object.entries(sent)).filter(([, e]) => e.alerted).map(([, e]) => e);
+    const parts: string[] = [];
+    if (down.length) parts.push(`Down: ${down.map((e) => `${e.title} ${mins(now - e.since)} (${e.why})`).join(', ')}.`);
+    if (newBack.length) parts.push(`${down.length ? 'Back' : 'All back'}: ${newBack.map(([, e]) => `${e.title} (${e.upWhy} after ${mins(e.upAt! - e.since)})`).join(', ')}.`);
+    const title = newDown.length ? `${newDown.map(([, e]) => e.title).join(', ')} down` : `${newBack.map(([, e]) => e.title).join(', ')} back up`;
+    return { title, body: parts.join(' '), tag: 'citadel-watchdog', url: '/c/' };
+  };
+  return { messageFor, sent, unsent };
 }
 
 /** Citadel, then every contraption, from the database. */
@@ -91,10 +97,38 @@ export function targets(db: DatabaseSync, home: string, citadelPort = 8573): Tar
   ];
 }
 
-/** Every admin's devices (Josh on #302, 2026-11-04: "Every admin"), by user name as push_subscriptions keeps it. */
-export function recipients(db: DatabaseSync): { name: string; endpoint: string; p256dh: string; auth: string }[] {
-  return db.prepare(`SELECT name, endpoint, p256dh, auth FROM push_subscriptions
+export interface Recipient {
+  name: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  /** The target keys this device hears about; null for everything. */
+  only: Set<string> | null;
+}
+
+/**
+ * Who hears (Josh on #302, 2026-11-04): every admin's devices, about everything ("Every admin"); and a
+ * contraption's owner, the owner of its home scheme, about that contraption, while they have Mandate on
+ * and a Citadel push subscription ("if they have mandate and alerts on"). Devices go by user name, as
+ * push_subscriptions keeps them.
+ */
+export function recipients(db: DatabaseSync): Recipient[] {
+  const admins = db.prepare(`SELECT name, endpoint, p256dh, auth FROM push_subscriptions
     WHERE name COLLATE NOCASE IN (SELECT name FROM users WHERE admin = 1 AND disabled_at IS NULL) ORDER BY id`).all() as any[];
+  const owners = db.prepare(`SELECT s.name, s.endpoint, s.p256dh, s.auth, 'app:' || c.name AS key FROM contraptions c
+    JOIN projects p ON p.id = c.home_scheme JOIN users u ON u.id = p.owner_id
+    JOIN push_subscriptions s ON s.name = u.name COLLATE NOCASE
+    WHERE u.admin = 0 AND u.disabled_at IS NULL AND EXISTS (SELECT 1 FROM contraption_users cu
+      JOIN contraptions m ON m.id = cu.contraption_id WHERE m.name = 'mandate' AND cu.user_id = u.id)
+    ORDER BY s.id, c.name`).all() as any[];
+  const out: Recipient[] = admins.map((s) => ({ ...s, only: null }));
+  const byDevice = new Map<string, Recipient>();
+  for (const { key, ...s } of owners) {
+    const r = byDevice.get(s.endpoint) ?? (out.push({ ...s, only: new Set() }), out.at(-1)!);
+    byDevice.set(s.endpoint, r);
+    r.only!.add(key);
+  }
+  return out;
 }
 
 export interface UnitState {

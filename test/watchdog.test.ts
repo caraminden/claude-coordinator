@@ -15,8 +15,10 @@ const root = mkdtempSync(join(tmpdir(), 'watchdog-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const MIN = 60_000;
 const T = 10 * MIN;
-const round = (state: WatchState, now: number, ...found: [string, string | null][]) =>
-  step(state, new Map(found.map(([k, f]) => [k, { title: k === 'citadel' ? 'Citadel' : k, finding: f }])), now, T);
+const round = (state: WatchState, now: number, ...found: [string, string | null][]) => {
+  const r = step(state, new Map(found.map(([k, f]) => [k, { title: k === 'citadel' ? 'Citadel' : k, finding: f }])), now, T);
+  return { ...r, message: r.messageFor(null) };
+};
 
 test('alerts once past the threshold, then once more when it is back', () => {
   let s: WatchState = {};
@@ -63,10 +65,14 @@ test('one push covers everything down; one going away unwatched gets an all-clea
   let s = round({}, 0, ['citadel', 'inactive'], ['mandate', 'port 3001 closed']).sent;
   const r = round(s, T, ['citadel', 'inactive'], ['mandate', 'port 3001 closed']);
   assert.equal(r.message?.title, 'Citadel, mandate down');
+  const owner = new Set(['mandate']);
+  assert.deepEqual(r.messageFor(owner), { title: 'mandate down', body: 'Down: mandate 10 min (port 3001 closed).', tag: 'citadel-watchdog', url: '/c/' }, "an owner hears only theirs");
+  assert.equal(r.messageFor(new Set(['peek'])), null, 'nor about anyone else');
   s = r.sent;
   const gone = round(s, T + 5 * MIN, ['citadel', 'inactive']); // mandate's unit was disabled
   assert.equal(gone.message?.title, 'mandate back up');
   assert.equal(gone.message?.body, 'Down: Citadel 15 min (inactive). Back: mandate (no longer watched after 15 min).');
+  assert.equal(gone.messageFor(owner)?.body, 'All back: mandate (no longer watched after 15 min).');
 });
 
 test('check skips contraptions whose unit is not enabled, and probes only active units', async () => {
@@ -126,7 +132,19 @@ test('targets and recipients come from the database', () => {
   db.prepare("UPDATE users SET disabled_at = 1 WHERE name = 'Josh'").run();
   store.createUser({ name: 'Sam', login: 'sam', admin: true });
   store.savePushSubscription('sam', 'https://push.example/sam', 'k', 'a');
-  assert.deepEqual(recipients(db).map((s) => s.name), ['Cara', 'sam'], 'admins only, not disabled ones, whatever the case of the name');
+  // Pat owns Peek's and Mandate's home schemes and has Mandate on; Lee owns a scheme too, without Mandate.
+  const lee = store.createUser({ name: 'Lee', login: 'lee' });
+  store.savePushSubscription('Lee', 'https://push.example/Lee', 'k', 'a');
+  const pat = store.findUser('name', 'Pat')!;
+  const patScheme = store.createProject('Pat things', null, pat.id);
+  const leeScheme = store.createProject('Lee things', null, lee.id);
+  const josh = store.findUser('name', 'Josh')!;
+  const joshScheme = store.createProject('Josh things', null, josh.id);
+  db.prepare("INSERT INTO contraptions (name, title, port, identity_public, identity_private, key_hash, keys_at, created_at, home_scheme) VALUES ('lees', 'Lees', 3003, 'p', 'q', 'h3', 0, 0, ?), ('joshs', 'Joshs', 3004, 'p', 'q', 'h4', 0, 0, ?)").run(leeScheme.id, joshScheme.id);
+  db.prepare("UPDATE contraptions SET home_scheme = ? WHERE name IN ('peek', 'mandate')").run(patScheme.id);
+  for (const u of [pat.id, josh.id]) db.prepare("INSERT INTO contraption_users (contraption_id, user_id, added_at) SELECT id, ?, 0 FROM contraptions WHERE name = 'mandate'").run(u);
+  assert.deepEqual(recipients(db).map((s) => [s.name, s.only && [...s.only]]), [['Cara', null], ['sam', null], ['Pat', ['app:mandate', 'app:peek']]],
+    'admins hear everything (not disabled ones, whatever the case of the name); an owner with Mandate on, their own; Lee has no Mandate, Josh is disabled');
   db.close();
 });
 
@@ -156,7 +174,7 @@ test('tools/watchdog.ts pushes the admins a readable message and saves its state
   }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out)))));
   const out = await run();
   assert.match(out, /1 watched, down: Citadel: failed/);
-  assert.match(out, /Pushing to 1 admin device\(s\): Citadel down: Down: Citadel 11 min \(failed\)\./);
+  assert.match(out, /Pushing to Cara: Citadel down: Down: Citadel 11 min \(failed\)\./);
   assert.equal(got.length, 1);
   assert.match(got[0].headers.authorization, new RegExp(`^vapid t=.+, k=${keys.publicKey}$`));
   assert.equal(got[0].headers.topic, 'citadel-watchdog');

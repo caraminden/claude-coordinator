@@ -1125,6 +1125,8 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
   let asked: Verdict | null = null;
   // A kill whose pids come from a whole listing: through a pipe (`| xargs kill`, `| while read p`), a
   // $( … ) it sits in, or a variable set from one. `listed`: this pipeline so far; `anyListed`: this paren level.
+  // shortcut: misses a kill inside `xargs sh -c '…'`, a listing saved to a file or read through <( … ), and
+  // a tainted variable echoed into xargs; widen it if a turn trips over one of those.
   const fed = new Set<Segment>();
   const tainted = new Set<string>();
   let listed = false;
@@ -1136,7 +1138,7 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
     if (from) {
       const names = !c.name ? s.words.map((w) => w.text.split('=')[0]) : c.name === 'for' ? c.args.slice(0, 1).map((w) => w.text) : c.name === 'read' ? c.args.filter((w) => !w.text.startsWith('-')).map((w) => w.text) : [];
       for (const n of names) tainted.add(n);
-    }
+    } else if (!c.name) for (const w of s.words) tainted.delete(w.text.split('=')[0]);
     if (wholeListing(c) || fed.has(s)) listed = anyListed = true;
     return null;
   };
@@ -1157,11 +1159,12 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
       seg = { words: [], redirects: [] };
       if (why && !why.ask) return why;
       asked ??= why;
-      if (tok.text !== '|' && tok.text !== '|&') listed = false;
+      if (tok.text !== '|' && tok.text !== '|&' && tok.text !== '(') listed = false;
       // A cd inside ( … ) or $( … ) doesn't outlive it.
+      // `ss -ltnp | ( grep x | xargs kill )`: the pipe carries on into the subshell.
       if (tok.text === '(') {
         stack.push({ cwd: st.cwd, redir: null, listed, anyListed });
-        listed = anyListed = false;
+        anyListed = false;
       }
       if (tok.text === ')' && stack.length) {
         const open = stack.pop()!;

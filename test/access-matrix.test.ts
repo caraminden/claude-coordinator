@@ -101,6 +101,7 @@ const OTHER_ROUTES: Probe[] = [
   P('DELETE', '/api/machines/:m', 'machine'), P('GET', '/api/machines/:m/session'),
   P('POST', '/api/machines/:m/session/0123456789abcdef01234567'), P('GET', '/api/machines/:m/contraption-session'),
   P('POST', '/api/machines/:m/contraption-session/0123456789abcdef01234567'),
+  P('GET', '/api/projects/:p/machines'), P('POST', '/api/projects/:p/machines/nope/check'),
   P('GET', '/api/contraptions/mine'), P('GET', '/api/contraptions'), P('POST', '/api/contraptions'), P('PATCH', '/api/contraptions/nope'),
   P('PUT', '/api/contraptions/nope/people/999'), P('POST', '/api/contraptions/nope/keys'), P('POST', '/api/contraptions/asks'),
   P('POST', '/api/contraptions/turns'), P('POST', '/api/contraptions/turns/1/cancel'), P('GET', '/api/contraptions/sessions?person=1'),

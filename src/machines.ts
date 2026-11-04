@@ -8,6 +8,7 @@
 // An agent with a workspaces config also serves its own workspace tools (server "ws"), which threads
 // see as mcp__<name>-ws__…, only while a person has the machine's workspace tools switched on.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Machine, Store } from './db.ts';
 
@@ -25,6 +26,11 @@ export type OnlineMachine = Machine & { servers: MachineServer[] };
 // An agent that stops reading (asleep mid-stream) is dropped rather than buffered for forever.
 const MAX_BACKLOG = 64 * 1024 * 1024;
 const PING_MS = 25_000;
+// How long a check (#307) waits on each server: a machine's MCP server may take a while to start.
+const CHECK_MS = 30_000;
+
+/** One server's check (#307): whether MCP initialize and tools/list came back, and what it lists. */
+export type CheckResult = { server: MachineServer; ok: boolean; tools: string[]; error: string | null; ms: number };
 
 const SSE_HEADERS = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' };
 
@@ -47,6 +53,8 @@ interface Agent {
   servers: MachineServer[];
   workspaces: unknown[];
   problems: string[];
+  /** The last check's results (#307), for list_machines; a reconnect starts without one. */
+  checked: { at: number; results: CheckResult[] } | null;
 }
 
 /** Whose turn a session serves: a minion's (its ticket and scheme), or a contraption turn's (#306). */
@@ -151,7 +159,7 @@ export class MachineRelay {
     if (old) this.dropAgent(machine.id, old);
     res.writeHead(200, SSE_HEADERS);
     res.write(`data: ${JSON.stringify({ hello: machine.name })}\n\n`);
-    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: ['mcp'], workspaces: [], problems: [] };
+    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: ['mcp'], workspaces: [], problems: [], checked: null };
     this.agents.set(machine.id, agent);
     this.store.updateMachine(machine.id, { last_seen_at: agent.since });
     this.onChange();
@@ -188,6 +196,80 @@ export class MachineRelay {
     for (const id of agent.sessions) if (!agent.servers.includes(this.sessions.get(id)!.server)) this.endSession(id, true);
     this.onChange();
     return true;
+  }
+
+  /** The last check of a connected machine (#307), or null. */
+  lastCheck(machineId: number) {
+    return this.agents.get(machineId)?.checked ?? null;
+  }
+
+  /**
+   * Test a machine the way a turn uses it (#307): on each server a turn would get, open a session as a
+   * turn's proxy does, send MCP initialize and tools/list, and close it. The agent starts a copy of its
+   * server for the session, as for any turn, and no tool is called, so nothing on the machine changes.
+   */
+  async check(machineId: number, holder: SessionHolder, who: string, timeoutMs = CHECK_MS): Promise<CheckResult[]> {
+    const servers = this.online().find((m) => m.id === machineId)?.servers ?? [];
+    const results: CheckResult[] = [];
+    for (const server of servers) results.push(await this.checkServer(machineId, holder, server, who, timeoutMs));
+    const agent = this.agents.get(machineId);
+    if (agent) agent.checked = { at: Date.now(), results };
+    return results;
+  }
+
+  private checkServer(machineId: number, holder: SessionHolder, server: MachineServer, who: string, timeoutMs: number): Promise<CheckResult> {
+    const started = Date.now();
+    return new Promise((resolve) => {
+      // Stands in for the proxy's stream: the session id, then the machine's replies, as server-sent events.
+      const sink = new EventEmitter() as EventEmitter & { writeHead(): void; write(chunk: string): boolean; end(): void };
+      const waiting = new Map<number, (reply: any) => void>();
+      let session = '';
+      let done = false;
+      let ended = false;
+      const finish = (ok: boolean, tools: string[], error: string | null) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ server, ok, tools, error, ms: Date.now() - started });
+        sink.end();
+      };
+      sink.writeHead = () => {};
+      sink.write = (chunk: string) => {
+        for (const line of String(chunk).split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          const msg = JSON.parse(line.slice(6));
+          if (msg.session) session = msg.session;
+          else waiting.get(msg.message?.id)?.(msg.message);
+        }
+        return true;
+      };
+      // The relay ends the stream when the agent drops or its server exits; ending it ourselves closes the session.
+      sink.end = () => {
+        if (!ended) {
+          ended = true;
+          sink.emit('close');
+        }
+        finish(false, [], 'the session ended: the machine went offline or its MCP server exited');
+      };
+      const timer = setTimeout(() => finish(false, [], `no answer in ${Math.round(timeoutMs / 1000)}s`), timeoutMs);
+      const send = (message: object) => this.fromSession(session, holder, { jsonrpc: '2.0', ...message }) || finish(false, [], 'the machine went offline');
+      const ask = (id: number, method: string, params: object) => new Promise<any>((res) => {
+        waiting.set(id, res);
+        send({ id, method, params });
+      });
+      if (!this.openSession(machineId, holder, server, who, sink as unknown as ServerResponse)) {
+        return finish(false, [], server === 'ws' ? 'offline, or its workspace tools are off' : 'offline');
+      }
+      (async () => {
+        const init = await ask(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'citadel-check', version: '1' } });
+        if (init?.error) return finish(false, [], `initialize failed: ${init.error.message ?? JSON.stringify(init.error)}`);
+        send({ method: 'notifications/initialized' });
+        const list = await ask(2, 'tools/list', {});
+        if (list?.error) return finish(false, [], `tools/list failed: ${list.error.message ?? JSON.stringify(list.error)}`);
+        if (!Array.isArray(list?.result?.tools)) return finish(false, [], `tools/list sent no tools: ${JSON.stringify(list).slice(0, 300)}`);
+        finish(true, list.result.tools.map((t: any) => String(t?.name)), null);
+      })();
+    });
   }
 
   /** End a machine's sessions of one server (its workspace tools were switched off). */

@@ -103,6 +103,10 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   the switch on. The MCP server choice can be None, for a machine that lends only a folder.
   The agent re-reads the file when it changes. Builds still run whatever the repo's project
   files say, so this limits what minions can ask for; it is not a sandbox.
+  The Taskmaster sees them too (#307): `list_machines` gives each machine its scheme can see
+  (all of them for an admin's ask, else those its asker's minion turns there would get) with its
+  live state, and `check_machine` opens a session like a turn's proxy, sends MCP `initialize` and
+  `tools/list` to each server a turn would get, and reports pass or fail. It calls no tool.
 - **GitHub** wakes a minion about its pull request. `src/github.ts` polls each open
   minion's branch for its newest PR with one `gh api graphql` call, one minion at a time
   (every 2 minutes while a PR is open, backing off to 15 while nothing changes; 30 for

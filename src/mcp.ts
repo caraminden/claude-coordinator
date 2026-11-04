@@ -366,6 +366,18 @@ const TOOLS = [
       "List every skill, agent and rule in every scheme's repo (.claude/skills, .claude/agents, .claude/rules) and in the Citadel kit, for picking what a scheme should adapt: name, kind, source (kit, or scheme and path), a one-line description, and whether the kit has one of the same name. Descriptions only, never the files themselves; a setup minion reads the ones it adapts.",
     inputSchema: { type: 'object', properties: {} },
   },
+  {
+    name: 'list_machines',
+    description:
+      "List the connected machines (people's computers lending an MCP server, like a Godot editor, and workspace tools) this scheme can see: an admin's ask sees all of them, anyone else's those a minion turn of theirs here would get. For each: online or offline from the server's live connection, connected since and last seen, host, the MCP server its agent runs, the tools it offered at its last check_machine, workspace tools on or off and its workspaces, and whom it is lent to. Read-only.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'check_machine',
+    description:
+      "Test one machine through the path a minion turn uses: for its MCP server (and its workspace tools, when on) open a session, send MCP initialize and tools/list, and close it. Reports pass or fail per server with the error, and the tools listed. It starts a copy of the machine's MCP server, as any turn does, but calls no tool, so nothing on the machine changes. Takes up to 30 seconds a server.",
+    inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'The machine name, as list_machines shows it, e.g. josh-laptop' } }, required: ['name'] },
+  },
   STRIKE_TEXT,
   LIST_PROPERTIES,
   {
@@ -646,6 +658,35 @@ function contraptionText(c: any): string {
 function contraptionPath(args: any): string {
   if (typeof args.name !== 'string' || !/^[a-z0-9-]+$/.test(args.name)) throw new Error('name is required: the contraption\'s slug, like mandate');
   return `/api/contraptions/${encodeURIComponent(args.name)}`;
+}
+
+/** How long ago a time was, for the machine tools. */
+function ago(ms: number | null): string {
+  if (!ms) return 'never';
+  const m = Math.round((Date.now() - ms) / 60_000);
+  const when = new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+  return `${when} (${m < 1 ? 'just now' : m < 120 ? `${m} min ago` : `${Math.round(m / 60)} h ago`})`;
+}
+
+/** One check result line per server (#307). */
+function checkLines(results: any[]): string[] {
+  return results.map((r) => `- ${r.server === 'ws' ? 'workspace tools' : 'MCP server'}: ${r.ok ? `PASS in ${r.ms} ms, ${r.tools.length} tools: ${r.tools.join(', ') || 'none'}` : `FAIL after ${r.ms} ms: ${r.error}`}`);
+}
+
+/** A machine as list_machines shows it (#307). */
+function machineText(m: any): string {
+  const lent = m.owner_id !== null ? `${m.owner_name ?? 'a removed person'}'s own: goes to the turns they ask for, in schemes they're in`
+    : m.project_names ? `lent to ${m.project_names.length ? m.project_names.join(', ') : 'no scheme'}` : "lent to every scheme an admin owns";
+  const ws = m.workspaces.map((w: any) => `${w.name} (${w.path})`).join(', ');
+  return [
+    `${m.name}: ${m.online ? `ONLINE, connected since ${ago(m.connected_at)}, host ${m.host || '?'}, ${m.sessions} session${m.sessions === 1 ? '' : 's'} open` : `OFFLINE, last seen ${ago(m.last_seen_at)}`}`,
+    m.online ? `  agent runs: ${m.command || '?'}; offers ${m.servers.length ? m.servers.map((s: string) => (s === 'ws' ? 'workspace tools' : 'its MCP server')).join(' and ') : 'nothing'}` : '',
+    `  workspace tools: ${m.workspace_tools ? 'on' : 'off'}${m.online && ws ? `; workspaces: ${ws}` : ''}`,
+    `  ${lent}`,
+    m.checked ? [`  last check ${ago(m.checked.at)}:`, ...checkLines(m.checked.results).map((l) => `  ${l}`)].join('\n') : m.online ? '  tools: not checked since it connected (check_machine lists them)' : '',
+    m.problems.length ? `  agent reports problems: ${m.problems.join('; ')}` : '',
+    m.notes ? `  notes: ${m.notes.replace(/\n+/g, ' ')}` : '',
+  ].filter(Boolean).join('\n');
 }
 
 /** How long a call keeps trying while the app restarts: the turn outlives the server, its calls wait for the next one. */
@@ -1093,6 +1134,19 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'strike_text':
       await call('POST', `/api/tickets/${TICKET}/strike`, { text: args.text, reason: args.reason });
       return 'Struck through in the chat, with your reason in a note.';
+    case 'list_machines': {
+      const { machine_tools, machines } = await call('GET', `/api/projects/${PROJECT}/machines`);
+      const head = `Machine tools for this scheme's minions: ${machine_tools ? 'on' : 'off (minions get no machines until a person switches them on)'}.`;
+      return [head, ...(machines.length ? machines.map(machineText) : ['No machines this scheme can see.'])].join('\n\n');
+    }
+    case 'check_machine': {
+      if (typeof args.name !== 'string' || !/^[a-z0-9-]{1,30}$/i.test(args.name)) throw new Error('name is required: the machine name, as list_machines shows it');
+      const { machine, results } = await call('POST', `/api/projects/${PROJECT}/machines/${args.name.toLowerCase()}/check`);
+      if (!machine.online) return `${machine.name}: FAIL, offline (last seen ${ago(machine.last_seen_at)}). Its agent isn't connected: on that computer, check machine-agent.mjs is running and its token is current.`;
+      if (!results.length) return `${machine.name}: online, but it offers nothing a turn would get (${machine.servers.includes('ws') ? 'workspace tools are switched off and it lends no MCP server' : 'no MCP server and no workspace tools'}).`;
+      const pass = results.every((r: any) => r.ok);
+      return [`${machine.name}: ${pass ? 'PASS' : 'FAIL'}`, ...checkLines(results)].join('\n');
+    }
     case 'list_catalogue': {
       const { items } = await call('GET', '/api/catalogue');
       if (!items.length) return 'Nothing in the catalogue.';

@@ -2,7 +2,7 @@
 // turn opens sessions to one and sends them messages.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { lendsMachine, machinesFor, managesMachine } from '../access.ts';
+import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, hashToken, newToken } from '../machines.ts';
 import type { Machine } from '../db.ts';
 import { HttpError, json, readJson, type Ctx, type Route } from '../http.ts';
@@ -98,6 +98,21 @@ const managed = (handler: (ctx: Ctx) => unknown) => (ctx: Ctx) => {
   return handler(ctx);
 };
 const turns = { who: ['minion'], refuse: 'Only a minion\'s turn can use a machine' } as const;
+
+/** The machines this Taskmaster's turn may see (#307), each as the Machines page shows it plus whom it goes to. */
+function taskmasterMachines({ app, caller, project }: Ctx) {
+  const asker = app.store.turnAsker(caller!.id);
+  return app.store.listMachines().filter((m) => taskmasterSeesMachine(app.store, m, project, asker)).map((m) => {
+    const view = app.machines.view(m);
+    return {
+      ...view,
+      owner_name: m.owner_id === null ? null : app.store.getUser(m.owner_id)?.name ?? null,
+      project_names: view.projects?.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`) ?? null,
+      checked: app.machines.lastCheck(m.id),
+    };
+  });
+}
+const taskmaster = { who: ['taskmaster'], refuse: 'Only a Taskmaster lists and checks machines here; people use the Machines page' } as const;
 
 export const machineRoutes: Route[] = [
   // On the app's own address only when machines have no address of their own (MACHINES_URL).
@@ -221,6 +236,24 @@ export const machineRoutes: Route[] = [
       const body = await readJson(req, 50_000_000);
       if (!app.machines.fromSession(params.session, { contraptionTurn: turn.id }, body.message)) throw new HttpError(503, 'That machine went offline');
       return json(res, 202, {});
+    },
+  },
+
+  // The Taskmaster's look at the machines (#307): list them with their live state, and test one.
+  {
+    method: 'GET', path: '/api/projects/:project/machines', ...taskmaster,
+    handler: (ctx) => json(ctx.res, 200, { machine_tools: !!ctx.project.machine_tools, machines: taskmasterMachines(ctx) }),
+  },
+  {
+    method: 'POST', path: '/api/projects/:project/machines/:name/check', ...taskmaster,
+    async handler(ctx) {
+      const { app, caller, project, res, params } = ctx;
+      const name = params.name.toLowerCase();
+      const machine = taskmasterMachines(ctx).find((m) => m.name === name);
+      if (!machine) throw new HttpError(404, `No machine called ${name} that this scheme can see`);
+      if (!machine.online) return json(res, 200, { machine, results: [] });
+      const results = await app.machines.check(machine.id, { ticketId: caller!.id, projectId: project.id }, `the ${project.name} Taskmaster's check`);
+      return json(res, 200, { machine: { ...machine, checked: app.machines.lastCheck(machine.id) }, results });
     },
   },
 

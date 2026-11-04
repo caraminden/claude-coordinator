@@ -4,9 +4,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, until, stopProcs, stopTurns } from './helpers.ts';
+import { createInterface } from 'node:readline';
+import { agentToken, bootServer, until, stopProcs, stopTurns } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
-import { Store } from '../src/db.ts';
+import { askerKey, Store } from '../src/db.ts';
+import { hashToken, newToken } from '../src/machines.ts';
 
 // The whole path from a thread's turn to a machine and back: the real server, the real agent
 // (public/machine-agent.mjs) running a stand-in MCP server, and a stand-in `claude -p` that acts
@@ -381,4 +383,82 @@ test('a contraption turn gets its person\'s own machines, and no one else\'s or 
   assert.equal(forged.status, 401);
   await forged.body!.cancel();
   for (const m of [own, sharedBox]) await call(`/api/machines/${m.machine.id}`, { method: 'DELETE' });
+});
+
+test('a Taskmaster lists the machines its scheme can see and checks one through a turn\'s path (#307)', async () => {
+  const store = new Store(join(root, 'data', 'coordinator.db'));
+  const josh = store.findUser('name', 'Josh')!;
+  const dana = store.findUser('name', 'Dana')!;
+  const cara = store.findUser('name', 'Cara')!;
+  const schemes = await call('/api/projects');
+  const [shared, caras] = ['Shared', 'Caras'].map((n) => schemes.find((p: any) => p.name === n));
+  const machine = (name: string, owner: number | null) => {
+    const m = store.createMachine(name, '', 'Cara', owner, owner !== null);
+    const token = newToken(m.id);
+    store.updateMachine(m.id, { token_hash: hashToken(token) });
+    return token;
+  };
+  startAgent(machine('tm-josh', josh.id));
+  startAgent(machine('tm-box', null));
+  // An agent whose MCP server dies at once: online, but the check fails.
+  startAgent(machine('tm-broken', null), ['--', process.execPath, '-e', 'process.exit(1)']);
+  await until('the machines to come online', async () => (await call('/api/machines')).filter((m: any) => m.name.startsWith('tm-') && m.online).length === 3);
+
+  // The Taskmaster's own MCP server, as its turn starts it, run for whoever asked for the turn.
+  const tools = async (project: any, asker: number) => {
+    const tm = (await call(`/api/projects/${project.id}`)).coordinator.id;
+    store.setSetting(askerKey(tm), asker);
+    const child = spawn(process.execPath, [join(repo, 'src', 'mcp.ts')], {
+      env: { ...process.env, COORDINATOR_ROLE: 'coordinator', COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), tm), COORDINATOR_PROJECT: String(project.id) },
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    procs.push(child);
+    const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+    let n = 0;
+    const use = async (name: string, args: object = {}) => {
+      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: ++n, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+      const r = JSON.parse((await lines.next()).value).result;
+      return (r.isError ? 'ERROR ' : '') + r.content[0].text as string;
+    };
+    return { use, tm, done: () => child.kill() };
+  };
+
+  // Josh's ask in a scheme he's in: his own machine and the shared ones, with their live state.
+  const asJosh = await tools(shared, josh.id);
+  let list = await asJosh.use('list_machines');
+  assert.match(list, /^tm-josh: ONLINE, connected since \d{4}-\d\d-\d\d \d\d:\d\d UTC \((just now|1 min ago)\), host /m);
+  assert.match(list, /Josh's own: goes to the turns they ask for/);
+  assert.match(list, /^tm-box: ONLINE/m);
+  assert.match(list, /lent to every scheme an admin owns/);
+  assert.match(list, /^sleepy: OFFLINE, last seen never/m);
+  assert.match(list, /tools: not checked since it connected/);
+
+  const passed = await asJosh.use('check_machine', { name: 'tm-box' });
+  assert.match(passed, /^tm-box: PASS\n- MCP server: PASS in \d+ ms, 1 tools: whoami$/);
+  await until('the check\'s session to close', async () => (await call('/api/machines')).find((m: any) => m.name === 'tm-box').sessions === 0);
+  list = await asJosh.use('list_machines');
+  assert.match(list, /tm-box: ONLINE[^]*?last check .*:\n  - MCP server: PASS in \d+ ms, 1 tools: whoami/);
+  assert.match(await asJosh.use('check_machine', { name: 'tm-broken' }), /^tm-broken: FAIL\n- MCP server: FAIL after \d+ ms: the session ended/);
+  assert.match(await asJosh.use('check_machine', { name: 'sleepy' }), /^sleepy: FAIL, offline/);
+  assert.match(await asJosh.use('check_machine', { name: 'nope' }), /^ERROR .*No machine called nope/);
+  asJosh.done();
+
+  // Dana's ask in the same scheme doesn't see or reach Josh's machine.
+  const asDana = await tools(shared, dana.id);
+  list = await asDana.use('list_machines');
+  assert.doesNotMatch(list, /tm-josh/);
+  assert.match(list, /^tm-box: ONLINE/m);
+  assert.match(await asDana.use('check_machine', { name: 'tm-josh' }), /^ERROR .*No machine called tm-josh/);
+  asDana.done();
+
+  // An admin's ask sees every machine, even one whose owner isn't in this scheme.
+  const asCara = await tools(caras, cara.id);
+  assert.match(await asCara.use('list_machines'), /^tm-josh: ONLINE/m);
+  asCara.done();
+
+  // Only a Taskmaster: not a person, not a minion.
+  await assert.rejects(call(`/api/projects/${shared.id}/machines`), /403/);
+  const minion = await call(`/api/projects/${shared.id}/tickets`, { method: 'POST', body: { message: 'hi' } });
+  const asMinion = await fetch(`${base}/api/projects/${shared.id}/machines`, { headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}` } });
+  assert.equal(asMinion.status, 403);
 });

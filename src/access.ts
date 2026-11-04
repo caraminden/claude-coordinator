@@ -85,6 +85,16 @@ export function lendsMachine(store: Store, machine: Machine, project: Project, a
   return machine.scoped ? store.machineGranted(machine.id, project.id) : lendsMachines(store, project);
 }
 
+/**
+ * Whether a Taskmaster's turn may list and check this machine (#307): any machine for an admin's ask, else
+ * one that a turn its asker started in this scheme would get (lendsMachine).
+ */
+export function taskmasterSeesMachine(store: Store, machine: Machine, project: Project, askerId: number | null): boolean {
+  const asker = askerId === null ? undefined : store.getUser(askerId);
+  if (asker?.admin && !asker.disabled_at) return true;
+  return lendsMachine(store, machine, project, askerId === null ? [] : [askerId]);
+}
+
 /** Whether a machine's owner is among a turn's askers and, for a scheme's turn, in that scheme. */
 export function ownerAsked(store: Store, ownerId: number, askers: readonly number[], projectId: number | null): boolean {
   const owner = store.getUser(ownerId);

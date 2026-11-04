@@ -248,3 +248,9 @@ test('the Windows task runs hidden, logs, replaces a running copy and shows what
   assert.match(win, /'Remove it: Unregister-ScheduledTask -TaskName "Coordinator agent \(pc\)" -Confirm:\$false; Get-CimInstance /);
   assert.match(win, /\n}$/);
 });
+
+test('systemd gets % doubled everywhere, but $ only in ExecStart, where it expands', () => {
+  const s = backgroundService({ platform: 'linux', home: '/home/jo', uid: 1000, name: 'pc', env: { PATH: '/opt/$x/bin:/usr/bin' }, argv: ['/usr/bin/node', '/home/jo/a/machine-agent.mjs', 'https://a', 't$1', '--', 'run', '5%'] });
+  assert.match(s.text, /^Environment="PATH=\/opt\/\$x\/bin:\/usr\/bin"$/m);
+  assert.match(s.text, /^ExecStart="\/usr\/bin\/node" "\/home\/jo\/a\/machine-agent\.mjs" "https:\/\/a" "t\$\$1" "--log" "\/home\/jo\/a\/machine-agent-pc\.log" "--" "run" "5%%"$/m);
+});

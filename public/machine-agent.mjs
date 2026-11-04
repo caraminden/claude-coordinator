@@ -487,8 +487,9 @@ function logTo(file) {
 }
 
 const xml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-// systemd reads quotes and backslashes, and expands % and $ even inside quotes.
-const unitWord = (s) => `"${s.replace(/[\\"]/g, '\\$&').replace(/%/g, '%%').replace(/\$/g, '$$$$')}"`;
+// systemd reads quotes and backslashes, and expands % everywhere; ExecStart also expands $.
+const unitQuote = (s) => `"${s.replace(/[\\"]/g, '\\$&').replace(/%/g, '%%')}"`;
+const unitWord = (s) => unitQuote(s).replace(/\$/g, '$$$$');
 
 /**
  * What runs the agent in the background on macOS (a launchd agent) or Linux (a systemd user unit):
@@ -550,7 +551,7 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=${dir.replace(/%/g, '%%')}
-${Object.entries(vars).map(([k, v]) => `Environment=${unitWord(`${k}=${v}`)}`).join('\n')}
+${Object.entries(vars).map(([k, v]) => `Environment=${unitQuote(`${k}=${v}`)}`).join('\n')}
 ExecStart=${args.map(unitWord).join(' ')}
 Restart=always
 RestartSec=30
@@ -584,7 +585,9 @@ async function installService(name, argv) {
     const run = spawnSync(cmd, args, { encoding: 'utf8' });
     if (run.status !== 0) {
       throw new Error(`${cmd} ${args.join(' ')} failed${run.error ? `: ${run.error.message}` : `:\n${run.stderr.trim()}`}\n` +
-        (cmd === 'systemctl' ? 'This computer has no systemd user session: run the "in this window" lines from the Machines page in a terminal you leave open instead.' : ''));
+        (cmd === 'systemctl'
+          ? 'This computer has no systemd user session: use the "Just try it" lines from the Machines page in a terminal you leave open instead.'
+          : 'launchd needs this Mac\'s own login (not SSH): run this in Terminal on the Mac, or use the "Just try it" lines from the Machines page.'));
     }
   }
   console.log(`Installed ${s.file}. Waiting for the agent to connect…`);

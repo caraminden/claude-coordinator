@@ -142,7 +142,7 @@ export function machineSetupWindows(url, name, token, kind, what, folder) {
     '$skip = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue).Count',
     `Start-ScheduledTask -TaskName "${task}"`,
     '"Started. Waiting for it to connect..."',
-    'foreach ($i in 1..40) { Start-Sleep -Milliseconds 500; $said = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue | Select-Object -Skip $skip); if ($said -match "Connected to |rejected|refused") { break } }',
+    'foreach ($i in 1..40) { Start-Sleep -Milliseconds 500; $all = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue); if ($all.Count -lt $skip) { $skip = 0 }; $said = @($all | Select-Object -Skip $skip); if ($said -match "Connected to |rejected|refused") { break } }',
     '$said',
     'if ($said -match "Connected to ") { "It runs in the background now, also after you close this window, and starts again at every logon." } else { "It has not connected yet: the lines above say why (nothing above means it did not start)." }',
     psq(`Its output: ${help.watch}`),

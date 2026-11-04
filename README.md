@@ -97,6 +97,10 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   A workspace its owner keeps on a branch (an Obsidian vault with Obsidian Git) sets
   `"git_sync": false`: `git_sync` refuses there, `workspaces` and the Machines page say it's off,
   and an agent whose workspaces all have it off doesn't offer the tool.
+  A folder typed in the add form ("Folder minions can use", #305) makes both snippets add it to
+  that file as a workspace named after the folder, keeping what's there, with a
+  `git pull --ff-only` task and `git_sync` off when it's a git repo; such a machine starts with
+  the switch on. The MCP server choice can be None, for a machine that lends only a folder.
   The agent re-reads the file when it changes. Builds still run whatever the repo's project
   files say, so this limits what minions can ask for; it is not a sandbox.
 - **GitHub** wakes a minion about its pull request. `src/github.ts` polls each open

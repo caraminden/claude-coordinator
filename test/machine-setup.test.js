@@ -89,6 +89,22 @@ test('the terminal folder step refuses a missing folder or a broken file and lea
   assert.equal(run.status, 1);
   assert.match(run.stderr, /is not valid JSON/);
   assert.equal(readFileSync(file, 'utf8'), '{ not json');
+  for (const text of ['[]', 'null', '{"workspaces":[]}']) {
+    writeFileSync(file, text);
+    run = runPosix(agent, vault);
+    assert.equal(run.status, 1, text);
+    assert.match(run.stderr, /does not hold/);
+    assert.equal(readFileSync(file, 'utf8'), text);
+  }
+});
+
+test('a folder that moves keeps its workspace name and says where it was', () => {
+  const { agent, vault, file } = dirs();
+  writeFileSync(file, JSON.stringify({ workspaces: { [workspaceName(vault)]: { path: '/old/place', tasks: {} } } }));
+  const run = runPosix(agent, vault);
+  assert.equal(run.status, 0);
+  assert.match(run.stdout, /\(it was \/old\/place\)/);
+  assert.equal(read(file).workspaces[workspaceName(vault)].path, vault);
 });
 
 test('the Windows folder step runs the same script from a literal here-string, before the task is registered', () => {

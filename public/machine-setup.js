@@ -43,8 +43,13 @@ const MERGE = [
   '    process.exit(1);',
   '  }',
   '}',
-  'config.workspaces ??= {};',
-  'const w = config.workspaces[name] ??= {};',
+  'const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);',
+  'if (!isObject(config) || !isObject(config.workspaces ??= {}) || !isObject(config.workspaces[name] ??= {})) {',
+  '  console.error(`${file} does not hold { "workspaces": { ... } } as the agent reads it. Fix or move it, then run this again.`);',
+  '  process.exit(1);',
+  '}',
+  'const w = config.workspaces[name];',
+  'const was = w.path && w.path !== dir ? ` (it was ${w.path})` : "";',
   'w.path = dir;',
   'w.tasks ??= {};',
   'const pull = fs.existsSync(path.join(dir, ".git")) && !w.tasks.pull;',
@@ -54,7 +59,7 @@ const MERGE = [
   '  w.git_sync ??= false;',
   '}',
   'fs.writeFileSync(file, JSON.stringify(config, null, 2) + os.EOL);',
-  'console.log(`Workspace ${name} is ${dir}${pull ? ", with a pull task" : ""}, in ${path.resolve(file)}`);',
+  'console.log(`Workspace ${name} is ${dir}${was}${pull ? ", with a pull task" : ""}, in ${path.resolve(file)}`);',
 ].join('\n');
 
 const posix = (s) => `'${s.replace(/'/g, `'\\''`)}'`;

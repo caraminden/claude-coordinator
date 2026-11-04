@@ -724,7 +724,8 @@ function renderMachineSetup() {
     h('strong', {}, `Connect ${t.name}`),
     h('p', { class: 'small' }, 'The token is shown only now; if you lose it, make a new one. Run one of these on that computer:'),
     folder ? h('p', { class: 'small' }, `It adds ${folder} to machine-agent.json there as workspace ${workspaceName(folder)}, keeping what the file already lists. `,
-      'If the folder is a git repo it also gets a pull task (git pull --ff-only) with git sync off; pull uses the git sign-in saved on that computer, so check git pull works there first.') : false,
+      'If the folder is a git repo it also gets a pull task (git pull --ff-only) with git sync off; pull uses the git sign-in saved on that computer, so check git pull works there first.',
+      view.machines.find((m) => m.id === t.id)?.workspace_tools === false ? ' Workspace tools are off for this machine: switch them on below so minions get the folder.' : '') : false,
     ...block('Windows PowerShell: starts now and at every logon, no reboot', machineSetupWindows(t.url, t.name, t.token, kind, command, folder)),
     ...block('Any computer, in a terminal you leave open', machineSetup(t.url, t.token, kind, command, folder))));
 }

@@ -1,7 +1,7 @@
 // The down-alert watchdog (#302): tools/watchdog.ts runs this every 5 minutes from a user timer
 // (deploy/citadel-watchdog.timer). It checks Citadel's unit and /api/health, and each contraption's
 // enabled citadel-app-<name>.service and its health path (or port). Once one has been down for the
-// threshold it web-pushes every admin (and a down contraption's owner: recipients) straight from here, since Citadel (and Mandate) may be the thing
+// threshold it web-pushes every admin, and a contraption's home-scheme owner (see recipients), straight from here, since Citadel (and Mandate) may be the thing
 // that's down, and again when it's back. It reads the database read-only and never restarts anything:
 // that's systemd's job (Restart=always).
 import { execFile } from 'node:child_process';

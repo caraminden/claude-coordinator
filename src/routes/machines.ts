@@ -207,7 +207,8 @@ export const machineRoutes: Route[] = [
     handler({ req, res, app, params }) {
       const turn = contraptionTurn(ctxToken(req), app);
       const id = Number(params.machineId);
-      if (!turn.machines.includes(id)) throw new HttpError(403, 'That machine isn\'t this turn\'s person\'s, or the turn started without it');
+      // The owner check too: a removed machine's id can come back as someone else's.
+      if (!turn.machines.includes(id) || app.store.getMachine(id)?.owner_id !== turn.person) throw new HttpError(403, 'That machine isn\'t this turn\'s person\'s, or the turn started without it');
       const who = `${app.store.getUser(turn.person)?.name ?? 'someone'} in ${app.store.listContraptions().find((c) => c.id === turn.contraption)?.title ?? 'a contraption'}`;
       if (!app.machines.openSession(id, { contraptionTurn: turn.id }, 'mcp', who, res)) throw new HttpError(503, 'That machine is offline');
     },
@@ -232,7 +233,8 @@ export const machineRoutes: Route[] = [
       const machine = app.store.getMachine(Number(params.machineId));
       // A person's own (#306) opens only for a turn that got it at its start (src/runner.ts TurnState.owned),
       // which its owner asked for: never mid-turn, never for someone else's.
-      if (machine && machine.owner_id !== null && !app.runner.ownedMachines(caller!.id).includes(machine.id)) {
+      // The owner check too: a removed machine's id can come back as someone else's.
+      if (machine && machine.owner_id !== null && (!app.runner.ownedMachines(caller!.id).includes(machine.id) || machine.owner_id !== app.store.turnAsker(caller!.id))) {
         throw new HttpError(403, 'That machine is someone else\'s, or this turn started without it');
       }
       // A machine lent to chosen schemes opens only for a minion that would have got it at its turn's start

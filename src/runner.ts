@@ -1681,8 +1681,9 @@ export class Runner {
     const askers = [...(resumes || limitTries ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
     const asker = askers.find((a) => !this.store.getUser(a)?.admin) ?? askers[0] ?? before ?? person;
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now and lent
-    // to the scheme, and the askers' own (#306): only people in this batch, so a turn no one asked for gets none.
-    const machines = ticket.kind === 'coordinator' || !project.machine_tools ? [] : this.machines(project, askers);
+    // to the scheme, and the asker's own (#306): the one person this batch (or the turn it resumes) answers, so
+    // a turn no one asked for gets none, and a ride-along message doesn't bring its sender's machines.
+    const machines = ticket.kind === 'coordinator' || !project.machine_tools ? [] : this.machines(project, askers.length ? [asker!] : []);
     // Tool calls matching the merge asks or the project's approval rules wait for a person (threads only:
     // a Taskmaster can't show cards, so an ask would be a silent deny there).
     const rules = ticket.kind === 'coordinator' ? [] : [...new Set([...MERGE_ASKS, ...lines(project.approval_rules)])];

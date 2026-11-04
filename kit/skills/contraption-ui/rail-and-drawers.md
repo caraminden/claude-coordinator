@@ -101,5 +101,5 @@ const drawers = initDrawers({
 
 ## Not here yet (the rail)
 
-- The list is fetched once per page load: someone newly enabled for a contraption sees it on their next load.
+- The list is fetched once per page load: someone newly enabled for a contraption sees it on their next load. Only a greyed-out app (down when the page loaded, say mid-restart) or an icon that failed to load is asked about again, every 15 s while the page is showing, and drawn again once it's back (#311).
 - No unread badges or per-app state on the icons.

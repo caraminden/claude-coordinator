@@ -27,7 +27,8 @@ const showing = () => (inContraption ? location.pathname.match(/\/apps\/([^/]+)\
  * contraption showing (null: Citadel's own views): Citadel first, then each contraption, which opens in
  * Citadel's window (#/apps/<name>): in the page from Citadel itself, through Citadel's root from a
  * contraption's own page. None at all when nothing is enabled. One that isn't up (its service is down,
- * or its keys don't open) is a greyed tile, so the page fetches nothing from it.
+ * or its keys don't open) is a greyed tile, so the page fetches nothing from it; the rail asks again every
+ * 15 s until it's back (recheckSoon).
  */
 export function railItems(mine, current, citadel = '/', inCitadel = false) {
   if (!mine?.length) return [];
@@ -161,6 +162,12 @@ function syncRail() {
 /** Take the rail away (signing out). */
 export function hideRail() {
   shown++;
+  clearRail();
+}
+
+function clearRail() {
+  clearTimeout(recheck);
+  recheck = 0;
   for (const el of [nav, backdrop, handle]) el?.remove();
   nav = backdrop = handle = null;
   document.documentElement.classList.remove('has-citadel-rail');
@@ -174,6 +181,36 @@ function makeBackdrop() {
   return el;
 }
 
+const RECHECK_MS = 15_000;
+let recheck = 0; // a timer while an app is greyed out or its icon failed, so it comes back once it's up (#311)
+let drawn = ''; // the entries drawn, to redraw only when a recheck finds them changed
+let iconFailed = false;
+
+const fetchItems = async () => {
+  let mine = [];
+  try {
+    const res = await fetch(new URL('api/contraptions/mine', root), { headers: { Accept: 'application/json' } });
+    if (res.ok) mine = await res.json();
+  } catch {}
+  return railItems(mine, showing(), root.pathname, !inContraption);
+};
+
+/** Ask again soon; an open switcher or a hidden page waits for the next round. */
+function recheckSoon() {
+  if (recheck) return;
+  recheck = setTimeout(async () => {
+    recheck = 0;
+    if (!nav) return;
+    if (nav.classList.contains('open') || document.hidden) return recheckSoon();
+    const mark = shown;
+    const items = await fetchItems();
+    if (mark !== shown || !nav) return;
+    if (nav.classList.contains('open')) return recheckSoon();
+    if (iconFailed || JSON.stringify(items) !== drawn) drawRail(items);
+    else recheckSoon();
+  }, RECHECK_MS);
+}
+
 /** Fetch your contraptions and draw the rail, or take it away when there are none. */
 export async function showRail() {
   if (host) {
@@ -184,15 +221,17 @@ export async function showRail() {
     return false;
   }
   const mark = ++shown;
-  let mine = [];
-  try {
-    const res = await fetch(new URL('api/contraptions/mine', root), { headers: { Accept: 'application/json' } });
-    if (res.ok) mine = await res.json();
-  } catch {}
+  const items = await fetchItems();
   if (mark !== shown) return false;
-  const items = railItems(mine, showing(), root.pathname, !inContraption);
-  hideRail();
+  return drawRail(items);
+}
+
+function drawRail(items) {
+  clearRail();
   if (!items.length) return false;
+  drawn = JSON.stringify(items);
+  iconFailed = false;
+  if (items.some((i) => i.down)) recheckSoon();
   addStyles();
   nav = document.createElement('nav');
   nav.className = slot ? 'citadel-rail placed' : 'citadel-rail';
@@ -215,7 +254,12 @@ export async function showRail() {
       pic = document.createElement('img');
       pic.src = item.icon;
       pic.alt = '';
-      pic.addEventListener('error', () => pic.replaceWith(tile), { once: true }); // went down since the list was fetched
+      // Went down since the list was fetched (a restart): a letter for now, the icon again once it loads.
+      pic.addEventListener('error', () => {
+        pic.replaceWith(tile);
+        iconFailed = true;
+        recheckSoon();
+      }, { once: true });
     }
     const label = document.createElement('span');
     label.className = 'label';

@@ -343,6 +343,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .progress-line .count { font-variant-numeric: tabular-nums; font-weight: 600; }
 .progress-line .chev { color: var(--muted); }
 .progress .meter { display: block; appearance: none; width: calc(100% - 0.4rem); height: 3px; border: 0; border-radius: 2px; margin: 0.25rem 0.2rem 0; background: var(--line); overflow: hidden; }
+.progress .meter.blank { visibility: hidden; }
 .progress .meter::-webkit-progress-bar { background: var(--line); }
 .progress .meter::-webkit-progress-value { background: var(--running); }
 .progress .meter::-moz-progress-bar { background: var(--running); }
@@ -627,6 +628,8 @@ button.pin.on { color: var(--accent); }
 .usage[data-level="error"] .fill { background: var(--error); }
 .usage[data-level="error"] .label { color: var(--error); }
 .usage[hidden] { display: none; }
+/* "Week 9%" → "Week 10%" doesn't nudge the bar: room for "Week 100%" (rule 13). */
+.usage .label { min-width: 9ch; text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) { .usage .track { width: 3rem; } }
 
 /* The working line under the chat while a turn runs, one line: who's working · what's running · time · queued */
@@ -639,7 +642,9 @@ button.pin.on { color: var(--accent); }
 .typing .line:not(:has(.what)) .lead { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .typing .time, .typing .queued { flex: none; font-variant-numeric: tabular-nums; }
 .typing .sep { flex: none; opacity: 0.6; }
-.typing[hidden] { display: none; }
+/* No turn running: the line keeps its room, empty, so a turn starting or ending moves nothing (rule 13). */
+.typing { min-height: calc(0.9rem + 8px); } /* the dots pill: its padding, dots and border */
+.typing[hidden] { visibility: hidden; }
 /* A turn's in-between remarks, folded into a row per stretch between messages */
 .unread-divider { display: flex; align-items: center; gap: 0.5rem; margin: 0.75rem 0; color: var(--accent); font-size: 0.8em; font-weight: 600; }
 .unread-divider::before, .unread-divider::after { content: ''; flex: 1; border-top: 1px solid var(--accent); }
@@ -806,7 +811,9 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .find-box .chat-find { width: 9rem; padding: 0.2rem 0.5rem; font-size: 0.85em; transition: width 0.15s; }
 .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 13rem; }
 .find-box .find-count { font-size: 0.8em; min-width: 2.2rem; text-align: right; }
-.find-box .find-count:empty, .find-box .chat-find:placeholder-shown ~ .find-step { display: none; }
+/* Count and steps appear with the box's focus widening, then hold their room: typing moves nothing (rule 13). */
+.find-box .chat-find:placeholder-shown:not(:focus) ~ :is(.find-count, .find-step) { display: none; }
+.find-box .find-count:empty { visibility: hidden; }
 .find-box .find-step { padding: 0.1rem 0.45rem; font-size: 0.85em; }
 @media (max-width: 800px) { .find-box .chat-find, .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 7rem; } }
 /* Squeezed while Claude works: "." → ".." → "..." instead of "Cla…" (thread.js, stateFit). The text stays for screen readers. */
@@ -1235,7 +1242,7 @@ dialog.viewer .composer .picker { display: none; }
 /* Today's cost after the weekly bar (public/cost.js), opening to the last 7 days. */
 .cost-chip { flex: none; }
 .cost-chip[hidden] { display: none; }
-.cost-chip > summary { list-style: none; cursor: pointer; padding: 0.1rem 0.4rem; border-radius: 6px; }
+.cost-chip > summary { font-variant-numeric: tabular-nums; list-style: none; cursor: pointer; padding: 0.1rem 0.4rem; border-radius: 6px; }
 .cost-chip > summary::-webkit-details-marker { display: none; }
 .cost-chip > summary:hover, .cost-chip[open] > summary { background: var(--line); color: var(--ink); }
 .cost-chip b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }

@@ -3,6 +3,7 @@
 // Options… opens a sheet for changing those or chaining the minion after another.
 import { api, h } from './core.js';
 import { briefMessage, findBriefs, matchType } from './briefs.js';
+import { steadyLabel } from './ui/status.js';
 
 /**
  * Hang a Start button on each brief in `doc`, the markdownDoc of `text`. `file` says where it is: its
@@ -38,30 +39,32 @@ function show(slot, brief, file, number) {
   const disarm = () => {
     clearTimeout(armed);
     armed = null;
-    btn.textContent = label;
+    labels.set('idle');
     btn.classList.remove('armed');
   };
   // Two taps, so a brush while scrolling on a phone doesn't start a minion.
   const btn = h('button', { type: 'button', class: 'secondary', title: 'Start this brief as a new minion', onclick: async () => {
     status.textContent = '';
     if (!armed) {
-      btn.textContent = 'Tap again to start';
+      labels.set('armed');
       btn.classList.add('armed');
       armed = setTimeout(disarm, ARM_MS);
       return;
     }
     disarm();
     btn.disabled = true;
-    btn.textContent = 'Starting…';
+    labels.set('starting');
     try {
       const type = matchType(brief.typeHint, await typeValues(file.projectId));
       show(slot, brief, file, await start(brief, file, { title: brief.title, type }));
     } catch (ex) {
       status.textContent = ex.message;
       btn.disabled = false;
-      btn.textContent = label;
+      labels.set('idle');
     }
-  } }, label);
+  } });
+  // Its labels share the widest one's width, so arming it doesn't shove Options along (rule 13).
+  const labels = steadyLabel(btn, { idle: label, armed: 'Tap again to start', starting: 'Starting…' });
   const options = h('button', { type: 'button', class: 'options', title: 'Change the title or type, or start it after another minion', onclick: () => {
     disarm();
     openSheet(slot, brief, file);

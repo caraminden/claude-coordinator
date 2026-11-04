@@ -1004,7 +1004,8 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const sub = args.filter((w) => !w.text.startsWith('-')).map((w) => w.text);
   if (name === 'gh' && sub[0] === 'auth' && /^(login|logout|refresh|switch)$/.test(sub[1] ?? '')) return hard(`\`gh auth ${sub[1]}\` would change which GitHub login gh uses. ${GH_ENV_WHY}`);
   // Every turn, Citadel, its contraptions and other people's dev servers run as the one account, so a
-  // pattern kill reaches them all: a turn's `pkill -u cara -f app/dev/dev.ts` took Citadel down (2026-11-03).
+  // pattern kill reaches them all: on 2026-11-03 a turn's `pkill -f app/dev/dev.ts` killed two minions'
+  // shells (#299; what took Citadel down was a kill fed by grep, see listingKill).
   if (name === 'pkill' || name === 'killall') return hard(`\`${name}\` kills by name across the whole account: other minions' shells and dev servers, Citadel and its contraptions. Stop your own process by pid: \`$!\` when you start it, or the pid from \`ss -ltnp 'sport = :<your port>'\`, checked with \`readlink /proc/<pid>/cwd\`.`);
   if (name === 'printenv') return hard(`\`printenv\` prints the environment. ${ENV_WHY}`);
   // Anywhere among the plain words: an option's value (`--model haiku`) comes before the subcommand.
@@ -1092,13 +1093,53 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   return null;
 }
 
+/** The command a segment runs and its arguments, past assignments, keywords and wrappers (`xargs -n1 kill` is kill). */
+function commandOf(seg: Segment): { name: string; args: Word[] } {
+  const w = seg.words;
+  let i = 0;
+  for (let wrapped = false; i < w.length; i++) {
+    const t = w[i].text;
+    if (WRAPPERS.has(basename(t))) wrapped = true;
+    else if (!/^[A-Za-z_]\w*=/.test(t) && !KEYWORDS.has(t) && !(wrapped && (t.startsWith('-') || /^[\d.]+[smhd]?$/.test(t)))) break;
+  }
+  return { name: basename(w[i]?.text ?? ''), args: w.slice(i + 1) };
+}
+
+/** Every socket on the account, left for grep or awk to narrow down: ss with no port filter, netstat, lsof -i with no port. */
+function wholeListing({ name, args }: { name: string; args: Word[] }): boolean {
+  if (name === 'netstat') return true;
+  if (name === 'ss') return !args.some((w) => /\b([sd]port|src|dst)\b/.test(w.text));
+  const inet = (t: string) => /^-[a-zA-Z]*i/.test(t);
+  if (name === 'lsof') return args.some((w) => inet(w.text)) && !args.some((w, k) => w.text.includes(':') && (inet(w.text) || /^-[a-zA-Z]*i$/.test(args[k - 1]?.text ?? '')));
+  return false;
+}
+
+const LISTING_KILL_WHY = "That `kill` takes its pids from the whole socket table narrowed by grep or awk, so a pattern that comes out empty or loose kills every server on the account: on 2026-11-03 `kill $(ss -ltnp | grep \":$P \" …)` with an empty $P took Citadel and every contraption down for 7½ hours (#299). Let ss pick the port, `ss -ltnp 'sport = :<port>'`, or use `$!` from when you started it.";
+
 /** Why this Bash command is blocked, or null. One hard-blocked part makes the whole command a hard block. */
 export function commandReason(command: string, st: State, cfg: TripwireConfig): Verdict | null {
   // Open parens: the folder before each, and for a $( … ), the command it sits in, to pick up after it.
-  const stack: { cwd: string | null; outer?: Segment; redir: string | null }[] = [];
+  const stack: { cwd: string | null; outer?: Segment; redir: string | null; listed: boolean; anyListed: boolean }[] = [];
   let seg: Segment = { words: [], redirects: [] };
   let redir: string | null = null;
   let asked: Verdict | null = null;
+  // A kill whose pids come from a whole listing: through a pipe (`| xargs kill`, `| while read p`), a
+  // $( … ) it sits in, or a variable set from one. `listed`: this pipeline so far; `anyListed`: this paren level.
+  const fed = new Set<Segment>();
+  const tainted = new Set<string>();
+  let listed = false;
+  let anyListed = false;
+  const listingKill = (s: Segment): Verdict | null => {
+    const c = commandOf(s);
+    const from = listed || fed.has(s);
+    if (c.name === 'kill' && (from || c.args.some((w) => w.unknown && [...tainted].some((v) => w.tmpl!.includes(`\0${v}\0`))))) return hard(LISTING_KILL_WHY);
+    if (from) {
+      const names = !c.name ? s.words.map((w) => w.text.split('=')[0]) : c.name === 'for' ? c.args.slice(0, 1).map((w) => w.text) : c.name === 'read' ? c.args.filter((w) => !w.text.startsWith('-')).map((w) => w.text) : [];
+      for (const n of names) tainted.add(n);
+    }
+    if (wholeListing(c) || fed.has(s)) listed = anyListed = true;
+    return null;
+  };
   for (const tok of [...lex(command, cfg.home), { kind: 'op', text: ';' } as Tok]) {
     if (tok.kind === 'word') {
       if (redir) seg.redirects.push({ op: redir, target: tok.word });
@@ -1106,21 +1147,31 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
       redir = null;
     } else if (tok.kind === 'redir') redir = tok.op;
     else if (tok.text === '$(') {
-      stack.push({ cwd: st.cwd, outer: seg, redir });
+      stack.push({ cwd: st.cwd, outer: seg, redir, listed, anyListed });
       seg = { words: [], redirects: [] };
       redir = null;
+      listed = anyListed = false;
     } else {
       redir = null;
-      const why = segmentReason(seg, st, cfg);
+      const why = segmentReason(seg, st, cfg) ?? listingKill(seg);
       seg = { words: [], redirects: [] };
       if (why && !why.ask) return why;
       asked ??= why;
+      if (tok.text !== '|' && tok.text !== '|&') listed = false;
       // A cd inside ( … ) or $( … ) doesn't outlive it.
-      if (tok.text === '(') stack.push({ cwd: st.cwd, redir: null });
+      if (tok.text === '(') {
+        stack.push({ cwd: st.cwd, redir: null, listed, anyListed });
+        listed = anyListed = false;
+      }
       if (tok.text === ')' && stack.length) {
         const open = stack.pop()!;
+        const inner = anyListed;
         st.cwd = open.cwd;
-        if (open.outer) (seg = open.outer), (redir = open.redir);
+        ({ listed, anyListed } = open);
+        if (open.outer) {
+          (seg = open.outer), (redir = open.redir);
+          if (inner) fed.add(seg);
+        } else if (inner) listed = anyListed = true;
       }
     }
   }

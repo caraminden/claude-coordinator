@@ -717,7 +717,7 @@ export function machinesPage() {
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Machines'), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
-      h('div', { class: 'meta' }, 'Computers that lend their MCP tools to every minion, in every scheme, while they are connected. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.')),
+      h('div', { class: 'meta' }, 'Computers that lend their MCP tools to minions while they are connected: in every scheme an admin owns, or only in the schemes picked under Lend to. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.')),
     form,
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
@@ -725,7 +725,7 @@ export function machinesPage() {
       'Each machine runs one MCP server; add another machine for a second one. It needs Node 18 or newer. ',
       'With workspace tools switched on, minions also get mcp__<name>-ws__…: git sync and the tasks its owner lists in machine-agent.json on that computer, nothing else. ',
       '"Claude Code MCP server" runs one already set up for Claude Code on that computer, like godot-ai after its dock\'s Configure. ',
-      'A minion gets the tools of every machine online when its turn starts, named mcp__<name>__…, plus the machine\'s notes, and the tools act on that computer, ',
+      'A minion gets the tools of every machine online and lent to its scheme when its turn starts, named mcp__<name>__…, plus the machine\'s notes, and the tools act on that computer, ',
       'so only add servers you trust minions to run.'));
   setTimeout(() => {
     renderMachineSetup();
@@ -801,6 +801,7 @@ function renderMachineList() {
           h('span', { class: 'meta' }, [machineStatus(m), m.command, `added by ${m.created_by}`].filter(Boolean).join(' · '))),
         newToken, remove),
       machineWorkspaces(m),
+      machineLending(m),
       h('details', { class: 'machine-notes', 'data-id': m.id, open: editing },
         h('summary', {}, m.notes ? `Notes: ${m.notes.split('\n')[0]}` : 'Add notes for minions'),
         notes, h('div', { class: 'row' }, save, saved)));
@@ -856,6 +857,39 @@ function machineWorkspaces(m) {
       toggle, h('span', {}, 'Workspace tools for minions'), status),
     reported,
     ...(m.problems ?? []).map((p) => h('p', { class: 'error small' }, p)));
+}
+
+/** Which schemes' minions get a machine: every admin-owned scheme (the default), or only the ones ticked (#303). */
+function machineLending(m) {
+  const status = h('span', { class: 'muted small', role: 'status' });
+  const save = async (projects) => {
+    status.textContent = 'Saving…';
+    try {
+      await api(`api/machines/${m.id}`, { method: 'PATCH', body: { projects } });
+      status.textContent = '';
+    } catch (err) {
+      status.textContent = err.message;
+      renderMachineList();
+    }
+  };
+  const choice = (scoped, label, title) => {
+    const radio = h('input', { type: 'radio', name: `lend-${m.id}`, checked: scoped === (m.projects !== null) });
+    // "Only these" starts with none ticked, so grants left from before never come back by themselves.
+    radio.onchange = () => save(scoped ? [] : null);
+    return h('label', { class: 'row small', title }, radio, h('span', {}, label));
+  };
+  const schemes = m.projects === null ? [] : (view.projects ?? []).map((p) => {
+    const box = h('input', { type: 'checkbox', checked: m.projects.includes(p.id) });
+    box.onchange = () => save([...document.querySelectorAll(`.machine-lending[data-id="${m.id}"] .schemes input:checked`)].map((b) => Number(b.value)));
+    box.value = p.id;
+    return h('label', { class: 'row small' }, box, h('span', {}, p.name));
+  });
+  return h('div', { class: 'machine-lending', 'data-id': m.id },
+    h('div', { class: 'row small' }, h('span', { class: 'muted' }, 'Lend to'), status),
+    choice(false, 'Every scheme an admin owns', 'Minions in every scheme an admin owns get it, as for every machine before'),
+    choice(true, 'Only these schemes', 'Only the ticked schemes\' minions get it, whoever owns the scheme; Taskmasters never do'),
+    m.projects === null ? '' : h('div', { class: 'schemes' }, ...schemes,
+      m.projects.length ? '' : h('p', { class: 'muted small' }, 'No scheme gets it until you tick one.')));
 }
 
 /** The import picker: this app's Claude Code instruction and memory files, to tick and add. */

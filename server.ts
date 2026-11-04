@@ -750,9 +750,9 @@ process.on('SIGHUP', () => {
   );
 });
 
-// The machines-only listener: the agent's two endpoints and the agent script, nothing else.
+// The machines-only listener: every agent route (connect, send, info, upload) and the agent script, nothing else.
 if (MACHINES_URL) {
-  const agentApi = router(agentRoutes.filter((r) => r.path === '/api/machines/connect' || r.path === '/api/machines/send'));
+  const agentApi = router(agentRoutes);
   const agents = createServer(async (req, res) => {
     try {
       const url = requestUrl(req);

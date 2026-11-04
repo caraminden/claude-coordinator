@@ -74,3 +74,27 @@ test('the machines listener serves nothing but agents', async () => {
   assert.match(await (await fetch(`${agentBase}/machine-agent.mjs`)).text(), /machine agent/);
   assert.equal((await fetch(`${agentBase}/api/machines/connect`)).status, 401);
 });
+
+test('every route the agent calls is served at the machines URL, and refused at the app address', async () => {
+  const { token } = await call('/api/machines', { method: 'POST', body: { name: 'desk' } });
+  const auth = { Authorization: `Bearer ${token}` };
+  // Every path machine-agent.mjs calls; a 404 here means the listener drops it before its handler.
+  for (const [method, path] of [['GET', '/api/machines/connect'], ['POST', '/api/machines/send'], ['POST', '/api/machines/info'], ['POST', '/api/machines/upload']]) {
+    assert.equal((await fetch(agentBase + path, { method })).status, 401, `${path} at the machines URL`);
+    const here = await fetch(base + path, { method, headers: auth });
+    assert.equal(here.status, 403, `${path} at the app address`);
+    assert.match((await here.json()).error, new RegExp(`connect at ${agentBase}`));
+  }
+  // Not connected yet: info says so, and an upload has no workspace session to go to.
+  assert.equal((await fetch(`${agentBase}/api/machines/info`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: '{}' })).status, 409);
+  assert.equal((await fetch(`${agentBase}/api/machines/upload?session=nope&name=a.txt`, { method: 'POST', headers: auth, body: 'hi' })).status, 410);
+});
+
+test('an agent with workspaces tells the app so through the machines URL', async () => {
+  const { token } = await call('/api/machines', { method: 'POST', body: { name: 'studio' } });
+  const configFile = join(root, 'studio.json');
+  writeFileSync(configFile, JSON.stringify({ workspaces: { scratch: { path: root } } }));
+  const agent = spawn(process.execPath, [join(repo, 'public/machine-agent.mjs'), agentBase, token, '--config', configFile], { stdio: 'ignore' });
+  procs.push(agent);
+  await until('studio to offer workspace tools', async () => (await call('/api/machines')).find((m: any) => m.name === 'studio' && m.online && m.servers.includes('ws')));
+});

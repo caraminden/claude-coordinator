@@ -99,7 +99,7 @@ export const peopleRoutes: Route[] = [
       app.store.deleteUser(user.id, uidOf(session));
       dropStreams(app, user.id);
       // Their collaborator invites go too (#310); a refusal stays on its row for the next boot's sweep.
-      void app.repoAccess.tidy();
+      void app.repoAccess.tidy().catch((err) => console.error('repo access after removing a person', err));
       return json(res, 200, {});
     },
   },

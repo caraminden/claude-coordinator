@@ -202,3 +202,31 @@ test('a boot check or preview, or a server with no OAuth App, leaves GitHub alon
   assert.equal(w.gh.calls.length, 0);
   assert.equal(w.store.listRepoCollaborators().length, 0);
 });
+
+test('an invite GitHub made stays Citadel\'s when accepting it fails, so leaving withdraws it', async () => {
+  const w = world();
+  w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
+  w.store.addMember(w.scheme.id, w.josh.id);
+  const real = w.gh.fetch;
+  (w.access as any).fetch = (async (url: string, init?: RequestInit) => {
+    if (init?.method === 'PATCH') throw new Error('timed out');
+    return real(url, init);
+  }) as typeof fetch;
+  await w.access.sync(w.scheme.id, w.josh.id);
+  assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'invited');
+  assert.match(w.access.view(w.scheme.id, w.josh.id)!.error!, /Couldn't reach GitHub/);
+  w.store.removeMember(w.scheme.id, w.josh.id);
+  assert.equal(await w.access.remove(w.scheme.id, w.josh.id), null);
+  assert.equal(w.gh.invites.size, 0);
+});
+
+test('members of a scheme whose repo went stay on GitHub at the sweep', async () => {
+  const w = world();
+  w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
+  w.store.addMember(w.scheme.id, w.josh.id);
+  await w.access.sync(w.scheme.id, w.josh.id);
+  w.store.setProjectUpstream(w.scheme.id, null, null);
+  await w.access.sweep();
+  assert.ok(w.gh.collaborators.get('caraminden/peek-auras')!.has('KatzMeIfYouCan'));
+  assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'added');
+});

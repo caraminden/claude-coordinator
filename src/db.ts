@@ -119,7 +119,6 @@ export interface Ticket {
   updated_at: number;
 }
 
-/** One of a person's linked accounts (src/credentials.ts); `secret` is still encrypted. */
 /** A row of repo_collaborators: see its CREATE TABLE. */
 export interface RepoCollaborator {
   project_id: number;
@@ -132,6 +131,7 @@ export interface RepoCollaborator {
   updated_at: number;
 }
 
+/** One of a person's linked accounts (src/credentials.ts); `secret` is still encrypted. */
 export interface CredentialRow {
   user_id: number;
   kind: string;

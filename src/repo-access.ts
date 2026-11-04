@@ -61,7 +61,7 @@ export class RepoAccess {
     if (!this.store.listMembers(projectId).some((m) => m.id === userId)) return;
     const prev = this.store.getRepoCollaborator(projectId, userId);
     // shortcut: a scheme pointed at a different repo starts over there and forgets the old one, whose collaborator stays on GitHub; track both if repos ever move.
-    if ((prev?.state === 'added' || prev?.state === 'existing') && prev.slug === slug) return;
+    if ((prev?.state === 'added' || prev?.state === 'existing') && prev.slug === slug && !prev.error) return;
     const put = (state: RepoCollaborator['state'], fields: Partial<Pick<RepoCollaborator, 'login' | 'invitation_id' | 'error'>> = {}) =>
       this.store.putRepoCollaborator({ project_id: projectId, user_id: userId, slug, login: null, invitation_id: null, error: null, state, ...fields });
     const login = this.link.login(userId)?.login;
@@ -73,6 +73,8 @@ export class RepoAccess {
     }
     const repoOwner = slug.split('/')[0];
     if (login.toLowerCase() === repoOwner || login.toLowerCase() === ownerToken.login.toLowerCase()) return put('existing', { login });
+    // Set once GitHub has made the invite, so a failure after it still remembers the invite as Citadel's.
+    let invited: number | null = prev?.state === 'invited' ? prev.invitation_id : null;
     try {
       const check = await this.api('GET', `/repos/${slug}/collaborators/${login}`, ownerToken.secret);
       // Already in: a collaborator Citadel invited earlier who has since accepted stays Citadel's.
@@ -81,14 +83,14 @@ export class RepoAccess {
       const invite = await this.api('PUT', `/repos/${slug}/collaborators/${login}`, ownerToken.secret, { permission: 'push' });
       if (invite.status === 204) return put('added', { login });
       if (invite.status !== 201) return put('failed', { login, error: await explain(invite, ownerToken.login, login, slug) });
-      const id = Number(((await invite.json()) as { id?: number }).id);
+      const id = invited = Number(((await invite.json().catch(() => ({}))) as { id?: number }).id) || null;
       const memberToken = this.link.token(member);
-      if (!memberToken || memberToken.login.toLowerCase() !== login.toLowerCase()) return put('invited', { login, invitation_id: id });
+      if (!id || !memberToken || memberToken.login.toLowerCase() !== login.toLowerCase()) return put('invited', { login, invitation_id: id });
       const accept = await this.api('PATCH', `/user/repository_invitations/${id}`, memberToken.secret);
       if (accept.status === 204) return put('added', { login, invitation_id: id });
       return put('invited', { login, invitation_id: id, error: `Citadel couldn't accept the invite for @${login}: ${await githubSays(accept)}` });
     } catch (err: any) {
-      return put(prev?.state === 'invited' ? 'invited' : 'failed', { login, invitation_id: prev?.invitation_id ?? null, error: `Couldn't reach GitHub (${err?.message ?? err}); Citadel tries again at its next restart.` });
+      return put(invited !== null || prev?.state === 'invited' ? 'invited' : 'failed', { login, invitation_id: invited, error: `Couldn't reach GitHub (${err?.message ?? err}); Citadel tries again at its next restart.` });
     }
   }
 
@@ -145,10 +147,11 @@ export class RepoAccess {
     if (!this.on) return;
     const kept = new Set<string>();
     for (const p of this.store.listProjects()) {
-      if (!repoSlug(p.repo_url)) continue;
+      const github = !!repoSlug(p.repo_url);
       for (const m of this.store.listMembers(p.id)) {
+        // Still a member even if the scheme's repo went: only leaving takes anyone off GitHub.
         kept.add(`${p.id}:${m.id}`);
-        if (m.owner) continue;
+        if (m.owner || !github) continue;
         const r = this.store.getRepoCollaborator(p.id, m.id);
         if (!r || r.state === 'failed' || r.state === 'waiting' || r.state === 'invited' || r.error) await this.sync(p.id, m.id);
       }

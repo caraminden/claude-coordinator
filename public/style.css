@@ -1069,6 +1069,8 @@ a.thread-ref:hover { text-decoration: underline; }
 .machine-add { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin: 0.9rem 0; }
 .machine-add label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85em; margin-bottom: 0; }
 .machine-add label.wide { flex: 1 1 18rem; }
+.machine-add label.check { flex-direction: row; align-items: center; gap: 0.4rem; align-self: end; min-height: 2.5rem; cursor: pointer; }
+.machine-add label.check input { width: auto; margin: 0; }
 .machine-setup { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 1rem; }
 .machine-setup pre { margin: 0.4rem 0 0; padding: 0.5rem 0.6rem; background: var(--code-bg); border-radius: 6px; overflow-x: auto; font-size: 0.82em; white-space: pre-wrap; word-break: break-all; user-select: all; }
 .machine-setup .small { margin: 0.3rem 0 0; font-size: 0.85em; }

@@ -668,7 +668,7 @@ export function machinesPage() {
     h('label', {}, 'Name', name),
     h('label', { class: 'wide' }, 'MCP server to run there', h('span', { class: 'row' }, kind, command)),
     h('label', { class: 'wide' }, 'Folder minions can use (optional)', folder),
-    mine ? h('label', { class: 'row small wide', title: 'Off: a shared machine, lent to schemes under Lend to. On: only turns you ask for get it, in schemes you are in.' }, mine, h('span', {}, 'Mine: only turns I ask for use it')) : '',
+    mine ? h('label', { class: 'check', title: 'Off: a shared machine, lent to schemes under Lend to. On: only turns you ask for get it, in schemes you are in, and your contraptions\' turns.' }, mine, h('span', {}, 'Mine: only my turns use it')) : '',
     h('button', { type: 'submit' }, 'Add machine'),
     status);
   form.onsubmit = async (e) => {
@@ -699,6 +699,7 @@ export function machinesPage() {
       'A folder typed when adding a machine goes into machine-agent.json by the setup lines, and the machine starts with workspace tools on. ',
       'With workspace tools switched on, minions also get mcp__<name>-ws__…: git sync and the tasks its owner lists in machine-agent.json on that computer, nothing else. ',
       '"Claude Code MCP server" runs one already set up for Claude Code on that computer, like godot-ai after its dock\'s Configure. ',
+      'A person\'s own machine goes only to turns they ask for: their minions\' turns in schemes they are in, and their contraptions\' turns. ',
       'A minion gets the tools of every machine online and lent to its scheme when its turn starts, named mcp__<name>__…, plus the machine\'s notes, and the tools act on that computer, ',
       'so only add servers you trust minions to run.'));
   setTimeout(() => {
@@ -780,7 +781,8 @@ function renderMachineList() {
         newToken, remove),
       machineWorkspaces(m),
       // A person's own machine goes to the turns they ask for (#306): nothing to lend.
-      m.owner_id === null ? machineLending(m) : h('p', { class: 'muted small' }, `Only turns ${m.created_by} asks for use it, in schemes they are in.`),
+      m.owner_id === null ? machineLending(m) : h('div', { class: 'machine-lending' },
+        h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Used by'), h('span', {}, `turns ${m.created_by} asks for, in schemes they are in, and their contraptions`))),
       h('details', { class: 'machine-notes', 'data-id': m.id, open: editing },
         h('summary', {}, m.notes ? `Notes: ${m.notes.split('\n')[0]}` : 'Add notes for minions'),
         notes, h('div', { class: 'row' }, save, saved)));

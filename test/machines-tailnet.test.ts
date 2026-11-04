@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, freePort, until, stopProcs } from './helpers.ts';
+import { bootServer, freePort, until, stopProcs, stopTurns } from './helpers.ts';
+import { machineFakes } from './machine-fakes.ts';
 
 // With MACHINES_URL set, agents connect only there (the tailnet), and that listener serves nothing
 // but agents.
@@ -13,11 +14,11 @@ const root = mkdtempSync(join(tmpdir(), 'machines-tailnet-'));
 const procs: ChildProcess[] = [];
 after(async () => {
   await stopProcs(procs);
+  await stopTurns(root);
   rmSync(root, { recursive: true, force: true });
 });
 
-const mcpServer = join(root, 'fake-mcp.mjs');
-writeFileSync(mcpServer, 'process.stdin.resume();\n');
+const { mcpServer, fakeClaude, turns } = machineFakes(root);
 
 let base = '';
 let agentBase = '';
@@ -46,7 +47,7 @@ function startAgent(url: string, token: string) {
 
 before(async () => {
   agentBase = `http://127.0.0.1:${await freePort()}`;
-  const srv = await bootServer({ root, env: { MACHINES_URL: agentBase }, stdout: true });
+  const srv = await bootServer({ root, env: { MACHINES_URL: agentBase, CLAUDE_BIN: fakeClaude }, stdout: true });
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);
@@ -90,11 +91,33 @@ test('every route the agent calls is served at the machines URL, and refused at 
   assert.equal((await fetch(`${agentBase}/api/machines/upload?session=nope&name=a.txt`, { method: 'POST', headers: auth, body: 'hi' })).status, 410);
 });
 
-test('an agent with workspaces tells the app so through the machines URL', async () => {
-  const { token } = await call('/api/machines', { method: 'POST', body: { name: 'studio' } });
+test('a workspace turn works end to end with the agent on the machines URL: its tools, fetch_file and run_task', async () => {
+  const folder = join(root, 'ws-folder');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'report.zip'), 'zip bytes');
   const configFile = join(root, 'studio.json');
-  writeFileSync(configFile, JSON.stringify({ workspaces: { scratch: { path: root } } }));
+  writeFileSync(configFile, JSON.stringify({ workspaces: { w: { path: folder, tasks: { hi: { run: [process.execPath, '-e', 'console.log("task ran")'] } } } } }));
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'studio' } });
   const agent = spawn(process.execPath, [join(repo, 'public/machine-agent.mjs'), agentBase, token, '--config', configFile], { stdio: 'ignore' });
   procs.push(agent);
-  await until('studio to offer workspace tools', async () => (await call('/api/machines')).find((m: any) => m.name === 'studio' && m.online && m.servers.includes('ws')));
+  // The workspaces arrive through /api/machines/info.
+  const online = await until('studio to report its workspace', async () => (await call('/api/machines')).find((m: any) => m.name === 'studio' && m.workspaces.length));
+  assert.deepEqual(online.servers, ['ws']);
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: true } });
+
+  const project = await call('/api/projects', { method: 'POST', body: { name: 'Vault' } });
+  const before = turns().length;
+  const ticket = await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'vault' } });
+  const turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
+  assert.equal(turn.error, undefined);
+  assert.ok(turn.allow.includes('mcp__studio-ws'));
+  const ws = turn.results['studio-ws'];
+  assert.ok(ws.tools.includes('run_task') && ws.tools.includes('fetch_file'));
+  assert.match(ws.text, /## w\nFolder: .*ws-folder/);
+  // fetch_file goes through /api/machines/upload.
+  const copied = ws.fetched.match(/to (\S+) on the app/)?.[1];
+  assert.ok(copied, ws.fetched);
+  assert.match(copied, new RegExp(`shared/${ticket.ticket?.id ?? ticket.id}/machine-files/studio/report\\.zip$`));
+  assert.equal(readFileSync(copied, 'utf8'), 'zip bytes');
+  assert.match(ws.ran, /task ran/);
 });

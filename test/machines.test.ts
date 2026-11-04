@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, until, stopProcs, stopTurns } from './helpers.ts';
+import { bootServer, until, stopProcs, stopTurns } from './helpers.ts';
+import { machineFakes } from './machine-fakes.ts';
 
 // The whole path from a thread's turn to a machine and back: the real server, the real agent
 // (public/machine-agent.mjs) running a stand-in MCP server, and a stand-in `claude -p` that acts
@@ -18,57 +19,7 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-// A tiny MCP server with one tool that says which process answered.
-const mcpServer = join(root, 'fake-mcp.mjs');
-writeFileSync(mcpServer, `
-import { createInterface } from 'node:readline';
-const out = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
-createInterface({ input: process.stdin }).on('line', (line) => {
-  const m = JSON.parse(line);
-  if (m.method === 'initialize') out({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: m.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '1' } } });
-  if (m.method === 'tools/list') out({ jsonrpc: '2.0', id: m.id, result: { tools: [{ name: 'whoami', inputSchema: { type: 'object' } }] } });
-  if (m.method === 'tools/call') out({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: 'pid ' + process.pid }] } });
-});
-`);
-
-// Stands in for claude: records its arguments, talks to each machine server it was given, writes
-// what came back, then ends the turn.
-const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
-const { spawn } = require('node:child_process');
-const { createInterface } = require('node:readline');
-const { appendFileSync, readFileSync } = require('node:fs');
-const args = process.argv.slice(2);
-const system = readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8');
-const config = JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8'));
-const allow = JSON.parse(readFileSync(args[args.indexOf('--settings') + 1], 'utf8')).permissions.allow;
-const report = (r) => appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify(r) + '\\n');
-process.stdin.resume();
-(async () => {
-  const results = {};
-  for (const [name, s] of Object.entries(config.mcpServers)) {
-    if (name === 'thread') continue;
-    const p = spawn(s.command, s.args, { stdio: ['pipe', 'pipe', 'inherit'] });
-    const replies = createInterface({ input: p.stdout })[Symbol.asyncIterator]();
-    const call = async (id, method, params) => {
-      p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\\n');
-      return JSON.parse((await replies.next()).value);
-    };
-    await call(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake-claude', version: '1' } });
-    const tools = await call(2, 'tools/list', {});
-    // A machine's workspace tools: list the workspaces, then copy a file over.
-    const ws = name.endsWith('-ws');
-    const called = await call(3, 'tools/call', { name: ws ? 'workspaces' : 'whoami', arguments: {} });
-    results[name] = { tools: tools.result.tools.map((t) => t.name), text: called.result.content[0].text };
-    if (ws) results[name].fetched = (await call(4, 'tools/call', { name: 'fetch_file', arguments: { workspace: 'w', path: 'report.zip' } })).result.content[0].text;
-    p.stdin.end();
-  }
-  report({ args, system, allow, results, token: process.env.COORDINATOR_TOKEN });
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
-  process.exit(0);
-})().catch((err) => { report({ args, error: String(err) }); process.exit(1); });
-`);
-chmodSync(fakeClaude, 0o755);
+const { mcpServer, fakeClaude, turns } = machineFakes(root);
 
 let base = '';
 let cookie = '';
@@ -83,8 +34,6 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
   if (!res.ok) throw new Error(`${res.status} ${data.error}`);
   return data;
 }
-
-const turns = () => jsonLines(join(root, 'turns.jsonl'));
 
 function startAgent(token: string, run = ['--', process.execPath, mcpServer], env: NodeJS.ProcessEnv = {}) {
   const agent = spawn(process.execPath, [join(repo, 'public/machine-agent.mjs'), base, token, ...run], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MACHINES_URL: undefined, ...env } });
@@ -189,7 +138,7 @@ test('workspace tools reach minions only once a person switches them on, and fet
   writeFileSync(join(folder, 'report.zip'), Buffer.from([0x50, 0x4b, 0, 1, 2, 3]));
   const config = join(root, 'agent-dir', 'machine-agent.json');
   mkdirSync(join(root, 'agent-dir'), { recursive: true });
-  writeFileSync(config, JSON.stringify({ workspaces: { w: { path: folder, tasks: { hi: { run: [process.execPath, '-e', '1'] } } } } }));
+  writeFileSync(config, JSON.stringify({ workspaces: { w: { path: folder, tasks: { hi: { run: [process.execPath, '-e', 'console.log("task ran")'] } } } } }));
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'box-ws' } }), /400/);
   const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'wsbox' } });
   assert.equal(machine.workspace_tools, false);
@@ -219,6 +168,7 @@ test('workspace tools reach minions only once a person switches them on, and fet
   const copied = ws.fetched.match(/to (\S+) on the app/)[1];
   assert.match(copied, new RegExp(`shared/${ticket.ticket?.id ?? ticket.id}/machine-files/wsbox/report\\.zip$`));
   assert.deepEqual([...readFileSync(copied)], [0x50, 0x4b, 0, 1, 2, 3]);
+  assert.match(ws.ran, /task ran/);
   assert.ok(turn.allow.includes('mcp__wsbox-ws'));
   assert.match(turn.system, /wsbox \(mcp__wsbox, mcp__wsbox-ws\)[\s\S]*call its workspaces tool first/);
 });

@@ -529,6 +529,9 @@ async function main() {
       method: 'POST',
       headers: { ...auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({ servers: offered(), ...(host ? host.summary() : {}) }),
+    }).then(async (res) => {
+      // fetch doesn't throw on a refusal; a silent one hid #301's 404.
+      if (!res.ok) log(`The app refused this computer's workspaces: ${res.status} ${(await res.json().catch(() => ({}))).error ?? ''}`);
     }).catch((err) => log(`Could not tell the app about workspaces: ${err.message}`));
   }
   if (host) {

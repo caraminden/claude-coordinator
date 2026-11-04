@@ -84,6 +84,8 @@ test('check skips contraptions whose unit is not enabled, and probes only active
   const found = await check(list, { unitState: async (u) => units[u], answer: async (p) => (probed.push((p as any).port), 'port 2 closed') });
   assert.deepEqual([...found], [['citadel', { title: 'Citadel', finding: 'failed' }], ['app:a', { title: 'A', finding: 'port 2 closed' }]]);
   assert.deepEqual(probed, [2]);
+  const wedged = await check(list.slice(0, 2), { unitState: async (u) => (u === 'claude-coordinator.service' ? Promise.reject(new Error('bus timed out')) : units[u]), answer: async () => null });
+  assert.deepEqual([...wedged.keys()].sort(), ['app:a', 'citadel'], 'one failing systemctl still lets every target through, probed');
 });
 
 const listen = (s: Server) => new Promise<number>((ok) => s.listen(0, '127.0.0.1', () => ok((s.address() as any).port)));

@@ -134,9 +134,10 @@ export async function answer(probe: Target['probe'], ms = 5000): Promise<Finding
 export async function check(list: Target[], deps = { unitState, answer }): Promise<Map<string, { title: string; finding: Finding }>> {
   const found = new Map<string, { title: string; finding: Finding }>();
   await Promise.all(list.map(async (t) => {
-    const u = await deps.unitState(t.unit);
-    if (!t.always && u.enabled !== 'enabled') return;
-    const finding = u.active !== 'active' ? u.active : await deps.answer(t.probe);
+    // A wedged user bus mustn't silence the rest: without a unit state, whether it answers decides.
+    const u = await deps.unitState(t.unit).catch((err: Error) => (console.error(err.message), null));
+    if (u && !t.always && u.enabled !== 'enabled') return;
+    const finding = u && u.active !== 'active' ? u.active : await deps.answer(t.probe);
     found.set(t.key, { title: t.title, finding });
   }));
   return found;

@@ -47,6 +47,7 @@ if (message) {
     const results = await Promise.all(subs.map((s) => postPush(s, message, keys, 'https://localhost').then(
       async (res) => (res.ok || console.error(`Push to ${s.name} answered ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`), res.ok),
       (err) => (console.error(`Push to ${s.name} failed: ${err.message}`), false))));
+    // One device that got it is enough: the alert is out (a phone that missed it hears the all-clear).
     delivered = results.some(Boolean);
   }
   // Undelivered: keep it unsaid, so the next round tries again.

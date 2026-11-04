@@ -1354,7 +1354,8 @@ export class Runner {
     const person = this.personOf?.(author, extra.from) ?? null;
     const asker = askedBy !== undefined ? askedBy : person;
     // Nor one someone else asked for (#255): a non-member's relay runs as the owner, whose message waits.
-    const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker)));
+    // Nor one typed for by someone else (#295): its process carries their CITADEL_PERSON_ID, which can't change mid-turn.
+    const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker) || (extra.typed && turn.typedBy && turn.typedBy !== person)));
     const steers = !!(steer && live && turn && !turn.result && !otherPerson && existsSync(join(live.dir, 'steer.jsonl')));
     const row = this.emit(ticketId, 'user_message', {
       author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}),

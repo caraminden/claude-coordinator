@@ -397,7 +397,9 @@ for plugins and hooks that write files people should see. A turn answering one p
 own typed message also gets `CITADEL_PERSON_ID` (their user id, the `sub` of a contraption
 identity) and `CITADEL_PERSON_LOGIN`, so a contraption's hook guard can let the session read
 that person's data and nobody else's; every other turn (a relay, a wake, a schedule, a resume,
-GitHub, a contraption's post) has neither, not even empty. Host and container turns alike.
+GitHub, a contraption's post) has neither, not even empty. They're fixed when the turn
+starts: another person's typed message waits for a turn of its own rather than steering in.
+Host and container turns alike.
 
 The Taskmaster itself runs in `acceptEdits` with only its MCP tools
 pre-approved, so it can read the code and manage minions but can't run shell

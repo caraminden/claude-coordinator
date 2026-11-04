@@ -251,6 +251,8 @@ setInterval(() => {
   // (Before Josh's asks below: a turn someone else asked for takes no steer from Cara, #255.)
   assert.equal(await during([['GitHub', {}]], { steer: ['Cara', { typed: true }] }), Cara.id, 'Cara typed into a GitHub turn');
   assert.equal(await during([['Cara', {}]]), null, 'not typed: a brief or a card answer');
+  // Josh's typed steer into Cara's typed turn waits for a turn of its own: the running one keeps her env (#295).
+  assert.equal(await during([['Cara', { typed: true }]], { steer: ['Josh', { typed: true }] }), Cara.id, "Josh can't steer into Cara's typed turn");
   assert.equal(await during([['Taskmaster', { from: tm.id }]]), null, 'a relay');
   assert.equal(await during([['Contraption Peek, for Josh', { asker: Josh.id }]]), null, "a contraption's ask");
   assert.equal(await during([['GitHub', {}]], { queue: [['Cara', { typed: true }], ['GitHub', {}]] }), Cara.id, 'Cara typed, with GitHub in the same turn');

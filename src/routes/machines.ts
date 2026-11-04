@@ -83,6 +83,15 @@ export const agentRoutes: Route[] = [
 // Anyone signed in adds machines; each manages their own, and admins manage all (#306).
 const people = { who: ['person'], refuse: 'Only people manage machines' } as const;
 
+const ctxToken = (req: Ctx['req']) => (req.headers.authorization ?? '').match(/^Bearer (cmt_[\w-]+)$/)?.[1] ?? '';
+
+/** The running contraption turn a machine proxy's token belongs to. */
+function contraptionTurn(token: string, app: Ctx['app']) {
+  const turn = token ? app.contraptionTurns.machineTurn(token) : null;
+  if (!turn) throw new HttpError(401, 'Not a running contraption turn');
+  return turn;
+}
+
 /** A machine route for its owner and admins; to anyone else the machine isn't there. */
 const managed = (handler: (ctx: Ctx) => unknown) => (ctx: Ctx) => {
   if (!managesMachine(ctx.session, ctx.machine)) throw new HttpError(404, 'No such machine');
@@ -192,6 +201,28 @@ export const machineRoutes: Route[] = [
     }),
   },
 
+  // A contraption turn's MCP proxy (#306): the same, for its person's own machines only, with its turn's token.
+  {
+    method: 'GET', path: '/api/machines/:machineId/contraption-session', who: 'machine',
+    handler({ req, res, app, params }) {
+      const turn = contraptionTurn(ctxToken(req), app);
+      const id = Number(params.machineId);
+      if (!turn.machines.includes(id)) throw new HttpError(403, 'That machine isn\'t this turn\'s person\'s, or the turn started without it');
+      const who = `${app.store.getUser(turn.person)?.name ?? 'someone'} in ${app.store.listContraptions().find((c) => c.id === turn.contraption)?.title ?? 'a contraption'}`;
+      if (!app.machines.openSession(id, { contraptionTurn: turn.id }, 'mcp', who, res)) throw new HttpError(503, 'That machine is offline');
+    },
+  },
+  {
+    method: 'POST', path: '/api/machines/:machineId/contraption-session/:session', who: 'machine',
+    async handler({ req, res, app, params }) {
+      const turn = contraptionTurn(ctxToken(req), app);
+      if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
+      const body = await readJson(req, 50_000_000);
+      if (!app.machines.fromSession(params.session, { contraptionTurn: turn.id }, body.message)) throw new HttpError(503, 'That machine went offline');
+      return json(res, 202, {});
+    },
+  },
+
   // A minion's MCP proxy: open a session to a machine (held open as a stream), then send it messages.
   {
     method: 'GET', path: '/api/machines/:machineId/session', ...turns,
@@ -210,7 +241,7 @@ export const machineRoutes: Route[] = [
         throw new HttpError(403, 'That machine isn\'t lent to this scheme');
       }
       const who = `#${caller!.number} in ${project?.name ?? 'a scheme'}`;
-      if (!app.machines.openSession(Number(params.machineId), caller!, server, who, res)) throw new HttpError(503, server === 'ws' ? 'That machine is offline, or its workspace tools are off' : 'That machine is offline');
+      if (!app.machines.openSession(Number(params.machineId), { ticketId: caller!.id, projectId: caller!.project_id }, server, who, res)) throw new HttpError(503, server === 'ws' ? 'That machine is offline, or its workspace tools are off' : 'That machine is offline');
     },
   },
   {
@@ -218,7 +249,7 @@ export const machineRoutes: Route[] = [
     async handler({ req, res, app, caller, params }) {
       if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
       const body = await readJson(req, 50_000_000);
-      if (!app.machines.fromSession(params.session, caller!.id, body.message)) throw new HttpError(503, 'That machine went offline');
+      if (!app.machines.fromSession(params.session, { ticketId: caller!.id, projectId: caller!.project_id }, body.message)) throw new HttpError(503, 'That machine went offline');
       return json(res, 202, {});
     },
   },

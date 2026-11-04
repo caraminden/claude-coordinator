@@ -11,6 +11,8 @@ const MACHINE = Number(process.argv[2]);
 const NAME = process.argv[3] ?? `machine ${MACHINE}`;
 // 'ws' for the machine agent's own workspace tools, else the MCP server it lends.
 const SERVER = process.argv[4] === 'ws' ? 'ws' : 'mcp';
+// A contraption turn's proxy opens its person's machine on its own route (#306), with its turn's token.
+const ROUTE = process.env.COORDINATOR_MACHINE_ROUTE === 'contraption-session' ? 'contraption-session' : 'session';
 const headers = { Authorization: `Bearer ${TOKEN}` };
 
 function fail(text: string): never {
@@ -23,7 +25,7 @@ async function connect(first: boolean): Promise<Response> {
   const started = Date.now();
   for (;;) {
     try {
-      const res = await fetch(`${API}/api/machines/${MACHINE}/session?server=${SERVER}`, { headers: { ...headers, Accept: 'text/event-stream' } });
+      const res = await fetch(`${API}/api/machines/${MACHINE}/${ROUTE}?server=${SERVER}`, { headers: { ...headers, Accept: 'text/event-stream' } });
       // The app answered: a machine that is offline stays offline, so don't keep claude waiting.
       if (!res.ok || !res.body) fail(`${NAME} is not available (${res.status}): ${await res.text().catch(() => '')}`);
       return res;
@@ -48,7 +50,7 @@ function unreachable(message: any, why: string) {
 }
 
 async function post(message: any): Promise<Response> {
-  return fetch(`${API}/api/machines/${MACHINE}/session/${session}`, {
+  return fetch(`${API}/api/machines/${MACHINE}/${ROUTE}/${session}`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({ message }),

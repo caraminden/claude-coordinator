@@ -3,7 +3,8 @@
 // the host for the server login's owner, as their minion turns do), and hands back its events.
 //
 // A turn can reach only the contraption's own MCP servers (on its 127.0.0.1 port; containers share the
-// host's network) and, if the contraption allows, Agent with a cap on how many run at once. It runs in an
+// host's network), the MCP servers of its person's own machines that are online (#306), and, if the
+// contraption allows, Agent with a cap on how many run at once. It runs in an
 // empty scratch folder per (contraption, person), with no user or project settings, CLAUDE.md, memory,
 // skills, plugins or other MCP servers: see args() and settings().
 //
@@ -11,7 +12,7 @@
 // private turn folder that is deleted when the turn ends, and only the meter (src/db.ts contraption_turns)
 // and the session names are stored. The transcript is the person's own Claude session, in their folder.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -23,6 +24,24 @@ import { claudeConfigDir, projectSlug } from './sessions.ts';
 
 /** Read once at load, like the runner's pinned files: a deploy doesn't change the hook under a running server. */
 const AGENT_CAP = readFileSync(join(import.meta.dirname, 'contraption-agent-cap.ts'), 'utf8');
+/** The stdio stand-in for a machine's MCP server, as minion turns use it (src/machine-mcp.ts). */
+const MACHINE_MCP = readFileSync(join(import.meta.dirname, 'machine-mcp.ts'), 'utf8');
+
+/** One of the person's own machines a turn gets (#306). */
+export interface PersonMachine {
+  id: number;
+  name: string;
+  notes: string;
+}
+
+/** What a contraption turn tells claude about the person's machines it has. */
+export function machinesPrompt(machines: PersonMachine[]): string {
+  if (!machines.length) return '';
+  return [
+    `Connected machines: ${machines.map((m) => `${m.name} (mcp__${m.name})`).join(', ')}. Their MCP tools run on this person's own computers, not where you run, and fail if that computer goes offline mid-turn.`,
+    ...machines.filter((m) => m.notes).map((m) => `Notes on ${m.name} from its owner:\n${m.notes}`),
+  ].join('\n\n');
+}
 
 export type TurnErrorCode = 'not_enabled' | 'no_plan' | 'limit' | 'busy' | 'timeout' | 'canceled' | 'bad_request' | 'failed';
 
@@ -144,8 +163,8 @@ export function mcpConfig(port: number, servers: McpServer[]) {
 }
 
 /** The turn's --settings: what it may use, where it compacts, and the Agent cap's hook. */
-export function settings(req: TurnRequest, hook: { node: string; script: string; slots: string } | null) {
-  const allow = req.mcp.map((s) => `mcp__${s.name}`);
+export function settings(req: TurnRequest, hook: { node: string; script: string; slots: string } | null, machines: string[] = []) {
+  const allow = [...req.mcp, ...machines.map((name) => ({ name }))].map((s) => `mcp__${s.name}`);
   if (req.agents) allow.push('Agent');
   const out: Record<string, unknown> = {
     permissions: { allow, defaultMode: 'dontAsk' },
@@ -180,6 +199,9 @@ interface Live {
   pidFile: string;
   /** Why Citadel stopped it, if it did. */
   stopped: 'timeout' | 'canceled' | null;
+  /** Its machine proxies' key to the session routes (routes/machines.ts), and the machines it got at its start. */
+  token: string;
+  machines: number[];
 }
 
 export interface ClaudePlaces {
@@ -201,6 +223,9 @@ export class ContraptionTurns {
   private names = new Set<string>();
   /** A preview (a copy of the data) never runs turns. */
   noTurns = false;
+  /** The person's own machines online now (#306), and the address their proxies reach Citadel at: set by server.ts. */
+  machines: (person: number) => PersonMachine[] = () => [];
+  apiUrl = () => '';
 
   constructor(store: Store, contraptions: Contraptions, claude: ClaudePlaces, opts: { dataDir: string; claudeBin: string; podman?: string; env?: NodeJS.ProcessEnv }) {
     this.store = store;
@@ -212,6 +237,12 @@ export class ContraptionTurns {
     this.env = opts.env ?? process.env;
     // No turn outlives the server: drop what a crash left behind.
     rmSync(join(this.dataDir, 'run', 'contraption-turns'), { recursive: true, force: true });
+  }
+
+  /** The running turn a machine proxy's token belongs to, or null. */
+  machineTurn(token: string): { id: number; person: number; contraption: number; machines: number[] } | null {
+    for (const t of this.live.values()) if (t.token === token) return t;
+    return null;
   }
 
   /** Turns running now, which a restart would cut off. */
@@ -282,7 +313,7 @@ export class ContraptionTurns {
     this.names.add(key);
     const id = this.store.startContraptionTurn(c.id, req.person, req.session);
     const dir = this.turnDir(id, place);
-    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: place.host ? null : place.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null };
+    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: place.host ? null : place.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [] };
     this.live.set(id, live);
     let outcome: string = 'failed';
     let usage: Usage | null = null;
@@ -314,14 +345,24 @@ export class ContraptionTurns {
     mkdirSync(join(dir.onHost, 'slots'), { mode: 0o700 });
     mkdirSync(join(dir.onHost, 'tmp'));
     const secret = (name: string, text: string) => writeFileSync(join(dir.onHost, name), text, { mode: 0o600 });
-    secret('mcp.json', JSON.stringify(mcpConfig(c.port, req.mcp)));
-    if (req.system) secret('system.md', req.system);
+    const config: { mcpServers: Record<string, object> } = mcpConfig(c.port, req.mcp);
+    // The person's own machines (#306), through the same stand-in minion turns use; a contraption server's name wins.
+    const machines = this.machines(req.person).filter((m) => !req.mcp.some((s) => s.name === m.name));
+    live.machines = machines.map((m) => m.id);
+    if (machines.length) {
+      secret('machine-mcp.ts', MACHINE_MCP);
+      const env = { COORDINATOR_API: this.apiUrl(), COORDINATOR_TOKEN: live.token, COORDINATOR_MACHINE_ROUTE: 'contraption-session' };
+      for (const m of machines) config.mcpServers[m.name] = { type: 'stdio', command: process.execPath, args: [join(dir.inside, 'machine-mcp.ts'), String(m.id), m.name, 'mcp'], env };
+    }
+    secret('mcp.json', JSON.stringify(config));
+    const system = [req.system, machinesPrompt(machines)].filter(Boolean).join('\n\n');
+    if (system) secret('system.md', system);
     let hook = null;
     if (req.agents) {
       secret('agent-cap.ts', AGENT_CAP);
       hook = { node: process.execPath, script: join(dir.inside, 'agent-cap.ts'), slots: join(dir.inside, 'slots') };
     }
-    secret('settings.json', JSON.stringify(settings(req, hook)));
+    secret('settings.json', JSON.stringify(settings(req, hook, machines.map((m) => m.name))));
 
     const tmp = join(dir.inside, 'tmp');
     let env: Record<string, string> = {
@@ -331,7 +372,7 @@ export class ContraptionTurns {
     };
     delete env.SSH_AUTH_SOCK;
     if (req.agents && (req.agents.model ?? req.model)) env.CLAUDE_CODE_SUBAGENT_MODEL = (req.agents.model ?? req.model)!;
-    const argv = args(req, dir.inside, claudeSession, resume);
+    const argv = args({ ...req, system }, dir.inside, claudeSession, resume);
     let cmd: string;
     let cmdArgs: string[];
     if (place.host) {

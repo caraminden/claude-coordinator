@@ -94,7 +94,8 @@ test("the stream carries a scheme's news to its people, and admin-only news to a
   assert.equal(scope({ type: 'event', event: { ticket_id: t.id } }), games.id);
   assert.equal(scope({ type: 'ticket', ticket: { project_id: citadel.id } }), citadel.id);
   assert.equal(scope({ type: 'branch', ticketId: t.id }), games.id);
-  assert.equal(scope({ type: 'machines', machines: [] }), 'admin');
+  // The machines list goes to everyone, each cut to their own machines by server.ts broadcast (#306).
+  assert.equal(scope({ type: 'machines', machines: [] }), null);
   assert.equal(scope({ type: 'properties', projectId: null }), null);
   assert.ok(mayReceive(store, joshS, games.id) && !mayReceive(store, oliveS, games.id));
   assert.ok(!mayReceive(store, joshS, citadel.id) && !mayReceive(store, joshS, 'admin') && mayReceive(store, oliveS, null));

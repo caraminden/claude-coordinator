@@ -9,7 +9,7 @@ import { homedir } from 'node:os';
 import { fileType, findArtifacts, findByName, isArtifact, linkedPaths, type FoundArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
-import { claudeRefusal, lendsMachine, machinesFor, mayReceive, messagePerson, messageScope, turnRefusal } from './src/access.ts';
+import { claudeRefusal, lendsMachine, machinesFor, mayReceive, ownerAsked, messagePerson, messageScope, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
 import { Landings } from './src/land.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
@@ -208,6 +208,9 @@ runner.onAuthFailure = (person) => claudeLink.expire(person);
 // Contraptions' turns (the turn API): on the same Claude a person's minion turns use, never anyone else's.
 const contraptionTurns = new ContraptionTurns(store, contraptions, claudeLink, { dataDir: DATA_DIR, claudeBin: process.env.CLAUDE_BIN ?? 'claude' });
 contraptionTurns.noTurns = PREVIEW;
+// A contraption turn gets its person's own machines that are online (#306), never a shared one.
+contraptionTurns.machines = (person) => machines.online().filter((m) => m.owner_id !== null && m.servers.includes('mcp') && ownerAsked(store, m.owner_id, [person], null));
+contraptionTurns.apiUrl = () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`;
 claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container);
 const landings = new Landings();
 // Contraption turns and app deploys run as the server's children: a restart waits for them like landings.

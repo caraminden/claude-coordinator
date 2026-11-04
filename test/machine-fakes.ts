@@ -30,7 +30,8 @@ const { spawn } = require('node:child_process');
 const { createInterface } = require('node:readline');
 const { appendFileSync, readFileSync } = require('node:fs');
 const args = process.argv.slice(2);
-const system = readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8');
+// A contraption turn with no system prompt has no file.
+const system = args.includes('--append-system-prompt-file') ? readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8') : '';
 const config = JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8'));
 const allow = JSON.parse(readFileSync(args[args.indexOf('--settings') + 1], 'utf8')).permissions.allow;
 const report = (r) => appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify(r) + '\\n');
@@ -39,7 +40,8 @@ process.stdin.resume();
   const results = {};
   for (const [name, s] of Object.entries(config.mcpServers)) {
     if (name === 'thread') continue;
-    const p = spawn(s.command, s.args, { stdio: ['pipe', 'pipe', 'inherit'] });
+    // As claude does: a server's own env on top of claude's (a contraption turn's proxy gets its token that way).
+    const p = spawn(s.command, s.args, { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, ...s.env } });
     const replies = createInterface({ input: p.stdout })[Symbol.asyncIterator]();
     const call = async (id, method, params) => {
       p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\\n');

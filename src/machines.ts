@@ -49,11 +49,17 @@ interface Agent {
   problems: string[];
 }
 
+/** Whose turn a session serves: a minion's (its ticket and scheme), or a contraption turn's (#306). */
+export type SessionHolder = { ticketId: number; projectId: number } | { contraptionTurn: number };
+
 interface Session {
   machineId: number;
-  ticketId: number;
-  /** The minion's scheme, so taking a scheme off a scoped machine ends its sessions. */
-  projectId: number;
+  /** 't<ticket id>' or 'c<contraption turn id>': only that turn's proxy may send on it. */
+  holder: string;
+  /** The minion, for fetch_file; null for a contraption turn. */
+  ticketId: number | null;
+  /** The minion's scheme, so taking a scheme off a scoped machine ends its sessions; null for a contraption turn. */
+  projectId: number | null;
   server: MachineServer;
   /** Which minion, for the agent's log and its workspace lock ("#90 in Citadel"). */
   who: string;
@@ -72,6 +78,8 @@ function cleanWorkspaces(v: unknown): unknown[] {
     tasks: list(w?.tasks).map((t: any) => ({ name: text(t?.name, 40), run: list(t?.run).map((a) => text(a)), about: text(t?.about) })),
   }));
 }
+
+const holderKey = (h: SessionHolder) => ('ticketId' in h ? `t${h.ticketId}` : `c${h.contraptionTurn}`);
 
 export class MachineRelay {
   private agents = new Map<number, Agent>();
@@ -189,7 +197,7 @@ export class MachineRelay {
 
   /** End a machine's sessions in schemes it is no longer lent to. */
   endSessionsWhere(machineId: number, gone: (projectId: number) => boolean) {
-    for (const [id, s] of this.sessions) if (s.machineId === machineId && gone(s.projectId)) this.endSession(id, true);
+    for (const [id, s] of this.sessions) if (s.machineId === machineId && s.projectId !== null && gone(s.projectId)) this.endSession(id, true);
   }
 
   /** The thread a machine's workspace session serves, for a file its agent sends; null if none. */
@@ -207,12 +215,13 @@ export class MachineRelay {
     return true;
   }
 
-  /** A thread's proxy started: give it a session whose stream carries the machine's replies. */
-  openSession(machineId: number, ticket: { id: number; project_id: number }, server: MachineServer, who: string, res: ServerResponse): boolean {
+  /** A turn's proxy started: give it a session whose stream carries the machine's replies. */
+  openSession(machineId: number, holder: SessionHolder, server: MachineServer, who: string, res: ServerResponse): boolean {
     const agent = this.agents.get(machineId);
     if (!agent || !this.online().some((m) => m.id === machineId && m.servers.includes(server))) return false;
     const id = randomBytes(12).toString('hex');
-    this.sessions.set(id, { machineId, ticketId: ticket.id, projectId: ticket.project_id, server, who, res });
+    const minion = 'ticketId' in holder ? holder : null;
+    this.sessions.set(id, { machineId, holder: holderKey(holder), ticketId: minion?.ticketId ?? null, projectId: minion?.projectId ?? null, server, who, res });
     agent.sessions.add(id);
     res.writeHead(200, SSE_HEADERS);
     res.write(`data: ${JSON.stringify({ session: id })}\n\n`);
@@ -226,9 +235,9 @@ export class MachineRelay {
   }
 
   /** A message from a thread's proxy to the machine. False if the session or machine is gone. */
-  fromSession(sessionId: string, ticketId: number, message: unknown): boolean {
+  fromSession(sessionId: string, holder: SessionHolder, message: unknown): boolean {
     const s = this.sessions.get(sessionId);
-    if (!s || s.ticketId !== ticketId) return false;
+    if (!s || s.holder !== holderKey(holder)) return false;
     const agent = this.agents.get(s.machineId);
     if (!agent) return false;
     if (agent.res.writableLength > MAX_BACKLOG) {

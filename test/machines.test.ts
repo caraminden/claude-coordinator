@@ -339,3 +339,46 @@ test('a person\'s own machine goes only to turns they ask for, in schemes they\'
   assert.equal((await josh.as(`/api/machines/${machine.id}`, { method: 'DELETE' })).status, 200);
   await call(`/api/machines/${mineMade.machine.id}`, { method: 'DELETE' });
 });
+
+test('a contraption turn gets its person\'s own machines, and no one else\'s or a shared one (#306)', async () => {
+  const made = await call('/api/contraptions', { method: 'POST', body: { name: 'tally', title: 'Tally', port: 9102 } });
+  const key = readFileSync(join(made.keys_dir, 'contraption.key'), 'utf8');
+  const me = await call('/api/me');
+  const olive = await call('/api/people', { method: 'POST', body: { name: 'Olive' } });
+  const store = new Store(join(root, 'data', 'coordinator.db'));
+  store.updateUser(olive.person.id, { server_login: 1 });
+  for (const id of [me.id, olive.person.id]) await call(`/api/contraptions/tally/people/${id}`, { method: 'PUT', body: { enabled: true } });
+
+  const own = await call('/api/machines', { method: 'POST', body: { name: 'cara-app-box', mine: true } });
+  await call(`/api/machines/${own.machine.id}`, { method: 'PATCH', body: { notes: 'The tally sheet lives here.' } });
+  startAgent(own.token);
+  const sharedBox = await call('/api/machines', { method: 'POST', body: { name: 'shared-app-box' } });
+  startAgent(sharedBox.token);
+  await until('both to come online', async () => (await call('/api/machines')).filter((m: any) => ['cara-app-box', 'shared-app-box'].includes(m.name) && m.online).length === 2);
+
+  const turnFor = async (person: number) => {
+    const before = turns().length;
+    const res = await fetch(`${base}/api/contraptions/turns`, {
+      method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ person, session: 's', prompt: 'count' }),
+    });
+    const events = await res.text();
+    assert.doesNotMatch(events, /event: error/, events);
+    return (await until('a contraption turn', () => turns().length > before && turns())).at(-1);
+  };
+  const caras = await turnFor(me.id);
+  assert.deepEqual(Object.keys(caras.results), ['cara-app-box'], 'her own machine, not the shared one');
+  assert.deepEqual(caras.results['cara-app-box'].tools, ['whoami']);
+  assert.match(caras.results['cara-app-box'].text, /^pid \d+$/, 'the call reached the machine');
+  assert.ok(caras.allow.includes('mcp__cara-app-box'));
+  assert.match(caras.system, /Connected machines: cara-app-box[\s\S]*The tally sheet lives here\./);
+  const olives = await turnFor(olive.person.id);
+  assert.deepEqual(olives.results, {});
+  assert.equal(olives.system, '');
+
+  // A minion's token doesn't open the contraption route, and a made-up turn token doesn't either.
+  const forged = await fetch(`${base}/api/machines/${own.machine.id}/contraption-session`, { headers: { Authorization: 'Bearer cmt_forged' } });
+  assert.equal(forged.status, 401);
+  await forged.body!.cancel();
+  for (const m of [own, sharedBox]) await call(`/api/machines/${m.machine.id}`, { method: 'DELETE' });
+});

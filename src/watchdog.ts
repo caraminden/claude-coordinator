@@ -1,7 +1,7 @@
 // The down-alert watchdog (#302): tools/watchdog.ts runs this every 5 minutes from a user timer
 // (deploy/citadel-watchdog.timer). It checks Citadel's unit and /api/health, and each contraption's
 // enabled citadel-app-<name>.service and its health path (or port). Once one has been down for the
-// threshold it web-pushes the owner straight from here, since Citadel (and Mandate) may be the thing
+// threshold it web-pushes every admin straight from here, since Citadel (and Mandate) may be the thing
 // that's down, and again when it's back. It reads the database read-only and never restarts anything:
 // that's systemd's job (Restart=always).
 import { execFile } from 'node:child_process';
@@ -91,11 +91,10 @@ export function targets(db: DatabaseSync, home: string, citadelPort = 8573): Tar
   ];
 }
 
-/** The owner (the first admin, whom Citadel made at its first start) or every admin, by user name as push_subscriptions keeps it. */
-export function recipients(db: DatabaseSync, who: 'owner' | 'admins'): { name: string; endpoint: string; p256dh: string; auth: string }[] {
-  const people = who === 'owner' ? 'SELECT name FROM users WHERE id = (SELECT min(id) FROM users WHERE admin = 1) AND disabled_at IS NULL'
-    : 'SELECT name FROM users WHERE admin = 1 AND disabled_at IS NULL';
-  return db.prepare(`SELECT name, endpoint, p256dh, auth FROM push_subscriptions WHERE name COLLATE NOCASE IN (${people}) ORDER BY id`).all() as any[];
+/** Every admin's devices (Josh on #302, 2026-11-04: "Every admin"), by user name as push_subscriptions keeps it. */
+export function recipients(db: DatabaseSync): { name: string; endpoint: string; p256dh: string; auth: string }[] {
+  return db.prepare(`SELECT name, endpoint, p256dh, auth FROM push_subscriptions
+    WHERE name COLLATE NOCASE IN (SELECT name FROM users WHERE admin = 1 AND disabled_at IS NULL) ORDER BY id`).all() as any[];
 }
 
 export interface UnitState {

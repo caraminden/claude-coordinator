@@ -123,12 +123,14 @@ test('targets and recipients come from the database', () => {
     ['app:mandate', 'citadel-app-mandate.service', { url: 'http://127.0.0.1:3001/health' }],
     ['app:peek', 'citadel-app-peek.service', { port: 3002 }],
   ]);
-  assert.deepEqual(recipients(db, 'owner').map((s) => s.name), ['Cara']);
-  assert.deepEqual(recipients(db, 'admins').map((s) => s.name), ['Cara', 'Josh']);
+  db.prepare("UPDATE users SET disabled_at = 1 WHERE name = 'Josh'").run();
+  store.createUser({ name: 'Sam', login: 'sam', admin: true });
+  store.savePushSubscription('sam', 'https://push.example/sam', 'k', 'a');
+  assert.deepEqual(recipients(db).map((s) => s.name), ['Cara', 'sam'], 'admins only, not disabled ones, whatever the case of the name');
   db.close();
 });
 
-test('tools/watchdog.ts pushes the owner a readable message and saves its state', async () => {
+test('tools/watchdog.ts pushes the admins a readable message and saves its state', async () => {
   const dir = mkdtempSync(join(root, 'run-'));
   const store = new Store(join(dir, 'coordinator.db'));
   store.createUser({ name: 'Cara', login: 'cara', admin: true });
@@ -154,7 +156,7 @@ test('tools/watchdog.ts pushes the owner a readable message and saves its state'
   }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out)))));
   const out = await run();
   assert.match(out, /1 watched, down: Citadel: failed/);
-  assert.match(out, /Pushing to 1 device\(s\) of owner: Citadel down: Down: Citadel 11 min \(failed\)\./);
+  assert.match(out, /Pushing to 1 admin device\(s\): Citadel down: Down: Citadel 11 min \(failed\)\./);
   assert.equal(got.length, 1);
   assert.match(got[0].headers.authorization, new RegExp(`^vapid t=.+, k=${keys.publicKey}$`));
   assert.equal(got[0].headers.topic, 'citadel-watchdog');

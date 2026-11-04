@@ -1,5 +1,5 @@
 [Unit]
-Description=Citadel down-alert watchdog: web-pushes the owner when Citadel or a contraption has been down 10 minutes (#302)
+Description=Citadel down-alert watchdog: web-pushes every admin when Citadel or a contraption has been down 10 minutes (#302)
 
 [Service]
 Type=oneshot

@@ -1,8 +1,7 @@
 // One round of the down-alert watchdog (src/watchdog.ts), run by deploy/citadel-watchdog.service every
 // 5 minutes. `--dry-run` prints what it found and would send, and saves and sends nothing.
 // Environment: DATA_DIR (Citadel's, default ~/.local/share/claude-coordinator), WATCHDOG_STATE (its
-// state file, default $STATE_DIRECTORY/state.json), WATCHDOG_MINUTES (default 10), WATCHDOG_TO
-// (owner or admins, default owner), CITADEL_SYSTEMCTL (a stand-in systemctl, for tests).
+// state file, default $STATE_DIRECTORY/state.json), WATCHDOG_MINUTES (default 10), CITADEL_SYSTEMCTL (a stand-in systemctl, for tests).
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -16,7 +15,6 @@ const home = homedir();
 const dataDir = env.DATA_DIR || join(home, '.local/share/claude-coordinator');
 const stateFile = env.WATCHDOG_STATE || join(env.STATE_DIRECTORY || join(home, '.local/state/citadel-watchdog'), 'state.json');
 const minutes = Number(env.WATCHDOG_MINUTES) || 10;
-const who = env.WATCHDOG_TO === 'admins' ? 'admins' : 'owner';
 const systemctl = env.CITADEL_SYSTEMCTL || 'systemctl';
 
 const db = new DatabaseSync(join(dataDir, 'coordinator.db'), { readOnly: true });
@@ -35,8 +33,8 @@ console.log(`${found.size} watched, ${down.length ? `down: ${down.join('; ')}` :
 
 let next = sent;
 if (message) {
-  const subs = recipients(db, who);
-  console.log(`${dry ? 'Would push' : 'Pushing'} to ${subs.length} device(s) of ${who}: ${message.title}: ${message.body}`);
+  const subs = recipients(db);
+  console.log(`${dry ? 'Would push' : 'Pushing'} to ${subs.length} admin device(s): ${message.title}: ${message.body}`);
   // Never make a key pair here: loadVapidKeys would, and a new one orphans every subscription.
   const keyFile = join(dataDir, 'vapid.json');
   let delivered = false;

@@ -10,6 +10,7 @@ import { ASK_FILES_MAX, askFiles, askMessage, saveAskFiles } from '../contraptio
 import { parseTurn, TurnError } from '../contraption-turns.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 import { ServiceError } from '../app-services.ts';
+import { contraptionRead } from '../contraption-read.ts';
 import { mandateItem, SCHEME_CALLER } from '../mandate-items.ts';
 import { relay } from '../relay.ts';
 import type { ContraptionRow } from '../db.ts';
@@ -176,6 +177,8 @@ export const contraptionRoutes: Route[] = [
   { method: ['GET', 'PUT', 'POST', 'DELETE'], path: '/api/contraptions/relay/:to/*rest', who: 'contraption', handler: (ctx) => relay(ctx, ctx.contraption) },
   // mandate_item (#268): a minion or Taskmaster puts or clears an item in its asker's Mandate.
   { method: ['PUT', 'DELETE'], path: '/api/mandate/items/:key', who: ['taskmaster', 'minion'], refuse: 'Only a minion or Taskmaster puts items for its scheme', handler: mandateItem },
+  // contraption_read (#295): a minion or Taskmaster reads its asker's data in a contraption, through the app's read commands.
+  { method: 'POST', path: '/api/contraption-read/:app', who: ['taskmaster', 'minion'], refuse: "Only a minion or Taskmaster reads a person's contraption data", handler: contraptionRead },
   fromContraption('POST', '/api/contraptions/turns', async ({ req, res, app }, c) => {
     const body = await readJson(req, 4_000_000);
     const emit = eventStream(req, res);

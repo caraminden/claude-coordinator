@@ -393,7 +393,11 @@ scheme can also list folders relative to the repo root (e.g. `tools/mods/delve`)
 absolute ones; each minion turn gets `--plugin-dir <worktree>/<folder>` (or the
 absolute path) for every one that exists. Turns also get `COORDINATOR_SHARED_DIR` (the
 scheme's shared folder) and `COORDINATOR_FILES_DIR` (the minion's own) in their environment,
-for plugins and hooks that write files people should see.
+for plugins and hooks that write files people should see. A turn answering one person's
+own typed message also gets `CITADEL_PERSON_ID` (their user id, the `sub` of a contraption
+identity) and `CITADEL_PERSON_LOGIN`, so a contraption's hook guard can let the session read
+that person's data and nobody else's; every other turn (a relay, a wake, a schedule, a resume,
+GitHub, a contraption's post) has neither, not even empty. Host and container turns alike.
 
 The Taskmaster itself runs in `acceptEdits` with only its MCP tools
 pre-approved, so it can read the code and manage minions but can't run shell

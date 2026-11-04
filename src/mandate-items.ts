@@ -10,7 +10,8 @@
 //     hook: true always, and link the minion's page. The number routes her ticks back (relay.ts schemeHook).
 //   - Mandate's status and body come back as { status, answer }; Citadel's own refusals are HTTP errors.
 import { APP_NAME } from './appname.ts';
-import { HttpError, json, readJson, type Ctx } from './http.ts';
+import type { Ticket } from './db.ts';
+import { HttpError, json, readJson, type App, type Ctx } from './http.ts';
 
 /** Contraption names Citadel keeps for its schemes when it calls Mandate for one. */
 export const SCHEME_CALLER = /^scheme-\d+$/;
@@ -23,24 +24,35 @@ const FIELDS = ['title', 'day', 'time', 'at', 'alert'] as const;
 // shortcut: a ticked or deleted item's row stays until the minion clears its key; prune if settings ever grows from it.
 export const titleKey = (projectId: number, person: number, key: string) => `mandate-title:${projectId}:${person}:${key}`;
 
-export async function mandateItem({ req, res, app, params, caller }: Ctx) {
+/**
+ * The person whose own typed message the caller's turn answers (Runner.typedBy), checked for a call into
+ * contraption `name` on their behalf: on the scheme, the contraption registered and enabled for them, and an
+ * identity for them signed with its key, `from` scheme-<id>. Shared by mandate_item and contraption_read (#295).
+ */
+export function typedPersonFor(app: App, ticket: Ticket, name: string, doing: string) {
   const { store, contraptions, runner } = app;
+  const uid = runner.typedBy(ticket.id);
+  const user = uid === null ? undefined : store.getUser(uid);
+  if (!user || user.disabled_at) throw new HttpError(403, `Only a turn answering a person's own typed message may ${doing}, and this one isn't (a GitHub or system message, a relay, a wake, or several people). Ask them to send the request in this chat.`);
+  if (!store.canSee({ uid: user.id, admin: !!user.admin }, ticket.project_id)) throw new HttpError(403, `${user.name} isn't on this scheme`);
+  const c = store.getContraption(name);
+  if (!c) throw new HttpError(404, `${name} isn't registered in ${APP_NAME}`);
+  if (!contraptions.enabled(c.name, user.id)) throw new HttpError(403, `${user.name} doesn't have ${c.title} enabled`);
+  const project = store.getProject(ticket.project_id)!;
+  const identity = contraptions.signIdentity(c.name, user, { name: `scheme-${project.id}`, title: project.name });
+  if (!identity) throw new HttpError(503, `${c.title}'s keys don't open; an admin can rotate them in Settings → Contraptions`);
+  return { user, project, contraption: c, identity };
+}
+
+export async function mandateItem({ req, res, app, params, caller }: Ctx) {
+  const { store } = app;
   const ticket = caller!;
   // The Taskmaster has no number: 0 stands for it.
   const prefix = `${ticket.number ?? 0}.`;
   const key = prefix + params.key;
   if (!KEY.test(key) || !params.key) throw new HttpError(400, `key must be 1 to ${128 - prefix.length} letters, digits, dots, underscores, colons or dashes`);
 
-  const uid = runner.typedBy(ticket.id);
-  const user = uid === null ? undefined : store.getUser(uid);
-  if (!user || user.disabled_at) throw new HttpError(403, "Only a turn answering a person's own typed message may put items in their Mandate, and this one isn't (a GitHub or system message, a relay, a wake, or several people). Ask them to send the request in this chat.");
-  if (!store.canSee({ uid: user.id, admin: !!user.admin }, ticket.project_id)) throw new HttpError(403, `${user.name} isn't on this scheme`);
-  const mandate = store.getContraption('mandate');
-  if (!mandate) throw new HttpError(404, `Mandate isn't registered in ${APP_NAME}`);
-  if (!contraptions.enabled(mandate.name, user.id)) throw new HttpError(403, `${user.name} doesn't have Mandate enabled`);
-  const project = store.getProject(ticket.project_id)!;
-  const identity = contraptions.signIdentity(mandate.name, user, { name: `scheme-${project.id}`, title: project.name });
-  if (!identity) throw new HttpError(503, `${mandate.title}'s keys don't open; an admin can rotate them in Settings → Contraptions`);
+  const { user, project, contraption: mandate, identity } = typedPersonFor(app, ticket, 'mandate', 'put items in their Mandate');
 
   let body: Record<string, unknown> | undefined;
   if (req.method === 'PUT') {

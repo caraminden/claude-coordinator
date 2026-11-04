@@ -119,6 +119,8 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   assert.equal(env.ANTHROPIC_API_KEY, undefined);
   assert.equal(env.CLAUDE_CONFIG_DIR, join(volume, '.claude'));
   assert.equal(env.COORDINATOR_CONTAINER, '1');
+  // Not a typed message (#295): no person, not even empty.
+  assert.ok(!('CITADEL_PERSON_ID' in env) && !('CITADEL_PERSON_LOGIN' in env));
   // The host's runtime folder isn't in the container: .NET's named mutexes need one that exists (#225).
   assert.equal(env.XDG_RUNTIME_DIR, env.TMPDIR);
   assert.ok(statSync(env.XDG_RUNTIME_DIR).isDirectory());
@@ -134,6 +136,15 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   // A landing running on the host does: the restart would kill it.
   r.hostJobs = () => 1;
   assert.equal(r.interruptible(), 1);
+});
+
+test("a container turn answering the person's own typed message carries their id and login, as a host turn does (#295)", async () => {
+  const id = newTicket();
+  const r = runner(inContainer);
+  r.send(id, 'Josh', 'what is on my list?', [], { typed: true });
+  await until(() => status(id) === 'idle');
+  const env = JSON.parse(readFileSync(seen, 'utf8').trim().split('\n').at(-1)!).env;
+  assert.deepEqual([env.CITADEL_PERSON_ID, env.CITADEL_PERSON_LOGIN, env.COORDINATOR_CONTAINER], [String(josh.id), 'josh', '1']);
 });
 
 test("a container turn's exec runs in a scope of its own under the turns slice, so a restart of the server's unit doesn't kill its conmon (#258)", async () => {

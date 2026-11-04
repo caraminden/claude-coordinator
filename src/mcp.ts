@@ -580,6 +580,32 @@ const MANDATE_ITEM = {
   },
 };
 
+/** Reading the asking person's data in a contraption (#295): every minion and Taskmaster; the server checks whom for. */
+const CONTRAPTION_READ = {
+  name: 'contraption_read',
+  description: `Read the data of the person whose own message this turn answers in one of their ${APP_NAME} apps (contraptions such as mandate), as them, read-only. Use it when they ask about their own data in an app. Without command it lists the app's read commands (name, description, input schema); with command it runs one with args and returns its JSON. Refused on a turn started by GitHub, a system message, a Taskmaster or minion relay, a wake or a resume, and for an app they haven't enabled. Answers past 64 KB are cut.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      app: { type: 'string', description: 'The contraption\'s name, like mandate.' },
+      command: { type: 'string', description: 'A read command the app lists. Leave out to list them.' },
+      args: { type: 'object', description: "The command's input, matching its input schema." },
+    },
+    required: ['app'],
+  },
+};
+
+/** What contraption_read hands back: a list of read commands, or a command's answer. */
+function readText(app: string, command: string | undefined, r: { status: number; answer: unknown; truncated?: number }): string {
+  const body = typeof r.answer === 'string' ? r.answer : JSON.stringify(r.answer);
+  const cut = r.truncated ? `\n(Cut at ${r.truncated / 1024} KB: ask for less, if the command can narrow it.)` : '';
+  if (command) return `${app} answered ${r.status}${r.status === 404 ? ' (no such read command)' : r.status === 403 ? ' (not a read command, or not allowed)' : ''}: ${body}${cut}`;
+  if (r.status === 404) return `${app} offers no read commands: it has no /app-api/read.`;
+  if (r.status !== 200 || !Array.isArray(r.answer)) return `${app} answered ${r.status} to the list of read commands: ${body}${cut}`;
+  if (!r.answer.length) return `${app} lists no read commands.`;
+  return r.answer.map((c: any) => `- ${c?.name}: ${c?.description ?? ''}${c?.input_schema ? `\n  input: ${JSON.stringify(c.input_schema)}` : ''}`).join('\n') + cut;
+}
+
 /** A deploy as the tools show it. */
 function deployText(d: any): string {
   if (!d) return 'No deploy since the server started.';
@@ -1010,6 +1036,11 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call(clear === true ? 'DELETE' : 'PUT', path, clear === true ? undefined : fields);
       return `Mandate answered ${r.status}: ${typeof r.answer === 'string' ? r.answer : JSON.stringify(r.answer)}`;
     }
+    case 'contraption_read': {
+      if (typeof args.app !== 'string' || !args.app) throw new Error('app is required, like mandate');
+      const r = await call('POST', `/api/contraption-read/${encodeURIComponent(args.app)}`, { command: args.command, args: args.args });
+      return readText(args.app, args.command, r);
+    }
     case 'deploy_contraption': {
       const path = `${contraptionPath(args)}/deploy`;
       if (args.follow !== true) await call('POST', path, {});
@@ -1174,8 +1205,8 @@ function scheduleLine(s: any): string {
 
 function toolList() {
   const deploy = APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM] : [...TOOLS, ...deploy, MANDATE_ITEM];
-  return [...THREAD_TOOLS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), MANDATE_ITEM, ...(APPROVALS ? [APPROVE] : [])];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ] : [...TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ];
+  return [...THREAD_TOOLS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), MANDATE_ITEM, CONTRAPTION_READ, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

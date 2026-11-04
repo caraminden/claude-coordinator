@@ -1780,6 +1780,12 @@ export class Runner {
     }
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
+    // Whose data this turn may read (#295): the person whose own typed message it answers, as the identity's
+    // `sub`, for contraptions' own hook guards. Set fresh per process and absent (never empty) on any other turn:
+    // a relay, a wake, a schedule, a resume, GitHub or a contraption's post. turnEnv never passes CITADEL_*
+    // through, and a steer can't change a running process's env, so it stays narrower than typedBy, never wider.
+    const typer = typedBy ? this.store.getUser(typedBy) : undefined;
+    if (typer && !typer.disabled_at) Object.assign(env, { CITADEL_PERSON_ID: String(typer.id), CITADEL_PERSON_LOGIN: typer.login });
     const from = batch.find((m) => m.from || this.personOf?.(m.author))?.from;
     if (from) this.turnFrom.set(ticket.id, from);
     else this.turnFrom.delete(ticket.id);

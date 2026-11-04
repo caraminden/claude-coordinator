@@ -17,6 +17,7 @@ import { markdownElement } from './ui/markdown.js';
 import { iconSrc } from './schemes.js';
 import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, showFrame } from './frames.js';
+import { initAppSwitch } from './appswitch.js';
 
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
@@ -897,6 +898,7 @@ export function start(who) {
   loadPrs();
   route();
   showRail();
+  initAppSwitch(me);
 }
 
 export async function logout() {

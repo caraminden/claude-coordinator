@@ -147,6 +147,7 @@ uses the built-in `node:sqlite`.
 | `src/mcp.ts` | MCP server giving the Taskmaster its minion-management tools |
 | `src/approvals.ts` | Approval rules, plugin folders, and the Approve / Deny cards |
 | `src/inbox.ts`, `public/inbox.js` | The Needs-you inbox: a scheme's open cards and ready/try minions, as a strip at the top of the minions list |
+| `src/memory.ts` | Semantic memory (#331): the memory_chunks table, the background indexer (each person's message with the final reply, and minions' titles and notes; never tool output or person notes) and search by meaning behind `/api/projects/:project/memory` and the `search_memory` MCP tool |
 | `src/schedules.ts`, `public/schedules.js` | Scheduled minions: cron parsing, the schedules table, and the panel the clock in the Minions header swaps in; the server's timer starts each due run as a fresh minion |
 | `src/tripwire.ts` | PreToolUse hook every turn gets: blocks known accidents (live data, checkout, units, keys) |
 | `src/push.ts` | Web Push: VAPID keys and signing, payload encryption, when to notify |
@@ -163,6 +164,7 @@ uses the built-in `node:sqlite`.
 | `kit/` | The Citadel kit: a Claude Code plugin (skills, agents, hooks) every turn of every scheme loads |
 | `public/progress.js` | Task-list and step tracking, shared with the server |
 | `deploy/claude-coordinator.service` | systemd user unit, with drop-ins in `.service.d/`; `citadel.slice` caps it and its turns, `claude-coordinator.socket` holds the port across restarts |
+| `deploy/citadel-embed.service`, `deploy/embed-install.sh` | Semantic memory's embedding model (llama-server with Qwen3-Embedding-0.6B on localhost:21434) and its installer |
 | `deploy/backup.sh`, `deploy/prune.sh` | Nightly database backup; pruning of long-closed minions (each with a `.service` and `.timer`) |
 | `deploy/offbox.sh`, `deploy/offbox-serve.sh`, `deploy/desktop/` | The off-box copy set backup.sh refreshes, the forced command the desktop's key runs, and the desktop's pull script and setup |
 | `tools/land.sh` | Lands a minion's branch: rebase onto main, test, fast-forward main, deploy, under the deploy lock |
@@ -180,6 +182,8 @@ Configuration comes from the environment:
 | `SESSION_SECRET` | (required, 32+ chars) | Signs session cookies, and encrypts people's linked accounts: changing it unlinks everyone's GitHub |
 | `CITADEL_CONTRAPTIONS_DIR` | `~/.config/citadel/contraptions` (another `DATA_DIR`: its `contraptions/`) | Where each contraption's key folder goes (`<name>/identity.pub`, `<name>/contraption.key`), which its own service reads |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | (unset: turns use the box's gh login) | The OAuth App people link their own GitHub through (below) |
+| `CITADEL_EMBED_URL` / `CITADEL_EMBED_MODEL` | `http://127.0.0.1:21434` / `Qwen3-Embedding-0.6B-Q8_0` | Semantic memory's embedding service, and the model name stored with each vector: a new name embeds everything again |
+| `CITADEL_MEMORY_SCHEMES` | (unset: the scheme whose code the server runs) | Comma-separated scheme ids whose chats get indexed for search by meaning |
 | `HOST` / `PORT` | `127.0.0.1` / `8573` | Listen address |
 | `DATA_DIR` | `~/.local/share/claude-coordinator` | Database, clones, worktrees |
 | `CLAUDE_BIN` | `claude` | Claude Code executable |
@@ -264,6 +268,17 @@ tools/watchdog.ts --dry-run` shows a round without saving or sending.
 ln -s ~/claude-coordinator/deploy/citadel-watchdog.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now citadel-watchdog.timer
+```
+
+**Semantic memory.** `deploy/citadel-embed.service` runs llama-server with
+Qwen3-Embedding-0.6B on `127.0.0.1:21434`, at nice 10 on 4 threads. Every minute the
+server embeds what was said since its last pass in the indexed schemes, and minions and
+the Taskmaster there get the `search_memory` tool. Without the service, indexing waits
+and search answers 503; nothing else changes. To install it (downloads llama.cpp and the
+model, about 660 MB, checked against pinned hashes):
+
+```sh
+bash ~/claude-coordinator/deploy/embed-install.sh
 ```
 
 Turns for the server login's owner run as the service's user on that user's

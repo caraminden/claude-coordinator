@@ -81,7 +81,8 @@ export const CHECKOUT = join(import.meta.dirname, '..');
 if (existsSync(KIT_SOURCE)) cpSync(KIT_SOURCE, KIT, { recursive: true });
 /** citadel-heavy (tools/), the host-wide slots for heavy builds and test suites (#325), first on every turn's PATH from its pinned bin folder. */
 export const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
-cpSync(join(import.meta.dirname, '..', 'tools', 'citadel-heavy'), HEAVY);
+const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
+if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
 /** The minion prompt's line on citadel-heavy. */
 export const HEAVY_LINE = 'Heavy builds and full test suites (a whole-workspace `cargo build`, `test`, `check` or `clippy`, a cross-target or release build, a full `npm test`) go through `citadel-heavy <command...>`, as in `citadel-heavy cargo test --workspace`: every scheme and person shares a few slots host-wide, so it may wait in line, saying for whom, and it frees its slot when the command ends or dies. Give that call a long timeout or run it in the background. Leave quick single-crate checks, dev servers and watchers out of it, and don\'t wrap a script that takes its own deploy or land lock (tools/land.sh runs its tests in a slot already); wrap the build or test step inside it instead.';
 /** A build's default parallelism in turns, so the few heavy jobs at once (citadel-heavy's 2 slots) leave cores for the rest. */
@@ -949,7 +950,14 @@ export class Runner {
    * It carries the calling turn's own token: a fresh one would log that turn's tools out (#225).
    */
   hostEnv(ticket: Ticket, token: string): Record<string, string> {
-    return { ...turnEnv(process.env), ...this.coordinatorEnv(ticket, token), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id) };
+    return { ...turnEnv(process.env), ...this.coordinatorEnv(ticket, token), ...this.heavyEnv(ticket, ticket.person_id), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id) };
+  }
+
+  /** citadel-heavy's slots (#325), in the projects folder every person's container mounts at the same path, and who a job runs for. */
+  private heavyEnv(ticket: Ticket, person: number | null): Record<string, string> {
+    const payer = person ? this.store.getUser(person)?.login : undefined;
+    const who = `${this.store.getProject(ticket.project_id)?.name ?? '?'} #${ticket.number}${payer ? ` (${payer})` : ''}`;
+    return { CARGO_BUILD_JOBS: TURN_BUILD_JOBS, CITADEL_HEAVY_DIR: join(this.dataDir, 'projects', '.heavy'), CITADEL_HEAVY_WHO: who };
   }
 
   /** How many turns run in this container now (it isn't restarted under them). */
@@ -1815,9 +1823,7 @@ export class Runner {
       // XDG_RUNTIME_DIR: without it every one fails, NuGet's restore included (#225).
       if (tmp) env.XDG_RUNTIME_DIR = tmp;
     }
-    // citadel-heavy's slots live in the projects folder, the one every person's container mounts at the same path.
-    const payer = person ? this.store.getUser(person)?.login : undefined;
-    env = { ...env, PATH: [join(pin, 'bin'), env.PATH].filter(Boolean).join(':'), CARGO_BUILD_JOBS: TURN_BUILD_JOBS, CITADEL_HEAVY_DIR: join(this.dataDir, 'projects', '.heavy'), CITADEL_HEAVY_WHO: `${project.name} #${ticket.number}${payer ? ` (${payer})` : ''}` };
+    env = { ...env, ...this.heavyEnv(ticket, person), PATH: [join(pin, 'bin'), env.PATH].filter(Boolean).join(':') };
     // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
     if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;
     if (filesDir) env.COORDINATOR_FILES_DIR = filesDir;

@@ -254,6 +254,10 @@ test('every turn finds citadel-heavy first on its PATH, pinned, with the shared 
   assert.equal(t.env.CITADEL_HEAVY_DIR, join(root, 'projects', '.heavy'), "in the projects folder every container mounts");
   assert.match(t.env.CITADEL_HEAVY_WHO, /^P[\d.]+ #\d+$/);
   assert.equal(t.env.CARGO_BUILD_JOBS, '4');
+  // The land tool's land.sh on the host queues in the same slots, under the same name.
+  const host = runner.hostEnv(store.getTicket(t.id)!, 'token');
+  assert.equal(host.CITADEL_HEAVY_DIR, t.env.CITADEL_HEAVY_DIR);
+  assert.equal(host.CITADEL_HEAVY_WHO, t.env.CITADEL_HEAVY_WHO);
   assert.ok(t.system.includes(HEAVY_LINE));
   assert.match(HEAVY_LINE, /`citadel-heavy cargo test --workspace`/);
   const tm = await turn('coordinator', 'connected');

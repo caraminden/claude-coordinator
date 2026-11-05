@@ -701,6 +701,16 @@ function darkManifest(assets: Map<string, Buffer>) {
   const manifest = JSON.parse(assets.get('manifest.webmanifest')!.toString());
   return Buffer.from(JSON.stringify({ ...manifest, ...manifest.color_scheme_dark }, null, 2));
 }
+// The CI runner agent's installer and scripts (#328), which Cara's one-time install downloads: read from tools/ci-runner/
+// at each request, so they are always the deployed checkout's. Nothing in them is secret.
+const RUNNER_FILES = new Set(['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1']);
+async function serveRunnerFile(res: ServerResponse, path: string) {
+  const name = path.slice('/ci-runner/'.length);
+  if (!RUNNER_FILES.has(name)) throw new HttpError(404, 'Not found');
+  const body = await readFile(join(import.meta.dirname, 'tools', 'ci-runner', name));
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': body.length });
+  res.end(body);
+}
 async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string, etag = false) {
   const name = path === '/' ? 'index.html' : path.replace(/^\//, '');
   let body = ASSETS.get(name);
@@ -767,6 +777,8 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
       // The front end's URLs are relative, so the page itself needs the trailing slash.
       if (!preview[2]) return void res.writeHead(302, { Location: `/${previewPath(Number(preview[1]))}${url.search}` }).end();
       await previews.proxy(req, res, Number(preview[1]), preview[2] + url.search, session?.agent === undefined ? session : null);
+    } else if (url.pathname.startsWith('/ci-runner/')) {
+      await serveRunnerFile(res, url.pathname);
     } else {
       await serveStatic(req, res, url.pathname);
     }
@@ -833,14 +845,15 @@ process.on('SIGHUP', () => {
   );
 });
 
-// The machines-only listener: every agent route (connect, send, info, upload) and the agent script, nothing else.
+// The machines-only listener: every agent route (connect, send, info, upload) and the agents' scripts, nothing else.
 if (MACHINES_URL) {
   const agentApi = router(agentRoutes);
   const agents = createServer(async (req, res) => {
     try {
       const url = requestUrl(req);
       if (agentApi.knows(url.pathname)) await agentApi(app, req, res, url, null);
-      else if (url.pathname === '/machine-agent.mjs' && req.method === 'GET') await serveStatic(req, res, url.pathname);
+      else if ((url.pathname === '/machine-agent.mjs' || url.pathname === '/runner-agent.mjs') && req.method === 'GET') await serveStatic(req, res, url.pathname);
+      else if (url.pathname.startsWith('/ci-runner/') && req.method === 'GET') await serveRunnerFile(res, url.pathname);
       else throw new HttpError(404, 'Not found');
     } catch (err: any) {
       const status = err instanceof HttpError ? err.status : 500;

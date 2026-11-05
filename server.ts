@@ -11,6 +11,7 @@ import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
 import { claudeRefusal, lendsMachine, machinesFor, mayReceive, ownerAsked, messagePerson, messageScope, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
+import { CodexLink } from './src/codex-link.ts';
 import { Landings } from './src/land.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
@@ -242,6 +243,7 @@ runner.placeFor = (person) => {
   return claudeLink.place(user.id) ?? { refused: claudeRefusal(user, (uid) => claudeLink.linked(uid)) ?? `${user.name}'s Claude isn't ready, so this message waits here.` };
 };
 runner.onAuthFailure = (person) => claudeLink.expire(person);
+const codexLink = new CodexLink(claudeLink);
 // Contraptions' turns (the turn API): on the same Claude a person's minion turns use, never anyone else's.
 const contraptionTurns = new ContraptionTurns(store, contraptions, claudeLink, { dataDir: DATA_DIR, claudeBin: process.env.CLAUDE_BIN ?? 'claude' });
 contraptionTurns.noTurns = PREVIEW;
@@ -732,7 +734,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, claude: claudeLink, contraptions, contraptionTurns, landings, services,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {

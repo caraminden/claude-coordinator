@@ -308,7 +308,8 @@ podman and systemd aren't reachable from inside. The tripwire keeps turns away f
 can get a second opinion from another model family on the person's own ChatGPT
 plan: `citadel-codex-review` (`src/codex-review.ts`, on every turn's PATH) drives
 `codex app-server` in a read-only, ephemeral thread and prints the review. The
-person signs in once inside their container with `codex login --device-auth`; the
+person signs in from Settings → Your account (`src/codex-link.ts`), which runs
+`codex login --device-auth` in their container and shows OpenAI's link and code; the
 login stays in `~/.codex/auth.json` in their volume, which the tripwire won't let a
 turn read. The image's `/etc/codex/requirements.toml` (`deploy/claude-container/codex/`)
 runs Citadel's tripwire as Codex's only hook, failing closed: the hook reads the

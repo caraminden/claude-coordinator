@@ -172,6 +172,25 @@ export const peopleRoutes: Route[] = [
       return json(res, 200, app.claude.status(uidOf(session)));
     },
   },
+  // Signing in to Codex (src/codex-link.ts, #330): in the person's Claude container, by OpenAI's device code. No token passes through.
+  { method: 'GET', path: '/api/me/codex', who: ['person'], handler: ({ res, app, session }) => json(res, 200, app.codex.status(uidOf(session))) },
+  {
+    method: 'POST', path: '/api/me/codex', who: ['person'],
+    handler({ res, app, session }) {
+      const uid = uidOf(session);
+      if (app.codex.status(uid).state === 'no container') throw new HttpError(400, 'Codex signs in inside your own Claude container, and you have none: link your Claude first.');
+      // Starting the container can take minutes (it rebuilds the image after an update): Settings polls GET meanwhile.
+      void app.codex.link(uid);
+      return json(res, 202, app.codex.status(uid));
+    },
+  },
+  {
+    method: 'DELETE', path: '/api/me/codex', who: ['person'],
+    async handler({ res, app, session }) {
+      await app.codex.unlink(uidOf(session)).catch((err) => { throw new HttpError(400, err.message); });
+      return json(res, 200, app.codex.status(uidOf(session)));
+    },
+  },
   { method: 'GET', path: '/api/projects/:project/members', who: ['person'], handler: ({ res, app, project }) => json(res, 200, members(app, project.id)) },
   {
     method: 'POST', path: '/api/projects/:project/members', who: ['person'], access: 'owner',

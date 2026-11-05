@@ -4,7 +4,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { imageHash } from '../src/claude-link.ts';
+import { imageHash, type ClaudeLink } from '../src/claude-link.ts';
+import { CodexLink, deviceCode } from '../src/codex-link.ts';
+import { Containers } from '../src/containers.ts';
 import { notReady, review } from '../src/codex-review.ts';
 
 // Codex as a read-only second-opinion reviewer (#330): the managed tripwire hook baked into each
@@ -170,3 +172,84 @@ test("a failed Codex turn says why (a usage limit, say), and a stuck one times o
   const missing = await review('Review.', { cwd: root, timeoutMs: 5_000, bin: join(root, 'no-codex') });
   assert.equal(missing.code, 3);
 });
+
+// Signing in from Settings: a fake `podman exec` prints Codex's device-code screen, then signs in (or
+// fails) when the test says so, as OpenAI's side would once the person enters the code.
+const DEVICE = `Welcome to Codex [v\x1b[90m0.166.0\x1b[0m]
+
+Follow these steps to sign in with ChatGPT using device code authorization:
+
+1. Open this link in your browser and sign in to your account
+   \x1b[94mhttps://auth.openai.com/codex/device\x1b[0m
+
+2. Enter this one-time code \x1b[90m(expires in 15 minutes)\x1b[0m
+   \x1b[94mAB12-CD34Z\x1b[0m
+`;
+
+test("the device link and code are read from codex login's screen, and not before both are out", () => {
+  const plain = DEVICE.replace(/\x1b\[[0-9;]*m/g, '');
+  assert.deepEqual(deviceCode(plain), { url: 'https://auth.openai.com/codex/device', code: 'AB12-CD34Z' });
+  assert.equal(deviceCode(plain.slice(0, plain.indexOf('2. Enter'))), null);
+});
+
+test("Codex signs in inside the person's container by device code, and the login stays a file Citadel only checks for", async () => {
+  const dir = join(root, 'link');
+  const home = join(dir, 'volume');
+  mkdirSync(join(home, '.codex'), { recursive: true });
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  const calls = join(dir, 'calls.jsonl');
+  const go = join(dir, 'go');
+  writeFileSync(join(bin, 'podman'), `#!${process.execPath}
+const fs = require('node:fs');
+fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+const args = process.argv.slice(2);
+if (args.includes('logout')) { fs.rmSync(${JSON.stringify(join(home, '.codex', 'auth.json'))}, { force: true }); process.exit(0); }
+process.stdout.write(${JSON.stringify(DEVICE)});
+const wait = setInterval(() => {
+  if (!fs.existsSync(${JSON.stringify(go)})) return;
+  const how = fs.readFileSync(${JSON.stringify(go)}, 'utf8');
+  if (how === 'ok') fs.writeFileSync(${JSON.stringify(join(home, '.codex', 'auth.json'))}, '{}');
+  else process.stderr.write('Error: device code expired');
+  clearInterval(wait);
+  process.exit(how === 'ok' ? 0 : 1);
+}, 50);
+`);
+  chmodSync(join(bin, 'podman'), 0o755);
+  const savedPath = process.env.PATH;
+  process.env.PATH = `${bin}:${savedPath}`;
+  try {
+    let linked = true;
+    const claude = { meta: () => (linked ? { container: 'citadel-claude-2', home, linkedAt: 1 } : null), name: () => 'citadel-claude-2', ensure: async () => {} } as unknown as ClaudeLink;
+    const codex = new CodexLink(claude, new Containers());
+    assert.deepEqual(codex.status(2), { state: 'not linked' });
+    const started = await codex.link(2);
+    assert.deepEqual(started, { state: 'waiting', url: 'https://auth.openai.com/codex/device', code: 'AB12-CD34Z' });
+    const argv = JSON.parse(readFileSync(calls, 'utf8').trim().split('\n')[0]);
+    assert.deepEqual(argv, ['exec', '-i', 'citadel-claude-2', 'codex', 'login', '--device-auth', '-c', 'cli_auth_credentials_store="file"']);
+    // OpenAI turns the code down: the sign-in says why, without the link or the code.
+    writeFileSync(go, 'expired');
+    await until(() => codex.status(2).state === 'not linked');
+    assert.match(codex.status(2).error!, /exit 1.*device code expired/);
+    assert.doesNotMatch(codex.status(2).error!, /AB12|auth\.openai/);
+    rmSync(go);
+    await codex.link(2);
+    writeFileSync(go, 'ok');
+    await until(() => codex.status(2).state === 'linked');
+    // Signing out runs codex logout in the container, which deletes the login.
+    await codex.unlink(2);
+    assert.deepEqual(codex.status(2), { state: 'not linked' });
+    assert.ok(readFileSync(calls, 'utf8').includes('"logout"'));
+    // Without a Claude container (the server's own login, or not linked) there's nowhere for Codex to run.
+    linked = false;
+    assert.deepEqual(codex.status(2), { state: 'no container' });
+  } finally {
+    process.env.PATH = savedPath;
+  }
+});
+
+async function until(check: () => boolean, ms = 5000) {
+  const end = Date.now() + ms;
+  while (!check() && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(check(), 'timed out');
+}

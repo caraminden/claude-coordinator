@@ -1,5 +1,6 @@
 // HTTP plumbing for the API: one error type, JSON in and out, and the checks on what a request sends.
 import type { ClaudeLink } from './claude-link.ts';
+import type { CodexLink } from './codex-link.ts';
 import type { Contraptions } from './contraptions.ts';
 import type { AppServices } from './app-services.ts';
 import type { ContraptionTurns } from './contraption-turns.ts';
@@ -187,6 +188,8 @@ export interface App {
   runnerJobs: RunnerJobs;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */
   claude: ClaudeLink;
+  /** People's own Codex sign-ins, in their Claude container (src/codex-link.ts, #330). */
+  codex: CodexLink;
   /** Contraptions' keys and who each is enabled for (src/contraptions.ts). */
   contraptions: Contraptions;
   /** Contraptions' systemd user services (src/app-services.ts). */

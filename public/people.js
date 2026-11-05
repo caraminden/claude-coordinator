@@ -173,7 +173,7 @@ export function accountPage() {
   return page(
     head('Your account', [`Signed in as ${account?.name} (login ${account?.login ?? '—'})`, account?.admin ? ', an admin.' : '.',
       account?.turns ? '' : ' Your messages don\'t start turns yet: they wait in the chat until you link your Claude below.']),
-    form, claudeCard(), githubCard());
+    form, claudeCard(), codexCard(), githubCard());
 }
 
 /** A plan's week as of its last turn: "41%, resets Mon 9:00 AM", or null before its first turn. */
@@ -248,6 +248,56 @@ function claudeCard() {
       h('div', { class: 'row' }, link('Link Claude')), note);
   };
   api('api/me/claude').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
+  return card;
+}
+
+/** Your own Codex (#330): a second-opinion reviewer on your ChatGPT plan, signed in inside your Claude container. */
+function codexCard() {
+  const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading Codex…'));
+  let poll = null;
+  const render = (st) => {
+    clearTimeout(poll);
+    if (!card.isConnected && poll) return;
+    const title = (chip, cls = '') => h('h3', {}, 'Codex', h('span', { class: `link-chip ${cls}` }, chip));
+    const errLine = st.error ? h('p', { class: 'error', role: 'status' }, st.error) : '';
+    const act = (label, method, cls = '', ask = '') => h('button', {
+      type: 'button', class: `small ${cls}`,
+      onclick: async (e) => {
+        if (ask && !confirm(ask)) return;
+        e.target.disabled = true;
+        render(await api('api/me/codex', { method }).catch((err) => ({ ...st, error: err.message })));
+      },
+    }, label);
+    const note = h('p', { class: 'muted small' }, 'Self-review asks Codex for a second opinion on your ChatGPT plan, counting against its limits. ',
+      'You sign in with OpenAI inside your own container on the server: Citadel never sees your password or token.');
+    const again = () => (poll = setTimeout(() => api('api/me/codex').then(render).catch(() => {}), 2000));
+    if (st.state === 'no container') {
+      return card.replaceChildren(title('Needs your Claude', 'off'), errLine,
+        h('p', { class: 'muted' }, 'Codex signs in inside your own Claude container, so link your Claude above first. Turns on the server\'s own login can\'t use Codex yet.'));
+    }
+    if (st.state === 'starting') {
+      again();
+      return card.replaceChildren(title('Starting', 'off'), errLine,
+        h('p', {}, 'Starting your container and OpenAI\'s sign-in. After an update this rebuilds Citadel\'s image, which can take a few minutes.'));
+    }
+    if (st.state === 'waiting') {
+      again();
+      return card.replaceChildren(title('Signing in', 'off'), errLine,
+        h('p', {}, '1. ', h('a', { href: st.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open OpenAI\'s sign-in'), ' and sign in with your ChatGPT account.'),
+        h('p', {}, '2. Enter this code there (it lasts 15 minutes): ', h('code', {}, st.code)),
+        h('p', { class: 'muted small' }, 'This page carries on by itself once you\'re signed in. If OpenAI refuses the code, turn on device code sign-in for Codex in ChatGPT\'s security settings.'),
+        h('div', { class: 'row' }, act('Cancel', 'DELETE', 'secondary')), note);
+    }
+    if (st.state === 'linked') {
+      return card.replaceChildren(title('Linked', 'ok'), errLine,
+        h('p', {}, 'Signed in with ChatGPT.'),
+        h('div', { class: 'row' }, act('Sign out', 'DELETE', 'secondary', 'Sign out of Codex? Self-review stops asking it until you sign in again.')), note);
+    }
+    return card.replaceChildren(title('Not linked', 'off'), errLine,
+      h('p', {}, 'Sign in to Codex with your ChatGPT plan, and self-review gets a second opinion from another model family.'),
+      h('div', { class: 'row' }, act('Link Codex', 'POST')), note);
+  };
+  api('api/me/codex').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
   return card;
 }
 

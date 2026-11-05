@@ -95,6 +95,24 @@ test('from reaches back to the turn holding that event', () => {
   assert.equal(page.more, true);
 });
 
+test('the newest page reaches back to the turn holding a card still waiting on people', () => {
+  const { store, t } = setup('open-card');
+  turn(store, t.id, 2);
+  // A long planning turn ends with a plan card; the Taskmaster's short follow-up turn comes after it.
+  const planning = [store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'deep dive' }).id];
+  for (let i = 0; i < 40; i++) planning.push(store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: `reading ${i}` }] } }).id);
+  planning.push(store.addEvent(t.id, 'plan', { id: 'p1', summary: 'Plan', plan: '- step', status: 'pending' }).id);
+  planning.push(store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'The plan is on the card below.' }] } }).id);
+  planning.push(store.addEvent(t.id, 'claude', { type: 'result', subtype: 'success', duration_ms: 10 }).id);
+  const followUp = [store.addEvent(t.id, 'user_message', { author: 'Taskmaster', text: 'hold the WoW steps' }).id];
+  for (let i = 0; i < 3; i++) followUp.push(store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: `ok ${i}` }] } }).id);
+  followUp.push(store.addEvent(t.id, 'claude', { type: 'result', subtype: 'success', duration_ms: 10 }).id);
+  assert.deepEqual(historyPage(store, t.id, { limit: 20 }).events.map((e) => e.id), [...planning, ...followUp]);
+  // Once a person has written after it, the card isn't waiting any more and the page is whole turns that fit again.
+  const said = store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'lgtm' }).id;
+  assert.deepEqual(historyPage(store, t.id, { limit: 20 }).events.map((e) => e.id), [...followUp, said]);
+});
+
 test("each page carries the plan as it stood before it, so the readout matches a full replay", () => {
   const { store, t } = setup('plan');
   const create = (id: string, subject: string) => [

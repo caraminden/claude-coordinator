@@ -13,11 +13,15 @@ const PLANS_KEPT = 200;
 /**
  * The newest page before `before` (see Store.eventsPage), with the task list as it stood just before
  * the page: a plan can outlive the turn that made it, and the readout replays the page on top of it.
+ * The newest page also reaches back to the turn holding the oldest card still waiting on people.
  */
 export function historyPage(store: Store, ticketId: number, opts: { before?: number; limit?: number; from?: number } = {}) {
   const before = opts.before ?? Number.MAX_SAFE_INTEGER;
   const limit = Math.min(Math.max(1, opts.limit ?? PAGE_EVENTS), MAX_PAGE_EVENTS);
-  const { events, more } = store.eventsPage(ticketId, before, limit, opts.from);
+  // The newest page reaches back to a card still waiting on people, or later turns push it behind Load earlier.
+  const open = opts.before == null ? store.openCardEventId(ticketId) : null;
+  const from = open == null ? opts.from : Math.min(open, opts.from ?? open);
+  const { events, more } = store.eventsPage(ticketId, before, limit, from);
   return { events, more, tasks: more ? planBefore(store, ticketId, events[0].id) : [] };
 }
 

@@ -167,4 +167,33 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   assert.equal(r.status, 429);
   assert.equal(said().filter((e) => e.text.includes('one too many')).length, 0);
   assert.equal((await ask({ person: Rachel.id, kind: 'bug', text: 'still fine' })).status, 202);
+
+  // A data ask (#318) only files: its files and a sidecar with its words, no message and no turn, even
+  // for a non-member past his ask limit; data asks keep their own count.
+  const events = store.listEvents(tm()!.id).length;
+  const dir = join(shared, 'inbox', 'peek-auras', 'josh');
+  const jsonl = { name: 'layout.jsonl', data: b64('{"x":1}\n') };
+  r = await ask({ person: Josh.id, kind: 'data', item: 'Main layout', summary: 'Find my UI confirm', files: [jsonl, { name: 'crop.png', data: b64('PNG') }] });
+  assert.equal(r.status, 202);
+  assert.equal(r.body.proposal, false);
+  assert.equal(r.body.member, false);
+  assert.deepEqual(r.body.files, ['inbox/peek-auras/josh/layout.jsonl', 'inbox/peek-auras/josh/crop.png']);
+  assert.match(r.body.sidecar, /^inbox\/peek-auras\/josh\/\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z-ask\.json$/);
+  assert.equal(readFileSync(join(dir, 'layout.jsonl'), 'utf8'), '{"x":1}\n');
+  const record = JSON.parse(readFileSync(join(shared, r.body.sidecar), 'utf8'));
+  assert.deepEqual({ ...record, at: undefined }, { contraption: 'peek-auras', person: 'josh', item: 'Main layout', summary: 'Find my UI confirm', text: null, files: r.body.files, at: undefined });
+  assert.ok(Date.now() - Date.parse(record.at) < 60_000);
+  // Same names again: -2, as for other asks; text alone gives the summary.
+  r = await ask({ person: Josh.id, kind: 'data', text: 'Saved twice. Second time.', files: [jsonl] });
+  assert.deepEqual(r.body.files, ['inbox/peek-auras/josh/layout-2.jsonl']);
+  assert.equal(JSON.parse(readFileSync(join(shared, r.body.sidecar), 'utf8')).summary, 'Saved twice.');
+  // The caps and checks still hold, and nothing reached the Taskmaster.
+  assert.equal((await ask({ person: Josh.id, kind: 'data', files: [{ name: 'a.bin', data: half }, { name: 'b.bin', data: half }] })).status, 413);
+  assert.equal((await ask({ person: Josh.id, kind: 'data', files: Array.from({ length: 21 }, (_, i) => ({ name: `${i}.png`, data: b64('x') })) })).status, 400);
+  assert.equal((await ask({ person: Josh.id, kind: 'data', text: ' ' })).status, 400);
+  assert.equal((await ask({ person: Dana.id, kind: 'data' })).status, 403);
+  assert.equal(store.listEvents(tm()!.id).length, events, 'a data ask posts nothing');
+  // A data loop is cut off at 60 in 10 minutes.
+  for (let i = 2; i < 60; i++) assert.equal((await ask({ person: Josh.id, kind: 'data', text: `save ${i}` })).status, 202, `save ${i}`);
+  assert.equal((await ask({ person: Josh.id, kind: 'data', text: 'one too many' })).status, 429);
 });

@@ -65,7 +65,11 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   the chat shows a header line (kind, contraption, person, `item` such as an aura's name, at most 100
   characters) and `summary` (at most 200; without one, the text's first sentence), the full text behind a
   toggle; the Taskmaster's turn reads it all. An ask to change how the contraption itself behaves (its
-  skills, prompts or agent instructions) is a feature ask like any other.
+  skills, prompts or agent instructions) is a feature ask like any other. A `kind: 'data'` ask (#318)
+  only files, for a member or not: its files, plus `<time>-ask.json` beside them with `{ contraption,
+  person, item, summary, text, files, at }` (`text` optional); no chat message, no wake, and its own loop
+  cap of 60 per person in 10 minutes. All kinds answer 202 `{ scheme, member, proposal, files }`, data
+  adding `sidecar`, the JSON's path.
 - Each scheme can have **instructions** (up to 16,000 characters), edited on the
   scheme's Settings page (beside Sign out in the overview panel). They're appended
   to the system prompt of the Taskmaster and every minion, so they apply from each one's next turn. "Import from Claude Code" lists

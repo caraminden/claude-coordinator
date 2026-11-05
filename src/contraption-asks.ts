@@ -2,7 +2,8 @@
 // brief's section 5, shared/project/specs/contraptions/citadel-apps-brief.md). The contraption's server
 // sends one as the person using it; their files go into the home scheme's shared folder under
 // inbox/<contraption>/<login>/, and the ask goes to its Taskmaster, labelled like #211's relays. As there,
-// a non-member's feature ask is a proposal only, and their bug reports are worked as usual.
+// a non-member's feature ask is a proposal only, and their bug reports are worked as usual. A data ask (#318)
+// only files: its files plus a `<time>-ask.json` sidecar with its item, summary and text, waking no one.
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { extname, join, sep } from 'node:path';
 import type { ContraptionRow, Project, User } from './db.ts';
@@ -13,7 +14,7 @@ import { asData } from './quote.ts';
 export const ASK_FILES_MAX = 16 * 1024 * 1024;
 const MAX_FILES = 20;
 
-export const README_INBOX_LINE = "- `inbox/` (written by Citadel): files people sent with a contraption's bug report or feature ask, under `inbox/<contraption>/<person's login>/`. The ask itself is in the Taskmaster's chat.";
+export const README_INBOX_LINE = "- `inbox/` (written by Citadel): files people sent with a contraption's bug report, feature ask or data, under `inbox/<contraption>/<person's login>/`. A bug or feature ask itself is in the Taskmaster's chat; a data ask's words are in the `<time>-ask.json` beside its files.";
 
 /** A name that is safe as one path segment: no folders, no leading dot, letters, digits, dots, dashes and underscores only. */
 export function safeName(name: string): string {

@@ -1,7 +1,7 @@
 // Contraptions (src/contraptions.ts): admins register them, edit them, enable them per person and
 // rotate their keys, as does Citadel's Taskmaster on an admin's turn (#246); anyone signed in lists
 // the ones enabled for them, for the app rail; a contraption's own server sends its people's bug
-// reports and feature asks to its home scheme (src/contraption-asks.ts) and runs turns for its people through the turn API (src/contraption-turns.ts).
+// reports, feature asks and data to its home scheme (src/contraption-asks.ts) and runs turns for its people through the turn API (src/contraption-turns.ts).
 import type { IncomingMessage } from 'node:http';
 import { APP_NAME } from '../appname.ts';
 import { adminAskRefusal } from '../access.ts';
@@ -147,6 +147,8 @@ function deployable(app: App, name: string, caller: Ctx['caller']): ContraptionR
 
 /** Asks per contraption and person: ASK_LIMIT in ASK_WINDOW_MS, then 429. shortcut: kept in memory, so a restart forgets it; fine as a loop backstop. */
 const ASK_LIMIT = 10;
+/** Data asks wake no one, so they get more room: one per save, say; this only stops a loop filling the disk. */
+const DATA_ASK_LIMIT = 60;
 const ASK_WINDOW_MS = 10 * 60_000;
 const askTimes = new Map<string, number[]>();
 
@@ -339,31 +341,42 @@ export const contraptionRoutes: Route[] = [
   },
   {
     // A bug report or feature ask from a contraption's server, as one of its people: files into the home
-    // scheme's shared folder, the ask to its Taskmaster, waking it.
+    // scheme's shared folder, the ask to its Taskmaster, waking it. A data ask (#318) only files: its files
+    // and a sidecar holding its words, with no message and no wake.
     method: 'POST', path: '/api/contraptions/asks', who: 'contraption',
     async handler({ req, res, app, contraption: c }) {
       // Base64 is 4/3 of the files, plus room for the text.
       const body = (await readJson(req, Math.ceil(ASK_FILES_MAX * 4 / 3) + 1_000_000)) ?? {};
       const person = Number.isInteger(body.person) ? app.store.getUser(body.person) : undefined;
       if (!person || !app.contraptions.enabled(c.name, person.id)) throw new HttpError(403, `${c.title} isn't enabled for that person`);
-      // A contraption stuck in a loop would wake the Taskmaster on every call.
-      const key = `${c.name}:${person.id}`;
+      const kind = oneOf(body.kind, ['bug', 'feature', 'data'], 'Kind') as 'bug' | 'feature' | 'data' | null;
+      if (!kind) throw new HttpError(400, 'Kind is required: bug, feature or data');
+      // A contraption stuck in a loop would wake the Taskmaster on every call, or fill the disk with data.
+      const key = `${c.name}:${person.id}${kind === 'data' ? ':data' : ''}`;
+      const limit = kind === 'data' ? DATA_ASK_LIMIT : ASK_LIMIT;
       const recent = (askTimes.get(key) ?? []).filter((t) => Date.now() - t < ASK_WINDOW_MS);
-      if (recent.length >= ASK_LIMIT) throw new HttpError(429, `At most ${ASK_LIMIT} asks per person in ${ASK_WINDOW_MS / 60_000} minutes: try again later`);
-      const kind = oneOf(body.kind, ['bug', 'feature'], 'Kind') as 'bug' | 'feature' | null;
-      if (!kind) throw new HttpError(400, 'Kind is required: bug or feature');
-      const text = str(body.text, 'Text', 10_000);
-      const summary = askLine(body.summary, 'Summary', ASK_SUMMARY_MAX) ?? askSummary(text);
+      if (recent.length >= limit) throw new HttpError(429, `At most ${limit} ${kind === 'data' ? 'data asks' : 'asks'} per person in ${ASK_WINDOW_MS / 60_000} minutes: try again later`);
+      const text = kind === 'data' && (body.text === undefined || body.text === null) ? null : str(body.text, 'Text', 10_000);
+      const summary = askLine(body.summary, 'Summary', ASK_SUMMARY_MAX) ?? (text === null ? null : askSummary(text));
       const item = askLine(body.item, 'Item', ASK_ITEM_MAX);
       const files = askFiles(body.files);
       const scheme = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme);
       if (!scheme) throw new HttpError(409, `${c.title} has no home scheme to send asks to: an admin sets one in Settings → Contraptions`);
-      const taskmaster = await ensureCoordinator(app, scheme);
-      askTimes.set(key, [...recent, Date.now()]);
-      const paths = saveAskFiles(projectSharedDir(app.dataDir, scheme.id), c.name, person.login, files);
       // A member as #211 counts one: in the scheme, or an admin.
       const member = app.store.canSee({ uid: person.id, admin: !!person.admin }, scheme.id);
-      const ask = askMessage(c, scheme, person, member, kind, text, paths, item);
+      const shared = projectSharedDir(app.dataDir, scheme.id);
+      if (kind === 'data') {
+        askTimes.set(key, [...recent, Date.now()]);
+        const paths = saveAskFiles(shared, c.name, person.login, files);
+        const at = new Date().toISOString();
+        const record = { contraption: c.name, person: person.login, item, summary, text, files: paths, at };
+        const [sidecar] = saveAskFiles(shared, c.name, person.login, [{ name: `${at.replace(/[:.]/g, '-')}-ask.json`, data: Buffer.from(`${JSON.stringify(record, null, 2)}\n`) }]);
+        return json(res, 202, { scheme: scheme.name, member, proposal: false, files: paths, sidecar });
+      }
+      const taskmaster = await ensureCoordinator(app, scheme);
+      askTimes.set(key, [...recent, Date.now()]);
+      const paths = saveAskFiles(shared, c.name, person.login, files);
+      const ask = askMessage(c, scheme, person, member, kind, text!, paths, item);
       // The chat shows the ask collapsed to a header and its summary (public/askcard.js); the turn reads the whole text.
       const shown = { kind, contraption: c.title, person: person.name, member, summary, ...(item ? { item } : {}) };
       app.runner.send(taskmaster.id, ask.author, ask.text, [], { asker: person.id, ask: shown });

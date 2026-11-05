@@ -115,6 +115,26 @@ test("a running turn waits, and holds the mark, until its result; then it's inde
   store.db.close();
 });
 
+test("a message sent during a turn gets its own turn's reply, and the turn it waited on keeps its final one", async () => {
+  const { store, A, a1 } = world(join(root, 'queued.db'));
+  const a = store.addEvent(a1.id, 'user_message', { author: 'Cara', text: 'Question about apples' });
+  store.addEvent(a1.id, 'claude', assistant('Apples half way'));
+  const b = store.addEvent(a1.id, 'user_message', { author: 'Cara', text: 'Then pears' });
+  store.db.prepare('UPDATE events SET created_at = ? WHERE id = ?').run(a.created_at + 5, b.id);
+  store.addEvent(a1.id, 'claude', assistant('Apples final answer'));
+  const ra = store.addEvent(a1.id, 'claude', { type: 'result' });
+  const ended = a.created_at + 10;
+  store.recordTurn(a1.id, { event_id: ra.id, ended_at: ended, duration_ms: ended - a.created_at, session_cost_usd: 0 });
+  store.addEvent(a1.id, 'claude', assistant('Pears done'));
+  const rb = store.addEvent(a1.id, 'claude', { type: 'result' });
+  store.recordTurn(a1.id, { event_id: rb.id, ended_at: ended + 100, duration_ms: 50, session_cost_usd: 0 });
+  while ((await store.memory.index(A.id, embed, 'fake')) > 0);
+  const text = (id: number) => (store.db.prepare("SELECT text FROM memory_chunks WHERE source_kind = 'turn' AND source_id = ?").get(id) as { text: string }).text;
+  assert.match(text(a.id), /Reply: Apples final answer$/);
+  assert.match(text(b.id), /Reply: Pears done$/);
+  store.db.close();
+});
+
 test('a new title or note, or a new model, embeds again; a deleted minion takes its chunks', async () => {
   const { store, A, a1, a2 } = world(join(root, 'three.db'));
   turn(store, a1.id, 'Cara', 'Hello there', 'Hi.');

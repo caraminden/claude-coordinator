@@ -50,8 +50,9 @@ export function spokenText(kind: string, data: any): string {
   return (data.message?.content ?? []).filter((b: any) => b?.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
 }
 
-const USER_MAX = 1500;
-const REPLY_MAX = 2500;
+// About 600 tokens a chunk at most: embedding costs about 7 CPU-seconds per 500 tokens on perigee (#331's benchmark).
+const USER_MAX = 1000;
+const REPLY_MAX = 1500;
 /** A turn with no result and no later message counts as over after this: its reply so far is what it said. */
 const STUCK_MS = 60 * 60_000;
 /** Messages that aren't a person's or a relay's ask: CI and server notices are noise. */
@@ -108,7 +109,8 @@ export class Memory {
     if (todo.length < max) todo.push(...this.staleRows(projectId, model, max - todo.length));
     const put = this.db.prepare(`INSERT INTO memory_chunks (project_id, ticket_id, person_id, source_kind, source_id, ts, text, vec, model)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (source_kind, source_id) DO UPDATE SET text = excluded.text, vec = excluded.vec, model = excluded.model, ts = excluded.ts`);
+      ON CONFLICT (source_kind, source_id) DO UPDATE SET project_id = excluded.project_id, ticket_id = excluded.ticket_id, person_id = excluded.person_id,
+        ts = excluded.ts, text = excluded.text, vec = excluded.vec, model = excluded.model`);
     for (let i = 0; i < todo.length; i += 8) {
       const part = todo.slice(i, i + 8);
       const vecs = await embed(part.map((p) => p.text));
@@ -126,7 +128,7 @@ export class Memory {
    */
   private pendingTurns(projectId: number, max: number, now: number): { chunks: Pending[]; mark: number | null } {
     const after = this.store.getSetting<number>(this.markKey(projectId)) ?? 0;
-    const msgs = this.db.prepare(`SELECT e.id, e.ticket_id, e.data, e.created_at, EXISTS (SELECT 1 FROM memory_chunks m WHERE m.source_kind = 'turn' AND m.source_id = e.id) AS done
+    const msgs = this.db.prepare(`SELECT e.id, e.ticket_id, e.data, e.created_at, EXISTS (SELECT 1 FROM memory_chunks m WHERE m.source_kind = 'turn' AND m.source_id = e.id AND m.ticket_id = e.ticket_id AND m.ts = e.created_at) AS done
       FROM events e JOIN tickets t ON t.id = e.ticket_id
       WHERE t.project_id = ? AND e.kind = 'user_message' AND e.id > ? ORDER BY e.id LIMIT 200`)
       .all(projectId, after) as { id: number; ticket_id: number; data: string; created_at: number; done: number }[];
@@ -153,10 +155,16 @@ export class Memory {
     }
     const asked = spokenText('user_message', msg).trim();
     if (!asked || NOT_ASKS.has(msg.author)) return null;
-    const next = (this.db.prepare("SELECT MIN(id) AS id FROM events WHERE ticket_id = ? AND id > ? AND kind = 'user_message'").get(m.ticket_id, m.id) as { id: number | null }).id;
-    const result = (this.db.prepare('SELECT MIN(event_id) AS id FROM turns WHERE ticket_id = ? AND event_id > ?').get(m.ticket_id, m.id) as { id: number | null }).id;
-    const end = Math.min(next ?? Infinity, result !== null ? result + 1 : Infinity);
-    if (end === Infinity && now - m.created_at < STUCK_MS) return 'running';
+    // Its turn's result: the first after it, or for a message that waited for the turn before it to end,
+    // the first of a turn that started after it was sent (a steer joins the running turn instead).
+    const result = (this.db.prepare(`SELECT MIN(event_id) AS id FROM turns WHERE ticket_id = ? AND event_id > ?
+      ${msg.steered ? '' : 'AND (duration_ms IS NULL OR ended_at - duration_ms >= ?)'}`).get(m.ticket_id, m.id, ...(msg.steered ? [] : [m.created_at])) as { id: number | null }).id;
+    let end = result !== null ? result + 1 : Infinity;
+    if (end === Infinity) {
+      // No result (refused, or the turn died): once it's stuck, its reply is what came before the next message.
+      if (now - m.created_at < STUCK_MS) return 'running';
+      end = (this.db.prepare("SELECT MIN(id) AS id FROM events WHERE ticket_id = ? AND id > ? AND kind = 'user_message'").get(m.ticket_id, m.id) as { id: number | null }).id ?? Infinity;
+    }
     // The turn's last words that aren't a Grunt's: its reply.
     const rows = this.db.prepare("SELECT data FROM events WHERE ticket_id = ? AND id > ? AND id < ? AND kind = 'claude' ORDER BY id DESC LIMIT 300")
       .all(m.ticket_id, m.id, Number.isFinite(end) ? end : Number.MAX_SAFE_INTEGER) as { data: string }[];

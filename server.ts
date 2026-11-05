@@ -205,7 +205,16 @@ const EMBED_MODEL = process.env.CITADEL_EMBED_MODEL || 'Qwen3-Embedding-0.6B-Q8_
 const embed = llamaEmbed(process.env.CITADEL_EMBED_URL || 'http://127.0.0.1:21434');
 const MEMORY_SCHEMES = process.env.CITADEL_MEMORY_SCHEMES?.split(',').map(Number);
 // shortcut: phase 1 indexes one scheme, the one whose code this server runs (Citadel's own); phase 2 opens it to every scheme.
-const memoryScheme = (id: number) => MEMORY_SCHEMES ? MEMORY_SCHEMES.includes(id) : runsRepo(store.getProject(id)?.repo_dir ?? null, waiters.head);
+const homeSchemes = { head: null as string | null, ids: new Map<number, boolean>() }; // runsRepo runs git: once per scheme per live commit
+const memoryScheme = (id: number) => {
+  if (MEMORY_SCHEMES) return MEMORY_SCHEMES.includes(id);
+  if (homeSchemes.head !== waiters.head) {
+    homeSchemes.head = waiters.head;
+    homeSchemes.ids.clear();
+  }
+  if (!homeSchemes.ids.has(id)) homeSchemes.ids.set(id, runsRepo(store.getProject(id)?.repo_dir ?? null, waiters.head));
+  return homeSchemes.ids.get(id)!;
+};
 runner.memoryScheme = memoryScheme;
 /** Fetch a scheme's origin and fast-forward its main if it can (#208), then look at the waiters again: a merge on GitHub can be what they wait on (#229). */
 function catchUp(repoDir: string) {

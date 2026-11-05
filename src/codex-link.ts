@@ -31,9 +31,12 @@ interface Login {
 const FILE_STORE = 'cli_auth_credentials_store="file"';
 /** OpenAI's device code lasts 15 minutes; past that the sign-in can't finish. */
 const DEVICE_CODE_MS = 16 * 60_000;
+/** Settings reads a person's Codex usage windows at most this often (#342): their turns report them too. */
+const LIMITS_EVERY_MS = 5 * 60_000;
 
 export class CodexLink {
   private logins = new Map<number, Login>();
+  private limitsAt = new Map<number, number>();
   private claude: ClaudeLink;
   private containers: Containers;
 
@@ -118,6 +121,17 @@ export class CodexLink {
     login?.child?.kill();
   }
 
+  /**
+   * A linked person's Codex usage windows (account/rateLimits), from a short `codex app-server` in their
+   * container if it's already running (never started for this); null if not, or if read in the last LIMITS_EVERY_MS.
+   */
+  async readLimits(uid: number): Promise<unknown> {
+    if (this.status(uid).state !== 'linked' || Date.now() - (this.limitsAt.get(uid) ?? 0) < LIMITS_EVERY_MS) return null;
+    this.limitsAt.set(uid, Date.now());
+    if ((await this.containers.status(this.claude.name(uid))).state !== 'running') return null;
+    return appServerLimits(['podman', 'exec', '-i', this.claude.name(uid), 'codex', 'app-server', '-c', FILE_STORE, '-c', 'history.persistence="none"']);
+  }
+
   /** Sign out of Codex in their container (codex revokes the login and deletes the file). */
   async unlink(uid: number): Promise<void> {
     this.cancel(uid);
@@ -126,6 +140,50 @@ export class CodexLink {
     const r = await this.containers.exec(this.claude.name(uid), ['codex', 'logout', '-c', FILE_STORE], { timeout: 60_000 });
     if (r.code !== 0) throw new Error(`Codex didn't sign out: ${lastLines(`${r.stdout}\n${r.stderr}`)}`);
   }
+}
+
+/** Ask a `codex app-server` (argv) for its account's usage windows; null if it can't say within timeoutMs. */
+export function appServerLimits(argv: string[], timeoutMs = 20_000): Promise<unknown> {
+  return new Promise((resolve) => {
+    const child = spawn(argv[0], argv.slice(1), { stdio: ['pipe', 'pipe', 'ignore'] });
+    let done = false;
+    const finish = (limits: unknown) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      // app-server ends with its stdin; the kill is for one that doesn't.
+      child.stdin.end();
+      const kill = setTimeout(() => child.kill(), 3000);
+      child.once('exit', () => clearTimeout(kill));
+      if (child.exitCode !== null || child.signalCode !== null) clearTimeout(kill);
+      resolve(limits ?? null);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    const send = (m: object) => child.stdin.write(JSON.stringify(m) + '\n');
+    child.stdin.on('error', () => finish(null));
+    child.on('error', () => finish(null));
+    child.on('exit', () => finish(null));
+    let buf = '';
+    child.stdout.on('data', (chunk) => {
+      buf += chunk;
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        let m: any;
+        try {
+          m = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (m.id === 1) {
+          send({ method: 'initialized' });
+          send({ id: 2, method: 'account/rateLimits/read', params: { excludeResetCreditDetails: true } });
+        } else if (m.id === 2) finish(m.result?.rateLimitsByLimitId?.codex ?? m.result?.rateLimits);
+      }
+    });
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'citadel-codex-usage', version: '1' }, capabilities: { experimentalApi: false, requestAttestation: false } } });
+  });
 }
 
 /** OpenAI's device link and one-time code in `codex login --device-auth`'s output, or null until both are out. */

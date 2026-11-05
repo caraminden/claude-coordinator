@@ -663,6 +663,15 @@ button.pin.on { color: var(--accent); }
 /* "Week 9%" → "Week 10%" doesn't nudge the bar: room for "Week 100%" (rule 13). */
 .usage .label { min-width: 9ch; text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) { .usage .track { width: 3rem; } }
+/* Codex's bars (#342): in Settings' Codex card, one per window; the top bar stacks Codex's under Claude's. */
+.codex-windows { display: flex; flex-direction: column; gap: 0.3rem; }
+.codex-windows dd { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.75rem; }
+.codex-windows .usage .label { min-width: 4ch; }
+.codex-windows .usage .track { width: 8rem; }
+.usage.codex .which { font-size: 0.9em; }
+.usage.codex .which:empty { display: none; }
+.topbar .meters { display: flex; flex-direction: column; gap: 0.25rem; }
+.topbar .meters:not(:has(> :not([hidden]))) { display: none; }
 
 /* The working line under the chat while a turn runs, one line: who's working · what's running · time · queued */
 .typing { display: flex; align-items: center; gap: 0.4rem; margin: 0.25rem 0 0.75rem; color: var(--muted); font-size: 0.9em; white-space: nowrap; cursor: pointer; }

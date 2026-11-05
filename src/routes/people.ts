@@ -176,7 +176,15 @@ export const peopleRoutes: Route[] = [
     },
   },
   // Signing in to Codex (src/codex-link.ts, #330): in the person's Claude container, by OpenAI's device code. No token passes through.
-  { method: 'GET', path: '/api/me/codex', who: ['person'], handler: ({ res, app, session }) => json(res, 200, codexState(app, uidOf(session))) },
+  {
+    method: 'GET', path: '/api/me/codex', who: ['person'],
+    handler({ res, app, session }) {
+      const uid = uidOf(session);
+      // Fresh usage windows for the card's bar (#342): they arrive as a 'codex' message.
+      void app.codex.readLimits(uid).then((l) => l && app.runner.updateCodexUsage(l, uid), () => {});
+      return json(res, 200, codexState(app, uid));
+    },
+  },
   {
     method: 'POST', path: '/api/me/codex', who: ['person'],
     handler({ res, app, session }) {

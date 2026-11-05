@@ -1,5 +1,5 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
-import { account, api, codexToggle, h, icon, setCodex, view } from './core.js';
+import { account, api, codexToggle, codexWindowsBlock, h, icon, setCodex, view } from './core.js';
 import { settingsTabs } from './settings.js';
 import { hideButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';
@@ -294,7 +294,7 @@ function codexCard() {
     }
     if (st.state === 'linked') {
       return card.replaceChildren(title('Linked', 'ok'), errLine,
-        h('p', {}, 'Signed in with ChatGPT.'),
+        h('p', {}, 'Signed in with ChatGPT.'), st.override ? codexWindowsBlock() : '',
         h('div', { class: 'row' }, act('Sign out', 'DELETE', 'secondary', 'Sign out of Codex? Self-review stops asking it, and your turns can\'t run on it, until you sign in again.')), override, note);
     }
     return card.replaceChildren(title('Not linked', 'off'), errLine,

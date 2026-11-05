@@ -98,7 +98,11 @@ export interface SchemeRefsConfig {
   sent: string;
 }
 
-/** The tools whose text shows in this scheme's chats: not message_taskmaster, which another scheme reads. */
+/**
+ * The tools whose text shows in this scheme's chats, where a bare #N links. Left out of WORDING_MATCHER's list:
+ * message_taskmaster (another scheme reads it, so its bare #N rightly links there), update_ticket (a title or
+ * note) and file writes.
+ */
 export const SCHEME_REFS_MATCHER = '^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$';
 
 /** The PreToolUse hook's answer: a deny with the reason, or null to let the call through. */

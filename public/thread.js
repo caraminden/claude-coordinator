@@ -11,6 +11,7 @@ import { gist, groupTitle, gruntName, gruntOf } from './grunts.js';
 import { stepMark } from './ui/chat.js';
 import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
+import { askHeader } from './askcard.js';
 import { payerChip, payerLine } from './payer.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
@@ -761,7 +762,7 @@ export function appendEvent(event, scroll = true) {
       const bubble = userBubble(data.author, data.text,
         (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
         data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null,
-        { id: event.id, strikes: data.strikes, brief: data.brief },
+        { id: event.id, strikes: data.strikes, brief: data.brief, ask: data.ask },
         (data.files ?? []).map((f) => ({ ...f, href: uploadUrl(event.ticket_id, f.name) })));
       bubble.dataset.event = event.id;
       // What its ✎ puts back in the message box while it waits in the queue (markQueued); a comment on a file would lose its file.
@@ -1441,7 +1442,8 @@ function machineAuthor(author) {
   // Citadel's Taskmaster also hears whose ask it is: "Taskmaster of Delve, for Josh, a Citadel member".
   const [, scheme, whose = ''] = author.match(/^Taskmaster of (.+?)(, for .+)?$/) ?? [];
   if (scheme) return `${scheme} Taskmaster${whose}`;
-  return author === APP_AUTHOR || author === GITHUB_NAME || /^#\d+ /.test(author) ? author : null;
+  // A contraption's ask from before #316 carried no summary: it collapses like the rest.
+  return author === APP_AUTHOR || author === GITHUB_NAME || /^#\d+ /.test(author) || /^Contraption .+, for .+ member$/.test(author) ? author : null;
 }
 
 /** A chat message from a person; `about`, for a comment on a file, links that file. */
@@ -1501,6 +1503,12 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
       h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
   }
   if (files.length) msg.append(h('div', { class: 'files' }, files.map(fileChip)));
+  // A contraption's ask: its header and summary, the full text behind the toggle (askcard.js).
+  if (event?.ask) {
+    msg.querySelector('.who').remove();
+    return h('details', { class: 'msg user ask' },
+      h('summary', {}, h('div', { class: 'who' }, askHeader(event.ask)), h('div', { class: 'ask-summary' }, event.ask.summary)), msg);
+  }
   // Messages between Claudes and from the app aren't meant for people, so they start collapsed to one line,
   // except the brief that started the minion: it says what the minion is for.
   const who = machineAuthor(author);

@@ -61,7 +61,11 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   bug reports and feature asks to its home scheme with `POST /api/contraptions/asks`: files (16 MiB in all)
   go into that scheme's shared folder under `inbox/<contraption>/<login>/`, and the ask reaches its
   Taskmaster labelled like `message_taskmaster`'s; a non-member's feature ask is a proposal only
-  (`src/contraption-asks.ts`).
+  (`src/contraption-asks.ts`). Its body is `{ person, kind: 'bug' | 'feature', text, summary?, item?, files? }`:
+  the chat shows a header line (kind, contraption, person, `item` such as an aura's name, at most 100
+  characters) and `summary` (at most 200; without one, the text's first sentence), the full text behind a
+  toggle; the Taskmaster's turn reads it all. An ask to change how the contraption itself behaves (its
+  skills, prompts or agent instructions) is a feature ask like any other.
 - Each scheme can have **instructions** (up to 16,000 characters), edited on the
   scheme's Settings page (beside Sign out in the overview panel). They're appended
   to the system prompt of the Taskmaster and every minion, so they apply from each one's next turn. "Import from Claude Code" lists

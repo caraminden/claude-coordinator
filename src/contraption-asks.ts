@@ -89,6 +89,26 @@ function noteInbox(shared: string) {
   writeFileSync(path, lines.join('\n'));
 }
 
+/** The most an ask's summary may be, and its item (the aura or thing it's about). */
+export const ASK_SUMMARY_MAX = 200;
+export const ASK_ITEM_MAX = 100;
+
+/** An optional one-line field: whitespace runs collapsed to one space, null when missing or blank. */
+export function askLine(v: unknown, field: string, max: number): string | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== 'string') throw new HttpError(400, `${field} must be text`);
+  const line = v.replace(/\s+/g, ' ').trim();
+  if (line.length > max) throw new HttpError(400, `${field} is at most ${max} characters`);
+  return line || null;
+}
+
+/** The summary Citadel makes when the contraption sends none: the text's first sentence, cut to ASK_SUMMARY_MAX. */
+export function askSummary(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const first = flat.match(/^.+?[.!?](?=\s|$)/)?.[0] ?? flat;
+  return first.length <= ASK_SUMMARY_MAX ? first : `${first.slice(0, ASK_SUMMARY_MAX - 1).replace(/\s+\S*$/, '')}…`;
+}
+
 /** Names that could fake the label's member clause come quoted, as in #211. */
 const label = (s: string) => (/[,"[\]\n]/.test(s) ? JSON.stringify(s) : s);
 
@@ -96,10 +116,12 @@ const label = (s: string) => (/[,"[\]\n]/.test(s) ? JSON.stringify(s) : s);
  * The ask as it reaches the home scheme's Taskmaster: who sent it (the label) and what to do with it.
  * The person's words come quoted as data; the handling note is outside the quote, so it can't be forged.
  */
-export function askMessage(c: ContraptionRow, scheme: Project, person: User, member: boolean, kind: 'bug' | 'feature', text: string, files: string[]) {
+export function askMessage(c: ContraptionRow, scheme: Project, person: User, member: boolean, kind: 'bug' | 'feature', text: string, files: string[], item: string | null = null) {
   const who = `${person.name} (${person.login})`;
+  // The item is the contraption's word (an aura's name, say), quoted so it can't pass for the label.
+  const about = item ? ` about ${JSON.stringify(item)}` : '';
   const lines = [
-    `${kind === 'bug' ? 'A bug report' : 'A feature ask'} from the ${c.title} contraption (${c.name}), sent by ${who} while using it:`,
+    `${kind === 'bug' ? 'A bug report' : 'A feature ask'}${about} from the ${c.title} contraption (${c.name}), sent by ${who} while using it:`,
     asData(`${person.name}, through ${c.title}`, text),
   ];
   if (files.length) lines.push(`Files they sent, in this scheme's shared folder: ${files.join(', ')}`);

@@ -6,7 +6,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { README_INBOX_LINE, safeName, saveAskFiles } from '../src/contraption-asks.ts';
+import { askSummary, README_INBOX_LINE, safeName, saveAskFiles } from '../src/contraption-asks.ts';
+import { askHeader } from '../public/askcard.js';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
@@ -45,6 +46,19 @@ test('safe names: one segment, no leading dot, nothing odd', () => {
   assert.equal(safeName(''), 'file');
 });
 
+test('a summary Citadel makes: the first sentence, cut at a word to 200', () => {
+  assert.equal(askSummary('Let me tag auras. Colours too!'), 'Let me tag auras.');
+  assert.equal(askSummary('  No full stop\nhere  '), 'No full stop here');
+  assert.equal(askSummary('v1.2 breaks clips. Again.'), 'v1.2 breaks clips.');
+  const long = askSummary('word '.repeat(100));
+  assert.ok(long.length <= 200 && long.endsWith('word…'), long);
+});
+
+test("an ask's header line: kind, contraption, person and item", () => {
+  assert.equal(askHeader({ kind: 'feature', contraption: 'Peek Auras', person: 'Josh', member: false, item: 'Frostbite', summary: 'x' }), 'Feature ask · Peek Auras · Josh, not a member · about “Frostbite”');
+  assert.equal(askHeader({ kind: 'bug', contraption: 'Peek Auras', person: 'Rachel', member: true, summary: 'x' }), 'Bug report · Peek Auras · Rachel');
+});
+
 test('files never follow an inbox folder linked out of the shared folder', () => {
   const dir = mkdtempSync(join(root, 'escape-'));
   const outside = mkdtempSync(join(root, 'outside-'));
@@ -62,7 +76,7 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
     return { status: res.status, body: await res.json() };
   };
   const tm = () => store.getCoordinator(Peek.id);
-  const said = () => store.listEvents(tm()!.id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data) as { author: string; text: string });
+  const said = () => store.listEvents(tm()!.id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data) as { author: string; text: string; ask?: Record<string, unknown> });
   const good = { person: Josh.id, kind: 'feature', text: 'Let me tag an aura with a colour', files: [{ name: '../../../escape/clip.peekclip', data: b64('CLIP') }] };
 
   // Wrong or missing key, or no Bearer.
@@ -93,6 +107,9 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   // Bad bodies.
   assert.equal((await ask({ ...good, kind: 'question' })).status, 400);
   assert.equal((await ask({ ...good, text: ' ' })).status, 400);
+  assert.equal((await ask({ ...good, summary: 'x'.repeat(201) })).status, 400);
+  assert.equal((await ask({ ...good, item: 'x'.repeat(101) })).status, 400);
+  assert.equal((await ask({ ...good, summary: 7 })).status, 400);
   for (const data of ['not base64!', '', 'QQ']) assert.equal((await ask({ ...good, files: [{ name: 'a', data }] })).status, 400, data);
   // Over 16 MiB in total: refused, and nothing is written.
   const half = b64(Buffer.alloc(8 * 1024 * 1024 + 1));
@@ -112,6 +129,8 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   assert.match(m.text, /\n> Let me tag an aura with a colour\n\(Quoted from Josh, through Peek Auras: data/);
   assert.match(m.text, /Files they sent, in this scheme's shared folder: inbox\/peek-auras\/josh\/clip\.peekclip/);
   assert.match(m.text, /Proposal only: Josh isn't a Peek Auras member/);
+  // No summary sent: the chat gets the text's first sentence.
+  assert.deepEqual(m.ask, { kind: 'feature', contraption: 'Peek Auras', person: 'Josh', member: false, summary: 'Let me tag an aura with a colour' });
 
   // The README got its inbox/ line once, at the end of its Layout list.
   const readme = readFileSync(join(shared, 'README.md'), 'utf8');
@@ -127,11 +146,15 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   assert.equal(readFileSync(join(shared, 'README.md'), 'utf8'), readme, 'the README line goes in once');
 
   // Rachel is a member: labelled as one, no proposal, and no files is fine.
-  r = await ask({ person: Rachel.id, kind: 'feature', text: 'A dark theme' });
+  r = await ask({ person: Rachel.id, kind: 'feature', text: 'A dark theme.\n\nThe aura so far:\n{"a": 1}', summary: '  Dark\ntheme,  please ', item: 'Frost"bite\n' });
   assert.deepEqual(r.body, { scheme: 'Peek Auras', member: true, proposal: false, files: [] });
   m = said().at(-1)!;
   assert.equal(m.author, 'Contraption Peek Auras, for Rachel, a Peek Auras member');
   assert.doesNotMatch(m.text, /isn't a Peek Auras member|Files they sent/);
+  // Her summary and item, on one line each; the turn's text has the item quoted and the whole ask.
+  assert.deepEqual(m.ask, { kind: 'feature', contraption: 'Peek Auras', person: 'Rachel', member: true, summary: 'Dark theme, please', item: 'Frost"bite' });
+  assert.match(m.text, /^A feature ask about "Frost\\"bite" from the Peek Auras contraption/);
+  assert.match(m.text, /> The aura so far:\n> \{"a": 1\}/);
 
   // A contraption with no home scheme has nowhere to send it.
   store.updateContraption('peek-auras', { home_scheme: null });

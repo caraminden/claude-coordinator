@@ -314,6 +314,13 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .msg.coord > summary .preview { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .msg.coord[open] > summary .preview { display: none; }
 .msg.coord > .msg { border: 0; background: none; padding: 0 0.85rem 0.6rem; }
+/* A contraption's ask (askcard.js): header and summary showing, the full text behind the toggle. */
+.msg.ask { padding: 0; }
+.msg.ask > summary { display: block; padding: 0.6rem 0.85rem; cursor: pointer; list-style: none; }
+.msg.ask > summary::-webkit-details-marker { display: none; }
+.msg.ask > summary .who::before { content: '▸ '; }
+.msg.ask[open] > summary .who::before { content: '▾ '; }
+.msg.ask > .msg { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; padding: 0.6rem 0.85rem; }
 /* Grunt reports collapse to a line each (thread.js addGruntText); a fan-out's lines share one block. */
 .msg.grunt > summary .dur { flex: none; font-variant-numeric: tabular-nums; }
 .grunts > .grunt-list { padding: 0 0.6rem 0.5rem; }

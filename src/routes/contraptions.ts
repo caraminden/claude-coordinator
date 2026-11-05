@@ -6,7 +6,7 @@ import type { IncomingMessage } from 'node:http';
 import { APP_NAME } from '../appname.ts';
 import { adminAskRefusal } from '../access.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { ASK_FILES_MAX, askFiles, askMessage, saveAskFiles } from '../contraption-asks.ts';
+import { ASK_FILES_MAX, ASK_ITEM_MAX, ASK_SUMMARY_MAX, askFiles, askLine, askMessage, askSummary, saveAskFiles } from '../contraption-asks.ts';
 import { parseTurn, TurnError } from '../contraption-turns.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
 import { ServiceError } from '../app-services.ts';
@@ -353,6 +353,8 @@ export const contraptionRoutes: Route[] = [
       const kind = oneOf(body.kind, ['bug', 'feature'], 'Kind') as 'bug' | 'feature' | null;
       if (!kind) throw new HttpError(400, 'Kind is required: bug or feature');
       const text = str(body.text, 'Text', 10_000);
+      const summary = askLine(body.summary, 'Summary', ASK_SUMMARY_MAX) ?? askSummary(text);
+      const item = askLine(body.item, 'Item', ASK_ITEM_MAX);
       const files = askFiles(body.files);
       const scheme = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme);
       if (!scheme) throw new HttpError(409, `${c.title} has no home scheme to send asks to: an admin sets one in Settings → Contraptions`);
@@ -361,8 +363,10 @@ export const contraptionRoutes: Route[] = [
       const paths = saveAskFiles(projectSharedDir(app.dataDir, scheme.id), c.name, person.login, files);
       // A member as #211 counts one: in the scheme, or an admin.
       const member = app.store.canSee({ uid: person.id, admin: !!person.admin }, scheme.id);
-      const ask = askMessage(c, scheme, person, member, kind, text, paths);
-      app.runner.send(taskmaster.id, ask.author, ask.text, [], { asker: person.id });
+      const ask = askMessage(c, scheme, person, member, kind, text, paths, item);
+      // The chat shows the ask collapsed to a header and its summary (public/askcard.js); the turn reads the whole text.
+      const shown = { kind, contraption: c.title, person: person.name, member, summary, ...(item ? { item } : {}) };
+      app.runner.send(taskmaster.id, ask.author, ask.text, [], { asker: person.id, ask: shown });
       return json(res, 202, { scheme: scheme.name, member, proposal: !member && kind === 'feature', files: paths });
     },
   },

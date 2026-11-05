@@ -107,7 +107,7 @@ context, so a fan-out must not return prose.
 Over six context windows of one Delve build, about 18% of what filled the session was repeats
 that helped nobody. Three of them a session controls:
 
-- **The checklist.** Every update resends the whole list. Keep it under ten lines, fold finished
+- **The checklist.** Every update resends the whole list. Keep it under ten lines, collapse finished
   steps into one line, and update it when a step changes, not on every call.
 - **The PR description.** Write it once at a milestone, from the worker that ran the checks,
   rather than reading and rewriting it in the session every round (that alone cost 3.6%).

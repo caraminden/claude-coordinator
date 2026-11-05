@@ -135,7 +135,7 @@ export function renderShelf() {
   const sub = (title, count, items, empty, render = item) => h('div', { class: 'sub' },
     h('h4', {}, title, count ? h('span', { class: 'count' }, count) : ''),
     items.length ? items.map(render) : h('p', { class: 'muted small' }, empty));
-  // Recent starts folded; opening it is remembered with the panels' own open state.
+  // Recent starts collapsed; opening it is remembered with the panels' own open state.
   const recentFold = h('details', { class: 'sub fold', open: loadPanelState().recent === true },
     h('summary', {}, 'Recent', recent.length ? h('span', { class: 'count' }, recent.length) : ''),
     recent.length ? recent.map(item) : h('p', { class: 'muted small' }, 'Documents, pages and canvases that minions create show up here.'));

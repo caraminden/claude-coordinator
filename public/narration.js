@@ -1,4 +1,4 @@
-// Which of Claude's words fold out of the chat and which stay. Pure string work, so it can be
+// Which of Claude's words collapse out of the chat and which stay. Pure string work, so it can be
 // tested without a browser.
 
 /** Narration is shorter than this; anything this long is something Claude is telling you. */
@@ -10,7 +10,7 @@ export const CLAMP_OVER = 2000;
 const STRUCTURE = /^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\||```|~~~|>)/m;
 
 /**
- * Whether `text` is an in-between remark ("Checking the merged code boots:") that may fold once
+ * Whether `text` is an in-between remark ("Checking the merged code boots:") that may collapse once
  * more work follows it: one plain paragraph, short, with no Markdown structure. Answers, lists,
  * tables and reports never are.
  */

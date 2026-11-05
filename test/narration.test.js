@@ -37,7 +37,7 @@ function sortTurn(items) {
 const answer = `Here are the rules.\n\n1. Who can strike\n2. Whose words`;
 const long = 'word '.repeat(CLAMP_OVER / 4);
 
-test('short remarks before work fold; the last words never settle', () => {
+test('short remarks before work collapse; the last words never settle', () => {
   assert.deepEqual(sortTurn(['Checking the tests.', { tool: 'Bash' }, 'Merging.', { tool: 'Bash' }, 'Done.']), ['fold', 'fold', null]);
 });
 
@@ -47,7 +47,7 @@ test('an answer followed by a status call and a status line stays (#127)', () =>
   assert.deepEqual(sortTurn(['Yes, it landed as abc123.', { tool: 'TaskUpdate' }, { tool: 'mcp__thread__set_thread_status' }, 'Ready to close.']), ['keep', null]);
 });
 
-test('bookkeeping and then work still folds a remark', () => {
+test('bookkeeping and then work still collapses a remark', () => {
   assert.deepEqual(sortTurn(['Tests pass. Next, screenshots.', { tool: 'TaskUpdate' }, { tool: 'Bash' }, 'Done.']), ['fold', null]);
 });
 

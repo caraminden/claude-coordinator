@@ -302,7 +302,7 @@ async function renderPropertiesPage() {
         ? [btn('Approve', `Make ${k.key}: ${v.value} usable`, () => review(k, v, 'approve')), btn('Reject', 'Drop the proposal', () => review(k, v, 'reject'))]
         : [
           flag ? btn('Approve', `Mark ${k.key}: ${v.value} as reviewed`, () => review(k, v, 'approve')) : '',
-          btn('Merge…', `Fold ${v.value} into another value: it becomes an alias, and what carries it moves over`, () => {
+          btn('Merge…', `Merge ${v.value} into another value: it becomes an alias, and what carries it moves over`, () => {
             const into = prompt(`Merge ${k.key}: ${v.value} into which value?\n${values.filter((o) => o !== v && o.status === 'active').map((o) => o.value).join(', ')}`);
             if (into) review(k, v, 'merge', { into: into.trim() });
           }),

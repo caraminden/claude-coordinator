@@ -1,4 +1,4 @@
-// Grunts (subagents) in a chat: their reports fold to one line each, and a fan-out to one block.
+// Grunts (subagents) in a chat: their reports collapse to one line each, and a fan-out to one block.
 
 /**
  * The Agent call a stored event belongs to when a Grunt said or did it, else null. Claude Code tags

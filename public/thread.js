@@ -148,7 +148,7 @@ function holdInPlace(el, top) {
 /**
  * Scroll the open chat to event `target` (an id, or 'latest' for the minion's latest reply) and flash it,
  * loading back to it if it's older than the loaded page (#236). False when it isn't there: gone, or
- * folded away with nothing to show.
+ * collapsed away with nothing to show.
  */
 export async function jumpToEvent(target) {
   const id = target === 'latest' ? view.latestReply : Number(target);
@@ -157,7 +157,7 @@ export async function jumpToEvent(target) {
   if (!find() && view.page?.more && id < view.page.events[0].id) await showEarlier(null, id);
   const found = find();
   if (!found) return false;
-  // A reply folded into the turn's narration or a Taskmaster update shows as that fold.
+  // A reply collapsed into the turn's narration or a Taskmaster update shows as that collapsed row.
   const el = found.parentElement.closest('#log details:not([open])') ?? found;
   el.scrollIntoView({ block: 'center' });
   holdInPlace(el, el.getBoundingClientRect().top);
@@ -582,7 +582,7 @@ function actionList(actions) {
   return h('div', { class: 'actions' }, actions.map(actionEl));
 }
 
-/** Which parts of a ticket's readout are expanded; kept per ticket so re-renders and reconnects don't fold it up. */
+/** Which parts of a ticket's readout are expanded; kept per ticket so re-renders and reconnects don't collapse it. */
 const progressUiState = new Map();
 function progressUi(ticketId) {
   if (!progressUiState.has(ticketId)) progressUiState.set(ticketId, { open: false, openSteps: new Set() });
@@ -722,7 +722,7 @@ export function appendEvent(event, scroll = true) {
     if (view.pendingRequest?.length) view.turnRequest = view.pendingRequest;
     view.pendingRequest = [];
   }
-  // A Grunt's words fold into its own line, so they aren't the minion's reply or its working line.
+  // A Grunt's words collapse into its own line, so they aren't the minion's reply or its working line.
   const grunt = gruntOf(event.kind, data);
   if (grunt && !view.gruntStarts.has(grunt)) view.gruntStarts.set(grunt, event.created_at);
   if (event.kind === 'claude' && data.type === 'assistant' && !grunt) {
@@ -735,7 +735,7 @@ export function appendEvent(event, scroll = true) {
   }
   if (event.kind === 'claude') scheduleProgress();
   const nodes = [];
-  // The turn's words the sorter has settled, to fold or keep once they're in the log.
+  // The turn's words the sorter has settled, to collapse or keep once they're in the log.
   const settle = [];
 
   if (event.kind === 'user_message') {
@@ -787,13 +787,13 @@ export function appendEvent(event, scroll = true) {
   } else if (event.kind === 'question_result') {
     view.cards.get(data.id)?.markSettled();
   } else if (event.kind === 'strike') {
-    // strike_text: redraw the message it struck, wherever it shows now (a bubble or a folded update).
+    // strike_text: redraw the message it struck, wherever it shows now (a bubble or a collapsed update).
     for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) {
       el.closest('.coord')?.querySelector('summary .preview')?.replaceChildren(...previewNodes(el.source, data.strikes));
       el.replaceWith(messageBody(el.source, data.strikes, el.ticketId, data.event));
     }
   } else if (event.kind === 'replaced') {
-    // A reply the link check sent back gives way to its rewrite (#281): the bubble, or its line in a fold.
+    // A reply the link check sent back gives way to its rewrite (#281): the bubble, or its line in the collapsed row.
     for (const el of log.querySelectorAll(`[data-body="${data.event}"]`)) {
       const fold = el.closest('details.narration');
       (el.closest('.note-text') ?? el.closest('.msg') ?? el).remove();
@@ -887,7 +887,7 @@ export function appendEvent(event, scroll = true) {
 }
 
 /**
- * A Grunt's report as one folded line (its name, gist and how long it ran), merged with the lines just
+ * A Grunt's report as one collapsed line (its name, gist and how long it ran), merged with the lines just
  * above it into one "8 Grunts finished" block when several report in a row (a fan-out). More words
  * from a Grunt whose line is in that block go into the same line.
  */
@@ -953,7 +953,7 @@ function stamped(el, event) {
 }
 
 /**
- * Fold or keep one of the turn's words, as narrationSorter settled it. Folded remarks go in an
+ * Collapse or keep one of the turn's words, as narrationSorter settled it. Collapsed remarks go in an
  * "updates along the way" row, one per stretch between kept messages, where the first of them
  * was.
  */
@@ -1431,7 +1431,7 @@ const COORDINATOR_NAME = 'Coordinator';
 const APP_AUTHOR = 'Citadel';
 
 /**
- * Who sent a message that isn't from a person (authors from server.ts), as the fold shows them:
+ * Who sent a message that isn't from a person (authors from server.ts), as the collapsed row shows them:
  * the Taskmaster, another scheme's ("Taskmaster of Delve"), a minion ("#12 Title"), the app or
  * GitHub. null for a person.
  */
@@ -1501,7 +1501,7 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
       h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: 'Attached image', loading: 'lazy' })))));
   }
   if (files.length) msg.append(h('div', { class: 'files' }, files.map(fileChip)));
-  // Messages between Claudes and from the app aren't meant for people, so they start folded to one line,
+  // Messages between Claudes and from the app aren't meant for people, so they start collapsed to one line,
   // except the brief that started the minion: it says what the minion is for.
   const who = machineAuthor(author);
   if (who && event?.brief) msg.querySelector('.who').textContent = who;
@@ -1512,7 +1512,7 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
   return msg;
 }
 
-/** A folded message's one line: its text without Markdown marks, struck words keeping their line. */
+/** A collapsed message's one line: its text without Markdown marks, struck words keeping their line. */
 function previewNodes(text, strikes) {
   const flat = (t) => t.replace(/[#*_`>\[\]~]/g, '').replace(/\s+/g, ' ');
   return struckSource((text ?? '').trim(), strikes).split(/~~(.+?)~~/).map((part, i) => (i % 2 ? h('del', {}, flat(part)) : flat(part)));

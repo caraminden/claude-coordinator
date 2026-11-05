@@ -194,7 +194,7 @@ export function renderGithubStrip() {
 /**
  * The overview's header: the project name with a ✎ that turns it into a text field in place.
  * Enter or ✓ saves; Esc or tapping away cancels. It sits in the panel's <summary>, so its own
- * clicks and keys must not fold the panel or close the phone drawer.
+ * clicks and keys must not collapse the panel or close the phone drawer.
  */
 export function projectTitle(project) {
   const wrap = h('span', { class: 'project-title' });
@@ -232,7 +232,7 @@ export function projectTitle(project) {
       if (e.key === 'Enter') { e.preventDefault(); save(); }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); show(); }
     });
-    // A space let through to the <summary> would fold the panel in some browsers.
+    // A space let through to the <summary> would collapse the panel in some browsers.
     input.addEventListener('keyup', (e) => { if (e.key === ' ') e.preventDefault(); });
     input.addEventListener('blur', () => { if (!saving) show(); });
     wrap.replaceChildren(input,
@@ -242,7 +242,7 @@ export function projectTitle(project) {
     input.select();
   };
   wrap.addEventListener('click', (e) => {
-    // Clicks inside the title edit it; they don't fold the panel or close the drawer.
+    // Clicks inside the title edit it; they don't collapse the panel or close the drawer.
     if (e.target.closest('button, input')) { e.preventDefault(); e.stopPropagation(); }
   });
   show();

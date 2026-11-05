@@ -87,7 +87,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   try { localStorage.setItem(LAST_SCHEME, String(projectId)); } catch {}
 
   // Both side panels collapse to a slim tab so the main panel can take their room. On wider
-  // screens that choice is remembered; on phones they fold away above the main panel instead.
+  // screens that choice is remembered; on phones they collapse away above the main panel instead.
   const narrowQuery = matchMedia('(max-width: 800px)');
   const panelOpen = (name) => !narrowQuery.matches && loadPanelState()[name] !== false;
   // The overview panel: account and usage (standing in for the top bar, which wider screens hide
@@ -187,7 +187,7 @@ async function switchChat(main, seq) {
   else view.tickets.set(ticket.id, ticket);
   renderCrumbs(main);
   document.querySelector('#app .split').lastElementChild.replaceWith(chatSection(chatId, ticket));
-  // On phones the panels sit above the chat; fold them away as a fresh load would.
+  // On phones the panels sit above the chat; collapse them away as a fresh load would.
   if (matchMedia('(max-width: 800px)').matches) for (const el of document.querySelectorAll('#app .panels > details:not(.citadel-drawer)')) el.open = false;
   renderShelf();
   renderSidebar();

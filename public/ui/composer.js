@@ -68,7 +68,7 @@ export function fitHeight(box) {
   const scrolled = [document.scrollingElement, box.closest('.chat')].filter(Boolean)
     .map((el) => [el, el.scrollTop, el.scrollTop >= el.scrollHeight - el.clientHeight - 2]);
   box.style.height = 'auto';
-  // Not laid out (a folded panel, or a phone's drawer still tucked away): keep the CSS height.
+  // Not laid out (a collapsed panel, or a phone's drawer still tucked away): keep the CSS height.
   if (!box.scrollHeight) box.style.height = '';
   else box.style.height = `${box.scrollHeight + box.offsetHeight - box.clientHeight}px`;
   for (const [el, top, atEnd] of scrolled) el.scrollTop = atEnd ? el.scrollHeight : top;

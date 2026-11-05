@@ -778,7 +778,7 @@ function transcript(events: any[]): string[] {
         .filter((b: any) => b.type === 'text' && b.text.trim())
         .map((b: any) => b.text.trim())
         .join('\n');
-      // A Grunt's report (a subagent's words) folds to its first line, as it does in the chat. Not
+      // A Grunt's report (a subagent's words) collapses to its first line, as it does in the chat. Not
       // public/grunts.js: this file runs as a pinned copy that only carries ./ imports (runner.ts pinnedCopy).
       const first = () => text.split('\n').map((l) => l.replace(/^[\s#>*-]+/, '').trim()).find(Boolean);
       if (text && data.parent_tool_use_id) out.push(`(Grunt reported) ${clip(first() ?? '')}`);

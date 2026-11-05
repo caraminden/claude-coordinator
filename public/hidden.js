@@ -1,5 +1,5 @@
 // Schemes a person hid for themselves (#226): out of the shelf's list, the switcher and the badges,
-// folded under "Hidden (N)" with Unhide, and a note inside one opened by its link. Only ever your own.
+// collapsed under "Hidden (N)" with Unhide, and a note inside one opened by its link. Only ever your own.
 import { api, h, me, schemeIcon, view } from './core.js';
 import { schemeCount } from './inbox.js';
 import { openNewScheme } from './sidebar.js';
@@ -36,7 +36,7 @@ const row = (p, button) => h('div', { class: 'scheme-row' },
     schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), p.hidden ? null : schemeCount(p)),
   button);
 
-/** The shelf's Schemes column: the ones you haven't hidden, + New scheme, then the hidden ones folded away. */
+/** The shelf's Schemes column: the ones you haven't hidden, + New scheme, then the hidden ones collapsed away. */
 export function renderSchemesShelf() {
   const el = document.getElementById('schemes-shelf');
   if (!el) return;

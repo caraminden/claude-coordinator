@@ -23,7 +23,7 @@ test('text splits per message id, not glued across a tool call; without ids, at 
   assert.deepEqual(reply(chatModel([{ events: old }])).map((b) => b.text ?? b.kind), ['Let me check.', 'steps', 'Done.']);
 });
 
-test('a run of calls between texts folds into one block, each step marked by its result', () => {
+test('a run of calls between texts collapses into one block, each step marked by its result', () => {
   const events = [tool('g', 'get'), result('g'), tool('r', 'read', {}, null, t(1)), result('r', false, null, t(3)), tool('s', 'search')];
   const [run] = reply(chatModel([{ events }]));
   assert.deepEqual(run.steps.map((s) => [s.id, s.state]), [['g', 'done'], ['r', 'failed'], ['s', 'running']]);
@@ -84,7 +84,7 @@ test('a call the app claims as a card leaves the step run and takes its result',
   assert.equal(reply(chatModel([{ events: [tool('a', 'Agent')] }], { card: () => true }))[0].kind, 'steps');
 });
 
-test('renderChat: the folded row reads the step in hand while running and a count once done', () => {
+test('renderChat: the collapsed row reads the step in hand while running and a count once done', () => {
   const stepLabel = (name, input) => (name === 'move_todo' ? `Moving “${input.title}”` : undefined);
   const running = renderChat([{ ask: 'Go', events: [tool('a', 'list'), result('a'), tool('m', 'move_todo', { title: 'Dry <cleaning>' })] }], { stepLabel, now: 0 });
   assert.match(running, /<b>Moving “Dry &lt;cleaning&gt;”…<\/b> · step 2/);
@@ -92,7 +92,7 @@ test('renderChat: the folded row reads the step in hand while running and a coun
   const done = renderChat([{ events: [tool('a', 'list'), result('a'), tool('g', 'Agent'), result('g', false), { type: 'end', data: {} }] }], { now: 0 });
   assert.match(done, /2 steps · 1 Grunt · 1 failed/);
   assert.match(done, /data-state="failed"/);
-  assert.doesNotMatch(done, /cui-steps/, 'folded until opened');
+  assert.doesNotMatch(done, /cui-steps/, 'collapsed until opened');
   assert.match(renderChat([{ events: [tool('a', 'list_todos'), result('a')] }], { open: ['0.0'] }), /<span class="cui-step-label">List todos<\/span>/);
 });
 

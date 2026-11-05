@@ -76,7 +76,7 @@ const LINES: [string, string, object?][] = [
 ];
 
 // A recorded turn, as an app's chat draws it: text, a run of calls with a failed one, a Grunt with two steps, then an
-// error; once folded and once with its run open, and the same turn mid-flight.
+// error; once collapsed and once with its run open, and the same turn mid-flight.
 const { chatModel, renderChat } = await import('../public/ui/chat.js');
 const at = (s: number) => Date.UTC(2026, 10, 2, 12, 0, s);
 const ev = (type: string, data: object, s?: number) => ({ type, data, at: s === undefined ? undefined : at(s) });

@@ -1,6 +1,6 @@
 // Citadel UI: chat. Served to apps as /apps/_citadel/ui/chat.js (types: chat.d.ts beside it). An app's
 // agent chat, drawn from Citadel's turn API events: a reply's text, one row per run of tool steps that
-// folds ("✓ 5 steps · 1 Grunt ▸"), running Grunts under it with their own steps and clock, and notices.
+// collapses ("✓ 5 steps · 1 Grunt ▸"), running Grunts under it with their own steps and clock, and notices.
 // The look is take A of #282 (Cara, 2026-11-02). Docs: kit/skills/contraption-ui/SKILL.md.
 //
 // Every file in public/ui/ is standalone, because apps load it from outside Citadel's pages:

@@ -55,7 +55,7 @@ Each kind's full shape is in [`kinds.md`](kinds.md): read it before filling the 
 3. **Fill it with real things:** the scheme's real numbers, names and text; real art as sibling
    files (pixel art with `class="pixel"` at whole-number scales); a screen at its real size
    (`size` on boards). A grey box stands in only for something that does not exist yet, labelled so.
-4. **Make live what the feel decides:** hover details, folds, filters, toggles, a state switch, and
+4. **Make live what the feel decides:** hover details, collapsed sections, filters, toggles, a state switch, and
    always a pick bar where a choice is asked. Keep still what only needs looking at: art as images,
    long motion as a clip beside the page. The kit's API is in [`mockkit.md`](mockkit.md).
 5. **Check it in Citadel's viewer.** A page that mocks a scheme's own app or game screen is judged

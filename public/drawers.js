@@ -116,7 +116,7 @@ export function initDrawers({ left, right, main } = {}) {
   function mount(side) {
     const el = panelFor(side);
     if (!el) return false;
-    // A <details> panel (Citadel's) shows its contents in the drawer and goes back folded or not as it was.
+    // A <details> panel (Citadel's) shows its contents in the drawer and goes back collapsed or not as it was.
     const details = el instanceof HTMLDetailsElement;
     drawer = { el, side, wasOpen: details && el.open, returnFocus: document.activeElement, inerted: [], progress: 0 };
     keepPlace(() => {
@@ -297,7 +297,7 @@ export function initDrawers({ left, right, main } = {}) {
   }, { signal });
   document.addEventListener('click', (e) => {
     if (!drawer || !drawer.el.contains(e.target)) return;
-    // A <details> panel's own bar folds it in the page; in a drawer it closes the drawer. A button or
+    // A <details> panel's own bar collapses it in the page; in a drawer it closes the drawer. A button or
     // field in the bar (the project's rename ✎) does its own thing instead.
     const summary = e.target.closest('summary');
     if (summary?.parentElement === drawer.el && !e.target.closest('button, input')) { e.preventDefault(); close(); return; }

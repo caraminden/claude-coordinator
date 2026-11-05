@@ -67,7 +67,7 @@ test('read_ticket shows the last entries of a paged history and counts every ear
   assert.deepEqual(shown, [4, 3, 2, 1, 0].map((k) => MESSAGES - k).map((i) => `[Cara]: message ${i}`));
 });
 
-test("read_ticket folds a Grunt's report to its first line and keeps the minion's reply whole", async () => {
+test("read_ticket collapses a Grunt's report to its first line and keeps the minion's reply whole", async () => {
   const { text } = await readTicket({ ticket_id: store.getTicket(G.id)!.number });
   assert.match(text, /\(Grunt reported\) Emberknight has five takes\./);
   assert.doesNotMatch(text, /reads well/);

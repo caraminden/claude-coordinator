@@ -769,7 +769,7 @@ background: var(--citadel-warn-tint);</code></pre></div>
         <div class="cui-working"><span class="cui-spin" aria-hidden="true"></span><span role="status">Thinking… · <span class="cui-time" data-tick="12">12s</span></span></div>
       </div></div>
       <div class="mk-about">
-        <p>Your message: a bubble on the right, accent tint 9%, <code>radius-lg</code>. The reply: unboxed text, so long answers read like a page. A run of tool steps folds into one row (done ✓, running with its current step, failed ✕); Grunts get their own rows with task, time and state, never mixed into the agent's steps; as built, a running Grunt shows under its run's row and the rest sit in the row when it opens. Suggested replies sit under the reply; tapping one sends it and greys the rest. Tap any row to open it. (This specimen copies the look; the code is <code>mountChat</code>, and <code>test/ui-contract.json</code> holds a recorded turn's real HTML.)</p>
+        <p>Your message: a bubble on the right, accent tint 9%, <code>radius-lg</code>. The reply: unboxed text, so long answers read like a page. A run of tool steps collapses into one row (done ✓, running with its current step, failed ✕); Grunts get their own rows with task, time and state, never mixed into the agent's steps; as built, a running Grunt shows under its run's row and the rest sit in the row when it opens. Suggested replies sit under the reply; tapping one sends it and greys the rest. Tap any row to open it. (This specimen copies the look; the code is <code>mountChat</code>, and <code>test/ui-contract.json</code> holds a recorded turn's real HTML.)</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/chat.js</code> · <code>.cui-chat</code> <code>.cui-ask</code> <code>.cui-run</code> <code>.cui-grunt</code> <code>.cui-choices</code></p>
       </div>
     </div>
@@ -1074,7 +1074,7 @@ row.innerHTML =
   darkMq.addEventListener('change', () => applyTheme(scope.dataset.theme));
   addEventListener('resize', measures);
 
-  // Folds: tool runs and Grunt rows.
+  // Collapses: tool runs and Grunt rows.
   const STEPS = [
     'Read survey-2026-11.md', 'Searched for "chat-note" in app/web', 'Read app/web/style.css',
     'Read /apps/_citadel/theme.css', 'Edited app/web/style.css', 'Edited app/web/chat.ts',

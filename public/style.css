@@ -312,7 +312,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .msg.coord > summary .preview { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .msg.coord[open] > summary .preview { display: none; }
 .msg.coord > .msg { border: 0; background: none; padding: 0 0.85rem 0.6rem; }
-/* Grunt reports fold to a line each (thread.js addGruntText); a fan-out's lines share one block. */
+/* Grunt reports collapse to a line each (thread.js addGruntText); a fan-out's lines share one block. */
 .msg.grunt > summary .dur { flex: none; font-variant-numeric: tabular-nums; }
 .grunts > .grunt-list { padding: 0 0.6rem 0.5rem; }
 .grunts .grunt { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; }
@@ -645,7 +645,7 @@ button.pin.on { color: var(--accent); }
 /* No turn running: the line keeps its room, empty, so a turn starting or ending moves nothing (rule 13). */
 .typing { min-height: calc(0.9rem + 8px); } /* the dots pill: its padding, dots and border */
 .typing[hidden] { visibility: hidden; }
-/* A turn's in-between remarks, folded into a row per stretch between messages */
+/* A turn's in-between remarks, collapsed into a row per stretch between messages */
 .unread-divider { display: flex; align-items: center; gap: 0.5rem; margin: 0.75rem 0; color: var(--accent); font-size: 0.8em; font-weight: 600; }
 .unread-divider::before, .unread-divider::after { content: ''; flex: 1; border-top: 1px solid var(--accent); }
 .load-earlier { display: flex; justify-content: center; padding: 0.5rem 0; }
@@ -1035,7 +1035,7 @@ a.thread-ref:hover { text-decoration: underline; }
 /* Phones: the overview and threads panels pulled out from the screen edge as drawers (drawers.js,
    which brings the placement, backdrop, handles and motion; these are Citadel's look and which views have them). */
 @media (max-width: 800px) {
-  /* The drawers stand in for the panels, so their folded bars don't sit above the chat. */
+  /* The drawers stand in for the panels, so their collapsed bars don't sit above the chat. */
   .split > .panels:not(:has(> .citadel-drawer)) { display: none; }
   .panels > details:not(.citadel-drawer) { display: none; }
   .panels > details.citadel-drawer {

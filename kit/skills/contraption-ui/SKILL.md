@@ -131,7 +131,7 @@ cut off (your server restarted mid-turn) draws as still running when it's the ne
 `error` for it.
 
 What it does for you: words split per model message (the turn API's `message`), so "Let me check."
-and "Done." never glue together; each run of tool calls between texts folds into one row that reads
+and "Done." never glue together; each run of tool calls between texts collapses into one row that reads
 the step in hand while running ("**Moving “Dry cleaning”…** · step 2") and a count once done ("3 steps
 · 1 Grunt · 1 failed"), and opens on a tap; Grunts (Agent calls) show as their own rows holding their
 calls, with a clock, while they run; `canceled` shows "Stopped.", any other error a danger notice.

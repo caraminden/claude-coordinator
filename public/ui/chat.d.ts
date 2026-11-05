@@ -35,7 +35,7 @@ export interface Step {
 export type Block =
   /** Words, split per message id (or, without ids, at each tool call). */
   | { id: string; kind: 'text'; message: string | null; text: string }
-  /** A run of top-level calls between texts, drawn as one row that folds. */
+  /** A run of top-level calls between texts, drawn as one row that collapses. */
   | { id: string; kind: 'steps'; steps: Step[] }
   /** A call the app draws as its own card (mountChat's `block`); `result` once it has one. */
   | { id: string; kind: 'card'; tool: string; name: string; input: Record<string, unknown>; result?: BlockResult }

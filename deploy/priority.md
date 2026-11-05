@@ -61,7 +61,8 @@ directory order and the last rule for a name wins.
 ```sh
 pacman -Qo '/etc/ananicy.d/00-default/Development & Programming/node.rules'   # which package owns them
 sudo sed -i '/^\[options\]/a NoExtract = etc/ananicy.d/00-default/*/node.rules etc/ananicy.d/00-default/*/bash.rules etc/ananicy.d/00-default/*/dash.rules etc/ananicy.d/00-default/*/zsh.rules etc/ananicy.d/00-default/*/fish.rules etc/ananicy.d/00-default/*/podman.rules' /etc/pacman.conf
-sudo find /etc/ananicy.d/00-default -name node.rules -o -name bash.rules -o -name dash.rules -o -name zsh.rules -o -name fish.rules -o -name podman.rules | sudo xargs -d '\n' rm -v
+find /etc/ananicy.d/00-default -name node.rules -o -name bash.rules -o -name dash.rules -o -name zsh.rules -o -name fish.rules -o -name podman.rules   # look: expect six files
+find /etc/ananicy.d/00-default -name node.rules -o -name bash.rules -o -name dash.rules -o -name zsh.rules -o -name fish.rules -o -name podman.rules | sudo xargs -d '\n' rm -v
 sudo systemctl restart ananicy-cpp
 ```
 
@@ -83,7 +84,8 @@ instead of squeezing the page cache. 100 means the kernel weighs swapping and dr
 150 only makes sense when zram compresses 3:1 or better.
 
 ```sh
-# a. Disk swapfile in its own subvolume (btrfs needs that: no CoW, kept out of snapshots of /)
+# a. Disk swapfile in its own subvolume (btrfs needs that: no CoW, kept out of snapshots of /). Run once.
+findmnt -no FSTYPE /   # expect btrfs; on anything else use mkswap on a plain file instead
 sudo btrfs subvolume create /swap
 sudo btrfs filesystem mkswapfile --size 16g /swap/swapfile
 echo '/swap/swapfile none swap defaults,pri=10 0 0' | sudo tee -a /etc/fstab
@@ -91,6 +93,7 @@ sudo swapon /swap/swapfile
 
 # b. Swappiness 100: shadow CachyOS's udev rule (same name in /etc wins) and keep its zswap line
 sed 's/vm.swappiness}="150"/vm.swappiness}="100"/' /usr/lib/udev/rules.d/30-zram.rules | sudo tee /etc/udev/rules.d/30-zram.rules
+grep -n swappiness /etc/udev/rules.d/30-zram.rules   # must say "100"; if it still says 150, edit it by hand
 sudo sysctl vm.swappiness=100
 
 # c. 8 GiB zram from the next boot (this file replaces /usr/lib/systemd/zram-generator.conf)

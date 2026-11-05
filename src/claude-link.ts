@@ -91,6 +91,8 @@ export class ClaudeLink {
   /** Whether turns are running in a container right now (it isn't restarted under them). */
   /** How many turns run in a container now. */
   busy: (container: string) => number = () => 0;
+  /** Set once the server is shutting down: it has let go of its turns, so busy() reads 0 while they still run. */
+  private closing = false;
   /** Starts in flight, per person: two turns starting at once share one. */
   private starting = new Map<number, Promise<void>>();
 
@@ -193,9 +195,16 @@ export class ClaudeLink {
     const now = await this.containers.status(spec.name);
     // shortcut: a changed spec (new image, a new scheme's memory) waits until no other turn runs in the container; a busy one keeps its old mounts meanwhile.
     // A starting turn already counts as one of the container's turns.
-    if (now.state === 'running' && (now.spec === specHash(spec) || this.busy(spec.name) > (forTurn ? 1 : 0))) return;
+    // A server shutting down never replaces one: its busy() no longer sees the turns it let go of (2026-11-05: a
+    // turn starting during a deploy's restart replaced a stale-spec container and killed the ~20 turns in it).
+    if (now.state === 'running' && (this.closing || now.spec === specHash(spec) || this.busy(spec.name) > (forTurn ? 1 : 0))) return;
     await this.containers.start(spec);
     void this.containers.pruneImages(IMAGE_REPO, spec.image);
+  }
+
+  /** The server is shutting down: from now on, running containers are left as they are. */
+  close() {
+    this.closing = true;
   }
 
   /** Where a turn for `uid` runs, or null when it can't run (not linked, signed out). */

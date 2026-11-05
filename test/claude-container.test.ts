@@ -260,6 +260,12 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   link.busy = () => 1;
   await link.ensure(josh.id, true);
   assert.equal(log.filter((c) => c[0] === 'systemd-run').length, 2);
+  // A server shutting down has let go of its turns, so busy() reads 0 while they still run: it never replaces the container.
+  link.close();
+  link.busy = () => 0;
+  await link.ensure(josh.id, true);
+  assert.equal(log.filter((c) => c[0] === 'systemd-run').length, 2);
+  link.busy = () => 1;
   // Unlinking under running turns is refused rather than stopping the container under them.
   await assert.rejects(link.unlink(josh.id), /Turns are running/);
   link.busy = () => 0;

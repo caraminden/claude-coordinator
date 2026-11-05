@@ -22,7 +22,7 @@ import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
-import { type Chain, githubPrs, LiveWaiters } from './src/wake.ts';
+import { type Chain, githubPrs, LiveWaiters, runsRepo } from './src/wake.ts';
 import { errorText } from './src/scheme-repo.ts';
 import { catchUpTicketDir, createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { describeCron, runBrief, type Schedule } from './src/schedules.ts';
@@ -41,6 +41,7 @@ import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerTokens } from './src/ci-runner.ts';
 import { projectRoutes } from './src/routes/projects.ts';
+import { llamaEmbed } from './src/memory.ts';
 import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { themeCss } from './src/theme.ts';
@@ -199,6 +200,13 @@ const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, D
 waiters.prs = githubPrs(githubOf);
 mainSync.as = githubOf;
 runner.liveHead = () => waiters.head;
+// Semantic memory (#331): llama-server on this box embeds the chats (deploy/citadel-embed.service).
+const EMBED_MODEL = process.env.CITADEL_EMBED_MODEL || 'Qwen3-Embedding-0.6B-Q8_0';
+const embed = llamaEmbed(process.env.CITADEL_EMBED_URL || 'http://127.0.0.1:21434');
+const MEMORY_SCHEMES = process.env.CITADEL_MEMORY_SCHEMES?.split(',').map(Number);
+// shortcut: phase 1 indexes one scheme, the one whose code this server runs (Citadel's own); phase 2 opens it to every scheme.
+const memoryScheme = (id: number) => MEMORY_SCHEMES ? MEMORY_SCHEMES.includes(id) : runsRepo(store.getProject(id)?.repo_dir ?? null, waiters.head);
+runner.memoryScheme = memoryScheme;
 /** Fetch a scheme's origin and fast-forward its main if it can (#208), then look at the waiters again: a merge on GitHub can be what they wait on (#229). */
 function catchUp(repoDir: string) {
   void syncMain(repoDir)
@@ -352,6 +360,28 @@ async function runDueSchedules() {
   }
 }
 if (!BOOT_CHECK) setInterval(() => void safely('schedules', runDueSchedules), 30_000).unref();
+
+// Embed what was said since the last pass, a little at a time, never in a request.
+let indexing = false;
+let embedDown = false; // say so once per outage, not every minute
+async function indexMemory() {
+  if (indexing) return;
+  indexing = true;
+  try {
+    for (const p of store.listProjects()) {
+      if (!memoryScheme(p.id)) continue;
+      while ((await store.memory.index(p.id, embed, EMBED_MODEL)) > 0);
+    }
+    if (embedDown) console.log('Semantic memory: the embedding service is back');
+    embedDown = false;
+  } catch (err: any) {
+    if (!embedDown) console.error('Semantic memory indexing stopped:', err?.cause?.code ?? err?.message ?? err);
+    embedDown = true;
+  } finally {
+    indexing = false;
+  }
+}
+if (!BOOT_CHECK) setInterval(() => void safely('memory', indexMemory), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();
 
 // ---------- artifacts ----------
 
@@ -674,6 +704,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
   store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, claude: claudeLink, contraptions, contraptionTurns, landings, services,
+  memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {
     return ASSET_VERSION;

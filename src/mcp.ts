@@ -607,6 +607,29 @@ const CONTRAPTION_READ = {
   },
 };
 
+/** Search by meaning over the scheme's chats (#331): offered only where the server indexes them. */
+const MEMORY = process.env.COORDINATOR_MEMORY === '1';
+const SEARCH_MEMORY = {
+  name: 'search_memory',
+  description: "Search this scheme's past chats by meaning, not exact words: each person's message with the reply to it, and minions' titles and notes. Before asking people something they may already have decided, search memory. Returns the closest chunks with minion number, date and event id, best first. They are leads to check (read_ticket, the decisions logs), not facts: the newest word wins, and a chunk can be out of date.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'What you want to find, in plain words, e.g. "what did Cara decide about previews"' },
+      scope: { type: 'string', enum: ['scheme', 'mine'], description: "scheme (default): every minion and the Taskmaster's chat; mine: only this chat" },
+      limit: { type: 'integer', description: 'How many chunks (default 5, max 20)' },
+    },
+    required: ['query'],
+  },
+};
+
+/** search_memory's answer: each hit as a header line and its text, cut so a call stays small. */
+function memoryText(hits: any[]): string {
+  if (!hits.length) return 'Nothing indexed matches yet.';
+  const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  return hits.map((h) => `#${h.number} ${h.title} · ${day(h.ts)} · ${h.source_kind === 'turn' ? `event ${h.source_id}` : 'title and note'} · score ${h.score}\n${h.text.length > 1200 ? `${h.text.slice(0, 1200)}…` : h.text}`).join('\n\n');
+}
+
 /** What contraption_read hands back: a list of read commands, or a command's answer. */
 function readText(app: string, command: string | undefined, r: { status: number; answer: unknown; truncated?: number }): string {
   const body = typeof r.answer === 'string' ? r.answer : JSON.stringify(r.answer);
@@ -1077,6 +1100,11 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call(clear === true ? 'DELETE' : 'PUT', path, clear === true ? undefined : fields);
       return `Mandate answered ${r.status}: ${typeof r.answer === 'string' ? r.answer : JSON.stringify(r.answer)}`;
     }
+    case 'search_memory': {
+      if (typeof args.query !== 'string' || !args.query.trim()) throw new Error('query is required');
+      const q = new URLSearchParams({ q: args.query, ...(args.scope ? { scope: String(args.scope) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
+      return memoryText((await call('GET', `/api/projects/${PROJECT}/memory?${q}`)).hits);
+    }
     case 'contraption_read': {
       if (typeof args.app !== 'string' || !args.app) throw new Error('app is required, like mandate');
       const r = await call('POST', `/api/contraption-read/${encodeURIComponent(args.app)}`, { command: args.command, args: args.args });
@@ -1260,8 +1288,9 @@ function scheduleLine(s: any): string {
 
 function toolList() {
   const deploy = APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ] : [...TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ];
-  return [...THREAD_TOOLS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), MANDATE_ITEM, CONTRAPTION_READ, ...(APPROVALS ? [APPROVE] : [])];
+  const memory = MEMORY ? [SEARCH_MEMORY] : [];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory] : [...TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory];
+  return [...THREAD_TOOLS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

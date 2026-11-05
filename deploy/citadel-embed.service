@@ -1,0 +1,19 @@
+[Unit]
+Description=Citadel semantic memory: llama-server embedding the chats with Qwen3-Embedding-0.6B, localhost only (#331)
+After=network-online.target
+
+[Service]
+Type=simple
+# deploy/embed-install.sh puts llama.cpp and the model here.
+WorkingDirectory=%h/.local/share/citadel-embed
+Environment=LD_LIBRARY_PATH=%h/.local/share/citadel-embed/llama
+# --pooling last and a ubatch that holds a whole chunk, as the model card says. 4 threads and nice 10:
+# indexing is background work and the box is shared with builds; a search embeds one short query.
+ExecStart=%h/.local/share/citadel-embed/llama/llama-server -m %h/.local/share/citadel-embed/Qwen3-Embedding-0.6B-Q8_0.gguf --embedding --pooling last -t 4 -c 8192 -b 8192 -ub 8192 --host 127.0.0.1 --port 21434 --no-webui --log-disable
+Nice=10
+MemoryMax=3G
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

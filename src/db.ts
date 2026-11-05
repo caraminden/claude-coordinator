@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
 import { Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
+import { Memory } from './memory.ts';
 
 /** Settings key: who asked for a ticket's turns, when that isn't whom they run as (Store.turnAsker). */
 export const askerKey = (ticketId: number) => `asker:${ticketId}`;
@@ -679,7 +680,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 28; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths; 23: contraptions.repo, branch, folder; 24: tickets.parent; 25: machines.scoped (#303); 26: machines.owner_id (#306); 27: machines.mcp_kind, mcp_command (#308); 28: repo_collaborators (#310)
+export const SCHEMA_VERSION = 29; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths; 23: contraptions.repo, branch, folder; 24: tickets.parent; 25: machines.scoped (#303); 26: machines.owner_id (#306); 27: machines.mcp_kind, mcp_command (#308); 28: repo_collaborators (#310); 29: memory_chunks (#331)
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -696,6 +697,8 @@ export class Store {
   props: Registry;
   /** Scheduled minions (src/schedules.ts). */
   schedules: Schedules;
+  /** Semantic memory: chunks of the chats and their embeddings (src/memory.ts, #331). */
+  memory: Memory;
   /** The database file; the runner keeps its turn folders beside it. */
   readonly path: string;
 
@@ -718,6 +721,7 @@ export class Store {
     this.props.seed();
     this.settleBuilds();
     this.schedules = new Schedules(this.db);
+    this.memory = new Memory(this);
     this.serverLoginOwnerOnly();
     this.groupByType();
     this.noteSchemaVersion();
@@ -1232,6 +1236,7 @@ export class Store {
     this.db.prepare('DELETE FROM brief_starts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
+    this.memory.deleteTicket(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 

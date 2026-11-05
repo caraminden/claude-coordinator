@@ -923,6 +923,8 @@ export class Runner {
   noTurns = false;
   /** The commit the server runs now (server.ts: the waiters' head), to tell whether a scheme deploys here. */
   liveHead: () => string | null = () => null;
+  /** Whether a scheme's chats are indexed for search_memory (server.ts, #331). */
+  memoryScheme: (projectId: number) => boolean = () => false;
   /** A ticket was dismissed (its preview goes with it). */
   onClose: (ticketId: number) => Promise<void> | void = () => {};
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
@@ -1838,6 +1840,7 @@ export class Runner {
     // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
     if (ticket.kind !== 'coordinator') env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
     if (deploys) env.COORDINATOR_DEPLOYS = '1';
+    if (this.memoryScheme(project.id)) env.COORDINATOR_MEMORY = '1';
     // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
     const github = this.githubFor?.(person, dir) ?? null;
     if (github) env = { ...env, ...github.env };

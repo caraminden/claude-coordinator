@@ -19,6 +19,7 @@ import { claudeConfigDir } from '../sessions.ts';
 import type { Chain } from '../wake.ts';
 import { cloneProject, projectDir, removeProjectDir } from '../workspace.ts';
 import { ICON_HEADERS, iconVersion, readIcon } from '../scheme-icon.ts';
+import { spokenText } from '../memory.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, type App, type Ctx, type Route } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
@@ -169,14 +170,6 @@ function approvedSetupPlan(app: App, project: Project, t: Ticket): string | unde
   const card = app.store.latestPlan(t.id);
   const plan = card && JSON.parse(card.data);
   return plan?.status === 'approved' && plan.at > app.store.onboardingOpenedAt(project.id) ? `${plan.summary}\n${plan.plan}` : undefined;
-}
-
-/** What people and Claude said in an event, for searching (not tool calls or their output). */
-function spokenText(kind: string, data: any): string {
-  if (kind === 'user_message') return typeof data?.text === 'string' ? data.text : '';
-  // A reply the link check sent back that its rewrite replaced (#281) isn't in the chat to jump to.
-  if (data?.type !== 'assistant' || data.replaced) return '';
-  return (data.message?.content ?? []).filter((b: any) => b?.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
 }
 
 /** Minions whose chat says `q`: the newest hit per minion with a snippet, and its oldest (oldestId); `ticketId` narrows it to one. */
@@ -736,6 +729,25 @@ export const projectRoutes: Route[] = [
       const q = (url.searchParams.get('q') ?? '').trim().slice(0, 200);
       const ticket = Number(url.searchParams.get('ticket')) || undefined;
       return json(res, 200, q.length < 2 ? [] : searchProject(app, project.id, q, ticket));
+    },
+  },
+  // Search by meaning (#331): the scheme's chunks closest to q. scope mine: the calling minion's own
+  // chat, or a person's own messages. The router keeps people to their schemes and agents to their own.
+  {
+    method: 'GET', path: '/api/projects/:project/memory', who: ['person', 'taskmaster', 'minion'],
+    async handler({ res, url, app, project, caller, session }) {
+      const q = (url.searchParams.get('q') ?? '').trim().slice(0, 1000);
+      if (q.length < 2) throw new HttpError(400, 'Say what to look for (q)');
+      const mine = oneOf(url.searchParams.get('scope'), ['scheme', 'mine'], 'scope') === 'mine';
+      const limit = Number(url.searchParams.get('limit')) || 5;
+      if (!app.memory.indexed(project.id)) throw new HttpError(409, `${project.name}'s chats aren't indexed for search by meaning yet`);
+      const hits = await app.store.memory
+        .search(project.id, q, app.memory.embed, app.memory.model, { limit, ...(mine ? (caller ? { ticketId: caller.id } : { personId: session.uid ?? -1 }) : {}) })
+        .catch((err) => {
+          console.error('Semantic memory search failed:', err?.cause?.code ?? err?.message ?? err);
+          throw new HttpError(503, "The embedding service isn't answering, so search by meaning is down; exact-text search still works");
+        });
+      return json(res, 200, { hits });
     },
   },
 

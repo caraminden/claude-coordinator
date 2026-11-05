@@ -18,6 +18,7 @@ import type { Previews } from './previews.ts';
 import type { Pusher, PushTrigger } from './push.ts';
 import type { Runner } from './runner.ts';
 import type { Schedule } from './schedules.ts';
+import type { Embed } from './memory.ts';
 import type { Chain, LiveWaiters } from './wake.ts';
 
 /** An answer with a status: what any route or module throws to refuse a request. */
@@ -194,6 +195,8 @@ export interface App {
   landings: Landings;
   /** Open event streams (GET /api/stream), with whose they are. */
   clients: Map<ServerResponse, Session>;
+  /** Semantic memory's model (#331): what embeds a search, and which schemes are indexed. */
+  memory: { embed: Embed; model: string; indexed: (projectId: number) => boolean };
   dataDir: string;
   preview: boolean;
   machinesUrl: URL | null;

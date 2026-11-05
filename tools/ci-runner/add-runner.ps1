@@ -1,19 +1,21 @@
 <#
 .SYNOPSIS
-  Adds one scheme's self-hosted GitHub Actions runner to this Windows PC, in the shape of Delve's delve-ci.
+  Adds one scheme's self-hosted GitHub Actions runners to this Windows PC, in the shape of Delve's delve-ci.
 
 .DESCRIPTION
-  Citadel #320. Every scheme's CI runs on Cara's desktop, one runner instance per repo (a personal GitHub
-  account's runner serves one repo only). This script:
-    1. asks Citadel which repo and label the scheme has (no token yet), and stops if this PC already has
-       that repo's runner folder or service: safe to run again;
+  Citadel #320, #328. Every scheme's CI runs on Cara's desktop, with runner instances of its own per repo (a
+  personal GitHub account's runner serves one repo only). This script:
+    1. asks Citadel which repo and label the scheme has (no token yet), and skips each instance whose folder
+       or service is already here: safe to run again, and a higher -Count adds only the missing ones;
     2. asks Citadel for a registration token (about an hour, never stored; Citadel notes it in the scheme
        Taskmaster's chat), made with the scheme owner's GitHub login;
-    3. downloads the stock runner into C:\actions-runner-<repo>, writes its .env (telemetry off, Git\bin
-       first on PATH) and configures it with the label <scheme-slug>-ci as a Windows service under
-       NETWORK SERVICE, delayed automatic start, restart on failure.
+    3. downloads the stock runner and, for each missing instance, unpacks it into C:\actions-runner-<repo>
+       (then -2, -3, ...), writes its .env (telemetry off, Git\bin first on PATH) and a .citadel-runner
+       marker (which repo it serves: remove-runner.ps1 only ever removes folders with one), and configures it
+       with the label <scheme-slug>-ci as a Windows service under NETWORK SERVICE, delayed automatic start,
+       restart on failure.
   It never touches another runner, never restarts or reboots the PC.
-  Run it in an elevated PowerShell (Run as administrator): installing a service needs it.
+  Run it elevated (an admin PowerShell, or the CI runner agent, which runs as SYSTEM): installing a service needs it.
 
 .PARAMETER Scheme
   The scheme's name ("Peek Auras"), its runner label ("peek-auras-ci") or its id.
@@ -25,8 +27,11 @@
   That machine's token (ccm_...). Defaults to the CC_MACHINE_TOKEN environment variable. The machine must
   belong to someone in the scheme (Cara's reaches every scheme), or be lent to the scheme.
 
+.PARAMETER Count
+  How many runner instances the scheme should have here, 1 to 4 (default 1): one job runs on each at a time.
+
 .EXAMPLE
-  .\add-runner.ps1 -Scheme "Peek Auras" -CitadelUrl http://perigee:8574
+  .\add-runner.ps1 -Scheme "Peek Auras" -CitadelUrl http://perigee:8574 -Count 4
 #>
 [CmdletBinding()]
 param(
@@ -37,7 +42,8 @@ param(
   # From the release notes of that version (<!-- BEGIN SHA win-x64 -->); pass both to change version.
   [string]$RunnerSha256 = 'f48e0750a21812bca5f82de5f7f5aeae71abee647fab5a582f1742d07eba455f',
   [string]$GitBin = 'C:\Program Files\Git\bin',
-  [string]$RunnerName = $env:COMPUTERNAME
+  [string]$RunnerName = $env:COMPUTERNAME,
+  [ValidateRange(1, 4)][int]$Count = 1
 )
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1's progress bar makes a 100 MB download crawl.
@@ -69,22 +75,32 @@ function Get-RunnerToken([bool]$Mint) {
   }
 }
 
-# 1. Names first, so a re-run stops here without minting a token.
+# 1. Names first, so a re-run with nothing to add stops here without minting a token.
 $names = Get-RunnerToken $false
 $owner, $repoName = $names.repo -split '/', 2
-$dir = "C:\actions-runner-$repoName"
 $label = $names.label
-$servicePattern = "actions.runner.$owner-$repoName.*"
-$existing = Get-Service -Name $servicePattern -ErrorAction SilentlyContinue
-if ($existing -or (Test-Path $dir)) {
-  Write-Host "$($names.scheme) already has a runner here, so nothing changed:" -ForegroundColor Yellow
-  if (Test-Path $dir) { Write-Host "  folder  $dir" }
-  foreach ($s in $existing) { Write-Host "  service $($s.Name) ($($s.Status), $($s.StartType))" }
-  Write-Host 'To start over, remove it by hand first (config.cmd remove in that folder, with a removal token from GitHub).'
+# Instance 1 keeps #320's folder and name, so a runner added before -Count is the first of them.
+$instances = foreach ($i in 1..$Count) {
+  $suffix = if ($i -eq 1) { '' } else { "-$i" }
+  [pscustomobject]@{ Dir = "C:\actions-runner-$repoName$suffix"; Name = "$RunnerName$suffix"; Service = "actions.runner.$owner-$repoName.$RunnerName$suffix" }
+}
+$missing = @()
+foreach ($r in $instances) {
+  $service = Get-Service -Name $r.Service -ErrorAction SilentlyContinue
+  if ($service -or (Test-Path $r.Dir)) {
+    $state = if ($service) { "service $($service.Status)" } else { 'no service' }
+    Write-Host "Already here, left as it is: $($r.Name) in $($r.Dir) ($state)"
+  } else {
+    $missing += $r
+  }
+}
+if (-not $missing) {
+  Write-Host "$($names.scheme) already has $Count runner(s) here, so nothing changed." -ForegroundColor Yellow
+  Write-Host 'To start over, remove them first (remove-runner.ps1, or the ci_runners tool''s remove).'
   exit 0
 }
 
-# 2. Download the stock runner, fresh each run, and check it before it becomes a service.
+# 2. Download the stock runner once, fresh each run, and check it before it becomes a service.
 $zip = Join-Path $env:TEMP "actions-runner-win-x64-$RunnerVersion-$PID.zip"
 Write-Host "Downloading runner v$RunnerVersion"
 Invoke-WebRequest -Uri "https://github.com/actions/runner/releases/download/v$RunnerVersion/actions-runner-win-x64-$RunnerVersion.zip" -OutFile $zip -UseBasicParsing
@@ -93,57 +109,75 @@ if ($hash -ne $RunnerSha256) {
   Remove-Item -Force $zip
   Stop-With "The download's SHA-256 is $hash, not $RunnerSha256 from the release notes; nothing installed."
 }
-New-Item -ItemType Directory -Path $dir | Out-Null
-$configured = $false
+
+$machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+$reg = $null
+$failed = 0
 try {
-  Expand-Archive -Path $zip -DestinationPath $dir
+  foreach ($r in $missing) {
+    New-Item -ItemType Directory -Path $r.Dir | Out-Null
+    $configured = $false
+    try {
+      Expand-Archive -Path $zip -DestinationPath $r.Dir
 
-  # 3. The runner reads .env at start: telemetry off, and Git's bash first so `shell: bash` steps run.
-  $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-  @(
-    'DOTNET_CLI_TELEMETRY_OPTOUT=1'
-    'POWERSHELL_TELEMETRY_OPTOUT=1'
-    'DOTNET_NOLOGO=1'
-    "PATH=$GitBin;$machinePath"
-  ) | Set-Content -Path (Join-Path $dir '.env') -Encoding ASCII
+      # 3. The runner reads .env at start: telemetry off, and Git's bash first so `shell: bash` steps run.
+      @(
+        'DOTNET_CLI_TELEMETRY_OPTOUT=1'
+        'POWERSHELL_TELEMETRY_OPTOUT=1'
+        'DOTNET_NOLOGO=1'
+        "PATH=$GitBin;$machinePath"
+      ) | Set-Content -Path (Join-Path $r.Dir '.env') -Encoding ASCII
+      # Which repo this folder serves: remove-runner.ps1 acts only on folders whose marker names the scheme's repo.
+      @{ repo = $names.repo; label = $label; name = $r.Name; added_at = (Get-Date).ToUniversalTime().ToString('o') } |
+        ConvertTo-Json | Set-Content -Path (Join-Path $r.Dir '.citadel-runner') -Encoding ASCII
 
-  # 4. The token, as late as possible: it lasts about an hour.
-  $reg = Get-RunnerToken $true
-  Write-Host "Registering $RunnerName on $($reg.repo) with label $label"
-  Push-Location $dir
-  try {
-    & .\config.cmd --unattended --url "https://github.com/$($reg.repo)" --token $reg.token --name $RunnerName `
-      --labels $label --work _work --runasservice --windowslogonaccount 'NT AUTHORITY\NETWORK SERVICE'
-    if ($LASTEXITCODE -ne 0) { throw "config.cmd failed (exit $LASTEXITCODE)" }
-  } finally {
-    Pop-Location
+      # 4. The token, as late as possible: it lasts about an hour, and one registers every instance of this run.
+      if (-not $reg) { $reg = Get-RunnerToken $true }
+      Write-Host "Registering $($r.Name) on $($reg.repo) with label $label"
+      Push-Location $r.Dir
+      try {
+        & .\config.cmd --unattended --url "https://github.com/$($reg.repo)" --token $reg.token --name $r.Name `
+          --labels $label --work _work --runasservice --windowslogonaccount 'NT AUTHORITY\NETWORK SERVICE'
+        if ($LASTEXITCODE -ne 0) { throw "config.cmd failed (exit $LASTEXITCODE)" }
+      } finally {
+        Pop-Location
+      }
+      $configured = $true
+    } catch {
+      $failed++
+      Write-Host "$($r.Name): $($_.Exception.Message)" -ForegroundColor Red
+    } finally {
+      # Only a folder this run made, and only while no service points at it; once config.cmd has made the service,
+      # GitHub has the runner too, and the folder stays for `config.cmd remove`.
+      if (-not $configured -and (Test-Path $r.Dir)) {
+        if (Get-Service -Name $r.Service -ErrorAction SilentlyContinue) {
+          Write-Host "Setup failed after the service was made; $($r.Dir) stays. Look in its _diag, then remove it (remove-runner.ps1) before trying again." -ForegroundColor Yellow
+        } else {
+          Write-Host "Setup didn't finish; removing $($r.Dir), which this run made." -ForegroundColor Yellow
+          Remove-Item -Recurse -Force $r.Dir
+        }
+      }
+    }
+    if (-not $configured) { continue }
+
+    # 5. Like delve-ci: delayed automatic start, restart on failure. config.cmd already started the service.
+    $service = Get-Service -Name $r.Service -ErrorAction SilentlyContinue
+    if (-not $service) {
+      $failed++
+      Write-Host "config.cmd finished but there is no service $($r.Service); check $($r.Dir)\_diag." -ForegroundColor Red
+      continue
+    }
+    & sc.exe config $service.Name start= delayed-auto | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Couldn't set $($service.Name) to delayed automatic start (sc.exe exit $LASTEXITCODE)." }
+    & sc.exe failure $service.Name reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Couldn't set $($service.Name) to restart on failure (sc.exe exit $LASTEXITCODE)." }
+    Write-Host "Added: $($service.Name) is $((Get-Service -Name $service.Name).Status), folder $($r.Dir)" -ForegroundColor Green
   }
-  $configured = $true
 } finally {
   Remove-Item -Force $zip -ErrorAction SilentlyContinue
-  # Only a folder this run made, and only while no service points at it; once config.cmd has made the service,
-  # GitHub has the runner too, and the folder stays for `config.cmd remove`.
-  if (-not $configured -and (Test-Path $dir)) {
-    if (Get-Service -Name $servicePattern -ErrorAction SilentlyContinue) {
-      Write-Host "Setup failed after the service was made; $dir stays. Look in its _diag, then run config.cmd remove there (with a removal token from the repo's runner settings) before trying again." -ForegroundColor Yellow
-    } else {
-      Write-Host "Setup didn't finish; removing $dir, which this run made." -ForegroundColor Yellow
-      Remove-Item -Recurse -Force $dir
-    }
-  }
 }
 
-# 5. Like delve-ci: delayed automatic start, restart on failure. config.cmd already started the service.
-$service = Get-Service -Name $servicePattern -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $service) { Stop-With "config.cmd finished but no service matching $servicePattern exists; check $dir\_diag." }
-& sc.exe config $service.Name start= delayed-auto | Out-Null
-if ($LASTEXITCODE -ne 0) { Write-Warning "Couldn't set $($service.Name) to delayed automatic start (sc.exe exit $LASTEXITCODE)." }
-& sc.exe failure $service.Name reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
-if ($LASTEXITCODE -ne 0) { Write-Warning "Couldn't set $($service.Name) to restart on failure (sc.exe exit $LASTEXITCODE)." }
-
-$service = Get-Service -Name $service.Name
 Write-Host ''
-Write-Host "Done: $($service.Name) is $($service.Status)." -ForegroundColor Green
-Write-Host "  folder $dir"
 Write-Host "  label  $label  (runs-on: [self-hosted, $label])"
-Write-Host "  check  https://github.com/$($names.repo)/settings/actions/runners should list $RunnerName as Idle."
+Write-Host "  check  https://github.com/$($names.repo)/settings/actions/runners should list them as Idle."
+if ($failed) { Stop-With "$failed of $($missing.Count) runner(s) didn't install; the lines above say why." }

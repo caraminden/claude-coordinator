@@ -2,8 +2,12 @@
 // of its reach: three ops with checked numbers, its own scripts only, one job at a time, tokens kept out of its output.
 // Here the scripts are faked (a node one-liner stands in for PowerShell); the Windows side is untested until installed.
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { checkJob, JobRunner, jobCommand, redact, runCommand } from '../public/runner-agent.mjs';
+import { bootServer, stopProcs, until } from './helpers.ts';
 
 const ID = 'a'.repeat(24);
 
@@ -79,4 +83,43 @@ test('a script\'s output is collected, and one that runs too long is stopped', a
   const missing = await runCommand({ command: '/no/such/powershell', args: [] }, process.env);
   assert.notEqual(missing.code, 0);
   assert.match(missing.output, /could not start/);
+});
+
+test('end to end: the agent connects as a runner agent, a member\'s list runs its script, and Citadel serves the install files', async () => {
+  const srv = await bootServer();
+  const agentFile = join(import.meta.dirname, '..', 'public', 'runner-agent.mjs');
+  let agent: ReturnType<typeof spawn> | undefined;
+  try {
+    // Stands in for Windows PowerShell: says what it was given, and the token it found in its environment.
+    const ps = join(srv.root, 'win', 'System32', 'WindowsPowerShell', 'v1.0');
+    mkdirSync(ps, { recursive: true });
+    writeFileSync(join(ps, 'powershell.exe'), '#!/bin/sh\necho "fake ps: $*"\necho "token was $CC_MACHINE_TOKEN"\n');
+    chmodSync(join(ps, 'powershell.exe'), 0o755);
+    const made = await srv.call('/api/machines', { name: 'desk-runners' });
+    assert.equal(made.status, 201, JSON.stringify(made.data));
+    const tokenFile = join(srv.root, 'machine-token');
+    writeFileSync(tokenFile, `${made.data.token}\n`);
+    agent = spawn(process.execPath, [agentFile, srv.base, '--token-file', tokenFile], { env: { ...process.env, SystemRoot: join(srv.root, 'win') }, stdio: 'ignore' });
+    const online = await until('the runner agent to connect', async () => (await srv.call('/api/machines')).data.find((m: any) => m.name === 'desk-runners' && m.online));
+    assert.equal(online.runners, true);
+    assert.deepEqual(online.servers, [], 'turns never get it as an MCP machine');
+
+    const project = (await srv.call('/api/projects', { name: 'Vault' })).data;
+    const started = await srv.call(`/api/projects/${project.id}/ci-runners`, { op: 'list' });
+    assert.equal(started.status, 202, JSON.stringify(started.data));
+    const { job } = (await srv.call(`/api/projects/${project.id}/ci-runners?wait=20`)).data;
+    assert.equal(job.ok, true, job.text);
+    assert.match(job.text, /fake ps: -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \S+list-runners\.ps1/);
+    assert.match(job.text, /token was ccm_…/);
+    assert.doesNotMatch(job.text, new RegExp(made.data.token));
+
+    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1']) {
+      assert.equal((await fetch(`${srv.base}/ci-runner/${name}`)).status, 200, name);
+    }
+    assert.match(await (await fetch(`${srv.base}/runner-agent.mjs`)).text(), /Citadel's CI runner agent/);
+    assert.equal((await fetch(`${srv.base}/ci-runner/README.md`)).status, 404);
+  } finally {
+    if (agent) await stopProcs([agent]);
+    await srv.stop();
+  }
 });

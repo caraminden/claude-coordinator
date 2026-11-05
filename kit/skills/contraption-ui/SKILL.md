@@ -412,8 +412,10 @@ independently"). The starter's `manifest.webmanifest` has the shape; replace `my
   `display: "standalone"`.
 - A service worker is optional; if you have one, its scope is `/apps/<name>/`.
 
-Opened from Citadel's rail, your page is in a frame and Chrome only sees Citadel's page, so the rail
-has an **Install** link that opens your page on its own, where the browser offers your install.
+The app rail has an **Install <your title>** button for you, framed in Citadel or on your own page,
+which picks the way this browser can install you (the browser's dialog, your page in a new tab or in
+Chrome itself, or the iOS Share hint; rail-and-drawers.md, "Installing you"). Opened from Citadel's
+rail, your page is in a frame and Chrome only sees Citadel's page, so that button is the way in.
 Every deploy checks the above and logs `Warning (installing as its own app): …` lines when it's wrong
 (Citadel's `src/pwa-check.ts`). Full detail and the Android caveats:
 `shared/project/specs/contraptions/app-rail.md`, "Installing your contraption as its own app".

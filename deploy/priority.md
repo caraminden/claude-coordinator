@@ -47,7 +47,9 @@ a slice to end on every wake-up, and inside a container the compilers outrank cl
 levels. `CPUWeight` above can't fix that, and a systemd `Nice=` would just be overwritten: ananicy
 re-applies its rules to running processes every 15 s.
 
-**The server, no sudo:** ananicy-cpp names a process by the basename of its argv[0], so
+**The server, no sudo:** ananicy-cpp names a process by the basename of its argv[0], not its comm
+(`get_command_from_pid` in its `src/platform/linux/process.cpp`; that's why it catches node, whose
+comm is `node-MainThread`), so
 `claude-coordinator.service` now starts the server as `citadel-server` (`ExecStart=@/usr/bin/node
 citadel-server …`) and no rule matches it. After the deploy that brings this in, as cara on perigee:
 
@@ -127,7 +129,7 @@ day after.
 # 1. The server: memory, swap, priority, cgroup settings
 pid=$(systemctl --user show -p MainPID --value claude-coordinator)
 grep -E 'VmRSS|VmSwap' /proc/$pid/status
-ps -o pid,ni,cls,etime,comm -p $pid; ionice -p $pid; cat /proc/$pid/oom_score_adj
+ps -o pid,ni,cls,etime,args -p $pid; ionice -p $pid; cat /proc/$pid/oom_score_adj   # args starts citadel-server once renamed
 cg=/sys/fs/cgroup$(systemctl --user show -p ControlGroup --value claude-coordinator)
 cat $cg/memory.swap.max $cg/memory.swap.current $cg/cpu.weight
 #    before: CLS IDL, NI 16, "idle"; VmSwap high. After: TS, 0, best-effort; swap.max 0, VmSwap 0 after a restart.

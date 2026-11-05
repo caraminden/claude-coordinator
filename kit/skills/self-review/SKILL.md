@@ -35,9 +35,8 @@ quoted whole from your system prompt) plus:
 > Review branch `<branch>` in `<worktree>`, read-only: edit no files, no checkout, stash or reset.
 > The change is `git diff main...HEAD`. Follow `<kit>/skills/ponytail-review/SKILL.md`, reading
 > the code the diff connects to. Before reporting, re-check each finding against the code and
-> drop any without a concrete failing case. In a contraption (an app under `/apps/<name>/`), front-end
-> code that hand-rolls what Citadel UI serves (markdown rendering, a chat log, a composer) or copies a
-> Citadel hex colour instead of its `--citadel-*` variable is a Should-fix finding (`citadel:contraption-ui`). Return at most 25 lines: numbered findings (Must fix /
+> drop any without a concrete failing case. When the diff touches the front end, also apply "UI
+> checks" in `<kit>/skills/self-review/SKILL.md`. Return at most 25 lines: numbered findings (Must fix /
 > Should fix / Nice to have, file:line, one or two lines each), then
 > `Risk: low|medium|high: <reason>` using the rubric in `<kit>/skills/self-review/SKILL.md` §4
 > and the "Project facts" section of the repo's CLAUDE.md. This cap and format override
@@ -97,3 +96,25 @@ stay high whatever the edit, since a slip there can stop the service or open it 
   and an `ask_question` card "Merge and ship this high-risk change?" (Merge and ship /
   Hold, with your pick marked recommended). Set state null, note `risk high: waiting for a go`,
   and end the turn. Merge only on a go.
+
+## UI checks
+
+For a diff that touches the front end, each of these is a Should-fix finding. The rules behind
+them are "The rules" in `citadel:contraption-ui`.
+
+- In a contraption (an app under `/apps/<name>/`): hand-rolled markdown, a chat log, a composer or
+  a tooltip that Citadel UI serves; a copied Citadel hex colour instead of its `--citadel-*` variable.
+- Something that acts but isn't a `<button>` or `<a>`; an icon-only button with no `aria-label`;
+  an `<img>` with no `alt`; a field named only by its placeholder.
+- An action reachable only on `:hover` or only by dragging; meaning carried by a colour alone.
+- `outline: none` with no `:focus-visible` ring; animating `width`, `height`, `top` or `left`; a
+  loop that isn't a spinner or skeleton; a duration not from `--citadel-motion`; a state change
+  finished in `transitionend` or `animationend`.
+- A fixed `height` or `overflow: hidden` on a box of text; `100vh`; a long URL, id or table that
+  can push a phone page sideways; an `<img>` with no size or `aspect-ratio`.
+- A status, error or new element inserted into the flow; a submit that can fire twice; an empty
+  or failed state that is blank or says only "Error".
+
+The screenshots are yours, not the Grunt's: at desktop and phone widths, check equal top and
+bottom padding, nothing clipped or scrolling sideways, and tap targets `--citadel-control-h` tall
+on the phone.

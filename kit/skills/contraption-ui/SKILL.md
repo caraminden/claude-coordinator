@@ -427,7 +427,9 @@ Every deploy checks the above and logs `Warning (installing as its own app): …
 2. **Text on the accent uses `--citadel-on-accent`.**
 3. **Inputs are 16 px at 800 px and under**, so iOS Safari doesn't zoom on focus.
 4. **Focus is visible on keyboard focus only:** `:focus-visible` with the focus ring.
-5. **Motion respects reduced motion:** durations from `--citadel-motion`, spinners stop.
+5. **Motion respects reduced motion:** durations from `--citadel-motion`, spinners stop. Animate
+   `opacity` and `transform` only, and loop nothing but a spinner or skeleton. Set the end state
+   yourself, never in `transitionend` or `animationend`: at 0s a transition fires no event.
 6. **External links open a new tab; nothing uses `target="_top"`.**
 7. **No inline styles in what a component writes** (`style=""`, `<style>`): Citadel's CSP and maybe
    yours refuse them. Use classes, or a constructed stylesheet adopted once.
@@ -444,16 +446,44 @@ Every deploy checks the above and logs `Warning (installing as its own app): …
     things are moused over throughout the app, tooltips are great!" A number, a stat, a short label or an
     icon button gets the line or breakdown behind it through `data-tip` and `ui/tip.js`, not `title=""`
     (no touch, no keyboard, no styling) and not a tooltip of your own. Nothing a person needs to act
-    lives only in a tip: a phone shows it only on a tap or long press.
+    on lives only in a tip or behind `:hover`: a phone shows a tip only on a tap or long press, and
+    has no hover.
 13. **A status change moves nothing.** Cara, 2026-11-04: "set up rules that make sure status changes like
     that dont move any UI elements". Busy, saved, an error, a counter, a label swap: nothing else on the
     screen shifts. Reserve the room (`statusSlot` and `steadyLabel` from `ui/status.js`, a `min-width` for a
     number) or overlay it; never insert a line into the flow or let a label widen its button. Prove it with
     the headless check in "Status line and steady labels".
+14. **Keyboard and screen reader reach everything.** Anything that acts is a `<button>` or `<a>`
+    (a chip that toggles is a `button` with `aria-pressed`), so Tab, Enter and Space work. An
+    icon-only button has an `aria-label` (`data-tip` adds detail, not a name); an `<img>` has `alt`
+    (`""` for decoration). A drag has a button or menu way too ("Move up", "Move to…"). A sticky bar
+    of your own gets a matching `scroll-padding` on its scroller, so it never hides what has focus.
+15. **Tap targets are big enough:** 24 px each way at the least on desktop, `--citadel-control-h`
+    tall at 800 px and under, `--citadel-space-2` between neighbours. A small icon gets padding as
+    its hit area.
+16. **Every field has a label.** A visible `<label>` (or `aria-label`); a placeholder is a hint.
+    The right `type`, `inputmode` and `autocomplete` bring a phone's right keyboard and autofill.
+    Check a field when it loses focus and put its error under it (`aria-describedby`), keeping what
+    was typed. Submit is disabled while its request is on its way.
+17. **A colour never carries meaning alone.** A tone on a chip, status or notice also says it in a
+    word or an icon: "failed", not just a red dot.
+18. **Text is never clipped and never widens the page.** A box of text grows with it (no fixed
+    `height` or `overflow: hidden`); names, errors and actions wrap. The one cut is a single line
+    with its whole self in `data-tip-overflow`, as the status line does. Long URLs and ids break (`overflow-wrap:
+    anywhere`, `min-width: 0` on a flex or grid child), a wide table scrolls in its own box, and an
+    image has `max-width: 100%` and a `width`/`height` or `aspect-ratio`. Prose runs about 75ch
+    wide at most. A full-height layout uses `dvh`: `vh` puts its bottom under a phone's address bar.
+19. **Empty and failed say what next.** An empty list or search says why and offers the next step
+    ("No todos yet. Add one below."); an error says what failed and the way out (Retry, what was
+    kept), as the notice above does.
+20. **Undo over "are you sure?".** A delete or bulk change acts at once and offers Undo (a toast or
+    an undo bar); ask first only when nothing could bring it back.
+21. **A view worth coming back to has its own URL.** A tab, item or filter someone would share,
+    reload or go Back to updates the URL (`history.pushState`; `replaceState` for small steps), and
+    that URL opens the same view.
 
-A self-review of a contraption counts hand-rolled markdown, a chat log or composer the library
-has, a tooltip of its own, a status change that moves other elements, and a copied Citadel hex colour as
-findings.
+A self-review counts a break of these rules, and anything hand-rolled that the library serves, as a
+finding (`citadel:self-review`, "UI checks").
 
 Each rule shown right and wrong, with every part drawn live in both modes: Citadel's living
 design-system home, `docs/design-system/index.html` in Citadel's repo (Citadel's minions keep it

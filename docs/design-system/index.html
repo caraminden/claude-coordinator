@@ -939,6 +939,21 @@ row.innerHTML =
           <p>"Next" slides right as the label grows; the page under the message drops a line when it shows and climbs back when it goes.</p></div>
       </div>
     </div>
+
+    <div class="doc-rule">
+      <h3>14 to 21. The basics</h3>
+      <p class="doc-why">Accessibility, layout and feedback rules mined from ui-ux-pro-max's UX guidelines (MIT; #345, Josh: <q>Mine it, don't install</q>). Written out in <code>citadel:contraption-ui</code>, "The rules"; no live demo yet.</p>
+      <ul>
+        <li><b>14.</b> Keyboard and screen reader reach everything: real buttons and links, <code>aria-label</code> on icon-only buttons, <code>alt</code> on images, a button way for every drag, sticky bars that never hide focus.</li>
+        <li><b>15.</b> Tap targets: 24px each way on desktop, <code>--citadel-control-h</code> on phones, <code>--citadel-space-2</code> apart.</li>
+        <li><b>16.</b> Every field has a label; the right <code>type</code>, <code>inputmode</code> and <code>autocomplete</code>; its error under it; Submit disabled while it's sending.</li>
+        <li><b>17.</b> A colour never carries meaning alone.</li>
+        <li><b>18.</b> Text is never clipped and never widens the page; prose about 75ch at most; full height in <code>dvh</code>.</li>
+        <li><b>19.</b> Empty and failed states say what next.</li>
+        <li><b>20.</b> Undo over "are you sure?".</li>
+        <li><b>21.</b> A view worth coming back to has its own URL.</li>
+      </ul>
+    </div>
   </section>
 
   <section id="questions">
@@ -959,6 +974,7 @@ row.innerHTML =
       <li><time>2026-11-02</time> · Cara, on the #282 question card: text on the accent colour in dark mode: <q>Dark text</q></li>
       <li><time>2026-11-03</time> · Cara, in Theory of Crafting, on loading states: <q>keep the screen visible and just have a spinner or grey out the changed thing</q> (rule 10; <code>cui-busy</code> and <code>cui-skeleton</code>, #293)</li>
       <li><time>2026-11-04</time> · Cara: <q>If I have a screen with a chat open in citadel, it should default focus so I dont have to click on the chat box to type into it</q> (rule 11; the composer's <code>autofocus</code>, desktop only, #294)</li>
+      <li><time>2026-11-05</time> · Josh, on mining ui-ux-pro-max's UX guidelines: <q>Mine it, don't install</q> (rules 14 to 21 and rule 5's motion line, #345)</li>
     </ol>
   </section>
 </main>

@@ -1,7 +1,7 @@
 /* The page's own layout, on Citadel's tokens (theme.css). No hex values: use the --citadel-* variables. */
 html { background: var(--citadel-bg); }
 body {
-  margin: 0; display: flex; min-height: 100vh;
+  margin: 0; display: flex; min-height: 100dvh;
   background: var(--citadel-bg); color: var(--citadel-text);
   font: var(--citadel-size-body)/1.5 var(--citadel-font);
 }

@@ -140,7 +140,7 @@ test('a steer that came in as the reply went out starts the next turn', async ()
   (r as any).poll(t.id);
   // Over when its exit.json is there, or already handled by that poll (the runner then drops the turn and its folder).
   await until(() => existsSync(join(dir, 'exit.json')) || (r as any).turns.get(t.id)?.dir !== dir);
-  (r as any).poll(t.id);
+  (r as any).poll(t.id); // ends the turn if the first poll came before claude's exit; otherwise it follows the next turn
   await until(() => seen(t.dir).length === 2);
   assert.equal(seen(t.dir)[1], '[Cara]: just too late');
   assert.ok(events(t.id, 'note').some((n) => /arrived as the turn ended/.test(n.text)));

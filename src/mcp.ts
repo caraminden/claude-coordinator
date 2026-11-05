@@ -223,6 +223,21 @@ const LIST_TICKETS = {
   },
 };
 
+/** A scheme's CI runners on Cara's desktop (#328), through the runner agent there. */
+const CI_RUNNERS = {
+  name: 'ci_runners',
+  description:
+    "Add, list or remove this scheme's self-hosted GitHub Actions runners on Cara's desktop, through the CI runner agent there (tools/ci-runner/README.md). add installs `count` (1-4, default 1) runner services labelled <scheme-slug>-ci for the scheme's repo, skipping ones already there, then waits until GitHub shows them Idle; remove takes this scheme's runners off the PC and GitHub; list shows every runner service on that PC and which are Citadel's. Only for a turn a member of this scheme asked for. Each ask and its outcome is noted in the Taskmaster's chat. Waits up to 10 minutes; a longer job keeps going, its outcome goes in the Taskmaster's chat, and list afterwards shows the runners.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      op: { type: 'string', enum: ['add', 'list', 'remove'] },
+      count: { type: 'number', description: 'add only: how many runners this scheme should have, 1 to 4 (default 1)' },
+    },
+    required: ['op'],
+  },
+};
+
 const TOOLS = [
   LIST_TICKETS,
   {
@@ -1162,6 +1177,19 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'strike_text':
       await call('POST', `/api/tickets/${TICKET}/strike`, { text: args.text, reason: args.reason });
       return 'Struck through in the chat, with your reason in a note.';
+    case 'ci_runners': {
+      const started = await call('POST', `/api/projects/${PROJECT}/ci-runners`, { op: args.op, ...(args.count !== undefined ? { count: args.count } : {}) });
+      let job = started;
+      for (const end = Date.now() + 10 * 60_000; job.ok === null && Date.now() < end; ) {
+        const now = await call('GET', `/api/projects/${PROJECT}/ci-runners?wait=50`);
+        // The server restarted mid-job: the agent carries on, and its answer has nowhere to go.
+        if (!now.job) return `${started.op} on ${started.machine}: ${APP_NAME} restarted while it ran, so its outcome is lost; ci_runners list shows what is on the PC now.`;
+        job = now.job;
+      }
+      const head = `${job.op}${job.count ? ` ${job.count}` : ''} on ${job.machine}, asked by ${job.by}`;
+      if (job.ok === null) return `${head}: still running after 10 minutes. The outcome will be noted in the Taskmaster's chat; ci_runners list afterwards shows the runners.`;
+      return `${head}: ${job.ok ? 'done' : 'FAILED'}.\n${job.text}`;
+    }
     case 'list_machines': {
       const { machine_tools, machines } = await call('GET', `/api/projects/${PROJECT}/machines`);
       const head = `Machine tools for this scheme's minions: ${machine_tools ? 'on' : 'off (minions get no machines until a person switches them on)'}.`;
@@ -1289,8 +1317,8 @@ function scheduleLine(s: any): string {
 function toolList() {
   const deploy = APP_INSTRUCTIONS || HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : [];
   const memory = MEMORY ? [SEARCH_MEMORY] : [];
-  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory] : [...TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory];
-  return [...THREAD_TOOLS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(APPROVALS ? [APPROVE] : [])];
+  if (ROLE !== 'thread') return APP_INSTRUCTIONS ? [...TOOLS, CI_RUNNERS, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory] : [...TOOLS, CI_RUNNERS, ...deploy, MANDATE_ITEM, CONTRAPTION_READ, ...memory];
+  return [...THREAD_TOOLS, CI_RUNNERS, ...(HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION] : []), MANDATE_ITEM, CONTRAPTION_READ, ...memory, ...(APPROVALS ? [APPROVE] : [])];
 }
 
 function reply(msg: object) {

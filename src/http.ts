@@ -13,7 +13,7 @@ import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket } from '
 import type { MachineRelay } from './machines.ts';
 import type { GithubLink } from './github-link.ts';
 import type { RepoAccess } from './repo-access.ts';
-import type { RunnerTokens } from './ci-runner.ts';
+import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
 import type { Previews } from './previews.ts';
 import type { Pusher, PushTrigger } from './push.ts';
 import type { Runner } from './runner.ts';
@@ -183,6 +183,8 @@ export interface App {
   repoAccess: RepoAccess;
   /** CI runner registration tokens, minted with a scheme owner's GitHub login (src/ci-runner.ts, #320). */
   runnerTokens: RunnerTokens;
+  /** Jobs for the CI runner agent on Cara's desktop: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */
+  runnerJobs: RunnerJobs;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */
   claude: ClaudeLink;
   /** Contraptions' keys and who each is enabled for (src/contraptions.ts). */

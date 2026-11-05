@@ -39,7 +39,7 @@ import { contraptionRoutes } from './src/routes/contraptions.ts';
 import { ContraptionTurns } from './src/contraption-turns.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
-import { RunnerTokens } from './src/ci-runner.ts';
+import { RunnerJobs, RunnerTokens } from './src/ci-runner.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { llamaEmbed } from './src/memory.ts';
 import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
@@ -232,6 +232,7 @@ function liveOn(head: string | null) {
   for (const id of waiters.pendingLive()) runner.deployLive(id);
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
+const runnerJobs = new RunnerJobs(store, runnerTokens, machines);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
 runner.refuseTurn = (ticket, author) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid));
 // Sender pays (#213): the server login's owner runs on the host, everyone else in their own container.
@@ -632,6 +633,8 @@ runnerTokens.onFetched = (project, text) => {
   const coordinator = store.getCoordinator(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text });
 };
+// So is each runner agent job (#328): who asked for what, and how it ended.
+runnerJobs.onNote = runnerTokens.onFetched;
 
 // A scheme's main that can't follow origin's (#208) is told in its Taskmaster's chat, once per reason.
 mainSync.stuck = (repoDir, why) => {
@@ -719,7 +722,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, claude: claudeLink, contraptions, contraptionTurns, landings, services,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, claude: claudeLink, contraptions, contraptionTurns, landings, services,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {

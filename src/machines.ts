@@ -67,7 +67,16 @@ interface Agent {
   problems: string[];
   /** The last check's results (#307), for list_machines; a reconnect starts without one. */
   checked: { at: number; results: CheckResult[] } | null;
+  /** A CI runner agent (public/runner-agent.mjs, #328): it serves no MCP server, only runner jobs. */
+  runners: boolean;
 }
+
+/** One job for a CI runner agent (#328): add, list or remove one scheme's runners on its PC. */
+export type RunnerJob = { op: 'add'; scheme: number; count: number } | { op: 'list' } | { op: 'remove'; scheme: number };
+/** What the agent answers: whether its script exited 0, and the end of what it printed. */
+export type RunnerJobResult = { ok: boolean; output: string };
+// Downloading the 100 MB runner and configuring four instances takes minutes; a stuck script ends at the agent's own limit first.
+const RUNNER_JOB_MS = 20 * 60_000;
 
 /** Whose turn a session serves: a minion's (its ticket and scheme), or a contraption turn's (#306). */
 export type SessionHolder = { ticketId: number; projectId: number } | { contraptionTurn: number };
@@ -104,6 +113,8 @@ const holderKey = (h: SessionHolder) => ('ticketId' in h ? `t${h.ticketId}` : `c
 export class MachineRelay {
   private agents = new Map<number, Agent>();
   private sessions = new Map<string, Session>();
+  /** Runner jobs sent to an agent and waiting on its answer, by job id. */
+  private jobs = new Map<string, { machineId: number; done: (r: RunnerJobResult) => void }>();
   private store: Store;
   private onChange: () => void;
 
@@ -144,6 +155,7 @@ export class MachineRelay {
       /** The schemes it is lent to, or null for every scheme an admin owns. */
       projects: machine.scoped ? this.store.machineProjects(machine.id) : null,
       servers: agent?.servers ?? [],
+      runners: !!agent?.runners,
       workspaces: agent?.workspaces ?? [],
       problems: agent?.problems ?? [],
     };
@@ -167,15 +179,15 @@ export class MachineRelay {
   }
 
   /** A machine's agent connected: hold the stream open and send it its sessions' messages. */
-  connectAgent(machine: Machine, res: ServerResponse, info: { host: string; command: string }) {
+  connectAgent(machine: Machine, res: ServerResponse, info: { host: string; command: string; runners?: boolean }) {
     // A newer connection wins: the old one is a laptop that dropped off without the server noticing.
     const old = this.agents.get(machine.id);
     if (old) this.dropAgent(machine.id, old);
     res.writeHead(200, SSE_HEADERS);
     res.write(`data: ${JSON.stringify({ hello: machine.name })}\n\n`);
-    const mcp = machine.mcp_kind === null && mcpFromAgent(info.command);
+    const mcp = !info.runners && machine.mcp_kind === null && mcpFromAgent(info.command);
     if (mcp) this.store.updateMachine(machine.id, mcp);
-    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: ['mcp'], workspaces: [], problems: [], checked: null };
+    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: info.runners ? [] : ['mcp'], workspaces: [], problems: [], checked: null, runners: !!info.runners };
     this.agents.set(machine.id, agent);
     this.store.updateMachine(machine.id, { last_seen_at: agent.since });
     this.onChange();
@@ -190,6 +202,7 @@ export class MachineRelay {
     this.agents.delete(machineId);
     // Their MCP servers are gone with the agent; ending the proxies' streams tells claude so.
     for (const id of agent.sessions) this.endSession(id, false);
+    for (const [id, j] of this.jobs) if (j.machineId === machineId) j.done({ ok: false, output: 'The runner agent went offline before it answered; what it did so far is on its PC (list shows it).' });
     agent.res.end();
     if (this.store.getMachine(machineId)) this.store.updateMachine(machineId, { last_seen_at: Date.now() });
     this.onChange();
@@ -205,12 +218,44 @@ export class MachineRelay {
   setInfo(machine: Machine, body: { servers?: unknown; workspaces?: unknown; problems?: unknown }): boolean {
     const agent = this.agents.get(machine.id);
     if (!agent) return false;
+    // A runner agent offers no MCP server or workspaces, whatever it says.
+    if (agent.runners) return true;
     agent.servers = (['mcp', 'ws'] as const).filter((s) => Array.isArray(body.servers) && body.servers.includes(s));
     agent.workspaces = cleanWorkspaces(body.workspaces);
     agent.problems = (Array.isArray(body.problems) ? body.problems : []).slice(0, 50).map((p) => String(p).slice(0, 500));
     // A server it no longer offers is gone for the sessions using it.
     for (const id of agent.sessions) if (!agent.servers.includes(this.sessions.get(id)!.server)) this.endSession(id, true);
     this.onChange();
+    return true;
+  }
+
+  /** Machines whose CI runner agent is connected now (#328). */
+  runnerMachines(): Machine[] {
+    return this.store.listMachines().filter((m) => this.agents.get(m.id)?.runners);
+  }
+
+  /** Send a runner agent one job and wait for its answer; a refusal, an offline agent or no answer in time comes back as ok: false. */
+  runnerJob(machineId: number, job: RunnerJob, timeoutMs = RUNNER_JOB_MS): Promise<RunnerJobResult> {
+    const agent = this.agents.get(machineId);
+    if (!agent?.runners) return Promise.resolve({ ok: false, output: 'No runner agent is connected for that machine.' });
+    const id = randomBytes(12).toString('hex');
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => done({ ok: false, output: `The runner agent didn't answer in ${Math.round(timeoutMs / 60_000)} minutes; list shows what it did.` }), timeoutMs);
+      const done = (r: RunnerJobResult) => {
+        if (!this.jobs.delete(id)) return;
+        clearTimeout(timer);
+        resolve(r);
+      };
+      this.jobs.set(id, { machineId, done });
+      agent.res.write(`data: ${JSON.stringify({ runners: { id, ...job } })}\n\n`);
+    });
+  }
+
+  /** A runner agent's answer to a job. False if no such job is waiting on that machine. */
+  runnerResult(machine: Machine, body: { id?: unknown; ok?: unknown; output?: unknown }): boolean {
+    const job = typeof body.id === 'string' ? this.jobs.get(body.id) : undefined;
+    if (!job || job.machineId !== machine.id) return false;
+    job.done({ ok: body.ok === true, output: typeof body.output === 'string' ? body.output.slice(-20_000) : '' });
     return true;
   }
 

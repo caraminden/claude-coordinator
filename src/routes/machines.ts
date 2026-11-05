@@ -3,6 +3,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
+import { runnerAsk } from '../ci-runner.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, hashToken, newToken } from '../machines.ts';
 import type { Machine } from '../db.ts';
 import { HttpError, json, readJson, type Ctx, type Route } from '../http.ts';
@@ -76,7 +77,7 @@ const agent = (method: string, path: string, handler: (ctx: Ctx, machine: Machin
 export const agentRoutes: Route[] = [
   agent('GET', '/api/machines/connect', ({ url, res, app }, machine) => {
     const info = (k: string) => (url.searchParams.get(k) ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200);
-    return app.machines.connectAgent(machine, res, { host: info('host'), command: info('command') });
+    return app.machines.connectAgent(machine, res, { host: info('host'), command: info('command'), runners: url.searchParams.get('kind') === 'runners' });
   }),
   agent('POST', '/api/machines/send', async ({ req, res, app }, machine) => {
     // Room for screenshots, which MCP servers send as base64 images.
@@ -95,7 +96,13 @@ export const agentRoutes: Route[] = [
   agent('POST', '/api/machines/runner-token', async ({ req, res, app }, machine) => {
     const body = await readJson(req);
     if (body.mint !== undefined && typeof body.mint !== 'boolean') throw new HttpError(400, 'mint must be true or false');
-    return json(res, body.mint === false ? 200 : 201, await app.runnerTokens.issue(machine, body.scheme, body.mint !== false));
+    if (body.kind !== undefined && body.kind !== 'register' && body.kind !== 'remove') throw new HttpError(400, 'kind must be register or remove');
+    return json(res, body.mint === false ? 200 : 201, await app.runnerTokens.issue(machine, body.scheme, body.mint !== false, body.kind ?? 'register'));
+  }),
+  // A CI runner agent's answer to a job (#328, public/runner-agent.mjs).
+  agent('POST', '/api/machines/runner-result', async ({ req, res, app }, machine) => {
+    if (!app.machines.runnerResult(machine, await readJson(req, 100_000))) throw new HttpError(410, 'No such runner job');
+    return json(res, 202, {});
   }),
 ];
 
@@ -135,7 +142,27 @@ function taskmasterMachines({ app, caller, project }: Ctx) {
 }
 const taskmaster = { who: ['taskmaster'], refuse: 'Only a Taskmaster lists and checks machines here; people use the Machines page' } as const;
 
+/** A scheme's CI runners on the runner agent's PC (#328): members ask, from the page, a minion or the Taskmaster. */
+const runnerAskers = { who: ['person', 'minion', 'taskmaster'], refuse: 'Only a scheme\'s members, its minions and its Taskmaster change its CI runners' } as const;
+/** Whose ask a call is: the person signed in, or the person whose turn a minion or Taskmaster runs. */
+const askerOf = ({ session, caller, app }: Ctx) => (caller ? app.store.turnAsker(caller.id) : session.uid ?? null);
+
 export const machineRoutes: Route[] = [
+  {
+    method: 'POST', path: '/api/projects/:project/ci-runners', ...runnerAskers,
+    async handler(ctx) {
+      const ask = runnerAsk(await readJson(ctx.req));
+      return json(ctx.res, 202, await ctx.app.runnerJobs.start(ctx.project, askerOf(ctx), ask));
+    },
+  },
+  {
+    // ?wait=<seconds, up to 50> holds the answer until a running job ends.
+    method: 'GET', path: '/api/projects/:project/ci-runners', ...runnerAskers,
+    async handler({ res, url, app, project }) {
+      const wait = Math.min(50, Math.max(0, Number(url.searchParams.get('wait')) || 0));
+      return json(res, 200, { job: await app.runnerJobs.wait(project.id, wait * 1000) });
+    },
+  },
   // On the app's own address only when machines have no address of their own (MACHINES_URL).
   ...agentRoutes.map((r): Route => ({
     ...r,

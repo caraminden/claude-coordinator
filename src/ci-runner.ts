@@ -7,6 +7,7 @@
 import { lendsMachine } from './access.ts';
 import type { Machine, Project, Store } from './db.ts';
 import type { GithubLink } from './github-link.ts';
+import type { MachineRelay } from './machines.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
 
@@ -72,41 +73,61 @@ export class RunnerTokens {
   }
 
   /**
-   * Mint a registration token for `schemeRef`'s repo as its owner, for `machine`'s installer; with `mint` false, only
-   * the repo and label, after the same checks, asking GitHub nothing. Throws an HttpError saying why not.
+   * Mint a registration token (or, with kind 'remove', a removal token) for `schemeRef`'s repo as its owner, for `machine`'s
+   * installer; with `mint` false, only the repo and label, after the same checks, asking GitHub nothing. Throws an HttpError saying why not.
    */
-  async issue(machine: Machine, schemeRef: unknown, mint = true): Promise<RunnerToken> {
-    if (!this.live) throw new HttpError(403, 'A boot check or preview never asks GitHub for runner tokens');
+  async issue(machine: Machine, schemeRef: unknown, mint = true, kind: 'register' | 'remove' = 'register'): Promise<RunnerToken> {
     const project = findScheme(this.store, schemeRef);
     // A scheme this machine can't act for looks the same as one that doesn't exist.
     if (!project || !mayFetch(this.store, machine, project)) throw new HttpError(404, `No scheme "${String(schemeRef ?? '')}" that machine ${machine.name} may fetch a runner token for`);
+    const { slug, owner, ownerToken, label } = this.repoOf(project);
+    if (!mint) return { scheme: project.name, repo: slug, label, token: null, expires_at: null };
+    const r = await this.github(ownerToken, 'POST', `/repos/${slug}/actions/runners/${kind === 'remove' ? 'remove-token' : 'registration-token'}`);
+    if (r.status !== 201) throw new HttpError(502, await refused(r, owner.name, slug));
+    const body = (await r.json().catch(() => ({}))) as { token?: unknown; expires_at?: unknown };
+    if (typeof body.token !== 'string' || !body.token) throw new HttpError(502, `GitHub answered ${r.status} without a token`);
+    const expires = typeof body.expires_at === 'string' ? body.expires_at : '';
+    this.onFetched(project, `Machine ${machine.name} fetched a CI runner ${kind === 'remove' ? 'removal' : 'registration'} token for ${slug} (label ${label}), made with ${owner.name}'s GitHub login${expires ? `; it runs out at ${expires}` : ''}. Citadel didn't keep it.`);
+    return { scheme: project.name, repo: slug, label, token: body.token, expires_at: expires || null };
+  }
+
+  /** The runners GitHub lists for a scheme's repo with its label (#328), asked with the owner's login. */
+  async listed(project: Project): Promise<{ name: string; status: string; busy: boolean }[]> {
+    const { slug, owner, ownerToken, label } = this.repoOf(project);
+    const r = await this.github(ownerToken, 'GET', `/repos/${slug}/actions/runners?per_page=100`);
+    if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug));
+    const body = (await r.json().catch(() => ({}))) as { runners?: any[] };
+    return (Array.isArray(body.runners) ? body.runners : [])
+      .filter((x) => Array.isArray(x?.labels) && x.labels.some((l: any) => l?.name === label))
+      .map((x) => ({ name: String(x.name), status: String(x.status), busy: x.busy === true }));
+  }
+
+  /** The scheme's repo, owner, owner's GitHub token and runner label; throws an HttpError saying what's missing. */
+  private repoOf(project: Project) {
+    if (!this.live) throw new HttpError(403, 'A boot check or preview never asks GitHub for runner tokens');
     const slug = repoSlug(project.repo_url);
     if (!slug) throw new HttpError(409, `${project.name} has no GitHub repo, so it has nothing to register a runner with; set its repo in the scheme's settings first.`);
     const owner = this.store.getUser(project.owner_id ?? -1);
     if (!this.link.configured) throw new HttpError(409, 'Citadel has no GitHub OAuth App set up, so it holds no one\'s GitHub login to ask with.');
     const ownerToken = owner ? this.link.token(owner) : null;
-    if (!ownerToken) throw new HttpError(409, `${owner?.name ?? 'The scheme\'s owner'} (who owns ${project.name}) hasn't linked a working GitHub in Settings → Your account, so Citadel can't ask GitHub for a runner token for ${slug}.`);
+    if (!owner || !ownerToken) throw new HttpError(409, `${owner?.name ?? 'The scheme\'s owner'} (who owns ${project.name}) hasn't linked a working GitHub in Settings → Your account, so Citadel can't ask GitHub for a runner token for ${slug}.`);
     const label = runnerLabel(project.name);
     if (!label) throw new HttpError(409, `${project.name}'s name has no letters a-z or digits to make a runner label from; rename the scheme first.`);
     // Two schemes with one label would share runs-on, and one's jobs could run on the other's runner.
     const twin = this.store.listProjects().find((p) => p.id !== project.id && runnerLabel(p.name) === label);
     if (twin) throw new HttpError(409, `${project.name} and ${twin.name} would share the runner label ${label}; rename one first.`);
-    if (!mint) return { scheme: project.name, repo: slug, label, token: null, expires_at: null };
-    let r: Response;
+    return { slug, owner, ownerToken: ownerToken.secret, label };
+  }
+
+  private async github(token: string, method: string, path: string): Promise<Response> {
     try {
-      r = await this.fetch(`${API}/repos/${slug}/actions/runners/registration-token`, {
-        method: 'POST', signal: AbortSignal.timeout(GITHUB_WAIT_MS),
-        headers: { Authorization: `Bearer ${ownerToken.secret}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' },
+      return await this.fetch(`${API}${path}`, {
+        method, signal: AbortSignal.timeout(GITHUB_WAIT_MS),
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' },
       });
     } catch (err: any) {
       throw new HttpError(502, `Couldn't reach GitHub (${err?.message ?? err}); try again.`);
     }
-    if (r.status !== 201) throw new HttpError(502, await refused(r, owner!.name, slug));
-    const body = (await r.json().catch(() => ({}))) as { token?: unknown; expires_at?: unknown };
-    if (typeof body.token !== 'string' || !body.token) throw new HttpError(502, `GitHub answered ${r.status} without a token`);
-    const expires = typeof body.expires_at === 'string' ? body.expires_at : '';
-    this.onFetched(project, `Machine ${machine.name} fetched a CI runner registration token for ${slug} (label ${label}), made with ${owner!.name}'s GitHub login${expires ? `; it runs out at ${expires}` : ''}. Citadel didn't keep it.`);
-    return { scheme: project.name, repo: slug, label, token: body.token, expires_at: expires || null };
   }
 }
 
@@ -120,4 +141,139 @@ async function refused(r: Response, ownerName: string, slug: string): Promise<st
   // GitHub answers 404 (or 403) when the login isn't an admin of the repo: registering runners needs admin.
   if (r.status === 403 || r.status === 404) return `${ownerName}'s GitHub login isn't an admin of ${slug} (or the repo is gone or renamed), and registering a runner needs admin on the repo. (${said})`;
   return said;
+}
+
+// ---------- runner jobs (#328) ----------
+// Josh, 2026-11-05: "Citadel installs it itself". A CI runner agent (public/runner-agent.mjs) runs elevated on
+// the desktop and does three things for a scheme: add its runners, list what's there, remove its runners. People
+// and minions ask for one here; every ask and its outcome goes in the scheme Taskmaster's chat.
+
+export type RunnerOp = 'add' | 'list' | 'remove';
+/** GitHub runs one job per runner, and Josh picked four of them for Peek Auras' builds. */
+export const MAX_RUNNERS = 4;
+const IDLE_WAIT_MS = 120_000;
+const IDLE_POLL_MS = 5_000;
+
+/** A job as people and tools see it: what was asked, by whom, and how it ended (ok null while running). */
+export interface RunnerJobView {
+  op: RunnerOp;
+  count: number | null;
+  scheme: string;
+  machine: string;
+  by: string;
+  started_at: number;
+  finished_at: number | null;
+  ok: boolean | null;
+  text: string;
+}
+
+type Relay = Pick<MachineRelay, 'runnerMachines' | 'runnerJob'>;
+
+/** The ask from a route body: an op, and for add a count of 1 to MAX_RUNNERS (default 1). Throws a 400 otherwise. */
+export function runnerAsk(body: { op?: unknown; count?: unknown }): { op: RunnerOp; count: number | null } {
+  if (body.op !== 'add' && body.op !== 'list' && body.op !== 'remove') throw new HttpError(400, 'op must be add, list or remove');
+  if (body.op !== 'add') {
+    if (body.count !== undefined && body.count !== null) throw new HttpError(400, 'count goes with add only');
+    return { op: body.op, count: null };
+  }
+  const count = body.count ?? 1;
+  if (!Number.isInteger(count) || (count as number) < 1 || (count as number) > MAX_RUNNERS) throw new HttpError(400, `count must be a whole number from 1 to ${MAX_RUNNERS}`);
+  return { op: 'add', count: count as number };
+}
+
+export class RunnerJobs {
+  private store: Store;
+  private tokens: RunnerTokens;
+  private relay: Relay;
+  private idleWaitMs: number;
+  private pollMs: number;
+  /** The running or last job of each scheme, by scheme id. */
+  private jobs = new Map<number, { view: RunnerJobView; done: Promise<void> }>();
+  /** Machines with a job out: an agent runs one at a time. */
+  private busy = new Set<number>();
+  /** Told each ask and each outcome, for the scheme Taskmaster's chat. */
+  onNote: (project: Project, words: string) => void = () => {};
+
+  constructor(store: Store, tokens: RunnerTokens, relay: Relay, idleWaitMs = IDLE_WAIT_MS, pollMs = IDLE_POLL_MS) {
+    this.store = store;
+    this.tokens = tokens;
+    this.relay = relay;
+    this.idleWaitMs = idleWaitMs;
+    this.pollMs = pollMs;
+  }
+
+  /**
+   * Start a job for `project`, asked by person `askerId`, who must be a member (an admin is in every scheme). It runs in the
+   * background: wait() follows it. Throws an HttpError when it can't start, before anything reaches the PC.
+   */
+  async start(project: Project, askerId: number | null, ask: { op: RunnerOp; count: number | null }): Promise<RunnerJobView> {
+    const asker = askerId === null ? undefined : this.store.getUser(askerId);
+    if (!asker || asker.disabled_at || !this.store.canSee({ uid: asker.id, admin: !!asker.admin }, project.id)) {
+      throw new HttpError(403, `Only ${project.name}'s members can change its CI runners, and this ask isn't from one.`);
+    }
+    const running = this.jobs.get(project.id);
+    if (running && running.view.ok === null) throw new HttpError(409, `${project.name} already has a runner job running (${running.view.op}, asked by ${running.view.by}); wait for it.`);
+    const machines = this.relay.runnerMachines().filter((m) => mayFetch(this.store, m, project));
+    if (!machines.length) throw new HttpError(409, `No CI runner agent that may act for ${project.name} is online. Cara installs it once on her desktop (tools/ci-runner/README.md, "Install the runner agent"); if it is installed, that PC is off or asleep.`);
+    const machine = machines.find((m) => !this.busy.has(m.id));
+    if (!machine) throw new HttpError(409, `The runner agent on ${machines[0].name} is busy with another scheme's job; try again in a few minutes.`);
+    // The same checks the PC's scripts meet (a repo, the owner's GitHub link, a label), so a missing one fails here.
+    const names = ask.op === 'list' ? null : await this.tokens.issue(machine, project.id, false);
+    const what = ask.op === 'add' ? `add ${ask.count} CI runner${ask.count === 1 ? '' : 's'} for ${names!.repo} (label ${names!.label})`
+      : ask.op === 'remove' ? `remove ${names!.repo}'s CI runners (label ${names!.label})` : 'list the CI runners';
+    const view: RunnerJobView = { op: ask.op, count: ask.count, scheme: project.name, machine: machine.name, by: asker.name, started_at: Date.now(), finished_at: null, ok: null, text: '' };
+    this.busy.add(machine.id);
+    this.onNote(project, `${asker.name} asked the runner agent on ${machine.name} to ${what}.`);
+    const done = this.run(project, machine, ask, names?.label ?? '', view)
+      .catch((err) => Object.assign(view, { ok: false, text: `Citadel failed while following the job: ${err?.message ?? err}`, finished_at: Date.now() }))
+      .finally(() => this.busy.delete(machine.id)) as Promise<void>;
+    this.jobs.set(project.id, { view, done });
+    return { ...view };
+  }
+
+  private async run(project: Project, machine: Machine, ask: { op: RunnerOp; count: number | null }, label: string, view: RunnerJobView) {
+    const job = ask.op === 'add' ? { op: 'add' as const, scheme: project.id, count: ask.count! } : ask.op === 'remove' ? { op: 'remove' as const, scheme: project.id } : { op: 'list' as const };
+    const r = await this.relay.runnerJob(machine.id, job);
+    let text = r.output.trim() || '(it printed nothing)';
+    let ok = r.ok;
+    if (ok && ask.op === 'add') {
+      const idle = await this.waitIdle(project, ask.count!);
+      ok = idle.ok;
+      text += `\n\nOn GitHub (label ${label}): ${idle.text}`;
+    }
+    Object.assign(view, { ok, text, finished_at: Date.now() });
+    // The chat gets the outcome and the last lines, not the whole log.
+    const tail = text.split('\n').slice(-12).join('\n');
+    this.onNote(project, `Runner agent on ${machine.name}, ${ask.op} for ${project.name} (asked by ${view.by}): ${ok ? 'done' : 'FAILED'}.\n${tail}`);
+  }
+
+  /** Wait until GitHub shows at least `count` of the scheme's runners online and not busy, up to idleWaitMs. */
+  private async waitIdle(project: Project, count: number): Promise<{ ok: boolean; text: string }> {
+    const end = Date.now() + this.idleWaitMs;
+    let last = '';
+    for (;;) {
+      try {
+        const runners = await this.tokens.listed(project);
+        const idle = runners.filter((x) => x.status === 'online' && !x.busy).length;
+        last = runners.length ? runners.map((x) => `${x.name} ${x.status !== 'online' ? x.status : x.busy ? 'Active' : 'Idle'}`).join(', ') : 'none listed yet';
+        if (idle >= count) return { ok: true, text: last };
+      } catch (err: any) {
+        last = `couldn't ask GitHub: ${err.message}`;
+      }
+      if (Date.now() >= end) return { ok: false, text: `${last}; fewer than ${count} Idle after ${Math.round(this.idleWaitMs / 1000)}s` };
+      await new Promise((r) => setTimeout(r, this.pollMs));
+    }
+  }
+
+  /** The scheme's running or last job, waiting up to `waitMs` for a running one to end; null if it has had none since the server started. */
+  async wait(projectId: number, waitMs: number): Promise<RunnerJobView | null> {
+    const job = this.jobs.get(projectId);
+    if (!job) return null;
+    if (job.view.ok === null && waitMs > 0) {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([job.done, new Promise((r) => { timer = setTimeout(r, waitMs); })]);
+      clearTimeout(timer);
+    }
+    return { ...job.view };
+  }
 }

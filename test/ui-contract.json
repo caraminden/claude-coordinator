@@ -9,6 +9,7 @@
       "stepMark"
     ],
     "markdown.js": [
+      "copyText",
       "markdownElement",
       "markdownLine",
       "renderMarkdown",
@@ -123,6 +124,8 @@
       "cui-al-c",
       "cui-al-r",
       "cui-alt",
+      "cui-copy",
+      "cui-copy-text",
       "cui-front-matter",
       "cui-link",
       "cui-md",

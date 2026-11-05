@@ -2,6 +2,7 @@
 import { account, api, h, icon, view } from './core.js';
 import { settingsTabs } from './settings.js';
 import { hideButton } from './hidden.js';
+import { copyText } from './ui/markdown.js';
 
 /** Whether you may change this scheme's members and settings: its owner, or an admin. */
 export const ownsScheme = (project) => !!account && (account.admin || project.owner_id === account.id);
@@ -74,8 +75,7 @@ function linkBox(who, token, what) {
   const url = `${location.origin}${location.pathname}#/invite/${token}`;
   const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
   copy.onclick = async () => {
-    await navigator.clipboard.writeText(url);
-    copy.textContent = 'Copied';
+    copy.textContent = await copyText(url) ? 'Copied' : 'Couldn\'t copy';
   };
   return h('div', { class: 'machine-setup' },
     h('div', { class: 'row' }, h('strong', {}, `${what} link for ${who.name}`), h('span', { class: 'spacer' }), copy),

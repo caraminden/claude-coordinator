@@ -2,6 +2,7 @@
 import { account, ago, api, h, icon, listGroupsOf, openHash, schemeIcon, view } from './core.js';
 import { agentLog, DEFAULT_CLAUDE_MCP, machineSetup, machineSetupBackground, machineSetupRunnerAgent, machineSetupWindows, workspaceName } from './machine-setup.js';
 import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
+import { copyText } from './ui/markdown.js';
 
 // ---------- push notifications ----------
 
@@ -738,8 +739,7 @@ function renderMachineSetup() {
   view.machineSetupOs ??= guessOs();
   const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
   copy.onclick = async () => {
-    await navigator.clipboard.writeText(ways.find((w) => w.os === view.machineSetupOs).text);
-    copy.textContent = 'Copied';
+    copy.textContent = await copyText(ways.find((w) => w.os === view.machineSetupOs).text) ? 'Copied' : 'Couldn\'t copy';
   };
   const pick = (os) => {
     view.machineSetupOs = os;

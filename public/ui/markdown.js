@@ -314,6 +314,16 @@ const CSS = `
 :where(.cui-md .cui-front-matter) { color: var(--citadel-muted); font-size: 0.85em; }
 :where(.cui-md .cui-link) { text-decoration: underline dotted; }
 :where(.cui-md .cui-alt) { color: var(--citadel-muted); }
+:where(.cui-md .cui-copy) {
+  float: right; margin: -0.25rem -0.25rem 0.2rem 0.6rem; padding: 0.15rem 0.5rem; line-height: 1.3;
+  border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-sm); background: transparent; color: var(--citadel-text);
+  font: 500 var(--citadel-size-small) var(--citadel-font); cursor: pointer; user-select: none;
+}
+:where(.cui-md .cui-copy)::before { content: 'Copy'; }
+:where(.cui-md .cui-copy[data-copied="yes"])::before { content: 'Copied'; }
+:where(.cui-md .cui-copy[data-copied="no"])::before { content: "Couldn't copy"; }
+@media (hover: hover) { :where(.cui-md pre:not(:hover, :focus-within) > .cui-copy:not([data-copied])) { opacity: 0; } }
+:where(.cui-copy-text) { position: fixed; top: 0; left: -9999px; opacity: 0; font-size: 16px; }
 `;
 let sheet = false;
 function adoptStyles() {
@@ -326,6 +336,50 @@ function adoptStyles() {
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, s];
   } catch {}
 }
+
+/**
+ * Put `text` on the clipboard; whether it worked. navigator.clipboard needs a secure context (not
+ * Citadel's plain-http tailnet address), so without it a hidden textarea is copied the old way. The
+ * textarea goes beside `near` (default the body), so it can be selected inside a modal dialog too.
+ */
+export async function copyText(text, near = document.body) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {}
+  const ta = document.createElement('textarea');
+  ta.className = 'cui-copy-text';
+  ta.value = text;
+  ta.readOnly = true;
+  const back = document.activeElement;
+  near.append(ta);
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch {}
+  ta.remove();
+  back?.focus?.({ preventScroll: true });
+  return ok;
+}
+
+/** A fenced block's Copy button: its label is CSS, so the block's text and a selection over it stay the code's. */
+const copyButton = () => label(Object.assign(document.createElement('button'), { type: 'button', className: 'cui-copy' }), 'Copy code');
+const label = (b, text) => (b.setAttribute('aria-label', text), b);
+const copied = new WeakMap();
+async function onCopy(e) {
+  const b = e.target.closest?.('.cui-copy');
+  const code = b?.parentElement.querySelector(':scope > code');
+  if (!code) return;
+  const ok = await copyText(code.textContent, b.parentElement);
+  b.dataset.copied = ok ? 'yes' : 'no';
+  label(b, ok ? 'Copied' : 'Couldn\'t copy');
+  clearTimeout(copied.get(b));
+  copied.set(b, setTimeout(() => {
+    delete b.dataset.copied;
+    label(b, 'Copy code');
+  }, 2000));
+}
+const hooked = new WeakSet();
 
 /** A div.cui-md drawing `src` (options as renderMarkdown's), with its styles adopted. */
 export function markdownElement(src, opts) {
@@ -343,6 +397,12 @@ export function updateMarkdown(el, src, opts) {
   el.classList.add('cui-md');
   const t = document.createElement('template');
   t.innerHTML = renderMarkdown(src, opts);
+  // Before comparing, so an unchanged block with its button still matches the one drawn.
+  for (const pre of t.content.querySelectorAll('pre:not(.cui-front-matter)')) pre.prepend(copyButton());
+  if (!hooked.has(el)) {
+    hooked.add(el);
+    el.addEventListener('click', onCopy);
+  }
   const next = [...t.content.childNodes];
   const old = [...el.childNodes];
   let same = 0;

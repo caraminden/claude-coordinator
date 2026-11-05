@@ -31,3 +31,6 @@ export function markdownElement(src: string, opts?: MarkdownOptions): HTMLDivEle
 
 /** Draw `src` into `el` (it becomes `.cui-md`), replacing only the blocks that changed: call it on every streamed chunk. */
 export function updateMarkdown(el: Element, src: string, opts?: MarkdownOptions): void;
+
+/** Put `text` on the clipboard; resolves whether it worked. Without a secure context (plain http) it copies a hidden textarea, put beside `near` (default the body: pass an element inside an open modal dialog). Fenced code blocks drawn by markdownElement and updateMarkdown carry a Copy button (`.cui-copy`) that uses it. */
+export function copyText(text: string, near?: Element): Promise<boolean>;

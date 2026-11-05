@@ -48,7 +48,7 @@ your own.
 ## Markdown (`ui/markdown.js`)
 
 ```js
-import { markdownElement, updateMarkdown, renderMarkdown, markdownLine } from '/apps/_citadel/ui/markdown.js';
+import { markdownElement, updateMarkdown, renderMarkdown, markdownLine, copyText } from '/apps/_citadel/ui/markdown.js';
 
 box.append(markdownElement(text));                // a div.cui-md, its styles adopted
 updateMarkdown(replyEl, textSoFar, { streaming: true });  // on every chunk; only changed blocks redraw
@@ -66,6 +66,9 @@ reply sits under your page's headings; a document passes 1), and hooks `link(hre
 - Default links: http(s) and mailto open a new tab (`_blank`, `rel=noopener`); anything else is an
   inert `span.cui-link`. A `link` hook for your own paths should still never use `target="_top"`:
   inside Citadel's frame that takes the person out of Citadel.
+- Fenced code blocks drawn by `markdownElement`/`updateMarkdown` get a Copy button
+  (`.cui-copy`, top right, shown on hover; always on a phone) that copies the code exactly. For
+  your own Copy buttons, `copyText(text)` resolves whether it worked and also works on plain http.
 - Styles come only through `markdownElement`/`updateMarkdown`; `renderMarkdown` alone is a string,
   for tests and servers. Preact: `updateMarkdown(ref.current, text, opts)` in a `useEffect`, with
   nothing rendered into that element.

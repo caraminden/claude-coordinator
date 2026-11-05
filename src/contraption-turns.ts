@@ -4,9 +4,9 @@
 //
 // A turn can reach only the contraption's own MCP servers (on its 127.0.0.1 port; containers share the
 // host's network), the MCP servers of its person's own machines that are online (#306), and, if the
-// contraption allows, Agent with a cap on how many run at once, and WebSearch and WebFetch if it asks (#332). It runs in an
-// empty scratch folder per (contraption, person), with no user or project settings, CLAUDE.md, memory,
-// skills, plugins or other MCP servers: see args() and settings().
+// contraption allows, Agent with a cap on how many run at once, and WebSearch and WebFetch if it asks
+// (#332). It runs in an empty scratch folder per (contraption, person), with no user or project
+// settings, CLAUDE.md, memory, skills, plugins or other MCP servers: see args() and settings().
 //
 // Citadel keeps no turn content: the prompt, the contraption's system prompt and its MCP headers sit in a
 // private turn folder that is deleted when the turn ends, and only the meter (src/db.ts contraption_turns)

@@ -631,12 +631,17 @@ runner.onTurnEnd = (ticketId) => github.poke(ticketId);
 github.onMerged = (repoDir) => catchUp(repoDir);
 
 // Each CI runner token handed out (#320) is told in the scheme Taskmaster's chat, without waking it.
-runnerTokens.onFetched = (project, text) => {
+// One fetched by a runner agent job's scripts goes under that job's note instead (#339).
+runnerTokens.onFetched = (project, text, machine) => {
+  if (runnerJobs.absorb(project, machine, text)) return;
   const coordinator = store.getCoordinator(project.id);
   if (coordinator) runner.emit(coordinator.id, 'note', { text });
 };
-// So is each runner agent job (#328): who asked for what, and how it ended.
-runnerJobs.onNote = runnerTokens.onFetched;
+// So is each runner agent add or remove (#328), once, when it ends, its output collapsed under it (#339); a list isn't.
+runnerJobs.onNote = (project, text, detail) => {
+  const coordinator = store.getCoordinator(project.id);
+  if (coordinator) runner.emit(coordinator.id, 'note', { text, detail });
+};
 
 // A scheme's main that can't follow origin's (#208) is told in its Taskmaster's chat, once per reason.
 mainSync.stuck = (repoDir, why) => {

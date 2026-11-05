@@ -227,7 +227,7 @@ const LIST_TICKETS = {
 const CI_RUNNERS = {
   name: 'ci_runners',
   description:
-    "Add, list or remove this scheme's self-hosted GitHub Actions runners on Cara's desktop, through the CI runner agent there (tools/ci-runner/README.md). add installs `count` (1-4, default 1) runner services labelled <scheme-slug>-ci for the scheme's repo, skipping ones already there, then waits until GitHub shows them Idle; remove takes this scheme's runners off the PC and GitHub; list shows every runner service on that PC and which are Citadel's. Only for a turn a member of this scheme asked for. Each ask and its outcome is noted in the Taskmaster's chat. Waits up to 10 minutes; a longer job keeps going, its outcome goes in the Taskmaster's chat, and list afterwards shows the runners.",
+    "Add, list or remove this scheme's self-hosted GitHub Actions runners on Cara's desktop, through the CI runner agent there (tools/ci-runner/README.md). add installs `count` (1-4, default 1) runner services labelled <scheme-slug>-ci for the scheme's repo, skipping ones already there, then waits until GitHub shows them Idle; remove takes this scheme's runners off the PC and GitHub; list shows every runner service on that PC and which are Citadel's. Only for a turn a member of this scheme asked for. An add or remove posts one note in the Taskmaster's chat when it ends; a list posts none. Waits up to 10 minutes; a longer job keeps going, an add's or remove's outcome goes in the Taskmaster's chat, and list afterwards shows the runners.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -1187,7 +1187,7 @@ async function runTool(name: string, args: any): Promise<string> {
         job = now.job;
       }
       const head = `${job.op}${job.count ? ` ${job.count}` : ''} on ${job.machine}, asked by ${job.by}`;
-      if (job.ok === null) return `${head}: still running after 10 minutes. The outcome will be noted in the Taskmaster's chat; ci_runners list afterwards shows the runners.`;
+      if (job.ok === null) return `${head}: still running after 10 minutes. ${job.op === 'list' ? 'A list notes nothing; ask again later.' : 'The outcome will be noted in the Taskmaster\'s chat; ci_runners list afterwards shows the runners.'}`;
       return `${head}: ${job.ok ? 'done' : 'FAILED'}.\n${job.text}`;
     }
     case 'list_machines': {

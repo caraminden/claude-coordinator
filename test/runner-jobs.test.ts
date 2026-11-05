@@ -1,6 +1,6 @@
 // CI runner agent jobs (#328): the hub sends a job down the agent's stream and waits for its answer; RunnerJobs
 // lets only members ask, picks the agent that may act for the scheme, checks GitHub shows the runners Idle,
-// and notes every ask and outcome for the Taskmaster. GitHub and the agent are faked; nothing reaches either.
+// and notes each add's or remove's outcome for the Taskmaster, once (#339); a list notes nothing. GitHub and the agent are faked; nothing reaches either.
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
@@ -64,7 +64,8 @@ function world(idleMs = 10_000) {
   relays.push({ relay, store });
   const jobs = new RunnerJobs(store, tokens, relay, idleMs, 10);
   const notes: string[] = [];
-  jobs.onNote = (p, words) => notes.push(`${p.name}: ${words}`);
+  const details: string[] = [];
+  jobs.onNote = (p, words, detail) => { notes.push(`${p.name}: ${words}`); details.push(detail); };
   const pc = store.createMachine('cara-desktop-runners', 'x', 'Cara', cara.id, true);
   const agent = stream();
   relay.connectAgent(pc, agent, { host: 'DESKTOP-G248IJ8', command: 'citadel runner agent', runners: true });
@@ -74,7 +75,7 @@ function world(idleMs = 10_000) {
     assert.equal(relay.runnerResult(pc, { id: job.id, ok, output }), true);
     return job;
   };
-  return { store, cara, josh, olive, scheme, other, gh, relay, jobs, notes, pc, agent, answer };
+  return { store, cara, josh, olive, scheme, other, gh, relay, jobs, notes, details, pc, agent, answer };
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 30));
@@ -97,12 +98,12 @@ test('a runner agent is never offered to turns as an MCP machine, and whatever i
   assert.equal(w.relay.view(w.pc).runners, true);
 });
 
-test('a member\'s add goes to the agent, waits for GitHub to show the runners Idle, and both ends are noted', async () => {
+test('a member\'s add goes to the agent, waits for GitHub to show the runners Idle, and posts one note when it ends', async () => {
   const w = world();
   const started = await w.jobs.start(w.scheme, w.josh.id, { op: 'add', count: 2 });
   assert.equal(started.ok, null);
   assert.equal(started.machine, 'cara-desktop-runners');
-  assert.match(w.notes[0], /^Peek Auras: Josh asked the runner agent on cara-desktop-runners to add 2 CI runners for caraminden\/peek-auras \(label peek-auras-ci\)\.$/);
+  assert.equal(w.notes.length, 0, 'no note for the ask itself');
   const job = w.answer(true, 'Done: 2 runners');
   assert.deepEqual({ ...job, id: undefined }, { id: undefined, op: 'add', scheme: w.scheme.id, count: 2 });
   // GitHub lists them a moment later, one Idle, then both; another scheme's runner doesn't count.
@@ -113,7 +114,8 @@ test('a member\'s add goes to the agent, waits for GitHub to show the runners Id
   const done = (await w.jobs.wait(w.scheme.id, 5000))!;
   assert.equal(done.ok, true);
   assert.match(done.text, /Done: 2 runners\n\nOn GitHub \(label peek-auras-ci\): DESKTOP-G248IJ8 Idle, DESKTOP-G248IJ8-2 Idle$/);
-  assert.match(w.notes[1], /^Peek Auras: Runner agent on cara-desktop-runners, add for Peek Auras \(asked by Josh\): done\./);
+  assert.deepEqual(w.notes, ['Peek Auras: ✓ Josh added 2 CI runners for Peek Auras on cara-desktop-runners']);
+  assert.equal(w.details[0], done.text, 'the output goes under the note, line breaks kept');
   assert.ok(w.gh.calls.every((c) => !/token/.test(c)), 'Citadel itself mints nothing: the scripts on the PC do');
 });
 
@@ -125,7 +127,7 @@ test('an add whose runners never show Idle on GitHub fails, saying what GitHub s
   const done = (await w.jobs.wait(w.scheme.id, 2000))!;
   assert.equal(done.ok, false);
   assert.match(done.text, /DESKTOP-G248IJ8 offline; fewer than 1 Idle after 0s/);
-  assert.match(w.notes[1], /FAILED/);
+  assert.deepEqual(w.notes, ['Peek Auras: ✗ Cara tried to add 1 CI runner for Peek Auras on cara-desktop-runners, and it failed: On GitHub (label peek-auras-ci): DESKTOP-G248IJ8 offline; fewer than 1 Idle after 0s']);
 });
 
 test('only members ask; one job per scheme and per agent; a failed or lost job comes back as failed', async () => {
@@ -178,4 +180,31 @@ test('a scheme with no repo or no owner GitHub link fails before the PC is asked
   const bare = w.store.createProject('Bare', null, w.cara.id);
   await assert.rejects(w.jobs.start(bare, w.cara.id, { op: 'add', count: 1 }), { status: 409, message: /no GitHub repo/ });
   assert.equal(w.agent.sent.filter((m) => m.runners).length, 0);
+});
+
+test('a list notes nothing; a remove notes once, failed or not; a token its scripts fetch goes under its note', async () => {
+  const w = world();
+  await w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null });
+  w.answer(true, 'actions.runner.a Running\nactions.runner.b Running');
+  assert.equal((await w.jobs.wait(w.scheme.id, 1000))!.ok, true);
+  assert.deepEqual(w.notes, [], 'a list changes nothing, and the caller already has its output');
+
+  await w.jobs.start(w.scheme, w.josh.id, { op: 'remove', count: null });
+  // The PC's remove script fetches a removal token with the agent's key while the job runs: no note of its own.
+  assert.equal(w.jobs.absorb(w.scheme, w.pc, 'Machine cara-desktop-runners fetched a CI runner removal token'), true);
+  const stranger = w.store.createMachine('olive-pc', 'y', 'Olive', w.olive.id, true);
+  assert.equal(w.jobs.absorb(w.scheme, stranger, 'other'), false, 'another machine\'s token is noted as before');
+  assert.equal(w.jobs.absorb(w.other, w.pc, 'other'), false, 'so is one for a scheme with no job running');
+  w.answer(true, 'Removed actions.runner.a\nRemoved actions.runner.b');
+  await w.jobs.wait(w.scheme.id, 1000);
+  assert.deepEqual(w.notes, ["Peek Auras: ✓ Josh removed Peek Auras's CI runners on cara-desktop-runners"]);
+  assert.equal(w.details[0], 'Machine cara-desktop-runners fetched a CI runner removal token\nRemoved actions.runner.a\nRemoved actions.runner.b');
+  assert.equal(w.jobs.absorb(w.scheme, w.pc, 'later'), false, 'once the job ends, tokens are noted as before');
+
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'remove', count: null });
+  w.answer(false, Array.from({ length: 70 }, (_, i) => `line ${i + 1}`).join('\n'));
+  await w.jobs.wait(w.scheme.id, 1000);
+  assert.equal(w.notes[1], "Peek Auras: ✗ Cara tried to remove Peek Auras's CI runners on cara-desktop-runners, and it failed: line 70");
+  const kept = w.details[1].split('\n');
+  assert.deepEqual([kept[0], kept[1], kept.at(-1), kept.length], ['(10 earlier lines left out)', 'line 11', 'line 70', 61]);
 });

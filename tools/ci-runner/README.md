@@ -31,7 +31,8 @@ out to Citadel like a machine agent. It does three things, and only when a membe
 
 People and Taskmasters ask with the `ci_runners` tool (a minion's or the Taskmaster's), or
 `POST /api/projects/<id>/ci-runners` with `{"op": "add", "count": 2}`. Citadel checks the asker is in the
-scheme, and notes every ask and its outcome in the scheme Taskmaster's chat. Scheme setup calls
+scheme. An `add` or `remove` posts one note in the scheme Taskmaster's chat when it ends, with the
+agent's output (and any tokens its scripts fetched) collapsed under it; a `list` posts none. Scheme setup calls
 `ci_runners add` when it gives a scheme CI (the `citadel:scheme-setup` skill).
 
 What keeps the agent narrow:
@@ -85,7 +86,7 @@ $env:CC_MACHINE_TOKEN = 'ccm_…'
 - The scheme's owner must have linked GitHub in Settings → Your account, and the scheme must
   have a GitHub repo that owner admins. Citadel asks GitHub for the token with that login
   (`POST /api/machines/runner-token`, `src/ci-runner.ts`) and notes each one in the scheme
-  Taskmaster's chat.
+  Taskmaster's chat, under the job's note when a runner agent job fetched it.
 - Each instance takes a folder `C:\actions-runner-<repo>` (then `-2` …) and the runner name
   `<PC>` (then `<PC>-2` …).
 - An instance whose folder or service already exists is skipped, so re-running is safe.

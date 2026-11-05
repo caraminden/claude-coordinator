@@ -62,8 +62,8 @@ export class RunnerTokens {
   private fetch: Fetch;
   /** False in a boot check or preview: they run on a copy of the data and must not reach GitHub. */
   private live: boolean;
-  /** Told after each token handed out, for a note in the scheme Taskmaster's chat. */
-  onFetched: (project: Project, words: string) => void = () => {};
+  /** Told after each token handed out, for a note in the scheme Taskmaster's chat (or a runner job's, when one asked for it). */
+  onFetched: (project: Project, words: string, machine: Machine) => void = () => {};
 
   constructor(store: Store, link: GithubLink, live: boolean, fetch: Fetch = globalThis.fetch) {
     this.store = store;
@@ -87,7 +87,7 @@ export class RunnerTokens {
     const body = (await r.json().catch(() => ({}))) as { token?: unknown; expires_at?: unknown };
     if (typeof body.token !== 'string' || !body.token) throw new HttpError(502, `GitHub answered ${r.status} without a token`);
     const expires = typeof body.expires_at === 'string' ? body.expires_at : '';
-    this.onFetched(project, `Machine ${machine.name} fetched a CI runner ${kind === 'remove' ? 'removal' : 'registration'} token for ${slug} (label ${label}), made with ${owner.name}'s GitHub login${expires ? `; it runs out at ${expires}` : ''}. Citadel didn't keep it.`);
+    this.onFetched(project, `Machine ${machine.name} fetched a CI runner ${kind === 'remove' ? 'removal' : 'registration'} token for ${slug} (label ${label}), made with ${owner.name}'s GitHub login${expires ? `; it runs out at ${expires}` : ''}. Citadel didn't keep it.`, machine);
     return { scheme: project.name, repo: slug, label, token: body.token, expires_at: expires || null };
   }
 
@@ -146,13 +146,17 @@ async function refused(r: Response, ownerName: string, slug: string): Promise<st
 // ---------- runner jobs (#328) ----------
 // Josh, 2026-11-05: "Citadel installs it itself". A CI runner agent (public/runner-agent.mjs) runs elevated on
 // the desktop and does three things for a scheme: add its runners, list what's there, remove its runners. People
-// and minions ask for one here; every ask and its outcome goes in the scheme Taskmaster's chat.
+// and minions ask for one here. An add or remove ends in one note in the scheme Taskmaster's chat, its output
+// collapsed under it; a list notes nothing (Josh, 2026-11-05: "this seems too spammy, can we consolidate these
+// messages?"): it changes nothing, and the caller already has its output.
 
 export type RunnerOp = 'add' | 'list' | 'remove';
 /** GitHub runs one job per runner, and Josh picked four of them for Peek Auras' builds. */
 export const MAX_RUNNERS = 4;
 const IDLE_WAIT_MS = 120_000;
 const IDLE_POLL_MS = 5_000;
+/** The most of a job's output its note keeps; the tool's answer has all of it. */
+const NOTE_LINES = 60;
 
 /** A job as people and tools see it: what was asked, by whom, and how it ended (ok null while running). */
 export interface RunnerJobView {
@@ -168,6 +172,12 @@ export interface RunnerJobView {
 }
 
 type Relay = Pick<MachineRelay, 'runnerMachines' | 'runnerJob'>;
+
+/** A failed job's reason for its one-line note: its output's last line, cut to 160 characters. */
+function why(text: string): string {
+  const last = text.trim().split('\n').at(-1)!.trim();
+  return last.length > 160 ? `${last.slice(0, 159)}…` : last;
+}
 
 /** The ask from a route body: an op, and for add a count of 1 to MAX_RUNNERS (default 1). Throws a 400 otherwise. */
 export function runnerAsk(body: { op?: unknown; count?: unknown }): { op: RunnerOp; count: number | null } {
@@ -191,8 +201,10 @@ export class RunnerJobs {
   private jobs = new Map<number, { view: RunnerJobView; done: Promise<void> }>();
   /** Machines with a job out: an agent runs one at a time. */
   private busy = new Set<number>();
-  /** Told each ask and each outcome, for the scheme Taskmaster's chat. */
-  onNote: (project: Project, words: string) => void = () => {};
+  /** Told each add's or remove's outcome, for the scheme Taskmaster's chat: one line, and the output to show under it. */
+  onNote: (project: Project, words: string, detail: string) => void = () => {};
+  /** Token notes a running job's scripts caused, by scheme id, with the job's machine: they go under its note, not beside it. */
+  private tokenNotes = new Map<number, { machineId: number; lines: string[] }>();
 
   constructor(store: Store, tokens: RunnerTokens, relay: Relay, idleWaitMs = IDLE_WAIT_MS, pollMs = IDLE_POLL_MS) {
     this.store = store;
@@ -219,14 +231,14 @@ export class RunnerJobs {
     if (!machine) throw new HttpError(409, `The runner agent on ${machines[0].name} is busy with another scheme's job; try again in a few minutes.`);
     // The same checks the PC's scripts meet (a repo, the owner's GitHub link, a label), so a missing one fails here.
     const names = ask.op === 'list' ? null : await this.tokens.issue(machine, project.id, false);
-    const what = ask.op === 'add' ? `add ${ask.count} CI runner${ask.count === 1 ? '' : 's'} for ${names!.repo} (label ${names!.label})`
-      : ask.op === 'remove' ? `remove ${names!.repo}'s CI runners (label ${names!.label})` : 'list the CI runners';
     const view: RunnerJobView = { op: ask.op, count: ask.count, scheme: project.name, machine: machine.name, by: asker.name, started_at: Date.now(), finished_at: null, ok: null, text: '' };
     this.busy.add(machine.id);
-    this.onNote(project, `${asker.name} asked the runner agent on ${machine.name} to ${what}.`);
+    this.tokenNotes.set(project.id, { machineId: machine.id, lines: [] });
     const done = this.run(project, machine, ask, names?.label ?? '', view)
       .catch((err) => Object.assign(view, { ok: false, text: `Citadel failed while following the job: ${err?.message ?? err}`, finished_at: Date.now() }))
-      .finally(() => this.busy.delete(machine.id)) as Promise<void>;
+      .then(() => this.note(project, view))
+      .catch((err) => console.error(`Couldn't note ${project.name}'s runner job:`, err))
+      .finally(() => { this.busy.delete(machine.id); this.tokenNotes.delete(project.id); }) as Promise<void>;
     this.jobs.set(project.id, { view, done });
     return { ...view };
   }
@@ -242,9 +254,29 @@ export class RunnerJobs {
       text += `\n\nOn GitHub (label ${label}): ${idle.text}`;
     }
     Object.assign(view, { ok, text, finished_at: Date.now() });
-    // The chat gets the outcome and the last lines, not the whole log.
-    const tail = text.split('\n').slice(-12).join('\n');
-    this.onNote(project, `Runner agent on ${machine.name}, ${ask.op} for ${project.name} (asked by ${view.by}): ${ok ? 'done' : 'FAILED'}.\n${tail}`);
+  }
+
+  /**
+   * Take a token note when `machine` is running a job for `project` (its scripts fetch the tokens), so it goes under
+   * that job's note instead of beside it; false when no job of theirs is running, and the caller notes it as before.
+   */
+  absorb(project: Project, machine: Machine, words: string): boolean {
+    const held = this.tokenNotes.get(project.id);
+    if (!held || held.machineId !== machine.id) return false;
+    held.lines.push(words);
+    return true;
+  }
+
+  /** An add's or remove's one note, when it ends however it ends: who, what, where, how it went; the output goes under it. */
+  private note(project: Project, view: RunnerJobView) {
+    if (view.op === 'list') return;
+    const what = view.op === 'add' ? `${view.count} CI runner${view.count === 1 ? '' : 's'} for ${project.name}` : `${project.name}'s CI runners`;
+    const words = view.ok
+      ? `✓ ${view.by} ${view.op === 'add' ? 'added' : 'removed'} ${what} on ${view.machine}`
+      : `✗ ${view.by} tried to ${view.op} ${what} on ${view.machine}, and it failed: ${why(view.text)}`;
+    const lines = view.text.split('\n');
+    const kept = lines.length > NOTE_LINES ? [`(${lines.length - NOTE_LINES} earlier lines left out)`, ...lines.slice(-NOTE_LINES)] : lines;
+    this.onNote(project, words, [...(this.tokenNotes.get(project.id)?.lines ?? []), ...kept].join('\n'));
   }
 
   /** Wait until GitHub shows at least `count` of the scheme's runners online and not busy, up to idleWaitMs. */

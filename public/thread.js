@@ -819,6 +819,8 @@ export function appendEvent(event, scroll = true) {
     const struck = strikeNote(data);
     const short = struck ? null : shortNote(data.text);
     if (struck) nodes.push(struck);
+    // A note with output under it (a CI runner add or remove, #339) keeps it collapsed, line breaks and all.
+    else if (short != null && data.detail) nodes.push(h('details', { class: 'note detail' }, h('summary', {}, threadRefs(short)), h('pre', {}, data.detail)));
     else if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
   } else if (event.kind === 'error') {
     nodes.push(h('div', { class: 'note error' }, data.text));

@@ -36,9 +36,11 @@ about an hour and are never written down.
    ```
 
    It stops without changing anything if the repo's runner folder or service already exists, so
-   it is safe to run again. If a step fails before GitHub registers the runner, it removes the
-   folder it made. Options: `-RunnerVersion` (default `2.338.0`, Delve's), `-GitBin`, `-RunnerName`
-   (default the computer name).
+   it is safe to run again. It checks the runner download against the SHA-256 in GitHub's release
+   notes. If setup fails before the runner's service exists, it removes the folder it made;
+   after that, the folder stays for `config.cmd remove`. Options: `-RunnerVersion` with
+   `-RunnerSha256` (default `2.338.0`, Delve's), `-GitBin`, `-RunnerName` (default the computer
+   name).
 
    A Claude session on that PC needs Manual permissions to run it: auto mode refused to install
    Delve's runner.

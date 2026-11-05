@@ -27,18 +27,21 @@ export interface RunnerToken {
   expires_at: string | null;
 }
 
-/** A scheme's runner label: its name in lowercase with dashes, then -ci ("Peek Auras" → peek-auras-ci, "Delve" → delve-ci). */
+/** A scheme's runner label: its name in lowercase with dashes, then -ci ("Peek Auras" → peek-auras-ci, "Delve" → delve-ci); '' when its name has no a-z or 0-9. */
 export function runnerLabel(schemeName: string): string {
   const slug = schemeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  return `${slug || 'scheme'}-ci`;
+  return slug ? `${slug}-ci` : '';
 }
 
-/** The scheme a caller names: its id, its name (any case) or its label's slug. */
+/** The scheme a caller names: its id, its name (any case) or its label's slug. Throws a 409 when that names more than one. */
 export function findScheme(store: Store, ref: unknown): Project | undefined {
   if (typeof ref === 'number' || (typeof ref === 'string' && /^\d+$/.test(ref))) return store.getProject(Number(ref));
   if (typeof ref !== 'string' || !ref.trim()) return undefined;
   const want = ref.trim().toLowerCase();
-  return store.listProjects().find((p) => p.name.toLowerCase() === want || runnerLabel(p.name) === `${want.replace(/-ci$/, '')}-ci`);
+  const label = `${want.replace(/-ci$/, '')}-ci`;
+  const found = store.listProjects().filter((p) => p.name.toLowerCase() === want || runnerLabel(p.name) === label);
+  if (found.length > 1) throw new HttpError(409, `"${ref}" names more than one scheme (${found.map((p) => `${p.name}, id ${p.id}`).join('; ')}); pass its id instead.`);
+  return found[0];
 }
 
 /**
@@ -84,6 +87,10 @@ export class RunnerTokens {
     const ownerToken = owner ? this.link.token(owner) : null;
     if (!ownerToken) throw new HttpError(409, `${owner?.name ?? 'The scheme\'s owner'} (who owns ${project.name}) hasn't linked a working GitHub in Settings → Your account, so Citadel can't ask GitHub for a runner token for ${slug}.`);
     const label = runnerLabel(project.name);
+    if (!label) throw new HttpError(409, `${project.name}'s name has no letters a-z or digits to make a runner label from; rename the scheme first.`);
+    // Two schemes with one label would share runs-on, and one's jobs could run on the other's runner.
+    const twin = this.store.listProjects().find((p) => p.id !== project.id && runnerLabel(p.name) === label);
+    if (twin) throw new HttpError(409, `${project.name} and ${twin.name} would share the runner label ${label}; rename one first.`);
     if (!mint) return { scheme: project.name, repo: slug, label, token: null, expires_at: null };
     let r: Response;
     try {

@@ -34,10 +34,14 @@ param(
   [Parameter(Mandatory)][string]$CitadelUrl,
   [string]$MachineToken = $env:CC_MACHINE_TOKEN,
   [string]$RunnerVersion = '2.338.0',
+  # From the release notes of that version (<!-- BEGIN SHA win-x64 -->); pass both to change version.
+  [string]$RunnerSha256 = 'f48e0750a21812bca5f82de5f7f5aeae71abee647fab5a582f1742d07eba455f',
   [string]$GitBin = 'C:\Program Files\Git\bin',
   [string]$RunnerName = $env:COMPUTERNAME
 )
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1's progress bar makes a 100 MB download crawl.
+$ProgressPreference = 'SilentlyContinue'
 Set-StrictMode -Version 3
 
 function Stop-With([string]$Why) {
@@ -80,13 +84,14 @@ if ($existing -or (Test-Path $dir)) {
   exit 0
 }
 
-# 2. Download and unpack the stock runner.
-$zip = Join-Path $env:TEMP "actions-runner-win-x64-$RunnerVersion.zip"
-if (-not (Test-Path $zip)) {
-  Write-Host "Downloading runner v$RunnerVersion"
-  $tmp = "$zip.part"
-  Invoke-WebRequest -Uri "https://github.com/actions/runner/releases/download/v$RunnerVersion/actions-runner-win-x64-$RunnerVersion.zip" -OutFile $tmp -UseBasicParsing
-  Move-Item $tmp $zip
+# 2. Download the stock runner, fresh each run, and check it before it becomes a service.
+$zip = Join-Path $env:TEMP "actions-runner-win-x64-$RunnerVersion-$PID.zip"
+Write-Host "Downloading runner v$RunnerVersion"
+Invoke-WebRequest -Uri "https://github.com/actions/runner/releases/download/v$RunnerVersion/actions-runner-win-x64-$RunnerVersion.zip" -OutFile $zip -UseBasicParsing
+$hash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash
+if ($hash -ne $RunnerSha256) {
+  Remove-Item -Force $zip
+  Stop-With "The download's SHA-256 is $hash, not $RunnerSha256 from the release notes; nothing installed."
 }
 New-Item -ItemType Directory -Path $dir | Out-Null
 $configured = $false
@@ -115,10 +120,16 @@ try {
   }
   $configured = $true
 } finally {
-  # Only a folder this run made, and only when config never finished: GitHub has no runner for it.
+  Remove-Item -Force $zip -ErrorAction SilentlyContinue
+  # Only a folder this run made, and only while no service points at it; once config.cmd has made the service,
+  # GitHub has the runner too, and the folder stays for `config.cmd remove`.
   if (-not $configured -and (Test-Path $dir)) {
-    Write-Host "Setup didn't finish; removing $dir, which this run made." -ForegroundColor Yellow
-    Remove-Item -Recurse -Force $dir
+    if (Get-Service -Name $servicePattern -ErrorAction SilentlyContinue) {
+      Write-Host "Setup failed after the service was made; $dir stays. Look in its _diag, then run config.cmd remove there (with a removal token from the repo's runner settings) before trying again." -ForegroundColor Yellow
+    } else {
+      Write-Host "Setup didn't finish; removing $dir, which this run made." -ForegroundColor Yellow
+      Remove-Item -Recurse -Force $dir
+    }
   }
 }
 

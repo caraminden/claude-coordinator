@@ -54,6 +54,9 @@ test('labels and scheme lookup follow the scheme name', () => {
     assert.equal(findScheme(w.store, ref)?.id, w.scheme.id, String(ref));
   }
   assert.equal(findScheme(w.store, 'nope'), undefined);
+  assert.equal(runnerLabel('日本'), '');
+  w.store.createProject('peek-auras', null, w.cara.id);
+  assert.throws(() => findScheme(w.store, 'peek-auras-ci'), { status: 409, message: /more than one scheme/ });
   assert.equal(findScheme(w.store, { id: 1 }), undefined);
 });
 
@@ -113,6 +116,16 @@ test('mint: false gives the names after the same checks, without asking GitHub o
   await assert.rejects(w.tokens.issue(pc, 'No Repo', false), { status: 409 });
   assert.equal(w.gh.calls.length, 0);
   assert.equal(w.notes.length, 0);
+});
+
+test('a scheme with no label, or one another scheme shares, gets no token', async () => {
+  const w = world();
+  const pc = w.machine('cara-pc', w.cara.id, true);
+  const odd = w.store.createProject('日本', 'https://github.com/caraminden/nihon.git', w.cara.id);
+  await assert.rejects(w.tokens.issue(pc, odd.id), { status: 409, message: /no letters/ });
+  w.store.createProject('PEEK  auras!', null, w.cara.id);
+  await assert.rejects(w.tokens.issue(pc, w.scheme.id), { status: 409, message: /would share the runner label peek-auras-ci/ });
+  assert.equal(w.gh.calls.length, 0);
 });
 
 test('a boot check or preview never asks GitHub', async () => {

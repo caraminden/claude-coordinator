@@ -105,6 +105,16 @@ test('clear errors: no repo, no owner login, no admin, a missing scope, a dead l
   assert.equal(w.notes.length, 0, 'nothing handed out, nothing noted');
 });
 
+test('mint: false gives the names after the same checks, without asking GitHub or noting anything', async () => {
+  const w = world();
+  const pc = w.machine('cara-pc', w.cara.id, true);
+  assert.deepEqual(await w.tokens.issue(pc, 'Peek Auras', false), { scheme: 'Peek Auras', repo: 'caraminden/peek-auras', label: 'peek-auras-ci', token: null, expires_at: null });
+  await assert.rejects(w.tokens.issue(w.machine('olive-pc', w.olive.id, true), 'Peek Auras', false), { status: 404 });
+  await assert.rejects(w.tokens.issue(pc, 'No Repo', false), { status: 409 });
+  assert.equal(w.gh.calls.length, 0);
+  assert.equal(w.notes.length, 0);
+});
+
 test('a boot check or preview never asks GitHub', async () => {
   const w = world(false);
   await assert.rejects(w.tokens.issue(w.machine('cara-pc', w.cara.id, true), 'Peek Auras'), { status: 403 });

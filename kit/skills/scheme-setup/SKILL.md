@@ -138,6 +138,24 @@ echo 'refs/heads/x 0 refs/heads/main 0' | .githooks/pre-push; echo $?   # 1
 *Done when* the three lines print `.githooks`, `0 failed` and `1`. If you added a protected
 branch name, add a self-test line pushing to it first, in `self_test` in `guard.sh`.
 
+**CI runs on the shared runner.** Every scheme's GitHub Actions jobs run on Cara's desktop, one
+self-hosted runner per repo, labelled `<scheme-slug>-ci` (the scheme's name in lowercase with
+dashes: Peek Auras → `peek-auras-ci`); GitHub's hosted runners are only the fallback. So every
+job in a workflow you write, adapt or find in `.github/workflows/` gets this `runs-on`, with this
+scheme's label, and runs its steps in bash, which works on both:
+
+```yaml
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted", "<scheme-slug>-ci"]') }}
+    defaults:
+      run:
+        shell: bash
+```
+
+Write no workflow the plan doesn't ask for. If the repo has workflows, your done note says the
+runner must be added on the desktop (Citadel's `tools/ci-runner/add-runner.ps1`; the Taskmaster
+asks Cara), since jobs wait in the queue until it is. *Done when* no job's `runs-on` is a bare
+hosted runner.
+
 ### 5. Adapt each skill the plan pulls in
 
 For each item on the adapt list:

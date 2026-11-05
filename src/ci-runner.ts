@@ -22,8 +22,9 @@ export interface RunnerToken {
   repo: string;
   /** The runner's label, `<scheme-slug>-ci`, which the workflows' runs-on picks. */
   label: string;
-  token: string;
-  expires_at: string;
+  /** Null when the caller asked for the names only (`mint: false`), so a re-run can check before minting. */
+  token: string | null;
+  expires_at: string | null;
 }
 
 /** A scheme's runner label: its name in lowercase with dashes, then -ci ("Peek Auras" → peek-auras-ci, "Delve" → delve-ci). */
@@ -67,8 +68,11 @@ export class RunnerTokens {
     this.fetch = fetch;
   }
 
-  /** Mint a registration token for `schemeRef`'s repo as its owner, for `machine`'s installer. Throws an HttpError saying why not. */
-  async issue(machine: Machine, schemeRef: unknown): Promise<RunnerToken> {
+  /**
+   * Mint a registration token for `schemeRef`'s repo as its owner, for `machine`'s installer; with `mint` false, only
+   * the repo and label, after the same checks, asking GitHub nothing. Throws an HttpError saying why not.
+   */
+  async issue(machine: Machine, schemeRef: unknown, mint = true): Promise<RunnerToken> {
     if (!this.live) throw new HttpError(403, 'A boot check or preview never asks GitHub for runner tokens');
     const project = findScheme(this.store, schemeRef);
     // A scheme this machine can't act for looks the same as one that doesn't exist.
@@ -79,6 +83,8 @@ export class RunnerTokens {
     if (!this.link.configured) throw new HttpError(409, 'Citadel has no GitHub OAuth App set up, so it holds no one\'s GitHub login to ask with.');
     const ownerToken = owner ? this.link.token(owner) : null;
     if (!ownerToken) throw new HttpError(409, `${owner?.name ?? 'The scheme\'s owner'} (who owns ${project.name}) hasn't linked a working GitHub in Settings → Your account, so Citadel can't ask GitHub for a runner token for ${slug}.`);
+    const label = runnerLabel(project.name);
+    if (!mint) return { scheme: project.name, repo: slug, label, token: null, expires_at: null };
     let r: Response;
     try {
       r = await this.fetch(`${API}/repos/${slug}/actions/runners/registration-token`, {
@@ -92,9 +98,8 @@ export class RunnerTokens {
     const body = (await r.json().catch(() => ({}))) as { token?: unknown; expires_at?: unknown };
     if (typeof body.token !== 'string' || !body.token) throw new HttpError(502, `GitHub answered ${r.status} without a token`);
     const expires = typeof body.expires_at === 'string' ? body.expires_at : '';
-    const label = runnerLabel(project.name);
     this.onFetched(project, `Machine ${machine.name} fetched a CI runner registration token for ${slug} (label ${label}), made with ${owner!.name}'s GitHub login${expires ? `; it runs out at ${expires}` : ''}. Citadel didn't keep it.`);
-    return { scheme: project.name, repo: slug, label, token: body.token, expires_at: expires };
+    return { scheme: project.name, repo: slug, label, token: body.token, expires_at: expires || null };
   }
 }
 

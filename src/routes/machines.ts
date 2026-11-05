@@ -94,7 +94,8 @@ export const agentRoutes: Route[] = [
   // A CI runner registration token for a scheme's repo (#320): tools/ci-runner/add-runner.ps1 calls it.
   agent('POST', '/api/machines/runner-token', async ({ req, res, app }, machine) => {
     const body = await readJson(req);
-    return json(res, 201, await app.runnerTokens.issue(machine, body.scheme));
+    if (body.mint !== undefined && typeof body.mint !== 'boolean') throw new HttpError(400, 'mint must be true or false');
+    return json(res, body.mint === false ? 200 : 201, await app.runnerTokens.issue(machine, body.scheme, body.mint !== false));
   }),
 ];
 

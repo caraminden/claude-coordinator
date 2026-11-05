@@ -13,19 +13,33 @@
 // and the session names are stored. The transcript is the person's own Claude session, in their folder.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
 import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
-import { USAGE_LIMIT, turnEnv } from './runner.ts';
+import { claudeParts, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble } from './codex.ts';
+import { USAGE_LIMIT, turnEnv, tripwireConfig } from './runner.ts';
 import { claudeConfigDir, projectSlug } from './sessions.ts';
 
 /** Read once at load, like the runner's pinned files: a deploy doesn't change the hook under a running server. */
 const AGENT_CAP = readFileSync(join(import.meta.dirname, 'contraption-agent-cap.ts'), 'utf8');
 /** The stdio stand-in for a machine's MCP server, as minion turns use it (src/machine-mcp.ts). */
 const MACHINE_MCP = readFileSync(join(import.meta.dirname, 'machine-mcp.ts'), 'utf8');
+// A Codex turn (#337) runs the shim from its own folder in the container, and Codex's managed hook imports the tripwire from there.
+const CODEX_FILES = ['codex-turn.ts', 'codex.ts', 'tripwire.ts'].map((f) => [f, readFileSync(join(import.meta.dirname, f), 'utf8')] as const);
+
+/** A contraption session's Codex thread while its turns run on Codex: dropped on the first Claude turn after, or a fresh session. */
+const codexKey = (c: number, person: number, session: string) => `codex:contraption:${c}:${person}:${session}`;
+interface CodexSession {
+  thread: string | null;
+}
+/**
+ * The session's Codex turns as log parts, for the way back to Claude: in the person's own volume beside the
+ * scratch folder, never in Citadel's database, which keeps no contraption turn's content.
+ */
+const codexLogFile = (scratch: string, session: string) => join(`${scratch}.codex`, `${session}.jsonl`);
 
 /** One of the person's own machines a turn gets (#306). */
 export interface PersonMachine {
@@ -249,6 +263,9 @@ export class ContraptionTurns {
   /** The person's own machines online now (#306), and the address their proxies reach Citadel at: set by server.ts. */
   machines: (person: number) => PersonMachine[] = () => [];
   apiUrl = () => '';
+  /** Why a person's turns can't run on Codex, or null (Runner.codexWhy), and where their Codex usage goes: set by server.ts. */
+  codexWhy: (person: number) => string | null = () => "Codex isn't set up on this server";
+  onCodexUsage: (person: number, limits: unknown) => void = () => {};
 
   constructor(store: Store, contraptions: Contraptions, claude: ClaudePlaces, opts: { dataDir: string; claudeBin: string; podman?: string; env?: NodeJS.ProcessEnv }) {
     this.store = store;
@@ -348,6 +365,12 @@ export class ContraptionTurns {
     return join(configDir, 'projects', projectSlug(cwd), `${claudeSession}.jsonl`);
   }
 
+  /** Forget a session's Codex thread and its log. */
+  private dropCodex(key: string, logFile: string | null) {
+    this.store.deleteSetting(key);
+    if (logFile) rmSync(logFile, { force: true });
+  }
+
   /** Delete a Claude session's transcript and its subagents' from the person's Claude folder. */
   private dropTranscript(where: { configDir: string; cwd: string }, claudeSession: string) {
     const file = this.transcript(where.configDir, where.cwd, claudeSession);
@@ -395,6 +418,20 @@ export class ContraptionTurns {
   private async turn(c: ContraptionRow, req: TurnRequest, place: TurnPlace, live: Live, dir: { onHost: string; inside: string }, emit: Emit): Promise<{ outcome: string; usage: Usage | null }> {
     const where = this.scratch(c, req.person, place);
     mkdirSync(where.onHost, { recursive: true });
+    // Codex (#337): a Codex pick, or the person's "Use Codex until I switch back", once their container has Codex; else Claude's default.
+    const wantCodex = isCodexModel(req.model) || !!this.store.getSetting<boolean>(codexSwitchKey(req.person));
+    const codex = wantCodex && !place.host && !this.codexWhy(req.person);
+    if (isCodexModel(req.model) && !codex) req = { ...req, model: isCodexModel(c.default_model) ? null : c.default_model };
+    const ckey = codexKey(c.id, req.person, req.session);
+    const logFile = codexLogFile(where.onHost, req.session);
+    if (req.fresh) this.dropCodex(ckey, logFile);
+    const codexSession = this.store.getSetting<CodexSession>(ckey);
+    let codexLog = '';
+    try {
+      if (codexSession) codexLog = readFileSync(logFile, 'utf8');
+    } catch {
+      // No Codex turn logged anything yet.
+    }
     // Resume the name's session unless asked for a fresh one, or its transcript is gone (a relinked Claude).
     const known = this.store.contraptionSession(c.id, req.person, req.session);
     const resume = !!known && !req.fresh && existsSync(this.transcript(where.configDir, where.cwd, known.claude_session));
@@ -426,6 +463,23 @@ export class ContraptionTurns {
       hook = { node: process.execPath, script: join(dir.inside, 'agent-cap.ts'), slots: join(dir.inside, 'slots') };
     }
     secret('settings.json', JSON.stringify(settings(req, hook, machines.map((m) => m.name))));
+    let prompt = req.prompt;
+    if (codex) {
+      for (const [f, text] of CODEX_FILES) secret(f, text);
+      // The hook reads this (CITADEL_CODEX_TRIPWIRE): only the contraption's own servers and the person's machines.
+      secret('codex-tripwire.json', JSON.stringify({ script: join(dir.inside, 'tripwire.ts'), config: tripwireConfig(0, place.configDir, false), mode: 'contraption', mcp: Object.keys(config.mcpServers) }));
+      let claudeJsonl = '';
+      try {
+        if (resume) claudeJsonl = readFileSync(this.transcript(where.configDir, where.cwd, claudeSession), 'utf8');
+      } catch {
+        // No Claude transcript: a new thread starts from the Codex turns alone, if any.
+      }
+      secret('handover.md', fitLog([...claudeParts(claudeJsonl), ...readParts(codexLog)]));
+      if (!codexSession) this.store.setSetting(ckey, { thread: null });
+    } else if (codexSession) {
+      // Back on Claude after Codex turns: they come first, verbatim.
+      prompt = `${toClaudePreamble(fitLog(readParts(codexLog)))}\n\n${prompt}`;
+    }
 
     const tmp = join(dir.inside, 'tmp');
     let env: Record<string, string> = {
@@ -435,7 +489,13 @@ export class ContraptionTurns {
     };
     delete env.SSH_AUTH_SOCK;
     if (req.agents && (req.agents.model ?? req.model)) env.CLAUDE_CODE_SUBAGENT_MODEL = (req.agents.model ?? req.model)!;
-    const argv = args({ ...req, system }, dir.inside, claudeSession, resume);
+    let argv = args({ ...req, system }, dir.inside, claudeSession, resume);
+    if (codex) {
+      env.CITADEL_CODEX_TRIPWIRE = join(dir.inside, 'codex-tripwire.json');
+      // The shim reads claude's flags; --resume/--session-id are Claude's own session, which the Codex turns leave alone.
+      argv = [join(dir.inside, 'codex-turn.ts'), '--codex-mode', 'contraption', '--codex-log', join(dir.inside, 'codex-log.jsonl'), '--codex-handover', join(dir.inside, 'handover.md'),
+        ...(codexSession?.thread ? ['--codex-thread', codexSession.thread] : []), ...argv];
+    }
     let cmd: string;
     let cmdArgs: string[];
     if (place.host) {
@@ -448,7 +508,7 @@ export class ContraptionTurns {
       // `exec` keeps the pid, written first, so a cancel can signal claude inside the container.
       cmd = this.podman;
       cmdArgs = ['exec', '-i', '-w', where.cwd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), place.container,
-        'sh', '-c', 'echo $$ > "$0"; exec "$@"', join(dir.inside, 'pid'), resolveClaude(this.claudeBin), ...argv];
+        'sh', '-c', 'echo $$ > "$0"; exec "$@"', join(dir.inside, 'pid'), codex ? process.execPath : resolveClaude(this.claudeBin), ...argv];
     }
     if (live.stopped) return { outcome: live.stopped, usage: null };
 
@@ -457,7 +517,7 @@ export class ContraptionTurns {
     emit('start', { turn: live.id, session: req.session, claudeSession });
     child.stdin!.on('error', () => {}); // claude exited without reading it all
     // Open until the reply is out, as the turn wrapper keeps a minion turn's: steer() writes to it meanwhile.
-    child.stdin!.write(userLine(req.prompt));
+    child.stdin!.write(userLine(prompt));
     const timer = setTimeout(() => this.stop(live, 'timeout'), req.timeoutSec * 1000);
 
     let result: any = null;
@@ -471,7 +531,12 @@ export class ContraptionTurns {
     const handle = (ev: any) => {
       // A Grunt's events name the Agent call that started it; the top level's name none.
       const parent = ev.parent_tool_use_id ? String(ev.parent_tool_use_id) : null;
-      if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.session_id === 'string' && ev.session_id !== claudeSession) {
+      if (ev.type === 'codex_rate_limits') {
+        this.onCodexUsage(req.person, ev.rate_limits);
+      } else if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.codex_thread === 'string') {
+        const t = this.store.getSetting<CodexSession>(ckey);
+        if (t) this.store.setSetting(ckey, { ...t, thread: ev.codex_thread });
+      } else if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.session_id === 'string' && ev.session_id !== claudeSession) {
         this.store.putContraptionSession(c.id, req.person, req.session, ev.session_id);
       } else if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
         emit('compacted', {});
@@ -542,6 +607,22 @@ export class ContraptionTurns {
       child.on('close', (n) => resolve(n));
     });
     clearTimeout(timer);
+    if (codex) {
+      // This turn's log joins the session's, for the way back to Claude; its folder goes when the turn ends.
+      let log = '';
+      try {
+        log = readFileSync(join(dir.onHost, 'codex-log.jsonl'), 'utf8');
+      } catch {
+        // It logged nothing.
+      }
+      if (log) {
+        mkdirSync(dirname(logFile), { recursive: true, mode: 0o700 });
+        appendFileSync(logFile, log, { mode: 0o600 });
+      }
+    } else if (codexSession && result && !result.is_error) {
+      // Claude has the Codex turns now.
+      this.dropCodex(ckey, logFile);
+    }
 
     const usage: Usage | null = metered ? total : null;
     const error = (code: TurnErrorCode, message: string) => {
@@ -556,11 +637,12 @@ export class ContraptionTurns {
     }
     const why = [typeof result?.result === 'string' ? result.result : '', ...(Array.isArray(result?.errors) ? result.errors.map(String) : []), stderr].join('\n').trim();
     if (USAGE_LIMIT.test(why)) return error('limit', why.split('\n')[0].slice(0, 300));
-    if (isAuthFailure(why)) {
+    // A Codex turn's 401 is OpenAI's: it says nothing about the Claude sign-in.
+    if (!codex && isAuthFailure(why)) {
       if (!place.host) this.claude.expire(req.person);
       return error('no_plan', 'This person\'s Claude sign-in was refused: they need to link it again in Citadel');
     }
-    return error('failed', `Claude ended without a reply (exit ${code ?? 'unknown'})${why ? `: ${why.split('\n').filter(Boolean).at(-1)!.slice(0, 300)}` : ''}`);
+    return error('failed', `${codex ? 'Codex' : 'Claude'} ended without a reply (exit ${code ?? 'unknown'})${why ? `: ${why.split('\n').filter(Boolean).at(-1)!.slice(0, 300)}` : ''}`);
   }
 
   /** Stop a running turn: its process group on the host, claude itself in a container. */
@@ -634,6 +716,7 @@ export class ContraptionTurns {
     if (!s) return 'missing';
     const place = this.claude.place(person);
     if (place) this.dropTranscript(this.scratch(c, person, place), s.claude_session);
+    this.dropCodex(codexKey(c.id, person, name), place ? codexLogFile(this.scratch(c, person, place).onHost, name) : null);
     this.store.deleteContraptionSession(c.id, person, name);
     return 'deleted';
   }

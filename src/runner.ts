@@ -28,6 +28,7 @@ import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDir, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
+import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, type CodexThread, type CodexUsage } from './codex.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -86,6 +87,8 @@ const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
 if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
 /** citadel-codex-review (#330): a read-only Codex review on the person's own login, pinned with its driver like citadel-heavy. */
 export const CODEX_REVIEW = pinnedCopy('codex-review.ts');
+/** Codex turns (#337): the shim a turn runs in place of claude when it runs on Codex. */
+export const CODEX_TURN = pinnedCopy('codex-turn.ts');
 const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
 if (existsSync(CODEX_REVIEW_BIN)) cpSync(CODEX_REVIEW_BIN, join(MCP_DIR, 'bin', 'citadel-codex-review'));
 /** The minion prompt's line on citadel-heavy. */
@@ -291,6 +294,10 @@ interface TurnState {
   deployed?: true;
   /** Usage-limit resumes in a row that led to this turn. */
   limitTries?: number;
+  /** It runs on Codex (src/codex-turn.ts), not claude (#337). */
+  codex?: true;
+  /** A Claude turn that starts with the Codex turns before it: their thread is dropped once it succeeds. */
+  handBack?: true;
   /** The person it runs for (turnPerson). */
   person?: number | null;
   /** Who asked for it (Store.turnAsker), which a non-member's relay keeps apart from `person`. */
@@ -472,6 +479,9 @@ function clockTime(ms: number, tz?: string): string {
 export const MAX_RESUMES = 2;
 /** Said beside the role names, and passed on to Grunts, which don't see these prompts. */
 const ROLE_FRAMING = `${APP_NAME}, Scheme, Taskmaster, Minion and Grunt are playful names for how the work is organised, not a comment on ability. Work as a careful, senior engineer: think things through, check your work, and push back when something looks wrong.`;
+const RESUME_CODEX_PROMPT =
+  `Your last turn stopped at the account's usage limit, and its person has switched to Codex, so you carry on there now. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
+
 const RESUME_PROMPT =
   `The ${APP_NAME} server restarted while you were working, which interrupted your last turn. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
 
@@ -949,6 +959,8 @@ export class Runner {
   approvals: Approvals;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
   placeFor?: (person: number | null) => TurnPlace | { refused: string };
+  /** Why a person's turns can't run on Codex (#337), or null when they can: their own container, signed in to Codex. */
+  codexReady?: (person: number) => string | null;
   /** A container turn's Claude sign-in was refused, so that person has to link again. */
   onAuthFailure?: (person: number) => void;
 
@@ -1348,7 +1360,7 @@ export class Runner {
    * Start an auto-resume turn, after a restart or (limitTries > 0) the usage limit, with any messages
    * that were queued behind the cut-off one.
    */
-  private resume(ticketId: number, resumes: number, limitTries = 0) {
+  private resume(ticketId: number, resumes: number, limitTries = 0, onCodex = false) {
     // Someone's message got in first; its turn took the queue, and that is resume enough.
     if (this.isRunning(ticketId)) return;
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259).
@@ -1356,10 +1368,10 @@ export class Runner {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project || ticket.status === 'closed') return;
-      this.emit(ticketId, 'note', { text: limitTries ? 'Resumed after the usage limit reset' : 'Resumed after a server restart' });
+      this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : limitTries ? 'Resumed after the usage limit reset' : 'Resumed after a server restart' });
       const batch = this.takeQueue(ticketId);
       // It carries on the interrupted turn, so it runs for that turn's person.
-      return this.startTurn(project, ticket, [{ author: 'System', text: limitTries ? RESUME_LIMIT_PROMPT : RESUME_PROMPT, images: [] }, ...batch], ticket.person_id ?? this.turnPerson(ticket, project, batch), resumes, limitTries);
+      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : RESUME_PROMPT, images: [] }, ...batch], ticket.person_id ?? this.turnPerson(ticket, project, batch), resumes, limitTries);
     });
   }
 
@@ -1849,9 +1861,21 @@ export class Runner {
     // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
     const tripwire = tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE));
+    // Codex (#337): a Codex pick, or the sender's "Use Codex until I switch back" (which maps a Claude pick by tier),
+    // once their own container is signed in to Codex. Otherwise it runs on Claude, saying why.
+    const { model: picked, effort } = turnSettings(ticket, project);
+    const switched = person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person));
+    const codexWhy = isCodexModel(picked) || switched ? this.codexWhy(person) : null;
+    const codex = (isCodexModel(picked) || switched) && !codexWhy;
+    if (codexWhy) {
+      const name = CODEX_MODELS.find(([id]) => id === picked)?.[1];
+      this.emit(ticket.id, 'note', { text: name ? `This minion is set to ${name}, but ${codexWhy}, so this turn runs on Claude's default model.` : `Codex is switched on, but ${codexWhy}, so this turn runs on Claude.` });
+    }
+    const model = isCodexModel(picked) && !codex ? turnSettings({ ...ticket, model: null }, project).model : picked;
     // Codex's managed hook (deploy/claude-container/codex) reads the turn's tripwire from this file: its command can't carry it.
+    // A Codex turn's own run is checked in turn mode: its patches and MCP calls too, with no cards, and never its own folder.
     const codexTripwire = join(dir, 'codex-tripwire.json');
-    writeFileSync(codexTripwire, JSON.stringify({ script: pinned(TRIPWIRE), config: tripwireConfig(project.id, claudeConfigDir(process.env), false) }));
+    writeFileSync(codexTripwire, JSON.stringify({ script: pinned(TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(process.env), false), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}) }), { mode: 0o444 });
     const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
       hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
     };
@@ -1870,7 +1894,6 @@ export class Runner {
     if (addDirs.length) args.push('--add-dir', ...addDirs);
     if (existsSync(pinned(KIT))) args.push('--plugin-dir', pinned(KIT));
     if (ticket.kind !== 'coordinator') args.push(...pluginDirArgs(lines(project.plugin_dirs), ticket.cwd));
-    const { model, effort } = turnSettings(ticket, project);
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
@@ -1899,7 +1922,10 @@ export class Runner {
     // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
     const github = this.githubFor?.(person, dir) ?? null;
     if (github) env = { ...env, ...github.env };
-    const prompt = promptMessage(github ? [{ author: 'System', text: github.line, images: [] }, ...batch] : batch);
+    // Back on Claude after Codex turns: they come first, verbatim, and their thread goes once this turn succeeds.
+    const codexThread = this.store.getSetting<CodexThread>(codexThreadKey(ticket.id));
+    const handBack = !codex && codexThread ? [{ author: 'System', text: toClaudePreamble(fitLog(readParts(codexThread.log))), images: [] }] : [];
+    const prompt = promptMessage([...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...handBack, ...batch]);
     if (asker !== null && asker !== person) this.store.setSetting(askerKey(ticket.id), asker);
     else this.store.deleteSetting(askerKey(ticket.id));
     if (person !== ticket.person_id) {
@@ -1950,8 +1976,10 @@ export class Runner {
     }
     // With no copy of its transcript on this login or in the database, --resume would fail every turn from now on.
     // A restore that failed (disk full, say) still resumes and fails loudly: the database's copy may be fine.
-    if (ticket.session_id && (restoreFailed || existsSync(transcriptPath(configDir, ticket.cwd, ticket.session_id)))) args.push('--resume', ticket.session_id);
-    else if (ticket.session_id) {
+    const transcript = ticket.session_id ? transcriptPath(configDir, ticket.cwd, ticket.session_id) : null;
+    if (ticket.session_id && (restoreFailed || existsSync(transcript!))) {
+      if (!codex) args.push('--resume', ticket.session_id);
+    } else if (ticket.session_id) {
       this.emit(ticket.id, 'note', { text: `This minion's conversation (session ${ticket.session_id}) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here, but Claude doesn't remember the earlier turns.` });
       this.store.updateTicket(ticket.id, { session_id: null });
     }
@@ -1967,9 +1995,25 @@ export class Runner {
     writeFileSync(join(dir, 'prompt.jsonl'), prompt);
     for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
     // Holds the turn's token: private, and the wrapper deletes it once read.
-    writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: place.host ? this.claudeBin : resolveClaude(this.claudeBin), args, cwd: ticket.cwd, env }), { mode: 0o600 });
+    let command = place.host ? this.claudeBin : resolveClaude(this.claudeBin);
+    if (codex) {
+      // The Claude conversation from its last compaction, then any Codex turns on another person's Codex, verbatim:
+      // a new thread starts from it (the shim skips it when it resumes the thread).
+      let claudeJsonl = '';
+      try {
+        if (transcript) claudeJsonl = readFileSync(transcript, 'utf8');
+      } catch {
+        // No transcript: the hand-over is the Codex turns alone, if any.
+      }
+      writeFileSync(join(dir, 'handover.md'), fitLog([...claudeParts(claudeJsonl), ...readParts(codexThread?.log ?? '')]));
+      const same = codexThread?.person === person && codexThread.thread;
+      if (!same) this.store.setSetting(codexThreadKey(ticket.id), { thread: null, person: person!, log: codexThread?.log ?? '' });
+      command = process.execPath;
+      args.unshift(pinned(CODEX_TURN), '--codex-mode', 'turn', '--codex-log', join(dir, 'codex-log.jsonl'), '--codex-handover', join(dir, 'handover.md'), ...(same ? ['--codex-thread', same] : []));
+    }
+    writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command, args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort, ...(limitTries ? { limitTries } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }),
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
@@ -2130,6 +2174,8 @@ export class Runner {
       this.queues.set(ticketId, [...(this.queues.get(ticketId) ?? []), ...unsent]);
       this.emit(ticketId, 'note', { text: `${unsent.length === 1 ? 'A message' : `${unsent.length} messages`} arrived as the turn ended, so the next turn picks ${unsent.length === 1 ? 'it' : 'them'} up.` });
     }
+    // A Codex turn's log joins its thread's, for the way back to Claude (#337); the turn's folder goes below.
+    if (turn?.codex) this.keepCodexLog(ticketId, live.dir);
     const code = exit?.code ?? null;
     const signal = exit ? exit.signal : 'SIGKILL';
     const startError = exit?.error ? `Could not start claude: ${exit.error}` : null;
@@ -2155,12 +2201,17 @@ export class Runner {
     } else if (killed || !sawResult || code !== 0 || resultIsError) {
       status = 'error';
       // A container's sign-in that stopped working: their messages wait until they link again.
-      if (turn?.container && turn.person && isAuthFailure(`${resultError ?? ''}\n${stderr.join('\n')}`)) {
+      // Not a Codex turn's: its 401 is OpenAI's, and says nothing about the Claude sign-in.
+      if (turn?.container && turn.person && !turn.codex && isAuthFailure(`${resultError ?? ''}\n${stderr.join('\n')}`)) {
         this.onAuthFailure?.(turn.person);
         this.emit(ticketId, 'note', { text: `${this.store.getUser(turn.person)?.name ?? 'This person'}'s Claude sign-in expired. Link Claude again in Settings → Your account; their messages wait until then.` });
       }
       const usage = turn?.container && turn.person ? this.store.getSetting<Usage>(usageKey(turn.person)) : this.usage;
-      this.turnFailed(ticketId, killed || resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0, usage);
+      const codexReset = turn?.codex && turn.person ? codexResetAt(this.store.getSetting<CodexUsage>(codexUsageKey(turn.person))) : undefined;
+      this.turnFailed(ticketId, killed || resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0, usage, codexReset);
+    } else if (turn?.handBack) {
+      // Claude has the Codex turns now.
+      this.store.deleteSetting(codexThreadKey(ticketId));
     }
     // Still parked after answering: the row stays parked, whatever state the turn set. A failed turn keeps its error note.
     const parkedAs = this.parkedAs.get(ticketId);
@@ -2219,7 +2270,7 @@ export class Runner {
    * lines). A usage limit is a wait, not an error: no push, and it resumes after the reset. An account
    * problem needs a person: it blocks, never retries, and pushes once for everyone.
    */
-  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage) {
+  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage, codexReset?: number | null) {
     const exited = code ? `claude exited with code ${code}` : 'claude ended without finishing';
     const why = reason || stderr;
     const text = why ? `${why}${reason && stderr ? `\n${stderr}` : ''}\n(${exited})` : exited;
@@ -2235,7 +2286,8 @@ export class Runner {
         this.onTurnError(ticketId, `Usage limit: gave up after ${limitTries} resumes in a row`);
         return;
       }
-      const hit = [usage?.session, usage?.weekly].filter((w) => w?.status === 'rejected' && w.resetsAt && w.resetsAt > Date.now()).map((w) => w!.resetsAt!);
+      // A Codex turn's limit (codexReset is set, maybe null) is Codex's own windows, never Claude's.
+      const hit = codexReset !== undefined ? (codexReset ? [codexReset] : []) : [usage?.session, usage?.weekly].filter((w) => w?.status === 'rejected' && w.resetsAt && w.resetsAt > Date.now()).map((w) => w!.resetsAt!);
       const resetAt = hit.length ? Math.max(...hit) : parseResetTime(reason) ?? Date.now() + this.limitFallbackMs;
       const at = this.waitForLimit(ticketId, resetAt, limitTries + 1, tz);
       this.emit(ticketId, 'note', { text: `${reason}\nIt resumes by itself at ${clockTime(at, tz)}; messages sent before then go into that turn.` });
@@ -2268,6 +2320,12 @@ export class Runner {
     }
     if (!ev || typeof ev !== 'object') return;
     if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info, ticketId);
+    if (ev.type === 'codex_rate_limits') return this.updateCodexUsage(ev.rate_limits, this.store.getSetting<TurnState>(turnKey(ticketId))?.person ?? null);
+    if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.codex_thread === 'string') {
+      const t = this.store.getSetting<CodexThread>(codexThreadKey(ticketId));
+      if (t && t.thread !== ev.codex_thread) this.store.setSetting(codexThreadKey(ticketId), { ...t, thread: ev.codex_thread });
+      if (ev.codex_resume_failed) this.emit(ticketId, 'note', { text: `Codex couldn't pick up its thread ${ev.codex_resume_failed}, so this turn starts a new one from the hand-over log.` });
+    }
     // Each main-thread API call re-reads the whole context: its input is the context's size.
     const u = ev.type === 'assistant' && !ev.parent_tool_use_id ? ev.message?.usage : null;
     if (u) this.contextSizes.set(ticketId, (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0));
@@ -2421,6 +2479,66 @@ export class Runner {
   usageOf(uid: number | null | undefined): Usage | null {
     const payer = this.payerOf(uid);
     return payer === null ? this.usage : this.store.getSetting<Usage>(usageKey(payer));
+  }
+
+  /** Why a person's turns can't run on Codex (#337), or null when they can: only their own container, signed in to Codex. */
+  codexWhy(person: number | null): string | null {
+    if (this.payerOf(person) === null) return "the server's Claude login has no Codex";
+    return this.codexReady ? this.codexReady(person!) : "Codex isn't set up on this server";
+  }
+
+  /** What the usage bar shows of a person's Codex: whether they can use it, the switch and its windows. */
+  codexView(uid: number | null | undefined): { ready: boolean; why: string | null; on: boolean; usage: CodexUsage | null } | null {
+    const payer = this.payerOf(uid);
+    if (payer === null) return null;
+    const why = this.codexWhy(payer);
+    return { ready: !why, why, on: !!this.store.getSetting<boolean>(codexSwitchKey(payer)), usage: this.store.getSetting<CodexUsage>(codexUsageKey(payer)) };
+  }
+
+  /**
+   * "Use Codex until I switch back" (#337). Switching on resumes the person's minions waiting out a usage
+   * limit right away (on Codex now); returns why it can't, or null.
+   */
+  setCodexSwitch(uid: number, on: boolean): string | null {
+    if (on) {
+      const why = this.codexWhy(uid);
+      if (why) return why;
+      this.store.setSetting(codexSwitchKey(uid), true);
+    } else this.store.deleteSetting(codexSwitchKey(uid));
+    this.broadcast({ type: 'codex', codex: this.codexView(uid), payer: uid });
+    if (!on) return null;
+    const mine = (w: LimitResume) => {
+      const t = this.store.getTicket(w.ticket);
+      return !!t && this.payerOf(t.person_id ?? this.store.getProject(t.project_id)?.owner_id) === uid;
+    };
+    const now = this.limitResumes().filter(mine);
+    if (!now.length) return null;
+    this.saveLimitResumes(this.limitResumes().filter((w) => !mine(w)));
+    for (const w of now) {
+      if (w.queued?.length) this.queues.set(w.ticket, [...w.queued]);
+      this.resume(w.ticket, 0, 0, true);
+    }
+    return null;
+  }
+
+  /** Record a Codex turn's usage windows (account/rateLimits) as its person's, for their usage bar. */
+  updateCodexUsage(l: any, person: number | null) {
+    const w = (x: any) => (x && typeof x.usedPercent === 'number' ? { usedPercent: x.usedPercent, windowDurationMins: typeof x.windowDurationMins === 'number' ? x.windowDurationMins : null, resetsAt: typeof x.resetsAt === 'number' ? x.resetsAt : null } : null);
+    if (person === null || !l) return;
+    this.store.setSetting(codexUsageKey(person), { primary: w(l.primary), secondary: w(l.secondary), updatedAt: Date.now() });
+    this.broadcast({ type: 'codex', codex: this.codexView(person), payer: person });
+  }
+
+  /** Add a finished Codex turn's log to its minion's Codex thread. */
+  private keepCodexLog(ticketId: number, dir: string) {
+    let log = '';
+    try {
+      log = readFileSync(join(dir, 'codex-log.jsonl'), 'utf8');
+    } catch {
+      return;
+    }
+    const t = this.store.getSetting<CodexThread>(codexThreadKey(ticketId));
+    if (t && log) this.store.setSetting(codexThreadKey(ticketId), { ...t, log: t.log + log });
   }
 
   /** Record a turn's plan usage: the server login's (the top bar's meter), or a container turn's payer's own (#213). */

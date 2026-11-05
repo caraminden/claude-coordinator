@@ -191,6 +191,18 @@ export const peopleRoutes: Route[] = [
       return json(res, 200, app.codex.status(uidOf(session)));
     },
   },
+  // "Use Codex until I switch back" (#337): Codex becomes the person's default everywhere their turns run.
+  {
+    method: 'PUT', path: '/api/me/codex/switch', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const uid = uidOf(session);
+      const { on } = await readJson(req);
+      if (typeof on !== 'boolean') throw new HttpError(400, 'on must be true or false');
+      const why = app.runner.setCodexSwitch(uid, on);
+      if (why) throw new HttpError(400, `Can't switch to Codex: ${why}.`);
+      return json(res, 200, app.runner.codexView(uid));
+    },
+  },
   { method: 'GET', path: '/api/projects/:project/members', who: ['person'], handler: ({ res, app, project }) => json(res, 200, members(app, project.id)) },
   {
     method: 'POST', path: '/api/projects/:project/members', who: ['person'], access: 'owner',

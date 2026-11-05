@@ -29,7 +29,7 @@ export function codexModelFor(model: string | null | undefined): string {
 /** Past this, a hand-over log cuts its biggest tool outputs first (~150k tokens at 4 characters each). */
 export const HANDOVER_MAX = 600_000;
 
-type Part = { text: string; output?: boolean };
+export type Part = { text: string; output?: boolean };
 
 /** Join log parts, cutting the biggest outputs to one shared size (head and tail kept) until it fits in `max`. */
 export function fitLog(parts: Part[], max = HANDOVER_MAX): string {
@@ -68,6 +68,11 @@ export function callLine(name: string, input: any): string {
  * steps are left out (a Grunt's report comes back as its Agent call's output).
  */
 export function claudeLog(jsonl: string, max = HANDOVER_MAX): string {
+  return fitLog(claudeParts(jsonl), max);
+}
+
+/** claudeLog's parts, before fitting. */
+export function claudeParts(jsonl: string): Part[] {
   const lines = jsonl.split('\n');
   let from = 0;
   lines.forEach((l, i) => {
@@ -100,7 +105,7 @@ export function claudeLog(jsonl: string, max = HANDOVER_MAX): string {
       }
     }
   }
-  return fitLog(parts, max);
+  return parts;
 }
 
 /** What a Codex turn starts with when it takes over from Claude: the log, then the new message. */
@@ -126,3 +131,43 @@ You are running as Codex (OpenAI) inside Citadel, in place of Claude Code. The i
 - MCP tools keep their names (mcp__thread__set_thread_status is the thread server's set_thread_status). Call them as the instructions say.
 - Citadel's tripwire checks every shell command, patch and tool call. When it blocks one, it says why: take that as final. Calls that would need a person's Approve / Deny card are blocked here; ask with ask_question instead, or say what you needed.
 - There is no interactive terminal: run commands to completion (no tty, no write_stdin).`;
+
+/** A person's "Use Codex until I switch back" (the usage bar's switch): true while on. */
+export const codexSwitchKey = (uid: number) => `codex:on:user:${uid}`;
+/** A person's Codex usage windows, from their turns' account/rateLimits notifications. */
+export const codexUsageKey = (uid: number) => `codex:usage:user:${uid}`;
+/** A minion's Codex thread while its turns run on Codex: { thread, person, log }. Dropped on the first Claude turn after. */
+export const codexThreadKey = (ticketId: number) => `codex:thread:${ticketId}`;
+export interface CodexThread {
+  /** Codex's thread id, once the first turn has started it. */
+  thread: string | null;
+  /** Whose Codex (CODEX_HOME) holds it. */
+  person: number;
+  /** The Codex turns' log parts (one JSON { text, output? } a line), for the way back. */
+  log: string;
+}
+export interface CodexUsage {
+  primary: { usedPercent: number; windowDurationMins: number | null; resetsAt: number | null } | null;
+  secondary: { usedPercent: number; windowDurationMins: number | null; resetsAt: number | null } | null;
+  updatedAt: number;
+}
+
+/** A Codex log file's parts. */
+export function readParts(jsonl: string): Part[] {
+  return jsonl.split('\n').flatMap((l) => {
+    try {
+      const p = JSON.parse(l);
+      return typeof p?.text === 'string' ? [{ text: p.text, output: !!p.output }] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** When a person's full Codex window resets (ms), from their stored usage. */
+export function codexResetAt(u: CodexUsage | null | undefined): number | null {
+  const ws = [u?.primary, u?.secondary].filter((w): w is NonNullable<typeof w> => !!w?.resetsAt);
+  const full = ws.filter((w) => w.usedPercent >= 100);
+  const at = Math.max(0, ...(full.length ? full : ws).map((w) => w.resetsAt! * 1000));
+  return at > Date.now() ? at : null;
+}

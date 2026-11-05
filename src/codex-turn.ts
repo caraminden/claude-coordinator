@@ -149,7 +149,8 @@ export async function main(argv: string[], env: Record<string, string | undefine
   const one = (f: string) => flags.get(f)?.[0];
   const mode = one('--codex-mode') === 'contraption' ? 'contraption' : 'turn';
   const model = codexModelFor(one('--model'));
-  const effort = one('--effort') ?? null;
+  // Codex's efforts stop at xhigh: Claude's max asks for the most it has.
+  const effort = one('--effort') === 'max' ? 'xhigh' : one('--effort') ?? null;
   const partial = flags.has('--include-partial-messages');
   const replay = flags.has('--replay-user-messages');
   const web = (flags.get('--tools') ?? []).join(',').includes('WebSearch') || mode === 'turn';

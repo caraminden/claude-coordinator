@@ -244,9 +244,17 @@ runner.placeFor = (person) => {
 };
 runner.onAuthFailure = (person) => claudeLink.expire(person);
 const codexLink = new CodexLink(claudeLink);
+// Codex turns (#337) run only in a person's own container, once they've signed in to Codex there.
+const codexReady = (uid: number) => {
+  const state = codexLink.status(uid).state;
+  return state === 'linked' ? null : state === 'no container' ? 'Codex runs in your own Claude container, so link your Claude in Settings first' : 'you are not signed in to Codex (Settings → Your account)';
+};
+runner.codexReady = codexReady;
 // Contraptions' turns (the turn API): on the same Claude a person's minion turns use, never anyone else's.
 const contraptionTurns = new ContraptionTurns(store, contraptions, claudeLink, { dataDir: DATA_DIR, claudeBin: process.env.CLAUDE_BIN ?? 'claude' });
 contraptionTurns.noTurns = PREVIEW;
+contraptionTurns.codexWhy = (uid) => runner.codexWhy(uid);
+contraptionTurns.onCodexUsage = (uid, limits) => runner.updateCodexUsage(limits, uid);
 services.drain = (row) => contraptionTurns.drain(row.id);
 // A contraption turn gets its person's own machines that are online (#306), never a shared one.
 contraptionTurns.machines = (person) => machines.online().filter((m) => m.owner_id !== null && m.servers.includes('mcp') && ownerAsked(store, m.owner_id, [person], null));

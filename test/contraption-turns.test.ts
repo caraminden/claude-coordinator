@@ -7,6 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { codexSwitchKey } from '../src/codex.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, until, stopTurns } from './helpers.ts';
@@ -572,4 +573,65 @@ test('the API is only for a contraption\'s own server on this machine, with its 
   assert.deepEqual(await (await api(`/api/contraptions/sessions?person=${me.id}`)).json(), []);
   // Turns run in the server's own process: the health check counts them for a restart to wait on.
   assert.equal((await (await fetch(`${srv.base}/api/health`)).json()).interruptible, 0);
+});
+
+test("on Codex (#337) a contraption turn runs the shim in its own mode with only the app's tools, and its Codex turns go back to Claude, never through Citadel's database", async () => {
+  const codexLog = join(root, 'codex.jsonl');
+  const codexBin = join(root, 'codex-fake');
+  writeFileSync(codexBin, `#!${process.execPath}
+const fs = require('node:fs');
+const record = (m) => fs.appendFileSync(${JSON.stringify(codexLog)}, JSON.stringify(m) + '\\n');
+// The fake podman maps the container's ~/.citadel in argv only.
+const inVol = (f) => f.replace(${JSON.stringify(homedir() + '/.citadel/')}, ${JSON.stringify(join(root, 'vol-josh') + '/.citadel/')});
+record({ tripwire: JSON.parse(fs.readFileSync(inVol(process.env.CITADEL_CODEX_TRIPWIRE), 'utf8')), argv: process.argv.slice(2) });
+const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
+const note = (method, params) => send({ method, params: { threadId: 'cth', turnId: 'tu1', ...params } });
+require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+  const m = JSON.parse(line);
+  if (m.id === undefined) return;
+  if (m.method === 'thread/start' || m.method === 'thread/resume') { record({ method: m.method, params: m.params }); return send({ id: m.id, result: { thread: { id: 'cth' } } }); }
+  if (m.method !== 'turn/start') return send({ id: m.id, result: {} });
+  record({ method: m.method, params: m.params });
+  send({ id: m.id, result: { turn: { id: 'tu1' } } });
+  note('item/completed', { item: { type: 'agentMessage', id: 'm1', text: 'CODEX MOVED IT' } });
+  note('turn/completed', { turn: { id: 'tu1', status: 'completed' } });
+});
+`);
+  chmodSync(codexBin, 0o755);
+  rmSync(codexLog, { force: true });
+  // Into the container's environment as the person's own (a turn's env never takes the server's CITADEL_*).
+  const place = places.place;
+  places.place = (uid) => {
+    const p = place(uid);
+    return p && !p.host ? { ...p, env: { ...p.env, CITADEL_CODEX_BIN: codexBin, CODEX_HOME: join(root, 'codex-home') } } : p;
+  };
+  turns.codexWhy = () => null;
+  store.setSetting(codexSwitchKey(josh.id), true);
+  try {
+    const evs = await turn(mandate, { person: josh.id, session: 'on-codex', prompt: 'CODEX ASK one', mcp: [{ name: 'mandate', path: '/mcp' }] });
+    assert.equal(evs.at(-1)!.event, 'end', JSON.stringify(evs));
+    assert.ok(evs.some((e) => e.event === 'text' && e.data.delta.includes('CODEX MOVED IT')));
+    const calls = readFileSync(codexLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.equal(calls[0].tripwire.mode, 'contraption');
+    assert.deepEqual(calls[0].tripwire.mcp, ['mandate']);
+    assert.ok(calls[0].argv.includes('features.shell_tool=false'), 'no shell for an app turn');
+    assert.equal(calls.find((c) => c.method === 'thread/start').params.model, 'gpt-6-luna', "the app's haiku maps to Codex's fast model");
+    // Again on the same name: the thread carries on.
+    await turn(mandate, { person: josh.id, session: 'on-codex', prompt: 'CODEX ASK two', mcp: [{ name: 'mandate', path: '/mcp' }] });
+    assert.ok(readFileSync(codexLog, 'utf8').includes('"thread/resume"'));
+
+    store.deleteSetting(codexSwitchKey(josh.id));
+    await turn(mandate, { person: josh.id, session: 'on-codex', prompt: 'back on claude', mcp: [{ name: 'mandate', path: '/mcp' }] });
+    assert.match(lastRun().prompt, /<codex-turns>[\s\S]*CODEX ASK one[\s\S]*CODEX MOVED IT[\s\S]*CODEX ASK two[\s\S]*<\/codex-turns>[\s\S]*back on claude/);
+    assert.equal(store.getSetting(`codex:contraption:${mandate.id}:${josh.id}:on-codex`), null, 'Claude has them now');
+    store.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    for (const f of readdirSync(data).filter((n) => n.startsWith('coordinator.db'))) {
+      const bytes = readFileSync(join(data, f)).toString('latin1');
+      for (const w of ['CODEX ASK', 'CODEX MOVED IT']) assert.ok(!bytes.includes(w), `${f} holds "${w}"`);
+    }
+  } finally {
+    store.deleteSetting(codexSwitchKey(josh.id));
+    turns.codexWhy = () => "Codex isn't set up on this server";
+    places.place = place;
+  }
 });

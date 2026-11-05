@@ -87,7 +87,7 @@ export const appRoutes: Route[] = [
     handler({ req, res, app, session }) {
       if (app.clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
-      res.write(`data: ${JSON.stringify({ type: 'hello', version: app.assetVersion, usage: app.runner.usageOf(session.uid) })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'hello', version: app.assetVersion, usage: app.runner.usageOf(session.uid), codex: app.runner.codexView(session.uid) })}\n\n`);
       app.clients.set(res, session);
       const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
       req.on('close', () => {

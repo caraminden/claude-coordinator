@@ -128,6 +128,7 @@ test('a steer that came in as the reply went out starts the next turn', async ()
   await started(r, t);
   // The runner hasn't read the result yet, but the wrapper has, and has closed claude's input.
   r.pollMs = 1e6;
+  const dir = turnDir(r, t.id); // taken now: the turn can end in the gap below, and the runner then forgets it
   clearInterval((r as any).turns.get(t.id).timer);
   writeFileSync(join(t.dir, 'hold'), '');
   writeFileSync(join(t.dir, 'release'), '');
@@ -135,9 +136,10 @@ test('a steer that came in as the reply went out starts the next turn', async ()
   await new Promise((res) => setTimeout(res, 600));
   r.send(t.id, 'Cara', 'just too late', [], {}, true);
   rmSync(join(t.dir, 'hold'));
+  r.pollMs = 10; // before the first poll: if claude has already exited, that poll starts the next turn, which needs a real timer
   (r as any).poll(t.id);
-  await until(() => existsSync(join(turnDir(r, t.id), 'exit.json')));
-  r.pollMs = 10;
+  // Over when its exit.json is there, or already handled by that poll (the runner then drops the turn and its folder).
+  await until(() => existsSync(join(dir, 'exit.json')) || (r as any).turns.get(t.id)?.dir !== dir);
   (r as any).poll(t.id);
   await until(() => seen(t.dir).length === 2);
   assert.equal(seen(t.dir)[1], '[Cara]: just too late');

@@ -369,6 +369,13 @@ async function runDueSchedules() {
   }
 }
 if (!BOOT_CHECK) setInterval(() => void safely('schedules', runDueSchedules), 30_000).unref();
+// Dismissed minions' build output (#336): those dismissed before clearing on dismissal, or whose clearing
+// failed. Off the boot's hot path, then daily. A preview's rows point at the live worktrees, so never there.
+if (!BOOT_CHECK && !PREVIEW) {
+  const sweepBuild = () => void safely('build output sweep', () => runner.sweepBuildOutput());
+  setTimeout(sweepBuild, 10 * 60_000).unref();
+  setInterval(sweepBuild, 24 * 60 * 60_000).unref();
+}
 
 // Embed what was said since the last pass, a little at a time, never in a request.
 let indexing = false;

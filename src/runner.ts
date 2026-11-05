@@ -27,6 +27,7 @@ import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claud
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDir, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
+import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -1064,8 +1065,8 @@ export class Runner {
   }
 
   /**
-   * Close a ticket that is not running. Its worktree and branch are kept. Its temp folder and preview
-   * go on its lane, after its last turn's save; resolves once they are gone.
+   * Close a ticket that is not running. Its worktree and branch are kept. Its temp folder, preview and
+   * build output (#336) go on its lane, after its last turn's save; resolves once they are gone.
    */
   close(ticketId: number, text: string): Promise<void> {
     if (this.cancelLimitWait(ticketId)) this.queues.delete(ticketId);
@@ -1073,16 +1074,68 @@ export class Runner {
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
-    return this.lanes.run(ticketId, 'dismissal cleanup', () => {
-      try {
-        const ticket = this.store.getTicket(ticketId);
-        // Reopened while this waited (the status route): its temp folder is in use again.
-        if (ticket?.status === 'closed') clearTmpDir(this.tmpRoot(ticket.project_id), ticketId);
-      } catch (err: any) {
-        console.error(`Ticket ${ticketId}: could not clear its temp folder: ${err.message}`);
+    return this.lanes.run(ticketId, 'dismissal cleanup', async () => {
+      const ticket = this.store.getTicket(ticketId);
+      // Reopened while this waited (the status route): its temp folder is in use again.
+      if (ticket?.status === 'closed') {
+        try {
+          clearTmpDir(this.tmpRoot(ticket.project_id), ticketId);
+        } catch (err: any) {
+          console.error(`Ticket ${ticketId}: could not clear its temp folder: ${err.message}`);
+        }
       }
-      return this.onClose(ticketId);
+      await this.onClose(ticketId);
+      if (ticket?.status === 'closed') {
+        await this.clearBuild(ticket).then(
+          (r) => r?.dirs && console.log(`Ticket ${ticketId}: cleared ${size(r.bytes)} of build output on dismissal.`),
+          (err) => console.error(`Ticket ${ticketId}: could not clear its build output: ${err.message}`),
+        );
+      }
     });
+  }
+
+  /**
+   * Remove a dismissed minion's build output (src/build-output.ts), if its worktree is where a minion's
+   * belongs and is a git checkout: never a Taskmaster's (it works in the scheme's main checkout), nor a
+   * preview's (its copied rows point at the live worktrees). Null when there is nothing to look at.
+   */
+  private clearBuild(ticket: Ticket) {
+    const dir = ticketWorktree(this.dataDir, ticket.project_id, ticket.id);
+    if (ticket.kind === 'coordinator' || resolve(ticket.cwd) !== dir || !existsSync(join(dir, '.git'))) return Promise.resolve(null);
+    return clearBuildOutput(dir);
+  }
+
+  private sweepingBuild = false;
+
+  /**
+   * Clear the build output of minions dismissed before #336, or whose clearing failed: at boot and
+   * daily (server.ts). One worktree at a time, each on its lane so a reopen waits for it, and only on
+   * proof the minion is dismissed and idle, as the temp sweep (#259). Returns what it freed.
+   */
+  async sweepBuildOutput(): Promise<{ worktrees: number; bytes: number }> {
+    const freed = { worktrees: 0, bytes: 0 };
+    if (this.sweepingBuild) return freed;
+    this.sweepingBuild = true;
+    try {
+      for (const p of this.store.listProjects()) {
+        for (const t of this.store.listTickets(p.id)) {
+          if (t.status !== 'closed' || this.turns.has(t.id) || this.lanes.busy(t.id)) continue;
+          await this.lanes.run(t.id, 'build output sweep', async () => {
+            const now = this.store.getTicket(t.id);
+            if (now?.status !== 'closed' || this.turns.has(t.id)) return;
+            const r = await this.clearBuild(now);
+            if (r?.dirs) {
+              freed.worktrees++;
+              freed.bytes += r.bytes;
+            }
+          });
+        }
+      }
+    } finally {
+      this.sweepingBuild = false;
+    }
+    if (freed.worktrees) console.log(`Cleared ${size(freed.bytes)} of build output from ${freed.worktrees} dismissed minion${freed.worktrees === 1 ? "'s worktree" : "s' worktrees"}.`);
+    return freed;
   }
 
   /**

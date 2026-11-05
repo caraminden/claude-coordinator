@@ -241,6 +241,8 @@ const userLine = (text: string, uuid?: string) => JSON.stringify({ type: 'user',
 
 export interface ClaudePlaces {
   place(uid: number | null): TurnPlace | null;
+  /** The server login's Codex-only container (#341), whose place() is the host. */
+  codexPlace(uid: number): TurnPlace | null;
   expire(uid: number): void;
 }
 
@@ -344,7 +346,7 @@ export class ContraptionTurns {
       return { cwd: dir, onHost: dir, configDir: claudeConfigDir(this.env) };
     }
     const rel = join('.citadel', 'contraption-scratch', c.name);
-    return { cwd: join(homedir(), rel), onHost: join(dirname(place.configDir), rel), configDir: place.configDir };
+    return { cwd: join(homedir(), rel), onHost: join(place.home, rel), configDir: place.configDir };
   }
 
   /**
@@ -357,7 +359,7 @@ export class ContraptionTurns {
       return { onHost: dir, inside: dir };
     }
     const rel = join('.citadel', 'contraption-turns', String(id));
-    return { onHost: join(dirname(place.configDir), rel), inside: join(homedir(), rel) };
+    return { onHost: join(place.home, rel), inside: join(homedir(), rel) };
   }
 
   /** A Claude session's transcript, as this server sees it. */
@@ -396,15 +398,19 @@ export class ContraptionTurns {
     const place = this.claude.place(req.person);
     if (!place) return fail('no_plan', 'This person hasn\'t linked their Claude in Citadel (Settings → Claude), or it needs linking again');
 
+    // The server login's Codex turns run in its Codex-only container (#341); its Claude turns, and the session's bookkeeping, stay on the host.
+    const wantCodex = isCodexModel(req.model) || !!this.store.getSetting<boolean>(codexSwitchKey(req.person));
+    const at = (wantCodex && place.host && !this.codexWhy(req.person) && this.claude.codexPlace(req.person)) || place;
+
     this.names.add(key);
     const id = this.store.startContraptionTurn(c.id, req.person, req.session);
-    const dir = this.turnDir(id, place);
-    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: place.host ? null : place.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [], replied: false, steers: new Set() };
+    const dir = this.turnDir(id, at);
+    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: at.host ? null : at.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [], replied: false, steers: new Set() };
     this.live.set(id, live);
     let outcome: string = 'failed';
     let usage: Usage | null = null;
     try {
-      ({ outcome, usage } = await this.turn(c, req, place, live, dir, emit));
+      ({ outcome, usage } = await this.turn(c, req, place, at, wantCodex, live, dir, emit));
     } catch (err: any) {
       fail('failed', String(err?.message ?? err).slice(0, 300));
     } finally {
@@ -415,12 +421,15 @@ export class ContraptionTurns {
     }
   }
 
-  private async turn(c: ContraptionRow, req: TurnRequest, place: TurnPlace, live: Live, dir: { onHost: string; inside: string }, emit: Emit): Promise<{ outcome: string; usage: Usage | null }> {
+  /** `place` is where the person's Claude turns and the session's files are; `at` is where this one runs (they differ only for the server login on Codex). */
+  private async turn(c: ContraptionRow, req: TurnRequest, place: TurnPlace, at: TurnPlace, wantCodex: boolean, live: Live, dir: { onHost: string; inside: string }, emit: Emit): Promise<{ outcome: string; usage: Usage | null }> {
     const where = this.scratch(c, req.person, place);
     mkdirSync(where.onHost, { recursive: true });
+    // Its working folder, inside the container it runs in: Codex's app turns run only their MCP tools, so it holds nothing they need.
+    const runIn = at === place ? where : this.scratch(c, req.person, at);
+    if (runIn !== where) mkdirSync(runIn.onHost, { recursive: true });
     // Codex (#337): a Codex pick, or the person's "Enable Codex override", once their container has Codex; else Claude's default.
-    const wantCodex = isCodexModel(req.model) || !!this.store.getSetting<boolean>(codexSwitchKey(req.person));
-    const codex = wantCodex && !place.host && !this.codexWhy(req.person);
+    const codex = wantCodex && !at.host && !this.codexWhy(req.person);
     if (isCodexModel(req.model) && !codex) req = { ...req, model: isCodexModel(c.default_model) ? null : c.default_model };
     const ckey = codexKey(c.id, req.person, req.session);
     const logFile = codexLogFile(where.onHost, req.session);
@@ -467,7 +476,7 @@ export class ContraptionTurns {
     if (codex) {
       for (const [f, text] of CODEX_FILES) secret(f, text);
       // The hook reads this (CITADEL_CODEX_TRIPWIRE): only the contraption's own servers and the person's machines.
-      secret('codex-tripwire.json', JSON.stringify({ script: join(dir.inside, 'tripwire.ts'), config: tripwireConfig(0, place.configDir, false), mode: 'contraption', mcp: Object.keys(config.mcpServers) }));
+      secret('codex-tripwire.json', JSON.stringify({ script: join(dir.inside, 'tripwire.ts'), config: tripwireConfig(0, at.host ? place.configDir : at.configDir, false), mode: 'contraption', mcp: Object.keys(config.mcpServers) }));
       let claudeJsonl = '';
       try {
         if (resume) claudeJsonl = readFileSync(this.transcript(where.configDir, where.cwd, claudeSession), 'utf8');
@@ -498,21 +507,21 @@ export class ContraptionTurns {
     }
     let cmd: string;
     let cmdArgs: string[];
-    if (place.host) {
+    if (at.host) {
       [cmd, cmdArgs] = [this.claudeBin, argv];
     } else {
       // The person's own sign-in, so nothing of the server's may win over it.
       for (const v of AUTH_VARS) delete env[v];
-      env = { ...env, ...place.env, XDG_RUNTIME_DIR: tmp };
-      await place.ensure();
+      env = { ...env, ...at.env, XDG_RUNTIME_DIR: tmp };
+      await at.ensure();
       // `exec` keeps the pid, written first, so a cancel can signal claude inside the container.
       cmd = this.podman;
-      cmdArgs = ['exec', '-i', '-w', where.cwd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), place.container,
+      cmdArgs = ['exec', '-i', '-w', runIn.cwd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), at.container,
         'sh', '-c', 'echo $$ > "$0"; exec "$@"', join(dir.inside, 'pid'), codex ? process.execPath : resolveClaude(this.claudeBin), ...argv];
     }
     if (live.stopped) return { outcome: live.stopped, usage: null };
 
-    const child = spawn(cmd, cmdArgs, { cwd: place.host ? where.cwd : undefined, env: place.host ? env : turnEnv(this.env), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(cmd, cmdArgs, { cwd: at.host ? where.cwd : undefined, env: at.host ? env : turnEnv(this.env), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     live.child = child;
     emit('start', { turn: live.id, session: req.session, claudeSession });
     child.stdin!.on('error', () => {}); // claude exited without reading it all

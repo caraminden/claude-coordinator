@@ -965,6 +965,8 @@ export class Runner {
   placeFor?: (person: number | null) => TurnPlace | { refused: string };
   /** Why a person's turns can't run on Codex (#337), or null when they can: their own container, signed in to Codex. */
   codexReady?: (person: number) => string | null;
+  /** Where the server login's Codex turns run: its own container (#341), or null before there is one. */
+  codexPlaceFor?: (person: number) => TurnPlace | null;
   /** A container turn's Claude sign-in was refused, so that person has to link again. */
   onAuthFailure?: (person: number) => void;
 
@@ -1771,9 +1773,9 @@ export class Runner {
       return this.broadcastTicket(ticket.id);
     }
     // Whose Claude it runs on (sender pays, #213): the host's login for its owner, else their own container.
-    const place = this.placeFor?.(person) ?? { host: true as const };
-    if ('refused' in place) {
-      this.emit(ticket.id, 'note', { text: place.refused });
+    const claudePlace = this.placeFor?.(person) ?? { host: true as const };
+    if ('refused' in claudePlace) {
+      this.emit(ticket.id, 'note', { text: claudePlace.refused });
       return this.broadcastTicket(ticket.id);
     }
     // deploy/prune.sh removes worktrees of long-closed minions; a reopened one gets its back.
@@ -1813,6 +1815,22 @@ export class Runner {
     // Tool calls matching the merge asks or the project's approval rules wait for a person (threads only:
     // a Taskmaster can't show cards, so an ask would be a silent deny there).
     const rules = ticket.kind === 'coordinator' ? [] : [...new Set([...MERGE_ASKS, ...lines(project.approval_rules)])];
+    // Codex (#337): a Codex pick, or the sender's "Enable Codex override" (which maps a Claude pick by tier),
+    // once their own container is signed in to Codex. Otherwise it runs on Claude, saying why. The server
+    // login's Codex turns run in its own container, never on the host (#341): only there is Codex's hook.
+    const { model: picked, effort } = turnSettings(ticket, project);
+    const switched = person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person));
+    const wantsCodex = isCodexModel(picked) || switched;
+    let codexWhy = wantsCodex ? this.codexWhy(person) : null;
+    const codexPlace = wantsCodex && !codexWhy && claudePlace.host && person !== null ? this.codexPlaceFor?.(person) ?? null : null;
+    if (wantsCodex && !codexWhy && claudePlace.host && !codexPlace) codexWhy = "Codex's container isn't there yet (sign in to Codex in Settings → Your account)";
+    const codex = wantsCodex && !codexWhy;
+    const place: TurnPlace = codexPlace ?? claudePlace;
+    if (codexWhy) {
+      const name = CODEX_MODELS.find(([id]) => id === picked)?.[1];
+      this.emit(ticket.id, 'note', { text: name ? `This minion is set to ${name}, but ${codexWhy}, so this turn runs on Claude's default model.` : `Codex is switched on, but ${codexWhy}, so this turn runs on Claude.` });
+    }
+    const model = isCodexModel(picked) && !codex ? turnSettings({ ...ticket, model: null }, project).model : picked;
     // The turn's folder, with its own copy of the pinned files: a restart sweeps the server's copy, and
     // the tripwire hook must still be there for a turn that outlives it.
     const dir = join(place.host ? this.turnsDir : place.turnsDir, `${ticket.id}-${Date.now()}`);
@@ -1865,17 +1883,6 @@ export class Runner {
     // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
     const tripwire = tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE));
-    // Codex (#337): a Codex pick, or the sender's "Enable Codex override" (which maps a Claude pick by tier),
-    // once their own container is signed in to Codex. Otherwise it runs on Claude, saying why.
-    const { model: picked, effort } = turnSettings(ticket, project);
-    const switched = person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person));
-    const codexWhy = isCodexModel(picked) || switched ? this.codexWhy(person) : null;
-    const codex = (isCodexModel(picked) || switched) && !codexWhy;
-    if (codexWhy) {
-      const name = CODEX_MODELS.find(([id]) => id === picked)?.[1];
-      this.emit(ticket.id, 'note', { text: name ? `This minion is set to ${name}, but ${codexWhy}, so this turn runs on Claude's default model.` : `Codex is switched on, but ${codexWhy}, so this turn runs on Claude.` });
-    }
-    const model = isCodexModel(picked) && !codex ? turnSettings({ ...ticket, model: null }, project).model : picked;
     // Codex's managed hook (deploy/claude-container/codex) reads the turn's tripwire from this file: its command can't carry it.
     // A Codex turn's own run is checked in turn mode: its patches and MCP calls too, with no cards, and never its own folder.
     const codexTripwire = join(dir, 'codex-tripwire.json');
@@ -1935,7 +1942,7 @@ export class Runner {
     if (person !== ticket.person_id) {
       this.store.updateTicket(ticket.id, { person_id: person });
       const name = person && this.store.getUser(person)?.name;
-      if (ticket.person_id && name) this.emit(ticket.id, 'note', { text: place.host ? `Turns now run for ${name}, on the server's Claude login.` : `Turns now run on ${name}'s Claude plan.` });
+      if (ticket.person_id && name) this.emit(ticket.id, 'note', { text: claudePlace.host ? `Turns now run for ${name}, on the server's Claude login.` : `Turns now run on ${name}'s Claude plan.` });
     }
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
@@ -2210,7 +2217,8 @@ export class Runner {
         this.onAuthFailure?.(turn.person);
         this.emit(ticketId, 'note', { text: `${this.store.getUser(turn.person)?.name ?? 'This person'}'s Claude sign-in expired. Link Claude again in Settings → Your account; their messages wait until then.` });
       }
-      const usage = turn?.container && turn.person ? this.store.getSetting<Usage>(usageKey(turn.person)) : this.usage;
+      const payer = this.payerOf(turn?.person);
+      const usage = payer === null ? this.usage : this.store.getSetting<Usage>(usageKey(payer));
       const codexReset = turn?.codex && turn.person ? codexResetAt(this.store.getSetting<CodexUsage>(codexUsageKey(turn.person))) : undefined;
       this.turnFailed(ticketId, killed || resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0, usage, codexReset);
     } else if (turn?.handBack) {
@@ -2489,18 +2497,20 @@ export class Runner {
     return payer === null ? this.usage : this.store.getSetting<Usage>(usageKey(payer));
   }
 
-  /** Why a person's turns can't run on Codex (#337), or null when they can: only their own container, signed in to Codex. */
+  /**
+   * Why a person's turns can't run on Codex (#337), or null when they can: only in their own container, signed
+   * in to Codex. The server login's owner has one for Codex alone (#341). Codex is always the person's own, never a payer's.
+   */
   codexWhy(person: number | null): string | null {
-    if (this.payerOf(person) === null) return "the server's Claude login has no Codex";
-    return this.codexReady ? this.codexReady(person!) : "Codex isn't set up on this server";
+    if (!person) return 'Codex runs only for a person';
+    return this.codexReady ? this.codexReady(person) : "Codex isn't set up on this server";
   }
 
   /** What the usage bar shows of a person's Codex: whether they can use it, the switch and its windows. */
   codexView(uid: number | null | undefined): { ready: boolean; why: string | null; on: boolean; usage: CodexUsage | null } | null {
-    const payer = this.payerOf(uid);
-    if (payer === null) return null;
-    const why = this.codexWhy(payer);
-    return { ready: !why, why, on: !!this.store.getSetting<boolean>(codexSwitchKey(payer)), usage: this.store.getSetting<CodexUsage>(codexUsageKey(payer)) };
+    if (!uid) return null;
+    const why = this.codexWhy(uid);
+    return { ready: !why, why, on: !!this.store.getSetting<boolean>(codexSwitchKey(uid)), usage: this.store.getSetting<CodexUsage>(codexUsageKey(uid)) };
   }
 
   /**
@@ -2513,11 +2523,11 @@ export class Runner {
       if (why) return why;
       this.store.setSetting(codexSwitchKey(uid), true);
     } else this.store.deleteSetting(codexSwitchKey(uid));
-    this.broadcast({ type: 'codex', codex: this.codexView(uid), payer: uid });
+    this.broadcast({ type: 'codex', codex: this.codexView(uid), to: uid });
     if (!on) return null;
     const mine = (w: LimitResume) => {
       const t = this.store.getTicket(w.ticket);
-      return !!t && this.payerOf(t.person_id ?? this.store.getProject(t.project_id)?.owner_id) === uid;
+      return !!t && (t.person_id ?? this.store.getProject(t.project_id)?.owner_id) === uid;
     };
     // Due now, on Codex, spaced limitGapMs apart like any limit resume.
     const list = this.limitResumes();
@@ -2530,7 +2540,7 @@ export class Runner {
     const w = (x: any) => (x && typeof x.usedPercent === 'number' ? { usedPercent: x.usedPercent, windowDurationMins: typeof x.windowDurationMins === 'number' ? x.windowDurationMins : null, resetsAt: typeof x.resetsAt === 'number' ? x.resetsAt : null } : null);
     if (person === null || !l) return;
     this.store.setSetting(codexUsageKey(person), { primary: w(l.primary), secondary: w(l.secondary), updatedAt: Date.now() });
-    this.broadcast({ type: 'codex', codex: this.codexView(person), payer: person });
+    this.broadcast({ type: 'codex', codex: this.codexView(person), to: person });
   }
 
   /** Add a finished Codex turn's log to its minion's Codex thread. */

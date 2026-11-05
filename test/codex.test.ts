@@ -306,7 +306,7 @@ const wait = setInterval(() => {
   process.env.PATH = `${bin}:${savedPath}`;
   try {
     let linked = true;
-    const claude = { meta: () => (linked ? { container: 'citadel-claude-2', home, linkedAt: 1 } : null), name: () => 'citadel-claude-2', ensure: async () => {} } as unknown as ClaudeLink;
+    const claude = { volumeHome: () => (linked ? home : null), serverLogin: () => false, name: () => 'citadel-claude-2', ensure: async () => {} } as unknown as ClaudeLink;
     // The first start waits (a container rebuilding); later ones are instant.
     let started_ = () => {};
     const slow = new Promise<void>((r) => (started_ = r));

@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { ClaudeLink, containerPath, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
 import { Containers, runArgs, specHash, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
+import { CodexLink } from '../src/codex-link.ts';
 import { Store } from '../src/db.ts';
 import { Runner, TURN_SLICE, usageKey, wrapperAlive } from '../src/runner.ts';
 import { stopTurns } from './helpers.ts';
@@ -92,7 +93,7 @@ function runner(place: NonNullable<Runner['placeFor']>) {
   r.placeFor = place;
   return r;
 }
-const inContainer = () => ({ host: false as const, container: 'citadel-claude-test-2', configDir: join(volume, '.claude'), turnsDir: join(root, 'run', 'turns', 'person-2'), env: { HOME: volume, CLAUDE_CONFIG_DIR: join(volume, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} });
+const inContainer = () => ({ host: false as const, container: 'citadel-claude-test-2', configDir: join(volume, '.claude'), home: volume, turnsDir: join(root, 'run', 'turns', 'person-2'), env: { HOME: volume, CLAUDE_CONFIG_DIR: join(volume, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} });
 
 function newTicket() {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Josh' });
@@ -294,6 +295,37 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   assert.ok(log.some((c) => c.join(' ').includes(`volume rm -f citadel-claude-t-${josh.id}`)));
   const cara = store.createUser({ name: 'Cara2', login: 'cara2', admin: true, server_login: true });
   assert.deepEqual(link.place(cara.id), { host: true });
+});
+
+test("the server login gets a Codex-only container (#341): its Codex turns go there with the host's Claude folder, its Claude turns stay on the host, and unlinking Claude leaves it", async () => {
+  const log: string[][] = [];
+  const vol = join(root, 'server-login-vol');
+  const fakeRun: RunCmd = async (cmd, args) => {
+    log.push([cmd, ...args]);
+    if (args[0] === 'container' && args[1] === 'inspect') return { code: 0, stdout: 'true deadbeef', stderr: '' };
+    if (args[0] === 'volume' && args[1] === 'inspect') return { code: 0, stdout: vol + '\n', stderr: '' };
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), fake, new Containers(fakeRun), 'citadel-claude-sl-');
+  const owner = store.createUser({ name: 'Owner341', login: 'owner341', admin: true, server_login: true });
+  const codex = new CodexLink(link, new Containers(fakeRun));
+  assert.equal(link.codexPlace(owner.id), null, 'no container until its Codex sign-in makes one');
+  assert.equal(codex.status(owner.id).state, 'not linked', 'so Settings offers the sign-in');
+  assert.equal(codex.status(josh.id).state, 'no container', 'anyone else still needs their Claude linked');
+  await link.ensure(owner.id);
+  const place = link.codexPlace(owner.id);
+  assert.ok(place && !place.host);
+  assert.equal(place.container, `citadel-claude-sl-${owner.id}`);
+  assert.equal(place.home, vol);
+  assert.equal(place.configDir, join(process.env.CLAUDE_CONFIG_DIR ?? join(process.env.HOME!, '.claude')), "the host's Claude folder, where its sessions are");
+  assert.equal(place.turnsDir, link.turnsDir(owner.id));
+  assert.deepEqual(link.place(owner.id), { host: true }, 'its Claude turns stay on the host');
+  assert.equal(link.codexPlace(josh.id), null, 'only for the server login');
+  mkdirSync(join(vol, '.codex'), { recursive: true });
+  writeFileSync(join(vol, '.codex', 'auth.json'), '{}');
+  assert.equal(codex.status(owner.id).state, 'linked');
+  await link.unlink(owner.id);
+  assert.ok(!log.some((c) => c.join(' ').includes('volume rm')), 'it has no Claude link, so its volume stays');
 });
 
 test("a person's container mounts their own turns' files, never another person's or the host's (#241)", async () => {

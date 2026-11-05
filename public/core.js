@@ -515,7 +515,7 @@ setInterval(reloadWhenIdle, 2000);
 // ---------- account usage ----------
 
 export let usage = null;
-/** The person's Codex (#337): { ready, why, on, usage }, or null on the server's login, which has none. */
+/** The person's Codex (#337): { ready, why, on, usage }, or null when nobody is signed in. */
 export let codex = null;
 let codexHint = '';
 

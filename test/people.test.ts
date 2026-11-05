@@ -303,3 +303,18 @@ test("each person's meter shows their own plan: the stream's hello and usage new
   cara.stop();
   josh.stop();
 });
+
+test("Codex news goes to its own person, the server login's owner too, whose payer is the server's (#341)", async () => {
+  const cara = listen(people.Cara.cookie);
+  const josh = listen(people.Josh.cookie);
+  await until('both hellos', () => cara.seen.includes('"hello"') && josh.seen.includes('"hello"'));
+  assert.match(cara.seen, /"hello".*"codex":\{"ready":false/, 'the server login has a Codex to sign in to');
+  await as('Cara', '/api/me/codex/switch', { on: false }, 'PUT');
+  await until("Cara's Codex news", () => cara.seen.includes('"type":"codex"'));
+  await as('Josh', '/api/me/codex/switch', { on: false }, 'PUT');
+  await until("Josh's Codex news", () => josh.seen.includes('"type":"codex"'));
+  assert.equal(cara.seen.split('"type":"codex"').length, 2, "Cara gets only her own");
+  assert.equal(josh.seen.split('"type":"codex"').length, 2, "Josh gets only his own");
+  cara.stop();
+  josh.stop();
+});

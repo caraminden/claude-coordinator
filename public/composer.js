@@ -384,7 +384,7 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const modelName = (id) => [...MODELS, ...CODEX_MODELS].find(([m]) => m === id)?.[1] ?? id;
 /** Why Codex can't be picked here, briefly, or null. */
 function codexBlocked() {
-  if (!codex) return "not on the server's login";
+  if (!codex) return 'sign in first';
   if (codex.ready) return null;
   return /container/.test(codex.why ?? '') ? 'link your Claude first' : 'sign in to Codex first';
 }
@@ -426,7 +426,7 @@ export function renderModelPicker() {
   model.replaceChildren(h('option', { value: '' }, defModel),
     h('optgroup', { label: 'Claude' }, ...MODELS.map(([id, name]) => h('option', { value: id }, name))),
     h('optgroup', { label: blocked ? `Codex (${blocked})` : 'Codex' },
-      ...CODEX_MODELS.map(([id, name]) => h('option', { value: id, disabled: !!blocked && t.model !== id, title: blocked ? `Codex: ${codex?.why ?? "the server's Claude login has no Codex"}` : null }, name))));
+      ...CODEX_MODELS.map(([id, name]) => h('option', { value: id, disabled: !!blocked && t.model !== id, title: blocked ? `Codex: ${codex?.why ?? 'sign in to Citadel to use Codex'}` : null }, name))));
   // A model set outside these lists (say, by an older version) still shows as itself.
   if (t.model && ![...MODELS, ...CODEX_MODELS].some(([id]) => id === t.model)) model.append(h('option', { value: t.model }, t.model));
   model.value = t.model ?? '';

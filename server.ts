@@ -161,7 +161,7 @@ function broadcast(msg: object) {
     if (res.writableLength > MAX_CLIENT_BACKLOG) {
       clients.delete(res);
       res.destroy();
-    } else if (mayReceive(store, who, scope) && (!('payer' in msg) || runner.payerOf(who.uid) === (msg as { payer: number | null }).payer)) {
+    } else if (mayReceive(store, who, scope) && (!('payer' in msg) || runner.payerOf(who.uid) === (msg as { payer: number | null }).payer) && (!('to' in msg) || who.uid === (msg as { to: number }).to)) {
       res.write(machineList && !who.admin ? `data: ${JSON.stringify({ ...msg, machines: machinesFor(who, machineList) })}\n\n` : data);
     }
   }
@@ -244,12 +244,14 @@ runner.placeFor = (person) => {
 };
 runner.onAuthFailure = (person) => claudeLink.expire(person);
 const codexLink = new CodexLink(claudeLink);
-// Codex turns (#337) run only in a person's own container, once they've signed in to Codex there.
+// Codex turns (#337) run only in a person's own container, once they've signed in to Codex there (the server login's: #341).
 const codexReady = (uid: number) => {
   const state = codexLink.status(uid).state;
   return state === 'linked' ? null : state === 'no container' ? 'Codex runs in your own Claude container, so link your Claude in Settings first' : 'you are not signed in to Codex (Settings → Your account)';
 };
 runner.codexReady = codexReady;
+// The server login's owner signs in to Codex in a container of its own, and its Codex turns run there (#341).
+runner.codexPlaceFor = (uid) => claudeLink.codexPlace(uid);
 // Contraptions' turns (the turn API): on the same Claude a person's minion turns use, never anyone else's.
 const contraptionTurns = new ContraptionTurns(store, contraptions, claudeLink, { dataDir: DATA_DIR, claudeBin: process.env.CLAUDE_BIN ?? 'claude' });
 contraptionTurns.noTurns = PREVIEW;

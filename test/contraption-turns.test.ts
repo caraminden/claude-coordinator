@@ -3,10 +3,11 @@
 // and that Citadel keeps no turn text.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import type { TurnPlace } from '../src/claude-link.ts';
 import { codexSwitchKey } from '../src/codex.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
@@ -130,12 +131,15 @@ writeFileSync(
 const fs = require('node:fs'), { spawn } = require('node:child_process');
 const a = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(podmanLog)}, JSON.stringify(a) + '\\n');
-const home = ${JSON.stringify(homedir())}, vol = ${JSON.stringify(join(root, 'vol-josh'))};
-const m = (s) => (s.startsWith(home + '/.citadel/') ? vol + s.slice(home.length) : s);
 let i = 1, env = { ...process.env }, cwd;
 if (a[i] === '-i') i++;
-if (a[i] === '-w') { cwd = m(a[i + 1]); i += 2; }
+if (a[i] === '-w') { cwd = a[i + 1]; i += 2; }
 while (a[i] === '-e') { const [k, ...v] = a[i + 1].split('='); env[k] = v.join('='); i += 2; }
+// Each container's ~/.citadel is in its own volume: Cara's Codex-only one (#341), else Josh's.
+const home = ${JSON.stringify(homedir())}, vol = a[i] === 'citadel-claude-t-cara' ? ${JSON.stringify(join(root, 'vol-cara'))} : ${JSON.stringify(join(root, 'vol-josh'))};
+const m = (s) => (s.startsWith(home + '/.citadel/') ? vol + s.slice(home.length) : s);
+if (cwd) cwd = m(cwd);
+env.FAKE_VOL = vol;
 const child = spawn(a[i + 1], a.slice(i + 2).map(m), { env, cwd, stdio: 'inherit' });
 child.on('exit', (code) => process.exit(code ?? 1));
 `,
@@ -156,14 +160,17 @@ for (const c of [mandate, peek]) for (const u of [cara, josh, olive]) store.setC
 // Cara runs on the host (the server login); Josh in his container; Olive has linked nothing.
 const vol = join(root, 'vol-josh');
 const expired: number[] = [];
+let caraCodex: TurnPlace | null = null;
 const places = {
   place(uid: number | null) {
     if (uid === cara.id) return { host: true as const };
     if (uid === josh.id) {
-      return { host: false as const, container: 'citadel-claude-t-2', configDir: join(vol, '.claude'), turnsDir: join(root, 'run', 'turns', 'person-2'), env: { HOME: homedir(), CLAUDE_CONFIG_DIR: join(vol, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} };
+      return { host: false as const, container: 'citadel-claude-t-2', configDir: join(vol, '.claude'), home: vol, turnsDir: join(root, 'run', 'turns', 'person-2'), env: { HOME: homedir(), CLAUDE_CONFIG_DIR: join(vol, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} };
     }
     return null;
   },
+  // Cara's Codex-only container (#341), once a test gives her one.
+  codexPlace: (uid: number) => (uid === cara.id ? caraCodex : null),
   expire: (uid: number) => expired.push(uid),
 };
 // The server's own environment: what must and mustn't reach a turn.
@@ -575,14 +582,14 @@ test('the API is only for a contraption\'s own server on this machine, with its 
   assert.equal((await (await fetch(`${srv.base}/api/health`)).json()).interruptible, 0);
 });
 
-test("on Codex (#337) a contraption turn runs the shim in its own mode with only the app's tools, and its Codex turns go back to Claude, never through Citadel's database", async () => {
-  const codexLog = join(root, 'codex.jsonl');
-  const codexBin = join(root, 'codex-fake');
-  writeFileSync(codexBin, `#!${process.execPath}
+// A fake codex app-server, for Codex turns (#337): it logs the hook config it got and its requests.
+const codexLog = join(root, 'codex.jsonl');
+const codexBin = join(root, 'codex-fake');
+writeFileSync(codexBin, `#!${process.execPath}
 const fs = require('node:fs');
 const record = (m) => fs.appendFileSync(${JSON.stringify(codexLog)}, JSON.stringify(m) + '\\n');
 // The fake podman maps the container's ~/.citadel in argv only.
-const inVol = (f) => f.replace(${JSON.stringify(homedir() + '/.citadel/')}, ${JSON.stringify(join(root, 'vol-josh') + '/.citadel/')});
+const inVol = (f) => f.replace(${JSON.stringify(homedir() + '/.citadel/')}, process.env.FAKE_VOL + '/.citadel/');
 record({ tripwire: JSON.parse(fs.readFileSync(inVol(process.env.CITADEL_CODEX_TRIPWIRE), 'utf8')), argv: process.argv.slice(2) });
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
 const note = (method, params) => send({ method, params: { threadId: 'cth', turnId: 'tu1', ...params } });
@@ -597,7 +604,9 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   note('turn/completed', { turn: { id: 'tu1', status: 'completed' } });
 });
 `);
-  chmodSync(codexBin, 0o755);
+chmodSync(codexBin, 0o755);
+
+test("on Codex (#337) a contraption turn runs the shim in its own mode with only the app's tools, and its Codex turns go back to Claude, never through Citadel's database", async () => {
   rmSync(codexLog, { force: true });
   // Into the container's environment as the person's own (a turn's env never takes the server's CITADEL_*).
   const place = places.place;
@@ -633,5 +642,44 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
     store.deleteSetting(codexSwitchKey(josh.id));
     turns.codexWhy = () => "Codex isn't set up on this server";
     places.place = place;
+  }
+});
+
+test("the server login's Codex app turns run in its own Codex-only container, handing over with its Claude turns on the host both ways (#341)", async () => {
+  rmSync(codexLog, { force: true });
+  const volCara = join(root, 'vol-cara');
+  caraCodex = {
+    host: false, container: 'citadel-claude-t-cara', configDir: claudeDir, home: volCara, turnsDir: join(root, 'run', 'turns', `person-${cara.id}`),
+    env: { HOME: homedir(), CLAUDE_CONFIG_DIR: join(volCara, '.claude'), DISABLE_AUTOUPDATER: '1', CITADEL_CODEX_BIN: codexBin, CODEX_HOME: join(root, 'codex-home') }, ensure: async () => {},
+  };
+  turns.codexWhy = () => null;
+  const ask = { person: cara.id, session: 'cara-codex', mcp: [{ name: 'mandate', path: '/mcp' }] };
+  try {
+    // On Claude first, on the host; its transcript is in the host's Claude folder.
+    await turn(mandate, { ...ask, prompt: 'HOST ASK' });
+    assert.ok(!readFileSync(podmanLog, 'utf8').includes('citadel-claude-t-cara'));
+    const { claude_session } = store.contraptionSession(mandate.id, cara.id, 'cara-codex')!;
+    const transcript = join(claudeDir, 'projects', join(data, 'contraption-scratch', 'mandate', String(cara.id)).replace(/[^a-zA-Z0-9]/g, '-'), `${claude_session}.jsonl`);
+    appendFileSync(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: 'HOST CLAUDE ASK' } }) + '\n');
+
+    store.setSetting(codexSwitchKey(cara.id), true);
+    const evs = await turn(mandate, { ...ask, prompt: 'CODEX ASK cara' });
+    assert.equal(evs.at(-1)!.event, 'end', JSON.stringify(evs));
+    const exec = readFileSync(podmanLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1);
+    assert.ok(exec.includes('citadel-claude-t-cara'), 'in her own container');
+    assert.ok(!exec.some((a: string) => a.startsWith('ANTHROPIC_API_KEY=')), "never the server's Claude key");
+    const calls = readFileSync(codexLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.equal(calls[0].tripwire.mode, 'contraption');
+    const said = calls.find((c) => c.method === 'turn/start').params.input.map((i: any) => i.text).join('\n');
+    assert.match(said, /HOST CLAUDE ASK/, 'the hand-over is her Claude conversation on the host');
+
+    store.deleteSetting(codexSwitchKey(cara.id));
+    await turn(mandate, { ...ask, prompt: 'back on the host' });
+    assert.equal(lastRun().cwd, join(data, 'contraption-scratch', 'mandate', String(cara.id)));
+    assert.match(lastRun().prompt, /<codex-turns>[\s\S]*CODEX ASK cara[\s\S]*CODEX MOVED IT[\s\S]*<\/codex-turns>[\s\S]*back on the host/);
+  } finally {
+    store.deleteSetting(codexSwitchKey(cara.id));
+    turns.codexWhy = () => "Codex isn't set up on this server";
+    caraCodex = null;
   }
 });

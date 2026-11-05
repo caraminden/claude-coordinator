@@ -43,11 +43,12 @@ export class CodexLink {
   }
 
   status(uid: number): CodexStatus {
-    const meta = this.claude.meta(uid);
-    // Codex runs only in a person's container, where its managed tripwire hook is (deploy/claude-container/codex).
-    if (!meta) return { state: 'no container' };
+    // Codex runs only in a person's container, where its managed tripwire hook is (deploy/claude-container/codex):
+    // their Claude one, or for the server login one of its own that its sign-in makes (#341).
+    const home = this.claude.volumeHome(uid);
+    if (!home && !this.claude.serverLogin(uid)) return { state: 'no container' };
     const login = this.logins.get(uid);
-    if (existsSync(join(meta.home, '.codex', 'auth.json'))) {
+    if (home && existsSync(join(home, '.codex', 'auth.json'))) {
       if (login?.done) this.logins.delete(uid);
       return { state: 'linked' };
     }

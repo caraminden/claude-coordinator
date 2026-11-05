@@ -277,7 +277,7 @@ function codexCard() {
       h('p', { class: 'muted small' }, 'Runs your minions, Taskmasters and apps on Codex instead of Claude until you turn it off: handy when your Claude usage runs out. A Claude model picked for a minion runs as the Codex model of the same tier, and each conversation carries over word for word both ways. The left panel offers it too once your Claude usage passes 90%.')) : '';
     if (st.state === 'no container') {
       return card.replaceChildren(title('Needs your Claude', 'off'), errLine,
-        h('p', { class: 'muted' }, 'Codex signs in inside your own Claude container, so link your Claude above first. Turns on the server\'s own login can\'t use Codex yet.'), override);
+        h('p', { class: 'muted' }, 'Codex signs in inside your own Claude container, so link your Claude above first.'), override);
     }
     if (st.state === 'starting') {
       again();

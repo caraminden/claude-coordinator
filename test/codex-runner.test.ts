@@ -24,6 +24,7 @@ writeFileSync(join(bin, 'podman'), `#!${process.execPath}
 const { spawn } = require('node:child_process');
 const args = process.argv.slice(2);
 if (args[0] !== 'exec') process.exit(0);
+require('node:fs').appendFileSync(${JSON.stringify(join(root, 'seen.jsonl'))}, JSON.stringify({ who: 'podman', args }) + '\\n');
 const [cmd, ...rest] = args.slice(3);
 spawn(cmd === 'node' ? process.execPath : cmd, rest, { detached: true, stdio: 'ignore' }).unref();
 `);
@@ -91,8 +92,12 @@ const josh = store.createUser({ name: 'Josh', login: 'josh' });
 const cara = store.createUser({ name: 'Cara', login: 'cara', server_login: true });
 const volume = join(root, 'josh-volume');
 mkdirSync(join(volume, '.claude'), { recursive: true });
-const joshPlace = { host: false as const, container: 'citadel-claude-test-2', configDir: join(volume, '.claude'), turnsDir: join(root, 'run', 'turns', `person-${josh.id}`), env: { HOME: volume, CLAUDE_CONFIG_DIR: join(volume, '.claude') }, ensure: async () => {} };
+const joshPlace = { host: false as const, container: 'citadel-claude-test-2', configDir: join(volume, '.claude'), home: volume, turnsDir: join(root, 'run', 'turns', `person-${josh.id}`), env: { HOME: volume, CLAUDE_CONFIG_DIR: join(volume, '.claude') }, ensure: async () => {} };
 let signedIn = true;
+// The server login's Codex-only container (#341): Claude's config is the host's, where her sessions are.
+const caraVolume = join(root, 'cara-volume');
+const caraPlace = { host: false as const, container: 'citadel-claude-test-cara', configDir: process.env.CLAUDE_CONFIG_DIR!, home: caraVolume, turnsDir: join(root, 'run', 'turns', `person-${cara.id}`), env: { HOME: caraVolume, CLAUDE_CONFIG_DIR: join(caraVolume, '.claude') }, ensure: async () => {} };
+let caraContainer = true;
 
 function runner() {
   const r = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 'secret' }), claude);
@@ -101,6 +106,7 @@ function runner() {
   r.personOf = (author) => (author === 'Josh' ? josh.id : author === 'Cara' ? cara.id : null);
   r.placeFor = (uid) => (uid === josh.id ? joshPlace : { host: true });
   r.codexReady = () => (signedIn ? null : 'you are not signed in to Codex');
+  r.codexPlaceFor = (uid) => (uid === cara.id && caraContainer ? caraPlace : null);
   return r;
 }
 async function until(check: () => boolean) {
@@ -201,16 +207,53 @@ test("a Codex pick by someone without Codex runs on Claude's default, saying why
   r.send(t.id, 'Josh', 'go');
   await until(() => turnStarts().length === 1 && idle(t.id)());
   signedIn = true;
-  assert.equal(calls()[0].who, 'claude');
-  assert.equal(calls()[0].model, null, "no Codex model reaches claude");
+  assert.equal(turnStarts()[0].who, 'claude');
+  assert.equal(turnStarts()[0].model, null, "no Codex model reaches claude");
   assert.ok(notes(t.id).some((n) => n.includes('set to GPT-6 Luna, but you are not signed in to Codex')));
 });
 
-test("the server login has no Codex, so its switch won't turn on", () => {
+test('the server login runs its Codex turns in its own container, from its Claude conversation on the host, and its Claude turns stay on the host (#341)', async () => {
+  rmSync(seen, { force: true });
+  rmSync(mode, { force: true });
+  const t = minion(10);
   const r = runner();
-  assert.match(r.setCodexSwitch(cara.id, true)!, /server's Claude login has no Codex/);
-  assert.equal(store.getSetting(codexSwitchKey(cara.id)), null);
-  assert.equal(r.codexView(cara.id), null);
+  r.send(t.id, 'Cara', 'first ask');
+  await until(() => turnStarts().length === 1 && idle(t.id)());
+  assert.ok(!calls().some((c) => c.who === 'podman'), 'her Claude turn runs on the host');
+
+  assert.equal(r.setCodexSwitch(cara.id, true), null);
+  assert.equal(r.codexView(cara.id)?.on, true);
+  r.send(t.id, 'Cara', 'second ask');
+  await until(() => turnStarts().length === 2 && idle(t.id)());
+  const exec = calls().find((c) => c.who === 'podman')!.args;
+  assert.deepEqual(exec.slice(0, 3), ['exec', '-d', caraPlace.container]);
+  assert.ok(exec.at(-1).startsWith(caraPlace.turnsDir + '/'), `its turn folder is the one her container mounts: ${exec.at(-1)}`);
+  const said = calls().find((c) => c.method === 'turn/start').params.input.map((i: any) => i.text).join('\n');
+  assert.match(said, /\[Message\] \[Cara\]: first ask[\s\S]*\[Claude\] CLAUDE REPLY/, 'the hand-over is her host Claude conversation');
+
+  r.setCodexSwitch(cara.id, false);
+  r.send(t.id, 'Cara', 'third ask');
+  await until(() => turnStarts().length === 3 && idle(t.id)());
+  assert.equal(calls().filter((c) => c.who === 'podman').length, 1, 'back on Claude, on the host');
+  assert.match(calls().filter((c) => c.who === 'claude').at(-1).text, /CODEX REPLY/);
+});
+
+test("the server login's Codex turn runs on Claude, saying why, until its container is there; never Codex on the host", async () => {
+  rmSync(seen, { force: true });
+  const t = minion(11);
+  const r = runner();
+  caraContainer = false;
+  try {
+    assert.equal(r.setCodexSwitch(cara.id, true), null);
+    r.send(t.id, 'Cara', 'go');
+    await until(() => turnStarts().length === 1 && idle(t.id)());
+    assert.equal(turnStarts()[0].who, 'claude');
+    assert.ok(!calls().some((c) => c.who === 'podman'));
+    assert.ok(notes(t.id).some((n) => /Codex's container isn't there yet/.test(n)));
+  } finally {
+    caraContainer = true;
+    r.setCodexSwitch(cara.id, false);
+  }
 });
 
 test("switching on carries a minion waiting out Claude's limit on at once, on Codex; Codex's own limit waits for Codex's reset", async () => {

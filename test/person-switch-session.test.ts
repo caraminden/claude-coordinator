@@ -73,7 +73,7 @@ const josh = store.createUser({ name: 'Josh', login: 'josh' });
 const cara = store.createUser({ name: 'Cara', login: 'cara', server_login: true });
 const volume = join(root, 'josh-volume');
 mkdirSync(join(volume, '.claude'), { recursive: true });
-const joshPlace = { host: false as const, container: 'citadel-claude-test-2', configDir: join(volume, '.claude'), turnsDir: join(root, 'run', 'turns', 'person-2'), env: { HOME: volume, CLAUDE_CONFIG_DIR: join(volume, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} };
+const joshPlace = { host: false as const, container: 'citadel-claude-test-2', configDir: join(volume, '.claude'), home: volume, turnsDir: join(root, 'run', 'turns', 'person-2'), env: { HOME: volume, CLAUDE_CONFIG_DIR: join(volume, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} };
 
 function runner() {
   const r = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 'secret' }), fake);

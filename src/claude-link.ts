@@ -77,7 +77,10 @@ export interface ClaudeStatus {
  * Where a turn runs: the host, or a person's container (with its config folder as the host sees it, and
  * the folder its turns' files go in, the only part of run/turns that container mounts).
  */
-export type TurnPlace = { host: true } | { host: false; container: string; configDir: string; turnsDir: string; env: Record<string, string>; ensure: () => Promise<void> };
+export type TurnPlace = { host: true } | { host: false; container: string; configDir: string; home: string; turnsDir: string; env: Record<string, string>; ensure: () => Promise<void> };
+
+/** Where the server login's container volume is on the host (#341): it has no Claude link to record it in. */
+const containerHomeKey = (uid: number) => `container_home:${uid}`;
 
 interface Login {
   child: ChildProcess | null;
@@ -130,6 +133,15 @@ export class ClaudeLink {
 
   meta(uid: number): ClaudeMeta | null {
     return this.credentials.get<ClaudeMeta>(uid, 'claude_runner')?.meta ?? null;
+  }
+
+  serverLogin(uid: number): boolean {
+    return !!this.store.getUser(uid)?.server_login;
+  }
+
+  /** A person's container home (its volume) as the host sees it: their Claude link's, or the server login's Codex-only one (#341). */
+  volumeHome(uid: number): string | null {
+    return this.meta(uid)?.home ?? (this.serverLogin(uid) ? this.store.getSetting<string>(containerHomeKey(uid)) ?? null : null);
   }
 
   /** Turns for this person may start: on the host (server login) or in a container that's signed in. */
@@ -201,6 +213,7 @@ export class ClaudeLink {
     // Mounts inside HOME need their folders made in the volume first, as the person: podman makes missing
     // ones as root, and a root-owned ~/.claude left Claude unable to save the sign-in.
     const vol = await this.containers.volumePath(spec.name);
+    if (vol && this.serverLogin(uid)) this.store.setSetting(containerHomeKey(uid), vol);
     for (const m of spec.mounts) if (vol && !m.volume && m.dst.startsWith(this.home + '/')) mkdirSync(join(vol, relative(this.home, m.dst)), { recursive: true });
     const now = await this.containers.status(spec.name);
     // shortcut: a changed spec (new image, a new scheme's memory) waits until no other turn runs in the container; a busy one keeps its old mounts meanwhile.
@@ -224,10 +237,24 @@ export class ClaudeLink {
     const c = this.credentials.get<ClaudeMeta>(user.id, 'claude_runner');
     if (!c || c.failed) return null;
     return {
-      host: false, container: c.meta.container, configDir: join(c.meta.home, '.claude'), turnsDir: this.turnsDir(user.id),
-      env: { HOME: this.home, PATH: containerPath(process.env.PATH), CLAUDE_CONFIG_DIR: join(this.home, '.claude'), DISABLE_AUTOUPDATER: '1' },
-      ensure: () => this.ensure(user.id, true),
+      host: false, container: c.meta.container, configDir: join(c.meta.home, '.claude'), home: c.meta.home, turnsDir: this.turnsDir(user.id),
+      env: this.containerEnv(), ensure: () => this.ensure(user.id, true),
     };
+  }
+
+  /**
+   * Where the server login's Codex turns run (#341): its own container, though its Claude turns stay on the
+   * host. Its configDir is the host's, where its Claude sessions are (the hand-over and the session save read
+   * it). Null for anyone else, or before the container exists (its Codex sign-in makes it).
+   */
+  codexPlace(uid: number): Extract<TurnPlace, { host: false }> | null {
+    const home = this.serverLogin(uid) ? this.volumeHome(uid) : null;
+    if (!home) return null;
+    return { host: false, container: this.name(uid), configDir: claudeConfigDir(process.env), home, turnsDir: this.turnsDir(uid), env: this.containerEnv(), ensure: () => this.ensure(uid, true) };
+  }
+
+  private containerEnv(): Record<string, string> {
+    return { HOME: this.home, PATH: containerPath(process.env.PATH), CLAUDE_CONFIG_DIR: join(this.home, '.claude'), DISABLE_AUTOUPDATER: '1' };
   }
 
   /** The sign-in went bad mid-turn: say so until they link again. */

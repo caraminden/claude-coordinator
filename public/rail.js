@@ -288,7 +288,7 @@ function startSwitch() {
   if (switching || !inContraption || host) return;
   switching = true;
   Promise.all([import('./appswitch.js'), fetch(new URL('api/me', root), { headers: { Accept: 'application/json' } }).then((r) => (r.ok ? r.json() : null))])
-    .then(([m, me]) => me?.name && m.initAppSwitch(me.name))
+    .then(([m, me]) => (me?.name ? m.initAppSwitch(me.name) : (switching = false)))
     .catch(() => (switching = false));
 }
 

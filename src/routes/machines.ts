@@ -91,6 +91,11 @@ export const agentRoutes: Route[] = [
     return json(res, 202, {});
   }),
   agent('POST', '/api/machines/upload', machineUpload),
+  // A CI runner registration token for a scheme's repo (#320): tools/ci-runner/add-runner.ps1 calls it.
+  agent('POST', '/api/machines/runner-token', async ({ req, res, app }, machine) => {
+    const body = await readJson(req);
+    return json(res, 201, await app.runnerTokens.issue(machine, body.scheme));
+  }),
 ];
 
 // Anyone signed in adds machines; each manages their own, and admins manage all (#306).

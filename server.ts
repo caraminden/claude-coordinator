@@ -39,6 +39,7 @@ import { contraptionRoutes } from './src/routes/contraptions.ts';
 import { ContraptionTurns } from './src/contraption-turns.ts';
 import { GithubLink } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
+import { RunnerTokens } from './src/ci-runner.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
 import { fileRoutes } from './src/routes/files.ts';
@@ -138,6 +139,7 @@ const services = new AppServices(serviceOptions(process.env, DATA_DIR === DEFAUL
 const githubLink = new GithubLink(store, credentials, process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '');
 // A boot check or preview runs on a copy of the data: it leaves GitHub alone.
 const repoAccess = new RepoAccess(store, githubLink, !BOOT_CHECK);
+const runnerTokens = new RunnerTokens(store, githubLink, !BOOT_CHECK);
 // People's own Claude plans (#213). A dev copy tags its containers so it never shares the live server's.
 const claudeLink = new ClaudeLink(store, credentials, DATA_DIR, process.env.CLAUDE_BIN ?? 'claude', undefined, DATA_DIR === DEFAULT_DATA_DIR ? 'citadel-claude-' : `citadel-claude-${createHash('sha256').update(DATA_DIR).digest('hex').slice(0, 6)}-`);
 // Keep secrets out of the environment that claude and its tools inherit.
@@ -565,6 +567,12 @@ github.onMerged = (repoDir) => void syncMain(repoDir)
   })
   .catch((err) => console.error('Checking waiters after a merge failed:', err));
 
+// Each CI runner token handed out (#320) is told in the scheme Taskmaster's chat, without waking it.
+runnerTokens.onFetched = (project, text) => {
+  const coordinator = store.getCoordinator(project.id);
+  if (coordinator) runner.emit(coordinator.id, 'note', { text });
+};
+
 // A scheme's main that can't follow origin's (#208) is told in its Taskmaster's chat, once per reason.
 mainSync.stuck = (repoDir, why) => {
   if (!why) return;
@@ -651,7 +659,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, claude: claudeLink, contraptions, contraptionTurns, landings, services,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, claude: claudeLink, contraptions, contraptionTurns, landings, services,
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {
     return ASSET_VERSION;

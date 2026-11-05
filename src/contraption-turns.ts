@@ -85,7 +85,7 @@ export type Emit = (event: string, data: object) => void;
 
 export const DEFAULT_COMPACT_WINDOW = 40_000;
 export const DEFAULT_TIMEOUT_SEC = 180;
-/** How long a restart of a contraption waits for its running turns (#319): a turn on the default timeout always ends inside it. */
+/** How long a restart of a contraption waits for its running turns (#319): about a turn's default timeout. */
 export const DRAIN_MS = 3 * 60_000;
 /** How long a stopped turn's claude has between SIGTERM and SIGKILL: on the host it exits in under a second (#319). */
 const KILL_AFTER_MS = 2_000;
@@ -532,8 +532,6 @@ export class ContraptionTurns {
         resolve(null);
       });
       child.on('close', (n) => resolve(n));
-      // A stopped turn frees its session once claude has exited, not when the last pipe closes (#319).
-      child.on('exit', (n) => live.stopped && resolve(n));
     });
     clearTimeout(timer);
 

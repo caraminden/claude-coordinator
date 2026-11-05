@@ -4,7 +4,7 @@
 //
 // A turn can reach only the contraption's own MCP servers (on its 127.0.0.1 port; containers share the
 // host's network), the MCP servers of its person's own machines that are online (#306), and, if the
-// contraption allows, Agent with a cap on how many run at once. It runs in an
+// contraption allows, Agent with a cap on how many run at once, and WebSearch and WebFetch if it asks (#332). It runs in an
 // empty scratch folder per (contraption, person), with no user or project settings, CLAUDE.md, memory,
 // skills, plugins or other MCP servers: see args() and settings().
 //
@@ -70,6 +70,8 @@ export interface TurnRequest {
   compactWindow: number;
   mcp: McpServer[];
   agents: { max: number; model: string | null } | false;
+  /** WebSearch and WebFetch, off unless the contraption asks (#332). */
+  webSearch: boolean;
   timeoutSec: number;
 }
 
@@ -135,14 +137,20 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
     if (a.model !== undefined && (typeof a.model !== 'string' || !MODEL.test(a.model))) bad('agents.model must be a model name like haiku');
     agents = { max: int(a.max, 'agents.max', 1, 10, 1), model: a.model ?? null };
   }
+  if (body.webSearch !== undefined && typeof body.webSearch !== 'boolean') bad('webSearch must be true or false');
   return {
     person: body.person, session: body.session, fresh: body.fresh === true, prompt: body.prompt, system: body.system ?? '', model,
     compactWindow: int(body.compactWindow, 'compactWindow', 10_000, 1_000_000, DEFAULT_COMPACT_WINDOW), mcp, agents,
-    timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
+    webSearch: body.webSearch === true, timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
   };
 }
 
-/** The `claude` arguments for a turn: only the contraption's MCP servers and (maybe) Agent, nothing of the user's or Citadel's. */
+/** The built-in tools a turn gets: Agent and WebSearch/WebFetch, each only if asked for. */
+function builtins(req: TurnRequest): string[] {
+  return [...(req.agents ? ['Agent'] : []), ...(req.webSearch ? ['WebSearch', 'WebFetch'] : [])];
+}
+
+/** The `claude` arguments for a turn: only the contraption's MCP servers and (maybe) Agent and web search, nothing of the user's or Citadel's. */
 export function args(req: TurnRequest, dir: string, claudeSession: string, resume: boolean): string[] {
   const a = [
     '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
@@ -150,8 +158,8 @@ export function args(req: TurnRequest, dir: string, claudeSession: string, resum
     '--input-format', 'stream-json', '--replay-user-messages',
     // No user, project or local settings: no CLAUDE.md, hooks, plugins, permissions or MCP servers of theirs.
     '--setting-sources', '',
-    // The built-in tools: Agent or none. Subagents get no more than this.
-    '--tools', req.agents ? 'Agent' : '',
+    // The built-in tools: Agent and web search if asked for, else none. Subagents get no more than this.
+    '--tools', builtins(req).join(','),
     '--strict-mcp-config', '--mcp-config', join(dir, 'mcp.json'),
     '--settings', join(dir, 'settings.json'),
     '--permission-mode', 'dontAsk',
@@ -171,7 +179,7 @@ export function mcpConfig(port: number, servers: McpServer[]) {
 /** The turn's --settings: what it may use, where it compacts, and the Agent cap's hook. */
 export function settings(req: TurnRequest, hook: { node: string; script: string; slots: string } | null, machines: string[] = []) {
   const allow = [...req.mcp, ...machines.map((name) => ({ name }))].map((s) => `mcp__${s.name}`);
-  if (req.agents) allow.push('Agent');
+  allow.push(...builtins(req));
   const out: Record<string, unknown> = {
     permissions: { allow, defaultMode: 'dontAsk' },
     autoCompactWindow: req.compactWindow,

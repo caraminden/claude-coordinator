@@ -258,6 +258,20 @@ test('with agents allowed, the turn gets Agent and nothing more, its model, and 
   assert.deepEqual(Object.keys(settings.hooks).sort(), ['PostToolUse', 'PostToolUseFailure', 'PreToolUse']);
 });
 
+test('webSearch: true adds WebSearch and WebFetch to the tools and the allow list, alongside Agent if asked (#332)', async () => {
+  await turn(mandate, { session: 'search', webSearch: true, mcp: [{ name: 'mandate', path: '/mcp' }] });
+  let run = lastRun();
+  assert.equal(argAfter(run.argv, '--tools'), 'WebSearch,WebFetch');
+  assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate', 'WebSearch', 'WebFetch']);
+  assert.equal(JSON.parse(run.settings).hooks, undefined, 'no Agent cap without agents');
+  await turn(mandate, { session: 'search', webSearch: true, agents: { max: 1 }, mcp: [{ name: 'mandate', path: '/mcp' }] });
+  run = lastRun();
+  assert.equal(argAfter(run.argv, '--tools'), 'Agent,WebSearch,WebFetch');
+  assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate', 'Agent', 'WebSearch', 'WebFetch']);
+  await turn(mandate, { session: 'search', webSearch: false });
+  assert.equal(argAfter(lastRun().argv, '--tools'), '', 'false is the default: no built-in tools');
+});
+
 test('a Grunt\'s tool calls and results carry its Agent call\'s id, the top level\'s carry null, and its words never stream', async () => {
   const evs = await turn(mandate, { session: 'grunts', prompt: 'Use grunts.', agents: { max: 2 }, mcp: [{ name: 'mandate', path: '/mcp' }] });
   assert.deepEqual(evs.filter((e) => e.event === 'tool' || e.event === 'tool_result' || e.event === 'text'), [
@@ -499,10 +513,12 @@ test('requests are checked before anything runs', () => {
   bad({ mcp: [{ name: 'a', path: '/mcp', headers: { 'X-A': 'one\r\nX-B: two' } }] });
   bad({ mcp: [{ name: 'a', path: '/mcp' }, { name: 'a', path: '/other' }] });
   bad({ agents: { max: 50 } });
+  bad({ webSearch: 'yes' });
   bad({ compactWindow: 5 });
   bad({ timeoutSec: 0 });
   bad({ timeoutSec: 901 }); // a running turn holds back Citadel's restarts
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p', agents: false }, mandate).agents, false);
+  assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p' }, mandate).webSearch, false, 'off unless asked');
   assert.deepEqual(parseTurn({ person: 1, session: 's', prompt: 'p', agents: { max: 3 } }, mandate).agents, { max: 3, model: null });
 });
 

@@ -27,7 +27,8 @@ async function until(what: string, check: () => boolean) {
   assert.ok(check(), `timed out waiting for ${what}`);
 }
 const touch = (f: string) => `touch '${f}'`;
-const waitFor = (f: string) => `while [ ! -e '${f}' ]; do sleep 0.05; done`;
+// Bounded, so a failed assertion can't leave a job holding its slot (and the test file) open for good.
+const waitFor = (f: string) => `i=0; while [ ! -e '${f}' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i + 1)); done`;
 
 test('it runs the command with its stdin and exit status', () => {
   const { env } = folder();
@@ -43,11 +44,14 @@ test('with 2 slots a third job waits in line, says whose jobs hold them, and sta
   const b = job(env, 'Peek #2 (cara)', `${touch(join(root, 'b-up'))}; ${waitFor(go)}`);
   await until('two jobs running', () => existsSync(join(root, 'a-up')) && existsSync(join(root, 'b-up')));
   const c = job(env, 'Delve #3', touch(join(root, 'c-up')));
-  await until('the third to say it waits', () => /waiting/.test(c.err()));
-  assert.ok(!existsSync(join(root, 'c-up')), 'the third job waits');
-  assert.match(c.err(), /Peek #1 \(josh\): sh -c/);
-  assert.match(c.err(), /Peek #2 \(cara\): sh -c/);
-  writeFileSync(go, '');
+  try {
+    await until('the third to say whose jobs it waits on', () => /waiting/.test(c.err()) && /slot 2: /.test(c.err()));
+    assert.ok(!existsSync(join(root, 'c-up')), 'the third job waits');
+    assert.match(c.err(), /Peek #1 \(josh\): sh -c/);
+    assert.match(c.err(), /Peek #2 \(cara\): sh -c/);
+  } finally {
+    writeFileSync(go, '');
+  }
   assert.equal(await a.done, 0);
   assert.equal(await b.done, 0);
   assert.equal(await c.done, 0);
@@ -80,8 +84,11 @@ test('the slots file tunes how many run at once, and a nested call runs in the o
   const a = job(env, 'first', `${touch(join(root, 'n-up'))}; ${waitFor(go)}`);
   await until('the first job running', () => existsSync(join(root, 'n-up')));
   const b = job(env, 'second', 'true');
-  await until('the second to wait on the one slot', () => /all heavy slots \(1\) are busy/.test(b.err()));
-  writeFileSync(go, '');
+  try {
+    await until('the second to wait on the one slot', () => /all heavy slots \(1\) are busy/.test(b.err()));
+  } finally {
+    writeFileSync(go, '');
+  }
   assert.equal(await a.done, 0);
   assert.equal(await b.done, 0);
   // With the one slot held by the outer call, the inner one would wait forever if it queued.

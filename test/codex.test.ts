@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 import { imageHash, type ClaudeLink } from '../src/claude-link.ts';
 import { CodexLink, deviceCode } from '../src/codex-link.ts';
 import { Containers } from '../src/containers.ts';
-import { notReady, review } from '../src/codex-review.ts';
+import { notReady, overPace, review, usageLine } from '../src/codex-review.ts';
 
 // Codex as a read-only second-opinion reviewer (#330): the managed tripwire hook baked into each
 // person's container, and the app-server driver behind citadel-codex-review.
@@ -126,6 +126,12 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   const m = JSON.parse(line);
   log(m);
   if (m.method === 'initialize') send({ id: m.id, result: { userAgent: 'fake' } });
+  if (m.method === 'account/rateLimits/read') {
+    if (mode === 'no-limits') return send({ id: m.id, error: { code: -32600, message: 'not signed in with ChatGPT' } });
+    const resetsAt = Math.round(Date.now() / 1000) + 3600;
+    const used = mode === 'over' ? 85 : 12;
+    send({ id: m.id, result: { rateLimits: { primary: { usedPercent: used, windowDurationMins: 300, resetsAt }, secondary: { usedPercent: 30, windowDurationMins: 10080, resetsAt: resetsAt + 86400 * 3 } } } });
+  }
   if (m.method === 'thread/start') send({ id: m.id, result: { thread: { id: 'th1' } } });
   if (m.method === 'turn/start') {
     send({ id: m.id, result: { turn: { id: 'tu1' } } });
@@ -150,7 +156,7 @@ const logged = () => readFileSync(fakeLog, 'utf8').trim().split('\n').map((l) =>
 test('a review starts a read-only, ephemeral thread with no approvals, declines what Codex asks, and returns its last message', async () => {
   rmSync(fakeLog, { force: true });
   const r = await review('Review branch x.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'ok' } });
-  assert.deepEqual(r, { code: 0, text: '1. Must fix: x.ts:3 off by one\nRisk: medium: logic' });
+  assert.deepEqual(r, { code: 0, text: '1. Must fix: x.ts:3 off by one\nRisk: medium: logic', usage: '5-hour 12%, weekly 30%' });
   const msgs = logged();
   assert.deepEqual(msgs[0].argv.slice(0, 1), ['app-server']);
   assert.ok(msgs[0].argv.includes('cli_auth_credentials_store="file"'));
@@ -263,3 +269,28 @@ async function until(check: () => boolean, ms = 5000) {
   while (!check() && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
   assert.ok(check(), 'timed out');
 }
+
+test('Codex usage: a review is skipped past 80% of a window, or when a window is used faster than an even pace to its reset', () => {
+  const now = Date.UTC(2026, 10, 5, 12);
+  const at = (minsLeft: number) => Math.round(now / 1000) + minsLeft * 60;
+  const week = (usedPercent: number, daysLeft: number) => ({ usedPercent, windowDurationMins: 10080, resetsAt: at(daysLeft * 1440) });
+  const fiveHour = (usedPercent: number, minsLeft: number) => ({ usedPercent, windowDurationMins: 300, resetsAt: at(minsLeft) });
+  assert.equal(overPace(null, now), null, 'no limits (an API key, an older backend): review');
+  assert.equal(overPace({ primary: fiveHour(5, 290), secondary: week(8, 6.9) }, now), null, 'early in both windows, within the slack');
+  assert.equal(overPace({ primary: fiveHour(40, 150), secondary: week(50, 3.5) }, now), null, 'exactly on pace');
+  assert.match(overPace({ primary: fiveHour(85, 10), secondary: week(10, 6) }, now)!, /5-hour Codex limit is 85% used$/);
+  assert.match(overPace({ primary: fiveHour(10, 200), secondary: week(45, 5) }, now)!, /weekly Codex limit is 45% used with 29% of the window gone, on track to run out/);
+  assert.equal(overPace({ primary: { usedPercent: 30 } }, now), null, 'no reset time: only the 80% rule');
+  assert.equal(usageLine({ primary: fiveHour(12, 100), secondary: week(30, 2) }), '5-hour 12%, weekly 30%');
+});
+
+test('a review reads Codex usage first: it skips (exit 4) when over pace, and runs anyway when usage is unknown', async () => {
+  rmSync(fakeLog, { force: true });
+  const over = await review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'over' } });
+  assert.equal(over.code, 4);
+  assert.match(over.text, /^Skipped to save your Codex plan: the 5-hour Codex limit is 85% used\.$/);
+  assert.ok(!logged().some((m) => m.method === 'thread/start'), 'no thread is started');
+  const unknown = await review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'no-limits' } });
+  assert.equal(unknown.code, 0);
+  assert.equal(unknown.usage, '');
+});

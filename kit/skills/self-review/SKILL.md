@@ -60,8 +60,9 @@ on their own ChatGPT plan, reviews the same diff read-only. Write the first Grun
 `$TMPDIR/review-brief.md`, start the Grunt, then in the same message run
 `citadel-codex-review --timeout 540 < "$TMPDIR/review-brief.md"` (Bash timeout 600000). Its
 findings join the Grunt's: drop duplicates, and on a deep review the checking Grunt checks them
-too. A non-zero exit (a usage limit, a timeout) skips it: say so in the report line
-(`Codex: skipped: <why>`). Anything else `--check` prints means it isn't set up: skip it silently.
+too. A non-zero exit (a usage limit, a timeout, or exit 4: the person's Codex usage is past 80% or
+ahead of pace, so it saves their plan) skips it: say so in the report line (`Codex: skipped:
+<why>`). Its last stderr line, `Codex usage: 5-hour N%, weekly N%`, goes in the report line too. Anything else `--check` prints means it isn't set up: skip it silently.
 
 A light review costs about 47k Grunt tokens and a minute (about $0.35); deep is about $1 to $1.50.
 Don't re-review after fixes unless a fix grew past a few lines of high-row code.

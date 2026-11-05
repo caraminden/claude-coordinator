@@ -18,3 +18,9 @@ RUN ln -s /usr/local/bin/node /usr/bin/node \
  && git config --system credential.https://github.com.helper '!gh auth git-credential' \
  && git config --system user.name 'Citadel' \
  && git config --system user.email 'citadel@localhost'
+# Codex CLI (#330), pinned: citadel-codex-review drives its app-server for a second-opinion review on
+# the person's own ChatGPT login, which they sign in to here themselves (~/.codex, in their volume).
+# Its managed requirements run Citadel's tripwire as the only hook (codex/citadel-hook.mjs). Changing
+# a file in codex/ rebuilds the image too: the tag hashes this whole folder.
+RUN npm install -g --no-audit --no-fund @openai/codex@0.166.0 && npm cache clean --force
+COPY codex/ /etc/codex/

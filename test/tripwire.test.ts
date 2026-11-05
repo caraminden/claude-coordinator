@@ -187,6 +187,10 @@ const BLOCKED: [string, string?][] = [
   ['cd ~ && cat .ssh/config'],
   ['grep token ~/.claude/.credentials.json'],
   ['base64 < ~/.claude/.credentials.json'],
+  // the person's Codex login (#330)
+  ['cat ~/.codex/auth.json'],
+  ['jq .tokens $HOME/.codex/auth.json'],
+  ['grep -r token ~/.codex'],
   ['echo $(cat ~/.ssh/id_rsa)'],
   // the service's env file, any process's environment, the GitHub login (#115)
   ['cat ~/.config/claude-coordinator/env'],
@@ -266,6 +270,7 @@ const BLOCKED: [string, string?][] = [
 
 const ALLOWED = [
   // normal work in the worktree
+  'cat ~/.codex/config.toml && codex --version',
   'git status && git diff --stat',
   'git add -A && git commit -m "Tripwire: block writes to ~/.ssh and ~/claude-coordinator"',
   'git commit -F - <<EOF\nBlocks cat ~/.ssh/id_rsa and rm -rf ~/claude-coordinator\nEOF',

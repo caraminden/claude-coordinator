@@ -1,0 +1,4 @@
+#!/bin/sh
+# A read-only second-opinion review by Codex on the person's own ChatGPT login (#330): src/codex-review.ts,
+# pinned beside this folder in every turn (pin/bin/../codex-review.ts).
+exec node "$(dirname "$(readlink -f "$0")")/../codex-review.ts" "$@"

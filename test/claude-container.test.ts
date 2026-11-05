@@ -59,9 +59,13 @@ const fake = join(root, 'claude-fake');
 writeFileSync(
   fake,
   `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
+const { appendFileSync, existsSync, readFileSync } = require('node:fs');
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
-  appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ env: process.env }) + '\\n');
+  // What Codex's managed hook and citadel-codex-review find while the turn runs (#330); the turn's folder goes once it ends.
+  const codex = process.env.CITADEL_CODEX_TRIPWIRE ? JSON.parse(readFileSync(process.env.CITADEL_CODEX_TRIPWIRE, 'utf8')) : null;
+  const pinBin = process.env.PATH.split(':')[0];
+  const codexPinned = existsSync(pinBin + '/citadel-codex-review') && existsSync(pinBin + '/../codex-review.ts') && !!codex && existsSync(codex.script);
+  appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ env: process.env, codex, codexPinned }) + '\\n');
   if (input.includes('expired')) {
     console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired"}}' }));
     process.exit(1);
@@ -123,6 +127,12 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   assert.match(env.PATH, /^[^:]*\/pin\/bin:.*:\/usr\/local\/bin:/);
   assert.match(env.CITADEL_HEAVY_DIR, /\/projects\/\.heavy$/);
   assert.match(env.CITADEL_HEAVY_WHO, / #\d+ \(josh\)$/);
+  // Codex reviews (#330): the managed hook reads the turn's tripwire from a file, which never asks (no card in Codex); the reviewer is pinned beside citadel-heavy.
+  const { codex, codexPinned } = JSON.parse(readFileSync(seen, 'utf8').trim().split('\n').at(-1)!);
+  assert.match(codex.script, /\/pin\/tripwire\.ts$/);
+  assert.equal(codex.config.ask, false);
+  assert.equal(codex.config.project, store.getTicket(id)!.project_id);
+  assert.ok(codexPinned, 'the tripwire, citadel-codex-review and its driver are pinned in the turn');
   // Not a typed message (#295): no person, not even empty.
   assert.ok(!('CITADEL_PERSON_ID' in env) && !('CITADEL_PERSON_LOGIN' in env));
   // The host's runtime folder isn't in the container: .NET's named mutexes need one that exists (#225).

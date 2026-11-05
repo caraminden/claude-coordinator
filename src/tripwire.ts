@@ -1,7 +1,7 @@
 // The tripwire: a PreToolUse hook the runner adds to every turn (tripwireHooks in runner.ts), for
 // Taskmasters and minions in every scheme. It stops the known accidents (writes to the live database,
 // the live checkout, the service's config and units, other schemes' folders; restarting or stopping
-// the app's services; reading SSH keys, the Claude or GitHub login, the service's env file or any
+// the app's services; reading SSH keys, the Claude, Codex or GitHub login, the service's env file or any
 // process's environment, or printing the turn's own; state.db opened writable and the credentials
 // table; other people's homes and Claude runners; signing Claude in; running server.ts against the
 // live data) and the git habits every scheme shares (no path checkout, restore or stash; no checkout,
@@ -88,6 +88,7 @@ function writeReason(p: string, cfg: TripwireConfig): string | null {
 function readReason(p: string, cfg: TripwireConfig): string | null {
   if (under(p, join(cfg.home, '.ssh'))) return `${join(cfg.home, '.ssh')} holds SSH keys; nothing here needs to read them (ssh and git use them on their own).`;
   if (p === join(cfg.claudeConfig, '.credentials.json') || p === join(cfg.home, '.claude/.credentials.json')) return 'That file is the Claude login; nothing here needs to read it.';
+  if (p === join(cfg.home, CODEX_LOGIN)) return "That file is this person's Codex login (ChatGPT); codex uses it on its own, and nothing here needs to read it.";
   if (under(p, join(cfg.home, '.config/claude-coordinator'))) return `${join(cfg.home, '.config/claude-coordinator')} holds the live service's password and session secret, which let anyone act as a person. To try the API, log in to a dev copy or a preview with its own password; ask Cara to change the env file.`;
   if (ENVIRON.test(p)) return ENVIRON_WHY;
   if (p === join(cfg.home, '.config/gh/hosts.yml')) return GH_TOKEN_WHY;
@@ -103,6 +104,7 @@ function runnerReason(p: string, cfg: TripwireConfig): string | null {
   if (p.split('/').includes('citadel-claude') || RUNNER_SOCKET.test(basename(p))) return `${p} belongs to a Claude runner: its sign-in or its socket. Turns never touch a runner directly; Citadel talks to it.`;
   return null;
 }
+const CODEX_LOGIN = '.codex/auth.json';
 const RUNNER_SOCKET = /^(citadel|claude)-runner.*\.sock$/;
 const CONTAINER_STORAGE = '.local/share/containers/storage';
 // The rootless podman socket and registry logins, in $XDG_RUNTIME_DIR.
@@ -126,7 +128,7 @@ const ENVIRON_HIDDEN = /^\/proc\/[^/]*(\/task\/[^/]*)?\/environ$/;
 
 /** For a recursive search: a secret readReason guards that lies inside this folder, or null. */
 function secretInside(root: string, cfg: TripwireConfig): string | null {
-  const secrets = [join(cfg.home, '.ssh'), join(cfg.claudeConfig, '.credentials.json'), join(cfg.home, '.claude/.credentials.json'), join(cfg.home, '.config/claude-coordinator'), join(cfg.home, '.config/gh/hosts.yml'), join(cfg.home, '.config/citadel-claude'), join(cfg.home, CONTAINER_STORAGE)];
+  const secrets = [join(cfg.home, '.ssh'), join(cfg.claudeConfig, '.credentials.json'), join(cfg.home, '.claude/.credentials.json'), join(cfg.home, CODEX_LOGIN), join(cfg.home, '.config/claude-coordinator'), join(cfg.home, '.config/gh/hosts.yml'), join(cfg.home, '.config/citadel-claude'), join(cfg.home, CONTAINER_STORAGE)];
   const homes = dirname(cfg.home);
   if (homes !== '/' && under(homes, root)) return `other people's home folders in ${homes}`;
   return secrets.find((x) => x !== root && under(x, root)) ?? null;

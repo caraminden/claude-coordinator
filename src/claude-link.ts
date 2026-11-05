@@ -6,7 +6,7 @@
 // Citadel's bookkeeping: container, volume path, email and plan.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
 import { Containers, specHash, type ContainerSpec, type Mount } from './containers.ts';
@@ -32,6 +32,16 @@ export const IMAGE_PATH = ['/usr/local/bin', '/usr/bin', '/bin'];
 /** A container turn's PATH: the image's folders, then the host's others (dotnet, ~/.local/bin) in their order. */
 export function containerPath(hostPath = ''): string {
   return [...IMAGE_PATH, ...hostPath.split(delimiter).filter((d) => d && !IMAGE_PATH.includes(d))].join(delimiter);
+}
+
+/** A short hash of every file in an image's build folder, by path and contents, so a change to any of them rebuilds it. */
+export function imageHash(dir: string): string {
+  const h = createHash('sha256');
+  for (const f of (readdirSync(dir, { recursive: true }) as string[]).sort()) {
+    const p = join(dir, f);
+    if (statSync(p).isFile()) h.update(`${f}\0`).update(readFileSync(p));
+  }
+  return h.digest('hex').slice(0, 12);
 }
 
 /** Variables that would win over the container's own sign-in (Claude Code's auth precedence), so a container turn never gets the server's. */
@@ -138,9 +148,9 @@ export class ClaudeLink {
     return { ...base, state: !c ? 'not linked' : c.failed ? 'expired' : 'linked' };
   }
 
-  /** The image tag for the current Containerfile. */
+  /** The image tag for the current Containerfile and the files it copies in (codex/). */
   private image(): string {
-    return `${IMAGE_REPO}:${createHash('sha256').update(readFileSync(join(CONTAINERFILE_DIR, 'Containerfile'))).digest('hex').slice(0, 12)}`;
+    return `${IMAGE_REPO}:${imageHash(CONTAINERFILE_DIR)}`;
   }
 
   /**

@@ -54,6 +54,15 @@ sentence, and the numbered Must and Should findings, without the first Grunt's r
 each cited file:line, checks the finding against the code and returns
 `N: CONFIRMED|REFUTED: <evidence>`, at most 15 lines. Drop what it refutes.
 
+**Codex second opinion (light and deep):** when `citadel-codex-review --check` prints `ready`
+(the turn's person has signed in to Codex in their container), Codex, a model from another family
+on their own ChatGPT plan, reviews the same diff read-only. Write the first Grunt's brief to
+`$TMPDIR/review-brief.md`, start the Grunt, then in the same message run
+`citadel-codex-review --timeout 540 < "$TMPDIR/review-brief.md"` (Bash timeout 600000). Its
+findings join the Grunt's: drop duplicates, and on a deep review the checking Grunt checks them
+too. A non-zero exit (a usage limit, a timeout) skips it: say so in the report line
+(`Codex: skipped: <why>`). Anything else `--check` prints means it isn't set up: skip it silently.
+
 A light review costs about 47k Grunt tokens and a minute (about $0.35); deep is about $1 to $1.50.
 Don't re-review after fixes unless a fix grew past a few lines of high-row code.
 

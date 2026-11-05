@@ -289,6 +289,18 @@ stops the container and deletes the volume. A turn in a container lands with the
 podman and systemd aren't reachable from inside. The tripwire keeps turns away from
 `citadel-claude-*` containers and podman's storage.
 
+**Codex reviews (#330).** The image also has the Codex CLI, pinned, so self-review
+can get a second opinion from another model family on the person's own ChatGPT
+plan: `citadel-codex-review` (`src/codex-review.ts`, on every turn's PATH) drives
+`codex app-server` in a read-only, ephemeral thread and prints the review. The
+person signs in once inside their container with `codex login --device-auth`; the
+login stays in `~/.codex/auth.json` in their volume, which the tripwire won't let a
+turn read. The image's `/etc/codex/requirements.toml` (`deploy/claude-container/codex/`)
+runs Citadel's tripwire as Codex's only hook, failing closed: the hook reads the
+turn's config from the file `$CITADEL_CODEX_TRIPWIRE` names, allows shell commands
+only, and blocks the tripwire's ask tier. A review won't start on the host or in a
+container built before this, which have no managed hook.
+
 **People's own GitHub.** With an OAuth App set up, each person links their GitHub
 in Settings → Your account, and a turn pushes and opens pull requests as the
 person it runs for (who sent its messages; a relay counts as its sender's

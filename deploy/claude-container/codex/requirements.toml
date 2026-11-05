@@ -1,0 +1,18 @@
+# Codex's managed requirements in every person's container (#330), read from this fixed path. They
+# pin hooks on and run only these managed ones: a repo's own .codex hooks, or one a turn adds with -c,
+# never run. The hook's command must stay exactly as it is: see citadel-hook.mjs.
+allow_managed_hooks_only = true
+
+[features]
+hooks = true
+
+[hooks]
+managed_dir = "/etc/codex"
+
+[[hooks.PreToolUse]]
+matcher = ".*"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "/usr/local/bin/node /etc/codex/citadel-hook.mjs"
+timeout = 30

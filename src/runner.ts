@@ -83,6 +83,10 @@ if (existsSync(KIT_SOURCE)) cpSync(KIT_SOURCE, KIT, { recursive: true });
 export const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
 const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
 if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
+/** citadel-codex-review (#330): a read-only Codex review on the person's own login, pinned with its driver like citadel-heavy. */
+export const CODEX_REVIEW = pinnedCopy('codex-review.ts');
+const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
+if (existsSync(CODEX_REVIEW_BIN)) cpSync(CODEX_REVIEW_BIN, join(MCP_DIR, 'bin', 'citadel-codex-review'));
 /** The minion prompt's line on citadel-heavy. */
 export const HEAVY_LINE = 'Heavy builds and full test suites (a whole-workspace `cargo build`, `test`, `check` or `clippy`, a cross-target or release build, a full `npm test`) go through `citadel-heavy <command...>`, as in `citadel-heavy cargo test --workspace`: every scheme and person shares a few slots host-wide, so it may wait in line, saying for whom, and it frees its slot when the command ends or dies. Give that call a long timeout or run it in the background. Leave quick single-crate checks, dev servers and watchers out of it, and don\'t wrap a script that takes its own deploy or land lock (tools/land.sh runs its tests in a slot already); wrap the build or test step inside it instead.';
 /** A build's default parallelism in turns, so the few heavy jobs at once (citadel-heavy's 2 slots) leave cores for the rest. */
@@ -1788,6 +1792,9 @@ export class Runner {
     // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
     const tripwire = tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE));
+    // Codex's managed hook (deploy/claude-container/codex) reads the turn's tripwire from this file: its command can't carry it.
+    const codexTripwire = join(dir, 'codex-tripwire.json');
+    writeFileSync(codexTripwire, JSON.stringify({ script: pinned(TRIPWIRE), config: tripwireConfig(project.id, claudeConfigDir(process.env), false) }));
     const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
       hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
     };
@@ -1827,6 +1834,7 @@ export class Runner {
     // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
     if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;
     if (filesDir) env.COORDINATOR_FILES_DIR = filesDir;
+    env.CITADEL_CODEX_TRIPWIRE = codexTripwire;
     // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
     if (ticket.kind !== 'coordinator') env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
     if (deploys) env.COORDINATOR_DEPLOYS = '1';

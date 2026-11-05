@@ -108,6 +108,9 @@ test('the newest page reaches back to the turn holding a card still waiting on p
   for (let i = 0; i < 3; i++) followUp.push(store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: `ok ${i}` }] } }).id);
   followUp.push(store.addEvent(t.id, 'claude', { type: 'result', subtype: 'success', duration_ms: 10 }).id);
   assert.deepEqual(historyPage(store, t.id, { limit: 20 }).events.map((e) => e.id), [...planning, ...followUp]);
+  // Only so far back: a card with more events after it than a page may hold leaves the page as it was.
+  assert.equal(store.openCardEventId(t.id, followUp.length + 2), planning.at(-3));
+  assert.equal(store.openCardEventId(t.id, followUp.length + 1), null);
   // Once a person has written after it, the card isn't waiting any more and the page is whole turns that fit again.
   const said = store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'lgtm' }).id;
   assert.deepEqual(historyPage(store, t.id, { limit: 20 }).events.map((e) => e.id), [...followUp, said]);

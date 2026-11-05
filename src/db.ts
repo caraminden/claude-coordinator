@@ -1597,9 +1597,12 @@ export class Store {
     return this.openCardsWhere('e.ticket_id = ?', ticketId)[0]?.created_at ?? null;
   }
 
-  /** The event id of the oldest of a minion's open cards (openCards), or null with none. */
-  openCardEventId(ticketId: number): number | null {
-    return this.openCardsWhere('e.ticket_id = ?', ticketId)[0]?.id ?? null;
+  /** The event id of the oldest of a minion's open cards (openCards) with at most `within` events after it, or null. */
+  openCardEventId(ticketId: number, within: number): number | null {
+    const id = this.openCardsWhere('e.ticket_id = ?', ticketId)[0]?.id;
+    if (id == null) return null;
+    const { n } = this.db.prepare('SELECT COUNT(*) AS n FROM events WHERE ticket_id = ? AND id > ?').get(ticketId, id) as { n: number };
+    return n <= within ? id : null;
   }
 
   /** The id of the chat event that posted a minion's card `cardId` of `kind`, or null if there's none. */

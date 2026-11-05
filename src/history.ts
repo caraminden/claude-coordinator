@@ -19,7 +19,8 @@ export function historyPage(store: Store, ticketId: number, opts: { before?: num
   const before = opts.before ?? Number.MAX_SAFE_INTEGER;
   const limit = Math.min(Math.max(1, opts.limit ?? PAGE_EVENTS), MAX_PAGE_EVENTS);
   // The newest page reaches back to a card still waiting on people, or later turns push it behind Load earlier.
-  const open = opts.before == null ? store.openCardEventId(ticketId) : null;
+  // shortcut: a card with more than MAX_PAGE_EVENTS after it stays behind Load earlier; page towards it if that bites.
+  const open = opts.before == null ? store.openCardEventId(ticketId, MAX_PAGE_EVENTS) : null;
   const from = open == null ? opts.from : Math.min(open, opts.from ?? open);
   const { events, more } = store.eventsPage(ticketId, before, limit, from);
   return { events, more, tasks: more ? planBefore(store, ticketId, events[0].id) : [] };

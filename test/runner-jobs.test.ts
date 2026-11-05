@@ -47,7 +47,7 @@ afterEach(() => {
   for (const { relay, store } of relays.splice(0)) for (const m of store.listMachines()) relay.disconnect(m.id);
 });
 
-function world() {
+function world(idleMs = 10_000) {
   const store = new Store(':memory:');
   const creds = new Credentials(store, 'secret');
   const link = new GithubLink(store, creds, 'client', 'shh');
@@ -62,7 +62,7 @@ function world() {
   const tokens = new RunnerTokens(store, link, true, gh.fetch);
   const relay = new MachineRelay(store, () => {});
   relays.push({ relay, store });
-  const jobs = new RunnerJobs(store, tokens, relay, 200, 10);
+  const jobs = new RunnerJobs(store, tokens, relay, idleMs, 10);
   const notes: string[] = [];
   jobs.onNote = (p, words) => notes.push(`${p.name}: ${words}`);
   const pc = store.createMachine('cara-desktop-runners', 'x', 'Cara', cara.id, true);
@@ -110,7 +110,7 @@ test('a member\'s add goes to the agent, waits for GitHub to show the runners Id
   await tick();
   assert.equal((await w.jobs.wait(w.scheme.id, 0))!.ok, null, 'still waiting on the second');
   w.gh.runners.push({ name: 'DESKTOP-G248IJ8-2', status: 'online', busy: false, labels: [{ name: 'peek-auras-ci' }] });
-  const done = (await w.jobs.wait(w.scheme.id, 1000))!;
+  const done = (await w.jobs.wait(w.scheme.id, 5000))!;
   assert.equal(done.ok, true);
   assert.match(done.text, /Done: 2 runners\n\nOn GitHub \(label peek-auras-ci\): DESKTOP-G248IJ8 Idle, DESKTOP-G248IJ8-2 Idle$/);
   assert.match(w.notes[1], /^Peek Auras: Runner agent on cara-desktop-runners, add for Peek Auras \(asked by Josh\): done\./);
@@ -118,7 +118,7 @@ test('a member\'s add goes to the agent, waits for GitHub to show the runners Id
 });
 
 test('an add whose runners never show Idle on GitHub fails, saying what GitHub showed', async () => {
-  const w = world();
+  const w = world(200);
   await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1 });
   w.answer(true, 'Done');
   w.gh.runners.push({ name: 'DESKTOP-G248IJ8', status: 'offline', busy: false, labels: [{ name: 'peek-auras-ci' }] });

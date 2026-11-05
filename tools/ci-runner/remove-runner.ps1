@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Citadel #328. It acts only on folders C:\actions-runner-* holding a .citadel-runner marker (add-runner.ps1 writes
-  one) that names the scheme's repo, and never on Delve's C:\actions-runner, -2, -3, -4 or -perf, marker or not. For
+  one) that names the scheme's repo and that the repo's runner service runs from, and never on Delve's C:\actions-runner, -2, -3, -4 or -perf, marker or not. For
   each, it runs the runner's own `config.cmd remove` with a removal token Citadel mints with the scheme owner's
   GitHub login (about an hour, never stored), which takes the runner off GitHub and deletes its service, then
   deletes the folder. A runner GitHub won't remove keeps its folder, and the script says why.
@@ -70,6 +70,20 @@ if (-not $mine) {
   exit 0
 }
 
+# Anyone can make a folder in C:\ and write a marker, but only an admin makes a service: run config.cmd only in a folder
+# that the repo's runner service runs from, so a planted folder never gets its config.cmd run as SYSTEM.
+$owner, $repoName = $names.repo -split '/', 2
+$serviced = @(Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'actions.runner.%'" |
+    Where-Object { $_.Name -like "actions.runner.$owner-$repoName.*" } |
+    ForEach-Object { Split-Path (Split-Path ($_.PathName -replace '^"([^"]+)".*$', '$1') -Parent) -Parent })
+$skipped = @($mine | Where-Object { $serviced -notcontains $_.FullName })
+foreach ($d in $skipped) { Write-Host "$($d.FullName) has a marker for $($names.repo) but no runner service of that repo runs from it, so it was left alone; look at it by hand." -ForegroundColor Yellow }
+$mine = @($mine | Where-Object { $serviced -contains $_.FullName })
+if (-not $mine) {
+  if ($skipped) { Stop-With 'Nothing removed: see above.' }
+  exit 0
+}
+
 $reg = Get-RunnerToken $true
 $failed = 0
 foreach ($d in $mine) {
@@ -89,4 +103,4 @@ foreach ($d in $mine) {
   Remove-Item -Recurse -Force $d.FullName
   Write-Host "Removed $($d.FullName)" -ForegroundColor Green
 }
-if ($failed) { Stop-With "$failed of $($mine.Count) runner(s) weren't removed; the lines above say why." }
+if ($failed -or $skipped) { Stop-With "$($failed + $skipped.Count) runner folder(s) weren't removed; the lines above say why." }

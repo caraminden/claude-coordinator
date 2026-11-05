@@ -85,9 +85,17 @@ $instances = foreach ($i in 1..$Count) {
   [pscustomobject]@{ Dir = "C:\actions-runner-$repoName$suffix"; Name = "$RunnerName$suffix"; Service = "actions.runner.$owner-$repoName.$RunnerName$suffix" }
 }
 $missing = @()
+$taken = 0
 foreach ($r in $instances) {
   $service = Get-Service -Name $r.Service -ErrorAction SilentlyContinue
-  if ($service -or (Test-Path $r.Dir)) {
+  $marker = Join-Path $r.Dir '.citadel-runner'
+  $theirs = $null
+  if (Test-Path $marker) { try { $theirs = (Get-Content -Raw $marker | ConvertFrom-Json).repo } catch { $theirs = '(unreadable)' } }
+  if ($theirs -and $theirs -ne $names.repo) {
+    # Repo foo's second instance and repo foo-2's first share a folder name.
+    $taken++
+    Write-Host "$($r.Dir) already holds a runner for $theirs, so $($r.Name) can't go there; nothing changed for it." -ForegroundColor Red
+  } elseif ($service -or (Test-Path $r.Dir)) {
     $state = if ($service) { "service $($service.Status)" } else { 'no service' }
     Write-Host "Already here, left as it is: $($r.Name) in $($r.Dir) ($state)"
   } else {
@@ -95,6 +103,7 @@ foreach ($r in $instances) {
   }
 }
 if (-not $missing) {
+  if ($taken) { Stop-With "$taken runner(s) couldn't be added: their folders belong to another repo's runners." }
   Write-Host "$($names.scheme) already has $Count runner(s) here, so nothing changed." -ForegroundColor Yellow
   Write-Host 'To start over, remove them first (remove-runner.ps1, or the ci_runners tool''s remove).'
   exit 0
@@ -180,4 +189,4 @@ try {
 Write-Host ''
 Write-Host "  label  $label  (runs-on: [self-hosted, $label])"
 Write-Host "  check  https://github.com/$($names.repo)/settings/actions/runners should list them as Idle."
-if ($failed) { Stop-With "$failed of $($missing.Count) runner(s) didn't install; the lines above say why." }
+if ($failed -or $taken) { Stop-With "$($failed + $taken) runner(s) weren't added; the lines above say why." }

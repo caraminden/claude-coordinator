@@ -17,6 +17,9 @@ function personView(app: App, u: User) {
 }
 
 /** The signed-in person's id; a cookie from before per-person logins has none. */
+/** The Settings card's Codex: its sign-in, and the override it makes possible (#337). */
+const codexState = (app: App, uid: number) => ({ ...app.codex.status(uid), override: app.runner.codexView(uid) });
+
 function uidOf(session: { uid?: number }): number {
   if (typeof session.uid !== 'number') throw new HttpError(400, 'Sign in again first');
   return session.uid;
@@ -173,7 +176,7 @@ export const peopleRoutes: Route[] = [
     },
   },
   // Signing in to Codex (src/codex-link.ts, #330): in the person's Claude container, by OpenAI's device code. No token passes through.
-  { method: 'GET', path: '/api/me/codex', who: ['person'], handler: ({ res, app, session }) => json(res, 200, app.codex.status(uidOf(session))) },
+  { method: 'GET', path: '/api/me/codex', who: ['person'], handler: ({ res, app, session }) => json(res, 200, codexState(app, uidOf(session))) },
   {
     method: 'POST', path: '/api/me/codex', who: ['person'],
     handler({ res, app, session }) {
@@ -181,17 +184,17 @@ export const peopleRoutes: Route[] = [
       if (app.codex.status(uid).state === 'no container') throw new HttpError(400, 'Codex signs in inside your own Claude container, and you have none: link your Claude first.');
       // Starting the container can take minutes (it rebuilds the image after an update): Settings polls GET meanwhile.
       void app.codex.link(uid);
-      return json(res, 202, app.codex.status(uid));
+      return json(res, 202, codexState(app, uid));
     },
   },
   {
     method: 'DELETE', path: '/api/me/codex', who: ['person'],
     async handler({ res, app, session }) {
       await app.codex.unlink(uidOf(session)).catch((err) => { throw new HttpError(400, err.message); });
-      return json(res, 200, app.codex.status(uidOf(session)));
+      return json(res, 200, codexState(app, uidOf(session)));
     },
   },
-  // "Use Codex until I switch back" (#337): Codex becomes the person's default everywhere their turns run.
+  // "Enable Codex override" (#337): Codex becomes the person's default everywhere their turns run.
   {
     method: 'PUT', path: '/api/me/codex/switch', who: ['person'],
     async handler({ req, res, app, session }) {

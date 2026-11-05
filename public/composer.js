@@ -419,7 +419,7 @@ function modelPicker(chatId) {
 export function renderModelPicker() {
   const model = document.getElementById('model-picker');
   const effort = document.getElementById('effort-picker');
-  if (!model || !effort || !view.ticket) return;
+  if (!model || !effort || !view?.ticket) return;
   const t = view.ticket;
   const defModel = !t.model && t.last_model ? modelName(t.last_model) : 'Model';
   const blocked = codexBlocked();

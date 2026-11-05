@@ -542,34 +542,50 @@ export function renderUsage(next = usage) {
     ].filter(Boolean).join('\n');
   }
   for (const el of document.querySelectorAll('.usage')) renderCodexSwitch(el);
+  for (const el of document.querySelectorAll('.codex-toggle')) syncToggle(el);
 }
 
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-/** A Claude window is used up and hasn't reset yet. */
-const claudeOut = () => [usage?.session, usage?.weekly].some((w) => w?.status === 'rejected' && (!w.resetsAt || w.resetsAt > Date.now()));
+const live = (w) => w && (!w.resetsAt || w.resetsAt > Date.now());
+/** A Claude window is past 90% (or out): the left panel offers the override then (Josh, 2026-11-05). */
+const claudeHigh = () => [usage?.session, usage?.weekly].some((w) => live(w) && (w.status === 'rejected' || w.utilization >= 0.9));
 
-/**
- * "Use Codex until I switch back" (#337), under each usage bar: offered once a Claude window is used up,
- * and shown while it's on, with Codex's own usage and, after Claude's reset, a word that Claude is back.
- */
+/** "Enable Codex override" (#337): runs the person's turns on Codex. Settings has one; the left panel shows one past 90%. */
+export function codexToggle() {
+  const box = h('input', { type: 'checkbox', onchange: () => flipCodex(box) });
+  const el = h('span', { class: 'codex-toggle' },
+    h('label', { class: 'toggle', title: 'Run your turns on Codex (OpenAI) instead of Claude: minions, Taskmasters and apps. A Claude model picked for a minion runs as the Codex model of the same tier.' }, box, 'Enable Codex override'),
+    h('span', { class: 'hint', hidden: true }));
+  syncToggle(el);
+  return el;
+}
+
+function syncToggle(el) {
+  const box = el.querySelector('input');
+  box.checked = !!codex?.on;
+  box.disabled = !codex || (!codex.on && !codex.ready);
+  const hint = codexHint || (codex && !codex.on && !codex.ready ? `Codex isn't ready: ${codex.why}.` : '');
+  el.querySelector('.hint').textContent = hint;
+  el.querySelector('.hint').hidden = !hint;
+}
+
+/** The Settings card's fresh view of the override (it changes when Codex signs in or out). */
+export function setCodex(next) {
+  codex = next ?? null;
+  renderUsage();
+  renderModelPicker();
+}
+
+/** Under each usage bar, past 90% or while on: the override, Codex's own usage, and after Claude's reset a word that Claude is back. */
 function renderCodexSwitch(meter) {
   let sw = meter.nextElementSibling?.classList.contains('codex-switch') ? meter.nextElementSibling : null;
   if (!sw) {
-    const box = h('input', { type: 'checkbox', onchange: () => flipCodex(box) });
-    sw = h('div', { class: 'codex-switch', hidden: true },
-      h('label', { class: 'toggle', title: 'Run your turns on Codex (OpenAI) instead of Claude: minions, Taskmasters and apps. A Claude model picked for a minion runs as the Codex model of the same tier.' }, box, 'Use Codex until I switch back'),
-      h('span', { class: 'codex-usage' }), h('span', { class: 'claude-back' }, "Claude's back"), h('span', { class: 'hint' }));
+    sw = h('div', { class: 'codex-switch', hidden: true }, codexToggle(), h('span', { class: 'codex-usage' }), h('span', { class: 'claude-back' }, "Claude's back"));
     meter.after(sw);
   }
-  sw.hidden = !codex || !(codex.on || claudeOut());
+  sw.hidden = !codex || !(codex.on || claudeHigh());
   if (sw.hidden) return;
-  const box = sw.querySelector('input');
-  box.checked = codex.on;
-  box.disabled = !codex.on && !codex.ready;
-  const hint = codexHint || (!codex.on && !codex.ready ? `Codex isn't ready: ${codex.why}.` : '');
-  sw.querySelector('.hint').textContent = hint;
-  sw.querySelector('.hint').hidden = !hint;
-  sw.querySelector('.claude-back').hidden = !codex.on || claudeOut();
+  sw.querySelector('.claude-back').hidden = !codex.on || claudeHigh();
   const ws = [codex.usage?.primary, codex.usage?.secondary].filter(Boolean);
   const cu = sw.querySelector('.codex-usage');
   cu.hidden = !codex.on || !ws.length;

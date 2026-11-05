@@ -418,7 +418,7 @@ export class ContraptionTurns {
   private async turn(c: ContraptionRow, req: TurnRequest, place: TurnPlace, live: Live, dir: { onHost: string; inside: string }, emit: Emit): Promise<{ outcome: string; usage: Usage | null }> {
     const where = this.scratch(c, req.person, place);
     mkdirSync(where.onHost, { recursive: true });
-    // Codex (#337): a Codex pick, or the person's "Use Codex until I switch back", once their container has Codex; else Claude's default.
+    // Codex (#337): a Codex pick, or the person's "Enable Codex override", once their container has Codex; else Claude's default.
     const wantCodex = isCodexModel(req.model) || !!this.store.getSetting<boolean>(codexSwitchKey(req.person));
     const codex = wantCodex && !place.host && !this.codexWhy(req.person);
     if (isCodexModel(req.model) && !codex) req = { ...req, model: isCodexModel(c.default_model) ? null : c.default_model };

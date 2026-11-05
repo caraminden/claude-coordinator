@@ -1865,7 +1865,7 @@ export class Runner {
     // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
     const tripwire = tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE));
-    // Codex (#337): a Codex pick, or the sender's "Use Codex until I switch back" (which maps a Claude pick by tier),
+    // Codex (#337): a Codex pick, or the sender's "Enable Codex override" (which maps a Claude pick by tier),
     // once their own container is signed in to Codex. Otherwise it runs on Claude, saying why.
     const { model: picked, effort } = turnSettings(ticket, project);
     const switched = person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person));
@@ -2504,7 +2504,7 @@ export class Runner {
   }
 
   /**
-   * "Use Codex until I switch back" (#337). Switching on resumes the person's minions waiting out a usage
+   * "Enable Codex override" (#337). Switching on resumes the person's minions waiting out a usage
    * limit right away (on Codex now); returns why it can't, or null.
    */
   setCodexSwitch(uid: number, on: boolean): string | null {

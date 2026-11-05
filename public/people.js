@@ -1,5 +1,5 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
-import { account, api, h, icon, view } from './core.js';
+import { account, api, codexToggle, h, icon, setCodex, view } from './core.js';
 import { settingsTabs } from './settings.js';
 import { hideButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';
@@ -213,7 +213,7 @@ function claudeCard() {
     if (st.state === 'starting') {
       poll = setTimeout(() => api('api/me/claude').then(render).catch(() => {}), 2000);
       return card.replaceChildren(title('Starting', 'off'), errLine,
-        h('p', {}, 'Starting your container and Anthropic\'s sign-in. The first time builds Citadel\'s image, which can take a few minutes.'));
+        h('p', {}, 'Starting your container and Anthropic\'s sign-in. The first time builds Citadel\'s image, which can take a few minutes.'), override);
     }
     if (st.state === 'waiting for code') {
       const code = h('input', { placeholder: 'Paste the code here', autocomplete: 'off', spellcheck: 'false', required: true, maxlength: 2000 });
@@ -271,9 +271,13 @@ function codexCard() {
     const note = h('p', { class: 'muted small' }, 'Self-review asks Codex for a second opinion on your ChatGPT plan, counting against its limits. ',
       'You sign in with OpenAI inside your own container on the server: Citadel never sees your password or token.');
     const again = () => (poll = setTimeout(() => api('api/me/codex').then(render).catch(() => {}), 2000));
+    if (st.override !== undefined) setCodex(st.override);
+    // Josh, 2026-11-05: the override lives here, beside the sign-in, not in view all the time.
+    const override = st.override && (st.state === 'linked' || st.override.on) ? h('div', { class: 'codex-override' }, codexToggle(),
+      h('p', { class: 'muted small' }, 'Runs your minions, Taskmasters and apps on Codex instead of Claude until you turn it off: handy when your Claude usage runs out. A Claude model picked for a minion runs as the Codex model of the same tier, and each conversation carries over word for word both ways. The left panel offers it too once your Claude usage passes 90%.')) : '';
     if (st.state === 'no container') {
       return card.replaceChildren(title('Needs your Claude', 'off'), errLine,
-        h('p', { class: 'muted' }, 'Codex signs in inside your own Claude container, so link your Claude above first. Turns on the server\'s own login can\'t use Codex yet.'));
+        h('p', { class: 'muted' }, 'Codex signs in inside your own Claude container, so link your Claude above first. Turns on the server\'s own login can\'t use Codex yet.'), override);
     }
     if (st.state === 'starting') {
       again();
@@ -286,16 +290,16 @@ function codexCard() {
         h('p', {}, '1. ', h('a', { href: st.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open OpenAI\'s sign-in'), ' and sign in with your ChatGPT account.'),
         h('p', {}, '2. Enter this code there (it lasts 15 minutes): ', h('code', {}, st.code)),
         h('p', { class: 'muted small' }, 'This page carries on by itself once you\'re signed in. If OpenAI refuses the code, turn on device code sign-in for Codex in ChatGPT\'s security settings.'),
-        h('div', { class: 'row' }, act('Cancel', 'DELETE', 'secondary')), note);
+        h('div', { class: 'row' }, act('Cancel', 'DELETE', 'secondary')), override, note);
     }
     if (st.state === 'linked') {
       return card.replaceChildren(title('Linked', 'ok'), errLine,
         h('p', {}, 'Signed in with ChatGPT.'),
-        h('div', { class: 'row' }, act('Sign out', 'DELETE', 'secondary', 'Sign out of Codex? Self-review stops asking it until you sign in again.')), note);
+        h('div', { class: 'row' }, act('Sign out', 'DELETE', 'secondary', 'Sign out of Codex? Self-review stops asking it, and your turns can\'t run on it, until you sign in again.')), override, note);
     }
     return card.replaceChildren(title('Not linked', 'off'), errLine,
       h('p', {}, 'Sign in to Codex with your ChatGPT plan, and self-review gets a second opinion from another model family.'),
-      h('div', { class: 'row' }, act('Link Codex', 'POST')), note);
+      h('div', { class: 'row' }, act('Link Codex', 'POST')), override, note);
   };
   api('api/me/codex').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
   return card;

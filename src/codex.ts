@@ -135,7 +135,7 @@ You are running as Codex (OpenAI) inside Citadel, in place of Claude Code. The i
 /** What a turn says when it waits its turn: Codex runs one turn at a time per person (the shim's lock). */
 export const CODEX_WAITING = "Waiting for this person's other Codex turn to finish: Codex runs one turn at a time per person.";
 
-/** A person's "Use Codex until I switch back" (the usage bar's switch): true while on. */
+/** A person's "Enable Codex override" (Settings, and the usage bar past 90%): true while on. */
 export const codexSwitchKey = (uid: number) => `codex:on:user:${uid}`;
 /** A person's Codex usage windows, from their turns' account/rateLimits notifications. */
 export const codexUsageKey = (uid: number) => `codex:usage:user:${uid}`;

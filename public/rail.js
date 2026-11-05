@@ -216,6 +216,8 @@ if (typeof window === 'object' && inContraption && !host) {
     syncInstall();
   });
 }
+// Citadel's rail: an app installed from the tab its button opened hides the button here too.
+if (typeof window === 'object' && !inContraption) addEventListener('storage', (e) => { if (e.key?.startsWith('citadel-installed:')) syncInstall(); });
 
 function installButton() {
   const b = document.createElement('button');

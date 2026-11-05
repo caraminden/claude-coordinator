@@ -8,6 +8,8 @@ import { imageHash, type ClaudeLink } from '../src/claude-link.ts';
 import { CodexLink, deviceCode } from '../src/codex-link.ts';
 import { Containers } from '../src/containers.ts';
 import { notReady, overPace, review, usageLine } from '../src/codex-review.ts';
+// @ts-expect-error: a plain .mjs, shipped into the image as is.
+import { patchPaths } from '../deploy/claude-container/codex/citadel-hook.mjs';
 
 // Codex as a read-only second-opinion reviewer (#330): the managed tripwire hook baked into each
 // person's container, and the app-server driver behind citadel-codex-review.
@@ -73,6 +75,80 @@ test('a broken Codex hook blocks: no config, an unreadable one, a missing tripwi
   }
 });
 
+const turnCfg = (extra: object = {}) => configFile({ script: tripwire, config: { ...config, turnDir: `${home}/.citadel-turns/9-1` }, mode: 'turn', mcp: ['thread', 'perigee-godot'], rules: ['mcp__*__merge_pull_request', 'Bash(gh pr merge:*)'], ...extra });
+const patch = (body: string) => ({ hook_event_name: 'PreToolUse', tool_name: 'apply_patch', tool_input: { command: `*** Begin Patch\n${body}\n*** End Patch` }, cwd: worktree });
+
+test('a Codex turn runs the shell through the tripwire, and its ask tier and approval rules are blocks that point at ask_question', () => {
+  const t = turnCfg();
+  assert.equal(hook(bash('npm test && git commit -am wip'), t).code, 0);
+  assert.equal(hook(bash('cat ~/.ssh/id_rsa'), t).code, 2);
+  const ask = hook(bash('systemctl --user enable x.timer'), t);
+  assert.equal(ask.code, 2);
+  assert.match(ask.stderr, /ask_question/);
+  const merge = hook(bash('gh  pr merge 12 --squash'), t);
+  assert.equal(merge.code, 2);
+  assert.match(merge.stderr, /approval rule Bash\(gh pr merge:\*\)/);
+  const mcpMerge = hook({ tool_name: 'mcp__github__merge_pull_request', tool_input: {}, cwd: worktree }, configFile({ script: tripwire, config, mode: 'turn', mcp: ['github'], rules: ['mcp__*__merge_pull_request'] }));
+  assert.equal(mcpMerge.code, 2);
+  assert.match(mcpMerge.stderr, /approval rule/);
+});
+
+test("a Codex turn's patches are checked path by path as writes, and one the parser can't read is blocked", () => {
+  const t = turnCfg();
+  assert.equal(hook(patch('*** Update File: src/x.ts\n@@\n-a\n+b\n*** Add File: test/y.ts\n+z'), t).code, 0);
+  const live = hook(patch(`*** Update File: src/x.ts\n*** Move to: ${home}/claude-coordinator/src/x.ts\n@@\n-a\n+b`), t);
+  assert.equal(live.code, 2);
+  assert.match(live.stderr, /live checkout/);
+  assert.equal(hook(patch(`*** Delete File: ${home}/.local/share/claude-coordinator/state.db`), t).code, 2);
+  const own = hook(patch(`*** Add File: ${home}/.citadel-turns/9-1/pin/tripwire.ts\n+export {}`), t);
+  assert.equal(own.code, 2);
+  assert.match(own.stderr, /turn's own folder/);
+  for (const bad of ['*** Begin Patch\n*** Frobnicate: x\n*** End Patch', 'just text', '*** Begin Patch\n*** End Patch']) {
+    const r = hook({ tool_name: 'apply_patch', tool_input: { command: bad }, cwd: worktree }, t);
+    assert.equal(r.code, 2, bad);
+    assert.match(r.stderr, /could not be read/);
+  }
+  assert.equal(hook({ ...patch('*** Add File: x\n+y'), cwd: undefined }, t).code, 2, 'a relative path with no cwd');
+  assert.equal(hook(patch('*** Add File: x\n+y'), turnCfg({ rules: ['Edit(docs/**)'] })).code, 2, 'an edit rule blocks patches');
+  assert.equal(hook(bash(`echo x > ${home}/.citadel-turns/9-1/codex-tripwire.json`), t).code, 2, 'the shell can\'t rewrite the config either');
+});
+
+test("a Codex turn runs only its own MCP servers' tools; Grunts, goals and unknown tools are off", () => {
+  const t = turnCfg();
+  assert.equal(hook({ tool_name: 'mcp__thread__set_thread_status', tool_input: {}, cwd: worktree }, t).code, 0);
+  assert.equal(hook({ tool_name: 'mcp__perigee-godot__run', tool_input: {}, cwd: worktree }, t).code, 0);
+  for (const tool of ['mcp__other__x', 'collaborationspawn_agent', 'create_goal', 'Write', '']) {
+    assert.equal(hook({ tool_name: tool, tool_input: {}, cwd: worktree }, t).code, 2, tool || 'no tool');
+  }
+  assert.equal(hook({ tool_name: 'view_image', tool_input: { path: 'shot.png' }, cwd: worktree }, t).code, 0);
+  assert.equal(hook({ tool_name: 'view_image', tool_input: { path: `${home}/.ssh/id_rsa` }, cwd: worktree }, t).code, 2);
+});
+
+test("a contraption's Codex turn runs only the contraption's own tools: no shell, no patches", () => {
+  const c = configFile({ script: tripwire, config, mode: 'contraption', mcp: ['mandate'] });
+  assert.equal(hook({ tool_name: 'mcp__mandate__add_item', tool_input: {}, cwd: worktree }, c).code, 0);
+  for (const call of [bash('ls'), patch('*** Add File: x\n+y'), { tool_name: 'mcp__thread__x', tool_input: {}, cwd: worktree }, { tool_name: 'view_image', tool_input: { path: 'a.png' }, cwd: worktree }]) {
+    const r = hook(call, c);
+    assert.equal(r.code, 2, call.tool_name);
+    assert.match(r.stderr, /only its own tools \(mcp__mandate\)/);
+  }
+});
+
+test('an unknown or missing Codex hook mode is the read-only review', () => {
+  for (const mode of [undefined, 'admin', 7]) {
+    const r = hook(patch('*** Add File: x\n+y'), configFile({ script: tripwire, config, mode, mcp: ['thread'] }));
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /read-only/);
+    assert.equal(hook({ tool_name: 'mcp__thread__x', tool_input: {}, cwd: worktree }, configFile({ script: tripwire, config, mode, mcp: ['thread'] })).code, 2);
+  }
+});
+
+test('the patch parser reads every path a patch touches, moves included', () => {
+  assert.deepEqual(patchPaths('*** Begin Patch\n*** Update File: a.ts\n*** Move to: b.ts\n@@\n-x\n+y\n*** End of File\n*** Delete File: c.ts\n*** End Patch\n'), ['a.ts', 'b.ts', 'c.ts']);
+  assert.equal(patchPaths('*** Begin Patch\n*** Copy File: a\n*** End Patch'), null);
+  assert.equal(patchPaths(undefined), null);
+});
+
 test("Codex's managed requirements run only Citadel's hook, from a static command, and the image installs both", () => {
   const req = readFileSync(join(image, 'codex', 'requirements.toml'), 'utf8');
   assert.match(req, /^allow_managed_hooks_only = true$/m);
@@ -85,6 +161,8 @@ test("Codex's managed requirements run only Citadel's hook, from a static comman
   assert.match(containerfile, /^COPY codex\/ \/etc\/codex\/$/m);
   // The build folder's own modes can be 0600 (a turn's umask), and COPY keeps them: Codex runs as the person (#337).
   assert.match(containerfile, /^RUN chmod 0755 \/etc\/codex && chmod 0644 \/etc\/codex\/\* \\\n && runuser -u nobody -- cat \/etc\/codex\/requirements\.toml \/etc\/codex\/citadel-hook\.mjs > \/dev\/null$/m);
+  // write_stdin into a tty shell runs keystrokes no hook sees (#337).
+  assert.match(req, /^unified_exec_tty = false$/m);
 });
 
 test('the image tag changes with any file in its build folder, not just the Containerfile', () => {

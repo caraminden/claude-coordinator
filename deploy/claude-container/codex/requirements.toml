@@ -5,6 +5,9 @@ allow_managed_hooks_only = true
 
 [features]
 hooks = true
+# No tty shells (#337): keystrokes a turn types into one with write_stdin run without a PreToolUse
+# hook, so the tripwire never sees them. Without a tty, a session's stdin is closed. Pinned here, so -c can't undo it.
+unified_exec_tty = false
 
 [hooks]
 managed_dir = "/etc/codex"

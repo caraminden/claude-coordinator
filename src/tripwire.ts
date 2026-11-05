@@ -44,6 +44,8 @@ export interface TripwireConfig {
   ask?: boolean;
   /** The turn's environment, for paths like "$TMPDIR/x"; the hook's own (the turn's) when left out. */
   env?: Record<string, string | undefined>;
+  /** The turn's own folder (its pinned tripwire and hook config), read-only to the turn; Codex turns set it (#337). */
+  turnDir?: string;
 }
 
 /** Why a call is stopped, and whether a person may approve it once on a card instead. */
@@ -69,6 +71,7 @@ function hasDeployScript(cfg: TripwireConfig): boolean {
 /** Why a write to this absolute path is blocked, or null. */
 function writeReason(p: string, cfg: TripwireConfig): string | null {
   const configDir = join(cfg.home, '.config');
+  if (cfg.turnDir && under(p, cfg.turnDir)) return `${cfg.turnDir} is this turn's own folder: its pinned tripwire and the config its hooks read. Nothing in a turn changes it.`;
   if (under(p, cfg.checkout)) return `${cfg.checkout} is the live checkout the service runs from. Change code in your own worktree and merge to main. ${deployNote(cfg)}`;
   const projects = join(cfg.data, 'projects');
   if (under(p, projects) && p !== projects) {

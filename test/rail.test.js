@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { opensApart, railItems } from '../public/rail.js';
+import { chromeIntent, installMode, opensApart, railItems } from '../public/rail.js';
 
 test('no contraption enabled: no rail at all', () => {
   assert.deepEqual(railItems([], '/'), []);
@@ -29,4 +29,33 @@ test("a contraption's own installed app opens every other entry apart, so Chrome
   const items = railItems([{ name: 'mandate', title: 'Mandate' }], 'mandate', '/c/');
   assert.deepEqual(items.map((i) => opensApart(i, true)), [true, false]); // Mandate is where you are
   assert.deepEqual(items.map((i) => opensApart(i, false)), [false, false]);
+});
+
+test("the Install button picks how this browser installs the app showing (#297)", () => {
+  const at = (o) => installMode({ own: false, standalone: false, prompt: false, installed: false, android: false, ios: false, ...o });
+  // On the app's own page in a browser tab: the browser's prompt once it offers one.
+  assert.equal(at({ own: true, prompt: true }), 'prompt');
+  assert.equal(at({ own: true, prompt: true, android: true }), 'prompt');
+  // No prompt: on Android it may be a Custom Tab (no Install in its menu), so hand the page to Chrome; iOS gets the Share hint.
+  assert.equal(at({ own: true, android: true }), 'intent');
+  assert.equal(at({ own: true, ios: true }), 'ios');
+  // A desktop browser that offers nothing (installed already, or one that can't): no button.
+  assert.equal(at({ own: true }), null);
+  // The app's own installed window, or an app this browser installed: no button anywhere.
+  assert.equal(at({ own: true, standalone: true, prompt: true }), null);
+  assert.equal(at({ own: true, prompt: true, installed: true }), null);
+  assert.equal(at({ installed: true }), null);
+  // In Citadel, the app framed (the browser sees only Citadel): its own page in a new tab ...
+  assert.equal(at({}), 'tab');
+  assert.equal(at({ android: true }), 'tab');
+  assert.equal(at({ ios: true }), 'tab');
+  assert.equal(at({ standalone: true }), 'tab');
+  // ... except Citadel's installed app on Android, whose new tab would be a Custom Tab: straight to Chrome.
+  assert.equal(at({ standalone: true, android: true }), 'intent');
+});
+
+test("the Android link opens the app's page in Chrome, falling back to the page itself", () => {
+  const url = new URL('https://cara.example.net/apps/theory-of-crafting/');
+  assert.equal(chromeIntent(url),
+    'intent://cara.example.net/apps/theory-of-crafting/#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=https%3A%2F%2Fcara.example.net%2Fapps%2Ftheory-of-crafting%2F;end');
 });

@@ -53,3 +53,10 @@ export function hideRail(): void;
 
 /** Fetch your contraptions and draw the rail, or take it away when there are none. Resolves to whether there is one. */
 export function showRail(): Promise<boolean>;
+
+/** How the rail's Install button installs the app showing, or null to hide it (#297). `own`: on the app's own page, not framed in Citadel. */
+export type InstallMode = 'prompt' | 'intent' | 'tab' | 'ios';
+export function installMode(at: { own: boolean; standalone: boolean; prompt: boolean; installed: boolean; android: boolean; ios: boolean }): InstallMode | null;
+
+/** An Android intent:// link that opens `url` in Chrome itself (a Custom Tab's menu has no Install), else the plain URL. */
+export const chromeIntent: (url: URL) => string;

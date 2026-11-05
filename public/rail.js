@@ -168,16 +168,108 @@ export function mountRail(el) {
 }
 
 /**
- * Citadel's link to the framed contraption's own page, in a new tab (#297): framed, the page Chrome sees
- * is Citadel's, so its install menu offers Citadel; the contraption's page offers the contraption.
+ * How the rail's Install button installs the app showing (#297; Josh, 2026-11-05: "Citadel's kit, every
+ * app"), or null to hide it. `own`: on the app's own page (else Citadel's, the app framed, where the
+ * browser only sees Citadel). `standalone`: this page is an installed app's. `prompt`: the browser handed
+ * over beforeinstallprompt. `installed`: this browser has installed the app before.
+ *   prompt: the browser's own install dialog.
+ *   intent: Android: open the app's page in Chrome proper (an installed app's links open in a Custom Tab, whose menu has no Install).
+ *   tab:    open the app's page in a new tab, whose own button then installs it.
+ *   ios:    iOS has no prompt: say Share, then Add to Home Screen.
  */
-function installLink() {
-  const a = document.createElement('a');
-  Object.assign(a, { className: 'install', target: '_blank', rel: 'noopener', hidden: true });
+export function installMode({ own, standalone, prompt, installed, android, ios }) {
+  if (installed || (own && standalone)) return null;
+  if (own) return prompt ? 'prompt' : ios ? 'ios' : android ? 'intent' : null; // a desktop browser with no prompt can't
+  return standalone && android ? 'intent' : 'tab';
+}
+
+/** An Android link that opens `url` in Chrome itself, or as a plain link where Chrome isn't there. */
+export const chromeIntent = (url) =>
+  `intent://${url.host}${url.pathname}${url.search}#Intent;scheme=${url.protocol.slice(0, -1)};package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(url.href)};end`;
+
+const INSTALL_TIPS = {
+  prompt: (t) => `Install ${t} as its own app`,
+  intent: (t) => `Open ${t} in Chrome, where you can install it as its own app`,
+  tab: (t) => `Open ${t} on its own page, where your browser offers to install it as its own app`,
+  ios: (t) => `How to add ${t} to your Home Screen`,
+};
+const ua = typeof navigator === 'object' ? navigator.userAgent : '';
+const isAndroid = /Android/i.test(ua);
+const isIOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+let installPrompt = null; // beforeinstallprompt, kept for the button: a contraption's own page only
+// Shared by Citadel and every app on the origin, so Citadel's rail knows an app's page saw itself installed.
+const installedKey = (name) => `citadel-installed:${name}`;
+const knownInstalled = (name) => { try { return localStorage.getItem(installedKey(name)) === '1'; } catch { return false; } };
+const markInstalled = (name, on) => { try { if (on) localStorage.setItem(installedKey(name), '1'); else localStorage.removeItem(installedKey(name)); } catch {} };
+if (typeof window === 'object' && inContraption && !host) {
+  const me = showing();
+  if (me && installed) markInstalled(me, true);
+  addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault(); // the rail's button offers it instead of Chrome's banner; Chrome's menu still has Install
+    installPrompt = e;
+    if (me) markInstalled(me, false); // offered, so not installed (any more)
+    syncInstall();
+  });
+  addEventListener('appinstalled', () => {
+    installPrompt = null;
+    if (me) markInstalled(me, true);
+    syncInstall();
+  });
+}
+
+function installButton() {
+  const b = document.createElement('button');
+  Object.assign(b, { type: 'button', className: 'install', hidden: true });
   // A down arrow into a tray, drawn here since this file brings no icons.
-  a.innerHTML = '<span class="glyph"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span><span class="label"></span>';
-  a.addEventListener('click', closeRail);
-  return a;
+  b.innerHTML = '<span class="glyph"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span><span class="label"></span>';
+  b.addEventListener('click', async () => {
+    closeRail();
+    const name = showing();
+    const url = new URL(`/apps/${name}/`, location.href);
+    const mode = b.dataset.mode;
+    if (mode === 'prompt' && installPrompt) {
+      const p = installPrompt;
+      installPrompt = null; // one use each
+      syncInstall();
+      try {
+        await p.prompt();
+        if ((await p.userChoice).outcome === 'accepted') markInstalled(name, true);
+      } catch {}
+      syncInstall();
+    } else if (mode === 'intent') location.href = chromeIntent(url);
+    else if (mode === 'tab') open(url, '_blank', 'noopener');
+    else if (mode === 'ios') showHint(`To add ${b.dataset.title} to your Home Screen: in Safari, tap Share, then Add to Home Screen.`);
+  });
+  return b;
+}
+
+/** Show or hide the Install button for the app showing, and say what it will do. */
+function syncInstall() {
+  const b = nav?.querySelector('button.install');
+  if (!b) return;
+  const name = showing();
+  const title = name && nav.querySelector(`a[data-app="${CSS.escape(name)}"] .label`)?.textContent;
+  const mode = title ? installMode({ own: inContraption, standalone: installed, prompt: !!installPrompt, installed: knownInstalled(name), android: isAndroid, ios: isIOS }) : null;
+  b.hidden = !mode;
+  b.dataset.mode = mode ?? '';
+  if (!mode) return;
+  b.dataset.title = title;
+  b.title = INSTALL_TIPS[mode](title);
+  b.querySelector('.label').textContent = `Install ${title}`;
+}
+
+let hint = null;
+/** A short note by the rail's foot, gone at the next tap or after 10 s. */
+function showHint(text) {
+  hint?.remove();
+  hint = document.createElement('div');
+  hint.className = 'citadel-rail-hint';
+  hint.setAttribute('role', 'status');
+  hint.textContent = text;
+  document.body.append(hint);
+  const gone = () => { hint?.remove(); hint = null; removeEventListener('pointerdown', gone, true); };
+  setTimeout(() => addEventListener('pointerdown', gone, true), 0);
+  setTimeout(gone, 10_000);
 }
 
 let lastView = ''; // Citadel's own view before a frame, where its entry goes back to
@@ -194,13 +286,7 @@ function syncRail() {
     else a.removeAttribute('aria-current');
   }
   nav.querySelector('a').href = root.pathname + lastView;
-  const install = nav.querySelector('a.install');
-  const title = now && nav.querySelector(`a[data-app="${CSS.escape(now)}"] .label`)?.textContent;
-  install.hidden = !title;
-  if (!title) return;
-  install.href = `/apps/${now}/`;
-  install.title = `Open ${title} on its own page, where your browser offers to install it as its own app`;
-  install.querySelector('.label').textContent = `Install ${title}`;
+  syncInstall();
 }
 
 /** Take the rail away (signing out). */
@@ -342,8 +428,9 @@ function drawRail(items) {
     });
     nav.append(a);
   });
-  if (!inContraption) nav.append(installLink());
+  nav.append(installButton());
   syncRail();
+  syncInstall();
   if (slot) {
     slot.append(nav);
     return true;
@@ -404,7 +491,7 @@ if (typeof document !== 'undefined') {
 const list = (r) => `
   ${r} { align-items: stretch; gap: 6px;
     padding: calc(14px + env(safe-area-inset-top, 0px)) 12px calc(14px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px)); }
-  ${r} a { width: auto; height: auto; padding: 10px; gap: 12px; justify-content: flex-start; border-radius: 10px; }
+  ${r} :is(a, button.install) { width: auto; height: auto; padding: 10px; gap: 12px; justify-content: flex-start; border-radius: 10px; }
   ${r} a.current { box-shadow: none; background: #3b3631; font-weight: 600; }
   ${r} :is(img, .tile, .glyph) { width: 36px; height: 36px; opacity: 1; }
   ${r} .label { position: static; width: auto; height: auto; clip-path: none; overflow: hidden; text-overflow: ellipsis; }
@@ -422,21 +509,25 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
   padding: calc(10px + env(safe-area-inset-top, 0px)) 0 calc(10px + env(safe-area-inset-bottom, 0px)) env(safe-area-inset-left, 0px);
   background: #2a2622; color: #f4efe9; font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
 @media (prefers-color-scheme: dark) { .citadel-rail { background: #0f0e0d; border-right: 1px solid #34322e; } }
-.citadel-rail a { flex: none; box-sizing: border-box; width: 42px; height: 42px; padding: 4px; border-radius: 12px;
+.citadel-rail :is(a, button.install) { flex: none; box-sizing: border-box; width: 42px; height: 42px; padding: 4px; border-radius: 12px;
   display: flex; align-items: center; justify-content: center; color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; }
 .citadel-rail a.current { box-shadow: inset 0 0 0 2px #fff; }
-.citadel-rail a:focus-visible { outline: 2px solid #fb923c; outline-offset: 1px; }
+.citadel-rail :is(a, button.install):focus-visible { outline: 2px solid #fb923c; outline-offset: 1px; }
 .citadel-rail img, .citadel-rail .tile { flex: none; width: 34px; height: 34px; border-radius: 9px; opacity: 0.65; }
 .citadel-rail .tile { display: flex; align-items: center; justify-content: center; background: #5a534c; font-weight: 650; }
 .citadel-rail a:is(.current, :hover, :focus-visible) :is(img, .tile) { opacity: 1; }
 .citadel-rail a.down .tile { opacity: 0.35; }
 .citadel-rail .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.citadel-rail a[hidden] { display: none; }
-.citadel-rail a.install { margin-top: auto; }
+.citadel-rail :is(a, button)[hidden] { display: none; }
+.citadel-rail button.install { margin-top: auto; border: 0; background: none; font: inherit; text-align: start; cursor: pointer; }
 .citadel-rail .glyph { flex: none; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; opacity: 0.65; }
-.citadel-rail a.install:is(:hover, :focus-visible) .glyph { opacity: 1; }
+.citadel-rail button.install:is(:hover, :focus-visible) .glyph { opacity: 1; }
 .citadel-rail hr { flex: none; width: 26px; border: 0; border-top: 1px solid #5a534c; margin: 2px 0; }
 .citadel-rail-backdrop, .citadel-rail-handle { display: none; }
+.citadel-rail-hint { position: fixed; z-index: 60; left: calc(var(--citadel-rail, 0px) + 12px); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box; max-width: min(340px, calc(100vw - 24px)); padding: 10px 14px; border-radius: 10px;
+  background: #2a2622; color: #f4efe9; box-shadow: 0 4px 18px rgb(0 0 0 / 0.3); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+@media ${NARROW} { .citadel-rail-hint { left: 12px; } }
 .citadel-layer { position: fixed; inset: 0; z-index: 2147483000; background: Canvas; }
 .citadel-layer[hidden] { display: none; }
 .citadel-layer iframe { display: block; width: 100%; height: 100%; border: 0; }

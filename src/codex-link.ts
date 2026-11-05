@@ -23,6 +23,8 @@ interface Login {
   url?: string;
   code?: string;
   error?: string;
+  /** The sign-in process has ended (signed in, failed or cancelled). */
+  done?: boolean;
 }
 
 /** codex keeps its login in a file: a container has no keyring. */
@@ -46,11 +48,12 @@ export class CodexLink {
     if (!meta) return { state: 'no container' };
     const login = this.logins.get(uid);
     if (existsSync(join(meta.home, '.codex', 'auth.json'))) {
-      if (login && !login.child) this.logins.delete(uid);
+      if (login?.done) this.logins.delete(uid);
       return { state: 'linked' };
     }
     const error = login?.error ? { error: login.error } : {};
-    if (login?.child && !login.error) return login.code ? { state: 'waiting', url: login.url, code: login.code } : { state: 'starting' };
+    // From the click on: the container can take minutes to start before codex even runs.
+    if (login && !login.done && !login.error) return login.code ? { state: 'waiting', url: login.url, code: login.code } : { state: 'starting' };
     return { state: 'not linked', ...error };
   }
 
@@ -61,12 +64,14 @@ export class CodexLink {
     this.logins.set(uid, login);
     try {
       await this.claude.ensure(uid);
+      // Cancelled (or started again) while the container was starting.
+      if (this.logins.get(uid) !== login) return this.status(uid);
       const child = spawn('podman', ['exec', '-i', this.claude.name(uid), 'codex', 'login', '--device-auth', '-c', FILE_STORE], { stdio: ['pipe', 'pipe', 'pipe'] });
       login.child = child;
       const expire = setTimeout(() => child.kill(), DEVICE_CODE_MS);
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
-          login.error = 'Codex\'s sign-in didn\'t show a code within 60 seconds.';
+          login.error ??= 'Codex\'s sign-in didn\'t show a code within 60 seconds.';
           child.kill();
           resolve();
         }, 60_000);
@@ -82,7 +87,11 @@ export class CodexLink {
         child.stdout!.on('data', take);
         child.stderr!.on('data', take);
         child.on('error', (err) => {
+          clearTimeout(timer);
+          clearTimeout(expire);
           login.error = `Couldn't start Codex's sign-in: ${err.message}`;
+          login.child = null;
+          login.done = true;
           resolve();
         });
         child.on('exit', (code) => {
@@ -90,11 +99,13 @@ export class CodexLink {
           clearTimeout(expire);
           if (code !== 0 && !login.error && this.logins.get(uid) === login) login.error = signInError(code, login.out);
           login.child = null;
+          login.done = true;
           resolve();
         });
       });
     } catch (err: any) {
       login.error = err.message;
+      login.done = true;
     }
     return this.status(uid);
   }

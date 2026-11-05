@@ -221,9 +221,17 @@ const wait = setInterval(() => {
   try {
     let linked = true;
     const claude = { meta: () => (linked ? { container: 'citadel-claude-2', home, linkedAt: 1 } : null), name: () => 'citadel-claude-2', ensure: async () => {} } as unknown as ClaudeLink;
+    // The first start waits (a container rebuilding); later ones are instant.
+    let started_ = () => {};
+    const slow = new Promise<void>((r) => (started_ = r));
+    (claude as any).ensure = () => slow;
     const codex = new CodexLink(claude, new Containers());
     assert.deepEqual(codex.status(2), { state: 'not linked' });
-    const started = await codex.link(2);
+    // From the click on, while the container is still starting, Settings shows it and keeps polling.
+    const linking = codex.link(2);
+    assert.deepEqual(codex.status(2), { state: 'starting' });
+    started_();
+    const started = await linking;
     assert.deepEqual(started, { state: 'waiting', url: 'https://auth.openai.com/codex/device', code: 'AB12-CD34Z' });
     const argv = JSON.parse(readFileSync(calls, 'utf8').trim().split('\n')[0]);
     assert.deepEqual(argv, ['exec', '-i', 'citadel-claude-2', 'codex', 'login', '--device-auth', '-c', 'cli_auth_credentials_store="file"']);

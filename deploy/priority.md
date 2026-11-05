@@ -1,7 +1,8 @@
 # Keeping the server out of swap and ahead of builds (#326)
 
 Scheme switching got slow while minions compiled (report: `reports/perigee-load-2026-11-05.md` in
-the scheme's shared folder). Three things on perigee cause it, and one fix each. Only the first is a
+the scheme's shared folder). Every command here is bash: perigee's login shell is fish, so type
+`bash` first. Three things on perigee cause it, and one fix each. Only the first is a
 Citadel file; the other two are host settings, so they're commands for Cara to run. Run the
 [checks](#checks) before and after so the numbers show whether it worked.
 

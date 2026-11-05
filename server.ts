@@ -22,7 +22,7 @@ import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
-import { type Chain, LiveWaiters } from './src/wake.ts';
+import { type Chain, githubPrs, LiveWaiters } from './src/wake.ts';
 import { errorText } from './src/scheme-repo.ts';
 import { catchUpTicketDir, createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { describeCron, runBrief, type Schedule } from './src/schedules.ts';
@@ -37,7 +37,7 @@ import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AppServices, serviceOptions } from './src/app-services.ts';
 import { contraptionRoutes } from './src/routes/contraptions.ts';
 import { ContraptionTurns } from './src/contraption-turns.ts';
-import { GithubLink } from './src/github-link.ts';
+import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerTokens } from './src/ci-runner.ts';
 import { projectRoutes } from './src/routes/projects.ts';
@@ -194,8 +194,22 @@ if (runner.units && !BOOT_CHECK) {
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text) => runner.send(ticketId, APP_NAME, text));
+// The server reads a scheme's GitHub (PRs, merges, fetches) as its owner (#321): a private repo may let no one else in.
+const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, DATA_DIR);
+waiters.prs = githubPrs(githubOf);
+mainSync.as = githubOf;
 runner.liveHead = () => waiters.head;
 /** The server now runs `head`: wake its waiters, and dismiss pending-deploy minions it ships. */
+/** Fetch a scheme's origin and fast-forward its main if it can (#208), then look at the waiters again: a merge on GitHub can be what they wait on (#229). */
+function catchUp(repoDir: string) {
+  void syncMain(repoDir)
+    .catch((err) => console.error(`Catching up main in ${repoDir} failed:`, err))
+    .then(() => {
+      waiters.prs.forget?.();
+      waiters.check();
+    })
+    .catch((err) => console.error('Checking waiters after a merge failed:', err));
+}
 function liveOn(head: string | null) {
   waiters.check(head);
   for (const id of waiters.pendingLive()) runner.deployLive(id);
@@ -270,7 +284,12 @@ if (!BOOT_CHECK) {
   const stopPreview = runner.onClose;
   runner.onClose = (ticketId) => {
     const stopped = stopPreview(ticketId);
+    // Asked afresh (#321): a minion that merged its PR and dismissed itself may have read "not merged" a moment ago.
+    waiters.prs.forget?.();
     waiters.check();
+    // Its PR may have merged on GitHub with the watcher never seeing it (it watches open minions only).
+    const repoDir = store.getProject(store.getTicket(ticketId)?.project_id ?? -1)?.repo_dir;
+    if (repoDir) catchUp(repoDir);
     return stopped;
   };
   liveOn(BOOT_COMMIT);
@@ -554,18 +573,13 @@ if (!BOOT_CHECK || PREVIEW) {
 
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
 const github = new GithubWatcher(store, (ticketId, text) => runner.send(ticketId, GITHUB_NAME, text));
+github.as = githubOf;
 if (!BOOT_CHECK) github.start();
 // Members already in schemes get their invites, and leavers' are withdrawn (#310); it settles, so later boots only retry what failed.
 if (!BOOT_CHECK) void safely('repo access sweep', () => repoAccess.sweep());
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);
-// Then chains and commit waiters look again: a merged PR can be what they wait on (#229).
-github.onMerged = (repoDir) => void syncMain(repoDir)
-  .catch((err) => console.error(`Catching up main in ${repoDir} failed:`, err))
-  .then(() => {
-    waiters.prs.forget?.();
-    waiters.check();
-  })
-  .catch((err) => console.error('Checking waiters after a merge failed:', err));
+// A merged PR catches its scheme's main up, and chains and commit waiters look again.
+github.onMerged = (repoDir) => catchUp(repoDir);
 
 // Each CI runner token handed out (#320) is told in the scheme Taskmaster's chat, without waking it.
 runnerTokens.onFetched = (project, text) => {

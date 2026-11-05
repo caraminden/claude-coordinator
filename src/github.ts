@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Store, Ticket } from './db.ts';
 import { asData } from './quote.ts';
+import { asEnv, type GithubEnv } from './scheme-repo.ts';
 
 const run = promisify(execFile);
 
@@ -251,11 +252,11 @@ export function parseSnapshot(data: any): { pr: PrSnapshot | null; self: string 
   };
 }
 
-async function fetchSnapshot(repoDir: string, repo: string, branch: string) {
+async function fetchSnapshot(repoDir: string, repo: string, branch: string, as?: GithubEnv) {
   const [owner, name] = repo.split('/');
   const { stdout } = await run('gh', [
     'api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `branch=${branch}`,
-  ], { cwd: repoDir, timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
+  ], { cwd: repoDir, env: asEnv(as), timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
   return parseSnapshot(JSON.parse(stdout).data);
 }
 
@@ -289,6 +290,8 @@ export class GithubWatcher {
   private timer: NodeJS.Timeout | null = null;
   /** A ticket's PR was seen merged (or already merged at first look): its scheme's main can catch up (#208). */
   onMerged: (repoDir: string) => void = () => {};
+  /** The GitHub login a scheme's PRs are read as (#321: its owner's, for a private repo); undefined is the box's. */
+  as: (repoDir: string) => GithubEnv = () => undefined;
 
   constructor(store: Store, send: (ticketId: number, text: string) => void, fetch = fetchSnapshot) {
     this.store = store;
@@ -358,7 +361,7 @@ export class GithubWatcher {
 
   async poll(ticket: Ticket, repoDir: string, repo: string) {
     const prev = this.schedule.get(ticket.id);
-    const { pr, self } = await this.fetch(repoDir, repo, ticket.branch!);
+    const { pr, self } = await this.fetch(repoDir, repo, ticket.branch!, this.as(repoDir));
     if (!pr) {
       this.schedule.set(ticket.id, { nextAt: Date.now() + NO_PR_MS, wait: OPEN_MS, last: '' });
       return;

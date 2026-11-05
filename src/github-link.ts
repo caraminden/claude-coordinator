@@ -190,6 +190,16 @@ export function personGithub(link: GithubLink, person: User, dir: string): { env
   return c ? { env: { ...noLogin(dir), GH_TOKEN: c.secret }, login: c.login } : { env: noLogin(dir), login: null };
 }
 
+/**
+ * The GitHub login the server reads a scheme's repo as (#321: PR state, merges, fetches): its owner's
+ * when linked, since a private repo may let no one else in; otherwise undefined, the box's login.
+ */
+export function schemeGithub(store: Store, link: GithubLink, repoDir: string, dataDir: string): Record<string, string> | undefined {
+  const p = store.listProjects().find((x) => x.repo_dir === repoDir);
+  const owner = p?.owner_id != null ? store.getUser(p.owner_id) : null;
+  return owner && link.token(owner) ? personGithub(link, owner, join(dataDir, 'people', String(owner.id))).env : undefined;
+}
+
 /** An empty gh config folder in `dir`, so gh and git's gh credential helper can't fall back to the box's login; no prompts. */
 function noLogin(dir: string): Record<string, string> {
   const ghDir = join(dir, 'gh');

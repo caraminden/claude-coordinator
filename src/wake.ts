@@ -14,6 +14,7 @@
 import { execFileSync } from 'node:child_process';
 import type { Store } from './db.ts';
 import { githubRepo } from './github.ts';
+import { asEnv, type GithubEnv } from './scheme-repo.ts';
 
 /** A minion waiting for a commit to be live, or (commit null) for the next deploy after `since`. */
 export interface Waiter {
@@ -75,9 +76,10 @@ const UNMERGED_MS = 60_000;
 
 /**
  * PR lookups through the gh CLI, for repos whose origin is on GitHub. Synchronous like the git calls
- * here, so each is cached: checks run at restarts, reloads and dismissals, not on a timer.
+ * here, so each is cached: checks run at restarts, reloads and dismissals, not on a timer. `as` gives
+ * a repo's GitHub login (#321: its scheme owner's, since a private repo may let no one else read it).
  */
-export function githubPrs(): PrLookup {
+export function githubPrs(as: (repo: string) => GithubEnv = () => undefined): PrLookup {
   const merged = new Map<string, PrMerge>();
   const unmerged = new Map<string, number>();
   const ask = (repo: string, key: string, args: string[], parse: (json: any) => PrMerge | null): PrMerge | null => {
@@ -86,7 +88,7 @@ export function githubPrs(): PrLookup {
     if ((unmerged.get(key) ?? 0) > Date.now() || !githubRepo(git(repo, ['remote', 'get-url', 'origin']) ?? '')) return null;
     let pr: PrMerge | null = null;
     try {
-      pr = parse(JSON.parse(execFileSync('gh', args, { cwd: repo, encoding: 'utf8', timeout: 8_000, stdio: ['ignore', 'pipe', 'pipe'] })));
+      pr = parse(JSON.parse(execFileSync('gh', args, { cwd: repo, env: asEnv(as(repo)), encoding: 'utf8', timeout: 8_000, stdio: ['ignore', 'pipe', 'pipe'] })));
     } catch (err: any) {
       console.error(`Asking GitHub about ${key.split('\0').slice(1).join(' ')} failed:`, err.stderr?.trim() || err.message);
     }

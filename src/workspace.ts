@@ -69,6 +69,8 @@ export async function catchUpMain(repoDir: string): Promise<string | null> {
 /** Told when why a scheme's main can't catch up changes: a reason, or null once it's level again (server.ts notes it). */
 export const mainSync = {
   stuck: (repoDir: string, why: string | null) => { if (why) console.warn(`Not fast-forwarding main in ${repoDir}: ${why}`); },
+  /** The GitHub login the fetch runs as (#321: the scheme owner's; server.ts sets it); undefined is the box's. */
+  as: (_repoDir: string): GithubEnv => undefined,
 };
 
 // One catch-up per repo at a time: two at once would trip over git's index lock.
@@ -82,7 +84,7 @@ const stuckWhy = new Map<string, string | null>();
 export function syncMain(repoDir: string): Promise<void> {
   const next = (syncing.get(repoDir) ?? Promise.resolve()).then(async () => {
     try {
-      await git(['fetch', '--quiet', 'origin'], repoDir);
+      await git(['fetch', '--quiet', 'origin'], repoDir, mainSync.as(repoDir));
     } catch {
       // Unreachable remote: work from what we already have.
     }

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { type Chain, LiveWaiters, mergedPr, mergedPrOf, type PrMerge } from '../src/wake.ts';
+import { type Chain, githubPrs, LiveWaiters, mergedPr, mergedPrOf, type PrMerge } from '../src/wake.ts';
 import { bootServer, stopTurns, stopProcs } from './helpers.ts';
 
 // Chained minions: one created parked, whose brief is held until the minion it follows (its leader)
@@ -223,6 +223,63 @@ test('a leader whose PR was squash-merged counts as merged, and a held chain sta
   assert.equal(held.length, 1);
   squash(live, late.branch);
   assert.equal(w.check(), 1);
+});
+
+// #321: Threadspace merges PRs on GitHub, in a private repo only its owner's login can read, and the
+// server's own fetch can't reach it either, so its local main and origin/main both lag. Asking GitHub
+// as the box's login found nothing, and the leader read as dismissed without its work merged.
+test('a leader squash-merged into origin/main only, in a repo only the scheme owner\'s login can read, counts as merged', () => {
+  reset();
+  const remote = join(root, 'obsidian.git');
+  execFileSync('git', ['clone', '-q', '--bare', other.dir, remote]);
+  const scheme = join(root, 'obsidian');
+  execFileSync('git', ['clone', '-q', remote, scheme]);
+  const sg = (...args: string[]) => execFileSync('git', args, { cwd: scheme, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  // Its origin is on GitHub, out of the server's reach: nothing merged there reaches this clone.
+  sg('remote', 'set-url', 'origin', 'https://github.com/josh/obsidian.git');
+  const threadspace = store.createProject('Threadspace', null);
+  store.setProjectRepoDir(threadspace.id, scheme);
+  const repo = { dir: scheme, git: sg, commit: () => '', work: other.work };
+  const w = waiters(live.git('rev-parse', 'HEAD'));
+  const leader = minion(threadspace.id, repo);
+  const follower = chain(w, leader.id, 'merged', threadspace.id, repo);
+  sg('switch', '-q', leader.branch);
+  writeFileSync(join(scheme, 'docs'), 'one');
+  sg('add', '-A');
+  sg('-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'one');
+  writeFileSync(join(scheme, 'docs'), 'two');
+  sg('-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '-am', 'two');
+  const tip = sg('rev-parse', 'HEAD');
+  sg('switch', '-q', 'main');
+  // GitHub squash-merges its PR: origin's main gets one new commit, none of the branch's.
+  const merger = join(root, 'merger');
+  execFileSync('git', ['clone', '-q', remote, merger]);
+  const mg = (...args: string[]) => execFileSync('git', args, { cwd: merger, encoding: 'utf8' }).trim();
+  mg('fetch', '-q', scheme, `${leader.branch}:${leader.branch}`);
+  mg('merge', '--squash', '-q', leader.branch);
+  mg('-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'Squashed (#10)');
+  mg('push', '-q', 'origin', 'main');
+  const merge = mg('rev-parse', 'HEAD');
+  assert.throws(() => sg('cat-file', '-e', `${merge}^{commit}`), 'the scheme\'s clone has not got the merge');
+
+  // gh as the box runs it: GitHub only answers the owner's token.
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  const answer = join(root, 'pr-list.json');
+  writeFileSync(answer, JSON.stringify([{ number: 10, state: 'MERGED', headRefOid: tip, mergeCommit: { oid: merge } }]));
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh\n[ "$GH_TOKEN" = owner-token ] && [ "$1 $2" = "pr list" ] || { echo 'GraphQL: Could not resolve to a Repository' >&2; exit 1; }\ncat '${answer}'\n`);
+  chmodSync(join(bin, 'gh'), 0o755);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    w.prs = githubPrs((dir) => (dir === scheme ? { GH_TOKEN: 'owner-token' } : undefined));
+    store.updateTicket(leader.id, { status: 'closed' });
+    assert.equal(w.check(), 1);
+    assert.equal(held.length, 0, 'no "dismissed without its work being merged"');
+    assert.equal(started[0].c.ticket, follower);
+  } finally {
+    process.env.PATH = path;
+  }
 });
 
 test('GitHub\'s answers read as a merged PR or none', () => {

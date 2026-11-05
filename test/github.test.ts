@@ -233,3 +233,15 @@ test("a PR seen merged catches its scheme's main up once, even at the first look
   await w.poll(t, root, 'o/r');
   assert.deepEqual(synced, [root]);
 });
+
+test("a scheme's PRs are read as the GitHub login it names (#321: its owner's, for a private repo)", async () => {
+  const store = new Store(join(root, 'as.db'));
+  const project = store.createProject('P', null);
+  const ticket = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(ticket.id, root, 'ticket/1-t');
+  const asked: unknown[] = [];
+  const w = new GithubWatcher(store, () => {}, async (_dir, _repo, _branch, as) => (asked.push(as), { pr: pr(), self: 'cara' }));
+  w.as = (repoDir) => (repoDir === root ? { GH_TOKEN: 'owner-token' } : undefined);
+  await w.poll(store.getTicket(ticket.id)!, root, 'o/r');
+  assert.deepEqual(asked, [{ GH_TOKEN: 'owner-token' }]);
+});

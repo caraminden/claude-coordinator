@@ -132,3 +132,23 @@ test('a stuck main is reported once per reason, and once more when it is level a
     mainSync.stuck = was;
   }
 });
+
+// #321: a scheme's private repo answers only its owner's login, so main's catch-up fetches as them.
+test("main catches up through a fetch that runs as the scheme owner's GitHub login", async () => {
+  const r = join(root, 'owned');
+  git(['clone', '--quiet', remote, r], root);
+  // Its origin is on GitHub; only the owner's env knows the way there (a URL rewrite stands in for their token).
+  git(['remote', 'set-url', 'origin', 'https://github.com/josh/private.git'], r);
+  git(['pull', '--quiet', '--ff-only', remote, 'main'], seed);
+  commit(seed, 'squash-merged on GitHub');
+  git(['push', '--quiet', remote, 'main'], seed);
+  const was = mainSync.as;
+  mainSync.as = (dir) => (dir === r ? { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.${remote}.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/josh/private.git' } : undefined);
+  try {
+    await syncMain(r);
+    assert.equal(git(['rev-parse', 'main'], r), head(seed));
+    assert.equal(head(r), head(seed), 'the checkout itself moved');
+  } finally {
+    mainSync.as = was;
+  }
+});

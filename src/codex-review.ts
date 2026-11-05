@@ -80,7 +80,7 @@ export function usageLine(limits: RateLimits | null | undefined): string {
 /**
  * Run one review: start a read-only, ephemeral thread in `cwd`, send `brief`, and resolve with Codex's
  * last message. Approval requests are declined (the sandbox already refuses writes). It first reads the
-person's Codex usage and skips (code 4) when overPace says so; `usage` is the latest usage line.
+ * person's Codex usage and skips (code 4) when overPace says so; `usage` is the latest usage line.
  */
 export function review(brief: string, opts: { cwd: string; timeoutMs: number; bin?: string; env?: Record<string, string | undefined>; now?: () => number }): Promise<{ code: number; text: string; usage: string }> {
   const bin = opts.bin ?? 'codex';

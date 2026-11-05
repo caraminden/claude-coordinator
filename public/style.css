@@ -643,6 +643,17 @@ button.pin.on { color: var(--accent); }
 .usage[data-level="error"] .fill { background: var(--error); }
 .usage[data-level="error"] .label { color: var(--error); }
 .usage[hidden] { display: none; }
+/* "Use Codex until I switch back" (#337), under the usage bar */
+.codex-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.6rem; font-size: 0.8em; color: var(--muted); }
+.codex-switch[hidden], .codex-switch [hidden] { display: none; }
+.codex-switch .toggle { display: flex; align-items: center; gap: 0.4rem; margin: 0; padding: 0.15rem 0; color: var(--ink); cursor: pointer; white-space: nowrap; }
+.codex-switch .toggle input { width: auto; margin: 0; accent-color: var(--accent); flex: none; }
+.codex-switch .toggle:has(input:disabled) { color: var(--muted); cursor: default; }
+.codex-switch .codex-usage { font-variant-numeric: tabular-nums; cursor: default; }
+.codex-switch .codex-usage[data-level="warn"] { color: var(--waiting); }
+.codex-switch .codex-usage[data-level="error"] { color: var(--error); }
+.codex-switch .claude-back { color: var(--done); }
+.codex-switch .hint { flex-basis: 100%; }
 /* "Week 9%" → "Week 10%" doesn't nudge the bar: room for "Week 100%" (rule 13). */
 .usage .label { min-width: 9ch; text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) { .usage .track { width: 3rem; } }

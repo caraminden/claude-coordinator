@@ -1,7 +1,7 @@
 // The message box under a chat, on Citadel UI's composer (public/ui/composer.js: autogrow, Enter rules,
 // IME guard, list continuation, the text back on a failed send, the text draft). Citadel's own around it:
 // pasted and dropped files with their drafts, the model and effort pickers, and steer or queue mid-turn.
-import { account, api, catchUpEvents, formatSize, h, isCoordinator, me, reloadWhenIdle, scrollToBottom, sending, setSending, uploadUrl, view } from './core.js';
+import { account, api, catchUpEvents, codex, formatSize, h, isCoordinator, me, reloadWhenIdle, scrollToBottom, sending, setSending, uploadUrl, view } from './core.js';
 import { base64Url, renderTicketHead, renderTyping, userBubble } from './thread.js';
 import { mountComposer } from './ui/composer.js';
 
@@ -374,8 +374,20 @@ const MODELS = [
   ['claude-haiku-5-5', 'Haiku 5.5'],
   ['claude-fable-5-1', 'Fable 5.1'],
 ];
+// Codex's (#337, src/codex.ts CODEX_MODELS): one-off picks, for people whose own container is signed in to Codex.
+const CODEX_MODELS = [
+  ['gpt-6-astra', 'GPT-6 Astra'],
+  ['gpt-6.1-sol', 'GPT-6.1 Sol'],
+  ['gpt-6-luna', 'GPT-6 Luna'],
+];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
-const modelName = (id) => MODELS.find(([m]) => m === id)?.[1] ?? id;
+const modelName = (id) => [...MODELS, ...CODEX_MODELS].find(([m]) => m === id)?.[1] ?? id;
+/** Why Codex can't be picked here, briefly, or null. */
+function codexBlocked() {
+  if (!codex) return "not on the server's login";
+  if (codex.ready) return null;
+  return /container/.test(codex.why ?? '') ? 'link your Claude first' : 'sign in to Codex first';
+}
 
 /** Model and effort for this thread, beside Send; a change applies from its next turn. */
 function modelPicker(chatId) {
@@ -410,9 +422,13 @@ export function renderModelPicker() {
   if (!model || !effort || !view.ticket) return;
   const t = view.ticket;
   const defModel = !t.model && t.last_model ? modelName(t.last_model) : 'Model';
-  model.replaceChildren(h('option', { value: '' }, defModel), ...MODELS.map(([id, name]) => h('option', { value: id }, name)));
-  // A model set outside this list (say, by an older version) still shows as itself.
-  if (t.model && !MODELS.some(([id]) => id === t.model)) model.append(h('option', { value: t.model }, t.model));
+  const blocked = codexBlocked();
+  model.replaceChildren(h('option', { value: '' }, defModel),
+    h('optgroup', { label: 'Claude' }, ...MODELS.map(([id, name]) => h('option', { value: id }, name))),
+    h('optgroup', { label: blocked ? `Codex (${blocked})` : 'Codex' },
+      ...CODEX_MODELS.map(([id, name]) => h('option', { value: id, disabled: !!blocked && t.model !== id, title: blocked ? `Codex: ${codex?.why ?? "the server's Claude login has no Codex"}` : null }, name))));
+  // A model set outside these lists (say, by an older version) still shows as itself.
+  if (t.model && ![...MODELS, ...CODEX_MODELS].some(([id]) => id === t.model)) model.append(h('option', { value: t.model }, t.model));
   model.value = t.model ?? '';
   const shownDefault = t.default_effort ?? t.last_effort;
   const defEffort = !t.effort && shownDefault ? shownDefault : 'Effort';

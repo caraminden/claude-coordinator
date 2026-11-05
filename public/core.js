@@ -12,7 +12,7 @@ import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, refreshI
 import { onSchedulesChanged } from './schedules.js';
 import { onHiddenChanged } from './hidden.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
-import { uploadsRunning } from './composer.js';
+import { renderModelPicker, uploadsRunning } from './composer.js';
 import { markdownElement } from './ui/markdown.js';
 import { iconSrc } from './schemes.js';
 import { hideRail, showRail } from './rail.js';
@@ -428,6 +428,11 @@ function connectStream(catchUp = false) {
       }
       assetVersion ??= msg.version;
     }
+    if (msg.type === 'hello' || msg.type === 'codex') {
+      codex = msg.codex ?? null;
+      if (msg.type === 'codex') renderUsage();
+      renderModelPicker();
+    }
     if (msg.type === 'hello' || msg.type === 'usage') {
       renderUsage(msg.usage);
       // Rows of minions that hit the usage limit count down to its reset.
@@ -510,6 +515,9 @@ setInterval(reloadWhenIdle, 2000);
 // ---------- account usage ----------
 
 export let usage = null;
+/** The person's Codex (#337): { ready, why, on, usage }, or null on the server's login, which has none. */
+export let codex = null;
+let codexHint = '';
 
 /** A weekly-limit bar; one lives in the top bar and one in a project's side panel. */
 export const usageMeter = () => h('div', { class: 'usage', hidden: true },
@@ -533,6 +541,56 @@ export function renderUsage(next = usage) {
       `As of the last turn, ${ago(usage.updatedAt)}`,
     ].filter(Boolean).join('\n');
   }
+  for (const el of document.querySelectorAll('.usage')) renderCodexSwitch(el);
+}
+
+const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+/** A Claude window is used up and hasn't reset yet. */
+const claudeOut = () => [usage?.session, usage?.weekly].some((w) => w?.status === 'rejected' && (!w.resetsAt || w.resetsAt > Date.now()));
+
+/**
+ * "Use Codex until I switch back" (#337), under each usage bar: offered once a Claude window is used up,
+ * and shown while it's on, with Codex's own usage and, after Claude's reset, a word that Claude is back.
+ */
+function renderCodexSwitch(meter) {
+  let sw = meter.nextElementSibling?.classList.contains('codex-switch') ? meter.nextElementSibling : null;
+  if (!sw) {
+    const box = h('input', { type: 'checkbox', onchange: () => flipCodex(box) });
+    sw = h('div', { class: 'codex-switch', hidden: true },
+      h('label', { class: 'toggle', title: 'Run your turns on Codex (OpenAI) instead of Claude: minions, Taskmasters and apps. A Claude model picked for a minion runs as the Codex model of the same tier.' }, box, 'Use Codex until I switch back'),
+      h('span', { class: 'codex-usage' }), h('span', { class: 'claude-back' }, "Claude's back"), h('span', { class: 'hint' }));
+    meter.after(sw);
+  }
+  sw.hidden = !codex || !(codex.on || claudeOut());
+  if (sw.hidden) return;
+  const box = sw.querySelector('input');
+  box.checked = codex.on;
+  box.disabled = !codex.on && !codex.ready;
+  const hint = codexHint || (!codex.on && !codex.ready ? `Codex isn't ready: ${codex.why}.` : '');
+  sw.querySelector('.hint').textContent = hint;
+  sw.querySelector('.hint').hidden = !hint;
+  sw.querySelector('.claude-back').hidden = !codex.on || claudeOut();
+  const ws = [codex.usage?.primary, codex.usage?.secondary].filter(Boolean);
+  const cu = sw.querySelector('.codex-usage');
+  cu.hidden = !codex.on || !ws.length;
+  if (cu.hidden) return;
+  const top = Math.round(Math.max(...ws.map((w) => w.usedPercent)));
+  cu.textContent = `Codex ${top}%`;
+  cu.dataset.level = top >= 90 ? 'error' : top >= 75 ? 'warn' : '';
+  const span = (m) => (m === 300 ? '5-hour window' : m === 10080 ? 'Weekly' : m ? `${Math.round(m / 60)}-hour window` : 'Window');
+  cu.title = [...ws.map((w) => `${span(w.windowDurationMins)}: ${Math.round(w.usedPercent)}%${w.resetsAt ? `, resets ${when(w.resetsAt * 1000)}` : ''}`), `As of the last Codex turn, ${ago(codex.usage.updatedAt)}`].join('\n');
+}
+
+async function flipCodex(box) {
+  box.disabled = true;
+  codexHint = '';
+  try {
+    codex = await api('api/me/codex/switch', { method: 'PUT', body: { on: box.checked } });
+  } catch (err) {
+    codexHint = err.message;
+  }
+  renderUsage();
+  renderModelPicker();
 }
 
 // Phones and sleeping laptops drop connections quietly; recheck when the page comes back.

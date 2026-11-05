@@ -192,6 +192,7 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   assert.equal((await ask({ person: Josh.id, kind: 'data', files: Array.from({ length: 21 }, (_, i) => ({ name: `${i}.png`, data: b64('x') })) })).status, 400);
   assert.equal((await ask({ person: Josh.id, kind: 'data', text: ' ' })).status, 400);
   assert.equal((await ask({ person: Dana.id, kind: 'data' })).status, 403);
+  assert.equal((await ask({ person: Josh.id, kind: 'data' })).status, 400, 'an empty data ask files nothing');
   assert.equal(store.listEvents(tm()!.id).length, events, 'a data ask posts nothing');
   // A data loop is cut off at 60 in 10 minutes.
   for (let i = 2; i < 60; i++) assert.equal((await ask({ person: Josh.id, kind: 'data', text: `save ${i}` })).status, 202, `save ${i}`);

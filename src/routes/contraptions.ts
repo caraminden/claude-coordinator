@@ -147,7 +147,7 @@ function deployable(app: App, name: string, caller: Ctx['caller']): ContraptionR
 
 /** Asks per contraption and person: ASK_LIMIT in ASK_WINDOW_MS, then 429. shortcut: kept in memory, so a restart forgets it; fine as a loop backstop. */
 const ASK_LIMIT = 10;
-/** Data asks wake no one, so they get more room: one per save, say; this only stops a loop filling the disk. */
+/** Data asks wake no one, so they get more room (one per save, say); a loop backstop on their count, not their size. */
 const DATA_ASK_LIMIT = 60;
 const ASK_WINDOW_MS = 10 * 60_000;
 const askTimes = new Map<string, number[]>();
@@ -366,6 +366,7 @@ export const contraptionRoutes: Route[] = [
       const member = app.store.canSee({ uid: person.id, admin: !!person.admin }, scheme.id);
       const shared = projectSharedDir(app.dataDir, scheme.id);
       if (kind === 'data') {
+        if (!files.length && text === null && summary === null && item === null) throw new HttpError(400, 'A data ask needs files, text, a summary or an item');
         askTimes.set(key, [...recent, Date.now()]);
         const paths = saveAskFiles(shared, c.name, person.login, files);
         const at = new Date().toISOString();

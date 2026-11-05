@@ -132,6 +132,9 @@ You are running as Codex (OpenAI) inside Citadel, in place of Claude Code. The i
 - Citadel's tripwire checks every shell command, patch and tool call. When it blocks one, it says why: take that as final. Calls that would need a person's Approve / Deny card are blocked here; ask with ask_question instead, or say what you needed.
 - There is no interactive terminal: run commands to completion (no tty, no write_stdin).`;
 
+/** What a turn says when it waits its turn: Codex runs one turn at a time per person (the shim's lock). */
+export const CODEX_WAITING = "Waiting for this person's other Codex turn to finish: Codex runs one turn at a time per person.";
+
 /** A person's "Use Codex until I switch back" (the usage bar's switch): true while on. */
 export const codexSwitchKey = (uid: number) => `codex:on:user:${uid}`;
 /** A person's Codex usage windows, from their turns' account/rateLimits notifications. */

@@ -136,10 +136,17 @@ chmodSync(fake, 0o755);
 
 type Run = { code: number | null; events: any[]; calls: any[] };
 /** Run the shim with Claude's args; `input` lines go to stdin, the last after the first result unless `keepOpen`. */
-function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: object; sigterm?: boolean; env?: object } = {}): Promise<Run> {
+function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: object; sigterm?: boolean; env?: object; lockedMs?: number } = {}): Promise<Run> {
   rmSync(fakeLog, { force: true });
   const home = join(root, `home-${Math.random().toString(36).slice(2)}`);
   mkdirSync(home);
+  if (opts.lockedMs) {
+    // Another Codex turn of this person's (this test process) holds the lock for a while.
+    const lock = join(home, '.codex', 'citadel-turn.lock');
+    mkdirSync(lock, { recursive: true });
+    writeFileSync(join(lock, 'pid'), String(process.pid));
+    setTimeout(() => rmSync(lock, { recursive: true, force: true }), opts.lockedMs);
+  }
   const child = spawn(process.execPath, [SHIM, ...args], { cwd: root, env: { PATH: process.env.PATH, HOME: home, CODEX_HOME: join(home, '.codex'), CITADEL_CODEX_BIN: fake, FAKE: opts.fake ?? '', COORDINATOR_TOKEN: 'tok', ...opts.env }, stdio: ['pipe', 'pipe', 'inherit'] });
   const events: any[] = [];
   let buf = '';
@@ -222,6 +229,14 @@ test('a Codex turn that goes quiet is stopped with an error', async () => {
   const r = await run([], { fake: 'hang', env: { CITADEL_CODEX_QUIET_MS: '300' } });
   assert.match(r.events.at(-1).result, /Codex sent nothing/);
   assert.equal(r.code, 1);
+});
+
+test("a person's second Codex turn says it waits for their first, then runs", async () => {
+  const r = await run(['-p', '--output-format', 'stream-json', '--input-format', 'stream-json'], { lockedMs: 1500 });
+  assert.equal(r.events[0].type, 'codex_waiting');
+  assert.equal(r.events.filter((e) => e.type === 'codex_waiting').length, 1, 'said once');
+  assert.equal(r.events.at(-1).type, 'result');
+  assert.equal(r.events.at(-1).is_error, false);
 });
 
 test('a stored Codex thread resumes without the hand-over; one that is gone starts fresh with it', async () => {

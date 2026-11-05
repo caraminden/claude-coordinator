@@ -92,10 +92,10 @@ export function limitWords(limits: any, now = Date.now(), timeZone = Intl.DateTi
 }
 
 /** One Codex turn at a time per person: their ChatGPT login's refresh token is single-use, and two app-servers refreshing at once sign them out. */
-async function lock(home: string): Promise<() => void> {
+async function lock(home: string, onWait: () => void): Promise<() => void> {
   mkdirSync(home, { recursive: true });
   const dir = join(home, 'citadel-turn.lock');
-  for (;;) {
+  for (let waited = false; ; ) {
     try {
       mkdirSync(dir);
       writeFileSync(join(dir, 'pid'), String(process.pid));
@@ -114,7 +114,10 @@ async function lock(home: string): Promise<() => void> {
       }
       // No pid yet: its holder is between mkdir and write, unless that was a while ago.
       if (!alive && (pid || Date.now() - statSync(dir).mtimeMs > 10_000)) rmSync(dir, { recursive: true, force: true });
-      else await new Promise((r) => setTimeout(r, 1000));
+      else {
+        if (!waited) (waited = true), onWait();
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     }
   }
 }
@@ -168,7 +171,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
   const timeoutSec = Math.ceil(Number(env.MCP_TOOL_TIMEOUT || 600_000) / 1000);
   const mcp = mcpServers(mcpFile && existsSync(mcpFile) ? JSON.parse(readFileSync(mcpFile, 'utf8')) : {}, env, timeoutSec);
 
-  const unlock = await lock(home);
+  const unlock = await lock(home, () => out({ type: 'codex_waiting' }));
   process.on('exit', unlock);
   pruneRollouts(join(home, 'sessions'));
   // The kit pins beside this file in a turn's folder, and sits one up in the repo.

@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path';
 import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
 import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
-import { claudeParts, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble } from './codex.ts';
+import { claudeParts, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './runner.ts';
 import { claudeConfigDir, projectSlug } from './sessions.ts';
 
@@ -528,10 +528,13 @@ export class ContraptionTurns {
     const streamed = new Map<string, string>();
     const said = new Map<string, string>();
     let message = '';
+    let waited = false;
     const handle = (ev: any) => {
       // A Grunt's events name the Agent call that started it; the top level's name none.
       const parent = ev.parent_tool_use_id ? String(ev.parent_tool_use_id) : null;
-      if (ev.type === 'codex_rate_limits') {
+      if (ev.type === 'codex_waiting') {
+        waited = true;
+      } else if (ev.type === 'codex_rate_limits') {
         this.onCodexUsage(req.person, ev.rate_limits);
       } else if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.codex_thread === 'string') {
         const t = this.store.getSetting<CodexSession>(ckey);
@@ -629,7 +632,7 @@ export class ContraptionTurns {
       emit('error', { code, message });
       return { outcome: code, usage };
     };
-    if (live.stopped === 'timeout') return error('timeout', `The turn ran past ${req.timeoutSec} seconds and was stopped`);
+    if (live.stopped === 'timeout') return error('timeout', `The turn ran past ${req.timeoutSec} seconds and was stopped${waited ? `: ${CODEX_WAITING}` : ''}`);
     if (live.stopped === 'canceled') return error('canceled', 'The turn was stopped');
     if (result && !result.is_error) {
       emit('end', { stop: result.stop_reason ?? result.subtype ?? 'end_turn', usage: total });

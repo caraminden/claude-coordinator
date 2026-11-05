@@ -162,6 +162,36 @@ test('the switch moves a minion to Codex with its Claude conversation, keeps the
   assert.equal(store.getSetting(codexThreadKey(t.id)), null, 'Claude has the Codex turns now');
 });
 
+test("a hand-back Claude turn that fails keeps the Codex turns but not their thread, so Codex starts afresh from the hand-over", async () => {
+  rmSync(seen, { force: true });
+  rmSync(mode, { force: true });
+  const t = minion(4);
+  const r = runner();
+  assert.equal(r.setCodexSwitch(josh.id, true), null);
+  r.send(t.id, 'Josh', 'on codex');
+  await until(() => turnStarts().length === 1 && idle(t.id)());
+  assert.equal(store.getSetting<CodexThread>(codexThreadKey(t.id))!.thread, 'th1');
+
+  r.setCodexSwitch(josh.id, false);
+  writeFileSync(mode, 'claude-limit');
+  r.send(t.id, 'Josh', 'back on claude');
+  await until(() => turnStarts().length === 2 && idle(t.id)());
+  const kept = store.getSetting<CodexThread>(codexThreadKey(t.id))!;
+  assert.equal(kept.thread, null, "its thread never saw the Claude turn");
+  assert.match(kept.log, /on codex/);
+  r.cancelLimitWait(t.id);
+
+  rmSync(mode, { force: true });
+  r.setCodexSwitch(josh.id, true);
+  r.send(t.id, 'Josh', 'codex again');
+  await until(() => turnStarts().length === 3 && idle(t.id)());
+  assert.equal(calls().filter((c) => c.method === 'thread/resume').length, 0);
+  assert.equal(calls().filter((c) => c.method === 'thread/start').length, 2);
+  const said = calls().filter((c) => c.method === 'turn/start')[1].params.input.map((i: any) => i.text).join('\n');
+  assert.match(said, /<conversation>[\s\S]*on codex[\s\S]*<\/conversation>[\s\S]*codex again/);
+  r.setCodexSwitch(josh.id, false);
+});
+
 test("a Codex pick by someone without Codex runs on Claude's default, saying why", async () => {
   rmSync(seen, { force: true });
   signedIn = false;

@@ -28,7 +28,7 @@ import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDir, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
-import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, type CodexThread, type CodexUsage } from './codex.ts';
+import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -88,6 +88,8 @@ if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
 /** citadel-codex-review (#330): a read-only Codex review on the person's own login, pinned with its driver like citadel-heavy. */
 export const CODEX_REVIEW = pinnedCopy('codex-review.ts');
 /** Codex turns (#337): the shim a turn runs in place of claude when it runs on Codex. */
+/** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
+const CODEX_LOG_MAX = 2 * HANDOVER_MAX;
 export const CODEX_TURN = pinnedCopy('codex-turn.ts');
 const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
 if (existsSync(CODEX_REVIEW_BIN)) cpSync(CODEX_REVIEW_BIN, join(MCP_DIR, 'bin', 'citadel-codex-review'));
@@ -439,6 +441,8 @@ interface LimitResume {
   queued?: QueuedMessage[];
   /** The account's time zone from Claude's words, for saying the time. */
   tz?: string;
+  /** Its person switched to Codex: it resumes on Codex now (#337). */
+  codex?: true;
 }
 const RESUME_LIMIT_PROMPT =
   `Your last turn stopped at the account's usage limit, which has now reset. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
@@ -1443,7 +1447,7 @@ export class Runner {
     this.lastLimitResume = Date.now();
     this.saveLimitResumes(list.slice(1));
     // No turn runs while it waits: starting one ends the wait (startTurn).
-    this.resume(w.ticket, 0, w.tries);
+    this.resume(w.ticket, 0, w.tries, !!w.codex);
   }
 
   /** Merge into the saved state of a ticket's running turn. */
@@ -2213,6 +2217,9 @@ export class Runner {
       // Claude has the Codex turns now.
       this.store.deleteSetting(codexThreadKey(ticketId));
     }
+    // A hand-back turn that failed or was stopped may still have done work Codex's thread never saw: the next Codex turn starts a new one from the hand-over.
+    const back = turn?.handBack ? this.store.getSetting<CodexThread>(codexThreadKey(ticketId)) : null;
+    if (back?.thread) this.store.setSetting(codexThreadKey(ticketId), { ...back, thread: null });
     // Still parked after answering: the row stays parked, whatever state the turn set. A failed turn keeps its error note.
     const parkedAs = this.parkedAs.get(ticketId);
     this.parkedAs.delete(ticketId);
@@ -2320,6 +2327,7 @@ export class Runner {
     }
     if (!ev || typeof ev !== 'object') return;
     if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info, ticketId);
+    if (ev.type === 'codex_waiting') return this.emit(ticketId, 'note', { text: CODEX_WAITING });
     if (ev.type === 'codex_rate_limits') return this.updateCodexUsage(ev.rate_limits, this.store.getSetting<TurnState>(turnKey(ticketId))?.person ?? null);
     if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.codex_thread === 'string') {
       const t = this.store.getSetting<CodexThread>(codexThreadKey(ticketId));
@@ -2511,13 +2519,9 @@ export class Runner {
       const t = this.store.getTicket(w.ticket);
       return !!t && this.payerOf(t.person_id ?? this.store.getProject(t.project_id)?.owner_id) === uid;
     };
-    const now = this.limitResumes().filter(mine);
-    if (!now.length) return null;
-    this.saveLimitResumes(this.limitResumes().filter((w) => !mine(w)));
-    for (const w of now) {
-      if (w.queued?.length) this.queues.set(w.ticket, [...w.queued]);
-      this.resume(w.ticket, 0, 0, true);
-    }
+    // Due now, on Codex, spaced limitGapMs apart like any limit resume.
+    const list = this.limitResumes();
+    if (list.some(mine)) this.saveLimitResumes(list.map((w) => (mine(w) ? { ...w, at: Date.now(), tries: 0, codex: true as const } : w)));
     return null;
   }
 
@@ -2538,7 +2542,11 @@ export class Runner {
       return;
     }
     const t = this.store.getSetting<CodexThread>(codexThreadKey(ticketId));
-    if (t && log) this.store.setSetting(codexThreadKey(ticketId), { ...t, log: t.log + log });
+    if (!t || !log) return;
+    // Past what a hand-over can carry, the oldest turns go: fitLog would cut them to nothing anyway.
+    let all = t.log + log;
+    if (all.length > CODEX_LOG_MAX) all = all.slice(all.indexOf('\n', all.length - CODEX_LOG_MAX) + 1);
+    this.store.setSetting(codexThreadKey(ticketId), { ...t, log: all });
   }
 
   /** Record a turn's plan usage: the server login's (the top bar's meter), or a container turn's payer's own (#213). */

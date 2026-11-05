@@ -407,6 +407,9 @@ independently"). The starter's `manifest.webmanifest` has the shape; replace `my
   other app installing on that device.
 - **Link it relatively**: `<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">`.
   `/manifest.webmanifest` is Citadel's. Without `crossorigin` the fetch has no login and fails.
+- **Icons: a 192 and a 512 px PNG** with purpose `any` (a maskable 512 too, ideally), served by your app.
+  An SVG alone gets no Install on Android, only "Add to home screen". Also `name` and
+  `display: "standalone"`.
 - A service worker is optional; if you have one, its scope is `/apps/<name>/`.
 
 Opened from Citadel's rail, your page is in a frame and Chrome only sees Citadel's page, so the rail

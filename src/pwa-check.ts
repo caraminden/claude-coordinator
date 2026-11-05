@@ -46,5 +46,24 @@ export async function installProblems(name: string, get: (path: string) => Promi
   if (!under(id)) problems.push(`Its manifest's id resolves to ${at(id)}, not under ${home}: Chrome would take it for another app (Citadel's is "/"). Set "id": "${home}".`);
   if (!under(scope)) problems.push(`Its manifest's scope resolves to ${at(scope)}, not under ${home}: it would claim other apps' pages. Set "scope": "${home}".`);
   if (!start.pathname.startsWith(scope.pathname)) problems.push(`Its start_url ${at(start)} is outside its scope ${scope.pathname}.`);
+  // The rest of Chrome's install criteria (web.dev/articles/install-criteria): miss one and there's no Install, at most "Add to home screen".
+  if (typeof m.name !== 'string' && typeof m.short_name !== 'string') problems.push(`Its manifest has no name or short_name.`);
+  if (!['standalone', 'fullscreen', 'minimal-ui', 'window-controls-overlay'].includes(m.display as string)) problems.push(`Its manifest's display is ${JSON.stringify(m.display ?? null)}: browsers install only standalone, fullscreen or minimal-ui apps. Set "display": "standalone".`);
+  const icons = (Array.isArray(m.icons) ? m.icons : []) as { src?: unknown; sizes?: unknown; type?: unknown; purpose?: unknown }[];
+  for (const px of [192, 512]) {
+    // A PNG, since Android won't make an installed app from an SVG alone; "any" purpose, at least px wide.
+    const icon = icons.find((i) => typeof i?.src === 'string' && (i.type === 'image/png' || /\.png(\?|$)/i.test(i.src))
+      && String(i.purpose ?? 'any').split(/\s+/).includes('any')
+      && String(i.sizes ?? '').split(/\s+/).some((s) => Number(/^(\d+)x\d+$/i.exec(s)?.[1]) >= px));
+    const url = icon && resolve(icon.src, murl);
+    if (!url) {
+      problems.push(`Its manifest lists no PNG icon of at least ${px}x${px} (purpose "any"): Chrome asks for a 192 and a 512 px icon, and Android won't install from an SVG alone. Add icon-${px}.png.`);
+      continue;
+    }
+    if (!under(url)) continue; // served from elsewhere: not this app's to answer for
+    const r = await get(at(url));
+    await r.body?.cancel();
+    if (!r.ok) problems.push(`Its ${px} px icon ${url.pathname} answered ${r.status}.`);
+  }
   return problems;
 }

@@ -64,5 +64,6 @@ test("what else Chrome needs to offer Install: a name, an installable display, a
   // Listed, but the app doesn't serve it.
   assert.match((await withManifest({ ...good, icons: [...good.icons.slice(0, 1), { src: 'gone.png', sizes: '512x512' }] })).join('\n'), /512 px icon \/apps\/toc\/gone\.png answered 404/);
   assert.match((await withManifest({ ...good, name: undefined })).join('\n'), /no name or short_name/);
+  assert.match((await withManifest({ ...good, name: ' ' })).join('\n'), /no name or short_name/);
   assert.match((await withManifest({ ...good, display: 'browser' })).join('\n'), /display is "browser"/);
 });

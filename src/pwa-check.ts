@@ -47,7 +47,7 @@ export async function installProblems(name: string, get: (path: string) => Promi
   if (!under(scope)) problems.push(`Its manifest's scope resolves to ${at(scope)}, not under ${home}: it would claim other apps' pages. Set "scope": "${home}".`);
   if (!start.pathname.startsWith(scope.pathname)) problems.push(`Its start_url ${at(start)} is outside its scope ${scope.pathname}.`);
   // The rest of Chrome's install criteria (web.dev/articles/install-criteria): miss one and there's no Install, at most "Add to home screen".
-  if (typeof m.name !== 'string' && typeof m.short_name !== 'string') problems.push(`Its manifest has no name or short_name.`);
+  if (![m.name, m.short_name].some((v) => typeof v === 'string' && v.trim())) problems.push(`Its manifest has no name or short_name.`);
   if (!['standalone', 'fullscreen', 'minimal-ui', 'window-controls-overlay'].includes(m.display as string)) problems.push(`Its manifest's display is ${JSON.stringify(m.display ?? null)}: browsers install only standalone, fullscreen or minimal-ui apps. Set "display": "standalone".`);
   const icons = (Array.isArray(m.icons) ? m.icons : []) as { src?: unknown; sizes?: unknown; type?: unknown; purpose?: unknown }[];
   for (const px of [192, 512]) {

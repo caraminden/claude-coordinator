@@ -169,7 +169,7 @@ uses the built-in `node:sqlite`.
 | `deploy/offbox.sh`, `deploy/offbox-serve.sh`, `deploy/desktop/` | The off-box copy set backup.sh refreshes, the forced command the desktop's key runs, and the desktop's pull script and setup |
 | `tools/land.sh` | Lands a minion's branch: rebase onto main, test, fast-forward main, deploy, under the deploy lock |
 | `tools/deploy.sh`, `tools/boot-check.ts` | Safe deploys: checks, front-end reloads, restarts that keep turns running, rollback |
-| `tools/ci-runner/`, `src/ci-runner.ts` | Every scheme's CI on self-hosted runners on Cara's desktop: the installer, the `runs-on` line, and the route that mints runner tokens with the scheme owner's GitHub login |
+| `tools/ci-runner/`, `src/ci-runner.ts`, `public/runner-agent.mjs` | Every scheme's CI on self-hosted runners on Cara's desktop: the runner agent there (installed once, as SYSTEM) that adds, lists and removes a scheme's runners when a member asks through `ci_runners`, its scripts, the `runs-on` line, and the route that mints runner tokens with the scheme owner's GitHub login |
 
 ## Running
 

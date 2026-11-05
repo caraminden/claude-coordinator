@@ -151,10 +151,14 @@ scheme's label, and runs its steps in bash, which works on both:
         shell: bash
 ```
 
-Write no workflow the plan doesn't ask for. If the repo has workflows, your done note says the
-runner must be added on the desktop (Citadel's `tools/ci-runner/add-runner.ps1`; the Taskmaster
-asks Cara), since jobs wait in the queue until it is. *Done when* no job's `runs-on` is a bare
-hosted runner.
+Write no workflow the plan doesn't ask for. If the repo has workflows, add the scheme's runner
+yourself: call the `ci_runners` tool with `op: "add"` (one runner unless the plan names a count,
+at most 4). Citadel's runner agent on the desktop installs it, and the tool waits until GitHub
+shows it Idle. Jobs wait in the queue until a runner is there. If the tool says no runner agent
+is online, or the job failed, put its words in your done note and tell the Taskmaster
+(`message_coordinator`); don't install a runner any other way. *Done when* no job's `runs-on` is
+a bare hosted runner and, if the repo has workflows, `ci_runners` came back done with the runner
+Idle (or its failure is in your done note).
 
 ### 5. Adapt each skill the plan pulls in
 

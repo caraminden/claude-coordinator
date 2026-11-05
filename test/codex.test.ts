@@ -83,6 +83,8 @@ test("Codex's managed requirements run only Citadel's hook, from a static comman
   const containerfile = readFileSync(join(image, 'Containerfile'), 'utf8');
   assert.match(containerfile, /@openai\/codex@\d+\.\d+\.\d+ /, 'Codex is pinned to one version');
   assert.match(containerfile, /^COPY codex\/ \/etc\/codex\/$/m);
+  // The build folder's own modes can be 0600 (a turn's umask), and COPY keeps them: Codex runs as the person (#337).
+  assert.match(containerfile, /^RUN chmod 0755 \/etc\/codex && chmod 0644 \/etc\/codex\/\* \\\n && runuser -u nobody -- cat \/etc\/codex\/requirements\.toml \/etc\/codex\/citadel-hook\.mjs > \/dev\/null$/m);
 });
 
 test('the image tag changes with any file in its build folder, not just the Containerfile', () => {

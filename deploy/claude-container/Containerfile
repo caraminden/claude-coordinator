@@ -23,4 +23,9 @@ RUN ln -s /usr/local/bin/node /usr/bin/node \
 # Its managed requirements run Citadel's tripwire as the only hook (codex/citadel-hook.mjs). Changing
 # a file in codex/ rebuilds the image too: the tag hashes this whole folder.
 RUN npm install -g --no-audit --no-fund @openai/codex@0.166.0 && npm cache clean --force
+# The build folder's files can be 0600 (turns run with UMask=0077) and COPY keeps their mode, which
+# left Codex, running as the person, unable to read its requirements (#337). So set the modes here,
+# and fail the build unless a non-root user can read both files.
 COPY codex/ /etc/codex/
+RUN chmod 0755 /etc/codex && chmod 0644 /etc/codex/* \
+ && runuser -u nobody -- cat /etc/codex/requirements.toml /etc/codex/citadel-hook.mjs > /dev/null

@@ -270,6 +270,11 @@ const run = (bin: string, args: string[], timeout = 60_000) => new Promise<Ran>(
 
 export class AppServices {
   readonly opts: ServiceOptions;
+  /**
+   * Before its service stops or restarts (#319): hold its new turns and wait for its running ones
+   * (ContraptionTurns.drain). Set by server.ts; `release` lets the held turns start.
+   */
+  drain: (row: ContraptionRow) => Promise<{ said: string | null; release: () => void }> = async () => ({ said: null, release: () => {} });
 
   constructor(opts: ServiceOptions) {
     this.opts = opts;
@@ -396,7 +401,8 @@ export class AppServices {
     }
   }
 
-  private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[] }): Promise<string[]> {
+  /** `holds` (a deploy's) takes the drain's release, for after its health check; otherwise it's released after the restart. */
+  private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[]; holds?: (() => void)[] }): Promise<string[]> {
     const folder = this.folder(row);
     const manifest = await this.manifest(row, folder);
     const files = unitFiles(this.inputs(row, manifest, folder));
@@ -422,6 +428,17 @@ export class AppServices {
     if (live.length && !opts.replace) {
       throw new ServiceError(409, `Hand-installed units run ${row.name} already: ${live.map((u) => `${u.unit} (${u.active}, ${u.enabled || 'no file state'}; ${u.why})`).join('; ')}. Install again with replace to stop and disable them first; their files stay.`);
     }
+    const quiet = await this.drain(row);
+    if (quiet.said) said.push(quiet.said);
+    if (opts.holds) opts.holds.push(quiet.release);
+    try {
+      return await this.writeAndRestart(row, files, live, said);
+    } finally {
+      if (!opts.holds) quiet.release();
+    }
+  }
+
+  private async writeAndRestart(row: ContraptionRow, files: Map<string, string>, live: HandUnit[], said: string[]): Promise<string[]> {
     if (live.length) {
       // Timers first, so none starts its service again meanwhile.
       const units = live.map((u) => u.unit).sort((a, b) => Number(b.endsWith('.timer')) - Number(a.endsWith('.timer')));
@@ -451,12 +468,17 @@ export class AppServices {
   }
 
   /** start, stop or restart its service (an installed one). Its timers stay as they are. */
-  async act(row: ContraptionRow, action: 'start' | 'stop' | 'restart'): Promise<UnitState> {
+  async act(row: ContraptionRow, action: 'start' | 'stop' | 'restart'): Promise<UnitState & { waited: string | null }> {
     this.guard();
     const main = `${unitName(row.name)}.service`;
     if (!(await this.owned(row.name)).includes(main)) throw new ServiceError(409, `${row.title} has no service yet: install it first.`);
-    await this.must(action, main);
-    return this.state(main);
+    const quiet = action === 'start' ? null : await this.drain(row);
+    try {
+      await this.must(action, main);
+    } finally {
+      quiet?.release();
+    }
+    return { ...(await this.state(main)), waited: quiet?.said ?? null };
   }
 
   /** Deploys running now, so a Citadel restart waits for them (runner.hostJobs). */
@@ -579,6 +601,8 @@ export class AppServices {
     view.to = await git('rev-parse', 'HEAD');
     await say(prev === view.to ? `Already at ${short(view.to)}: building and restarting it anyway.` : `Now at ${short(view.to)}${prev ? ` (was ${short(prev)})` : ''}.`);
 
+    // Its turns held by the restart wait for the health check too, so they find its MCP servers up.
+    const holds: (() => void)[] = [];
     const buildAndStart = async () => {
       const m = await this.manifest(row, folder);
       const deadline = Date.now() + m.build_timeout * this.opts.minuteMs;
@@ -588,7 +612,7 @@ export class AppServices {
         if (code === 124) throw new Error(`The build ran past its ${m.build_timeout} minutes at: ${step}`);
         if (code) throw new Error(`Build step failed (exit ${code}): ${step}`);
       }
-      for (const line of await this.installNow(row, { all })) await say(line);
+      for (const line of await this.installNow(row, { all, holds })) await say(line);
       await this.healthy(row, m.health);
       await say(`Healthy: ${m.health ? `${m.health} answered` : `port ${row.port} open`}.`);
     };
@@ -614,6 +638,8 @@ export class AppServices {
         await say(`Rolling back failed too: ${again.message}`);
       }
       return;
+    } finally {
+      for (const release of holds) release();
     }
     // After the try, so nothing here can roll back a deploy that worked.
     const header = identity?.();

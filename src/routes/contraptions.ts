@@ -187,9 +187,11 @@ export const contraptionRoutes: Route[] = [
     // The contraption hung up: stop its turn rather than run it for nobody.
     let turn: number | null = null;
     let gone = false;
+    const hungUp = new AbortController();
     res.on('close', () => {
       if (res.writableFinished) return;
       gone = true;
+      hungUp.abort();
       if (turn !== null) app.contraptionTurns.cancel(c.id, turn);
     });
     try {
@@ -199,7 +201,7 @@ export const contraptionRoutes: Route[] = [
           if (gone) app.contraptionTurns.cancel(c.id, turn);
         }
         emit(event, data);
-      });
+      }, hungUp.signal);
     } catch (err) {
       if (!(err instanceof TurnError)) throw err;
       emit('error', { code: err.code, message: err.message });
@@ -308,8 +310,8 @@ export const contraptionRoutes: Route[] = [
       if (!action) throw new HttpError(400, 'Action is required: install, start, stop or restart');
       const said = await service(async () => {
         if (action === 'install') return app.services.install(c, { replace: body.replace === true, all: app.store.listContraptions() });
-        await app.services.act(c, action as 'start' | 'stop' | 'restart');
-        return [`${{ start: 'Started', stop: 'Stopped', restart: 'Restarted' }[action]} ${app.services.unitOf(c)}.`];
+        const { waited } = await app.services.act(c, action as 'start' | 'stop' | 'restart');
+        return [...(waited ? [waited] : []), `${{ start: 'Started', stop: 'Stopped', restart: 'Restarted' }[action]} ${app.services.unitOf(c)}.`];
       });
       return json(res, 200, { said, status: await service(() => app.services.status(c)) });
     },

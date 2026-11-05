@@ -211,6 +211,7 @@ runner.onAuthFailure = (person) => claudeLink.expire(person);
 // Contraptions' turns (the turn API): on the same Claude a person's minion turns use, never anyone else's.
 const contraptionTurns = new ContraptionTurns(store, contraptions, claudeLink, { dataDir: DATA_DIR, claudeBin: process.env.CLAUDE_BIN ?? 'claude' });
 contraptionTurns.noTurns = PREVIEW;
+services.drain = (row) => contraptionTurns.drain(row.id);
 // A contraption turn gets its person's own machines that are online (#306), never a shared one.
 contraptionTurns.machines = (person) => machines.online().filter((m) => m.owner_id !== null && m.servers.includes('mcp') && ownerAsked(store, m.owner_id, [person], null));
 contraptionTurns.apiUrl = () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`;

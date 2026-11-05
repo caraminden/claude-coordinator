@@ -545,7 +545,7 @@ const CONTRAPTION_TOOLS = [
   },
   {
     name: 'contraption_service',
-    description: `A contraption's systemd user service, which ${APP_NAME} writes and runs itself as citadel-app-<name> (plus citadel-app-<name>-<job> for timers its citadel-app.json names). status: its state, its manifest's problems and any hand-installed unit for it. install: write its units from the manifest in its folder, reload, enable and (re)start them; refused while a hand-installed unit for it runs or is enabled, unless replace is true, which stops and disables those first (their files stay). start, stop, restart: its service. logs: the last lines of its journal. Only on a turn a ${APP_NAME} admin asked for.`,
+    description: `A contraption's systemd user service, which ${APP_NAME} writes and runs itself as citadel-app-<name> (plus citadel-app-<name>-<job> for timers its citadel-app.json names). status: its state, its manifest's problems and any hand-installed unit for it. install: write its units from the manifest in its folder, reload, enable and (re)start them; refused while a hand-installed unit for it runs or is enabled, unless replace is true, which stops and disables those first (their files stay). start, stop, restart: its service (install, stop and restart first wait up to 3 minutes for its running agent turns, holding new ones). logs: the last lines of its journal. Only on a turn a ${APP_NAME} admin asked for.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -562,7 +562,7 @@ const CONTRAPTION_TOOLS = [
 /** Deploying a contraption from its repo: for Citadel's Taskmaster on an admin's turn, and a contraption's home scheme. */
 const DEPLOY_CONTRAPTION = {
   name: 'deploy_contraption',
-  description: `Deploy a contraption from its GitHub repo, as ${APP_NAME} runs it: clone its folder, or fetch and fast-forward its branch (refused if the folder has local changes or other commits), run the build steps in its citadel-app.json (niced, with a time limit), rewrite its units and restart it, then check its health. If anything after the fast-forward fails, it rolls back to the commit before, builds that and restarts it. Waits for the outcome (builds can take minutes) and returns what it did and the end of the log. Push the commit to the registered branch first: it deploys what is on GitHub, not a worktree.${HOME_CONTRAPTIONS.length ? ` This scheme may deploy: ${HOME_CONTRAPTIONS.join(', ')}.` : ` Only on a turn a ${APP_NAME} admin asked for.`}`,
+  description: `Deploy a contraption from its GitHub repo, as ${APP_NAME} runs it: clone its folder, or fetch and fast-forward its branch (refused if the folder has local changes or other commits), run the build steps in its citadel-app.json (niced, with a time limit), rewrite its units and restart it, then check its health. Before the restart it waits up to 3 minutes for the contraption's running agent turns to end (holding new ones until it is healthy again); past that it restarts anyway and names the turns it cut. If anything after the fast-forward fails, it rolls back to the commit before, builds that and restarts it. Waits for the outcome (builds can take minutes) and returns what it did and the end of the log. Push the commit to the registered branch first: it deploys what is on GitHub, not a worktree.${HOME_CONTRAPTIONS.length ? ` This scheme may deploy: ${HOME_CONTRAPTIONS.join(', ')}.` : ` Only on a turn a ${APP_NAME} admin asked for.`}`,
   inputSchema: {
     type: 'object',
     properties: {

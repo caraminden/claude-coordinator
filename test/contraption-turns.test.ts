@@ -65,6 +65,8 @@ take().then((m) => {
   fs.appendFileSync(path.join(dir, session + '.jsonl'), JSON.stringify({ prompt }) + '\\n');
   out({ type: 'system', subtype: 'init', session_id: session, tools: [] });
   if (prompt.includes('slow')) return setInterval(() => {}, 1000);
+  // Ignores SIGTERM, so only the SIGKILL ends it.
+  if (prompt.includes('stubborn')) { process.on('SIGTERM', () => {}); return setInterval(() => {}, 1000); }
   // Its reply is out, but it takes a while to exit.
   if (prompt.includes('linger')) {
     out({ type: 'result', subtype: 'success', is_error: false, result: 'Done.', usage: {} });
@@ -345,6 +347,64 @@ test('two names run at once, a second turn on a busy name gets busy, and cancel 
   assert.equal(turns.running(), 0);
   assert.equal(store.getContraptionTurn(started.data.turn)!.outcome, 'canceled');
   assert.equal(turns.sessions(mandate.id, cara.id).find((s) => s.name === 'aura-1')!.busy, false);
+});
+
+test('a stopped turn that ignores SIGTERM is killed and frees its session within a few seconds (#319)', async () => {
+  const evs: Ev[] = [];
+  const stubborn = turns.run(mandate, parseTurn({ person: cara.id, session: 'stub', prompt: 'stubborn' }, mandate), (event, data) => evs.push({ event, data }));
+  const started = await until('the stubborn turn', () => evs.find((e) => e.event === 'start'));
+  await until('claude to start', () => runs().some((r) => r.prompt === 'stubborn'));
+  const t0 = Date.now();
+  turns.cancel(mandate.id, started.data.turn);
+  await stubborn;
+  assert.ok(Date.now() - t0 < 3500, `freed after ${Date.now() - t0} ms`);
+  assert.equal(errorOf(evs), 'canceled');
+  assert.equal(turns.sessions(mandate.id, cara.id).find((s) => s.name === 'stub')!.busy, false);
+});
+
+test('a drain waits for the contraption\'s running turns, holds its new ones until released, and leaves others alone (#319)', async () => {
+  const lingering: Ev[] = [];
+  const first = turns.run(mandate, parseTurn({ person: cara.id, session: 'drain-1', prompt: 'linger' }, mandate), (event, data) => lingering.push({ event, data }));
+  await until('the lingering turn', () => lingering.find((e) => e.event === 'start'));
+  const drained = turns.drain(mandate.id, 10_000);
+  const held: Ev[] = [];
+  const second = turns.run(mandate, parseTurn({ person: cara.id, session: 'drain-2', prompt: 'Move my dentist to Thursday.' }, mandate), (event, data) => held.push({ event, data }));
+  assert.equal((await turn(peek, { session: 'drain-3' })).at(-1)!.event, 'end', 'another contraption\'s turns run meanwhile');
+  const { said, release } = await drained;
+  await first;
+  assert.match(said!, /^Waited \d+ s for 1 running turn to end\.$/);
+  assert.equal(lingering.at(-1)!.event, 'end', 'the running turn finished, not cut');
+  await new Promise((r) => setTimeout(r, 100));
+  assert.deepEqual(held, [], 'the new turn waits for the restart');
+  assert.equal(turns.running(), 0);
+  release();
+  await second;
+  assert.equal(held[0].event, 'start');
+  assert.equal(held.at(-1)!.event, 'end', 'and runs once released');
+});
+
+test('a drain stops waiting at its cap and names the turns it will cut; with none running it doesn\'t wait (#319)', async () => {
+  const t0 = Date.now();
+  const idle = await turns.drain(mandate.id, 10_000);
+  assert.equal(idle.said, null);
+  assert.ok(Date.now() - t0 < 100, 'no wait with nothing running');
+  idle.release();
+  const evs: Ev[] = [];
+  const slow = turns.run(mandate, parseTurn({ person: cara.id, session: 'cap-1', prompt: 'slow' }, mandate), (event, data) => evs.push({ event, data }));
+  const started = await until('the slow turn', () => evs.find((e) => e.event === 'start'));
+  const capped = await turns.drain(mandate.id, 300);
+  assert.match(capped.said!, new RegExp(`^Waited \\d+ s for 1 running turn: restarting anyway, which cuts off turn ${started.data.turn} \\(person ${cara.id}, session cap-1\\)\\.$`));
+  // A turn asked for meanwhile whose app hangs up (the restart takes the app down) never starts.
+  const gone = new AbortController();
+  const dropped: Ev[] = [];
+  const asked = turns.run(mandate, parseTurn({ person: cara.id, session: 'cap-2', prompt: 'hi' }, mandate), (event, data) => dropped.push({ event, data }), gone.signal);
+  gone.abort();
+  turns.cancel(mandate.id, started.data.turn);
+  await slow;
+  capped.release();
+  await asked;
+  assert.deepEqual(dropped.map((e) => [e.event, e.data.code]), [['error', 'canceled']]);
+  assert.ok(!runs().some((r) => r.prompt === 'hi'), 'its claude never ran');
 });
 
 test('a running turn takes a message from its own person, says when claude took it in, and counts what it cost', async () => {

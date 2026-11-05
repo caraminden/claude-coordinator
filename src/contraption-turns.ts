@@ -85,6 +85,10 @@ export type Emit = (event: string, data: object) => void;
 
 export const DEFAULT_COMPACT_WINDOW = 40_000;
 export const DEFAULT_TIMEOUT_SEC = 180;
+/** How long a restart of a contraption waits for its running turns (#319): a turn on the default timeout always ends inside it. */
+export const DRAIN_MS = 3 * 60_000;
+/** How long a stopped turn's claude has between SIGTERM and SIGKILL: on the host it exits in under a second (#319). */
+const KILL_AFTER_MS = 2_000;
 const SESSION_NAME = /^[\w.:@-]{1,100}$/;
 const MODEL = /^[\w.\[\]-]{1,60}$/;
 const SERVER_NAME = /^[A-Za-z0-9_-]{1,40}$/;
@@ -230,6 +234,8 @@ export class ContraptionTurns {
   private live = new Map<number, Live>();
   /** Busy session names: contraption id / person / name. */
   private names = new Set<string>();
+  /** Contraptions about to restart (#319): their new turns wait for `open`, which resolves once nothing holds them. */
+  private holds = new Map<number, { count: number; open: Promise<void>; release: () => void }>();
   /** A preview (a copy of the data) never runs turns. */
   noTurns = false;
   /** The person's own machines online now (#306), and the address their proxies reach Citadel at: set by server.ts. */
@@ -262,6 +268,42 @@ export class ContraptionTurns {
   /** Turns running in a container now (it isn't restarted under them). */
   inContainer(container: string): number {
     return [...this.live.values()].filter((t) => t.container === container).length;
+  }
+
+  /**
+   * Before a contraption's service stops or restarts (#319): hold its new turns, then wait up to `capMs` for
+   * its running ones to end. Resolves to a line for the deploy's output (null when none ran) and `release`,
+   * which lets the held turns start: call it once the restart is done.
+   */
+  async drain(contraption: number, capMs = DRAIN_MS): Promise<{ said: string | null; release: () => void }> {
+    let h = this.holds.get(contraption);
+    if (!h) {
+      let release!: () => void;
+      const open = new Promise<void>((ok) => (release = ok));
+      h = { count: 0, open, release };
+      this.holds.set(contraption, h);
+    }
+    h.count++;
+    const hold = h;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      if (--hold.count) return;
+      this.holds.delete(contraption);
+      hold.release();
+    };
+    const mine = () => [...this.live.values()].filter((t) => t.contraption === contraption);
+    const started = Date.now();
+    const ran = mine().length;
+    while (mine().length && Date.now() - started < capMs) await new Promise((ok) => setTimeout(ok, 200));
+    if (!ran) return { said: null, release };
+    const left = mine();
+    const waited = `Waited ${Math.round((Date.now() - started) / 1000)} s for ${ran} running turn${ran === 1 ? '' : 's'}`;
+    if (!left.length) return { said: `${waited} to end.`, release };
+    const said = `${waited}: restarting anyway, which cuts off ${left.map((t) => `turn ${t.id} (person ${t.person}, session ${t.session})`).join(', ')}.`;
+    console.warn(`contraption ${contraption}: ${said}`);
+    return { said, release };
   }
 
   private key(contraption: number, person: number, name: string) {
@@ -307,11 +349,15 @@ export class ContraptionTurns {
 
   /**
    * Run a turn, calling `emit` with its events, and resolve once it has ended (its last event is end or
-   * error). Refusals are an error event too. Its start event carries the turn's id, for cancel().
+   * error). Refusals are an error event too. Its start event carries the turn's id, for cancel(). While
+   * its contraption restarts (drain) it waits to start, and `hungUp` drops it if the app goes meanwhile.
    */
-  async run(c: ContraptionRow, req: TurnRequest, emit: Emit): Promise<void> {
+  async run(c: ContraptionRow, req: TurnRequest, emit: Emit, hungUp?: AbortSignal): Promise<void> {
     const fail = (code: TurnErrorCode, message: string) => emit('error', { code, message });
     if (this.noTurns) return fail('failed', 'This is a preview of Citadel: it never runs turns');
+    // Its service is about to restart (#319): start once that's done, unless the app hung up meanwhile.
+    for (let h; (h = this.holds.get(c.id)); ) await h.open;
+    if (hungUp?.aborted) return fail('canceled', 'The app hung up before the turn started');
     if (!this.contraptions.enabled(c.name, req.person)) return fail('not_enabled', `${c.title} isn't enabled for this person`);
     const key = this.key(c.id, req.person, req.session);
     if (this.names.has(key)) return fail('busy', `A turn is already running in ${req.session}`);
@@ -486,6 +532,8 @@ export class ContraptionTurns {
         resolve(null);
       });
       child.on('close', (n) => resolve(n));
+      // A stopped turn frees its session once claude has exited, not when the last pipe closes (#319).
+      child.on('exit', (n) => live.stopped && resolve(n));
     });
     clearTimeout(timer);
 
@@ -515,20 +563,22 @@ export class ContraptionTurns {
     live.stopped = why;
     const child = live.child;
     if (!child?.pid) return; // not started yet: turn() sees `stopped` before it spawns
+    let pid = '';
     if (live.container) {
-      let pid = '';
       try {
         pid = readFileSync(live.pidFile, 'utf8').trim();
       } catch {}
-      if (/^\d+$/.test(pid)) spawn(this.podman, ['exec', live.container, 'kill', '-TERM', pid], { stdio: 'ignore' }).on('error', () => {});
     }
-    const kill = (sig: NodeJS.Signals) => {
+    const kill = (sig: 'TERM' | 'KILL') => {
+      // claude in the container, which may outlive the podman exec that ran it, then the host's process group.
+      if (/^\d+$/.test(pid)) spawn(this.podman, ['exec', live.container!, 'kill', `-${sig}`, pid], { stdio: 'ignore' }).on('error', () => {});
+      if (child.exitCode !== null || child.signalCode !== null) return;
       try {
-        process.kill(-child.pid!, sig);
+        process.kill(-child.pid!, `SIG${sig}`);
       } catch {}
     };
-    kill('SIGTERM');
-    setTimeout(() => child.exitCode === null && child.signalCode === null && kill('SIGKILL'), 5_000).unref();
+    kill('TERM');
+    setTimeout(() => kill('KILL'), KILL_AFTER_MS).unref();
   }
 
   /** Cancel a contraption's own running turn; false when it has no such turn running. */

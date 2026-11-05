@@ -336,6 +336,76 @@ test('a deploy whose build fails rolls back to the commit before, builds it and 
   }
 });
 
+/** A stand-in for ContraptionTurns.drain: records when it ran and was released, against systemctl's restarts so far. */
+function drainSpy(said: string | null, ms = 200) {
+  const seen: string[] = [];
+  const restarts = () => fake.calls().filter((x) => / (restart|stop) /.test(` ${x} `)).length;
+  services.drain = async () => {
+    seen.push(`drain at ${restarts()} restarts`);
+    await new Promise((r) => setTimeout(r, ms));
+    seen.push(`drained at ${restarts()} restarts`);
+    return { said, release: () => seen.push(`released at ${restarts()} restarts`) };
+  };
+  return seen;
+}
+
+test('a deploy waits for its contraption\'s turns before restarting it, says so, and lets held turns go once it is healthy (#319)', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest([]) });
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    const seen = drainSpy('Waited 0 s for 2 running turns to end.');
+    services.deploy(c, 'Cara');
+    const d = await done(name);
+    assert.equal(d.state, 'deployed', d.said.join('\n'));
+    assert.deepEqual(seen, ['drain at 0 restarts', 'drained at 0 restarts', 'released at 1 restarts']);
+    const at = (re: RegExp) => d.said.findIndex((l) => re.test(l));
+    assert.ok(at(/^Waited 0 s for 2 running turns to end\.$/) >= 0, d.said.join('\n'));
+    assert.ok(at(/^Waited/) < at(/^Enabled and \(re\)started/) && at(/^Enabled/) < at(/^Healthy/));
+    // Released after the health check: the line saying it came first.
+    assert.match(readFileSync(d.log, 'utf8'), /Healthy[^]*Deployed/);
+  } finally {
+    svc.close();
+  }
+});
+
+test('a deploy that rolls back drains again before its second restart, and releases both holds (#319)', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest([]) });
+  const svc = await listening();
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    services.deploy(c, 'Cara');
+    assert.equal((await done(name)).state, 'deployed');
+    r.push({ 'citadel-app.json': appManifest([], { health: '/nope' }) });
+    const seen = drainSpy(null, 10);
+    services.deploy(c, 'Cara');
+    const d = await done(name);
+    assert.equal(d.state, 'rolled back', d.said.join('\n'));
+    assert.deepEqual(seen.filter((x) => !x.startsWith('drained')), ['drain at 1 restarts', 'drain at 2 restarts', 'released at 3 restarts', 'released at 3 restarts']);
+    assert.ok(!d.said.some((l) => /^Waited/.test(l)), 'nothing to say with no turns running');
+  } finally {
+    svc.close();
+  }
+});
+
+test('stop and restart drain the contraption\'s turns first and say how long they waited; start doesn\'t (#319)', async () => {
+  appFolder('mandate');
+  const m = row('mandate', 7341);
+  await services.install(m);
+  const seen = drainSpy('Waited 1 s for 1 running turn to end.', 10);
+  const restarted = await services.act(m, 'restart');
+  assert.equal(restarted.waited, 'Waited 1 s for 1 running turn to end.');
+  assert.deepEqual(seen, ['drain at 1 restarts', 'drained at 1 restarts', 'released at 2 restarts']);
+  assert.equal((await services.act(m, 'stop')).active, 'inactive');
+  assert.equal(seen.length, 6);
+  assert.equal((await services.act(m, 'start')).waited, null);
+  assert.equal(seen.length, 6, 'start cuts nothing, so it doesn\'t wait');
+});
+
 test('a deploy that doesn\'t come up healthy rolls back, and says so when the roll back doesn\'t either', async () => {
   const name = `app${++repoN}`;
   const r = remote(`cara/${name}`);

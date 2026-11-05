@@ -427,9 +427,10 @@ Every deploy checks the above and logs `Warning (installing as its own app): …
 2. **Text on the accent uses `--citadel-on-accent`.**
 3. **Inputs are 16 px at 800 px and under**, so iOS Safari doesn't zoom on focus.
 4. **Focus is visible on keyboard focus only:** `:focus-visible` with the focus ring.
-5. **Motion respects reduced motion:** durations from `--citadel-motion`, spinners stop. Animate
-   `opacity` and `transform` only, and loop nothing but a spinner or skeleton. Set the end state
-   yourself, never in `transitionend` or `animationend`: at 0s a transition fires no event.
+5. **Motion respects reduced motion:** durations from `--citadel-motion`, spinners stop. Animate colours,
+   `opacity` and `transform`, never layout (`width`, `height`, `top`, `left`, margins), and loop
+   nothing but a spinner or skeleton. Set the end state yourself, never in `transitionend` or
+   `animationend`: at 0s a transition fires no event.
 6. **External links open a new tab; nothing uses `target="_top"`.**
 7. **No inline styles in what a component writes** (`style=""`, `<style>`): Citadel's CSP and maybe
    yours refuse them. Use classes, or a constructed stylesheet adopted once.
@@ -453,15 +454,17 @@ Every deploy checks the above and logs `Warning (installing as its own app): …
     screen shifts. Reserve the room (`statusSlot` and `steadyLabel` from `ui/status.js`, a `min-width` for a
     number) or overlay it; never insert a line into the flow or let a label widen its button. Prove it with
     the headless check in "Status line and steady labels".
-14. **Keyboard and screen reader reach everything.** Anything that acts is a `<button>` or `<a>`
-    (a chip that toggles is a `button` with `aria-pressed`), so Tab, Enter and Space work. An
+14. **Keyboard and screen reader reach everything.** Anything that acts is a native control
+    (`<button>`, `<a href>`, an input, `<summary>`), never a clickable `div`, so Tab and Enter reach
+    it; a chip that toggles is a `button` with `aria-pressed`. An
     icon-only button has an `aria-label` (`data-tip` adds detail, not a name); an `<img>` has `alt`
     (`""` for decoration). A drag has a button or menu way too ("Move up", "Move to…"). A sticky bar
     of your own gets a matching `scroll-padding` on its scroller, so it never hides what has focus.
 15. **Tap targets are big enough:** 24 px each way at the least on desktop, `--citadel-control-h`
     tall at 800 px and under, `--citadel-space-2` between neighbours. A small icon gets padding as
     its hit area.
-16. **Every field has a label.** A visible `<label>` (or `aria-label`); a placeholder is a hint.
+16. **Every field has a label.** A visible `<label>` (or `aria-label`); a placeholder is a hint,
+    except in the composer, where it names the box unless you pass `label`.
     The right `type`, `inputmode` and `autocomplete` bring a phone's right keyboard and autofill.
     Check a field when it loses focus and put its error under it (`aria-describedby`), keeping what
     was typed. Submit is disabled while its request is on its way.
@@ -476,15 +479,15 @@ Every deploy checks the above and logs `Warning (installing as its own app): …
 19. **Empty and failed say what next.** An empty list or search says why and offers the next step
     ("No todos yet. Add one below."); an error says what failed and the way out (Retry, what was
     kept), as the notice above does.
-20. **Undo over "are you sure?".** A delete or bulk change acts at once and offers Undo (a toast or
-    an undo bar); ask first only when nothing could bring it back.
+20. **Undo over "are you sure?".** A delete or bulk change acts at once and offers Undo in a bar
+    of your own (`toast` takes no button); ask first only when nothing could bring it back.
 21. **A view worth coming back to has its own URL.** A tab, item or filter someone would share,
     reload or go Back to updates the URL (`history.pushState`; `replaceState` for small steps), and
     that URL opens the same view.
 
 A self-review counts a break of these rules, and anything hand-rolled that the library serves, as a
-finding (`citadel:self-review`, "UI checks").
+finding (`citadel:self-review`, "UI findings").
 
-Each rule shown right and wrong, with every part drawn live in both modes: Citadel's living
+Each rule shown right and wrong (14 to 21 listed, no demo yet), with every part drawn live in both modes: Citadel's living
 design-system home, `docs/design-system/index.html` in Citadel's repo (Citadel's minions keep it
 true; ask your Taskmaster for a copy if you need the page itself).

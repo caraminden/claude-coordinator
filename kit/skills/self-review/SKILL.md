@@ -36,7 +36,7 @@ quoted whole from your system prompt) plus:
 > The change is `git diff main...HEAD`. Follow `<kit>/skills/ponytail-review/SKILL.md`, reading
 > the code the diff connects to. Before reporting, re-check each finding against the code and
 > drop any without a concrete failing case. When the diff touches the front end, also apply "UI
-> checks" in `<kit>/skills/self-review/SKILL.md`. Return at most 25 lines: numbered findings (Must fix /
+> findings" in `<kit>/skills/self-review/SKILL.md`. Return at most 25 lines: numbered findings (Must fix /
 > Should fix / Nice to have, file:line, one or two lines each), then
 > `Risk: low|medium|high: <reason>` using the rubric in `<kit>/skills/self-review/SKILL.md` §4
 > and the "Project facts" section of the repo's CLAUDE.md. This cap and format override
@@ -70,7 +70,9 @@ Don't re-review after fixes unless a fix grew past a few lines of high-row code.
 
 Fix Must-fix and in-scope Should-fix findings, add the test a finding asks for, re-run the tests
 and commit. You own the call: a finding you judge wrong or out of scope goes in the "not fixed"
-list with a reason, not silently away.
+list with a reason, not silently away. On a UI change, also check your own desktop and phone
+screenshots for what the Grunt can't see: equal top and bottom padding, nothing clipped or
+scrolling sideways, phone tap targets `--citadel-control-h` tall.
 
 ## 4. Label the risk
 
@@ -97,24 +99,22 @@ stay high whatever the edit, since a slip there can stop the service or open it 
   Hold, with your pick marked recommended). Set state null, note `risk high: waiting for a go`,
   and end the turn. Merge only on a go.
 
-## UI checks
+## UI findings
 
 For a diff that touches the front end, each of these is a Should-fix finding. The rules behind
 them are "The rules" in `citadel:contraption-ui`.
 
 - In a contraption (an app under `/apps/<name>/`): hand-rolled markdown, a chat log, a composer or
   a tooltip that Citadel UI serves; a copied Citadel hex colour instead of its `--citadel-*` variable.
-- Something that acts but isn't a `<button>` or `<a>`; an icon-only button with no `aria-label`;
-  an `<img>` with no `alt`; a field named only by its placeholder.
+- A clickable `div` or `span` where a native control (`<button>`, `<a href>`, an input) belongs;
+  an icon-only button with no `aria-label`; an `<img>` with no `alt`; a field other than the
+  composer named only by its placeholder.
 - An action reachable only on `:hover` or only by dragging; meaning carried by a colour alone.
-- `outline: none` with no `:focus-visible` ring; animating `width`, `height`, `top` or `left`; a
+- `outline: none` with no `:focus-visible` ring; animating `width`, `height`, `top`, `left` or a margin; a
   loop that isn't a spinner or skeleton; a duration not from `--citadel-motion`; a state change
   finished in `transitionend` or `animationend`.
-- A fixed `height` or `overflow: hidden` on a box of text; `100vh`; a long URL, id or table that
+- A fixed `height` or `overflow: hidden` on a box of text (the status line's one-line cut is
+  fine); `100vh`; a long URL, id or table that
   can push a phone page sideways; an `<img>` with no size or `aspect-ratio`.
 - A status, error or new element inserted into the flow; a submit that can fire twice; an empty
   or failed state that is blank or says only "Error".
-
-The screenshots are yours, not the Grunt's: at desktop and phone widths, check equal top and
-bottom padding, nothing clipped or scrolling sideways, and tap targets `--citadel-control-h` tall
-on the phone.

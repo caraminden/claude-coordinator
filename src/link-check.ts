@@ -1,12 +1,14 @@
 // The link check: a Stop hook the runner adds to every turn (linkCheckHooks in runner.ts), for
 // Taskmasters and minions alike. Before a turn ends it reads the reply's file links with the server's
 // own linkedPaths and resolveFile (src/artifacts.ts), against the folders the chat serves them from
-// (ticketRoots in routes/files.ts), and sends the reply back once if any link wouldn't open.
+// (ticketRoots in routes/files.ts), and sends the reply back once if any link wouldn't open. The
+// same send-back carries the wording check's findings (src/wording.ts): a reserved word used in another sense.
 //
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
+import { CODE, explain, misusedWords } from './wording.ts';
 
 export interface LinkCheckConfig {
   /** The turn's working directory, which relative links resolve against (not the hook's cwd, which follows a `cd`). */
@@ -18,10 +20,7 @@ export interface LinkCheckConfig {
 }
 
 /** How a send-back starts, which the runner looks for to swap the reply for its rewrite (Runner.replaceSentBack). */
-export const SENT_BACK = "These file links in your reply won't open in the chat:";
-
-/** Text the chat renders as code, where a "[x](y)" is not a link. */
-const CODE = /^ {0,3}(```|~~~)[\s\S]*?(?:^ {0,3}\1|(?![\s\S]))|(`+)(?!`)[\s\S]*?[^`]\2(?!`)/gm;
+export const SENT_BACK = 'Your reply was sent back before people saw it.';
 
 /** The files `text` links that the chat would show as a card or preview but can't open, as absolute paths. */
 export async function brokenLinks(text: string, cfg: LinkCheckConfig): Promise<string[]> {
@@ -50,7 +49,8 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const prompt = String(input.prompt_id ?? '');
   if (!input.last_assistant_message || (cfg.nudged ? readMarker(cfg.nudged) === prompt : input.stop_hook_active)) return null;
   const broken = await brokenLinks(input.last_assistant_message, cfg);
-  if (!broken.length) return null;
+  const misused = misusedWords(input.last_assistant_message);
+  if (!broken.length && !misused.length) return null;
   if (cfg.nudged) {
     try {
       writeFileSync(cfg.nudged, prompt);
@@ -64,13 +64,14 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
     const match = await findByName(abs, cfg.roots);
     return `- ${abs}: ${existsSync(abs) ? 'outside the folders the chat can show' : 'no such file'}${match ? `. Did you mean ${match}?` : ''}`;
   }));
-  return {
-    decision: 'block',
-    reason: `${SENT_BACK}\n${lines.join('\n')}\n`
+  const links = broken.length
+    ? `These file links in your reply won't open in the chat:\n${lines.join('\n')}\n`
       + `Relative links resolve against your working directory ${cfg.cwd}; absolute paths are safest. `
       + `Files must be inside ${cfg.roots.length > 1 ? `it or ${cfg.roots.slice(1).join(' or ')}` : 'it'}. `
-      + 'Fix the paths (or drop links to files that are gone) and write the reply again in full.',
-  };
+      + 'Fix the paths (or drop links to files that are gone).\n'
+    : '';
+  const wording = misused.length ? `${explain(misused)}\n` : '';
+  return { decision: 'block', reason: `${SENT_BACK}\n${links}${wording}Write the reply again in full.` };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

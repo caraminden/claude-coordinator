@@ -66,6 +66,7 @@ export const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
 // Pinned too, so a deploy can't change the rules under a running turn.
 export const TRIPWIRE = pinnedCopy('tripwire.ts');
 export const LINK_CHECK = pinnedCopy('link-check.ts');
+export const WORDING = pinnedCopy('wording.ts');
 export const TURN_WRAPPER = pinnedCopy('turn-wrapper.ts');
 /**
  * The Citadel kit (kit/), the plugin every turn of every scheme loads; pinned like the tripwire, so a
@@ -104,6 +105,19 @@ export function tripwireHooks(projectId: number, claudeConfig: string, ask = fal
 export function linkCheckHooks(roots: string[], script = LINK_CHECK, nudged?: string) {
   const command = [process.execPath, script, JSON.stringify({ cwd: roots[0], roots, ...(nudged ? { nudged } : {}) })].map((s) => `'${s}'`).join(' ');
   return { Stop: [{ hooks: [{ type: 'command', command, timeout: 10 }] }] };
+}
+
+/** The tools whose text the wording check reads before it goes out: messages, cards, notes and file writes. */
+export const WORDING_MATCHER = '^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$';
+
+/**
+ * The PreToolUse hook every turn gets (src/wording.ts): it refuses once a message, card, note or a
+ * .md or .html file written into `shared` that uses a reserved word ("fold") in another sense. `shared`
+ * is the scheme's shared folder and the minion's own, since people read the files in both. `sent` is a file in the turn's folder listing the sentences already refused.
+ */
+export function wordingHooks(shared: string[], sent: string, script = WORDING) {
+  const command = [process.execPath, script, JSON.stringify({ shared, sent })].map((s) => `'${s}'`).join(' ');
+  return { matcher: WORDING_MATCHER, hooks: [{ type: 'command', command, timeout: 10 }] };
 }
 
 /**
@@ -1735,8 +1749,9 @@ export class Runner {
     }
     // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
+    const tripwire = tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE));
     const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
-      hooks: { ...tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE)), ...linkCheck }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
+      hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(WORDING))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
     };
     if (rules.length) settings.permissions.ask = rules;
     if (ticket.kind === 'coordinator') {

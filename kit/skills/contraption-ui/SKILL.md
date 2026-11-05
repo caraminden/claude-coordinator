@@ -157,7 +157,7 @@ only live region, so a screen reader hears progress without the whole log.
 - Messages mid-turn (the composer's `whileBusy: 'send'`): while a turn runs, your server sends the
   person's message into it with `POST /api/contraptions/turns/<turn>/messages` `{ "person": 3, "text":
   "…" }` (the turn's own person only, or 403). `{ "steered": true, "id": "<uuid>" }`: it's in; Claude
-  reads it between tool calls, or answers it after its reply, in the same turn. The turn's `taken`
+  reads it between tool calls, or, sent while it was still replying, answers it after that reply, in the same turn. The turn's `taken`
   event `{ "id": "<uuid>" }` says Claude has read it: call `chat.ask(text)` then, so the rest of the
   reply draws under it, and mark it seen. `{ "steered": false, "reason": "replied" | "ended" }`: its
   reply was already out, or it ended; send it as a new turn once this one's `end` or `error` arrives.

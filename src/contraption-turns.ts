@@ -409,6 +409,7 @@ export class ContraptionTurns {
     let result: any = null;
     // Each steer claude takes after a reply is a query of its own, with its own result and usage.
     const total: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    let metered = false;
     let stderr = '';
     const streamed = new Map<string, string>();
     const said = new Map<string, string>();
@@ -448,6 +449,7 @@ export class ContraptionTurns {
         for (const b of ev.message.content) if (b?.type === 'tool_result') emit('tool_result', { id: b.tool_use_id, ok: !b.is_error, parent });
       } else if (ev.type === 'result') {
         result = ev;
+        if (ev.usage) metered = true;
         const u = ev.usage ?? {};
         total.input += u.input_tokens ?? 0;
         total.output += u.output_tokens ?? 0;
@@ -487,7 +489,7 @@ export class ContraptionTurns {
     });
     clearTimeout(timer);
 
-    const usage: Usage | null = result?.usage ? total : null;
+    const usage: Usage | null = metered ? total : null;
     const error = (code: TurnErrorCode, message: string) => {
       emit('error', { code, message });
       return { outcome: code, usage };

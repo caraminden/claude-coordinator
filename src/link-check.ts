@@ -2,12 +2,14 @@
 // Taskmasters and minions alike. Before a turn ends it reads the reply's file links with the server's
 // own linkedPaths and resolveFile (src/artifacts.ts), against the folders the chat serves them from
 // (ticketRoots in routes/files.ts), and sends the reply back once if any link wouldn't open. The
-// same send-back carries the wording check's findings (src/wording.ts): a reserved word used in another sense.
+// same send-back carries the wording check's findings (src/wording.ts): a reserved word used in another sense,
+// and the cross-scheme link check's (src/scheme-refs.ts): a bare #N that likely means another scheme's minion.
 //
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
+import { explainStrays, readRefs, strayRefs } from './scheme-refs.ts';
 import { CODE, explain, misusedWords } from './wording.ts';
 
 export interface LinkCheckConfig {
@@ -17,6 +19,8 @@ export interface LinkCheckConfig {
   roots: string[];
   /** A file in the turn's folder marking that this turn's reply was sent back once already. */
   nudged?: string;
+  /** The scheme's minions and the other schemes' names (SchemeRefs in src/scheme-refs.ts), a file in the turn's folder. */
+  refs?: string;
 }
 
 /** How a send-back starts, which the runner looks for to swap the reply for its rewrite (Runner.replaceSentBack). */
@@ -50,7 +54,9 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   if (!input.last_assistant_message || (cfg.nudged ? readMarker(cfg.nudged) === prompt : input.stop_hook_active)) return null;
   const broken = await brokenLinks(input.last_assistant_message, cfg);
   const misused = misusedWords(input.last_assistant_message);
-  if (!broken.length && !misused.length) return null;
+  const refs = readRefs(cfg.refs);
+  const strays = refs ? strayRefs(input.last_assistant_message, refs) : [];
+  if (!broken.length && !misused.length && !strays.length) return null;
   if (cfg.nudged) {
     try {
       writeFileSync(cfg.nudged, prompt);
@@ -71,7 +77,8 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
       + 'Fix the paths (or drop links to files that are gone).\n'
     : '';
   const wording = misused.length ? `${explain(misused)}\n` : '';
-  return { decision: 'block', reason: `${SENT_BACK}\n${links}${wording}Write the reply again in full.` };
+  const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';
+  return { decision: 'block', reason: `${SENT_BACK}\n${links}${wording}${scheme}Write the reply again in full.` };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

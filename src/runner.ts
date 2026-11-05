@@ -14,6 +14,7 @@ import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, t
 import type { TripwireConfig } from './tripwire.ts';
 import type { TurnGithub } from './github-link.ts';
 import { SENT_BACK } from './link-check.ts';
+import { SCHEME_REFS_MATCHER, type SchemeRefs } from './scheme-refs.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import type { Ship } from './branch.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath } from './sessions.ts';
@@ -67,6 +68,7 @@ export const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
 export const TRIPWIRE = pinnedCopy('tripwire.ts');
 export const LINK_CHECK = pinnedCopy('link-check.ts');
 export const WORDING = pinnedCopy('wording.ts');
+export const SCHEME_REFS = pinnedCopy('scheme-refs.ts');
 export const TURN_WRAPPER = pinnedCopy('turn-wrapper.ts');
 /**
  * The Citadel kit (kit/), the plugin every turn of every scheme loads; pinned like the tripwire, so a
@@ -100,10 +102,10 @@ export function tripwireHooks(projectId: number, claudeConfig: string, ask = fal
  * The Stop hook every turn gets (src/link-check.ts): it sends a reply back once if a file it links
  * wouldn't open in the chat. `roots` are the folders the server shows the turn's files from
  * (ticketRoots in routes/files.ts), its working directory first. `nudged` is a file in the turn's
- * folder the check leaves once it has sent the reply back.
+ * folder the check leaves once it has sent the reply back. `refs` is the scheme-refs snapshot (writeSchemeRefs).
  */
-export function linkCheckHooks(roots: string[], script = LINK_CHECK, nudged?: string) {
-  const command = [process.execPath, script, JSON.stringify({ cwd: roots[0], roots, ...(nudged ? { nudged } : {}) })].map((s) => `'${s}'`).join(' ');
+export function linkCheckHooks(roots: string[], script = LINK_CHECK, nudged?: string, refs?: string) {
+  const command = [process.execPath, script, JSON.stringify({ cwd: roots[0], roots, ...(nudged ? { nudged } : {}), ...(refs ? { refs } : {}) })].map((s) => `'${s}'`).join(' ');
   return { Stop: [{ hooks: [{ type: 'command', command, timeout: 10 }] }] };
 }
 
@@ -118,6 +120,23 @@ export const WORDING_MATCHER = '^(mcp__(thread|coordinator)__(message_coordinato
 export function wordingHooks(shared: string[], sent: string, script = WORDING) {
   const command = [process.execPath, script, JSON.stringify({ shared, sent })].map((s) => `'${s}'`).join(' ');
   return { matcher: WORDING_MATCHER, hooks: [{ type: 'command', command, timeout: 10 }] };
+}
+
+/**
+ * The PreToolUse hook every turn gets (src/scheme-refs.ts): it refuses once a message or card shown in
+ * this scheme whose bare #N likely means another scheme's minion. `refs` is the snapshot (writeSchemeRefs),
+ * `sent` a file in the turn's folder listing the numbers already refused.
+ */
+export function schemeRefsHooks(refs: string, sent: string, script = SCHEME_REFS) {
+  const command = [process.execPath, script, JSON.stringify({ refs, sent })].map((s) => `'${s}'`).join(' ');
+  return { matcher: SCHEME_REFS_MATCHER, hooks: [{ type: 'command', command, timeout: 10 }] };
+}
+
+/** The scheme-refs snapshot for a turn of `project`: its name, the other schemes' names and its minions. */
+export function schemeRefs(project: Project, projects: Project[], tickets: Ticket[]): SchemeRefs {
+  const minions: SchemeRefs['minions'] = {};
+  for (const t of tickets) if (t.number != null) minions[t.number] = { title: t.title, closed: t.status === 'closed' };
+  return { scheme: project.name, others: projects.filter((p) => p.id !== project.id).map((p) => p.name), minions };
 }
 
 /**
@@ -1737,7 +1756,10 @@ export class Runner {
     // One --settings per turn: the tripwire hook and the shared settings, plus approval rules or the Taskmaster's access rules.
     const deny = credentialDenies(homedir(), claudeConfigDir(process.env), dirname(this.store.path));
     // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
-    const linkCheck = ticket.cwd ? linkCheckHooks([ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d), pinned(LINK_CHECK), join(dir, 'link-check-nudged')) : {};
+    // A file, not an argument: a scheme's minion list outgrows a command line.
+    const refsFile = join(dir, 'scheme-refs.json');
+    writeFileSync(refsFile, JSON.stringify(schemeRefs(project, this.store.listProjects(), this.store.listTickets(project.id))));
+    const linkCheck = ticket.cwd ? linkCheckHooks([ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d), pinned(LINK_CHECK), join(dir, 'link-check-nudged'), refsFile) : {};
     // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
     // title, state and note. The token travels in the environment (which the MCP server
     // inherits), never on the command line.
@@ -1751,7 +1773,7 @@ export class Runner {
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
     const tripwire = tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE));
     const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
-      hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(WORDING))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
+      hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
     };
     if (rules.length) settings.permissions.ask = rules;
     if (ticket.kind === 'coordinator') {

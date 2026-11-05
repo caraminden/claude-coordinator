@@ -93,7 +93,9 @@ export class Containers {
     const now = await this.status(spec.name);
     if (now.state === 'running' && now.spec === specHash(spec)) return;
     if (now.state !== 'missing') await this.stop(spec.name);
-    const unit = await this.run('systemd-run', ['--user', '--collect', '--quiet', `--unit=${spec.name}`, `--slice=${this.slice}`, '-p', 'TimeoutStopSec=20', 'podman', 'run', ...runArgs(spec)]);
+    // Every turn of the person runs in this one container, so an OOM kill must take only the process the
+    // kernel picked: systemd's default OOMPolicy=stop would stop the unit and every turn with it.
+    const unit = await this.run('systemd-run', ['--user', '--collect', '--quiet', `--unit=${spec.name}`, `--slice=${this.slice}`, '-p', 'TimeoutStopSec=20', '-p', 'OOMPolicy=continue', 'podman', 'run', ...runArgs(spec)]);
     if (unit.code !== 0) throw new Error(`could not start ${spec.name}: ${unit.stderr.trim() || `systemd-run exited ${unit.code}`}`);
     const until = Date.now() + timeoutMs;
     while (Date.now() < until) {

@@ -251,6 +251,8 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   assert.ok(inHome.length > 0);
   for (const m of inHome) assert.ok(existsSync(join(root, 'josh-vol-ensure', m.dst.slice(home.length + 1))), m.dst);
   assert.ok(log.some((c) => c[0] === 'systemd-run' && c.includes(`--unit=citadel-claude-t-${josh.id}`)));
+  // One turn running out of memory loses only its own process, not the container and every turn in it.
+  assert.ok(log.some((c) => c[0] === 'systemd-run' && c.includes('OOMPolicy=continue')));
   // The container runs an old spec: a starting turn that's its only one restarts it; with another turn there, it waits.
   link.busy = () => 2;
   await link.ensure(josh.id, true);

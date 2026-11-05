@@ -141,3 +141,20 @@ test('each person\'s inbox holds only their own minions and unassigned ones, car
   assert.deepEqual(ids('Josh'), [josh, nobody, tm].sort());
   assert.equal(inboxCount(store, approvals, p, 'Josh', {}), 3, 'their minion (ready, with a question and an approval), the unassigned one and the Taskmaster: minions, not items (Cara, 2026-11-01)');
 });
+
+test('a parked minion waits on something else by design: out of the inbox and its badge, its open cards and replies too; an approval holding up a running turn still counts (#344)', () => {
+  const store = new Store(join(root, 'parked.sqlite'));
+  const approvals = new Approvals(() => {});
+  const p = store.createProject('One', null).id;
+  const minion = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const asking = minion('asking'), offering = minion('offering'), blocked = minion('blocked'), live = minion('live');
+  store.addEvent(asking, 'question', { id: 'q', questions: [] });
+  store.addEvent(asking, 'plan', { id: 'p', summary: 's', plan: 'p', status: 'pending' });
+  store.updateTicket(offering, { replies: JSON.stringify(['Go']) });
+  store.updateTicket(live, { replies: JSON.stringify(['Go']) });
+  approvals.request(blocked, 'Bash', { command: 'ls' });
+  for (const id of [asking, offering, blocked]) store.updateTicket(id, { state: 'parked' });
+
+  assert.deepEqual(inboxItems(store, approvals, p, 'Cara').map((i) => [i.kind, i.ticketId]).sort(), [['approval', blocked], ['replies', live]]);
+  assert.equal(inboxCount(store, approvals, p, 'Cara', {}), 2);
+});

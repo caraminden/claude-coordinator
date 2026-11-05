@@ -31,7 +31,7 @@ test('the windows come shortest first, clamped, with no usage as null rather tha
   assert.deepEqual(ws.map((w) => [w.windowDurationMins, w.pct]), [[300, 33], [10080, 100]]);
 });
 
-test("each person's Codex usage is their own, and the server login has none", () => {
+test("each person's Codex usage is their own, the server login's included", () => {
   const store = new Store(join(root, 'test.db'));
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   const amy = store.createUser({ name: 'Amy', login: 'amy' });
@@ -42,8 +42,9 @@ test("each person's Codex usage is their own, and the server login has none", ()
   r.updateCodexUsage({ primary: win(80, 300), secondary: win(20, 10080) }, josh.id);
   assert.equal(r.codexView(josh.id)!.usage!.primary!.usedPercent, 80);
   assert.equal(r.codexView(amy.id)!.usage, null, "Amy doesn't see Josh's");
-  assert.equal(r.codexView(cara.id), null, 'no Codex on the server login');
-  assert.deepEqual(sent.map((m) => [m.type, m.payer]), [['codex', josh.id]], 'only Josh is told');
+  assert.equal(r.codexView(cara.id)!.usage, null, "the server login's Codex (#341) is its own too");
+  assert.equal(r.codexView(null), null, 'nobody signed in: no bar');
+  assert.deepEqual(sent.map((m) => [m.type, m.to]), [['codex', josh.id]], 'only Josh is told');
 });
 
 test('Settings reads the windows from a codex app-server: the codex limit first, then the plain one', async () => {

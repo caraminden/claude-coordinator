@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Run a heavy build or a full test suite in one of a few host-wide slots (#325):
+#   citadel-heavy <command> [args...]
+# Every minion of every scheme shares the slots, in every person's container and on the host, so a
+# burst of minions builds a few at a time instead of all at once. The rest wait in line and say for whom.
+# A slot is a flock(1) lock on a file in $CITADEL_HEAVY_DIR (turns get Citadel's projects folder, which
+# every container mounts at the same path). The kernel drops a lock when its holder exits or dies, so
+# no slot is ever left stale. How many slots: the number in $CITADEL_HEAVY_DIR/slots (edit it to tune;
+# the next job in line reads it), else $CITADEL_HEAVY_SLOTS, else 2.
+# Exits with the command's status. Nested calls (a wrapped script that wraps its own step) run straight
+# away in the outer call's slot. When the lock folder or flock is missing, it warns and runs unlocked.
+set -uo pipefail
+
+say() { echo "citadel-heavy: $*" >&2; }
+[ $# -gt 0 ] || { say "usage: citadel-heavy <command> [args...]"; exit 2; }
+[ -z "${CITADEL_HEAVY_HELD:-}" ] || exec "$@"
+
+dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
+if ! command -v flock >/dev/null || ! mkdir -p "$dir" 2>/dev/null || ! : 2>/dev/null >>"$dir/queue"; then
+  say "no lock folder at $dir (or no flock), so this runs without waiting for a slot"
+  exec "$@"
+fi
+
+who=${CITADEL_HEAVY_WHO:-$(id -un 2>/dev/null || echo someone)}
+what="$*"
+[ ${#what} -le 100 ] || what="${what:0:97}..."
+
+slots() {
+  local n
+  n=$(tr -dc 0-9 2>/dev/null <"$dir/slots")
+  n=${n:-${CITADEL_HEAVY_SLOTS:-2}}
+  [[ $n =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] || n=1
+  echo "$n"
+}
+
+# Try each slot once; on success fd 8 holds it and $slot says which.
+slot=
+take() {
+  local i n
+  n=$(slots)
+  for ((i = 0; i < n; i++)); do
+    exec 8<>"$dir/slot-$i"
+    if flock -n 8; then slot=$i; return 0; fi
+    exec 8>&-
+  done
+  return 1
+}
+
+holders() {
+  local i n f line
+  n=$(slots)
+  for ((i = 0; i < n; i++)); do
+    f="$dir/slot-$i.who"
+    line=$(cat "$f" 2>/dev/null) || line="(starting)"
+    say "  slot $((i + 1)): ${line:-(starting)}"
+  done
+}
+
+# The line: whoever holds the queue lock is next and polls for a free slot; the rest wait behind it.
+exec 7<>"$dir/queue"
+since=$SECONDS
+if ! flock -n 7; then
+  say "all heavy slots ($(slots)) are busy and others are in line first; waiting ($who: $what)"
+  holders
+  flock 7
+fi
+if ! take; then
+  say "all heavy slots ($(slots)) are busy; waiting for one ($who: $what)"
+  holders
+  told=$SECONDS
+  until take; do
+    sleep 2
+    if [ $((SECONDS - told)) -ge 60 ]; then
+      say "still waiting after $(((SECONDS - since) / 60)) min:"
+      holders
+      told=$SECONDS
+    fi
+  done
+fi
+exec 7>&-
+[ $((SECONDS - since)) -lt 2 ] || say "got slot $((slot + 1)) after $((SECONDS - since))s"
+
+printf '%s: %s (since %s, pid %s)\n' "$who" "$what" "$(date +%H:%M)" "$$" >"$dir/slot-$slot.who" 2>/dev/null
+trap 'rm -f "$dir/slot-$slot.who"' EXIT
+# The command runs as a child without the lock's fd, so a daemon it leaves behind (sccache, a build
+# server) can't keep the slot; this shell holds it until the command ends.
+export CITADEL_HEAVY_HELD=1
+"$@" 8>&-

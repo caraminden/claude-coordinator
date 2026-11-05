@@ -13,8 +13,8 @@ const land = join(import.meta.dirname, '..', 'tools', 'land.sh');
 const root = mkdtempSync(join(tmpdir(), 'land-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 // NODE_TEST_CONTEXT would make land.sh's own `node --test` report to this runner instead of exiting red;
-// COORDINATOR_* would have the real deploy.sh report to the live server.
-const env = { ...process.env, NODE_TEST_CONTEXT: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+// COORDINATOR_* would have the real deploy.sh report to the live server; CITADEL_HEAVY_* would queue it in the host's slots.
+const env = { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: join(root, 'heavy'), NODE_TEST_CONTEXT: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
 
 let n = 0;
@@ -56,6 +56,9 @@ test('rebases onto main, tests, fast-forwards main, and deploys holding the lock
   r.commit(r.source, 'c.txt', 'someone else\n');
   const res = r.run();
   assert.equal(res.status, 0, res.stderr);
+  // The tests ran in a citadel-heavy slot (#325), here the test's own lock folder.
+  assert.match(res.stderr, /running the tests \(in a citadel-heavy slot/);
+  assert.ok(existsSync(join(env.CITADEL_HEAVY_DIR, 'slot-0')));
   assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
   assert.equal(git(r.source, 'log', '--format=%s', '-3'), 'b.txt: mine\nc.txt: someone else\nbase');
   assert.ok(existsSync(join(r.source, 'b.txt')), "the scheme repo's checkout moves with main");
@@ -98,12 +101,14 @@ test('a deploy that fails before going live puts main back', () => {
   assert.ok(!existsSync(join(r.source, 'b.txt')));
 });
 
-test('refuses uncommitted work, main itself, and arguments', () => {
+test('refuses uncommitted work, main itself, arguments, and running inside a citadel-heavy slot', () => {
   const r = setup();
   writeFileSync(join(r.wt, 'a.txt'), 'dirty\n');
   assert.match(r.run().stderr, /uncommitted changes/);
   git(r.wt, 'checkout', '--', 'a.txt');
   assert.match(spawnSync('bash', [land, '--now'], { cwd: r.wt, encoding: 'utf8', env }).stderr, /takes no arguments/);
+  // Under citadel-heavy it would take the deploy lock while holding a slot, the reverse of its own order.
+  assert.match(r.run({ CITADEL_HEAVY_HELD: '1' }).stderr, /not under citadel-heavy/);
   const onMain = spawnSync('bash', [land], { cwd: r.source, encoding: 'utf8', env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source } });
   assert.match(onMain.stderr, /not main/);
 });

@@ -29,7 +29,7 @@ process.env.LC_TIME = 'en_GB.UTF-8';
 process.env.COORDINATOR_API = 'http://service.invalid';
 process.env.COORDINATOR_TOKEN = 'service-token';
 process.env.COORDINATOR_TICKET = '999';
-const { CHECKOUT, KIT, MCP_DIR, MCP_SERVER, Runner, turnEnv } = await import('../src/runner.ts');
+const { CHECKOUT, HEAVY_LINE, KIT, MCP_DIR, MCP_SERVER, Runner, turnEnv } = await import('../src/runner.ts');
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -64,7 +64,9 @@ const args = process.argv.slice(2);
 const settings = args.includes('--settings') ? JSON.parse(readFileSync(args[args.indexOf('--settings') + 1], 'utf8')) : null;
 const system = args.includes('--append-system-prompt-file') ? readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8') : null;
 const mcp = JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8'));
-writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, mcp }));
+// What a Bash call would run for \`citadel-heavy\`, read while the turn's folder still exists.
+const heavy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-heavy) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, mcp, heavy }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
 console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', cwd: process.cwd(), mcp_servers: status ? [{ name: role, status }] : [] }));
@@ -243,6 +245,19 @@ test("a Taskmaster's settings travel as a file, so hundreds of worktrees stay un
   for (const arg of t.args) assert.ok(Buffer.byteLength(arg) < 32 * 1024, `argument of ${Buffer.byteLength(arg)} bytes`);
   assert.ok(t.settings.permissions.allow.includes(`Bash(git -C ${join(scheme, 'tickets', '300')} log:*)`));
   assert.ok(t.settings.hooks.PreToolUse);
+});
+
+test('every turn finds citadel-heavy first on its PATH, pinned, with the shared slots folder and who it runs for; only minions are told to use it (#325)', async () => {
+  const t = await turn('ticket', 'connected');
+  assert.equal(t.heavy, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-heavy'), 'utf8'), 'on PATH and executable');
+  assert.ok(!t.env.PATH.startsWith(MCP_DIR) && t.env.PATH.split(':')[0].endsWith('/pin/bin'), "the turn's own pinned copy, which outlives a restart");
+  assert.equal(t.env.CITADEL_HEAVY_DIR, join(root, 'projects', '.heavy'), "in the projects folder every container mounts");
+  assert.match(t.env.CITADEL_HEAVY_WHO, /^P[\d.]+ #\d+$/);
+  assert.equal(t.env.CARGO_BUILD_JOBS, '4');
+  assert.ok(t.system.includes(HEAVY_LINE));
+  assert.match(HEAVY_LINE, /`citadel-heavy cargo test --workspace`/);
+  const tm = await turn('coordinator', 'connected');
+  assert.ok(!tm.system.includes(HEAVY_LINE));
 });
 
 test("the system prompt travels as a file, so a `pkill -f` for a word in it can't match claude itself", async () => {

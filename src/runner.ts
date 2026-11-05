@@ -79,6 +79,13 @@ const KIT_SOURCE = join(import.meta.dirname, '..', 'kit');
 /** The live checkout: the code this server runs, which Citadel's own Taskmaster may read. */
 export const CHECKOUT = join(import.meta.dirname, '..');
 if (existsSync(KIT_SOURCE)) cpSync(KIT_SOURCE, KIT, { recursive: true });
+/** citadel-heavy (tools/), the host-wide slots for heavy builds and test suites (#325), first on every turn's PATH from its pinned bin folder. */
+export const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
+cpSync(join(import.meta.dirname, '..', 'tools', 'citadel-heavy'), HEAVY);
+/** The minion prompt's line on citadel-heavy. */
+export const HEAVY_LINE = 'Heavy builds and full test suites (a whole-workspace `cargo build`, `test`, `check` or `clippy`, a cross-target or release build, a full `npm test`) go through `citadel-heavy <command...>`, as in `citadel-heavy cargo test --workspace`: every scheme and person shares a few slots host-wide, so it may wait in line, saying for whom, and it frees its slot when the command ends or dies. Give that call a long timeout or run it in the background. Leave quick single-crate checks, dev servers and watchers out of it, and don\'t wrap a script that takes its own deploy or land lock (tools/land.sh runs its tests in a slot already); wrap the build or test step inside it instead.';
+/** A build's default parallelism in turns, so the few heavy jobs at once (citadel-heavy's 2 slots) leave cores for the rest. */
+export const TURN_BUILD_JOBS = '4';
 /** The slice turn units run in; its name puts it under citadel.slice, which deploy/citadel.slice caps. */
 export const TURN_SLICE = 'citadel-turns.slice';
 
@@ -656,6 +663,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     'Scratch files go in $TMPDIR (your own temp folder, also a working directory) or your worktree. Claude Code asks a person before an `rm` whose target it cannot pin down (a glob after `cd`, `rm -rf *`, a bare `$d/*`), whatever the permission mode, so give `rm` absolute paths in a call with no `cd`: `rm -rf "$TMPDIR/out" && mkdir -p "$TMPDIR/out"`, and `"${d:?}"/*` for a variable.',
     'Stop your own processes by pid (`$!` when you start one, or `ss -ltnp \'sport = :<port>\'`), never by name: every turn, Citadel and its apps run as one account, so `pkill` or `killall` would hit other minions and Citadel itself (the tripwire blocks them).',
     'While your own background job runs (tests, a build, a dev server), wait for it inside the turn with one blocking command, up to 10 minutes per call, repeated until it ends, and no polling loops of short checks: the minions list shows you idle once your turn ends, and the job may not outlive it.',
+    HEAVY_LINE,
     ...(deploys ? ['After you deploy with tools/deploy.sh, set state pending-deploy and do not call close_self: a successful deploy dismisses the minion once it is live and your turn has ended (the restart does not interrupt your turn), and a failed one leaves it open with the error. pending-deploy means the deploy is all that is left: in a later turn, when someone still needs you (helping them use the change, an open question, more work), set another state or null, even while the deploy is still waiting.'] : []),
     'When the minion\'s work is done and should be dismissed with nothing to deploy, call the `close_self` tool (mcp__thread) near the end of your turn: the minion is dismissed once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not dismiss a minion whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can be dismissed, even if its brief says to dismiss.',
     `${deploys ? 'Once your change is live, or deployed and waiting in pending-deploy,' : 'Once your work is finished'} and nothing is left for a person to answer, try or read, end the minion in that same turn (${deploys ? 'pending-deploy after tools/deploy.sh, close_self otherwise' : 'close_self'}): do not leave it in state ready for a "looks good" or an "are we good?". People ask the Taskmaster those, and it answers from read_ticket without waking you.`,
@@ -1807,6 +1815,9 @@ export class Runner {
       // XDG_RUNTIME_DIR: without it every one fails, NuGet's restore included (#225).
       if (tmp) env.XDG_RUNTIME_DIR = tmp;
     }
+    // citadel-heavy's slots live in the projects folder, the one every person's container mounts at the same path.
+    const payer = person ? this.store.getUser(person)?.login : undefined;
+    env = { ...env, PATH: [join(pin, 'bin'), env.PATH].filter(Boolean).join(':'), CARGO_BUILD_JOBS: TURN_BUILD_JOBS, CITADEL_HEAVY_DIR: join(this.dataDir, 'projects', '.heavy'), CITADEL_HEAVY_WHO: `${project.name} #${ticket.number}${payer ? ` (${payer})` : ''}` };
     // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
     if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;
     if (filesDir) env.COORDINATOR_FILES_DIR = filesDir;

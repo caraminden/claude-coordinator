@@ -119,6 +119,10 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   assert.equal(env.ANTHROPIC_API_KEY, undefined);
   assert.equal(env.CLAUDE_CONFIG_DIR, join(volume, '.claude'));
   assert.equal(env.COORDINATOR_CONTAINER, '1');
+  // citadel-heavy (#325): pinned in the turn's folder, ahead of the image's tools, and its slots in the mounted projects folder.
+  assert.match(env.PATH, /^[^:]*\/pin\/bin:.*:\/usr\/local\/bin:/);
+  assert.match(env.CITADEL_HEAVY_DIR, /\/projects\/\.heavy$/);
+  assert.match(env.CITADEL_HEAVY_WHO, / #\d+ \(josh\)$/);
   // Not a typed message (#295): no person, not even empty.
   assert.ok(!('CITADEL_PERSON_ID' in env) && !('CITADEL_PERSON_LOGIN' in env));
   // The host's runtime folder isn't in the container: .NET's named mutexes need one that exists (#225).

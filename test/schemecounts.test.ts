@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cardEvent, countMoved, otherSchemes, rowTarget, turnMoved } from '../public/schemecounts.js';
+import { cardEvent, countMoved, otherSchemes, rowTarget, schemePill, turnMoved } from '../public/schemecounts.js';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -57,4 +57,14 @@ test('rowTarget: a Needs-you row goes to the oldest thing its minion waits on yo
   assert.equal(rowTarget([{ kind: 'question', at: 20, eventId: 4 }, { kind: 'state', at: 10 }]), 'latest', 'ready or try: the latest reply');
   assert.equal(rowTarget([{ kind: 'replies', at: 10 }]), 'latest');
   assert.equal(rowTarget([{ kind: 'approval', at: 10 }]), null, 'a card whose event is gone opens the chat as usual');
+});
+
+test('schemePill: the spinner shows beside the Needs-you count, not only at zero (#314), with the working number only over 1 (#278)', () => {
+  assert.deepEqual(schemePill({ inbox: 0, running: false, working: 0 }), { need: 0, busy: false, working: 0, label: '' }, 'nothing: hidden');
+  assert.deepEqual(schemePill({ inbox: 2, running: false, working: 0 }), { need: 2, busy: false, working: 0, label: '2 waiting on you' }, 'badge only');
+  assert.deepEqual(schemePill({ inbox: 0, running: true, working: 1 }), { need: 0, busy: true, working: 0, label: '1 minion working' }, 'spinner only, one minion: no number');
+  assert.deepEqual(schemePill({ inbox: 0, running: true, working: 0 }), { need: 0, busy: true, working: 0, label: 'Taskmaster working' }, 'only the Taskmaster mid-turn');
+  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 1 }), { need: 2, busy: true, working: 0, label: '2 waiting on you · 1 minion working' }, 'both');
+  assert.deepEqual(schemePill({ inbox: 2, running: true, working: 3 }), { need: 2, busy: true, working: 3, label: '2 waiting on you · 3 minions working' }, 'both, with the working number');
+  assert.equal(schemePill({ inbox: 1, running: false, working: 3 }).working, 0, 'no turn running: no working number, whatever the field says');
 });

@@ -1,7 +1,7 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './core.js';
-import { cardEvent, countMoved, otherSchemes, rowTarget, turnMoved } from './schemecounts.js';
+import { cardEvent, countMoved, otherSchemes, rowTarget, schemePill, turnMoved } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
@@ -80,13 +80,12 @@ export function inboxStrip() {
   return strip;
 }
 
-/** A scheme's Needs-you count (`inbox` from api/projects) as a pill for the scheme lists; at zero, a spinner while a turn runs in it (#248) with how many minions are working when that's more than one (#278; Cara, 2026-11-02: "Only show if number > 1"), else hidden. */
+/** A scheme's pill for the scheme lists: the spinner while a turn runs, then the Needs-you count (schemePill says what shows); hidden when neither. */
 export function schemeCount(p) {
-  if (!p.inbox && p.running) {
-    const label = p.working ? `${p.working} minion${p.working === 1 ? '' : 's'} working` : 'Taskmaster working';
-    return h('span', { class: 'scheme-count busy', 'data-scheme-inbox': p.id, role: 'img', title: label, 'aria-label': label }, h('i'), p.working > 1 ? h('b', { 'aria-hidden': 'true' }, p.working) : null);
-  }
-  return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !p.inbox, title: 'Waiting on you' }, p.inbox || '');
+  const { need, busy, working, label } = schemePill(p);
+  return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy, role: label ? 'img' : null, title: label || null, 'aria-label': label || null },
+    busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working) : null) : null,
+    need ? h('span', { class: 'need', 'aria-hidden': 'true' }, need) : null);
 }
 
 /** Redraw the strip: the count while minimized; opened, one row per waiting minion, linking to its chat. */

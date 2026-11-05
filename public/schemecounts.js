@@ -11,8 +11,24 @@ export const cardEvent = (event) => CARD_EVENTS.has(event.kind) || (event.kind =
 export const countMoved = (before, after) => !before || before.state !== after.state || !before.replies?.length !== !after.replies?.length || (before.status === 'closed') !== (after.status === 'closed')
   || before.properties?.assigned !== after.properties?.assigned;
 
-/** A minion started or ended a turn: the spinner in place of a zero count (#248). */
+/** A minion started or ended a turn: the spinner beside the count (#248). */
 export const turnMoved = (before, after) => (before?.status === 'running') !== (after.status === 'running');
+
+/**
+ * What a scheme's pill shows (`p` as api/projects sends it): the Needs-you count, the spinner while a
+ * turn runs (#248) and how many minions are working when that's more than one (#278; Cara,
+ * 2026-11-02: "Only show if number > 1"). The spinner shows beside the count, not only at zero (#314;
+ * Josh, 2026-11-05: "I think actually the blue spinner and number of minions should show regardless
+ * of badge"). `label` covers both, for the tooltip and screen readers; empty when the pill is hidden.
+ */
+export function schemePill(p) {
+  const need = p.inbox || 0;
+  const busy = !!p.running;
+  const parts = [];
+  if (need) parts.push(`${need} waiting on you`);
+  if (busy) parts.push(p.working ? `${p.working} minion${p.working === 1 ? '' : 's'} working` : 'Taskmaster working');
+  return { need, busy, working: busy && p.working > 1 ? p.working : 0, label: parts.join(' · ') };
+}
 
 /**
  * Other schemes' minions as the stream last showed them: `ticket` and `event` call `refetch` when

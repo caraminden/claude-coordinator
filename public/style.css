@@ -204,15 +204,17 @@ a.nav-item:has(> .scheme-count) > .name { flex: 1; overflow: hidden; text-overfl
 /* A scheme's favicon (#222). */
 .scheme-icon { flex: none; width: 1.25em; height: 1.25em; border-radius: 4px; object-fit: contain; vertical-align: -0.25em; }
 .scheme-crumb { display: inline-flex; align-items: center; gap: 0.35em; vertical-align: bottom; max-width: 100%; }
-.scheme-count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0.1rem 0.45rem; font-size: 0.85em; line-height: 1.3; font-weight: 600; }
+/* A scheme's pill: the spinner while a turn runs (#248), then the Needs-you count, side by side (#314). */
+.scheme-count { flex: none; display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85em; line-height: 1.3; font-weight: 600; }
 .scheme-count[hidden] { display: none; }
-/* At zero with a turn running (#248): a blue ring in the pill's own box, so the row doesn't shift; a still dot without motion. */
-.scheme-count.busy { background: none; padding-inline: 0.2rem; display: inline-flex; align-items: center; justify-content: center; }
-.scheme-count.busy::before { content: '\2007'; width: 0; overflow: hidden; } /* a digit's height, as the pill has */
-.scheme-count.busy i { width: 1.05em; height: 1.05em; box-sizing: border-box; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--running) 30%, transparent); border-top-color: var(--running); animation: scheme-spin 0.9s linear infinite; }
-.scheme-count.busy b { margin-left: 0.3em; color: var(--running); font-weight: 600; font-variant-numeric: tabular-nums; } /* how many minions are working (#278) */
+.scheme-count > .need { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0.1rem 0.45rem; }
+/* A blue ring in a box as tall as the count's, so the row doesn't shift; a still dot without motion. */
+.scheme-count > .busy { display: inline-flex; align-items: center; padding: 0.1rem 0.2rem; }
+.scheme-count > .busy::before { content: '\2007'; width: 0; overflow: hidden; } /* a digit's height, as the count has */
+.scheme-count > .busy i { width: 1.05em; height: 1.05em; box-sizing: border-box; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--running) 30%, transparent); border-top-color: var(--running); animation: scheme-spin 0.9s linear infinite; }
+.scheme-count > .busy b { margin-left: 0.3em; color: var(--running); font-weight: 600; font-variant-numeric: tabular-nums; } /* how many minions are working (#278) */
 @keyframes scheme-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .scheme-count.busy i { animation: none; border-color: transparent; background: var(--running) content-box; } }
+@media (prefers-reduced-motion: reduce) { .scheme-count > .busy i { animation: none; border-color: transparent; background: var(--running) content-box; } }
 button.nav-item.add { width: 100%; text-align: left; background: none; border: 0; color: var(--accent); font-weight: normal; }
 /* The shelf's scheme rows with their Hide or Unhide (#226): shown on hover where there is one, always on touch. */
 .scheme-row { display: flex; align-items: center; gap: 0.25rem; }

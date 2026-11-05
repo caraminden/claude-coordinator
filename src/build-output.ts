@@ -7,13 +7,12 @@
  * symlinks inside what it removes.
  */
 import { execFile } from 'node:child_process';
-import { lstat, realpath, rm } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, join, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 const NAMES = new Set(['target', 'node_modules']);
-const TIMEOUT_MS = 10 * 60_000;
 // Lowest best-effort IO class and lowest CPU priority, so a sweep never hogs the box. Not the idle
 // class: under steady IO it can starve, holding the minion's lane (and a reopen) behind it.
 const LOW = ['ionice', '-c2', '-n7', 'nice', '-n19'];
@@ -30,9 +29,9 @@ export function ticketWorktree(dataDir: string, projectId: number, ticketId: num
 export async function findBuildOutput(worktree: string): Promise<string[]> {
   const real = await realpath(worktree);
   // A folder that is no checkout of its own would answer for whatever repo holds it.
-  const top = (await run('git', ['-C', real, 'rev-parse', '--show-toplevel'], { timeout: TIMEOUT_MS })).stdout.trim();
+  const top = (await low(['git', '-C', real, 'rev-parse', '--show-toplevel'])).stdout.trim();
   if (top !== real) throw new Error(`${worktree} is not a git worktree of its own`);
-  const { stdout } = await run('git', ['-C', real, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'], { timeout: TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 });
+  const { stdout } = await low(['git', '-C', real, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory']);
   const found: string[] = [];
   // A trailing slash means git found the whole folder ignored; a name without one is a file or a symlink.
   for (const rel of stdout.split('\0').filter((p) => p.endsWith('/')).map((p) => p.slice(0, -1)).sort()) {
@@ -56,20 +55,18 @@ export async function diskUsage(dirs: string[]): Promise<number> {
 export async function clearBuildOutput(worktree: string): Promise<{ dirs: number; bytes: number }> {
   const dirs = await findBuildOutput(worktree);
   const bytes = await diskUsage(dirs);
-  for (const dir of dirs) {
-    try {
-      await low(['rm', '-rf', '--one-file-system', '--', dir]);
-    } catch (err: any) {
-      if (err.code !== 'ENOENT') throw err;
-      await rm(dir, { recursive: true, force: true }); // no ionice or nice on this box
-    }
-  }
+  for (const dir of dirs) await low(['rm', '-rf', '--one-file-system', '--', dir]);
   return { dirs: dirs.length, bytes };
 }
 
 async function low(cmd: string[]) {
-  const [bin, ...args] = [...LOW, ...cmd];
-  return run(bin, args, { timeout: 60 * 60_000, maxBuffer: 16 * 1024 * 1024 });
+  const opts = { timeout: 60 * 60_000, maxBuffer: 64 * 1024 * 1024 };
+  try {
+    return await run(LOW[0], [...LOW.slice(1), ...cmd], opts);
+  } catch (err: any) {
+    if (err.code !== 'ENOENT' || err.path !== LOW[0]) throw err;
+    return run(cmd[0], cmd.slice(1), opts); // a box without ionice
+  }
 }
 
 /** "12.3 GiB", or MiB under one GiB. */

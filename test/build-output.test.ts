@@ -90,6 +90,13 @@ test("dismissing a minion clears its worktree's build output; the sweep catches 
   assert.ok(!existsSync(dismissed.target), 'cleared on dismissal');
   assert.ok(existsSync(join(dismissed.target, '..', 'src', 'main.rs')), 'the worktree stays');
 
+  // Reopened while its preview stopped: its build output stays.
+  const reopenedMidClose = minion();
+  runner.onClose = (id) => store.updateTicket(id, { status: 'idle' });
+  await runner.close(reopenedMidClose.id, 'Dismissed.');
+  runner.onClose = () => {};
+  assert.ok(existsSync(reopenedMidClose.target), 'reopened during dismissal');
+
   const open = minion();
   const closedEarlier = minion();
   const taskmaster = minion('coordinator', join(data, 'projects', String(project.id), 'repo'));

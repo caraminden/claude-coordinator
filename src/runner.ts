@@ -1085,8 +1085,10 @@ export class Runner {
         }
       }
       await this.onClose(ticketId);
-      if (ticket?.status === 'closed') {
-        await this.clearBuild(ticket).then(
+      // Read again: it may have been reopened while its preview stopped.
+      const still = this.store.getTicket(ticketId);
+      if (still?.status === 'closed') {
+        await this.clearBuild(still).then(
           (r) => r?.dirs && console.log(`Ticket ${ticketId}: cleared ${size(r.bytes)} of build output on dismissal.`),
           (err) => console.error(`Ticket ${ticketId}: could not clear its build output: ${err.message}`),
         );

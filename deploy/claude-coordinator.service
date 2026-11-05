@@ -8,7 +8,9 @@ Type=simple
 # The database, its backups and session state are private to this account.
 UMask=0077
 WorkingDirectory=%h/claude-coordinator
-ExecStart=/usr/bin/node %h/claude-coordinator/server.ts
+# argv[0] is citadel-server, not node: ananicy-cpp names processes by argv[0], and CachyOS's rule for
+# node runs it at nice 16 under SCHED_IDLE, so the server lost every CPU race to a build (#326).
+ExecStart=@/usr/bin/node citadel-server %h/claude-coordinator/server.ts
 EnvironmentFile=%h/.config/claude-coordinator/env
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOST=127.0.0.1 PORT=8573

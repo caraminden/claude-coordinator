@@ -29,7 +29,7 @@ systemctl --user show claude-coordinator -p MemorySwapMax -p CPUWeight -p OOMSco
 next deploy does. To undo: `rm ~/.config/systemd/user/claude-coordinator.service.d/priority.conf`,
 then `systemctl --user daemon-reload`.
 
-## 2. ananicy-cpp: the biggest CPU problem (sudo)
+## 2. ananicy-cpp: the biggest CPU problem (the server's fix needs no sudo)
 
 CachyOS's packaged ananicy rules (`/etc/ananicy.d/00-default/`, checked against CachyOS/ananicy-rules
 at 03ef03f) match processes by name:
@@ -40,16 +40,28 @@ at 03ef03f) match processes by name:
 | `bash`, `dash`, `zsh`, `fish` | Doc-View | nice −4 | every shell a turn's Bash tool opens, so cargo, rustc and git inherit −4 |
 | `podman` | Service | nice 10 | podman itself |
 
-Seen from inside Cara's turn container on 2026-11-05: every `node` and `claude` process at nice 16
-with policy 5 (`SCHED_IDLE`), every `bash` at nice −4. I couldn't see the server itself from there,
-but it's a `node` process on the same host, so it almost certainly gets the same treatment (check 2
-below confirms it). A `SCHED_IDLE` task never preempts a running task when it wakes, so with all 16
-CPUs busy compiling, the server waits for a slice to end on every wake-up, and inside a container the
-compilers outrank claude by 20 nice levels. `CPUWeight` above can't fix that: ananicy re-applies its
-rules to running processes every 15 s, and a systemd `Nice=` would just be overwritten.
+Seen on 2026-11-05: the server at policy `IDL` (`SCHED_IDLE`), and every `node` and `claude` process
+in Cara's turn container at nice 16 under `SCHED_IDLE`, every `bash` at nice −4. A `SCHED_IDLE` task
+never preempts a running task when it wakes, so with all 16 CPUs busy compiling, the server waits for
+a slice to end on every wake-up, and inside a container the compilers outrank claude by 20 nice
+levels. `CPUWeight` above can't fix that, and a systemd `Nice=` would just be overwritten: ananicy
+re-applies its rules to running processes every 15 s.
 
-**Recommended: turn ananicy-cpp off.** Its rules are for a desktop (13,500 of them are games), and on
-a build server they work against systemd's cgroup weights.
+**The server, no sudo:** ananicy-cpp names a process by the basename of its argv[0], so
+`claude-coordinator.service` now starts the server as `citadel-server` (`ExecStart=@/usr/bin/node
+citadel-server …`) and no rule matches it. After the deploy that brings this in, as cara on perigee:
+
+```sh
+systemctl --user daemon-reload   # the service file is a link into the checkout: load the new ExecStart
+```
+
+The restart after that (the next deploy) starts it clean. Check 1 below should then show `CLS TS`,
+`NI 0`.
+
+**Everything else needs root:** turn wrappers, MCP servers and claude still run under `SCHED_IDLE`,
+and shells (with the compilers they start) at −4. Whoever has root on perigee can turn ananicy-cpp off.
+Its rules are written for a desktop (13,500 of them are games), and on a build server they work
+against systemd's cgroup weights.
 
 ```sh
 sudo systemctl disable --now ananicy-cpp
@@ -67,11 +79,10 @@ find /etc/ananicy.d/00-default -name node.rules -o -name bash.rules -o -name das
 sudo systemctl restart ananicy-cpp
 ```
 
-Either way, processes keep the nice they already have. The server gets a clean one at its next restart
-(the next deploy). New turns inherit from the server, so they come right after that, with no need to
-restart the containers.
+Either way, processes keep the nice they already have. New turns inherit from the server, so they come
+right once it has restarted, with no need to restart the containers.
 
-## 3. zram retune (sudo; Cara's call)
+## 3. zram retune (root; Cara's call)
 
 Today: one 30 GB zram device (as big as RAM, from CachyOS's `zram-size = ram`), `vm.swappiness = 150`
 (set by CachyOS's udev rule `/usr/lib/udev/rules.d/30-zram.rules` whenever zram0 comes up, which beats

@@ -104,7 +104,7 @@ const OTHER_ROUTES: Probe[] = [
   P('GET', '/api/projects/:p/machines'), P('POST', '/api/projects/:p/machines/nope/check'),
   P('GET', '/api/contraptions/mine'), P('GET', '/api/contraptions'), P('POST', '/api/contraptions'), P('PATCH', '/api/contraptions/nope'),
   P('PUT', '/api/contraptions/nope/people/999'), P('POST', '/api/contraptions/nope/keys'), P('POST', '/api/contraptions/asks'),
-  P('POST', '/api/contraptions/turns'), P('POST', '/api/contraptions/turns/1/cancel'), P('GET', '/api/contraptions/sessions?person=1'),
+  P('POST', '/api/contraptions/turns'), P('POST', '/api/contraptions/turns/1/cancel'), P('POST', '/api/contraptions/turns/1/messages'), P('GET', '/api/contraptions/sessions?person=1'),
   P('DELETE', '/api/contraptions/sessions/acolyte?person=1'), P('PUT', '/api/mandate/items/k'), P('DELETE', '/api/mandate/items/k'),
   // Wrong methods and unknown paths.
   P('DELETE', '/api/projects/:p'), P('PUT', '/api/projects/:p/properties'), P('GET', '/api/push/subscription'),

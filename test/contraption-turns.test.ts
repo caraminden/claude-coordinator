@@ -33,20 +33,52 @@ const fs = require('node:fs'), path = require('node:path');
 const argv = process.argv.slice(2);
 const opt = (name) => { const i = argv.indexOf(name); return i < 0 ? undefined : argv[i + 1]; };
 const read = (f) => f && fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null;
+// stream-json in, one message a line; with --replay-user-messages each is echoed (with its uuid) as it's taken in.
+const out = (o) => console.log(JSON.stringify(o));
+const waiting = [];
+let wake = null;
+require('node:readline').createInterface({ input: process.stdin }).on('line', (l) => {
+  if (!l.trim()) return;
+  waiting.push(JSON.parse(l));
+  wake?.();
+});
+const take = () => new Promise((resolve) => {
+  const go = () => {
+    wake = null;
+    const m = waiting.shift();
+    if (argv.includes('--replay-user-messages')) out({ ...m, isReplay: true, parent_tool_use_id: null, uuid: m.uuid ?? 'r' + Math.random() });
+    resolve(m);
+  };
+  waiting.length ? go() : (wake = go);
+});
+const textOf = (m) => m.message.content.map((b) => b.text).join('');
 let prompt = '';
-process.stdin.on('data', (d) => (prompt += d));
-process.stdin.on('end', () => {
+take().then((m) => {
+  prompt = textOf(m);
   const session = opt('--resume') ?? opt('--session-id');
   fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({
     argv, cwd: process.cwd(), env: process.env, prompt, pid: process.pid, cwdFiles: fs.readdirSync(process.cwd()),
     settings: read(opt('--settings')), mcp: read(opt('--mcp-config')), system: read(opt('--append-system-prompt-file')),
   }) + '\\n');
-  const out = (o) => console.log(JSON.stringify(o));
   const dir = path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
   fs.mkdirSync(dir, { recursive: true });
   fs.appendFileSync(path.join(dir, session + '.jsonl'), JSON.stringify({ prompt }) + '\\n');
   out({ type: 'system', subtype: 'init', session_id: session, tools: [] });
   if (prompt.includes('slow')) return setInterval(() => {}, 1000);
+  // Its reply is out, but it takes a while to exit.
+  if (prompt.includes('linger')) {
+    out({ type: 'result', subtype: 'success', is_error: false, result: 'Done.', usage: {} });
+    out({ type: 'assistant', message: { id: 'm8', content: [{ type: 'text', text: 'Bye.' }] } });
+    return setTimeout(() => process.exit(0), 1500);
+  }
+  // As claude does with a message that arrives mid-reply: finishes the reply, then answers it as a query of its own.
+  if (prompt.includes('steer me')) {
+    return take().then((m) => {
+      out({ type: 'result', subtype: 'success', is_error: false, result: 'First.', usage: { input_tokens: 1, output_tokens: 2 } });
+      out({ type: 'assistant', message: { id: 'm9', content: [{ type: 'text', text: 'Heard: ' + textOf(m) }] } });
+      out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: 'Heard.', usage: { input_tokens: 3, output_tokens: 4, cache_read_input_tokens: 5 } });
+    });
+  }
   if (prompt.includes('plan limit')) { out({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your 5-hour limit · resets 3pm" }); process.exit(1); }
   if (prompt.includes('expired')) { out({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 401 authentication_error OAuth token has expired' }); process.exit(1); }
   if (prompt.includes('crash')) { process.stderr.write('boom\\n'); process.exit(3); }
@@ -315,6 +347,36 @@ test('two names run at once, a second turn on a busy name gets busy, and cancel 
   assert.equal(turns.sessions(mandate.id, cara.id).find((s) => s.name === 'aura-1')!.busy, false);
 });
 
+test('a running turn takes a message from its own person, says when claude took it in, and counts what it cost', async () => {
+  const evs: Ev[] = [];
+  const running = turns.run(mandate, parseTurn({ person: cara.id, session: 'steered', prompt: 'steer me' }, mandate), (event, data) => evs.push({ event, data }));
+  const id = (await until('the turn to start', () => evs.find((e) => e.event === 'start'))).data.turn;
+  assert.equal(turns.steer(peek.id, id, cara.id, 'Hi.'), null, 'another contraption has no such turn');
+  assert.equal(turns.steer(mandate.id, id, josh.id, 'Hi.'), 'other_person');
+  const out = turns.steer(mandate.id, id, cara.id, 'Make it Friday.');
+  assert.ok(out && typeof out === 'object' && out.steered);
+  await running;
+  const taken = evs.findIndex((e) => e.event === 'taken');
+  assert.deepEqual(evs[taken].data, { id: out.id }, 'one taken event, for the message');
+  assert.equal(evs.filter((e) => e.event === 'taken').length, 1, 'not for the prompt');
+  assert.ok(evs.findIndex((e) => e.event === 'text' && e.data.delta === 'Heard: Make it Friday.') > taken, 'claude read it after taking it in');
+  assert.deepEqual(evs.at(-1), { event: 'end', data: { stop: 'end_turn', usage: { input: 4, output: 6, cacheRead: 5, cacheWrite: 0 } } }, 'both replies\' usage');
+  assert.deepEqual(turns.steer(mandate.id, id, cara.id, 'Too late.'), { steered: false, reason: 'ended' });
+  assert.equal(turns.steer(mandate.id, id, josh.id, 'Too late.'), 'other_person');
+  assert.equal(turns.steer(mandate.id, 99_999, cara.id, 'Hi.'), null);
+});
+
+test('a turn whose reply is out takes no message', async () => {
+  const evs: Ev[] = [];
+  const running = turns.run(mandate, parseTurn({ person: cara.id, session: 'lingering', prompt: 'linger' }, mandate), (event, data) => evs.push({ event, data }));
+  const id = (await until('the turn to start', () => evs.find((e) => e.event === 'start'))).data.turn;
+  await until('its reply', () => evs.some((e) => e.event === 'text'));
+  assert.equal(turns.running(), 1, 'claude is still running');
+  assert.deepEqual(turns.steer(mandate.id, id, cara.id, 'One more thing.'), { steered: false, reason: 'replied' });
+  await running;
+  assert.equal(evs.at(-1)!.event, 'end');
+});
+
 test('a turn past its timeout is stopped', async () => {
   const evs = await turn(mandate, { session: 'slowpoke', prompt: 'slow', timeoutSec: 1 });
   assert.equal(errorOf(evs), 'timeout');
@@ -426,6 +488,10 @@ test('the API is only for a contraption\'s own server on this machine, with its 
   assert.deepEqual(sessions.map((s: any) => [s.name, s.busy]), [['acolyte', false]]);
   assert.equal((await api('/api/contraptions/sessions?person=999')).status, 403);
   assert.equal((await api('/api/contraptions/turns/12345/cancel', { method: 'POST', body: '{}' })).status, 404);
+  const steer = (body: object) => api('/api/contraptions/turns/12345/messages', { method: 'POST', body: JSON.stringify(body) });
+  assert.equal((await steer({ person: me.id, text: 'Hi.' })).status, 404);
+  assert.equal((await steer({ person: me.id, text: ' ' })).status, 400);
+  assert.equal((await steer({ text: 'Hi.' })).status, 400);
   assert.equal((await api(`/api/contraptions/sessions/acolyte?person=${me.id}`, { method: 'DELETE' })).status, 200);
   assert.deepEqual(await (await api(`/api/contraptions/sessions?person=${me.id}`)).json(), []);
   // Turns run in the server's own process: the health check counts them for a restart to wait on.

@@ -208,6 +208,17 @@ export const contraptionRoutes: Route[] = [
     if (!app.contraptionTurns.cancel(c.id, Number(params.turn))) throw new HttpError(404, 'No such turn running');
     return json(res, 200, { ok: true });
   }),
+  // Steer a running turn as its person: { person, text } → { steered: true, id } (its `taken` event carries
+  // the id), or { steered: false, reason: 'ended' | 'replied' }, when the app sends it as the next turn.
+  fromContraption('POST', '/api/contraptions/turns/:turn/messages', async ({ req, res, app, params }, c) => {
+    const body = await readJson(req, 4_000_000);
+    if (!Number.isInteger(body?.person) || body.person < 1) throw new HttpError(400, 'person must be a person\'s id');
+    if (typeof body.text !== 'string' || !body.text.trim()) throw new HttpError(400, 'text is required');
+    const out = app.contraptionTurns.steer(c.id, Number(params.turn), body.person, body.text);
+    if (!out) throw new HttpError(404, 'No such turn');
+    if (out === 'other_person') throw new HttpError(403, 'Only the turn\'s own person can steer it');
+    return json(res, 200, out);
+  }),
   fromContraption('GET', '/api/contraptions/sessions', ({ res, app, url }, c) => {
     return json(res, 200, app.contraptionTurns.sessions(c.id, enabledPerson(app, c, url)));
   }),

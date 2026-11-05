@@ -80,7 +80,7 @@ export interface Usage {
   cacheWrite: number;
 }
 
-/** One reply event: start, text, tool, tool_result, compacted, end or error. */
+/** One reply event: start, text, tool, tool_result, compacted, taken (a steer reached claude), end or error. */
 export type Emit = (event: string, data: object) => void;
 
 export const DEFAULT_COMPACT_WINDOW = 40_000;
@@ -142,6 +142,8 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
 export function args(req: TurnRequest, dir: string, claudeSession: string, resume: boolean): string[] {
   const a = [
     '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    // Messages in as minion turns take them, so the app can steer the turn; each is echoed back once claude takes it in.
+    '--input-format', 'stream-json', '--replay-user-messages',
     // No user, project or local settings: no CLAUDE.md, hooks, plugins, permissions or MCP servers of theirs.
     '--setting-sources', '',
     // The built-in tools: Agent or none. Subagents get no more than this.
@@ -202,7 +204,14 @@ interface Live {
   /** Its machine proxies' key to the session routes (routes/machines.ts), and the machines it got at its start. */
   token: string;
   machines: number[];
+  /** Its reply is out: claude's stdin is closed, so it takes no more steers. */
+  replied: boolean;
+  /** Ids of steers written to claude that it hasn't taken in yet. */
+  steers: Set<string>;
 }
+
+/** One message as claude's stream-json input takes it; claude echoes `uuid` back once it takes it in. */
+const userLine = (text: string, uuid?: string) => JSON.stringify({ type: 'user', ...(uuid ? { uuid } : {}), message: { role: 'user', content: [{ type: 'text', text }] } }) + '\n';
 
 export interface ClaudePlaces {
   place(uid: number | null): TurnPlace | null;
@@ -313,7 +322,7 @@ export class ContraptionTurns {
     this.names.add(key);
     const id = this.store.startContraptionTurn(c.id, req.person, req.session);
     const dir = this.turnDir(id, place);
-    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: place.host ? null : place.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [] };
+    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: place.host ? null : place.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [], replied: false, steers: new Set() };
     this.live.set(id, live);
     let outcome: string = 'failed';
     let usage: Usage | null = null;
@@ -392,11 +401,14 @@ export class ContraptionTurns {
     const child = spawn(cmd, cmdArgs, { cwd: place.host ? where.cwd : undefined, env: place.host ? env : turnEnv(this.env), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     live.child = child;
     emit('start', { turn: live.id, session: req.session, claudeSession });
-    child.stdin!.on('error', () => {});
-    child.stdin!.end(req.prompt);
+    child.stdin!.on('error', () => {}); // claude exited without reading it all
+    // Open until the reply is out, as the turn wrapper keeps a minion turn's: steer() writes to it meanwhile.
+    child.stdin!.write(userLine(req.prompt));
     const timer = setTimeout(() => this.stop(live, 'timeout'), req.timeoutSec * 1000);
 
     let result: any = null;
+    // Each steer claude takes after a reply is a query of its own, with its own result and usage.
+    const total: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     let stderr = '';
     const streamed = new Map<string, string>();
     const said = new Map<string, string>();
@@ -430,10 +442,22 @@ export class ContraptionTurns {
             }
           }
         }
+      } else if (ev.type === 'user' && ev.isReplay && !parent && live.steers.delete(ev.uuid)) {
+        emit('taken', { id: ev.uuid });
       } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
         for (const b of ev.message.content) if (b?.type === 'tool_result') emit('tool_result', { id: b.tool_use_id, ok: !b.is_error, parent });
       } else if (ev.type === 'result') {
         result = ev;
+        const u = ev.usage ?? {};
+        total.input += u.input_tokens ?? 0;
+        total.output += u.output_tokens ?? 0;
+        total.cacheRead += u.cache_read_input_tokens ?? 0;
+        total.cacheWrite += u.cache_creation_input_tokens ?? 0;
+        // The reply is out: no more steers (the turn wrapper's rule); those already written are still answered.
+        if (!live.replied) {
+          live.replied = true;
+          child.stdin!.end();
+        }
       }
     };
     let buf = '';
@@ -463,8 +487,7 @@ export class ContraptionTurns {
     });
     clearTimeout(timer);
 
-    const u = result?.usage;
-    const usage: Usage | null = u ? { input: u.input_tokens ?? 0, output: u.output_tokens ?? 0, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0 } : null;
+    const usage: Usage | null = result?.usage ? total : null;
     const error = (code: TurnErrorCode, message: string) => {
       emit('error', { code, message });
       return { outcome: code, usage };
@@ -472,7 +495,7 @@ export class ContraptionTurns {
     if (live.stopped === 'timeout') return error('timeout', `The turn ran past ${req.timeoutSec} seconds and was stopped`);
     if (live.stopped === 'canceled') return error('canceled', 'The turn was stopped');
     if (result && !result.is_error) {
-      emit('end', { stop: result.stop_reason ?? result.subtype ?? 'end_turn', usage: usage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+      emit('end', { stop: result.stop_reason ?? result.subtype ?? 'end_turn', usage: total });
       return { outcome: 'end', usage };
     }
     const why = [typeof result?.result === 'string' ? result.result : '', ...(Array.isArray(result?.errors) ? result.errors.map(String) : []), stderr].join('\n').trim();
@@ -512,6 +535,30 @@ export class ContraptionTurns {
     if (!live || live.contraption !== contraption) return false;
     this.stop(live, 'canceled');
     return true;
+  }
+
+  /**
+   * Pass a message into a contraption's running turn, as minion steers go (src/runner.ts send): claude
+   * reads it between tool calls, or answers it after its reply. Its `taken` event, with the id returned
+   * here, says claude took it in. Only the turn's own person can steer it, and not once its reply is out.
+   * null when the contraption has no such turn; 'other_person' when it isn't the person's.
+   */
+  steer(contraption: number, turn: number, person: number, text: string): { steered: true; id: string } | { steered: false; reason: 'ended' | 'replied' } | 'other_person' | null {
+    const live = this.live.get(turn);
+    if (!live) {
+      const row = this.store.getContraptionTurn(turn);
+      if (row?.contraption_id !== contraption) return null;
+      return row.user_id === person ? { steered: false, reason: 'ended' } : 'other_person';
+    }
+    if (live.contraption !== contraption) return null;
+    if (live.person !== person) return 'other_person';
+    if (live.stopped) return { steered: false, reason: 'ended' };
+    if (live.replied) return { steered: false, reason: 'replied' };
+    if (!live.child?.stdin?.writable) return { steered: false, reason: 'ended' }; // claude has gone
+    const id = randomUUID();
+    live.steers.add(id);
+    live.child.stdin.write(userLine(text, id));
+    return { steered: true, id };
   }
 
   /** A person's sessions in a contraption: names, when last used, and whether a turn runs in one now. */

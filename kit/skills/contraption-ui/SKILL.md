@@ -154,6 +154,15 @@ only live region, so a screen reader hears progress without the whole log.
   open on a click or Enter.
 - Stop is the composer's: on Stop, call the turn API's cancel; the `error` event (`canceled`) that
   follows ends the turn in the chat.
+- Messages mid-turn (the composer's `whileBusy: 'send'`): while a turn runs, your server sends the
+  person's message into it with `POST /api/contraptions/turns/<turn>/messages` `{ "person": 3, "text":
+  "…" }` (the turn's own person only, or 403). `{ "steered": true, "id": "<uuid>" }`: it's in; Claude
+  reads it between tool calls, or answers it after its reply, in the same turn. The turn's `taken`
+  event `{ "id": "<uuid>" }` says Claude has read it: call `chat.ask(text)` then, so the rest of the
+  reply draws under it, and mark it seen. `{ "steered": false, "reason": "replied" | "ended" }`: its
+  reply was already out, or it ended; send it as a new turn once this one's `end` or `error` arrives.
+  A steered message with no `taken` by the turn's `end` or `error` (it was stopped or failed) never
+  reached Claude: send it as the next turn too. `push` ignores `taken`.
 - `chatModel(turns)` is the same reading as plain data, and `renderChat(turns)` as an HTML string
   (tests, a print view); `stepMark(state)`, `gruntName(input)` and `duration(ms)` are the row parts.
 - Preact: mount it once in a `useEffect` on an empty element, keep the returned object in a ref, and

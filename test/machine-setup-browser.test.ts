@@ -34,7 +34,7 @@ const wait = async (what: string, expression: string) => {
     if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
   }
 };
-const snippets = () => page.eval<string[]>('[...document.querySelectorAll("#machine-setup pre")].map((p) => p.textContent)');
+const snippets = () => page.eval<string[]>('[...document.querySelectorAll("#machine-setup .machine-setup-way:not([data-os=runner]) pre")].map((p) => p.textContent)');
 
 async function openMachines() {
   await page.send('Page.navigate', { url: `${srv.base}/#/p/${projectId}/machines` });
@@ -126,4 +126,12 @@ test('a machine added before its server was kept follows the form, and says so (
   for (const s of await snippets()) assert.match(s, /--claude-mcp godot-ai/, 'the fresh form says godot-ai');
   await page.eval(`(() => { const k = document.querySelector('.machine-add [name=kind]'); k.value = 'none'; k.dispatchEvent(new Event('change')); })()`);
   for (const s of await snippets()) assert.doesNotMatch(s, /--claude-mcp|-- /, 'picking None in the form fixes its lines');
+});
+
+test('the CI runner agent tab shows the install line with this app\'s address and the token filled in', { skip }, async () => {
+  await openMachines();
+  await add('runner-pc', 'none');
+  const line = await page.eval<string>('document.querySelector("#machine-setup [data-os=runner] pre").textContent');
+  assert.ok(line.startsWith(`$u = '${srv.base}';`), line);
+  assert.match(line, /-MachineToken 'ccm_\d+_[\w-]+'$/);
 });

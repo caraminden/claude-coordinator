@@ -152,3 +152,9 @@ export function machineSetupWindows(url, name, token, kind, what, folder) {
     '}',
   ].join('\n');
 }
+
+/** The CI runner agent's one-time install line (tools/ci-runner/README.md), for an admin PowerShell on Cara's desktop, with this app's machines address and the token filled in. */
+export function machineSetupRunnerAgent(url, token) {
+  const u = url.replace(/\/$/, '');
+  return `$u = '${u}'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\install-runner-agent.ps1" -CitadelUrl $u -MachineToken '${token}'`;
+}

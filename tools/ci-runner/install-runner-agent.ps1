@@ -24,7 +24,7 @@
   The token (ccm_...) of the machine you added for this agent on the Machines page. Defaults to CC_MACHINE_TOKEN.
 
 .EXAMPLE
-  .\install-runner-agent.ps1 -CitadelUrl http://perigee:8574 -MachineToken ccm_12_...
+  .\install-runner-agent.ps1 -CitadelUrl '<the address the Machines page shows>' -MachineToken ccm_12_...
 #>
 [CmdletBinding()]
 param(
@@ -49,7 +49,9 @@ $url = $CitadelUrl.TrimEnd('/')
 if ($MachineToken -notmatch '^ccm_\d+_[\w-]{43}$') { Stop-With 'Pass the machine''s token (ccm_...) from the Machines page with -MachineToken.' }
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { Stop-With 'Run this in an elevated PowerShell (Run as administrator): the agent installs services.' }
-$node = (Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+# Not `(...).Source` on the pipeline: with nothing found that reads a property of $null, which StrictMode makes an error.
+$cmd = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+$node = if ($cmd) { $cmd.Source } else { $null }
 if (-not $node -or [version](& $node -v).TrimStart('v') -lt [version]'18.0') { Stop-With 'Node 18 or newer is not on PATH. Install it (winget install OpenJS.NodeJS.LTS), open a new PowerShell and run this again.' }
 if (-not (Test-Path (Join-Path $GitBin 'bash.exe'))) { Stop-With "No bash.exe in $GitBin; install Git for Windows (the runners' bash steps need it) or pass -GitBin." }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12

@@ -1,6 +1,6 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
 import { account, ago, api, h, icon, listGroupsOf, openHash, schemeIcon, view } from './core.js';
-import { agentLog, DEFAULT_CLAUDE_MCP, machineSetup, machineSetupBackground, machineSetupWindows, workspaceName } from './machine-setup.js';
+import { agentLog, DEFAULT_CLAUDE_MCP, machineSetup, machineSetupBackground, machineSetupRunnerAgent, machineSetupWindows, workspaceName } from './machine-setup.js';
 import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
 
 // ---------- push notifications ----------
@@ -731,6 +731,9 @@ function renderMachineSetup() {
       text: machineSetupBackground(t.url, t.name, t.token, kind, command, folder), log: agentLog('posix', t.name) },
     { os: 'window', tab: 'Just try it', label: 'Try it in a terminal window (stops when you close it)',
       text: machineSetup(t.url, t.token, kind, command, folder) },
+    { os: 'runner', tab: 'CI runner agent', label: 'Administrator PowerShell on the Windows PC that hosts the CI runners (tools/ci-runner/README.md): installs the runner agent as a background task, instead of the MCP agent above. Use it on a machine added with no MCP server and no folder.',
+      text: machineSetupRunnerAgent(t.url, t.token),
+      note: 'It checks Node 18+ and Git for Windows, registers the task Citadel runner agent (SYSTEM, at startup), starts it and waits until this machine shows online. No reboot, and no runner is touched.' },
   ];
   view.machineSetupOs ??= guessOs();
   const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
@@ -757,7 +760,7 @@ function renderMachineSetup() {
     ways.map((w) => h('div', { class: 'machine-setup-way', 'data-os': w.os, hidden: w.os !== view.machineSetupOs },
         h('p', { class: 'small' }, w.label),
         h('pre', {}, w.text),
-        w.log
+        w.note ? h('p', { class: 'small muted' }, w.note) : w.log
           ? h('p', { class: 'small muted' }, 'It writes what it prints to ', h('code', {}, w.log), ', and ends by printing how to watch that log, stop it and remove it.')
           : h('p', { class: 'small muted' }, 'Good for a first try: you see what it prints. Closing the window, logging out or restarting stops it, and the machine goes offline.')))));
 }

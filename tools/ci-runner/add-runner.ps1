@@ -31,7 +31,7 @@
   How many runner instances the scheme should have here, 1 to 4 (default 1): one job runs on each at a time.
 
 .EXAMPLE
-  .\add-runner.ps1 -Scheme "Peek Auras" -CitadelUrl http://perigee:8574 -Count 4
+  .\add-runner.ps1 -Scheme "Peek Auras" -CitadelUrl '<the address the Machines page shows>' -Count 4
 #>
 [CmdletBinding()]
 param(

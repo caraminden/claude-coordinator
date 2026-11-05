@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, 
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanFolder, machineSetup, machineSetupBackground, machineSetupWindows, workspaceName } from '../public/machine-setup.js';
+import { cleanFolder, machineSetup, machineSetupBackground, machineSetupRunnerAgent, machineSetupWindows, workspaceName } from '../public/machine-setup.js';
 import { backgroundService } from '../public/machine-agent.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'machine-setup-'));
@@ -253,4 +253,11 @@ test('systemd gets % doubled everywhere, but $ only in ExecStart, where it expan
   const s = backgroundService({ platform: 'linux', home: '/home/jo', uid: 1000, name: 'pc', env: { PATH: '/opt/$x/bin:/usr/bin' }, argv: ['/usr/bin/node', '/home/jo/a/machine-agent.mjs', 'https://a', 't$1', '--', 'run', '5%'] });
   assert.match(s.text, /^Environment="PATH=\/opt\/\$x\/bin:\/usr\/bin"$/m);
   assert.match(s.text, /^ExecStart="\/usr\/bin\/node" "\/home\/jo\/a\/machine-agent\.mjs" "https:\/\/a" "t\$\$1" "--log" "\/home\/jo\/a\/machine-agent-pc\.log" "--" "run" "5%%"$/m);
+});
+
+test('the runner agent line carries the real address and token, nothing to edit', () => {
+  const t = machineSetupRunnerAgent('http://10.0.0.5:8574/', 'ccm_12_abc');
+  assert.ok(t.startsWith("$u = 'http://10.0.0.5:8574';"));
+  assert.match(t, /-CitadelUrl \$u -MachineToken 'ccm_12_abc'$/);
+  assert.doesNotMatch(t, /perigee|…|</);
 });

@@ -56,11 +56,11 @@ Peek Auras #83's working steps once those exist.
 1. On Citadel's Machines page, add a machine named `cara-desktop-runners` that runs nothing
    and has no folder. Copy its token (`ccm_…`) and the address its setup lines connect to.
    Being Cara's, it may act for every scheme.
-2. On the desktop, open PowerShell **as administrator** and paste this. Put that address in
+2. Easiest: the page shows the whole line, address and token filled in, on its **CI runner agent** tab right after you add the machine (or make a new token). Copy that and skip to the end of this step. By hand: open PowerShell **as administrator** and paste this. Put that address in
    `$u` and the token in place of `ccm_…`:
 
    ```powershell
-   $u = 'http://perigee:8574'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-runner-agent.ps1" -CitadelUrl $u -MachineToken 'ccm_…'
+   $u = '<the address the Machines page shows>'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\install-runner-agent.ps1" -CitadelUrl $u -MachineToken 'ccm_…'
    ```
 
    It checks that Node 18+ and Git for Windows are there, creates and locks the folder,

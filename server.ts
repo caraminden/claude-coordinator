@@ -199,7 +199,6 @@ const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, D
 waiters.prs = githubPrs(githubOf);
 mainSync.as = githubOf;
 runner.liveHead = () => waiters.head;
-/** The server now runs `head`: wake its waiters, and dismiss pending-deploy minions it ships. */
 /** Fetch a scheme's origin and fast-forward its main if it can (#208), then look at the waiters again: a merge on GitHub can be what they wait on (#229). */
 function catchUp(repoDir: string) {
   void syncMain(repoDir)
@@ -210,6 +209,7 @@ function catchUp(repoDir: string) {
     })
     .catch((err) => console.error('Checking waiters after a merge failed:', err));
 }
+/** The server now runs `head`: wake its waiters, and dismiss pending-deploy minions it ships. */
 function liveOn(head: string | null) {
   waiters.check(head);
   for (const id of waiters.pendingLive()) runner.deployLive(id);

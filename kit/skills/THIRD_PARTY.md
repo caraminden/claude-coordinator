@@ -61,7 +61,7 @@ Every copy drops the Codex-only `agents/openai.yaml`.
   mode flag and a status-line script under `~/.claude`, run `git ls-files` for a code
   map, and make no network calls.
 - **tdd**: asks the user to confirm test seams before every test; `bug-fixing` covers
-  test-first for bugs.
+  test-first for bugs, and `test-quality` takes the rest of its ideas (below).
 - **code-review**: a project skill with this name replaces Claude Code's built-in
   `/code-review`; its spec half also needs an issue tracker. `ponytail-review` covers
   reviews in plain English.
@@ -87,8 +87,13 @@ copied, so nothing here needs re-syncing; the source is named so the idea can be
 | `docs-and-mocks/reader-test.md` | Test a doc on a context-free reader with predicted questions | [anthropics/skills](https://github.com/anthropics/skills) `skills/doc-coauthoring`, "Reader Testing", `ca45fc4` | No licence file: idea only, paraphrased |
 | `docs-and-mocks/prototypes.md` | Throwaway prototypes: a logic toy, look variants, the shared rules | mattpocock/skills `skills/engineering/prototype` (`SKILL.md`, `LOGIC.md`, `UI.md`), `4ae2317` | MIT, Matt Pocock (text below) |
 | `docs-and-mocks/looks.md` | A token plan checked against the brief; the "generated page" tells; boldness in one place | anthropics/skills `skills/frontend-design`, `ca45fc4` | Apache-2.0 |
+| `test-quality/` | The property catalogue and its strength order; the two ways a property test asserts nothing (tautology, vacuity); "no shape, so example tests"; a library is a person's call; a failure sorted into code bug, wrong property or open spec | [trailofbits/skills](https://github.com/trailofbits/skills) `plugins/property-based-testing` (Henrik Brodin), `470419e` | CC-BY-SA 4.0, so paraphrase only: never paste its text here |
+| `test-quality/` | Mutate a few lines and check a test fails (the idea only: theirs runs a mutation tool, ours is by hand) | trailofbits/skills `plugins/mutation-testing`, `470419e` | CC-BY-SA 4.0, paraphrase only |
+| `test-quality/` | Tests through public interfaces, mocks only at system boundaries, expected values from an independent source, vertical slices. Left out: confirming every seam with the user first | mattpocock/skills `skills/engineering/tdd` (`SKILL.md`, `tests.md`, `mocking.md`), `4ae2317` | MIT, Matt Pocock (text below) |
+| `test-quality/` | Tests that give false confidence (no assertion, swallowed exceptions, missing await, self-referential and always-true assertions); calibrate severity honestly | [dotnet/skills](https://github.com/dotnet/skills) `plugins/dotnet-test/skills/test-anti-patterns`, `d63a2a7` | MIT, .NET Foundation |
+| `test-quality/` | Behavioural gaps rated 1 to 10, acting on 7 and up (the scale lives in self-review's tests lens) | [anthropics/claude-plugins-official](https://github.com/anthropics/claude-plugins-official) `plugins/pr-review-toolkit/agents/pr-test-analyzer.md`, `d189be9` | Apache-2.0 |
 
-(Citadel #352, 2026-11-06, from the #346 skills survey.) The mattpocock pin here is newer than the
+(Citadel #352 and #348, 2026-11-06, from the #346 skills survey.) The mattpocock pin here is newer than the
 copied pack's on purpose: `prototype` was read at the commit the survey used, and the copies above
 stay at theirs until someone re-syncs them.
 

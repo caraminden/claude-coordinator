@@ -13,6 +13,8 @@ import { agentToken, bootServer, stopProcs, stopTurns } from './helpers.ts';
 // Safe deploys (tools/deploy.sh): the server reloads public/ on SIGHUP, answers /api/health, and takes
 // deploy reports; the script tells front-end-only changes from the rest.
 const repo = join(import.meta.dirname, '..');
+// The scripts refuse to run in a person's Claude container (COORDINATOR_CONTAINER=1); these tests stand in for the host.
+const hostEnv = { ...process.env, COORDINATOR_CONTAINER: undefined };
 const root = mkdtempSync(join(tmpdir(), 'deploy-test-'));
 const procs: ChildProcess[] = [];
 after(async () => {
@@ -129,6 +131,12 @@ test('a warning (live, but not pushed to GitHub) shows as an error and still dis
   assert.ok(store.listEvents(t.id).some((e) => e.kind === 'error' && JSON.parse(e.data).text === text));
 });
 
+test("deploy.sh refuses to run in a person's container, before touching anything", () => {
+  const r = spawnSync('bash', [join(repo, 'tools', 'deploy.sh')], { encoding: 'utf8', env: { ...hostEnv, COORDINATOR_CONTAINER: '1', DEPLOY_LIVE: join(root, 'no-live') } });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /runs in a container: land with the land tool/);
+});
+
 test('deploy.sh tells front-end-only changes from the rest', () => {
   const git = (...args: string[]) => execFileSync('git', ['-C', join(root, 'g'), ...args], { encoding: 'utf8' }).trim();
   mkdirSync(join(root, 'g', 'public'), { recursive: true });
@@ -146,7 +154,7 @@ test('deploy.sh tells front-end-only changes from the rest', () => {
   const c = commit('public/style.css');
   const d = commit('server.ts');
   const kind = (from: string, to: string) =>
-    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'change-kind', join(root, 'g'), from, to], { encoding: 'utf8' }).trim();
+    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'change-kind', join(root, 'g'), from, to], { encoding: 'utf8', env: hostEnv }).trim();
   assert.equal(kind(a, c), 'frontend');
   assert.equal(kind(b, c), 'frontend');
   assert.equal(kind(a, d), 'server', 'any change outside public/ restarts');
@@ -158,7 +166,7 @@ test('deploy.sh tells front-end-only changes from the rest', () => {
 test('deploy.sh waits only for turns a restart would cut off; a server from before units counts every running turn', async () => {
   // Async, so the stand-in server below (in this process) can answer.
   const count = async (url: string) =>
-    (await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'interruptible'], { encoding: 'utf8', env: { ...process.env, DEPLOY_URL: url, DEPLOY_DB: join(data, 'coordinator.db') } })).stdout.trim();
+    (await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'interruptible'], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_URL: url, DEPLOY_DB: join(data, 'coordinator.db') } })).stdout.trim();
   assert.equal(await count(base), '0');
   assert.equal(await count('http://127.0.0.1:9'), '0', 'a server that is down has no turns to cut off');
   const old = createHttpServer((_req, res) => res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"ok":true,"reload":"sighup"}'));
@@ -174,7 +182,7 @@ test('deploy.sh waits only for turns a restart would cut off; a server from befo
 });
 
 test("deploy.sh names the same turn units as the runner, so a rollback stops only this server's", () => {
-  const units = execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'turn-units'], { encoding: 'utf8', env: { ...process.env, DEPLOY_DB: join(data, 'coordinator.db') } }).trim();
+  const units = execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'turn-units'], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_DB: join(data, 'coordinator.db') } }).trim();
   const tag = (new Runner(store, () => {}, () => ({})) as any).unitTag;
   assert.equal(units, `citadel-turn-${tag}-*.service`);
 });
@@ -192,7 +200,7 @@ test('deploy.sh pushes the live commit to main, never forced, and a failed push 
     return git(live, 'rev-parse', 'HEAD');
   };
   // Failed pushes go to the journal; a test tag keeps them out of the real deploy unit's log.
-  const env = { ...process.env, DEPLOY_LIVE: live, DEPLOY_UNIT: 'deploy-test-push' };
+  const env = { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_UNIT: 'deploy-test-push' };
   // Status 1 makes the deploy report a warning; the deploy itself carries on.
   const push = (sha: string, to = remote) => {
     const r = spawnSync('bash', [join(repo, 'tools', 'deploy.sh'), 'push-github', sha], {
@@ -243,7 +251,7 @@ test('deploy.sh copies the database before a restart, keeps a copy already there
     return execFileSync('git', ['-C', live, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
   });
   const deploySh = (args: string[], db = file) =>
-    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), ...args], { encoding: 'utf8', env: { ...process.env, DEPLOY_LIVE: live, DEPLOY_DB: db } }).trim();
+    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), ...args], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: db } }).trim();
   for (const [i, c] of commits.entries()) {
     const out = deploySh(['backup-db', c]);
     assert.equal(out, join(dir, 'backups', `pre-deploy-${c}.db`));
@@ -278,7 +286,7 @@ test('the restart refuses to restart when it cannot copy the database first', ()
   cpSync(join(repo, 'tools', 'deploy.sh'), copy);
   const r = spawnSync('bash', [copy, 'restart'], {
     encoding: 'utf8',
-    env: { ...process.env, DEPLOY_LIVE: live, DEPLOY_DB: join(dir, 'coordinator.db'), DEPLOY_NOW: '1', DEPLOY_URL: 'http://127.0.0.1:1', DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_REMOTE: '' },
+    env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: join(dir, 'coordinator.db'), DEPLOY_NOW: '1', DEPLOY_URL: 'http://127.0.0.1:1', DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_REMOTE: '' },
   });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /FAILED: Could not copy the database to backups\/ .*so nothing restarted/);

@@ -14,7 +14,7 @@ const root = mkdtempSync(join(tmpdir(), 'land-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 // NODE_TEST_CONTEXT would make land.sh's own `node --test` report to this runner instead of exiting red;
 // COORDINATOR_* would have the real deploy.sh report to the live server; CITADEL_HEAVY_* would queue it in the host's slots.
-const env = { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: join(root, 'heavy'), NODE_TEST_CONTEXT: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+const env = { ...process.env, COORDINATOR_CONTAINER: undefined, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: join(root, 'heavy'), NODE_TEST_CONTEXT: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
 
 let n = 0;
@@ -101,7 +101,7 @@ test('a deploy that fails before going live puts main back', () => {
   assert.ok(!existsSync(join(r.source, 'b.txt')));
 });
 
-test('refuses uncommitted work, main itself, arguments, and running inside a citadel-heavy slot', () => {
+test("refuses uncommitted work, main itself, arguments, running inside a citadel-heavy slot, and a person's container", () => {
   const r = setup();
   writeFileSync(join(r.wt, 'a.txt'), 'dirty\n');
   assert.match(r.run().stderr, /uncommitted changes/);
@@ -109,6 +109,8 @@ test('refuses uncommitted work, main itself, arguments, and running inside a cit
   assert.match(spawnSync('bash', [land, '--now'], { cwd: r.wt, encoding: 'utf8', env }).stderr, /takes no arguments/);
   // Under citadel-heavy it would take the deploy lock while holding a slot, the reverse of its own order.
   assert.match(r.run({ CITADEL_HEAVY_HELD: '1' }).stderr, /not under citadel-heavy/);
+  // A person's Claude container has no deploy lock or GitHub login: the land tool runs it on the host.
+  assert.match(r.run({ COORDINATOR_CONTAINER: '1' }).stderr, /runs in a container: call the land tool/);
   const onMain = spawnSync('bash', [land], { cwd: r.source, encoding: 'utf8', env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source } });
   assert.match(onMain.stderr, /not main/);
 });

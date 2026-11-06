@@ -17,7 +17,9 @@ so their `subagent_type` is `citadel:<name>` (`citadel:check-runner`, `citadel:f
   summarises (code, transcripts, usage data, docs lookups). Building and general-purpose workers
   inherit high. Never put `effort` on a skill: it would hold for the rest of a long turn, and a
   switch mid-session may restart the prompt cache.
-- Models: Agent calls set `model` too: `haiku` for bulk reads, `sonnet` for mechanical runs
+- Models: Agent calls set `model` too: `haiku` for bulk reads only when the brief holds
+  everything the Grunt needs (the cheapest model took 2 to 3 times the turns on multi-step
+  work in obra/superpowers' subagent-driven-development, so turn count can beat token price), `sonnet` for mechanical runs
   (regeneration, reviewer passes), and the `citadel:check-runner` agent runs on `haiku` at `low` effort
   (its answer is a verdict), the session's own model for judgment.
 
@@ -84,6 +86,30 @@ resolved, files touched, and anything left undone. A conflict that needs a judgm
 the worker's to settle: it stops at its last green commit and returns the question. One worker
 writes the branch at a time; the session commits before starting it and leaves the tree alone
 while it runs. The session trusts the summary and CI; it does not re-run what the worker ran.
+
+## Writing the brief
+
+- Put the critical constraints at the start of the brief and again at the end; the middle is
+  what a long prompt loses.
+- Pass file paths between agents, not pasted content: the next agent reads the file itself.
+
+## Reviewer Grunts and fix loops
+
+A reviewer's brief says: don't trust the author's report, read the diff; you don't dispatch
+subagents; look outside the diff only to test a named risk.
+
+Fix loops are capped. Re-review only the fix diff, park new findings on untouched code as a
+list for the session, and stop after a set number of rounds (two unless a person says more).
+
+When several reviewers report, merge their findings: the same file:line and the same issue is
+one finding, and where severities conflict the higher wins.
+
+## Before looping an agent
+
+Loop an agent only if all four hold: the task repeats often, the goal is machine-checkable, the
+budget fits the number of rounds, and the agent can see the result of each round. Give every loop
+a stop condition. Watch for the agent gaming the verifier (Goodhart) rather than meeting the
+goal. A person owns the goal.
 
 ## Fan-outs: one page, not a stream
 

@@ -6,8 +6,8 @@ turn of every scheme loads the same set the same way, through the kit (`kit/READ
 
 | Pack | Pinned at | License |
 |------|-----------|---------|
-| [mattpocock/skills](https://github.com/mattpocock/skills) | `49dd158` (2026-10-09, plugin 1.3.1) | MIT, Matt Pocock |
-| [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) | `2961b52` (2026-10-13, v5.2.0) | MIT, Dietrich Gebert |
+| [mattpocock/skills](https://github.com/mattpocock/skills) | `4ae2317` | MIT, Matt Pocock |
+| [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) | `96608e0` | MIT, Dietrich Gebert |
 
 ## What is here
 

@@ -105,7 +105,7 @@ nothing is installed, and none of their scripts run. Credited here all the same.
 
 | Skill | Idea | From | License |
 |-------|------|------|---------|
-| `bug-fixing` | Step 6, hunting for siblings of the root cause by widening a search one part at a time | [trailofbits/skills](https://github.com/trailofbits/skills) `470419e`, `plugins/variant-analysis` | CC-BY-SA 4.0, so paraphrase only: never paste its text here |
+| `bug-fixing` | Step 5, hunting for siblings of the root cause by widening a search one part at a time | [trailofbits/skills](https://github.com/trailofbits/skills) `470419e`, `plugins/variant-analysis` | CC-BY-SA 4.0, so paraphrase only: never paste its text here |
 | `diagnosing-bugs` | Three strikes, then ask | [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) `8eef6dc`, "Critical Rules"; the same point as superpowers' "3+ failed fixes means question the design" | MIT |
 | `diagnosing-bugs` | Flaky tests: wait on the condition, bisect for the polluting test; fix where the bad value first appears | [obra/superpowers](https://github.com/obra/superpowers) `22f0b46`, `skills/systematic-debugging/` (`condition-based-waiting.md`, `find-polluter.sh`, `root-cause-tracing.md`) | MIT |
 | `diagnosing-bugs` | Competing hypotheses, one investigator Grunt each | [wshobson/agents](https://github.com/wshobson/agents) `4bde316`, `parallel-debugging` | MIT |

@@ -39,19 +39,20 @@ bug classes of its own; read them before step 1.
 4. **Fix the minimum.** The fix touches the cause and nothing else. No refactoring, no
    renames, no second bug in the same change; note those for a separate PR. Grep every
    caller of what you touch first, and fix the root once in the shared code.
-5. **Prove it.** The new test passes, the whole suite passes, the build is clean. A
-   presentation-only fix is proven by a before and after screenshot or captured output.
-   If it doesn't hold (still red, or the bug comes back), that is strike one: switch to
-   citadel:diagnosing-bugs and follow its three-strikes rule.
-6. **Hunt for siblings.** The step 3 sentence says *why* the line was wrong, and the same
+5. **Hunt for siblings.** The step 3 sentence says *why* the line was wrong, and the same
    mistake is usually made elsewhere. Write a `git grep -nE` pattern that matches the
-   wrong line and nothing else, and check it against the unfixed code (`git grep … main`)
-   to prove it hits. Then loosen one part at a time (a name to a wildcard, one call to
-   its family, one folder to the whole repo), reading every hit after each step, and stop
-   once more than half the hits are noise. A sibling with the same cause is the same bug:
-   fix it here with its own test case. List anything you're unsure of in the report.
+   wrong line and nothing else, and check it against the unfixed code (`git grep … main`,
+   or the commit before your fix) to prove it hits. Then loosen one part at a time (a
+   name to a wildcard, one call to its family, one folder to the whole repo), reading
+   every hit after each step, and stop once more than half the hits are noise. A sibling
+   with the same cause is the same bug: give it a test case that goes red, then fix it
+   here. A sibling with a different cause, or one you're unsure of, goes in the report.
    Hunts miss when they search only the module that was fixed, keep the pattern so tight
    it finds only the original, or loosen several parts at once so real hits drown.
+6. **Prove it.** The new tests pass, the whole suite passes, the build is clean. A
+   presentation-only fix is proven by a before and after screenshot or captured output.
+   If the fix doesn't hold (still red, or the bug comes back), switch to
+   citadel:diagnosing-bugs: its three-strikes rule counts this as the first failed fix.
 7. **Report** in the PR: cause in one sentence, the fix, the test name, the siblings
    (fixed, listed, or "none" with the widest pattern searched), and anything related you
    saw and left alone. The reply is five lines at most: cause, fix, proof, what was left

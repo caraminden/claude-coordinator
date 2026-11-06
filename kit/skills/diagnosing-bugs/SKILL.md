@@ -17,17 +17,20 @@ If the redacted output is not enough to diagnose the bug, say so and ask the use
 
 ## Three strikes
 
-A strike is a fix that didn't hold, counting any made under citadel:bug-fixing.
+Each fix that didn't hold is a strike, counting one made under citadel:bug-fixing (arriving
+from it, you are on your second try).
 
-1. **Strike one:** diagnose with the phases below and fix.
-2. **Strike two:** take a different approach. Not a variation on the first fix: a
+1. **First try:** diagnose with the phases below and fix.
+2. **Second try:** take a different approach. Not a variation on the first fix: a
    different hypothesis, seam or loop.
-3. **Strike three:** question the assumption both fixes shared: the design, the spec, or
+3. **Third try:** question the assumption both fixes shared: the design, the spec, or
    what the bug even is.
 
-After strike three, stop and ask the user (a card, where the session has a card tool)
+After the third strike, stop and ask the user (a card, where the session has a card tool)
 instead of trying a fourth. Keep a one-line log of every failed attempt (what you tried,
-what happened, what you changed next) and put it in the question and the PR.
+what happened, what you changed next) and put it in the question and the PR. This is the
+one turn that may end on a red test: the question says the branch is red and must not be
+merged until it's answered.
 
 ## Phase 1: Build a feedback loop
 

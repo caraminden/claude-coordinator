@@ -16,9 +16,9 @@ next check diffs only what came after. Paths here are from the repo root.
 |---------------|---------------|---------------|-----------|---------|--------|---------|
 | [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) | `AGENTS.md` | `96608e0` | `.claude/rules/ponytail.md` (a plugin can't carry rules) | MIT | adapted: path-scoped to code files; "In this repo" section added | `96608e0` 2026-11-06 |
 | DietrichGebert/ponytail | `AGENTS.md` | `96608e0` | `kit/skills/scheme-setup/templates/ponytail.md` (copied into each new scheme's `.claude/rules/`) | MIT | adapted: as the row above, "In this repo" left for each scheme to write | `96608e0` 2026-11-06 |
-| DietrichGebert/ponytail | `skills/ponytail-review/` | `96608e0` | `kit/skills/ponytail-review/` | MIT | unchanged | `96608e0` 2026-11-06 |
-| DietrichGebert/ponytail | `skills/ponytail-audit/` | `96608e0` | `kit/skills/ponytail-audit/` | MIT | unchanged | `96608e0` 2026-11-06 |
-| DietrichGebert/ponytail | `skills/ponytail-debt/` | `96608e0` | `kit/skills/ponytail-debt/` | MIT | unchanged | `96608e0` 2026-11-06 |
+| DietrichGebert/ponytail | `skills/ponytail-review/` | `96608e0` | `kit/skills/ponytail-review/` | MIT | adapted: shorter description that also covers a whole repo and the debt ledger; two pointer lines to `AUDIT.md` and `DEBT.md` (#362) | `96608e0` 2026-11-06 |
+| DietrichGebert/ponytail | `skills/ponytail-audit/SKILL.md` | `96608e0` | `kit/skills/ponytail-review/AUDIT.md` | MIT | moved, otherwise unchanged (#362) | `96608e0` 2026-11-06 |
+| DietrichGebert/ponytail | `skills/ponytail-debt/SKILL.md` | `96608e0` | `kit/skills/ponytail-review/DEBT.md` | MIT | moved, otherwise unchanged (#362) | `96608e0` 2026-11-06 |
 | [mattpocock/skills](https://github.com/mattpocock/skills) | `skills/productivity/grilling/` | `4ae2317` | `kit/skills/grilling/` | MIT | adapted: a round is asked as decision cards where the session has a card tool, numbered questions elsewhere | `4ae2317` 2026-11-06 |
 | mattpocock/skills | `skills/engineering/domain-modeling/` | `4ae2317` | `kit/skills/domain-modeling/` | MIT | adapted: glossary and decisions log from Project facts | `4ae2317` 2026-11-06 |
 | mattpocock/skills | `skills/engineering/codebase-design/` | `4ae2317` | `kit/skills/codebase-design/` | MIT | adapted: "each with a fresh context window" also in `SKILL.md`'s pointer to DESIGN-IT-TWICE (#354) | `4ae2317` 2026-11-06 |
@@ -40,6 +40,14 @@ and re-synced to the pins above by #354 (2026-11-06). Licence texts are at the e
   code, so design talk and research keep their normal style. The plugin's levels
   (`/ponytail lite|ultra`) and status line need its hooks and are not used; asking a
   session to be more or less minimal works instead.
+- **ponytail-audit** and **ponytail-debt** live inside `ponytail-review` as `AUDIT.md` and
+  `DEBT.md` (#362, from the #353 stocktake): three skills with near-identical descriptions made
+  every session read three where one would do, and each is something a person asks for, so one
+  description and two pointer lines reach them. The files are verbatim, frontmatter and
+  `/ponytail-audit`-style names included, so a sync stays a plain copy; sessions follow the
+  pointer line, not those names. `ponytail-review`'s description is rewritten to cover all
+  three and to leave "code review" and "review my PR" to the built-in `code-review`, and "is
+  this over-engineered" to the built-in `simplify`.
 - **diagnosing-bugs** and the repo's own `bug-fixing` skill both matched every bug
   report. Its description now makes it the escalation for hard bugs.
 - **improve-codebase-architecture** was user-invoked (`disable-model-invocation: true`).

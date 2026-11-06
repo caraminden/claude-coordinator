@@ -1,16 +1,13 @@
 ---
 name: self-review
 description: >
-  The review a minion runs on its own branch before merging: a Grunt reviews the diff against
-  main, real findings get fixed, and the change gets a risk label (low / medium / high) that
-  decides whether it ships by itself. Use before every merge to main, and when someone asks
-  "how risky is this".
+  Before merging your own branch: a Grunt reviews the diff against main, real findings get fixed,
+  and the change gets a risk label (low / medium / high) that decides whether it ships by itself.
+  Also for "how risky is this".
 ---
 
 Faster review for the people who merge, not another gate: they wave low through and look
-properly at high. Decisions behind it: Cara on Citadel #107, 2026-10-29 (stop and ask on high,
-skip tiny docs and copy, the rubric below, label in the note and reply only, no property); Cara
-on Citadel #122, 2026-10-29 (high goes by what the change does, not which file it touches).
+properly at high. Decisions behind it: Citadel #107 and #122 (Cara, 2026-10-29).
 
 The repo's CLAUDE.md, "Project facts", names what this skill needs per repo: the front end,
 the files that are high risk by file, and how a change ships.

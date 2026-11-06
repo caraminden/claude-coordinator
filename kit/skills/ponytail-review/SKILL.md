@@ -1,17 +1,18 @@
 ---
 name: ponytail-review
 description: >
-  Quality review of a change: is the logic right, is it safe, does it hold
-  under real load, is risky code tested, is it fast enough, and is every line
-  needed. Reads the connected code, not only the diff. Each finding is
-  explained in plain English. Use for "review this", "code review", "review
-  the last commit", "review my PR", "is this over-engineered", /ponytail-review.
+  Plain-English review a person asked for, of a change or a whole repo: bugs, safety, load,
+  missing tests, speed, what to cut. Also lists `shortcut:` comments as a debt ledger. Reports
+  only, changes nothing.
 ---
 
 Review a change like the senior developer who will be paged when it breaks.
 Order of importance: correct, safe, holds under load, tested, fast, lean.
 Lean still matters: every extra line must be read, tested and fixed later.
 This is a report the user asked for, so give it in full.
+
+- Whole repo, not a change: read `AUDIT.md` in this folder and follow it instead.
+- List the shortcuts (the `shortcut:` debt ledger): read `DEBT.md` in this folder and follow it instead.
 
 ## 1. Understand first
 

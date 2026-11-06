@@ -127,7 +127,7 @@ interaction) but takes its colours from these tokens, never dataviz's placeholde
     wide at most. A full-height layout uses `dvh`: `vh` puts its bottom under a phone's address bar.
 19. **Empty and failed say what next.** An empty list or search says why and offers the next step
     ("No todos yet. Add one below."); an error says what failed and the way out (Retry, what was
-    kept), as the notice above does.
+    kept), as the `cui-notice` example in [references/base-parts.md](references/base-parts.md) does.
 20. **Undo over "are you sure?".** A delete or bulk change acts at once and offers Undo in a bar
     of your own (`toast` takes no button); ask first only when nothing could bring it back.
 21. **A view worth coming back to has its own URL.** A tab, item or filter someone would share,

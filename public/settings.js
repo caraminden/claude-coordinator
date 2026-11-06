@@ -296,6 +296,7 @@ export function approvalsEditor() {
   const dirs = field('plugin-dirs', 'plugin_dirs', 'tools/mods/delve');
   const optional = field('optional-plugin-dirs', 'optional_plugin_dirs', 'tools/plugins/devtools');
   optional.rows = 3;
+  optional.setAttribute('aria-label', 'Optional plugin folders');
   const groups = field('list-groups', 'list_groups', 'area: balance');
   groups.rows = 3;
   // Plugins load code from any folder on the server, so only an admin changes them.

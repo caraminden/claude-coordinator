@@ -111,10 +111,15 @@ copied, so nothing here needs re-syncing; the source is named so the idea can be
 | `lenses.md`, "Receiving review" | Check review comments against the code; clear up unclear items first | obra/superpowers `22f0b46`, `skills/receiving-code-review` | MIT, Jesse Vincent |
 | `self-review/SKILL.md` §4, `.github/pull_request_template.md` | Door and Blast radius | mattpocock/skills `4ae2317`, `skills/engineering/pr` | MIT, Matt Pocock |
 | `lenses.md`, "Smells" | The smell baseline, with the repo's standards winning | mattpocock/skills `4ae2317`, `skills/engineering/code-review` | MIT, Matt Pocock |
+| `contraption-ui/references/motion.md`, self-review "UI findings" (motion line) | Should it animate (how often, what for), easing and duration ceilings, no `scale(0)`, origin-aware popovers, transitions over keyframes, `@starting-style`, warm tooltips, the fix order. Left out: springs, gestures, stagger, custom curves per app | [emilkowalski/skills](https://github.com/emilkowalski/skills) `c8a7962`, `skills/emil-design-eng` ("Animation Decision Framework"), `skills/review-animations` (`SKILL.md`, `STANDARDS.md`) | MIT, Emil Kowalski |
+| `contraption-ui/references/worst-case-data.md`, self-review step 3 | Plausible worst-case values per kind of field, change the data not the component, failure signatures and fixes, cut-or-wrap per field, Broken/Ugly/Fragile. Left out: the in-page demo toggle | emilkowalski/skills `c8a7962`, `skills/break-ui` (`SKILL.md`, `CATALOG.md`) | MIT, Emil Kowalski |
+| `contraption-ui/references/craft-floor.md` | Tabular numerals, every state, browser surfaces, and the "refuse" defaults (nested cards, gradient text, emoji as icons, decorative glass, modal by reflex). Left out: the side-bar ban, type rules, its hooks and binary | [pbakaus/impeccable](https://github.com/pbakaus/impeccable) `c3bb418`, `skill/reference/craft-floor.md` | Apache-2.0 |
+| `contraption-ui/references/component-checks.md` | Acceptance criteria per component (dialog, tooltip, toggletip, live region) as a checklist | [Intopia/intopia-web-accessibility-skill](https://github.com/Intopia/intopia-web-accessibility-skill) `74b3944`, `references/acceptance-criteria/`, `references/topic/` | CC BY-NC-SA 4.0 (the repo's `LICENSE`; the survey read it as NOASSERTION), so the idea only: the criteria are written from WCAG 2.2 and WAI-ARIA, never its text |
+| `contraption-ui/references/dogfood.md`, self-review step 3 | Exploratory QA on a dev copy: map, real jobs end to end, write each finding as found, retry before recording, proof matched to the finding, severity scale, five to ten well-proven findings. Left out: its `agent-browser` CLI and video recording | [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser) `71850a0`, `skill-data/dogfood` (`SKILL.md`, `references/issue-taxonomy.md`) | Apache-2.0 |
 
-(Citadel #352, #348, #350 and #347, 2026-11-06, from the #346 skills survey; the trailofbits rows
-are CC-BY-SA, so they stay paraphrased.) Mined rows are not re-synced, so the upstream check skips
-them.
+(Citadel #352, #348, #350, #347 and #355, 2026-11-06, from the #346 skills survey; the trailofbits
+rows and the Intopia row are share-alike, so they stay paraphrased.) Mined rows are not re-synced,
+so the upstream check skips them.
 
 skill-stocktake (Citadel #353): upstream is a slash command that scans `~/.claude/skills` and keeps
 its state in a JSON cache through jq and Node scripts. Ours is model-invoked (see

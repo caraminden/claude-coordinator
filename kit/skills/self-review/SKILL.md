@@ -66,7 +66,10 @@ and commit. You own the call: a finding you judge wrong or out of scope goes in 
 list with a reason, not silently away. Comments from a person, a GitHub review or Codex go
 through "Receiving review" in `references/lenses.md` part 2. On a UI change, also check your own
 desktop and phone screenshots for what the Grunt can't see: equal top and bottom padding,
-nothing clipped or scrolling sideways, phone tap targets `--citadel-control-h` tall.
+nothing clipped or scrolling sideways, phone tap targets `--citadel-control-h` tall. When the
+change draws data (names, counts, lists), take those screenshots again with worst-case data in
+a dev copy (`citadel:contraption-ui`, `references/worst-case-data.md`) and fix what it breaks; a
+new page, view or flow also gets that skill's dogfood pass (`references/dogfood.md`).
 
 ## 4. Label the risk
 
@@ -114,7 +117,9 @@ them are "The rules" in `citadel:contraption-ui`.
 - An action reachable only on `:hover` or only by dragging; meaning carried by a colour alone.
 - `outline: none` with no `:focus-visible` ring; animating `width`, `height`, `top`, `left` or a margin; a
   loop that isn't a spinner or skeleton; a duration not from `--citadel-motion`; a state change
-  finished in `transitionend` or `animationend`.
+  finished in `transitionend` or `animationend`; `transition: all`, `ease-in`, `scale(0)`, keyframes
+  on something that can be retriggered, motion on a keyboard action, hover motion outside
+  `@media (hover: hover)` (why: `contraption-ui`'s `references/motion.md`).
 - A fixed `height` or `overflow: hidden` on a box of text (the status line's one-line cut is
   fine); `100vh`; a long URL, id or table that
   can push a phone page sideways; an `<img>` with no size or `aspect-ratio`.

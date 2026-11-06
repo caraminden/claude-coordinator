@@ -488,6 +488,14 @@ Every deploy checks the above and logs `Warning (installing as its own app): …
 A self-review counts a break of these rules, and anything hand-rolled that the library serves, as a
 finding (`citadel:self-review`, "UI findings").
 
+## Read on demand
+
+- Adding or reviewing an animation or transition: [references/motion.md](references/motion.md).
+- A view that draws names, counts or lists, before its screenshots: [references/worst-case-data.md](references/worst-case-data.md).
+- A page or part of your own nearly done: [references/craft-floor.md](references/craft-floor.md).
+- Building a dialog, tooltip, live region, drawer or disclosure by hand: [references/component-checks.md](references/component-checks.md).
+- A new page, view or flow, or a request to QA an app: [references/dogfood.md](references/dogfood.md).
+
 Each rule shown right and wrong (14 to 21 listed, no demo yet), with every part drawn live in both modes: Citadel's living
 design-system home, `docs/design-system/index.html` in Citadel's repo (Citadel's minions keep it
 true; ask your Taskmaster for a copy if you need the page itself).

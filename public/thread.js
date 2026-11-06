@@ -346,6 +346,9 @@ export function renderTicketHead() {
   const chat = el.closest('.chat');
   chat?.classList.toggle('dismissed', t.status === 'closed');
   chat?.classList.toggle('turn-running', t.status === 'running');
+  // Whose chat it is, so you know at a glance who you're talking to (#360, style.css).
+  chat?.classList.toggle('role-taskmaster', coord);
+  chat?.classList.toggle('role-minion', !coord);
   for (const bubble of chat?.querySelectorAll('.log [data-event]') ?? []) markQueued(bubble, t);
   const box = chat?.querySelector('.composer textarea');
   if (box) box.placeholder = composerPlaceholder(t);

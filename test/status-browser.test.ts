@@ -2,7 +2,7 @@
 // layout-shift check for Cara's rule (2026-11-04, "set up rules that make sure status changes like that dont move
 // any UI elements"). Each part cycles through its states while the test records every element's box and the
 // page's layout-shift entries; nothing may move. A naive status line (a <p> that's empty until it says something)
-// proves the check catches a shift. Apps copy this check (citadel:contraption-ui, "Status line").
+// proves the check catches a shift. Apps copy this check (citadel:contraption-ui, references/status.md).
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';

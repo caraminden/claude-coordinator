@@ -2,7 +2,7 @@
 // manifest's resolved `id`, and won't offer to install a page that sits inside an installed app's
 // scope, so on Citadel's one origin each contraption's id and scope must be its own /apps/<name>/
 // (Citadel's are "/" and "/c/"). A deploy runs this and logs what it finds as warnings.
-// Rules for authors: kit/skills/contraption-ui/SKILL.md, "Installing as its own app".
+// Rules for authors: kit/skills/contraption-ui/references/installing.md.
 
 /**
  * What's wrong with how contraption `name` installs as its own app: [] when nothing. `get` fetches a

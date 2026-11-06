@@ -413,7 +413,51 @@ function modelPicker(chatId) {
   // Workflow (#359): off by default, as the tool adds ~2k tokens to every call; the Taskmaster never gets it.
   const workflow = h('select', { class: 'picker', id: 'workflow-picker', onchange: save('workflow') },
     h('option', { value: '' }, 'Workflow off'), h('option', { value: 'on' }, 'Workflow on'));
-  return h('span', { class: 'pickers' }, model, effort, workflow, pluginPicker(chatId));
+  // Each picker in a row with its name, which only phones show; on desktop the rows are display: contents.
+  const row = (name, control, id) => h('span', { class: 'picker-row', id }, h('span', { class: 'picker-label', 'aria-hidden': 'true' }, name), control);
+  const pickers = h('span', { class: 'pickers', id: 'pickers' },
+    row('Model', model), row('Effort', effort), row('Workflow', workflow, 'workflow-row'), row('Plugins', pluginPicker(chatId), 'plugin-row'));
+  return settingsMenu(pickers);
+}
+
+const phone = matchMedia('(max-width: 800px)');
+let closeSettings = () => {};
+// The phone texts differ ("Default", "Off"), so crossing the breakpoint refills them, and shuts the menu.
+phone.addEventListener('change', () => {
+  closeSettings();
+  renderModelPicker();
+});
+
+/**
+ * Phones (#365): one settings button beside Send in place of the row of pickers, which it opens as a menu
+ * of named rows. Desktop never shows the button, and the pickers stay inline as before (style.css).
+ */
+function settingsMenu(pickers) {
+  const button = h('button', { type: 'button', class: 'picker settings-button', id: 'settings-picker', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'pickers' },
+    h('span', { class: 'gear', 'aria-hidden': 'true' }, '⚙'), h('span', { class: 'dot', 'aria-hidden': 'true' }));
+  const wrap = h('span', { class: 'settings-picker' }, button, pickers);
+  const close = () => {
+    wrap.classList.remove('open');
+    button.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', outside, true);
+  };
+  // A tap outside closes it. Not focusout: a select that disables itself while it saves, or a checkbox
+  // Safari doesn't focus, would drop the focus and shut the menu under the person's thumb.
+  const outside = (e) => !wrap.contains(e.target) && close();
+  button.addEventListener('click', () => {
+    if (wrap.classList.contains('open')) return close();
+    wrap.classList.add('open');
+    button.setAttribute('aria-expanded', 'true');
+    document.addEventListener('pointerdown', outside, true);
+  });
+  wrap.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && wrap.classList.contains('open')) {
+      close();
+      button.focus();
+    }
+  });
+  closeSettings = close;
+  return wrap;
 }
 
 /** The folder's last part, the name people know a plugin by ("tools/plugins/devtools" → "devtools"). */
@@ -469,7 +513,9 @@ export function renderModelPicker() {
   const effort = document.getElementById('effort-picker');
   if (!model || !effort || !view?.ticket) return;
   const t = view.ticket;
-  const defModel = !t.model && t.last_model ? modelName(t.last_model) : 'Model';
+  // On phones each picker sits beside its name, so a default with nothing to show says "Default".
+  const onPhone = phone.matches;
+  const defModel = !t.model && t.last_model ? modelName(t.last_model) : onPhone ? 'Default' : 'Model';
   const blocked = codexBlocked();
   model.replaceChildren(h('option', { value: '' }, defModel),
     h('optgroup', { label: 'Claude' }, ...MODELS.map(([id, name]) => h('option', { value: id }, name))),
@@ -479,7 +525,7 @@ export function renderModelPicker() {
   if (t.model && ![...MODELS, ...CODEX_MODELS].some(([id]) => id === t.model)) model.append(h('option', { value: t.model }, t.model));
   model.value = t.model ?? '';
   const shownDefault = t.default_effort ?? t.last_effort;
-  const defEffort = !t.effort && shownDefault ? shownDefault : 'Effort';
+  const defEffort = !t.effort && shownDefault ? shownDefault : onPhone ? 'Default' : 'Effort';
   effort.replaceChildren(h('option', { value: '' }, defEffort), ...EFFORTS.map((e) => h('option', { value: e }, e)));
   effort.value = t.effort ?? '';
   model.classList.toggle('is-default', !t.model);
@@ -491,23 +537,37 @@ export function renderModelPicker() {
   effort.setAttribute('aria-label', effort.title);
   const workflow = document.getElementById('workflow-picker');
   if (!workflow) return;
-  workflow.hidden = t.kind === 'coordinator';
+  workflow.hidden = document.getElementById('workflow-row').hidden = t.kind === 'coordinator';
+  workflow.options[0].textContent = onPhone ? 'Off' : 'Workflow off';
+  workflow.options[1].textContent = onPhone ? 'On' : 'Workflow on';
   workflow.value = t.workflow ? 'on' : '';
   workflow.classList.toggle('is-default', !t.workflow);
   workflow.title = `${t.workflow ? 'This minion can use the Workflow tool' : 'Workflow tool off for this minion'}: turning it on adds ~2k tokens to every call, and a change breaks the prompt cache once${later}`;
   workflow.setAttribute('aria-label', workflow.title);
-  renderPluginPicker(t, later);
+  const picked = renderPluginPicker(t, later);
+  renderSettingsButton(t, picked, later);
+}
+
+/** The phone settings button: a dot when anything is off its default, and the settings in its label. */
+function renderSettingsButton(t, picked, later) {
+  const button = document.getElementById('settings-picker');
+  if (!button) return;
+  const off = [t.model && modelName(t.model), t.effort && `${t.effort} effort`, t.workflow && t.kind !== 'coordinator' && 'Workflow on',
+    picked.length && `plugins: ${picked.map(pluginName).join(', ')}`].filter(Boolean);
+  button.classList.toggle('is-default', !off.length);
+  button.title = `Settings for this minion: ${off.length ? off.join(', ') : 'all on their defaults'}${later}`;
+  button.setAttribute('aria-label', button.title);
 }
 
 function renderPluginPicker(t, later) {
   const wrap = document.getElementById('plugin-picker-wrap');
   const button = document.getElementById('plugin-picker');
   const menu = document.getElementById('plugin-menu');
-  if (!wrap || !button || !menu) return;
+  if (!wrap || !button || !menu) return [];
   const offered = t.optional_plugin_dirs ?? [];
   // A pick an admin has since taken off the list no longer loads, so it isn't shown as on.
   const picked = (t.plugin_dirs ? t.plugin_dirs.split('\n') : []).filter((d) => offered.includes(d));
-  wrap.hidden = button.hidden = t.kind === 'coordinator' || !offered.length;
+  wrap.hidden = button.hidden = document.getElementById('plugin-row').hidden = t.kind === 'coordinator' || !offered.length;
   button.textContent = !picked.length ? 'No plugins' : picked.length === 1 ? pluginName(picked[0]) : `${picked.length} plugins`;
   button.classList.toggle('is-default', !picked.length);
   button.title = `${picked.length ? `Extra plugins for this minion: ${picked.map(pluginName).join(', ')}` : 'No extra plugins for this minion'}: each costs tokens and memory on every turn, and a change breaks the prompt cache once${later}`;
@@ -516,4 +576,5 @@ function renderPluginPicker(t, later) {
   menu.replaceChildren(h('p', { class: 'muted small' }, 'Extra plugins for this minion'),
     ...offered.map((d) => h('label', { title: d }, h('input', { type: 'checkbox', value: d, checked: picked.includes(d) }), ` ${pluginName(d)}`)));
   if (focused) menu.querySelector(`input[value="${CSS.escape(focused)}"]`)?.focus();
+  return t.kind === 'coordinator' ? [] : picked;
 }

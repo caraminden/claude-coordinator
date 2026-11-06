@@ -922,17 +922,40 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .composer .plugin-menu input[type=checkbox] { width: auto; margin: 0; padding: 0; flex: none; }
 .composer .plugin-menu label { display: flex; align-items: center; gap: 0.35rem; margin: 0; padding: 0.3rem 0.25rem; color: var(--ink); font-size: 0.9em; border-radius: 4px; cursor: pointer; overflow-wrap: anywhere; }
 .composer .plugin-menu label:hover { background: var(--line); }
+/* Phones get one settings button for the pickers (#365); on desktop its box and the rows vanish from layout,
+   leaving the pickers inline exactly as before. */
+.composer .settings-picker, .composer .picker-row { display: contents; }
+.composer .picker-row[hidden] { display: none; }
+.composer .picker-label, .composer button.settings-button { display: none; }
 @media (max-width: 800px) {
-  .composer select.picker, .composer button.picker { max-width: 8.5rem; }
-  .composer button.picker { min-width: 0; flex: 0 1 auto; max-width: 5rem; }
-  /* The menu hangs from the whole row, not the narrow button, so a long folder name stays on screen. */
-  .composer .row { position: relative; }
-  .composer .plugin-picker { position: static; }
-  /* Phones: Add image, the pickers and Send (with its ▾ mid-turn) share one line; the pickers give way. */
-  .composer .row { gap: 0.5rem; flex-wrap: nowrap; }
-  .composer .pickers { min-width: 0; }
-  .composer select.picker { min-width: 0; flex: 0 1 auto; }
-  .composer .row > .add-image, .composer .row > .to-latest, .composer .send-group { flex: none; }
+  /* Phones: Add image, the settings button and Send (with its ▾ mid-turn) share one line. */
+  .composer .row { position: relative; gap: 0.5rem; flex-wrap: nowrap; }
+  .composer .row > .add-image, .composer .row > .to-latest, .composer .settings-picker, .composer .send-group { flex: none; }
+  .composer .settings-picker { display: inline-flex; }
+  .composer button.settings-button { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h); padding: 0.2rem 0.6rem; }
+  .composer button.settings-button .gear { font-size: 1.15em; line-height: 1; }
+  /* Something's off its default (a model, an effort, Workflow on, a plugin): an accent dot on the gear. */
+  .composer button.settings-button .dot { position: absolute; top: 0.3rem; right: 0.3rem; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--accent); }
+  .composer button.settings-button.is-default .dot { display: none; }
+  .composer button.settings-button:not(.is-default) { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+  /* The menu hangs from the whole row, not the button, so a long folder name stays on screen. */
+  .composer .pickers { display: none; }
+  /* Open, it may reach up over the thread bar (z-index 4, earlier in the page), not under it; the top bar stays on top. */
+  .composer:has(.settings-picker.open) { z-index: 4; }
+  .composer .settings-picker.open .pickers { position: absolute; right: 0; bottom: calc(100% + 0.35rem); z-index: 5; display: flex; flex-direction: column; gap: 0.1rem; width: min(22rem, 100%); max-height: calc(100dvh - 9rem); overflow-y: auto; padding: 0.4rem 0.75rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.12); }
+  .composer .picker-row { display: flex; align-items: center; gap: 0.75rem; min-height: 2.75rem; }
+  .composer .picker-row[hidden] { display: none; }
+  .composer .picker-label { display: block; flex: none; width: 4.5rem; color: var(--muted); font-size: 0.9em; }
+  /* 16px so iOS doesn't zoom into a select on tap. */
+  .composer .picker-row select.picker { flex: 1; min-width: 0; font-size: 16px; }
+  /* Plugins: its checkboxes right in the row, no button and menu of their own. */
+  #plugin-row { align-items: flex-start; }
+  #plugin-row .picker-label { padding-top: 0.8rem; }
+  .composer .picker-row .plugin-picker { position: static; flex: 1; min-width: 0; }
+  .composer .picker-row .plugin-button { display: none; }
+  .composer .picker-row .plugin-menu, .composer .picker-row .plugin-menu[hidden] { position: static; display: flex; width: auto; max-width: none; padding: 0; background: none; border: 0; box-shadow: none; }
+  .composer .picker-row .plugin-menu p { display: none; }
+  .composer .picker-row .plugin-menu label { min-height: 2.75rem; padding: 0.5rem 0.25rem; font-size: 1rem; }
   .composer textarea { min-height: 3rem; }
 }
 /* Words that only fit on wider screens ("BUG:", "Close ticket", "Add image", "Latest"); phones get the short form. */
@@ -1257,7 +1280,7 @@ dialog.viewer .ticket-head > .row > h2 { font-size: 0.95rem; }
 dialog.viewer .ticket-head :is(.prop-chip, .find-box, .head-nav > :not(.refresh-btn), .close-view, button[title='Dismiss minion']) { display: none; }
 dialog.viewer .msg .file-preview img, dialog.viewer .msg .file-preview video { max-height: 10rem; }
 dialog.viewer .composer textarea { min-height: 2.6rem; height: 2.6rem; max-height: 10rem; }
-dialog.viewer .composer .picker, dialog.viewer .composer .plugin-picker { display: none; }
+dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display: none; }
 @media (max-width: 800px) {
   /* Phones: the file on top with most of the height, the chat below it. */
   dialog.viewer { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); }

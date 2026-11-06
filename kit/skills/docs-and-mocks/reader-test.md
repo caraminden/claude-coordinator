@@ -13,7 +13,11 @@ reader who holds nothing.
    > Read only this file: `<path>`. Don't open any other file. For each question, answer from the
    > doc alone, quote the line you answered from, and say "the doc doesn't say" when it doesn't.
    > Then list: what is ambiguous (two readings and both), what the doc assumes a reader already
-   > knows, and anything that contradicts itself. Under 400 words.
+   > knows, and anything that contradicts itself. Its readers are `<who>` and already know
+   > `<what>`; don't list those as assumed. Under 400 words.
+
+   Name the readers (the scheme's members, a fresh minion) and what they know (the scheme's names,
+   its machines): without that the Grunt's "assumed" list fills up with words every reader knows.
 
    An HTML doc counts as text: tell the Grunt the picture-only parts (art, live boards) are out of
    scope, and test any claim that rests on them by asking whether the text says it too.

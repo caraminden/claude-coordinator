@@ -60,7 +60,8 @@ Ask one question: will the session need what this step reads, or only what it co
   session with subagents costs far less than one session per item, because each of those
   sessions gets woken at its own large context for every feedback round. Use a session per item
   only when a person asks for one. More than four similar jobs run as one session with Sonnet
-  Grunts and one collated page (see "Fan-outs" below).
+  Grunts and one collated page. This threshold sets where the work runs; how its Grunts report
+  back is the fan-out rule below, which starts at 3 Grunts.
 
 ## Keep the step in the session when
 
@@ -115,7 +116,9 @@ goal. A person owns the goal.
 
 ## Fan-outs: one page, not a stream
 
-A turn that starts more than 2 Grunts, or loops one Grunt more than once, is a fan-out. Added on
+A turn that starts more than 2 Grunts, or loops one Grunt more than once, is a fan-out. This
+threshold sets how the Grunts report back; where the work runs is the more-than-four-jobs rule
+above. Added on
 Delve #55 (Cara, 2026-10-30): 8 drawers and 8 critics over 3 rounds put about 16 reports of 20 to
 40 lines each into the chat per round. Every Grunt's report lands in the chat as well as in your
 context, so a fan-out must not return prose.

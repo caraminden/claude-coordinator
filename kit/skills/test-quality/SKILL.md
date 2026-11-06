@@ -24,7 +24,7 @@ dependency: offer it once, with the test you would write, and leave the call to 
   command, so it survives a refactor.
 - **It mocks only at system boundaries**: the network, the clock, randomness, other processes,
   and sometimes the file system or database (a temp copy beats a mock). Needing to mock your own
-  module means the seam is in the wrong place (citadel:codebase-design).
+  module means the seam is in the wrong place ([CODEBASE-DESIGN.md](../improve-codebase-architecture/CODEBASE-DESIGN.md)).
 - **Its expected value comes from somewhere else**: the rule, the spec, a worked literal. Never
   recompute it the way the code does.
 - **One behaviour per test, named for the behaviour** (`rejects a reply with no body`), not for

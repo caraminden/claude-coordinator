@@ -88,7 +88,9 @@ copied, so nothing here needs re-syncing; the source is named so the idea can be
 | `docs-and-mocks/prototypes.md` | Throwaway prototypes: a logic toy, look variants, the shared rules | mattpocock/skills `skills/engineering/prototype` (`SKILL.md`, `LOGIC.md`, `UI.md`), `4ae2317` | MIT, Matt Pocock (text below) |
 | `docs-and-mocks/looks.md` | A token plan checked against the brief; the "generated page" tells; boldness in one place | anthropics/skills `skills/frontend-design`, `ca45fc4` | Apache-2.0 |
 
-(Citadel #352, 2026-11-06, from the #346 skills survey.)
+(Citadel #352, 2026-11-06, from the #346 skills survey.) The mattpocock pin here is newer than the
+copied pack's on purpose: `prototype` was read at the commit the survey used, and the copies above
+stay at theirs until someone re-syncs them.
 
 ## Updating
 

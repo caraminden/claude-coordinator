@@ -12,7 +12,9 @@ buttons, in the scheme's own words (Ore, Forge, Claim; not `dispatch` or `state.
 
 - **The rules in their own `<script>`,** as pure functions `(state, arg) => state` with no DOM in
   them, so the winning set can be lifted into the real code. The board's `on` handlers only call
-  them.
+  them. The kit merges what a handler returns into the board's state, so keep the whole model under
+  one key and replace it: `state: { game: rules.start() }`, `build: (s, { arg }) => ({ game:
+  rules.build(s.game, arg) })`, `reset: () => ({ game: rules.start() })`.
 - **The full state after every action,** as labelled fields (not a JSON dump), with what just
   changed marked.
 - **Free-play buttons,** one per action, always there, in any order.

@@ -7,7 +7,8 @@ reader who holds nothing.
    option do you recommend, and why?"), what it costs, what it touches, what happens to today's
    behaviour, what is still open, and one or two about the awkward case. Write the answer you
    expect beside each, for yourself.
-2. **Brief a Grunt** (`general-purpose`, Sonnet, medium effort: `citadel:subagents`) with only
+2. **Brief a Grunt** (`general-purpose`, with `model: sonnet` and `effort: medium` set on the Agent
+   call: it reads and summarises, `citadel:subagents`) with the Grunt line and only
    the doc's path and the questions, none of your own context or expected answers:
 
    > Read only this file: `<path>`. Don't open any other file. For each question, answer from the

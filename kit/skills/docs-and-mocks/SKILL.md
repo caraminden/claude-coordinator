@@ -45,9 +45,9 @@ five lines can say is a reply.
 | Design-system home | `starter/doc.html`, status `living` | Tokens, components, rules, each with where it lives in the code |
 | Prototype | `starter/review.html`, one board per rule set | The question on top, the full state after every action, free-play buttons, scenarios, a verdict pick |
 
-Each kind's full shape is in [`kinds.md`](kinds.md): read it before filling the starter. A prototype
-is throwaway code that answers one question; its rules, and when look variants belong in the real
-app instead of a review page, are in [`prototypes.md`](prototypes.md).
+Each kind's full shape is in [`kinds.md`](kinds.md), a prototype's in [`prototypes.md`](prototypes.md):
+read it before filling the starter. A prototype is throwaway code that answers one question; that file also says when look variants belong in the
+real app instead of a review page.
 
 ## Steps
 

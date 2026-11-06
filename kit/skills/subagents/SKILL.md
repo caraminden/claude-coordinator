@@ -17,11 +17,12 @@ so their `subagent_type` is `citadel:<name>` (`citadel:check-runner`, `citadel:f
   summarises (code, transcripts, usage data, docs lookups). Building and general-purpose workers
   inherit high. Never put `effort` on a skill: it would hold for the rest of a long turn, and a
   switch mid-session may restart the prompt cache.
-- Models: Agent calls set `model` too: `haiku` for bulk reads only when the brief holds
-  everything the Grunt needs (the cheapest model took 2 to 3 times the turns on multi-step
-  work in obra/superpowers' subagent-driven-development, so turn count can beat token price), `sonnet` for mechanical runs
+- Models: Agent calls set `model` too: `haiku` for bulk reads, `sonnet` for mechanical runs
   (regeneration, reviewer passes), and the `citadel:check-runner` agent runs on `haiku` at `low` effort
   (its answer is a verdict), the session's own model for judgment.
+- Turn count beats token price: the cheapest model took 2 to 3 times the turns on multi-step work
+  in obra/superpowers' subagent-driven-development. Use `haiku` only when the brief holds
+  everything the Grunt needs.
 
 ## How the cost works
 
@@ -41,7 +42,7 @@ same work to Sonnet saves only about 25 to 33%. Keeping noisy work out of the se
 Ask one question: will the session need what this step reads, or only what it concludes?
 - If it needs only the conclusion, use a subagent.
 - If that conclusion is a verdict (pass or fail, a table, "it lives in X.ts"), give the subagent
-  Sonnet or Haiku.
+  Sonnet, or Haiku when the brief holds everything it needs.
 - If the conclusion is a judgment, leave the model unset so the subagent inherits the session's.
 
 ## Use a subagent when
@@ -101,7 +102,8 @@ subagents; look outside the diff only to test a named risk.
 Fix loops are capped. Re-review only the fix diff, park new findings on untouched code as a
 list for the session, and stop after a set number of rounds (two unless a person says more).
 
-When several reviewers report, merge their findings: the same file:line and the same issue is
+Several reviewers, or a loop, make a fan-out: they write findings to files and return 3 lines
+(see below). When several report, merge from their files: the same file:line and the same issue is
 one finding, and where severities conflict the higher wins.
 
 ## Before looping an agent

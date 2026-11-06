@@ -25,7 +25,7 @@ paths come from each repo's CLAUDE.md "Project facts".
 | `grilling/` | mattpocock `skills/productivity/grilling` | A round is asked as decision cards where the session has a card tool, numbered questions elsewhere |
 | `domain-modeling/` | mattpocock `skills/engineering/domain-modeling` | Glossary and decisions log from Project facts |
 | `codebase-design/` | mattpocock `skills/engineering/codebase-design` | none |
-| `diagnosing-bugs/` | mattpocock `skills/engineering/diagnosing-bugs` | Narrower description (the escalation from `bug-fixing`), glossary from Project facts and optional |
+| `diagnosing-bugs/` | mattpocock `skills/engineering/diagnosing-bugs` | Narrower description (the escalation from `bug-fixing`), glossary from Project facts and optional; Three strikes, Flaky tests, trigger hypotheses and fix-at-the-source added (see Ideas below) |
 | `improve-codebase-architecture/` | mattpocock `skills/engineering/improve-codebase-architecture` | Model-invoked; headless output; glossary and decisions log from Project facts |
 | `writing-for-agents/` | mattpocock `skills/productivity/writing-for-agents` | none |
 
@@ -97,6 +97,18 @@ stay at theirs until someone re-syncs them.
 Copy the files again from a newer upstream commit, re-apply the local changes above, and
 bump the pins in the first table. Do not also install either pack as a plugin: a session
 would see every skill twice.
+
+## Ideas from other packs
+
+These skills take ideas from other packs, written in our own words: nothing is copied,
+nothing is installed, and none of their scripts run. Credited here all the same.
+
+| Skill | Idea | From | License |
+|-------|------|------|---------|
+| `bug-fixing` | Step 6, hunting for siblings of the root cause by widening a search one part at a time | [trailofbits/skills](https://github.com/trailofbits/skills) `470419e`, `plugins/variant-analysis` | CC-BY-SA 4.0, so paraphrase only: never paste its text here |
+| `diagnosing-bugs` | Three strikes, then ask | [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) `8eef6dc`, "Critical Rules"; the same point as superpowers' "3+ failed fixes means question the design" | MIT |
+| `diagnosing-bugs` | Flaky tests: wait on the condition, bisect for the polluting test; fix where the bad value first appears | [obra/superpowers](https://github.com/obra/superpowers) `22f0b46`, `skills/systematic-debugging/` (`condition-based-waiting.md`, `find-polluter.sh`, `root-cause-tracing.md`) | MIT |
+| `diagnosing-bugs` | Competing hypotheses, one investigator Grunt each | [wshobson/agents](https://github.com/wshobson/agents) `4bde316`, `parallel-debugging` | MIT |
 
 ## Licenses
 

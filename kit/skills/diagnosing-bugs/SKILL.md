@@ -15,6 +15,20 @@ This skill has you show commands, outputs and captured artifacts. **Redact every
 
 If the redacted output is not enough to diagnose the bug, say so and ask the user.
 
+## Three strikes
+
+A strike is a fix that didn't hold, counting any made under citadel:bug-fixing.
+
+1. **Strike one:** diagnose with the phases below and fix.
+2. **Strike two:** take a different approach. Not a variation on the first fix: a
+   different hypothesis, seam or loop.
+3. **Strike three:** question the assumption both fixes shared: the design, the spec, or
+   what the bug even is.
+
+After strike three, stop and ask the user (a card, where the session has a card tool)
+instead of trying a fourth. Keep a one-line log of every failed attempt (what you tried,
+what happened, what you changed next) and put it in the question and the PR.
+
 ## Phase 1: Build a feedback loop
 
 **This is the skill.** Everything else is mechanical. If you have a **tight** pass/fail signal for the bug (one that goes red on _this_ bug), you will find the cause; bisection, hypothesis-testing, and instrumentation all just consume it. If you don't have one, no amount of staring at code will save you.
@@ -49,6 +63,30 @@ A 30-second flaky loop is barely better than no loop; a 2-second deterministic o
 ### Non-deterministic bugs
 
 The goal is not a clean repro but a **higher reproduction rate**. Loop the trigger 100×, parallelise, add stress, narrow timing windows, inject sleeps. A 50%-flake bug is debuggable; 1% is not, so keep raising the rate until it's debuggable.
+
+### Flaky tests
+
+Sleeps help reproduce a race; they never fix one.
+
+- **A wait on a timer races the thing it waits for.** Wait on the condition itself: await
+  the process's exit, poll the state with a deadline, bind port 0 and read the port back.
+  Citadel's previews test failed now and then because stop deleted the preview's folder
+  right after SIGTERM while the process was still writing there; the fix (#154) awaits
+  the exit, with SIGKILL after 2 s, before deleting. Test servers that picked a free port
+  and then bound it lost it to a parallel suite in between (#156).
+- **Passes alone, fails in the suite:** an earlier test leaves something behind (a file,
+  a process, an env var, a module cache). Bisect for the polluter: run half the earlier
+  tests then the victim, keep whichever half still breaks it, repeat to one test. Then
+  check what that test leaves behind.
+
+### When the first repro fails
+
+List 3+ hypotheses about what triggers the bug (timing, data, environment, order), each
+with an evidence plan: the repro it predicts, and what would rule it out. They are
+guesses at how to reproduce it, not at what to fix, so they serve this phase. When they're
+independent and slow to check, give each to its own investigator Grunt (the
+citadel:subagents skill picks model and effort), and have each report confirmed, ruled
+out or unclear, with the evidence.
 
 ### When you genuinely cannot build a loop
 
@@ -118,6 +156,8 @@ Write the regression test **before the fix**, but only if there is a **correct s
 A correct seam is one where the test exercises the **real bug pattern** as it occurs at the call site. If the only available seam is too shallow (single-caller test when the bug needs multiple callers, unit test that can't replicate the chain that triggered the bug), a regression test there gives false confidence.
 
 **If no correct seam exists, that itself is the finding.** Note it. The codebase architecture is preventing the bug from being locked down. Flag this for the next phase.
+
+Fix where the bad value first appears, not where it surfaces: trace back up the call chain, one caller at a time, to the first place the value is already wrong.
 
 If a correct seam exists:
 

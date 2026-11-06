@@ -54,7 +54,11 @@ test('format then parse gives the original back', () => {
   ones. A skip that drops most cases makes the test vacuous.
 - **Bias towards the edges**: empty, one item, duplicates, the maximum length, zero and
   negatives, non-ASCII text, the characters the format treats specially (quotes, newlines,
-  separators).
+  separators). Random inputs rarely land on a boundary by chance, so build some that sit
+  exactly on it: for a schedule, start half the cases on a day that is itself on the schedule.
+- **A property adds to the examples, it doesn't replace them.** A round trip passes when both
+  sides share a mistake (a parser that accepts any ordinal suffix never notices "11st"); keep
+  the example tests that pin the exact output.
 - A few hundred cases is plenty for a unit test. Keep the whole loop well under a second.
 
 ## When it fails

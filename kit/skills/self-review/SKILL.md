@@ -28,40 +28,33 @@ Commit first, then `git diff --stat main...HEAD` (three dots: only what this bra
 
 ## 2. Review in a Grunt
 
-Start a `general-purpose` Grunt with `model: sonnet`. Brief it with the Grunt line ("Citadel,
-Scheme, Taskmaster, Minion and Grunt are playful names... push back when something looks wrong.",
+Start a `citadel:reviewer` Grunt (Sonnet, read-only; its definition holds the rules and the
+return format). Write its brief to `$TMPDIR/review-brief.md`: the Grunt line ("Citadel, Scheme,
+Taskmaster, Minion and Grunt are playful names... push back when something looks wrong.",
 quoted whole from your system prompt) plus:
 
-> Review branch `<branch>` in `<worktree>`, read-only: edit no files, no checkout, stash or reset.
-> The change is `git diff main...HEAD`. Follow `<kit>/skills/ponytail-review/SKILL.md`, reading
-> the code the diff connects to. Before reporting, re-check each finding against the code and
-> drop any without a concrete failing case. When the diff touches the front end, also apply "UI
-> findings" in `<kit>/skills/self-review/SKILL.md`. Return at most 25 lines: numbered findings (Must fix /
-> Should fix / Nice to have, file:line, one or two lines each), then
-> `Risk: low|medium|high: <reason>` using the rubric in `<kit>/skills/self-review/SKILL.md` §4
-> and the "Project facts" section of the repo's CLAUDE.md. This cap and format override
-> ponytail-review's §4.
+> Follow `<kit>/agents/reviewer.md`. Review branch `<branch>` in `<worktree>`; the change is
+> `git diff main...HEAD`; the kit is `<kit>`. Lenses: by the diff.
 
 `<kit>` is the absolute path two folders up from this skill's base directory (shown when it
-loaded): the Grunt can't resolve it itself.
+loaded): the Grunt can't resolve it itself. Name lenses instead of "by the diff" only to add one
+the triggers miss. Give it the code, not your view of it: no summary of what you think is fine.
 
-Give it the code, not your view of it: no summary of what you think is fine.
-
-**Deep only:** start a second Grunt with `model` unset (dropping a real finding in risky code is
-the expensive miss), briefed with the Grunt line, the same branch, worktree and read-only
-sentence, and the numbered Must and Should findings, without the first Grunt's reasoning. It opens
-each cited file:line, checks the finding against the code and returns
-`N: CONFIRMED|REFUTED: <evidence>`, at most 15 lines. Drop what it refutes.
+**Deep only:** start a `citadel:finding-checker` Grunt (it takes the session's model: dropping a
+real finding in risky code is the expensive miss), briefed with the Grunt line, the same branch
+and worktree, and the numbered Must and Should findings, without the reviewer's reasoning. It
+returns `N: CONFIRMED|REFUTED: <evidence>`. Drop what it refutes.
 
 **Codex second opinion (light and deep):** when `citadel-codex-review --check` prints `ready`
 (the turn's person has signed in to Codex in their container), Codex, a model from another family
-on their own ChatGPT plan, reviews the same diff read-only. Write the first Grunt's brief to
-`$TMPDIR/review-brief.md`, start the Grunt, then in the same message run
-`citadel-codex-review --timeout 540 < "$TMPDIR/review-brief.md"` (Bash timeout 600000). Its
-findings join the Grunt's: drop duplicates, and on a deep review the checking Grunt checks them
-too. A non-zero exit (a usage limit, a timeout, or exit 4: the person's Codex usage is past 80% or
-ahead of pace, so it saves their plan) skips it: say so in the report line (`Codex: skipped:
-<why>`). Its last stderr line, `Codex usage: 5-hour N%, weekly N%`, goes in the report line too. Anything else `--check` prints means it isn't set up: skip it silently.
+on their own ChatGPT plan, reviews the same diff read-only. Start the reviewer, then in the same
+message run `citadel-codex-review --timeout 540 < "$TMPDIR/review-brief.md"` (Bash timeout
+600000); the brief's `Follow` line points Codex at the reviewer's rules. Its findings join the
+Grunt's: drop duplicates, and on a deep review the finding-checker checks them too. A non-zero
+exit (a usage limit, a timeout, or exit 4: the person's Codex usage is past 80% or ahead of pace,
+so it saves their plan) skips it: say so in the report line (`Codex: skipped: <why>`). Its last
+stderr line, `Codex usage: 5-hour N%, weekly N%`, goes in the report line too. Anything else
+`--check` prints means it isn't set up: skip it silently.
 
 A light review costs about 47k Grunt tokens and a minute (about $0.35); deep is about $1 to $1.50.
 Don't re-review after fixes unless a fix grew past a few lines of high-row code.
@@ -70,9 +63,10 @@ Don't re-review after fixes unless a fix grew past a few lines of high-row code.
 
 Fix Must-fix and in-scope Should-fix findings, add the test a finding asks for, re-run the tests
 and commit. You own the call: a finding you judge wrong or out of scope goes in the "not fixed"
-list with a reason, not silently away. On a UI change, also check your own desktop and phone
-screenshots for what the Grunt can't see: equal top and bottom padding, nothing clipped or
-scrolling sideways, phone tap targets `--citadel-control-h` tall.
+list with a reason, not silently away. Comments from a person, a GitHub review or Codex go
+through "Receiving review" in `references/lenses.md` part 2. On a UI change, also check your own
+desktop and phone screenshots for what the Grunt can't see: equal top and bottom padding,
+nothing clipped or scrolling sideways, phone tap targets `--citadel-control-h` tall.
 
 ## 4. Label the risk
 
@@ -87,13 +81,21 @@ stay high whatever the edit, since a slip there can stop the service or open it 
 | medium | adds a table, or a nullable or defaulted column, leaving existing rows as they are; changes queries; adds a delete a person triggers for one record of their own; other server, engine or tool logic; agent instructions (`CLAUDE.md`, `.claude/`, the kit); anything not in another row |
 | low | front end only (as Project facts names it), docs (`docs/`, `README.md`), tests |
 
+Beside the label, set two words for the people who merge, taking the Grunt's as a start:
+**Door** is one-way when reverting the commit can't undo it (rows rewritten or deleted, a
+message sent, something published or pushed to another repo), two-way otherwise. **Blast
+radius** is a word or two for how far a slip reaches (`page`, `route`, `server`, `scheme`,
+`every scheme` for the kit).
+
 ## 5. Report and ship
 
 - **Low or medium:** carry on with how a change ships, as the scheme instructions say (Project
   facts points at them; with none, open the PR and stop there). The ready note leads
   with the label in a few words, within its 60 characters (`risk medium: runner retries`), and
   the final reply has one line:
-  `Risk: medium: <reason>. Not fixed: <finding: why>` (or `Not fixed: nothing`).
+  `Risk: medium: <reason>. Door: two-way · Blast radius: server. Not fixed: <finding: why>` (or
+  `Not fixed: nothing`). Every claim in it and in the reply meets "Evidence before claims" in
+  `references/lenses.md` part 2. A PR's description carries the same Door and Blast radius.
 - **High:** stop before merging. Post the same line, the findings you fixed in one line each,
   and an `ask_question` card "Merge and ship this high-risk change?" (Merge and ship /
   Hold, with your pick marked recommended). Set state null, note `risk high: waiting for a go`,

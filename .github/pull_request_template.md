@@ -12,4 +12,6 @@ One sentence on what the change does, if the title does not already say it.
 
 **Proof:** For a feature, a row per thing that was asked for: the test, screenshot or output that shows it, or "not built" and why. Then the fresh-eyes agent's report, if it ran.
 
+**Merge danger:** `Risk: low|medium|high: <reason> · Door: one-way|two-way · Blast radius: <word>`, from the self-review (one-way: reverting the commit can't undo it).
+
 **Decisions:** Any decision this records, or none.

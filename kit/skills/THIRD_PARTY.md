@@ -100,10 +100,22 @@ copied, so nothing here needs re-syncing; the source is named so the idea can be
 | `writing-for-agents/` (Importing a third-party skill) | Look for an existing skill on skills.sh first. Left out: its `npx skills` installer | [vercel-labs/skills](https://github.com/vercel-labs/skills) `skills/find-skills`, `d3701c1` | MIT, Vercel |
 | `writing-for-agents/` (Pruning) | Five structural prose tells and "every sentence adds something". Left out: the 26-pattern catalogue | [blader/humanizer](https://github.com/blader/humanizer) `SKILL.md`, `0ef9fe5` | MIT, Siqi Chen |
 | `scheme-setup/` (step 3) | The CLAUDE.md check (commands, non-obvious, current, concise) and its keep-out list | anthropics/claude-plugins-official `plugins/claude-md-management/skills/claude-md-improver` and `references/quality-criteria.md`, `d189be9` | Apache-2.0 |
+| `self-review/references/lenses.md`, "flag only what's real" | The false-positive list and "flag only what's definitely wrong or a quotable rule" | anthropics/claude-plugins-official `d189be9`, `plugins/code-review/commands/code-review.md` | Apache-2.0 |
+| `lenses.md`, "Pick by the diff" | Lenses picked by the diff: silent failures, comment accuracy, behavioural test gaps rated 1 to 10, type invariants | anthropics/claude-plugins-official `d189be9`, `plugins/pr-review-toolkit/` (`commands/review-pr.md`, agents `silent-failure-hunter`, `comment-analyzer`, `pr-test-analyzer`, `type-design-analyzer`) | Apache-2.0 |
+| `lenses.md`, "blast radius and removed guards" | Blast radius by caller count, `git log -S` on removed guards | trailofbits/skills `470419e`, `plugins/differential-review` | CC-BY-SA 4.0 (paraphrase only) |
+| `agents/finding-checker.md` | Argue the finding is wrong first; a verdict needs a test or a trace | trailofbits/skills `470419e`, `plugins/fp-check` | CC-BY-SA 4.0 (paraphrase only) |
+| `lenses.md`, "Access and secrets" | Fail closed; no fallback secrets | trailofbits/skills `470419e`, `plugins/insecure-defaults`, `plugins/sharp-edges` | CC-BY-SA 4.0 (paraphrase only) |
+| `lenses.md`, "audit before you conclude" | The pre-conclusion audit and "found nothing? say so" | getsentry/skills `e94f222`, `skills/find-bugs` | Apache-2.0 |
+| `lenses.md`, "no check-gaming" | Shortcuts that game a check, generalised beyond .NET | Aaronontheweb/dotnet-skills `5ca5db8`, `skills/slopwatch` | MIT, Aaron Stannard |
+| `lenses.md`, "Evidence before claims" | Claims against the evidence each needs | obra/superpowers `22f0b46`, `skills/verification-before-completion` | MIT, Jesse Vincent |
+| `lenses.md`, "Receiving review" | Check review comments against the code; clear up unclear items first | obra/superpowers `22f0b46`, `skills/receiving-code-review` | MIT, Jesse Vincent |
+| `self-review/SKILL.md` §4, `.github/pull_request_template.md` | Door and Blast radius | mattpocock/skills `4ae2317`, `skills/engineering/pr` | MIT, Matt Pocock |
+| `lenses.md`, "Smells" | The smell baseline, with the repo's standards winning | mattpocock/skills `4ae2317`, `skills/engineering/code-review` | MIT, Matt Pocock |
 
-(Citadel #352, #348 and #350, 2026-11-06, from the #346 skills survey.) The mattpocock pin here is newer than the
-copied pack's on purpose: `prototype` was read at the commit the survey used, and the copies above
-stay at theirs until someone re-syncs them.
+(Citadel #352, #348, #350 and #347, 2026-11-06, from the #346 skills survey; the trailofbits rows
+are CC-BY-SA, so they stay paraphrased.) The mattpocock pin here is newer than the copied pack's on
+purpose: `prototype` was read at the commit the survey used, and the copies above stay at theirs
+until someone re-syncs them.
 
 skill-stocktake (Citadel #353): upstream is a slash command that scans `~/.claude/skills` and keeps
 its state in a JSON cache through jq and Node scripts. Ours is model-invoked (see

@@ -92,10 +92,17 @@ copied, so nothing here needs re-syncing; the source is named so the idea can be
 | `test-quality/` | Tests through public interfaces, mocks only at system boundaries, expected values from an independent source, vertical slices. Left out: confirming every seam with the user first | mattpocock/skills `skills/engineering/tdd` (`SKILL.md`, `tests.md`, `mocking.md`), `4ae2317` | MIT, Matt Pocock (text below) |
 | `test-quality/` | Tests that give false confidence (no assertion, swallowed exceptions, missing await, self-referential and always-true assertions); calibrate severity honestly | [dotnet/skills](https://github.com/dotnet/skills) `plugins/dotnet-test/skills/test-anti-patterns`, `d63a2a7` | MIT, .NET Foundation |
 | `test-quality/` | Behavioural gaps rated 1 to 10, acting on 7 and up (the scale lives in self-review's tests lens) | [anthropics/claude-plugins-official](https://github.com/anthropics/claude-plugins-official) `plugins/pr-review-toolkit/agents/pr-test-analyzer.md`, `d189be9` | Apache-2.0 |
+| `skill-stocktake/` | Audit each skill for overlap, freshness, actionability and trigger breadth; five verdicts with reasons that stand alone; a quick scan of what changed | [affaan-m/everything-claude-code](https://github.com/affaan-m/everything-claude-code) `skills/skill-stocktake`, `b38be6a` | MIT, Affaan Mustafa (text below) |
 
 (Citadel #352 and #348, 2026-11-06, from the #346 skills survey.) The mattpocock pin here is newer than the
 copied pack's on purpose: `prototype` was read at the commit the survey used, and the copies above
 stay at theirs until someone re-syncs them.
+
+skill-stocktake (Citadel #353): upstream is a slash command that scans `~/.claude/skills` and keeps
+its state in a JSON cache through jq and Node scripts. Ours is model-invoked (see
+improve-codebase-architecture above), scans the kit, the repo's skills and the session's skill
+list, takes "changed since last time" from `git log`, adds a cost line and a usage count of its
+own (`uses.ts`), and writes a report with handoffs instead of offering to delete files.
 
 ## Updating
 
@@ -123,6 +130,32 @@ nothing is installed, and none of their scripts run. Credited here all the same.
 MIT License
 
 Copyright (c) 2026 Matt Pocock
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### affaan-m/everything-claude-code
+
+```
+MIT License
+
+Copyright (c) 2026 Affaan Mustafa
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

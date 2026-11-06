@@ -43,7 +43,9 @@ Create either file when it is first needed.
    depend on the replay is a slowdown to name. Then ask: **did a cost show up this milestone that no check
    catches?** A suite that got slower, a file every change fought over, a variation that
    took a copy instead of a table row, a refactor found again. A yes becomes a proposed
-   check in step 6 (a test, a hook, a script line that prints), not a note.
+   check in step 6 (a test, a hook, a script line that prints), not a note. A skill that
+   fired on the wrong turn or failed to fire gets a quick citadel:skill-stocktake for its
+   verdict; the fix stays this retro's to land.
 4. **UI audit**, when the milestone touched a screen: check each screen it added or
    changed against the UI rules Project facts names, with a screenshot as the evidence, at the
    screen's fullest state as well as its first, and with the longest names and values a

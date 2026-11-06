@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { catalogue, frontmatter } from '../src/catalogue.ts';
 import { ONBOARDING, ONBOARDING_MODES, Store, type Project } from '../src/db.ts';
 import { onboardingPrompt } from '../src/runner.ts';
+import { projectSharedDir, surveyReports } from '../src/workspace.ts';
 import { bootServer, jsonLines, REPO, until, stopProcs, stopTurns } from './helpers.ts';
 
 // New scheme onboarding (#172): the kickoff from the form, the Taskmaster's onboarding section while
@@ -88,6 +89,32 @@ test('a tune-up gets its own section: start from onboarding.md or the current st
   }
 });
 
+test('both plans name a skills survey for the stack, with every scheme\'s survey reports listed for the three-month check (#357)', () => {
+  const data = join(root, 'surveys');
+  const report = (id: number, name: string) => {
+    const dir = join(projectSharedDir(data, id), 'reports');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, name), '# survey');
+    return join(dir, name);
+  };
+  const general = report(2, 'skills-survey-2026-11.md');
+  const godot = report(1, 'skills-survey-godot-csharp-2026-11.md');
+  report(1, 'skills-surveyor-notes.md');
+  report(3, 'aura-kinds-survey.md');
+  mkdirSync(join(data, 'projects', '.heavy'), { recursive: true });
+  const found = surveyReports(data);
+  assert.deepEqual([...found].sort(), [general, godot].sort());
+  assert.deepEqual(surveyReports(join(root, 'no-such-data')), []);
+  for (const mode of ONBOARDING_MODES) {
+    const text = onboardingPrompt(project('interview', mode), '/shared', found);
+    assert.match(text, /\*\*Skills survey:\*\*.*a research minion for <stack>/, mode);
+    assert.match(text, /Follow citadel:skills-survey for <stack>\./, mode);
+    assert.match(text, /3 months/, mode);
+    assert.ok(text.includes(godot) && text.includes(general), mode);
+    assert.match(onboardingPrompt(project('interview', mode), '/shared'), /Skills survey reports so far \(the name gives the stack and month\): none\./, mode);
+  }
+});
+
 test('schemes from before onboarding read as done', () => {
   const store = new Store(join(root, 'old.db'));
   assert.equal(store.createProject('Old', null).onboarding, 'done');
@@ -120,6 +147,9 @@ test('the catalogue gives names and one-line descriptions, never bodies', () => 
 test('"Create and set up" sends the Taskmaster one kickoff from Citadel; "Create only" skips setup', async () => {
   const bad = await call('/api/projects', { method: 'POST', body: { name: 'X', source: 'svn' } });
   assert.equal(bad.status, 400);
+  const surveyDir = join(projectSharedDir(join(root, 'data'), 98), 'reports');
+  mkdirSync(surveyDir, { recursive: true });
+  writeFileSync(join(surveyDir, 'skills-survey-2026-11.md'), '# survey');
   const { status, data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Lanternfall', source: 'none', about: 'A small roguelike deckbuilder.', setup: true } });
   assert.equal(status, 201);
   assert.equal(p.onboarding, 'interview');
@@ -136,6 +166,7 @@ test('"Create and set up" sends the Taskmaster one kickoff from Citadel; "Create
   const turn = await until('the Taskmaster turn', () => turns().find((t) => t.token?.startsWith(`${page.coordinator.id}.`)));
   assert.match(JSON.stringify(turn.prompt), /New scheme \\"Lanternfall\\"/);
   assert.match(turn.system, /## Setting up this scheme \(onboarding: interview, first-run\)/);
+  assert.ok(turn.system.includes(join(surveyDir, 'skills-survey-2026-11.md')), 'the plan lists every scheme\'s survey reports');
 
   const only = await call('/api/projects', { method: 'POST', body: { name: 'Scratch', setup: false } });
   assert.equal(only.data.onboarding, 'skipped');

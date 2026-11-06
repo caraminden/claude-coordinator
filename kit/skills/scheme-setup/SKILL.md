@@ -222,7 +222,13 @@ Record every copy (rules, adapted skills and agents alike) under `## Copies` in
 `$COORDINATOR_SHARED_DIR/onboarding.md`, adding the heading if it isn't there. One row each:
 file here, source (scheme and path, or "kit template"), the source's commit (`git -C <source>
 rev-parse --short HEAD`), today's date. A tune-up refreshes copies from this table. Leave the
-rest of that file to the Taskmaster. *Done when* every copied file has its row.
+rest of that file to the Taskmaster.
+
+A copy from outside Citadel (a third-party skill, agent or rule, from a plan line or a
+`citadel:skills-survey` handoff) also gets a row in the repo's `THIRD_PARTY.md`, made with its
+licence text if it isn't there, so the scheduled upstream check can read it. One row per copied
+path: `upstream repo | upstream path | pinned commit | path here | licence | copied (unchanged /
+adapted) | date`. *Done when* every copied file has its row.
 
 ### 8. Commit and merge
 

@@ -1,6 +1,6 @@
 // Project checkouts and per-ticket working directories.
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -25,6 +25,23 @@ export function projectDir(dataDir: string, projectId: number): string {
 /** Where every thread and the coordinator of a project share handoffs, specs and notes. Ticket ids are numbers, so "project" never clashes with a ticket's shared folder. */
 export function projectSharedDir(dataDir: string, projectId: number): string {
   return join(projectDir(dataDir, projectId), 'shared', 'project');
+}
+
+/** Every scheme's skills-survey reports (`reports/skills-survey-*.md` in its shared folder), for onboarding's three-month check: the name carries the stack and month. */
+export function surveyReports(dataDir: string): string[] {
+  const ls = (dir: string) => {
+    try {
+      return readdirSync(dir);
+    } catch {
+      return [];
+    }
+  };
+  return ls(join(dataDir, 'projects'))
+    .filter((id) => /^\d+$/.test(id))
+    .flatMap((id) => {
+      const dir = join(projectSharedDir(dataDir, Number(id)), 'reports');
+      return ls(dir).filter((f) => /^skills-survey-.*\.md$/.test(f)).map((f) => join(dir, f));
+    });
 }
 
 export async function removeProjectDir(dataDir: string, projectId: number) {

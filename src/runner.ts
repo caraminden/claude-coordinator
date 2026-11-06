@@ -19,7 +19,7 @@ import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import type { Ship } from './branch.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath } from './sessions.ts';
 import { Lanes } from './lanes.ts';
-import { projectDir, restoreTicketDir } from './workspace.ts';
+import { projectDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { previewKey } from './previews.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { CITADEL_REPLY_MS } from './access.ts';
@@ -648,8 +648,8 @@ const CHAT_FACTS = [
  * `deploys`: the server runs this scheme's code (runsRepo), so tools/deploy.sh and pending-deploy
  * mean something here; elsewhere those lines are left out.
  */
-export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null): string {
-  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir), onboardingPrompt(project, sharedDir), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
+export function systemPrompt(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = []): string {
+  if (ticket.kind === 'coordinator') return [coordinatorPrompt(project, ticketsDir, memoryDir), onboardingPrompt(project, sharedDir, surveys), ...showingFiles(ticket, filesDir, sharedDir), ...instructionLayers(project, appText)].join('\n');
   const where = ticket.branch
     ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
     : 'Your working directory is a dedicated folder for this minion.';
@@ -818,10 +818,11 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
  * part, one setup minion and the first minions. A tune-up (#175) runs the same steps as a diff on what the
  * scheme already has. '' once onboarding is done or skipped.
  */
-export function onboardingPrompt(project: Project, sharedDir: string | null): string {
+export function onboardingPrompt(project: Project, sharedDir: string | null, surveys: string[] = []): string {
   if (!onboardingOpen(project)) return '';
   const record = sharedDir ? join(sharedDir, 'onboarding.md') : 'onboarding.md in the scheme\'s shared folder';
   const steps = `Move \`onboarding\` along with set_project_settings as you go: \`planned\` once the plan card is posted, \`setting-up\` once a person approves it, \`done\` once`;
+  const surveyed = `Skills survey reports so far (the name gives the stack and month): ${surveys.join(', ') || 'none'}.`;
   const scope = 'Throughout: other schemes are read only through `list_catalogue` and the setup minion\'s reads of the files it adapts; never read their memory, and never write outside this scheme.';
   if (project.onboarding_mode === 'tune-up') return [
     `## Tuning up this scheme (onboarding: ${project.onboarding}, tune-up)`,
@@ -835,6 +836,8 @@ export function onboardingPrompt(project: Project, sharedDir: string | null): st
     '- **Retire:** every repo copy the kit now covers (`in_kit`), and skills people say they no longer use, each with why. Nothing is deleted that isn\'t listed here.',
     '- **Instructions:** the edits to the scheme instructions as a line diff, in a ```diff block: `-` and `+` lines with two unchanged lines around each change, never the whole text.',
     '- **Settings and properties:** each change, old → new.',
+    '- **Skills survey:** has one for this stack run in the last 3 months? If not, "Skills survey: a research minion for <stack>, started after Approve", its brief "Follow citadel:skills-survey for <stack>." with the reports below; if so, name that report under Left as is.',
+    surveyed,
     '- **Left as is:** one line on what you checked and are keeping.',
     '- **Done by:** you (instructions, settings, properties, onboarding.md); one setup minion (repo edits), only when the plan touches repo files.',
     'On Revise, post the whole revised plan again.',
@@ -867,6 +870,8 @@ export function onboardingPrompt(project: Project, sharedDir: string | null): st
     '- **Shipping:** the answer to how changes land. For auto-merge or straight to main, also who pushes main to GitHub: the recommended route is a scheme-local `tools/land.sh` the setup minion writes (rebase onto local main, run the check command, fast-forward main, push it to origin, never forced); without one named, main stays local.',
     '- **Repo:** CLAUDE.md with its **Project facts** section drafted (check commands, front end, high-risk files, how a change ships, UI rules, glossary, decisions log, retros), `.claude/settings.json`, guard and pre-push hooks, rules to copy.',
     '- **First minions:** their titles and kinds, started once setup merges.',
+    '- **Skills survey:** "Skills survey: a research minion for <stack>, started with the first minions", its brief "Follow citadel:skills-survey for <stack>." with the reports below; when one under 3 months old already covers the stack, name that report instead.',
+    surveyed,
     '- **Done by:** you (instructions, settings, properties, onboarding.md); one setup minion (repo files, skills); the first minions after it merges.',
     'On Revise, post the whole revised plan again.',
     '',
@@ -1841,7 +1846,7 @@ export class Runner {
     // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
     const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
     // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
-    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id)));
+    writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : []));
     const args = [
       '-p',
       '--input-format', 'stream-json',

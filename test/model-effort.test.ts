@@ -119,6 +119,35 @@ test("a minion's Workflow switch (#359): off by default, set at creation or late
   assert.ok(notes.some((n: string) => /^Cara turned the Workflow tool off for this minion/.test(n)));
 });
 
+test("a minion's plugin picks (#361): from the scheme's optional folders, at creation or later, never on a Taskmaster", async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Plugin picks' } });
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  const offList = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Early', message: 'hi', plugin_dirs: ['tools/plugins/devtools'] } });
+  assert.equal(offList.status, 400, 'nothing is optional yet');
+  assert.match(offList.data.error, /no optional plugin folders/);
+  assert.equal((await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { optional_plugin_dirs: 'tools/plugins/devtools\ntools/plugins/lsp' } })).data.optional_plugin_dirs, 'tools/plugins/devtools\ntools/plugins/lsp');
+
+  const plain = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Plain', message: 'hi' } });
+  assert.equal(plain.data.plugin_dirs, '');
+  const ui = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'UI', message: 'hi', plugin_dirs: ['tools/plugins/devtools'] } });
+  assert.equal(ui.status, 201);
+  assert.equal(ui.data.plugin_dirs, 'tools/plugins/devtools');
+
+  assert.equal((await call(`/api/tickets/${plain.data.id}`, { method: 'PATCH', body: { plugin_dirs: ['tools/plugins/lsp', 'tools/plugins/devtools'] } })).data.plugin_dirs, 'tools/plugins/lsp\ntools/plugins/devtools');
+  const bad = await call(`/api/tickets/${plain.data.id}`, { method: 'PATCH', body: { plugin_dirs: ['/home'] } });
+  assert.equal(bad.status, 400);
+  assert.match(bad.data.error, /not one of this scheme's optional plugin folders/);
+  assert.equal((await call(`/api/tickets/${plain.data.id}`, { method: 'PATCH', body: { plugin_dirs: null } })).data.plugin_dirs, '');
+  const tm = await call(`/api/tickets/${page.coordinator.id}`, { method: 'PATCH', body: { plugin_dirs: ['tools/plugins/devtools'] } });
+  assert.equal(tm.status, 400);
+  assert.match(tm.data.error, /Only minions/);
+  const notes = (await call(`/api/tickets/${plain.data.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  assert.ok(notes.some((n: string) => /^Cara set this minion's extra plugin folders to tools\/plugins\/lsp, tools\/plugins\/devtools from (now on|the next turn)\.$/.test(n)), notes.join('\n'));
+  assert.ok(notes.some((n: string) => /^Cara took this minion's extra plugin folders off/.test(n)));
+  const tmNotes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  assert.ok(tmNotes.includes("Cara set the optional plugin folders to: tools/plugins/devtools, tools/plugins/lsp. Minions load them only when they pick them, from their next turn."), tmNotes.join('\n'));
+});
+
 test("the Taskmaster's create_ticket and update_ticket pass model and effort on", async () => {
   const bodies: { method: string; path: string; body: any }[] = [];
   const api = createHttpServer((req, res) => {
@@ -148,19 +177,20 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
       replies.set(++rid, (x) => r(x.result));
       mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: rid, method: 'tools/call', params: { name, arguments: args } }) + '\n');
     });
-    const created = await tool('create_ticket', { title: 'T', properties: { type: 'chore' }, message: 'go', model: 'claude-haiku-5-5', effort: 'low', workflow: true });
+    const created = await tool('create_ticket', { title: 'T', properties: { type: 'chore' }, message: 'go', model: 'claude-haiku-5-5', effort: 'low', workflow: true, plugin_folders: ['tools/plugins/devtools'] });
     assert.ok(!created.isError, created.content[0].text);
     assert.match(created.content[0].text, /model: claude-haiku-5-5 \| effort: low/);
     const updated = await tool('update_ticket', { ticket_id: 4, effort: 'high' });
     assert.ok(!updated.isError, updated.content[0].text);
-    const switched = await tool('update_ticket', { ticket_id: 4, workflow: false });
+    const switched = await tool('update_ticket', { ticket_id: 4, workflow: false, plugin_folders: [] });
     assert.ok(!switched.isError, switched.content[0].text);
     assert.deepEqual(bodies.map((b) => `${b.method} ${b.path}`), ['POST /api/projects/2/tickets', 'GET /api/projects/2', 'PATCH /api/tickets/40', 'GET /api/projects/2', 'PATCH /api/tickets/40']);
     assert.equal(bodies[0].body.model, 'claude-haiku-5-5');
     assert.equal(bodies[0].body.effort, 'low');
     assert.equal(bodies[0].body.workflow, true);
+    assert.deepEqual(bodies[0].body.plugin_dirs, ['tools/plugins/devtools']);
     assert.deepEqual(bodies[2].body, { effort: 'high' }, 'what is left out stays');
-    assert.deepEqual(bodies[4].body, { workflow: false }, 'false is sent, not dropped');
+    assert.deepEqual(bodies[4].body, { workflow: false, plugin_dirs: [] }, 'false and [] are sent, not dropped');
   } finally {
     mcp.kill();
     api.close();

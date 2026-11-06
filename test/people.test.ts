@@ -192,6 +192,10 @@ test('people make their own schemes, add others to them, and see nothing else', 
   assert.equal((await as('Josh', `/api/projects/${josh.data.id}`, { plugin_dirs: '/home' }, 'PATCH')).status, 403);
   assert.equal((await as('Josh', `/api/projects/${josh.data.id}`, { plugin_dirs: '', approval_rules: 'Bash(rm:*)' }, 'PATCH')).status, 200);
   assert.equal((await as('Cara', `/api/projects/${josh.data.id}`, { plugin_dirs: 'tools/mods' }, 'PATCH')).status, 200);
+  // The optional ones (#361) too: a minion picks only from what an admin registered.
+  assert.equal((await as('Josh', `/api/projects/${josh.data.id}`, { optional_plugin_dirs: '/home' }, 'PATCH')).status, 403);
+  assert.equal((await as('Cara', `/api/projects/${josh.data.id}`, { optional_plugin_dirs: 'tools/plugins/devtools' }, 'PATCH')).status, 200);
+  assert.equal((await as('Josh', `/api/projects/${josh.data.id}`, { optional_plugin_dirs: 'tools/plugins/devtools' }, 'PATCH')).status, 200, 'unchanged is not a change');
 
   // Josh adds Olive: she sees it, but only its owner changes its settings or members.
   assert.equal((await as('Olive', `/api/projects/${josh.data.id}/members`, { person: people.Josh.id })).status, 404);

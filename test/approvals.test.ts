@@ -6,7 +6,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
-import { APPROVAL_TOOL, Approvals, cleanPluginDirs, cleanRules, permissionArgs, pluginDirArgs, unsettledCards } from '../src/approvals.ts';
+import { APPROVAL_TOOL, Approvals, cleanPluginDirs, cleanPluginPicks, cleanRules, permissionArgs, pluginDirArgs, turnPluginDirs, unsettledCards } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { stopTurns } from './helpers.ts';
@@ -49,6 +49,27 @@ test('--plugin-dir only for folders that exist, in the worktree or at their abso
   writeFileSync(join(wt, 'file'), '');
   assert.deepEqual(pluginDirArgs(['tools/mods/delve', 'missing', 'file', outside, join(root, 'gone')], wt), ['--plugin-dir', join(wt, 'tools/mods/delve'), '--plugin-dir', outside]);
   assert.deepEqual(pluginDirArgs([], wt), []);
+});
+
+test("a minion's plugin picks (#361) come only from its scheme's optional folders", () => {
+  const optional = 'tools/plugins/devtools\ntools/plugins/lsp';
+  assert.equal(cleanPluginPicks(['tools/plugins/devtools/', './tools/plugins/lsp'], optional), 'tools/plugins/devtools\ntools/plugins/lsp', 'normalised like the scheme lists');
+  assert.equal(cleanPluginPicks(null, optional), '');
+  assert.equal(cleanPluginPicks([], optional), '');
+  assert.equal(cleanPluginPicks('', optional), '');
+  assert.throws(() => cleanPluginPicks(['/home'], optional), /not one of this scheme's optional plugin folders/);
+  assert.throws(() => cleanPluginPicks(['tools/plugins/devtools'], ''), /no optional plugin folders/);
+  assert.throws(() => cleanPluginPicks([3], optional), /list of text lines/);
+});
+
+test("a turn loads the scheme's folders, then its minion's picks that are still optional; a Taskmaster neither", () => {
+  const project = { plugin_dirs: 'tools/mods/delve', optional_plugin_dirs: 'tools/plugins/devtools\ntools/mods/delve' };
+  const minion = (plugin_dirs: string) => ({ kind: 'ticket', plugin_dirs });
+  assert.deepEqual(turnPluginDirs(project, minion('')), ['tools/mods/delve']);
+  assert.deepEqual(turnPluginDirs(project, minion('tools/plugins/devtools\ntools/mods/delve')), ['tools/mods/delve', 'tools/plugins/devtools'], 'once each');
+  // An admin took it off the optional list: the stored pick stays but no longer loads.
+  assert.deepEqual(turnPluginDirs({ plugin_dirs: '', optional_plugin_dirs: '' }, minion('tools/plugins/devtools')), []);
+  assert.deepEqual(turnPluginDirs(project, { kind: 'coordinator', plugin_dirs: 'tools/plugins/devtools' }), []);
 });
 
 // ---------- cards ----------
@@ -241,8 +262,9 @@ process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const store = new Store(join(root, 'test.db'));
 const runner = new Runner(store, () => {}, () => ({}), fake);
 
-async function turn(projectId: number, mkdirs: string[] = []) {
+async function turn(projectId: number, mkdirs: string[] = [], picks = '') {
   const t = store.createTicket({ project_id: projectId, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  if (picks) store.updateTicket(t.id, { plugin_dirs: picks });
   const cwd = join(root, `ticket-${t.id}`);
   for (const d of mkdirs) mkdirSync(join(cwd, d), { recursive: true });
   mkdirSync(cwd, { recursive: true });
@@ -277,6 +299,15 @@ test('a project without rules or plugins still sends a minion\'s prompts to card
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /"ask":true/);
   assert.ok(Number(t.timeout) >= 24 * 3600_000);
   assert.equal(t.approvals, '1');
+  await finish(t.id);
+});
+
+test("a minion's picked plugin folders reach its turn after the scheme's (#361)", async () => {
+  const ui = store.createProject('UI', null);
+  store.setProjectSettings(ui.id, { plugin_dirs: 'tools/mods/ui', optional_plugin_dirs: 'tools/plugins/devtools\ntools/plugins/lsp' });
+  const t = await turn(ui.id, ['tools/mods/ui', 'tools/plugins/devtools', 'tools/plugins/lsp'], 'tools/plugins/devtools');
+  const plugins = t.args.filter((_: string, i: number) => t.args[i - 1] === '--plugin-dir');
+  assert.deepEqual(plugins.slice(1), [join(t.cwd, 'tools/mods/ui'), join(t.cwd, 'tools/plugins/devtools')], 'not the folder it did not pick');
   await finish(t.id);
 });
 

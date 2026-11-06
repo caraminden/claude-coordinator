@@ -413,7 +413,51 @@ function modelPicker(chatId) {
   // Workflow (#359): off by default, as the tool adds ~2k tokens to every call; the Taskmaster never gets it.
   const workflow = h('select', { class: 'picker', id: 'workflow-picker', onchange: save('workflow') },
     h('option', { value: '' }, 'Workflow off'), h('option', { value: 'on' }, 'Workflow on'));
-  return h('span', { class: 'pickers' }, model, effort, workflow);
+  return h('span', { class: 'pickers' }, model, effort, workflow, pluginPicker(chatId));
+}
+
+/** The folder's last part, the name people know a plugin by ("tools/plugins/devtools" → "devtools"). */
+const pluginName = (dir) => dir.replace(/\/+$/, '').split('/').pop();
+
+/**
+ * Plugins (#361): which of the scheme's optional plugin folders this minion loads, as a checkbox per
+ * folder in a menu over the button. Shown only on a minion in a scheme that has optional folders.
+ */
+function pluginPicker(chatId) {
+  const button = h('button', { type: 'button', class: 'picker plugin-button', id: 'plugin-picker', 'aria-haspopup': 'true', 'aria-expanded': 'false', hidden: true });
+  const menu = h('div', { class: 'plugin-menu', id: 'plugin-menu', hidden: true });
+  const wrap = h('span', { class: 'plugin-picker', id: 'plugin-picker-wrap', hidden: true }, button, menu);
+  const close = () => {
+    menu.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+  };
+  button.addEventListener('click', () => {
+    if (!menu.hidden) return close();
+    menu.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    menu.querySelector('input')?.focus();
+  });
+  wrap.addEventListener('focusout', (e) => !wrap.contains(e.relatedTarget) && close());
+  wrap.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !menu.hidden) {
+      close();
+      button.focus();
+    }
+  });
+  menu.addEventListener('change', async () => {
+    const boxes = [...menu.querySelectorAll('input')];
+    const picks = boxes.filter((b) => b.checked).map((b) => b.value);
+    for (const b of boxes) b.disabled = true;
+    try {
+      const ticket = await api(`api/tickets/${chatId}`, { method: 'PATCH', body: { plugin_dirs: picks } });
+      if (view?.kind === 'project' && view.id === chatId) view.ticket = ticket;
+    } catch (err) {
+      alertNote(err.message);
+    } finally {
+      renderModelPicker();
+    }
+  });
+  return wrap;
 }
 
 /**
@@ -452,4 +496,24 @@ export function renderModelPicker() {
   workflow.classList.toggle('is-default', !t.workflow);
   workflow.title = `${t.workflow ? 'This minion can use the Workflow tool' : 'Workflow tool off for this minion'}: turning it on adds ~2k tokens to every call, and a change breaks the prompt cache once${later}`;
   workflow.setAttribute('aria-label', workflow.title);
+  renderPluginPicker(t, later);
+}
+
+function renderPluginPicker(t, later) {
+  const wrap = document.getElementById('plugin-picker-wrap');
+  const button = document.getElementById('plugin-picker');
+  const menu = document.getElementById('plugin-menu');
+  if (!wrap || !button || !menu) return;
+  const offered = t.optional_plugin_dirs ?? [];
+  // A pick an admin has since taken off the list no longer loads, so it isn't shown as on.
+  const picked = (t.plugin_dirs ? t.plugin_dirs.split('\n') : []).filter((d) => offered.includes(d));
+  wrap.hidden = button.hidden = t.kind === 'coordinator' || !offered.length;
+  button.textContent = !picked.length ? 'No plugins' : picked.length === 1 ? pluginName(picked[0]) : `${picked.length} plugins`;
+  button.classList.toggle('is-default', !picked.length);
+  button.title = `${picked.length ? `Extra plugins for this minion: ${picked.map(pluginName).join(', ')}` : 'No extra plugins for this minion'}: each costs tokens and memory on every turn, and a change breaks the prompt cache once${later}`;
+  button.setAttribute('aria-label', button.title);
+  const focused = menu.contains(document.activeElement) ? document.activeElement.value : null;
+  menu.replaceChildren(h('p', { class: 'muted small' }, 'Extra plugins for this minion'),
+    ...offered.map((d) => h('label', { title: d }, h('input', { type: 'checkbox', value: d, checked: picked.includes(d) }), ` ${pluginName(d)}`)));
+  if (focused) menu.querySelector(`input[value="${CSS.escape(focused)}"]`)?.focus();
 }

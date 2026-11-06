@@ -10,7 +10,7 @@ import { APP_NAME } from './appname.ts';
 import { AGENT_NAME } from './auth.ts';
 import { askerKey, onboardingOpen, type EventRow, type Machine, type Project, type Store, type Ticket } from './db.ts';
 import { WS_SUFFIX, type MachineServer } from './machines.ts';
-import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, type Go } from './approvals.ts';
+import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, turnPluginDirs, type Go } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
 import type { TurnGithub } from './github-link.ts';
 import { SENT_BACK } from './link-check.ts';
@@ -1090,6 +1090,8 @@ export class Runner {
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
       // What "Default" means in the composer: the effort a turn gets when the ticket has none of its own.
       default_effort: turnSettings({ ...ticket, effort: null }, this.store.getProject(ticket.project_id) ?? { default_effort: '' }).effort,
+      // What the composer's Plugins picker offers (#361): the scheme's optional plugin folders, for a minion.
+      optional_plugin_dirs: ticket.kind === 'coordinator' ? [] : lines(this.store.getProject(ticket.project_id)?.optional_plugin_dirs),
     };
   }
 
@@ -1915,7 +1917,7 @@ export class Runner {
     args.push('--settings', join(dir, 'settings.json'));
     if (addDirs.length) args.push('--add-dir', ...addDirs);
     if (existsSync(pinned(KIT))) args.push('--plugin-dir', pinned(KIT));
-    if (ticket.kind !== 'coordinator') args.push(...pluginDirArgs(lines(project.plugin_dirs), ticket.cwd));
+    args.push(...pluginDirArgs(turnPluginDirs(project, ticket), ticket.cwd));
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.

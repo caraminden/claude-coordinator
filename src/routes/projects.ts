@@ -2,7 +2,7 @@
 // search, and one Taskmaster writing to another's.
 import { mkdir, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { cleanPluginDirs, cleanRules, lines } from '../approvals.ts';
+import { cleanPluginDirs, cleanPluginPicks, cleanRules, lines } from '../approvals.ts';
 import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
@@ -209,7 +209,7 @@ function visibleSchemes(store: App['store'], who: { uid?: number; admin?: boolea
 }
 
 // What one line of list_tickets shows (ticketLine in src/mcp.ts), and all a minion gets of another.
-const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'workflow', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'parent', 'last_activity'] as const;
+const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'workflow', 'plugin_dirs', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'parent', 'last_activity'] as const;
 
 export const projectRoutes: Route[] = [
   {
@@ -410,12 +410,12 @@ export const projectRoutes: Route[] = [
     method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER, access: 'owner',
     async handler({ req, res, app, session, caller, project }) {
       const { store, runner } = app;
-      // Any of name, instructions, approval_rules, plugin_dirs, default_effort, machine_tools, onboarding, onboarding_mode and list_groups; what is left out stays.
+      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, machine_tools, onboarding, onboarding_mode and list_groups; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'default_effort', 'machine_tools', 'onboarding', 'onboarding_mode', 'list_groups'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'machine_tools', 'onboarding', 'onboarding_mode', 'list_groups'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'default_effort' | 'machine_tools' | 'onboarding' | 'onboarding_mode' | 'list_groups'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'machine_tools' | 'onboarding' | 'onboarding_mode' | 'list_groups'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -432,12 +432,15 @@ export const projectRoutes: Route[] = [
       try {
         if (body.approval_rules !== undefined) settings.approval_rules = cleanRules(body.approval_rules);
         if (body.plugin_dirs !== undefined) settings.plugin_dirs = cleanPluginDirs(body.plugin_dirs);
+        if (body.optional_plugin_dirs !== undefined) settings.optional_plugin_dirs = cleanPluginDirs(body.optional_plugin_dirs);
         if (body.list_groups !== undefined) settings.list_groups = JSON.stringify(store.props.listGroups(project.id, body.list_groups));
       } catch (err: any) {
         throw new HttpError(400, err.message);
       }
       // Plugins load code from any folder on the server: an admin's, or an admin's scheme's Taskmaster's.
-      if (settings.plugin_dirs !== undefined && settings.plugin_dirs !== (project.plugin_dirs ?? '') && !session.admin) {
+      // The optional ones too (#361): a minion picks from them without an admin, so registering one is the gate.
+      const pluginsChanged = (['plugin_dirs', 'optional_plugin_dirs'] as const).some((k) => settings[k] !== undefined && settings[k] !== (project[k] ?? ''));
+      if (pluginsChanged && !session.admin) {
         if (!caller || !lendsMachines(store, project)) throw new HttpError(403, 'Only an admin can change plugin folders');
         const refused = adminAskRefusal(store, caller.id);
         if (refused) throw new HttpError(403, refused);
@@ -468,6 +471,9 @@ export const projectRoutes: Route[] = [
         }
         if (coordinator && settings.plugin_dirs !== undefined) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} set the plugin folders to: ${shown(settings.plugin_dirs)}. They apply from each minion's next turn.` });
+        }
+        if (coordinator && settings.optional_plugin_dirs !== undefined) {
+          runner.emit(coordinator.id, 'note', { text: `${session.name} set the optional plugin folders to: ${shown(settings.optional_plugin_dirs)}. Minions load them only when they pick them, from their next turn.` });
         }
         if (coordinator && settings.default_effort !== undefined) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });
@@ -571,6 +577,12 @@ export const projectRoutes: Route[] = [
       const model = oneOf(body.model ?? null, MODELS, 'Model');
       const effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
       const workflow = body.workflow == null ? 0 : workflowSwitch(body.workflow);
+      let plugins = '';
+      try {
+        plugins = cleanPluginPicks(body.plugin_dirs, project.optional_plugin_dirs);
+      } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
       // Properties are checked before the minion exists, so a bad one doesn't leave half a minion.
       const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
       if (typeof props !== 'object' || Array.isArray(props)) throw new HttpError(400, 'properties must be an object of key: value');
@@ -608,7 +620,7 @@ export const projectRoutes: Route[] = [
       const { id, notes } = await app.newMinion(project, { title, props, model, effort }, session.name)
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
-      store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}) });
+      store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
       if (build) {
         store.updateTicket(id, { build });
         store.props.setBuild(id, build, session.name);

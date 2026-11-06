@@ -54,6 +54,28 @@ export function cleanPluginDirs(raw: unknown): string {
 }
 
 /**
+ * Validate a minion's plugin picks (#361): folders from its scheme's optional list, as stored ('' for none).
+ * Registering a folder there is admin-only (src/routes/projects.ts), so a pick never names a new path.
+ */
+export function cleanPluginPicks(raw: unknown, optional: string): string {
+  if (raw == null || raw === '') return '';
+  const picks = cleanPluginDirs(raw);
+  const allowed = lines(optional);
+  for (const d of lines(picks)) {
+    if (!allowed.length) throw new Error('This scheme has no optional plugin folders to pick from; an admin adds them in its settings');
+    if (!allowed.includes(d)) throw new Error(`"${d.slice(0, 80)}" is not one of this scheme's optional plugin folders: ${allowed.join(', ')}`);
+  }
+  return picks;
+}
+
+/** The plugin folders a turn loads besides the kit: its scheme's, then its minion's picks still on the optional list. A Taskmaster loads none. */
+export function turnPluginDirs(project: { plugin_dirs: string; optional_plugin_dirs: string }, ticket: { kind: string; plugin_dirs: string }): string[] {
+  if (ticket.kind === 'coordinator') return [];
+  const optional = lines(project.optional_plugin_dirs);
+  return [...new Set([...lines(project.plugin_dirs), ...lines(ticket.plugin_dirs).filter((d) => optional.includes(d))])];
+}
+
+/**
  * Permission flags for a turn. A minion's prompts go to the approval tool: the tripwire's asks, and
  * the project's approval rules, which the runner adds as `ask` rules to the turn's settings (Claude
  * Code still checks those in bypassPermissions). The tool shows a card for those and refuses any

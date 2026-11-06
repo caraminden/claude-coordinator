@@ -134,7 +134,7 @@ export function onProjectUpdate(project) {
   view.projects = view.projects.map((p) => (p.id === project.id ? { ...p, name: project.name } : p));
   if (view.projectId !== project.id) return;
   view.project = project;
-  for (const [id, key] of [['approval-rules', 'approval_rules'], ['plugin-dirs', 'plugin_dirs'], ['list-groups', 'list_groups']]) {
+  for (const [id, key] of [['approval-rules', 'approval_rules'], ['plugin-dirs', 'plugin_dirs'], ['optional-plugin-dirs', 'optional_plugin_dirs'], ['list-groups', 'list_groups']]) {
     const el = document.getElementById(id);
     if (el && !el.hasAttribute('data-draft')) el.value = settingText(project, key);
   }
@@ -294,17 +294,19 @@ export function approvalsEditor() {
   };
   const rules = field('approval-rules', 'approval_rules', 'Bash(gh pr merge:*)\nmcp__*__merge_pull_request');
   const dirs = field('plugin-dirs', 'plugin_dirs', 'tools/mods/delve');
+  const optional = field('optional-plugin-dirs', 'optional_plugin_dirs', 'tools/plugins/devtools');
+  optional.rows = 3;
   const groups = field('list-groups', 'list_groups', 'area: balance');
   groups.rows = 3;
   // Plugins load code from any folder on the server, so only an admin changes them.
-  dirs.readOnly = !account?.admin;
+  dirs.readOnly = optional.readOnly = !account?.admin;
   const status = h('span', { class: 'muted', role: 'status' });
   const save = h('button', { type: 'button' }, 'Save');
   const discard = h('button', { type: 'button', class: 'secondary' }, 'Discard');
   const same = (a, b) => splitLines(a).join('\n') === splitLines(b).join('\n');
   const sync = () => {
     let dirty = false;
-    for (const [t, key] of [[rules, 'approval_rules'], [dirs, 'plugin_dirs'], [groups, 'list_groups']]) {
+    for (const [t, key] of [[rules, 'approval_rules'], [dirs, 'plugin_dirs'], [optional, 'optional_plugin_dirs'], [groups, 'list_groups']]) {
       // Marked as a draft only while it differs, so someone else's save still shows otherwise.
       const d = !same(t.value, settingText(view.project, key));
       t.toggleAttribute('data-draft', d);
@@ -312,7 +314,7 @@ export function approvalsEditor() {
     }
     save.disabled = discard.disabled = !dirty;
   };
-  for (const t of [rules, dirs, groups]) t.addEventListener('input', () => {
+  for (const t of [rules, dirs, optional, groups]) t.addEventListener('input', () => {
     status.textContent = '';
     sync();
   });
@@ -320,12 +322,13 @@ export function approvalsEditor() {
     save.disabled = true;
     status.textContent = 'Saving…';
     try {
-      const body = { approval_rules: rules.value, plugin_dirs: dirs.value };
+      const body = { approval_rules: rules.value, plugin_dirs: dirs.value, optional_plugin_dirs: optional.value };
       // Only when edited: a group whose value was archived since mustn't block saving the rules.
       if (!same(groups.value, settingText(view.project, 'list_groups'))) body.list_groups = splitLines(groups.value);
       view.project = await api(`api/projects/${p.id}`, { method: 'PATCH', body });
       rules.value = view.project.approval_rules;
       dirs.value = view.project.plugin_dirs;
+      optional.value = view.project.optional_plugin_dirs ?? '';
       groups.value = settingText(view.project, 'list_groups');
       renderSidebar();
       status.textContent = 'Saved. Minions pick this up on their next turn.';
@@ -337,6 +340,7 @@ export function approvalsEditor() {
   discard.onclick = () => {
     rules.value = view.project.approval_rules ?? '';
     dirs.value = view.project.plugin_dirs ?? '';
+    optional.value = view.project.optional_plugin_dirs ?? '';
     groups.value = settingText(view.project, 'list_groups');
     status.textContent = '';
     sync();
@@ -358,6 +362,10 @@ export function approvalsEditor() {
       'Folders relative to the repo root, one per line, like ', h('code', {}, 'tools/mods/delve'),
       ', or absolute paths. Each minion loads the ones that exist (relative ones in its worktree) as Claude Code plugins (', h('code', {}, '--plugin-dir'), ').', account?.admin ? '' : ' Only an admin changes these.'),
     dirs,
+    h('h3', { class: 'settings-label' }, 'Optional plugin folders'),
+    h('p', { class: 'muted small' },
+      'Folders as above that a minion loads only when it picks them: the Taskmaster when it starts the minion, or the Plugins picker beside its Send button. For plugins too costly for every minion, like ', h('code', {}, 'tools/plugins/devtools'), '.', account?.admin ? '' : ' Only an admin changes these.'),
+    optional,
     h('h3', { class: 'settings-label' }, 'List groups'),
     h('p', { class: 'muted small' },
       'Values of this scheme\'s own properties, one per line, like ', h('code', {}, 'area: balance'),

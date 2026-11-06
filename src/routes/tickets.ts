@@ -2,7 +2,7 @@
 // may do to it. Who may call each route is its `who` (src/http.ts).
 import { randomBytes } from 'node:crypto';
 import { isAbsolute, join, sep } from 'node:path';
-import { lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
+import { cleanPluginPicks, lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { commentMessage, optionImageProblem } from '../artifacts.ts';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
@@ -18,6 +18,16 @@ import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { ensureCoordinator } from './projects.ts';
+
+/** A minion's plugin picks (#361) as stored, from its scheme's optional folders; a Taskmaster loads none. */
+function pluginPicks(store: App['store'], ticket: { kind: string; project_id: number }, v: unknown): string {
+  if (ticket.kind === 'coordinator') throw new HttpError(400, 'Only minions pick plugin folders');
+  try {
+    return cleanPluginPicks(v, store.getProject(ticket.project_id)?.optional_plugin_dirs ?? '');
+  } catch (err: any) {
+    throw new HttpError(400, err.message);
+  }
+}
 
 // How long one wait for an approval card's outcome holds the request open.
 const APPROVAL_POLL_MS = 25_000;
@@ -113,11 +123,12 @@ export const ticketRoutes: Route[] = [
       const { req, res, app, session, caller, ticket } = ctx;
       const { id } = ticket;
       const { store, runner } = app;
-      // Any of title, state, note, replies, build, model, effort and workflow; null (or "") clears all but the title.
+      // Any of title, state, note, replies, build, model, effort, workflow and plugin_dirs; null (or "") clears all but the title.
       const body = await readJson(req);
-      const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'workflow'>> = {};
+      const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'workflow' | 'plugin_dirs'>> = {};
       if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
       if (body.workflow !== undefined) fields.workflow = workflowSwitch(body.workflow, ticket);
+      if (body.plugin_dirs !== undefined) fields.plugin_dirs = pluginPicks(store, ticket, body.plugin_dirs);
       if (body.effort !== undefined) fields.effort = oneOf(body.effort, EFFORTS, 'Effort');
       if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
       if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
@@ -142,6 +153,10 @@ export const ticketRoutes: Route[] = [
         if ('model' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.model ? modelName(fields.model) : 'the default model'} ${next}.` });
         if ('effort' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.effort ? `${fields.effort} effort` : 'the default effort'} ${next}.` });
         if ('workflow' in fields) runner.emit(id, 'note', { text: `${who} turned the Workflow tool ${fields.workflow ? 'on' : 'off'} for this minion ${next}.` });
+        if ('plugin_dirs' in fields) {
+          const text = fields.plugin_dirs ? `set this minion's extra plugin folders to ${lines(fields.plugin_dirs).join(', ')}` : "took this minion's extra plugin folders off";
+          runner.emit(id, 'note', { text: `${who} ${text} ${next}.` });
+        }
         runner.broadcastTicket(id);
         // A result or a blocker is worth a ping; whoever set it by hand already knows.
         if (fields.state && NOTIFY_STATES[fields.state]) {

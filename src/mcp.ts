@@ -69,6 +69,12 @@ const WORKFLOW = {
   description: "true lets the minion's turns call Claude Code's Workflow tool (scripted fan-out of agents), as in its composer; off by default, since it adds about 2k tokens to every API call. Set it when creating the minion: flipping it later breaks its prompt cache once.",
 };
 
+const PLUGIN_FOLDERS = {
+  type: ['array', 'null'],
+  items: { type: 'string' },
+  description: "Extra plugin folders this minion loads on top of its scheme's, picked from the scheme's optional plugin folders (get_project_settings lists them), e.g. Chrome DevTools for UI work. Each costs tokens and memory on every turn, so pick one only when the work needs it. Set it when creating the minion: changing it later breaks its prompt cache once. [] or null clears them.",
+};
+
 const PROPERTIES = {
   type: 'object',
   description:
@@ -276,6 +282,7 @@ const TOOLS = [
         model: MODEL,
         effort: EFFORT,
         workflow: WORKFLOW,
+        plugin_folders: PLUGIN_FOLDERS,
       },
       // properties is asked for but not required, so a client holding an older schema isn't refused before the fallback below.
       required: ['title', 'message'],
@@ -309,10 +316,10 @@ const TOOLS = [
   },
   {
     name: 'update_ticket',
-    description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort or Workflow switch; leave out what should stay. A new model, effort or switch applies from its next turn. (The branch keeps its original name.)",
+    description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort, Workflow switch or extra plugin folders; leave out what should stay. A new model, effort, switch or folder applies from its next turn. (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: BUILD, model: MODEL, effort: EFFORT, workflow: WORKFLOW },
+      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: BUILD, model: MODEL, effort: EFFORT, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
       required: ['ticket_id'],
     },
   },
@@ -467,13 +474,13 @@ const TOOLS = [
   {
     name: 'get_project_settings',
     description:
-      "Read the scheme's approval rules (Claude Code permission rules a minion must get a person's OK for, via an Approve / Deny card in its chat), plugin folders (folders in the repo every minion loads as Claude Code plugins) and default effort (what a minion without its own effort runs at).",
+      "Read the scheme's approval rules (Claude Code permission rules a minion must get a person's OK for, via an Approve / Deny card in its chat), plugin folders (folders in the repo every minion loads as Claude Code plugins), optional plugin folders (loaded only by a minion that picks them, with create_ticket's plugin_folders) and default effort (what a minion without its own effort runs at).",
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'set_project_settings',
     description:
-      'Replace the approval rules, plugin folders, default effort, machine tools switch and/or onboarding step; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
+      'Replace the approval rules, plugin folders, optional plugin folders, default effort, machine tools switch and/or onboarding step; leave out what should stay, and send the whole new list, not just the change (an empty list clears it). They apply from each minion\'s next turn. Only change them when people ask, or (onboarding) as setup moves along.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -486,6 +493,11 @@ const TOOLS = [
           type: 'array',
           items: { type: 'string' },
           description: 'Folder paths relative to the repo root, e.g. "tools/mods/delve", or absolute. Each is loaded with --plugin-dir when it exists (a relative one in the minion\'s worktree).',
+        },
+        optional_plugin_folders: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Plugin folders, as plugin_folders, that a minion loads only when it picks them (create_ticket or update_ticket plugin_folders, or its composer): for plugins too costly for every minion, like Chrome DevTools. Admin-only, as plugin_folders.',
         },
         default_effort: { ...EFFORT, description: "Effort for every minion's turns that has none of its own. null leaves it to Claude Code's default." },
         machine_tools: { type: 'boolean', description: "Whether this scheme's minions get the connected machines' MCP tools (Godot editors and the like). Off saves ~1.1k tokens a call in schemes that never use them." },
@@ -797,6 +809,7 @@ function ticketLine(t: any): string {
     t.model ? `model: ${t.model}` : '',
     t.effort ? `effort: ${t.effort}` : '',
     t.workflow ? 'workflow: on' : '',
+    t.plugin_dirs ? `plugins: ${t.plugin_dirs.split('\n').join(', ')}` : '',
     `status: ${t.status}${t.state ? `, ${t.state}` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
     t.note ? `note: ${t.note}` : '',
     t.branch ? `branch: ${t.branch}` : '',
@@ -1031,6 +1044,7 @@ async function runTool(name: string, args: any): Promise<string> {
         model: args.model ?? null,
         effort: args.effort ?? null,
         workflow: args.workflow ?? null,
+        plugin_dirs: args.plugin_folders,
       });
       const fallback = untyped ? [`No type was given, so it is type: other for now. Set the right one with set_properties (ticket_id ${t.number}), and pass properties: { type: … } to create_ticket next time.`] : [];
       return [`Created ${ticketLine(t)}`, ...(t.notes ?? []), ...fallback].join('\n') + tagNote(args);
@@ -1073,20 +1087,21 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'get_project_settings': {
       const { project } = await call('GET', `/api/projects/${PROJECT}`);
       const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
-      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders:\n${show(project.plugin_dirs)}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nMachine tools for minions: ${project.machine_tools ? 'on' : 'off'}`;
+      return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nMachine tools for minions: ${project.machine_tools ? 'on' : 'off'}`;
     }
     case 'set_project_settings': {
       const body: Record<string, unknown> = {};
       if (args.approval_rules !== undefined) body.approval_rules = args.approval_rules;
       if (args.plugin_folders !== undefined) body.plugin_dirs = args.plugin_folders;
+      if (args.optional_plugin_folders !== undefined) body.optional_plugin_dirs = args.optional_plugin_folders;
       if (args.default_effort !== undefined) body.default_effort = args.default_effort;
       if (args.machine_tools !== undefined) body.machine_tools = args.machine_tools;
       if (args.onboarding !== undefined) body.onboarding = args.onboarding;
       if (args.onboarding_mode !== undefined) body.onboarding_mode = args.onboarding_mode;
-      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, default_effort, machine_tools, onboarding, onboarding_mode or a mix');
+      if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, default_effort, machine_tools, onboarding, onboarding_mode or a mix');
       const project = await call('PATCH', `/api/projects/${PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
-      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), default effort ${project.default_effort || "Claude Code's default"}, machine tools ${project.machine_tools ? 'on' : 'off'}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.`;
+      return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), default effort ${project.default_effort || "Claude Code's default"}, machine tools ${project.machine_tools ? 'on' : 'off'}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.`;
     }
     case 'approve':
       return approve(args);
@@ -1171,8 +1186,8 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':
-      if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow'], 'update_ticket');
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow }))}${tagNote(args)}`;
+      if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
+      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}${tagNote(args)}`;
     case 'ask_question': {
       const { id: questionId } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
       return `The question card (id ${questionId}) is in the chat. End your turn now with a short reply; the answers will come as the next message.`;

@@ -163,6 +163,7 @@ test('admin-only routes refuse a Taskmaster turn a non-admin asked for, even one
     ['GET', '/api/contraptions'],
     ['PUT', '/api/app/instructions', { text: 'Be nice.' }],
     ['PATCH', `/api/projects/${Citadel.id}`, { plugin_dirs: ['tools/mods/sneaky'] }],
+    ['PATCH', `/api/projects/${Citadel.id}`, { optional_plugin_dirs: ['tools/mods/sneaky'] }],
   ] as const;
   // Every turn runs as Cara here; only who asked changes.
   store.updateTicket(CitadelTM.id, { person_id: Cara.id });
@@ -183,6 +184,7 @@ test('admin-only routes refuse a Taskmaster turn a non-admin asked for, even one
   assert.equal(store.turnAsker(made.body.id), Josh.id);
   assert.equal(store.appInstructions().text, '');
   assert.equal(store.getProject(Citadel.id)!.plugin_dirs ?? '', '');
+  assert.equal(store.getProject(Citadel.id)!.optional_plugin_dirs ?? '', '');
 
   // Cara asked: unchanged.
   askedBy(Cara);

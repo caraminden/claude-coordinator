@@ -226,16 +226,20 @@ rest of that file to the Taskmaster.
 
 A copy from outside Citadel (a third-party skill, agent or rule, from a plan line or a
 `citadel:skills-survey` handoff) also gets a row in the repo's `THIRD_PARTY.md`, so the scheduled
-upstream check can read it. Make the file when it isn't there, with this table and, below it, each
-licence's full text:
+upstream check (`citadel:upstream-check`) can read it. Make the file when it isn't there, with
+this table and, below it, each licence's full text:
 
 ```
-| Upstream repo | Upstream path | Pinned commit | Path here | Licence | Copied | Date |
+## Copies
+
+| Upstream repo | Upstream path | Pinned commit | Path here | Licence | Copied | Checked |
 |---|---|---|---|---|---|---|
-| owner/repo | skills/x | abc1234 | .claude/skills/x/ | MIT | unchanged | 2026-11-06 |
+| owner/repo | skills/x | abc1234 | .claude/skills/x/ | MIT | unchanged | abc1234 2026-11-06 |
 ```
 
-`Copied` is `unchanged` or `adapted`; one row per copied path. *Done when* every copied file has its row.
+`Copied` is `unchanged` or `adapted: <what changed>`; `Checked` starts as the pinned commit and
+today's date; one row per copied path. If this is the file's first row, your done note asks the
+Taskmaster for the monthly upstream-check schedule. *Done when* every copied file has its row.
 
 ### 8. Commit and merge
 
@@ -259,6 +263,6 @@ is pushed or your note says it stays local.
 ## Done note
 
 Your reply lists: the files written; kit items that covered planned ones (step 2); gaps that
-took a default; the copies recorded; scrub hits kept; the check command and its result;
-whether main is pushed; and any command Cara must run by hand (a unit install). The
-Taskmaster's first minions start on your merge by themselves; nothing for you to start.
+took a default; the copies recorded (and the upstream-check schedule to ask for, if any); scrub
+hits kept; the check command and its result; whether main is pushed; and any command Cara must
+run by hand (a unit install). The Taskmaster's first minions start on your merge by themselves; nothing for you to start.

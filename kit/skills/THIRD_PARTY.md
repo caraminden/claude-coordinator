@@ -5,32 +5,32 @@ Citadel's repo; others carry ideas mined from more packs ("Mined, not copied" be
 not installed as the upstream plugins, so every Citadel turn of every scheme loads the same
 set the same way, through the kit (`kit/README.md`).
 
-| Pack | Pinned at | License |
-|------|-----------|---------|
-| [mattpocock/skills](https://github.com/mattpocock/skills) | `4ae2317` | MIT, Matt Pocock |
-| [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) | `96608e0` | MIT, Dietrich Gebert |
+## Copies
 
-## What is here
+Every copied path, one row each, in the format `citadel:upstream-check` reads (a scheme repo's own
+`THIRD_PARTY.md` uses the same columns). **Pinned commit** is the upstream commit the copy was taken from;
+**Checked** is the upstream commit and date the last upstream check compared it against, so the
+next check diffs only what came after. Paths here are from the repo root.
 
-Carried over from the Delve repo (`.claude/skills/THIRD_PARTY.md` there, 2026-10-27), with
-Delve's paths taken back out, then moved into the kit (Citadel #164, 2026-10-29), where repo
-paths come from each repo's CLAUDE.md "Project facts".
+| Upstream repo | Upstream path | Pinned commit | Path here | Licence | Copied | Checked |
+|---------------|---------------|---------------|-----------|---------|--------|---------|
+| [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) | `AGENTS.md` | `96608e0` | `.claude/rules/ponytail.md` (a plugin can't carry rules) | MIT | adapted: path-scoped to code files; "In this repo" section added | `96608e0` 2026-11-06 |
+| DietrichGebert/ponytail | `AGENTS.md` | `96608e0` | `kit/skills/scheme-setup/templates/ponytail.md` (copied into each new scheme's `.claude/rules/`) | MIT | adapted: as the row above, "In this repo" left for each scheme to write | `96608e0` 2026-11-06 |
+| DietrichGebert/ponytail | `skills/ponytail-review/` | `96608e0` | `kit/skills/ponytail-review/` | MIT | unchanged | `96608e0` 2026-11-06 |
+| DietrichGebert/ponytail | `skills/ponytail-audit/` | `96608e0` | `kit/skills/ponytail-audit/` | MIT | unchanged | `96608e0` 2026-11-06 |
+| DietrichGebert/ponytail | `skills/ponytail-debt/` | `96608e0` | `kit/skills/ponytail-debt/` | MIT | unchanged | `96608e0` 2026-11-06 |
+| [mattpocock/skills](https://github.com/mattpocock/skills) | `skills/productivity/grilling/` | `4ae2317` | `kit/skills/grilling/` | MIT | adapted: a round is asked as decision cards where the session has a card tool, numbered questions elsewhere | `4ae2317` 2026-11-06 |
+| mattpocock/skills | `skills/engineering/domain-modeling/` | `4ae2317` | `kit/skills/domain-modeling/` | MIT | adapted: glossary and decisions log from Project facts | `4ae2317` 2026-11-06 |
+| mattpocock/skills | `skills/engineering/codebase-design/` | `4ae2317` | `kit/skills/codebase-design/` | MIT | adapted: "each with a fresh context window" also in `SKILL.md`'s pointer to DESIGN-IT-TWICE (#354) | `4ae2317` 2026-11-06 |
+| mattpocock/skills | `skills/engineering/diagnosing-bugs/` | `4ae2317` | `kit/skills/diagnosing-bugs/` | MIT | adapted: narrower description (the escalation from `bug-fixing`), glossary from Project facts and optional; three strikes, flaky tests, trigger hypotheses and fix-at-the-source added (see Ideas below) | `4ae2317` 2026-11-06 |
+| mattpocock/skills | `skills/engineering/improve-codebase-architecture/` | `4ae2317` | `kit/skills/improve-codebase-architecture/` | MIT | adapted: model-invoked; headless output; glossary and decisions log from Project facts | `4ae2317` 2026-11-06 |
+| mattpocock/skills | `skills/productivity/writing-for-agents/` | `4ae2317` | `kit/skills/writing-for-agents/` | MIT | adapted: testing and importing sections, prose tells, `TESTING.md` (ideas mined below) | `4ae2317` 2026-11-06 |
 
-| Path | From | Local change |
-|------|------|--------------|
-| `.claude/rules/ponytail.md` (Citadel's repo; a plugin can't carry rules) | ponytail `AGENTS.md` | Path-scoped to code files; "In this repo" section added |
-| `scheme-setup/templates/ponytail.md` (copied into each new scheme's `.claude/rules/`) | ponytail `AGENTS.md`, via the row above | "In this repo" left for each scheme to write |
-| `ponytail-review/` | ponytail `skills/ponytail-review` | none |
-| `ponytail-audit/` | ponytail `skills/ponytail-audit` | none |
-| `ponytail-debt/` | ponytail `skills/ponytail-debt` | none |
-| `grilling/` | mattpocock `skills/productivity/grilling` | A round is asked as decision cards where the session has a card tool, numbered questions elsewhere |
-| `domain-modeling/` | mattpocock `skills/engineering/domain-modeling` | Glossary and decisions log from Project facts |
-| `codebase-design/` | mattpocock `skills/engineering/codebase-design` | none |
-| `diagnosing-bugs/` | mattpocock `skills/engineering/diagnosing-bugs` | Narrower description (the escalation from `bug-fixing`), glossary from Project facts and optional; Three strikes, Flaky tests, trigger hypotheses and fix-at-the-source added (see Ideas below); `trigger-eval.tsv` added |
-| `improve-codebase-architecture/` | mattpocock `skills/engineering/improve-codebase-architecture` | Model-invoked; headless output; glossary and decisions log from Project facts |
-| `writing-for-agents/` | mattpocock `skills/productivity/writing-for-agents` | Testing and importing sections, prose tells, `TESTING.md`: ideas mined below |
-
-Every copy drops the Codex-only `agents/openai.yaml`.
+Every copy drops the Codex-only `agents/openai.yaml`; "unchanged" means every other file matches
+upstream at the pin. Carried over from the Delve repo (`.claude/skills/THIRD_PARTY.md` there,
+2026-10-27, mattpocock `49dd158`, ponytail `2961b52`) with Delve's paths taken back out, moved into
+the kit (Citadel #164, 2026-10-29), where repo paths come from each repo's CLAUDE.md "Project facts",
+and re-synced to the pins above by #354 (2026-11-06). Licence texts are at the end.
 
 ## Why the local changes
 
@@ -113,9 +113,8 @@ copied, so nothing here needs re-syncing; the source is named so the idea can be
 | `lenses.md`, "Smells" | The smell baseline, with the repo's standards winning | mattpocock/skills `4ae2317`, `skills/engineering/code-review` | MIT, Matt Pocock |
 
 (Citadel #352, #348, #350 and #347, 2026-11-06, from the #346 skills survey; the trailofbits rows
-are CC-BY-SA, so they stay paraphrased.) The mattpocock pin here is newer than the copied pack's on
-purpose: `prototype` was read at the commit the survey used, and the copies above stay at theirs
-until someone re-syncs them.
+are CC-BY-SA, so they stay paraphrased.) Mined rows are not re-synced, so the upstream check skips
+them.
 
 skill-stocktake (Citadel #353): upstream is a slash command that scans `~/.claude/skills` and keeps
 its state in a JSON cache through jq and Node scripts. Ours is model-invoked (see
@@ -125,9 +124,11 @@ own (`uses.ts`), and writes a report with handoffs instead of offering to delete
 
 ## Updating
 
-Copy the files again from a newer upstream commit, re-apply the local changes above, and
-bump the pins in the first table. Do not also install either pack as a plugin: a session
-would see every skill twice.
+`citadel:upstream-check` runs monthly (a scheduled minion) and says when upstream has something
+worth taking; it never applies an update itself. To take one, copy the files again from the newer
+upstream commit, re-apply the local changes above, set **Pinned commit** and **Checked** to that commit,
+and land it like any kit change (self-review included). Do not also install either pack as a
+plugin: a session would see every skill twice.
 
 ## Ideas from other packs
 

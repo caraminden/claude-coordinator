@@ -76,12 +76,12 @@ Check these, and the repo's own classes from Project facts, before anything exot
 
 ## Test smells
 
-- A test that asserts the number the code happens to produce rather than the number the
-  rule says it should (compute the expectation in the test from the rule).
+What makes any test prove nothing (an expectation copied from the code, mocks of your own
+logic, tautologies) is in citadel:test-quality. Two that belong to a bug fix:
+
 - A test that still passes when the behaviour it names is broken: revert the fix and check
   that it goes red.
 - Tolerances wider than the rule needs.
-- Mocks of your own pure logic: if something needs a mock, it may be in the wrong layer.
 
 ## Rules
 

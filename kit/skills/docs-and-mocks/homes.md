@@ -10,6 +10,7 @@ Follow the shared folder's README first; where it is silent:
 - **A design-system home and the scheme's `theme.css`:** the scheme's design folder (where its
   design docs already live; else `specs/design-system/`), linked from the scheme's CLAUDE.md or main
   design doc so sessions find it.
+- **Prototypes** (`prototypes.md`): the shared folder's `mockups/`, named `…-prototype.html`.
 - **Throwaway takes** shown only to pick from once, never meant to be a record: your own shown-files
   folder; delete them before you close.
 

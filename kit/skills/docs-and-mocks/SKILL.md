@@ -2,10 +2,11 @@
 name: docs-and-mocks
 description: >
   How to make the documents people decide from and come back to: review pages with takes side by
-  side and saved picks, proposal and design docs, and a scheme's living design-system home, built
-  with the mock kit so every scheme's look and layout match. Use before making an HTML page or a
-  design doc for ideation, a proposal, an art or feature review, or a design system, and to judge
-  whether one is worth making at all.
+  side and saved picks, proposal and design docs (reader-tested before posting), a scheme's living
+  design-system home, and throwaway prototypes, built with the mock kit so every scheme's look and
+  layout match. Use before making an HTML page or a design doc for ideation, a proposal, an art or
+  feature review, a new look or a design system, before prototyping rules or a state model a person
+  can click through, and to judge whether a page is worth making at all.
 ---
 
 # Docs and mocks
@@ -28,6 +29,9 @@ Make a page when one of these is true:
   recommendation before anyone builds. (Design doc.)
 - A scheme's look (colours, type, components, rules) spans several screens and minions keep asking
   what it is. (Design-system home: only then, Cara 2026-10-29.)
+- Rules or a state model look fine on paper, and the question is whether they still hold once
+  someone pushes them through real cases: an economy, an automation rule, a flow with awkward
+  orders. (Prototype: a logic toy.)
 
 A choice a click settles is a question card. A bug, a status, a one-off list of numbers or anything
 five lines can say is a reply.
@@ -39,15 +43,20 @@ five lines can say is a reply.
 | Review page | `starter/review.html` | "Now" first, then one live board per take; a pick and a note on each; Send |
 | Design doc | `starter/doc.html` (or `starter/doc.md` with no visuals) | Problem with real numbers, options with pictures, one recommendation, open questions, decisions log |
 | Design-system home | `starter/doc.html`, status `living` | Tokens, components, rules, each with where it lives in the code |
+| Prototype | `starter/review.html`, one board per rule set | The question on top, the full state after every action, free-play buttons, scenarios, a verdict pick |
 
-Each kind's full shape is in [`kinds.md`](kinds.md): read it before filling the starter.
+Each kind's full shape is in [`kinds.md`](kinds.md): read it before filling the starter. A prototype
+is throwaway code that answers one question; its rules, and when look variants belong in the real
+app instead of a review page, are in [`prototypes.md`](prototypes.md).
 
 ## Steps
 
 1. **Find the scheme's look.** A scheme with its own look keeps a `theme.css` (its design folder or
    the shared folder's `mockups/`). None: the kit's default is Citadel's look, which suits any
    scheme without one. A mock of a scheme's own screen (a game panel) wears that screen's look:
-   [`theming.md`](theming.md).
+   [`theming.md`](theming.md). A look nobody has decided yet (a new scheme's, a new screen's) gets a
+   token plan first (4 to 6 named colours, type roles, an ASCII wireframe), checked against the
+   brief and the "generated page" tells before you build: [`looks.md`](looks.md).
 2. **Copy into the page's folder** `starter/mockkit.js`, `starter/mockkit.css`, the theme if any,
    and the starter, renamed for what the page is (`stores-panel-takes.html`). The kit sits beside
    every page so an old decision page never changes under its picks (Cara 2026-10-29). Pages in one
@@ -64,15 +73,21 @@ Each kind's full shape is in [`kinds.md`](kinds.md): read it before filling the 
    Citadel-facing pages and docs people read on a phone. Every page gets one light phone look, since
    Cara often reviews on her phone: it opens, and mocks scale down to fit instead of scrolling
    sideways. Open the browser console for errors, hold every box to even room above and below, and
-   click every control once.
-6. **Show it:** link the page as a card and the screenshots inline, say in one line what to
+   click every control once. A page drawing a new look also gets the tells in `looks.md` as a
+   checklist.
+6. **Reader-test a design doc** before anyone sees it: write the 5 to 10 questions its readers
+   would ask, have a Grunt with no context answer them from the doc alone and say what it found
+   ambiguous, assumed or contradictory, then fix the doc where it missed. The brief and what counts
+   as a pass: [`reader-test.md`](reader-test.md). Review pages skip it unless their notes carry
+   the argument.
+7. **Show it:** link the page as a card and the screenshots inline, say in one line what to
    pick, and end the turn waiting on the picks.
-7. **Read the picks** with the `artifact_data` tool on the page's path: `db/<collection>/<id>` =
+8. **Read the picks** with the `artifact_data` tool on the page's path: `db/<collection>/<id>` =
    `{ v, note, by, at }`. Picks sent with Send also arrive as a comment message.
-8. **Write the decision back into the page:** status `decided`, the person's words quoted with the
+9. **Write the decision back into the page:** status `decided`, the person's words quoted with the
    date in its decisions log, the losing takes left in place. A page replaced by a newer one gets
    status `superseded` and a banner linking it. Where pages live and how a living home stays true:
    [`homes.md`](homes.md).
 
 Done when the page is linked with screenshots at the mocked screen's real size (plus the light phone look), every control was clicked once in
-the viewer, and its picks read back through `artifact_data`.
+the viewer, a design doc passed its reader test, and its picks read back through `artifact_data`.

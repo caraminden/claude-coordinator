@@ -77,6 +77,19 @@ Every copy drops the Codex-only `agents/openai.yaml`.
   not upstream's.)
 - `misc/`, `in-progress/`, `deprecated/`: TypeScript or JS tooling, or unfinished.
 
+## Mined, not copied
+
+Ideas taken from other skills and written out in the kit's own words. No upstream text or code is
+copied, so nothing here needs re-syncing; the source is named so the idea can be traced.
+
+| Kit file | Idea | Source, pinned | License |
+|----------|------|----------------|---------|
+| `docs-and-mocks/reader-test.md` | Test a doc on a context-free reader with predicted questions | [anthropics/skills](https://github.com/anthropics/skills) `skills/doc-coauthoring`, "Reader Testing", `ca45fc4` | No licence file: idea only, paraphrased |
+| `docs-and-mocks/prototypes.md` | Throwaway prototypes: a logic toy, look variants, the shared rules | mattpocock/skills `skills/engineering/prototype` (`SKILL.md`, `LOGIC.md`, `UI.md`), `4ae2317` | MIT, Matt Pocock (text below) |
+| `docs-and-mocks/looks.md` | A token plan checked against the brief; the "generated page" tells; boldness in one place | anthropics/skills `skills/frontend-design`, `ca45fc4` | Apache-2.0 |
+
+(Citadel #352, 2026-11-06, from the #346 skills survey.)
+
 ## Updating
 
 Copy the files again from a newer upstream commit, re-apply the local changes above, and

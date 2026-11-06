@@ -49,23 +49,31 @@ say so, name it, and stop: no Grunts.
 1. Make a scratch folder, `$TMPDIR/survey/` with `clones/` and `verdicts/` in it.
 2. Copy [grunt-brief.md](grunt-brief.md) to `$TMPDIR/survey/BRIEF.md` and fill in its blanks:
    who asked and their words, the scratch path, what we have (step 2.1), the scheme's stack.
-3. Start every Grunt in one message, each with `model: "sonnet"`, `effort: "medium"`. A Grunt
-   writes only its own clone folder and verdict file, and changes nothing else.
-   Each prompt is the role line your own prompt gives for Grunt briefs, "First read `<BRIEF.md>` and follow it
-   exactly", then the group's name, its repos or search, and what to compare against (name the
-   matching kit skill and its path, and the traps you expect: old engine versions, the wrong
-   language).
-4. Each Grunt writes one verdict file and returns at most 3 lines. Read the verdict files, not the
-   Grunts' transcripts.
+3. **With the Workflow tool** (this minion has workflow on; onboarding starts survey minions that
+   way), run [survey.workflow.js](survey.workflow.js) from this skill's folder:
+   `Workflow({ scriptPath: "<this skill's folder>/survey.workflow.js", args: { brief, scratch, groups: [{ name, repos, compare }] } })`.
+   `compare` names the matching kit skill and its path, and the traps you expect (old engine
+   versions, the wrong language). The script pins every agent to Sonnet at medium effort: one
+   reader per group, then one collation that re-reads every value 4 or 5 at the quoted files and
+   writes `verdicts/_ranked.md`. Wait for its notice, then read `_ranked.md`, not the verdict files.
+   For a 2-group scope it took 68 s and 98k Sonnet tokens, and about 1k tokens reached the session
+   (#358).
+4. **Without it**, start every Grunt in one message, each with `model: "sonnet"`, `effort:
+   "medium"`. A Grunt writes only its own clone folder and verdict file, and changes nothing else.
+   Each prompt is the role line your own prompt gives for Grunt briefs, "First read `<BRIEF.md>`
+   and follow it exactly", then the group's name, its repos or search, and what to compare against
+   (as `compare` above). Each Grunt writes one verdict file and returns at most 3 lines. Read the
+   verdict files, not the Grunts' transcripts.
 
-*Done when* every group has a verdict file, or its 3 lines say why it failed (repo gone, clone
-blocked), and that failure is in the report.
+*Done when* every group has a verdict file, or its return (3 lines, or the script's `groups`
+line) says why it failed (repo gone, clone blocked), and that failure is in the report.
 
 ## 4. Verdicts
 
 Every entry carries **use**, **mine** or **skip**, a value out of 5 for us, its target, why, what it
 would cost (words, and when they load), what it runs, and its licence. Check each Grunt's work: a
-value 4 or 5 is re-read by you at the file the Grunt quoted before it goes in the report.
+value 4 or 5 is re-read at the file the Grunt quoted before it goes in the report, by the script's
+collation (its "checked" or "lowered" column) or, without the script, by you.
 
 **Judge how often a skill fires by trying it on a couple of the scheme's own turns, not from its
 description** (Threadspace #24, 2026-11-06: a skill the survey judged "only on its own file types"

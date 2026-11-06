@@ -107,7 +107,7 @@ test('both plans name a skills survey for the stack, with every scheme\'s survey
   assert.deepEqual(surveyReports(join(root, 'no-such-data')), []);
   for (const mode of ONBOARDING_MODES) {
     const text = onboardingPrompt(project('interview', mode), '/shared', found);
-    assert.match(text, /\*\*Skills survey:\*\*.*a research minion for <stack>/, mode);
+    assert.match(text, /\*\*Skills survey:\*\*.*a research minion for <stack> with workflow on,/, mode);
     assert.match(text, /Follow citadel:skills-survey for <stack>\./, mode);
     assert.match(text, /3 months/, mode);
     assert.ok(text.includes(godot) && text.includes(general), mode);

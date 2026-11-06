@@ -14,8 +14,9 @@ process per turn) for a few small project groups ("schemes"). It ships its own C
 of skills and agents (the "kit", namespaced `citadel:*`) to every turn of every scheme. <Who asked,
 when, and their words.>
 
-You read one group of third-party skills and give each a verdict. **Read only: install nothing, run
-no third-party scripts, no `npm install`, no `pip`, no hooks.** Shallow-clone
+You read one group of third-party skills and give each a verdict. **Read only toward everything you survey:
+install nothing, run no third-party scripts, no `npm install`, no `pip`, no hooks.** You write
+only your clones and your one verdict file. Shallow-clone
 (`git clone --depth 1 <url> <dir>`) into a new empty folder,
 `<scratch>/clones/<your-group>/<repo>/`, record `git -C <dir> rev-parse --short HEAD`, and read
 files with cat, grep and wc. Use web search and fetch to find repos and star counts. Don't delete

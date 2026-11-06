@@ -225,10 +225,17 @@ rev-parse --short HEAD`), today's date. A tune-up refreshes copies from this tab
 rest of that file to the Taskmaster.
 
 A copy from outside Citadel (a third-party skill, agent or rule, from a plan line or a
-`citadel:skills-survey` handoff) also gets a row in the repo's `THIRD_PARTY.md`, made with its
-licence text if it isn't there, so the scheduled upstream check can read it. One row per copied
-path: `upstream repo | upstream path | pinned commit | path here | licence | copied (unchanged /
-adapted) | date`. *Done when* every copied file has its row.
+`citadel:skills-survey` handoff) also gets a row in the repo's `THIRD_PARTY.md`, so the scheduled
+upstream check can read it. Make the file when it isn't there, with this table and, below it, each
+licence's full text:
+
+```
+| Upstream repo | Upstream path | Pinned commit | Path here | Licence | Copied | Date |
+|---|---|---|---|---|---|---|
+| owner/repo | skills/x | abc1234 | .claude/skills/x/ | MIT | unchanged | 2026-11-06 |
+```
+
+`Copied` is `unchanged` or `adapted`; one row per copied path. *Done when* every copied file has its row.
 
 ### 8. Commit and merge
 

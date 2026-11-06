@@ -822,7 +822,7 @@ export function onboardingPrompt(project: Project, sharedDir: string | null, sur
   if (!onboardingOpen(project)) return '';
   const record = sharedDir ? join(sharedDir, 'onboarding.md') : 'onboarding.md in the scheme\'s shared folder';
   const steps = `Move \`onboarding\` along with set_project_settings as you go: \`planned\` once the plan card is posted, \`setting-up\` once a person approves it, \`done\` once`;
-  const surveyed = `Skills survey reports so far (the name gives the stack and month): ${surveys.join(', ') || 'none'}.`;
+  const surveyed = `Skills survey reports so far, from every scheme (the name gives the stack and month; the one exception to the read-only rule below, for the survey minion to read): ${surveys.join(', ') || 'none'}.`;
   const scope = 'Throughout: other schemes are read only through `list_catalogue` and the setup minion\'s reads of the files it adapts; never read their memory, and never write outside this scheme.';
   if (project.onboarding_mode === 'tune-up') return [
     `## Tuning up this scheme (onboarding: ${project.onboarding}, tune-up)`,
@@ -836,7 +836,7 @@ export function onboardingPrompt(project: Project, sharedDir: string | null, sur
     '- **Retire:** every repo copy the kit now covers (`in_kit`), and skills people say they no longer use, each with why. Nothing is deleted that isn\'t listed here.',
     '- **Instructions:** the edits to the scheme instructions as a line diff, in a ```diff block: `-` and `+` lines with two unchanged lines around each change, never the whole text.',
     '- **Settings and properties:** each change, old → new.',
-    '- **Skills survey:** has one for this stack run in the last 3 months? If not, "Skills survey: a research minion for <stack>, started after Approve", its brief "Follow citadel:skills-survey for <stack>." with the reports below; if so, name that report under Left as is.',
+    '- **Skills survey:** has one for this stack run in the last 3 months? If not, "Skills survey: a research minion for <stack>, started after Approve", its brief "Follow citadel:skills-survey for <stack>." with the reports below (it reads them; you judge by name); if one for this stack is under 3 months old, name it under Left as is.',
     surveyed,
     '- **Left as is:** one line on what you checked and are keeping.',
     '- **Done by:** you (instructions, settings, properties, onboarding.md); one setup minion (repo edits), only when the plan touches repo files.',
@@ -870,7 +870,7 @@ export function onboardingPrompt(project: Project, sharedDir: string | null, sur
     '- **Shipping:** the answer to how changes land. For auto-merge or straight to main, also who pushes main to GitHub: the recommended route is a scheme-local `tools/land.sh` the setup minion writes (rebase onto local main, run the check command, fast-forward main, push it to origin, never forced); without one named, main stays local.',
     '- **Repo:** CLAUDE.md with its **Project facts** section drafted (check commands, front end, high-risk files, how a change ships, UI rules, glossary, decisions log, retros), `.claude/settings.json`, guard and pre-push hooks, rules to copy.',
     '- **First minions:** their titles and kinds, started once setup merges.',
-    '- **Skills survey:** "Skills survey: a research minion for <stack>, started with the first minions", its brief "Follow citadel:skills-survey for <stack>." with the reports below; when one under 3 months old already covers the stack, name that report instead.',
+    '- **Skills survey:** "Skills survey: a research minion for <stack>, started with the first minions", its brief "Follow citadel:skills-survey for <stack>." with the reports below (it reads them; you judge by name); when one for this stack is under 3 months old, name that report instead.',
     surveyed,
     '- **Done by:** you (instructions, settings, properties, onboarding.md); one setup minion (repo files, skills); the first minions after it merges.',
     'On Revise, post the whole revised plan again.',

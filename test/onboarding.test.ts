@@ -111,7 +111,7 @@ test('both plans name a skills survey for the stack, with every scheme\'s survey
     assert.match(text, /Follow citadel:skills-survey for <stack>\./, mode);
     assert.match(text, /3 months/, mode);
     assert.ok(text.includes(godot) && text.includes(general), mode);
-    assert.match(onboardingPrompt(project('interview', mode), '/shared'), /Skills survey reports so far \(the name gives the stack and month\): none\./, mode);
+    assert.match(onboardingPrompt(project('interview', mode), '/shared'), /Skills survey reports so far, from every scheme \(the name gives the stack and month; [^)]*\): none\./, mode);
   }
 });
 

@@ -8,7 +8,8 @@ description: Survey third-party Claude skills, plugins and agents for a stack or
 A research minion runs this. It reads third-party skills (never installs or runs them), gives each a
 verdict, and ends in a ranked report, one handoff per minion the work becomes, and a pick card.
 The method is Citadel #346's (2026-11-05): 7 Sonnet Grunts, about 450k Grunt tokens and 3.5
-minutes. A stack-only survey is 2 or 3 Grunts, about a third of that.
+minutes, plus a small Grunt per fire-rate test (step 4). A stack-only survey is 2 or 3 Grunts,
+about a third of that.
 
 ## 1. Start from the last survey
 
@@ -20,6 +21,8 @@ ls -t "$COORDINATOR_SHARED_DIR"/../../../*/shared/project/reports/skills-survey-
 ```
 
 Read the newest general one (`skills-survey-<yyyy-mm>.md`, Citadel's) and any for your stack.
+When another scheme's report can't be read (the read is refused), treat it as not surveyed and say
+so in your report.
 Their verdicts stand: a repo they read at a pinned commit is not read again unless it is over 3
 months old or your stack needs a part they skipped. Your survey covers what they didn't, which is
 mostly the stack-specific skills. When a report under 3 months old already covers the whole scope,
@@ -46,7 +49,8 @@ say so, name it, and stop: no Grunts.
 1. Make a scratch folder, `$TMPDIR/survey/` with `clones/` and `verdicts/` in it.
 2. Copy [grunt-brief.md](grunt-brief.md) to `$TMPDIR/survey/BRIEF.md` and fill in its blanks:
    who asked and their words, the scratch path, what we have (step 2.1), the scheme's stack.
-3. Start every Grunt in one message, each with `model: "sonnet"`, `effort: "medium"`, read-only.
+3. Start every Grunt in one message, each with `model: "sonnet"`, `effort: "medium"`. A Grunt
+   writes only its own clone folder and verdict file, and changes nothing else.
    Each prompt is the role line your own prompt gives for Grunt briefs, "First read `<BRIEF.md>` and follow it
    exactly", then the group's name, its repos or search, and what to compare against (name the
    matching kit skill and its path, and the traps you expect: old engine versions, the wrong
@@ -87,14 +91,16 @@ NOASSERTION are ideas only, paraphrased; proprietary is skipped.
 ## 5. Deliver
 
 1. **Report:** `reports/skills-survey-<stack>-<yyyy-mm>.md` in your scheme's shared folder (a
-   general survey drops the stack), so the next survey's step 1 finds it. Lead with an "In short"
+   general survey drops the stack; make `reports/` and `handoffs/` when they aren't there), so the next survey's step 1 finds it. Lead with an "In short"
    of 4 or 5 lines, then one ranked table of use and mine (skill and source, verdict, where it
    goes, why, cost), skips grouped by reason, notes (licences, traps, what was not verified), every
    repo read with its pinned commit, the handoffs, and a decisions section.
 2. **Handoffs:** one per minion the work should become, in `handoffs/`, each with the ask, what to
    take with source paths and pins, its check, and a risk label. Work for another scheme gets its
    handoff here and goes to your Taskmaster to pass on.
-3. **Pick card:** one `ask_question` card listing the handoffs, recommended first, multi-select.
+3. **Pick card:** one `ask_question` card, recommended first: a multi-select question holds 2 to
+   6 options and a card up to 4 questions, so group the handoffs by scheme or size, at most 6 per
+   question, and pair a lone handoff with "None of these".
    Log the answer in the report's decisions section, quoting the person, with the date.
 4. Delete `$TMPDIR/survey/` once the report is written: clones are never shared.
 

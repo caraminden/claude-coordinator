@@ -1,8 +1,9 @@
 # Third-party skills
 
 Some skills in the Citadel kit are copies of two open-source packs, plus one rules file in
-Citadel's repo. They are copied in, not installed as the upstream plugins, so every Citadel
-turn of every scheme loads the same set the same way, through the kit (`kit/README.md`).
+Citadel's repo; others carry ideas mined from more packs ("Mined, not copied" below). They are copied in,
+not installed as the upstream plugins, so every Citadel turn of every scheme loads the same
+set the same way, through the kit (`kit/README.md`).
 
 | Pack | Pinned at | License |
 |------|-----------|---------|
@@ -25,9 +26,9 @@ paths come from each repo's CLAUDE.md "Project facts".
 | `grilling/` | mattpocock `skills/productivity/grilling` | A round is asked as decision cards where the session has a card tool, numbered questions elsewhere |
 | `domain-modeling/` | mattpocock `skills/engineering/domain-modeling` | Glossary and decisions log from Project facts |
 | `codebase-design/` | mattpocock `skills/engineering/codebase-design` | none |
-| `diagnosing-bugs/` | mattpocock `skills/engineering/diagnosing-bugs` | Narrower description (the escalation from `bug-fixing`), glossary from Project facts and optional; Three strikes, Flaky tests, trigger hypotheses and fix-at-the-source added (see Ideas below) |
+| `diagnosing-bugs/` | mattpocock `skills/engineering/diagnosing-bugs` | Narrower description (the escalation from `bug-fixing`), glossary from Project facts and optional; Three strikes, Flaky tests, trigger hypotheses and fix-at-the-source added (see Ideas below); `trigger-eval.tsv` added |
 | `improve-codebase-architecture/` | mattpocock `skills/engineering/improve-codebase-architecture` | Model-invoked; headless output; glossary and decisions log from Project facts |
-| `writing-for-agents/` | mattpocock `skills/productivity/writing-for-agents` | none |
+| `writing-for-agents/` | mattpocock `skills/productivity/writing-for-agents` | Testing and importing sections, prose tells, `TESTING.md`: ideas mined below |
 
 Every copy drops the Codex-only `agents/openai.yaml`.
 
@@ -93,8 +94,14 @@ copied, so nothing here needs re-syncing; the source is named so the idea can be
 | `test-quality/` | Tests that give false confidence (no assertion, swallowed exceptions, missing await, self-referential and always-true assertions); calibrate severity honestly | [dotnet/skills](https://github.com/dotnet/skills) `plugins/dotnet-test/skills/test-anti-patterns`, `d63a2a7` | MIT, .NET Foundation |
 | `test-quality/` | Behavioural gaps rated 1 to 10, acting on 7 and up (the scale lives in self-review's tests lens) | [anthropics/claude-plugins-official](https://github.com/anthropics/claude-plugins-official) `plugins/pr-review-toolkit/agents/pr-test-analyzer.md`, `d189be9` | Apache-2.0 |
 | `skill-stocktake/` | Audit each skill for overlap, freshness, actionability and trigger breadth; five verdicts with reasons that stand alone; a quick scan of what changed | [affaan-m/everything-claude-code](https://github.com/affaan-m/everything-claude-code) `skills/skill-stocktake`, `b38be6a` | MIT, Affaan Mustafa (text below) |
+| `writing-for-agents/` (Testing a skill, `TESTING.md`) | Run a baseline Grunt without the guidance first; reps and variance; match the form to the failure; exemption clauses don't scope | [obra/superpowers](https://github.com/obra/superpowers) `skills/writing-skills` and `references/testing-skills-with-subagents.md`, `22f0b46` | MIT, Jesse Vincent |
+| `writing-for-agents/TESTING.md` | Trigger evals: about 20 realistic prompts with near-misses and a held-out part. Left out: its scripts, which loop `claude -p` | anthropics/skills `skills/skill-creator`, "Description Optimization", `ca45fc4` | Apache-2.0 (the skill's own `LICENSE.txt`) |
+| `writing-for-agents/` (Importing a third-party skill, `TESTING.md`) | The import checklist: read order and what to look for. Left out: its scanner script | [getsentry/skills](https://github.com/getsentry/skills) `skills/skill-scanner`, `e94f222` | Apache-2.0 |
+| `writing-for-agents/` (Importing a third-party skill) | Look for an existing skill on skills.sh first. Left out: its `npx skills` installer | [vercel-labs/skills](https://github.com/vercel-labs/skills) `skills/find-skills`, `d3701c1` | MIT, Vercel |
+| `writing-for-agents/` (Pruning) | Five structural prose tells and "every sentence adds something". Left out: the 26-pattern catalogue | [blader/humanizer](https://github.com/blader/humanizer) `SKILL.md`, `0ef9fe5` | MIT, Siqi Chen |
+| `scheme-setup/` (step 3) | The CLAUDE.md check (commands, non-obvious, current, concise) and its keep-out list | anthropics/claude-plugins-official `plugins/claude-md-management/skills/claude-md-improver` and `references/quality-criteria.md`, `d189be9` | Apache-2.0 |
 
-(Citadel #352 and #348, 2026-11-06, from the #346 skills survey.) The mattpocock pin here is newer than the
+(Citadel #352, #348 and #350, 2026-11-06, from the #346 skills survey.) The mattpocock pin here is newer than the
 copied pack's on purpose: `prototype` was read at the commit the survey used, and the copies above
 stay at theirs until someone re-syncs them.
 

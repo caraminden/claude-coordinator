@@ -107,8 +107,24 @@ key, `- **Key:** value`, every key present, "none" written out where it is none:
 | Bug classes of its own | The stack's recurring bug kinds beyond bug-fixing's (a Godot signal wired twice, a stale save version) | bug-fixing | bug-fixing's classes only |
 | Docs test | A test that checks the paths docs name, if one exists | retro | skipped |
 
-*Done when* every key in the table has a line, each command was run or is marked untried, and
-each path named exists or is the stated place its first file goes.
+**Check it** before moving on: read each line as a session new to this repo would, against four
+tests.
+
+- **Commands:** every command is exact and copy-pasteable, and step 1 saw it pass or fail.
+- **Non-obvious:** every Working rule is a trap the code doesn't confess: a generated file, an
+  order that matters, the reason behind an odd choice.
+- **Current:** every path and command exists now; nothing describes how the repo used to be.
+- **Concise:** no line restates the README, the code, the Citadel-wide or scheme layers, or a
+  default the model already follows (`citadel:writing-for-agents`, "Pruning").
+
+Keep out: a directory tour the README or `ls` gives, generic advice ("write clean code"),
+one-off fixes that won't recur, template text left as the template, TODOs. On a tune-up, run
+the same tests on the existing file: fix the failures in lines the plan touches, and name the
+rest in your done note.
+
+*Done when* every key in the table has a line, each command was run or is marked untried,
+each path named exists or is the stated place its first file goes, and every line passes the
+check or its failure is in your done note.
 
 ### 4. Install the push guard
 

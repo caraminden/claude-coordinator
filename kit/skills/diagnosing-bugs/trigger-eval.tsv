@@ -1,0 +1,33 @@
+id	expected	prompt
+1	bug-fixing	[Cara]: the Approve button on plan cards does nothing on my phone, tapping it just highlights it
+2	bug-fixing	[Josh]: the minions list still shows #340 as running but its turn ended an hour ago, the state never cleared
+3	bug-fixing	[Cara]: land.sh crashed with "TypeError: Cannot read properties of undefined (reading 'sha')" when I ran it from #322
+4	bug-fixing	[Josh]: the usage bar says 140% for this week, that can't be right, the rows in the db add up to about 60%
+5	bug-fixing	[Cara]: the README says pending-deploy stays across turns but mine got cleared as soon as Josh sent a message
+6	bug-fixing	[Josh]: markdown tables in replies render as raw pipes in the chat since yesterday
+7	diagnosing-bugs	[Cara]: you fixed the double-send in the composer yesterday but it just happened again, twice this morning
+8	diagnosing-bugs	[Josh]: test/deploy.test.ts fails maybe one run in ten under land.sh, never when I run it alone. figure out why
+9	diagnosing-bugs	[Cara]: opening a scheme's minions list used to be instant, since the last deploy it takes like 4 seconds
+10	diagnosing-bugs	[Josh]: diagnose why the server's memory climbs to 2GB over a day and then it gets OOM killed
+11	diagnosing-bugs	[Cara]: I tried reproducing the vanishing-artifact bug with a test like you said, the test passes but people still see artifacts disappear. dig in
+12	diagnosing-bugs	[Josh]: every so often a turn just hangs at "Thinking…" forever, no error anywhere. can you debug this
+13	none	[Cara]: the chat scroll feels a bit floaty, can we make it snappier
+14	none	[Josh]: add a retry button to turns that failed
+15	none	[Cara]: why does the tripwire block rm with a glob after cd? explain it to me
+16	none	[Josh]: review PR #348 before I merge it, I'm worried about its error handling
+17	none	[Cara]: the onboarding flow takes too many steps, people give up half way through
+18	none	[Josh]: the test suite has always taken about 4 minutes, can we parallelise it to get it under one
+19	none	[Cara]: write a skill that tells minions how to deal with flaky tests
+20	none	[Josh]: the scheme-setup skill sent the last setup minion the wrong way, it copied guard.sh before writing CLAUDE.md. what went wrong in our process?
+21	bug-fixing	[Josh]: debug this: the scheme picker opens behind the top bar on Firefox
+22	bug-fixing	[Cara]: diagnose why the Approve button is greyed out on #350's plan card, it's been like that since the card was posted
+23	diagnosing-bugs	[Josh]: the chat scroll jumps back to the top sometimes when a new message arrives, I can't make it happen on purpose
+24	diagnosing-bugs	[Cara]: minions have been taking way longer to start their turns this week, like 40s before the first token
+25	none	[Josh]: the composer feels a bit laggy to me, nothing measurable, could just be my laptop. thoughts on making it feel snappier?
+26	bug-fixing|none	[Cara]: the usage page numbers look off, not sure if it's a bug or I'm reading it wrong
+27	diagnosing-bugs	[Josh]: the crash in land.sh is back, the same TypeError, after #322's fix landed
+28	bug-fixing	[Cara]: here's a failing test for the tripwire letting rm -rf $X/* through, make it pass
+29	none	[Josh]: is the fix in PR #333 actually right? read it before I merge
+30	none	[Cara]: minions are too slow at getting through their task lists, they make too many tool calls
+31	diagnosing-bugs	[Josh]: the deploy took 9 minutes today instead of the usual 40 seconds, find out what happened
+32	none	[Cara]: add a test that the tripwire blocks rm -rf $X/*; it already does, I just want it covered

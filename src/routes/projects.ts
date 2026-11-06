@@ -20,7 +20,7 @@ import type { Chain } from '../wake.ts';
 import { cloneProject, projectDir, removeProjectDir } from '../workspace.ts';
 import { ICON_HEADERS, iconVersion, readIcon } from '../scheme-icon.ts';
 import { spokenText } from '../memory.ts';
-import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, type App, type Ctx, type Route } from '../http.ts';
+import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
@@ -209,7 +209,7 @@ function visibleSchemes(store: App['store'], who: { uid?: number; admin?: boolea
 }
 
 // What one line of list_tickets shows (ticketLine in src/mcp.ts), and all a minion gets of another.
-const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'parent', 'last_activity'] as const;
+const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'workflow', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'parent', 'last_activity'] as const;
 
 export const projectRoutes: Route[] = [
   {
@@ -570,6 +570,7 @@ export const projectRoutes: Route[] = [
       // Insert first so concurrent creates get distinct ids, then build the working dir.
       const model = oneOf(body.model ?? null, MODELS, 'Model');
       const effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
+      const workflow = body.workflow == null ? 0 : workflowSwitch(body.workflow);
       // Properties are checked before the minion exists, so a bad one doesn't leave half a minion.
       const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
       if (typeof props !== 'object' || Array.isArray(props)) throw new HttpError(400, 'properties must be an object of key: value');
@@ -607,7 +608,7 @@ export const projectRoutes: Route[] = [
       const { id, notes } = await app.newMinion(project, { title, props, model, effort }, session.name)
         .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
-      store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null });
+      store.updateTicket(id, { person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}) });
       if (build) {
         store.updateTicket(id, { build });
         store.props.setBuild(id, build, session.name);

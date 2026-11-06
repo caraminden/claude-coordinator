@@ -129,6 +129,11 @@ context, so a fan-out must not return prose.
   page rather than starting another.
 - The 3-line return still has to carry anything that blocks you, such as "failed, no file
   written". Don't ask a Grunt to hide a failure to keep the return short.
+- Claude Code's Workflow tool runs a fan-out as a script, and only its return value reaches your
+  context. It is off unless a minion is opted in, as it adds about 2k tokens to every call: a
+  minion that will fan out asks the Taskmaster for it (create_ticket or update_ticket
+  `workflow: true`, or the composer's Workflow picker), ideally at creation, since a later flip
+  breaks the prompt cache once. It applies from the next turn.
 
 ## What else fills a session
 

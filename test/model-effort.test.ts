@@ -97,6 +97,28 @@ test('a new minion takes a model and effort; the scheme default shows when it ha
   assert.ok(later.includes("Cara took the connected machines' tools from this scheme's minions. It applies from each minion's next turn."));
 });
 
+test("a minion's Workflow switch (#359): off by default, set at creation or later, never on a Taskmaster", async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Workflows' } });
+  const { data: page } = await call(`/api/projects/${p.id}`);
+  const plain = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Plain', message: 'hi' } });
+  assert.equal(plain.data.workflow, 0);
+  const on = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Fan-out', message: 'hi', workflow: true } });
+  assert.equal(on.status, 201);
+  assert.equal(on.data.workflow, 1);
+  assert.equal((await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Bad', message: 'hi', workflow: 'yes' } })).status, 400);
+
+  assert.equal((await call(`/api/tickets/${plain.data.id}`, { method: 'PATCH', body: { workflow: true } })).data.workflow, 1);
+  assert.equal((await call(`/api/tickets/${plain.data.id}`, { method: 'PATCH', body: { workflow: false } })).data.workflow, 0);
+  assert.equal((await call(`/api/tickets/${plain.data.id}`, { method: 'PATCH', body: { workflow: 1 } })).status, 400);
+  const tm = await call(`/api/tickets/${page.coordinator.id}`, { method: 'PATCH', body: { workflow: true } });
+  assert.equal(tm.status, 400);
+  assert.match(tm.data.error, /Only minions/);
+  const notes = (await call(`/api/tickets/${plain.data.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
+  // Its first turn may still be running, so the note says now or the next turn.
+  assert.ok(notes.some((n: string) => /^Cara turned the Workflow tool on for this minion from (now on|the next turn)\.$/.test(n)), notes.join('\n'));
+  assert.ok(notes.some((n: string) => /^Cara turned the Workflow tool off for this minion/.test(n)));
+});
+
 test("the Taskmaster's create_ticket and update_ticket pass model and effort on", async () => {
   const bodies: { method: string; path: string; body: any }[] = [];
   const api = createHttpServer((req, res) => {
@@ -126,15 +148,19 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
       replies.set(++rid, (x) => r(x.result));
       mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: rid, method: 'tools/call', params: { name, arguments: args } }) + '\n');
     });
-    const created = await tool('create_ticket', { title: 'T', properties: { type: 'chore' }, message: 'go', model: 'claude-haiku-5-5', effort: 'low' });
+    const created = await tool('create_ticket', { title: 'T', properties: { type: 'chore' }, message: 'go', model: 'claude-haiku-5-5', effort: 'low', workflow: true });
     assert.ok(!created.isError, created.content[0].text);
     assert.match(created.content[0].text, /model: claude-haiku-5-5 \| effort: low/);
     const updated = await tool('update_ticket', { ticket_id: 4, effort: 'high' });
     assert.ok(!updated.isError, updated.content[0].text);
-    assert.deepEqual(bodies.map((b) => `${b.method} ${b.path}`), ['POST /api/projects/2/tickets', 'GET /api/projects/2', 'PATCH /api/tickets/40']);
+    const switched = await tool('update_ticket', { ticket_id: 4, workflow: false });
+    assert.ok(!switched.isError, switched.content[0].text);
+    assert.deepEqual(bodies.map((b) => `${b.method} ${b.path}`), ['POST /api/projects/2/tickets', 'GET /api/projects/2', 'PATCH /api/tickets/40', 'GET /api/projects/2', 'PATCH /api/tickets/40']);
     assert.equal(bodies[0].body.model, 'claude-haiku-5-5');
     assert.equal(bodies[0].body.effort, 'low');
+    assert.equal(bodies[0].body.workflow, true);
     assert.deepEqual(bodies[2].body, { effort: 'high' }, 'what is left out stays');
+    assert.deepEqual(bodies[4].body, { workflow: false }, 'false is sent, not dropped');
   } finally {
     mcp.kill();
     api.close();

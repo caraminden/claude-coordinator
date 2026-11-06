@@ -13,10 +13,13 @@ import { note } from './retro-log.ts';
 
 export const MAX_STOP_BLOCKS = 2;
 
-/** The background jobs still running, as "id (what it is)". */
+/**
+ * The background jobs still running, as "id (what it is)". A workflow run doesn't count: `claude -p`
+ * keeps the turn alive until it finishes, and no blocking command could wait for it (#359).
+ */
 export function runningJobs(input: any): string[] {
   const tasks = Array.isArray(input?.background_tasks) ? input.background_tasks : [];
-  return tasks.filter((t: any) => t?.status === 'running').map((t: any) => `${t.id} (${String(t.description || t.command || t.type || 'job').slice(0, 80)})`);
+  return tasks.filter((t: any) => t?.status === 'running' && t?.type !== 'workflow').map((t: any) => `${t.id} (${String(t.description || t.command || t.type || 'job').slice(0, 80)})`);
 }
 
 /** Why the turn may not end yet, or null. `blocks` is how many stops this prompt already refused. */

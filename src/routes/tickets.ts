@@ -15,7 +15,7 @@ import { tripwireConfig } from '../runner.ts';
 import { runsRepo } from '../wake.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
-import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, type App, type Ctx, type Route } from '../http.ts';
+import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { ensureCoordinator } from './projects.ts';
 
@@ -113,10 +113,11 @@ export const ticketRoutes: Route[] = [
       const { req, res, app, session, caller, ticket } = ctx;
       const { id } = ticket;
       const { store, runner } = app;
-      // Any of title, state, note, replies, build, model and effort; null (or "") clears all but the title.
+      // Any of title, state, note, replies, build, model, effort and workflow; null (or "") clears all but the title.
       const body = await readJson(req);
-      const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort'>> = {};
+      const fields: Partial<Pick<Ticket, 'title' | 'state' | 'note' | 'replies' | 'build' | 'model' | 'effort' | 'workflow'>> = {};
       if (body.model !== undefined) fields.model = oneOf(body.model, MODELS, 'Model');
+      if (body.workflow !== undefined) fields.workflow = workflowSwitch(body.workflow, ticket);
       if (body.effort !== undefined) fields.effort = oneOf(body.effort, EFFORTS, 'Effort');
       if (body.title !== undefined) fields.title = str(body.title, 'Title', 120);
       if (body.state !== undefined) fields.state = oneOf(body.state, TICKET_STATES, 'State') as TicketState | null;
@@ -140,6 +141,7 @@ export const ticketRoutes: Route[] = [
         const next = runner.isRunning(id) ? 'from the next turn' : 'from now on';
         if ('model' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.model ? modelName(fields.model) : 'the default model'} ${next}.` });
         if ('effort' in fields) runner.emit(id, 'note', { text: `${who} set this minion to ${fields.effort ? `${fields.effort} effort` : 'the default effort'} ${next}.` });
+        if ('workflow' in fields) runner.emit(id, 'note', { text: `${who} turned the Workflow tool ${fields.workflow ? 'on' : 'off'} for this minion ${next}.` });
         runner.broadcastTicket(id);
         // A result or a blocker is worth a ping; whoever set it by hand already knows.
         if (fields.state && NOTIFY_STATES[fields.state]) {

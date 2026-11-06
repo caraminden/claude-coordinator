@@ -134,6 +134,14 @@ export function buildNumber(v: unknown): number | null {
   return v as number;
 }
 
+/** A minion's Workflow switch (#359) as stored: true is 1; false, null or "" is 0. A Taskmaster never gets it. */
+export function workflowSwitch(v: unknown, ticket?: { kind: string }): number {
+  if (v === null || v === '' || v === false) return 0;
+  if (v !== true) throw new HttpError(400, 'Workflow must be true or false');
+  if (ticket?.kind === 'coordinator') throw new HttpError(400, 'Only minions can use the Workflow tool');
+  return 1;
+}
+
 /** One-tap replies: up to 3 short texts, stored as JSON; none (null or []) clears them. */
 export function replyList(v: unknown): string | null {
   if (v === null || (Array.isArray(v) && !v.length)) return null;

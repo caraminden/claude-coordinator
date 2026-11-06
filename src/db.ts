@@ -113,6 +113,8 @@ export interface Ticket {
   /** What Claude Code's defaults came out as on this thread's latest turn without a choice. */
   last_model: string | null;
   last_effort: string | null;
+  /** 1: its turns may call Claude Code's Workflow tool (#359), off by default as it costs ~2k tokens a call. */
+  workflow: number;
   last_activity: string | null;
   /** Whose turn it last ran (users.id; src/access.ts turnPerson): set when a minion is made, then at each turn's start. */
   person_id: number | null;
@@ -648,6 +650,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['tickets', 'effort', 'ALTER TABLE tickets ADD COLUMN effort TEXT'],
   ['tickets', 'last_model', 'ALTER TABLE tickets ADD COLUMN last_model TEXT'],
   ['tickets', 'last_effort', 'ALTER TABLE tickets ADD COLUMN last_effort TEXT'],
+  ['tickets', 'workflow', 'ALTER TABLE tickets ADD COLUMN workflow INTEGER NOT NULL DEFAULT 0'],
   ['projects', 'instructions', "ALTER TABLE projects ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"],
   ['projects', 'instructions_updated_by', 'ALTER TABLE projects ADD COLUMN instructions_updated_by TEXT'],
   ['projects', 'instructions_updated_at', 'ALTER TABLE projects ADD COLUMN instructions_updated_at INTEGER'],
@@ -1248,7 +1251,7 @@ export class Store {
     this.db.prepare(`UPDATE tickets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   }
 
-  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'last_model' | 'last_effort' | 'person_id'>>) {
+  updateTicket(id: number, fields: Partial<Pick<Ticket, 'status' | 'session_id' | 'last_activity' | 'title' | 'state' | 'note' | 'replies' | 'build' | 'parent' | 'model' | 'effort' | 'workflow' | 'last_model' | 'last_effort' | 'person_id'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     const sets = keys.map((k) => `${k} = ?`).join(', ');

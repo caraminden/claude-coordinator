@@ -180,9 +180,15 @@ export function turnEnv(from: NodeJS.ProcessEnv): Record<string, string> {
 }
 /**
  * Built-in tools no turn calls, kept out of the context every API call re-reads (#138, ~3.7k tokens):
- * Citadel schedules and fans out its own work, so /loop's wakeups, cron, remote triggers and workflows go.
+ * Citadel schedules its own work, so /loop's wakeups, cron and remote triggers go. Workflow (~2k tokens)
+ * goes too, except for a minion opted in with its `workflow` switch (#359; disallowedTools).
  */
 export const UNUSED_TOOLS = ['Workflow', 'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger'];
+/** The built-in tools a turn leaves out: AskUserQuestion can't be answered headless (ask_question shows a card instead). */
+export function disallowedTools(ticket: Pick<Ticket, 'kind' | 'workflow'>): string[] {
+  const optedIn = ticket.kind !== 'coordinator' && !!ticket.workflow;
+  return ['AskUserQuestion', ...UNUSED_TOOLS.filter((t) => !(optedIn && t === 'Workflow'))];
+}
 /**
  * The account's claude.ai skill packs (docx, pptx, browsers, morning brief…) and connectors (Claude Docs)
  * stay out of turns too (#138, ~3.3k tokens, ~1.8k more once the connector attaches mid-turn). In
@@ -1915,8 +1921,7 @@ export class Runner {
     // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
     let env: Record<string, string> = { ...turnEnv(process.env), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
     if (tmp) env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
-    // The built-in AskUserQuestion can't be answered in headless mode; ask_question shows a card instead.
-    args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', 'AskUserQuestion', ...UNUSED_TOOLS);
+    args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', ...disallowedTools(ticket));
     env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
     // In a container, claude signs in with the person's own login, so nothing of the server's may win over it.
     if (!place.host) {

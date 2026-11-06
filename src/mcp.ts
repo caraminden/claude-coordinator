@@ -64,6 +64,10 @@ const EFFORT = {
   enum: ['low', 'medium', 'high', 'xhigh', 'max', null],
   description: "The effort for the minion's turns, as in its composer. Leave it out (or null) for the scheme's default effort.",
 };
+const WORKFLOW = {
+  type: ['boolean', 'null'],
+  description: "true lets the minion's turns call Claude Code's Workflow tool (scripted fan-out of agents), as in its composer; off by default, since it adds about 2k tokens to every API call. Set it when creating the minion: flipping it later breaks its prompt cache once.",
+};
 
 const PROPERTIES = {
   type: 'object',
@@ -271,6 +275,7 @@ const TOOLS = [
         build: { ...BUILD, description: `${BUILD.description} Left out, it is the parent's build, else the start_after minion's, if any.` },
         model: MODEL,
         effort: EFFORT,
+        workflow: WORKFLOW,
       },
       // properties is asked for but not required, so a client holding an older schema isn't refused before the fallback below.
       required: ['title', 'message'],
@@ -304,10 +309,10 @@ const TOOLS = [
   },
   {
     name: 'update_ticket',
-    description: "Change a minion's title, state, note, build group (the major build it is assigned to), model or effort; leave out what should stay. A new model or effort applies from its next turn. (The branch keeps its original name.)",
+    description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort or Workflow switch; leave out what should stay. A new model, effort or switch applies from its next turn. (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: BUILD, model: MODEL, effort: EFFORT },
+      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: BUILD, model: MODEL, effort: EFFORT, workflow: WORKFLOW },
       required: ['ticket_id'],
     },
   },
@@ -791,6 +796,7 @@ function ticketLine(t: any): string {
     t.build ? `build: ${t.build}` : '',
     t.model ? `model: ${t.model}` : '',
     t.effort ? `effort: ${t.effort}` : '',
+    t.workflow ? 'workflow: on' : '',
     `status: ${t.status}${t.state ? `, ${t.state}` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
     t.note ? `note: ${t.note}` : '',
     t.branch ? `branch: ${t.branch}` : '',
@@ -1024,6 +1030,7 @@ async function runTool(name: string, args: any): Promise<string> {
         build: args.build,
         model: args.model ?? null,
         effort: args.effort ?? null,
+        workflow: args.workflow ?? null,
       });
       const fallback = untyped ? [`No type was given, so it is type: other for now. Set the right one with set_properties (ticket_id ${t.number}), and pass properties: { type: … } to create_ticket next time.`] : [];
       return [`Created ${ticketLine(t)}`, ...(t.notes ?? []), ...fallback].join('\n') + tagNote(args);
@@ -1164,8 +1171,8 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':
-      if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort'], 'update_ticket');
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort }))}${tagNote(args)}`;
+      if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow'], 'update_ticket');
+      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow }))}${tagNote(args)}`;
     case 'ask_question': {
       const { id: questionId } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
       return `The question card (id ${questionId}) is in the chat. End your turn now with a short reply; the answers will come as the next message.`;

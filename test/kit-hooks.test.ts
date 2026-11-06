@@ -36,6 +36,10 @@ test('job check: refuses a minion\'s stop while its background job runs, at most
   assert.equal(jobCheck(stop(), 'coordinator', 0), null, 'the Taskmaster loads the kit too, and is left alone');
   assert.equal(jobCheck(stop({ background_tasks: [{ ...running, status: 'completed' }] }), 'thread', 0), null);
   assert.equal(jobCheck(stop({ background_tasks: undefined }), 'thread', 0), null);
+  // #359: claude -p waits for a workflow run itself, and no blocking command could; a shell job beside it still counts.
+  const workflow = { id: 'w1', type: 'workflow', status: 'running', name: 'survey' };
+  assert.equal(jobCheck(stop({ background_tasks: [workflow] }), 'thread', 0), null);
+  assert.match(jobCheck(stop({ background_tasks: [workflow, running] }), 'thread', 0)!, /still running: b1 \(Run the test suite\)\./);
 
   const dir = mkdtempSync(join(tmpdir(), 'kit-jobs-'));
   const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_SHARED_DIR: shared() };

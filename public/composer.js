@@ -389,13 +389,14 @@ function codexBlocked() {
   return /container/.test(codex.why ?? '') ? 'link your Claude first' : 'sign in to Codex first';
 }
 
-/** Model and effort for this thread, beside Send; a change applies from its next turn. */
+/** Model, effort and (minions only) the Workflow switch for this thread, beside Send; a change applies from its next turn. */
 function modelPicker(chatId) {
   const save = (field) => async (e) => {
     const sel = e.target;
     sel.disabled = true;
     try {
-      const ticket = await api(`api/tickets/${chatId}`, { method: 'PATCH', body: { [field]: sel.value || null } });
+      const value = field === 'workflow' ? sel.value === 'on' : sel.value || null;
+      const ticket = await api(`api/tickets/${chatId}`, { method: 'PATCH', body: { [field]: value } });
       if (view?.kind === 'project' && view.id === chatId) {
         view.ticket = ticket;
         renderModelPicker();
@@ -409,7 +410,10 @@ function modelPicker(chatId) {
   };
   const model = h('select', { class: 'picker', id: 'model-picker', title: 'Model for this minion', 'aria-label': 'Model for this minion', onchange: save('model') });
   const effort = h('select', { class: 'picker', id: 'effort-picker', title: 'Effort for this minion', 'aria-label': 'Effort for this minion', onchange: save('effort') });
-  return h('span', { class: 'pickers' }, model, effort);
+  // Workflow (#359): off by default, as the tool adds ~2k tokens to every call; the Taskmaster never gets it.
+  const workflow = h('select', { class: 'picker', id: 'workflow-picker', onchange: save('workflow') },
+    h('option', { value: '' }, 'No Workflow'), h('option', { value: 'on' }, 'Workflow'));
+  return h('span', { class: 'pickers' }, model, effort, workflow);
 }
 
 /**
@@ -441,4 +445,11 @@ export function renderModelPicker() {
   effort.title = t.effort ? `Effort for this minion: ${t.effort}${later}` : `Effort for this minion: the default${t.default_effort ? ` (${t.default_effort})` : t.last_effort ? ` (${t.last_effort} on its last turn)` : ''}${later}`;
   model.setAttribute('aria-label', model.title);
   effort.setAttribute('aria-label', effort.title);
+  const workflow = document.getElementById('workflow-picker');
+  if (!workflow) return;
+  workflow.hidden = t.kind === 'coordinator';
+  workflow.value = t.workflow ? 'on' : '';
+  workflow.classList.toggle('is-default', !t.workflow);
+  workflow.title = `${t.workflow ? 'This minion can use the Workflow tool' : 'Workflow tool off for this minion'}: turning it on adds ~2k tokens to every call, and a change breaks the prompt cache once${later}`;
+  workflow.setAttribute('aria-label', workflow.title);
 }

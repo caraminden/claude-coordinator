@@ -79,7 +79,7 @@ const errors: string[] = [];
 const runner = new Runner(store, () => {}, (t) => ({ COORDINATOR_API: 'http://127.0.0.1:8573', COORDINATOR_TOKEN: `token-${t.id}` }), fake);
 runner.onTurnError = (_id, text) => errors.push(text);
 
-async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; machine_tools?: number } = {}, repoDir?: string, projectId?: number) {
+async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; workflow?: number; machine_tools?: number } = {}, repoDir?: string, projectId?: number) {
   writeFileSync(join(root, 'mcp-status'), mcpStatus);
   // A scheme has one Taskmaster, so each turn gets a scheme of its own unless it names one.
   const project = projectId ? store.getProject(projectId)! : store.createProject(`P${Math.random()}`, null);
@@ -89,7 +89,8 @@ async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { mo
   const cwd = join(root, `ticket-${t.id}`);
   mkdirSync(cwd, { recursive: true });
   store.setTicketDir(t.id, cwd, null);
-  if (set.model || set.effort) store.updateTicket(t.id, set as any);
+  const { machine_tools: _, ...own } = set;
+  if (Object.keys(own).length) store.updateTicket(t.id, own as any);
   errors.length = 0;
   runner.send(t.id, 'Cara', 'go');
   while (runner.isRunning(t.id)) await wait(20);
@@ -176,6 +177,16 @@ test("minion and Taskmaster turns both leave out unused built-in tools and the a
     assert.equal(t.settings.disableClaudeAiConnectors, true, kind);
     assert.ok(t.settings.hooks.PreToolUse, `${kind}: the tripwire hook is still there`);
   }
+});
+
+test('a minion opted in to Workflow (#359) gets the tool; the rest stay out, and a Taskmaster never gets it', async () => {
+  const denied = (t: any) => t.args.slice(t.args.indexOf('--disallowedTools') + 1);
+  const minion = await turn('ticket', 'connected', { workflow: 1 });
+  assert.ok(!denied(minion).includes('Workflow'));
+  for (const tool of ['AskUserQuestion', 'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger']) assert.ok(denied(minion).includes(tool), tool);
+  // The route refuses it for a Taskmaster; the runner holds even if the column says otherwise.
+  const tm = await turn('coordinator', 'connected', { workflow: 1 });
+  assert.ok(denied(tm).includes('Workflow'));
 });
 
 test("a Taskmaster may search and fetch the web without a prompt nobody can answer; a minion's rules are unchanged (#210)", async () => {

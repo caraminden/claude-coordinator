@@ -412,7 +412,7 @@ function modelPicker(chatId) {
   const effort = h('select', { class: 'picker', id: 'effort-picker', title: 'Effort for this minion', 'aria-label': 'Effort for this minion', onchange: save('effort') });
   // Workflow (#359): off by default, as the tool adds ~2k tokens to every call; the Taskmaster never gets it.
   const workflow = h('select', { class: 'picker', id: 'workflow-picker', onchange: save('workflow') },
-    h('option', { value: '' }, 'No Workflow'), h('option', { value: 'on' }, 'Workflow'));
+    h('option', { value: '' }, 'Workflow off'), h('option', { value: 'on' }, 'Workflow on'));
   return h('span', { class: 'pickers' }, model, effort, workflow);
 }
 

@@ -5,8 +5,8 @@ description: Whether a test proves anything, and test-first for new logic. Use w
 
 # Test quality
 
-A test is worth keeping when it goes red as soon as the behaviour it names breaks. Check
-commands come from the repo's CLAUDE.md, "Project facts". Never add a test library or other
+A test is worth keeping when it goes red as soon as its behaviour breaks. Check commands come
+from the repo's CLAUDE.md, "Project facts". Never add a test library or other
 dependency: offer it once, with the test you would write, and leave the call to a person.
 
 ## When it applies
@@ -21,7 +21,7 @@ dependency: offer it once, with the test you would write, and leave the call to 
 ## What a good test is
 
 - **It goes through the public interface** (the seam): the exported function, the route, the
-  command. It survives any refactor that keeps the behaviour.
+  command, so it survives a refactor.
 - **It mocks only at system boundaries**: the network, the clock, randomness, other processes,
   and sometimes the file system or database (a temp copy beats a mock). Needing to mock your own
   module means the seam is in the wrong place (citadel:codebase-design).
@@ -57,8 +57,9 @@ and saying so is fine.
 ## Check before calling it done
 
 1. **Mutate by hand.** Flip two or three risky lines of the diff (a comparison, a boundary, a
-   branch, a guard), run that test file, and confirm a test goes red each time. Then revert. A
-   mutant that survives is a gap, or a change that can't alter behaviour: decide which, and say.
+   branch, a guard), run that test file, confirm a test goes red each time, then revert. A
+   survivor is a gap, or a change that can't alter behaviour: decide which, and say. Reviewing
+   read-only, name the line you would flip and the test that should catch it instead.
 2. **Run the full check commands.**
 3. **Rate what is still untested** on the tests lens's scale in citadel:self-review
    (`references/lenses.md`): behavioural gaps scored 1 to 10, only 7 and up fixed in this change.

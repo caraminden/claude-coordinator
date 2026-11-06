@@ -27,6 +27,8 @@ Use the property-testing library the repo already has. With none, a plain loop i
 test runner does the job; adding a library is a person's call. A Node sketch:
 
 ```js
+// `test` and `assert` come from the runner (node:test, node:assert/strict); randomInput, parse
+// and format are the code under test and your own generator.
 // Small seeded generator (mulberry32): the same seed gives the same cases.
 function rng(seed) {
   return () => {
@@ -48,7 +50,7 @@ test('format then parse gives the original back', () => {
 ```
 
 - **Keep a fixed default seed**, so the suite is deterministic and never flaky. While writing
-  the test, run it under several other seeds (`PROP_SEED=$RANDOM`) to explore.
+  the test, run it under a few other seeds (`PROP_SEED=7`, `PROP_SEED=1234`) to explore.
 - **Put the seed and the input in the failure message**, so a failure can be replayed.
 - **Generate valid inputs directly** rather than generating anything and skipping the invalid
   ones. A skip that drops most cases makes the test vacuous.
@@ -84,5 +86,7 @@ On top of the general list in the skill, watch for:
 - so few cases (`5`) that it can't find anything;
 - the expected value rebuilt with the code's own formula: assert a rule instead (order doesn't
   matter, an identity element, a round trip);
-- float equality with no tolerance, or a check on the iteration order of a map or set: flaky,
-  and flaky tests get deleted.
+- float equality with no tolerance, or a check on an order nothing promises (rows with no
+  `ORDER BY`, keys merged from several sources, a hash map in a language whose maps don't keep
+  insertion order): flaky, and flaky tests get deleted. Where the order is part of the contract,
+  check it.

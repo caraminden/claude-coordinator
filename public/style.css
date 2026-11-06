@@ -913,15 +913,18 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .composer .plugin-picker[hidden] { display: none; }
 .composer button.picker { width: auto; padding: 0.2rem 0.4rem; font-size: 0.82em; font-weight: normal; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: var(--control-h); }
 .composer button.picker.is-default { color: var(--muted); }
+/* The selects' ▾, so it reads as a picker too. */
+.composer button.picker::after { content: ' ▾'; color: var(--muted); }
 .composer button.picker:hover, .composer button.picker:focus-visible { color: var(--ink); border-color: var(--accent); }
 .composer .plugin-menu { position: absolute; right: 0; bottom: calc(100% + 0.35rem); z-index: 5; display: flex; flex-direction: column; gap: 0.15rem; min-width: 12rem; padding: 0.4rem 0.5rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.12); }
 .composer .plugin-menu[hidden] { display: none; }
-.composer .plugin-menu p { margin: 0 0 0.2rem; }
-.composer .plugin-menu label { display: flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.25rem; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.composer .plugin-menu p { margin: 0 0 0.2rem; white-space: nowrap; }
+.composer .plugin-menu input[type=checkbox] { width: auto; margin: 0; padding: 0; flex: none; }
+.composer .plugin-menu label { display: flex; align-items: center; gap: 0.35rem; margin: 0; padding: 0.3rem 0.25rem; color: var(--ink); font-size: 0.9em; border-radius: 4px; cursor: pointer; white-space: nowrap; }
 .composer .plugin-menu label:hover { background: var(--line); }
 @media (max-width: 800px) {
   .composer select.picker, .composer button.picker { max-width: 8.5rem; }
-  .composer button.picker { min-width: 0; flex: 0 1 auto; }
+  .composer button.picker { min-width: 0; flex: 0 1 auto; max-width: 5rem; }
   /* Phones: Add image, the pickers and Send (with its ▾ mid-turn) share one line; the pickers give way. */
   .composer .row { gap: 0.5rem; flex-wrap: nowrap; }
   .composer .pickers { min-width: 0; }

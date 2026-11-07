@@ -115,11 +115,16 @@ if (pushSupported) {
 // A link into the installed app while it's open (the rail's way back from a contraption, a thread link
 // opened elsewhere) focuses the open window instead of opening another (manifest launch_handler,
 // focus-existing), and lands here: show a thread or view it names; a bare /c/ leaves you where you were.
-// A share from the Share sheet (/c/share?…, #375) goes to its route, which reloads an open frame there.
+// A share from the Share sheet (/c/share?…, #375) goes to its route, which reloads an open frame there;
+// encoded as the server's redirect does (src/http.ts ownPath), so a fresh launch's own share isn't taken twice.
+const shareHash = (url) => {
+  const q = new URLSearchParams(url.search).toString();
+  return `#/share${q ? `?${q}` : ''}`;
+};
 if ('launchQueue' in window) {
   window.launchQueue.setConsumer(({ targetURL }) => {
     const url = targetURL && new URL(targetURL);
-    const hash = url && (url.pathname.endsWith('/c/share') ? `#/share${url.search}` : url.hash);
+    const hash = url && (url.pathname.endsWith('/c/share') ? shareHash(url) : url.hash);
     if (hash) openHash(hash);
   });
 }

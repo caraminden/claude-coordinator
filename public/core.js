@@ -848,7 +848,7 @@ async function route() {
   let m;
   // A contraption in Citadel's window (frames.js): Citadel's page stays as it was underneath.
   if ((m = hash.match(/^#\/apps\/([a-z0-9][a-z0-9-]{0,31})$/))) return showFrame(m[1]);
-  if ((m = hash.match(/^#\/share(\?.*)?$/))) return takeShare(m[1] ?? '');
+  if ((m = hash.match(/^#\/share(\?.*)?$/))) return takeShare(m[1] ?? '', seq);
   hideFrames();
   // A jump left by a route that never opened its chat mustn't fire on a later, ordinary visit.
   if (pendingJump?.hash !== hash) pendingJump = null;
@@ -885,13 +885,16 @@ async function route() {
 }
 
 /** A share from the phone's Share sheet (#375): the contraption that takes it, filled in; else home, saying so. */
-async function takeShare(search) {
-  let mine = [];
+async function takeShare(search, seq) {
+  let mine;
   try {
     mine = await api('api/contraptions/mine');
   } catch (err) {
-    if (err.message === 'Not logged in') return; // the login is showing; the share is still in the address for after
+    // The login is showing, or Citadel didn't answer: the share stays in the address, for after or a reload.
+    if (err.message !== 'Not logged in') toast(`Couldn't open the share: ${err.message}. Reload to try again.`, { tone: 'warn', ms: 8000 });
+    return;
   }
+  if (seq !== routeSeq) return; // you went elsewhere meanwhile
   const to = shareTarget(search, mine);
   if (!to) {
     toast('Nothing here takes shares');

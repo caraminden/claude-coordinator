@@ -1,7 +1,7 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './core.js';
-import { cardEvent, countMoved, otherSchemes, rowTarget, schemePill, turnMoved } from './schemecounts.js';
+import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, turnMoved } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
@@ -97,8 +97,8 @@ export function renderInbox() {
   const count = new Set(items.filter((i) => !faded(i)).map((i) => i.ticketId)).size;
   // A scheme you hid (#226) keeps its strip but no pill.
   const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
-  const running = !hidden && [view.coordinator, ...view.tickets.values()].some((t) => t?.status === 'running');
-  const working = hidden ? 0 : [...view.tickets.values()].filter((t) => t.kind !== 'coordinator' && t.status === 'running').length;
+  const running = !hidden && [view.coordinator, ...view.tickets.values()].some(isWorking);
+  const working = hidden ? 0 : [...view.tickets.values()].filter((t) => t.kind !== 'coordinator' && isWorking(t)).length;
   for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running, working }));
   strip.hidden = !items.length;
   if (!items.length) return strip.replaceChildren();

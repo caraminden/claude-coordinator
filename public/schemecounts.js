@@ -11,8 +11,15 @@ export const cardEvent = (event) => CARD_EVENTS.has(event.kind) || (event.kind =
 export const countMoved = (before, after) => !before || before.state !== after.state || !before.replies?.length !== !after.replies?.length || (before.status === 'closed') !== (after.status === 'closed')
   || before.properties?.assigned !== after.properties?.assigned;
 
-/** A minion started or ended a turn: the spinner beside the count (#248). */
-export const turnMoved = (before, after) => (before?.status === 'running') !== (after.status === 'running');
+/**
+ * A minion or Taskmaster whose turn is doing work, for the spinner and its number (#248, #278). A turn
+ * held open on an approval card waits on a person, not working (#373; Cara, 2026-11-07: "it should only
+ * count actually working minions"). `t.approvals` is how many of its cards wait, as runner.view sends it.
+ */
+export const isWorking = (t) => t?.status === 'running' && !t.approvals;
+
+/** A minion started or ended work: the spinner beside the count (#248). */
+export const turnMoved = (before, after) => isWorking(before) !== isWorking(after);
 
 /**
  * What a scheme's pill shows (`p` as api/projects sends it): the Needs-you count, the spinner while a

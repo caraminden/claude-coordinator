@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cardEvent, countMoved, otherSchemes, rowTarget, schemePill, turnMoved } from '../public/schemecounts.js';
+import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, turnMoved } from '../public/schemecounts.js';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -41,6 +41,21 @@ test('cardEvent and countMoved, as the open scheme\'s badge uses them too', () =
   assert.equal(turnMoved(minion(), minion({ status: 'running' })), true, 'a turn started: the spinner (#248)');
   assert.equal(turnMoved(minion({ status: 'running' }), minion({ status: 'idle' })), true, 'a turn ended');
   assert.equal(turnMoved(minion({ status: 'idle' }), minion({ status: 'error' })), false, 'neither running');
+});
+
+test('isWorking: only a turn doing work spins the scheme\'s spinner and counts beside it, not one held on a person (#373)', () => {
+  assert.equal(isWorking(minion({ status: 'running' })), true, 'mid-turn');
+  assert.equal(isWorking(minion({ status: 'running', approvals: 0 })), true, 'no card waiting');
+  assert.equal(isWorking(minion({ status: 'running', approvals: 1 })), false, 'its turn waits on an approval card (Delve #110, 14 hours)');
+  assert.equal(isWorking(minion({ kind: 'coordinator', status: 'running', approvals: 1 })), false, 'a Taskmaster waiting on one too');
+  for (const status of ['idle', 'new', 'error', 'closed']) assert.equal(isWorking(minion({ status })), false, status);
+  for (const state of ['blocked', 'parked', 'outside', 'pending-deploy', 'ready', 'try']) {
+    assert.equal(isWorking(minion({ state })), false, `${state} between turns`);
+    assert.equal(isWorking(minion({ state, status: 'running' })), true, `${state} left from before, but a turn runs now`);
+  }
+  assert.equal(isWorking(undefined), false, 'no Taskmaster loaded yet');
+  assert.equal(turnMoved(minion({ status: 'running' }), minion({ status: 'running', approvals: 1 })), true, 'an approval card stops the spinner');
+  assert.equal(turnMoved(minion({ status: 'running', approvals: 1 }), minion({ status: 'running' })), true, 'answering it starts it again');
 });
 
 test('forget: after the counts are fetched afresh, a minion the watcher last saw before then refetches on its next change', () => {

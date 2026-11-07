@@ -9,6 +9,7 @@ import { AGENT_NAME } from '../auth.ts';
 import { askerKey, EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, lendsMachines, taskmasterTargets } from '../access.ts';
 import { inboxCount, inboxItems } from '../inbox.ts';
+import { isWorking } from '../../public/schemecounts.js';
 import { instructionSources, lineDiff } from '../instructions.ts';
 import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
@@ -217,18 +218,19 @@ export const projectRoutes: Route[] = [
     // inbox: the count on the scheme's Needs-you badge, for the scheme switcher.
     // icon: the version of the scheme's favicon (#222) for its URL, or null when it has none.
     // hidden: this person hid it (#226); its badge stays at zero.
-    // running: a minion or its Taskmaster has a turn running (#248), for the spinner; false when hidden.
-    // working: how many minions (not the Taskmaster) have a turn running, the number beside the spinner (#278); 0 when hidden.
+    // running: a minion or its Taskmaster has a turn doing work (#248; not one held on an approval card, #373), for the spinner; false when hidden.
+    // working: how many minions (not the Taskmaster) have a turn doing work, the number beside the spinner (#278); 0 when hidden.
     handler: async ({ res, app: { store, runner }, session }) => {
       const hidden = store.hiddenProjects(session.uid ?? -1);
+      const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id) });
       json(res, 200, await Promise.all(visibleSchemes(store, session).map(async (p) => {
         const tickets = store.listTickets(p.id);
         return {
           ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: tickets.filter((t) => t.kind === 'ticket').length,
           hidden: hidden.has(p.id),
           inbox: hidden.has(p.id) ? 0 : inboxCount(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id)),
-          running: !hidden.has(p.id) && tickets.some((t) => t.status === 'running'),
-          working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && t.status === 'running').length,
+          running: !hidden.has(p.id) && tickets.some(busy),
+          working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && busy(t)).length,
           icon: await iconVersion(p.repo_dir),
         };
       })));

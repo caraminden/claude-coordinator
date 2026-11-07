@@ -40,7 +40,8 @@ exit "\${FAKE_DEPLOY_EXIT:-0}"
   const wt = join(dir, 'wt');
   git(source, 'worktree', 'add', '-q', '-b', 'ticket/1-x', wt);
   const run = (extra: Record<string, string> = {}) =>
-    spawnSync('bash', [land], { cwd: wt, encoding: 'utf8', env: { ...env, DEPLOY_LIVE: live, DEPLOY_SOURCE: source, DEPLOY_NOTE: join(dir, 'note'), ...extra } });
+    // A time limit, so a land.sh whose test run hangs fails this test instead of hanging it (#377).
+    spawnSync('bash', [land], { cwd: wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: live, DEPLOY_SOURCE: source, DEPLOY_NOTE: join(dir, 'note'), ...extra } });
   const commit = (where: string, file: string, text: string) => {
     writeFileSync(join(where, file), text);
     git(where, 'add', '-A');
@@ -74,6 +75,33 @@ test('red tests stop it before main moves', () => {
   assert.match(res.stderr, /tests failed on the rebased branch/);
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   assert.equal(r.note(), null);
+});
+
+// The test run holds the deploy lock, so it must end however a test goes wrong (#377).
+test('a red test that leaks a handle ends the run at once instead of holding the lock', () => {
+  const r = setup();
+  r.commit(r.wt, 'test/ok.test.mjs', "import { test } from 'node:test';\ntest('leaks', () => { setInterval(() => {}, 1000); throw new Error('red'); });\n");
+  const main = git(r.source, 'rev-parse', 'main');
+  const t = Date.now();
+  const res = r.run({ DEPLOY_TEST_TIMEOUT: '60' });
+  assert.ok(Date.now() - t < 30_000, `not the whole time limit: ${Date.now() - t} ms`);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /tests failed on the rebased branch/);
+  assert.doesNotMatch(res.stderr, /ran past/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+});
+
+test('a test that hangs is stopped at the time limit, says so, and lets go of the lock', () => {
+  const r = setup();
+  r.commit(r.wt, 'test/ok.test.mjs', "import { test } from 'node:test';\ntest('hangs', () => new Promise(() => setInterval(() => {}, 1000)));\n");
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = r.run({ DEPLOY_TEST_TIMEOUT: '2' });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /the tests ran past 2s and were stopped: a test hung/);
+  assert.match(res.stderr, /tests failed on the rebased branch/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  const lock = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'lock');
+  assert.equal(spawnSync('flock', ['-n', lock, 'true']).status, 0, 'the deploy lock is free');
 });
 
 test('a conflict aborts the rebase and lands nothing', () => {
@@ -119,7 +147,7 @@ test('the real deploy.sh takes the lock land.sh holds, and lets go of it once th
   const r = setup();
   // The real script, a boot check that passes, and stand-ins for systemd: the queued "restart" waits
   // for the lock, then counts as live.
-  copyFileSync(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), join(r.source, 'tools', 'deploy.sh'));
+  for (const f of ['deploy.sh', 'run-tests.sh']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real deploy.sh');

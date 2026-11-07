@@ -44,7 +44,7 @@ fi
 
 say "running the tests (in a citadel-heavy slot, shared host-wide)"
 log="$state/land-test.log"
-if ! "$(dirname "${BASH_SOURCE[0]}")/citadel-heavy" sh -c 'node --test test/ >"$1" 2>&1' sh "$log"; then
+if ! "$(dirname "${BASH_SOURCE[0]}")/citadel-heavy" "$(dirname "${BASH_SOURCE[0]}")/run-tests.sh" "$log"; then
   tail -n 40 "$log" >&2
   refuse "tests failed on the rebased branch (full log: $log), so main is untouched"
 fi

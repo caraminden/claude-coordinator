@@ -661,14 +661,17 @@ export class AppServices {
         sock.once('connect', () => done(true)).once('error', () => done(false)).once('timeout', () => done(false));
       }));
     let seen = '';
-    for (let first = true; Date.now() < until; await new Promise((r) => setTimeout(r, 1000))) {
+    // Polls scale with healthMs (1 s at most), so a short healthMs isn't spent asleep (#377).
+    const poll = Math.min(1000, this.opts.healthMs / 10);
+    for (let first = true; Date.now() < until; await new Promise((r) => setTimeout(r, poll))) {
       const state = (await this.state(main)).active;
       const ok = state === 'active' && await probe();
-      seen = `${main} ${state}${state === 'active' ? `, ${health ?? `port ${row.port}`} not answering` : ''}`;
       if (!ok) {
+        seen = `${main} ${state}${state === 'active' ? `, ${health ?? `port ${row.port}`} not answering` : ''}`;
         first = true;
         continue;
       }
+      seen = `${main} ${state}, ${health ?? `port ${row.port}`} answered, but time ran out before the second check`;
       // Once more after a pause, so a service that starts and then crashes doesn't pass.
       if (!first) return;
       first = false;

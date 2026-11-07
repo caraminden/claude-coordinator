@@ -261,7 +261,7 @@ deploy() {
   # Put the checkout back on any failure from here until the restart is queued.
   trap 'say "putting the checkout back to $(short "$prev")"; git_live reset -q --hard "$prev"' ERR
   say "running the tests"
-  if ! (cd "$LIVE" && node --test test/ >"$STATE/test.log" 2>&1); then
+  if ! (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log"); then
     tail -n 40 "$STATE/test.log" >&2
     say "tests failed (full log: $STATE/test.log); nothing deployed"
     false

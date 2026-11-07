@@ -97,7 +97,7 @@ let fake: ReturnType<typeof fakeSystemd>;
 let services: AppServices;
 const opts = (): ServiceOptions => ({
   off: null, unitDir, systemctl: fake.bin, journalctl: fake.journal, home, keysDir: (x) => join(home, 'keys', x), citadelUrl: () => 'http://127.0.0.1:8573',
-  logDir: join(home, 'deploy-logs'), healthMs: 1500, minuteMs: 300, gitUrl: (repo) => `file://${join(root, 'remotes', repo)}.git`,
+  logDir: join(home, 'deploy-logs'), healthMs: 3000, minuteMs: 300, gitUrl: (repo) => `file://${join(root, 'remotes', repo)}.git`,
 });
 const appFolder = (name: string, manifest: object = MANIFEST) => {
   mkdirSync(join(home, 'apps', name), { recursive: true });
@@ -411,16 +411,22 @@ test('a deploy that doesn\'t come up healthy rolls back, and says so when the ro
   const r = remote(`cara/${name}`);
   r.push({ 'citadel-app.json': appManifest([]) });
   const svc = await listening();
-  const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
-  services.deploy(c, 'Cara');
-  assert.equal((await done(name)).state, 'deployed');
-  svc.close();
-  r.push({ 'citadel-app.json': appManifest(['true']) });
-  services.deploy(c, 'Cara');
-  const d = await done(name);
-  assert.equal(d.state, 'failed');
-  assert.ok(d.said.some((l) => /Not healthy after/.test(l)), d.said.join('\n'));
-  assert.ok(d.said.some((l) => /Rolling back failed too: Not healthy/.test(l)), d.said.join('\n'));
+  // In a finally: a server left listening keeps the file, and the deploy lock, running forever (#377).
+  try {
+    const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    services.deploy(c, 'Cara');
+    const first = await done(name);
+    assert.equal(first.state, 'deployed', first.said.join('\n'));
+    svc.close();
+    r.push({ 'citadel-app.json': appManifest(['true']) });
+    services.deploy(c, 'Cara');
+    const d = await done(name);
+    assert.equal(d.state, 'failed', d.said.join('\n'));
+    assert.ok(d.said.some((l) => /Not healthy after/.test(l)), d.said.join('\n'));
+    assert.ok(d.said.some((l) => /Rolling back failed too: Not healthy/.test(l)), d.said.join('\n'));
+  } finally {
+    svc.close();
+  }
 });
 
 test("a deploy checks, as the person deploying, that the app installs as its own app, and warns when it wouldn't (#297)", async () => {

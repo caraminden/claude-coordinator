@@ -96,12 +96,16 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   agent now and at every logon, in the person's own session, with no reboot.
   **Workspace tools** (#90): an agent started with `--config machine-agent.json` (both
   snippets pass it) reads workspaces from that file, which only the computer's owner edits:
-  a folder, extra read-only folders, and named tasks with a fixed argv (no shell, no
-  arguments from minions). With the machine's "Workspace tools" switch on (off by default),
+  a folder, extra read-only folders, and named tasks with a fixed argv (no shell; a minion's
+  arguments are appended only to a task that says `"args": true`). With the machine's "Workspace tools" switch on (off by default),
   turns also get `mcp__<name>-ws__…`: `workspaces`, `git_sync` (fetch origin, detached
   checkout; stops rather than overwrite local changes), `run_task`/`job` (one job per
   workspace, long ones return a job id), `read_file`, `list_files`, and `fetch_file`, which
   copies a file of up to 20 MB into the minion's shared files under `machine-files/<machine>/`.
+  `stop_job` ends a running job and what it started. For the Windows test box (#369,
+  `tools/win-test-box/`), `"screenshots": true` adds `screenshot` (the screen or one window as a PNG,
+  copied over like `fetch_file`), and `"screen_lock": <file>` makes tasks (unless `"screen": false`)
+  and screenshots take one lock file that the box's CI desktop jobs take too.
   A workspace its owner keeps on a branch (an Obsidian vault with Obsidian Git) sets
   `"git_sync": false`: `git_sync` refuses there, `workspaces` and the Machines page say it's off,
   and an agent whose workspaces all have it off doesn't offer the tool.

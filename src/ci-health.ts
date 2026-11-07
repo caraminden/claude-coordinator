@@ -248,7 +248,7 @@ export class CiHealth {
             console.error('GitHub rate limit reached; pausing CI health checks.');
             return;
           }
-          console.error(`CI health check of ${p.name} failed:`, err?.message ?? err);
+          this.sayOnce(`fail:${p.id}:${err?.message}`, `CI health check of ${p.name} failed (said once until a restart): ${err?.message ?? err}`);
         }
       }
     } finally {
@@ -324,7 +324,7 @@ export class CiHealth {
     }
   }
 
-  /** A GitHub answer's body, from cache on a 304; null for a 404 or 403 (when `quiet`) and anything else not 200. */
+  /** A GitHub answer's body, from cache on a 304; null for a 404 or 403 when `quiet`; anything else throws. */
   private async read(path: string, as: GithubEnv, quiet = false): Promise<any> {
     const had = this.cache.get(path);
     const r = await this.get(path, had?.etag ?? null, as);
@@ -334,16 +334,18 @@ export class CiHealth {
       return r.body;
     }
     if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String(r.body?.message ?? '')))) throw new RateLimited();
-    if (!quiet || (r.status !== 403 && r.status !== 404)) this.sayOnce(`${r.status}:${path}`, `CI health: GitHub answered ${r.status} for ${path} (said once until a restart)`);
-    return null;
+    if (quiet && (r.status === 403 || r.status === 404)) return null;
+    // Anything else skips this scheme's round: an answer GitHub didn't give mustn't read as "all clear" and clear alerts.
+    throw new Error(`GitHub answered ${r.status} for ${path}`);
   }
 
   private async jobs(slug: string, r: Run, as: GithubEnv): Promise<Job[]> {
     const key = `${slug}:${r.id}:${r.run_attempt ?? 1}`;
     const kept = this.jobsOf.get(key);
     if (kept) return kept;
-    const jobs: Job[] = (await this.read(`repos/${slug}/actions/runs/${r.id}/jobs?per_page=100`, as))?.jobs ?? [];
-    if (r.status === 'completed') {
+    const body = await this.read(`repos/${slug}/actions/runs/${r.id}/jobs?per_page=100`, as);
+    const jobs: Job[] = Array.isArray(body?.jobs) ? body.jobs : [];
+    if (r.status === 'completed' && Array.isArray(body?.jobs)) {
       this.jobsOf.set(key, jobs);
       this.cache.delete(`repos/${slug}/actions/runs/${r.id}/jobs?per_page=100`);
       if (this.jobsOf.size > 2000) this.jobsOf.delete(this.jobsOf.keys().next().value!);

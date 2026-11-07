@@ -158,10 +158,12 @@ function world() {
     mainRuns: [] as Run[],
     calls: [] as string[],
     rateLimited: false,
+    down: null as RegExp | null,
   };
   const etagOf = (body: any) => `W/"${JSON.stringify(body).length}-${JSON.stringify(body).split('').reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 7)}"`;
   const get = async (path: string, etag: string | null): Promise<GhAnswer> => {
     gh.calls.push(path);
+    if (gh.down?.test(path)) return { status: 502, etag: null, body: { message: 'Server Error' } };
     if (gh.rateLimited) return { status: 403, etag: null, body: { message: 'API rate limit exceeded for user ID 1.' } };
     let body: any;
     if (path.startsWith('repos/caraminden/notes/')) body = { total_count: 0, workflows: [] };
@@ -268,4 +270,24 @@ test('a rate limit pauses the checks', async () => {
   assert.equal(w.gh.calls.length, n, 'paused');
   await w.health.tick(t + 16 * MIN);
   assert.ok(w.gh.calls.length > n, 'resumes after 15 minutes');
+});
+
+test('a GitHub error skips the round: open alerts stay, and a failed jobs read is not kept', async () => {
+  const w = world();
+  const t = Date.now();
+  const r = runOf({ id: 801, name: 'windows', created_at: new Date(t - 10 * MIN).toISOString() });
+  w.gh.runs = [r];
+  w.gh.jobs.set(801, [dead(0, { run_id: 801, created_at: r.created_at })]);
+  w.gh.down = /\/runs\/801\/jobs/;
+  await w.health.tick(t);
+  assert.deepEqual(w.puts, [], 'nothing known, nothing said');
+  w.gh.down = null;
+  await w.health.tick(t + MIN);
+  assert.equal(w.puts.length, 1, 'the jobs are read again once GitHub answers');
+  assert.equal(w.puts[0][1], 'ci.nostart:windows-latest');
+  for (const down of [/\/actions\/workflows\?/, /\/actions\/runs\?per_page/, /\/workflows\/7\/runs/]) {
+    w.gh.down = down;
+    await w.health.tick(t + 2 * MIN);
+    assert.equal(w.puts.length, 1, `a 502 on ${down} clears nothing`);
+  }
 });

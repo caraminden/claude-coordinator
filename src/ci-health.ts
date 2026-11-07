@@ -334,7 +334,7 @@ export class CiHealth {
       return r.body;
     }
     if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String(r.body?.message ?? '')))) throw new RateLimited();
-    if (!quiet || (r.status !== 403 && r.status !== 404)) console.error(`CI health: GitHub answered ${r.status} for ${path}`);
+    if (!quiet || (r.status !== 403 && r.status !== 404)) this.sayOnce(`${r.status}:${path}`, `CI health: GitHub answered ${r.status} for ${path} (said once until a restart)`);
     return null;
   }
 

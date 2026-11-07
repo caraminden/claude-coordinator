@@ -65,6 +65,9 @@ test('the onboarding section is in the prompt only while setup is under way', ()
       assert.match(text, /citadel:scheme-setup/);
       assert.match(text, /\/shared\/onboarding\.md/);
       assert.match(text, /who pushes main/);
+      // Native-app schemes (#371): the kind, and a plan part only they get.
+      assert.match(text, /native app \(desktop or phone\)/);
+      assert.match(text, /\*\*Real hardware \(native-app schemes only; leave it out for any other kind\):\*\*.*`windows-latest` proves little.*Real-hardware ledger: docs\/unproven\.md.*\*\*First run on real hardware\*\*/);
     }
   }
 });
@@ -83,6 +86,7 @@ test('a tune-up gets its own section: start from onboarding.md or the current st
     assert.match(text, /ask only what that leaves missing or may have changed/);
     for (const part of ['Add', 'Update', 'Retire', 'Instructions']) assert.match(text, new RegExp(`\\*\\*${part}:\\*\\*`), part);
     assert.match(text, /every repo copy the kit now covers \(`in_kit`\)/);
+    assert.match(text, /A native-app scheme .* with no Real-hardware ledger line gets one/);
     assert.match(text, /as a line diff/);
     assert.match(text, /This is a tune-up: edit only, and delete only what the plan lists under Retire\./);
     assert.match(text, /propose_plan/);

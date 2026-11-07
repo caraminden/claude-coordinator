@@ -68,6 +68,11 @@ change draws data (names, counts, lists), take those screenshots again with wors
 a dev copy (`citadel:contraption-ui`, `references/worst-case-data.md`) and fix what it breaks; a
 new page, view or flow also gets that skill's dogfood pass (`references/dogfood.md`).
 
+When Project facts names a **Real-hardware ledger**, everything this change does that wasn't
+seen working on real hardware gets an entry there, committed with the change, as the ledger's
+header says. The reply and the PR's "not verified" name those entry numbers, where a bare "not
+run in-game" or "not run on a real machine" would leave the debt unseen.
+
 ## 4. Label the risk
 
 You set the label, not the Grunt; take the highest row that matches what the final diff does.

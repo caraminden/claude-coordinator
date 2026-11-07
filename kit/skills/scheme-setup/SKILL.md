@@ -80,7 +80,11 @@ file from here on. Sections, in this order:
    running it.
 2. **Working rules**: only this repo's own (its stack's traps, a file never to edit by hand).
    The Citadel-wide layer and the scheme instructions already reach every session, so nothing
-   of theirs is repeated. When the repo has none yet, leave the section out.
+   of theirs is repeated. A native-app scheme (the plan has a Real hardware part) always has
+   one: *GitHub's hosted runners (`windows-latest` and the rest) are GPU-less VMs at 100%
+   display scaling with square window corners, so a desktop test passing there proves little;
+   only a run on real hardware proves it.* Otherwise, when the repo has none yet, leave the
+   section out.
 3. **Compact instructions**, as is: *When this conversation is compacted, keep each person's
    asks and decisions in their own words with their times, every open question and who owes
    the next step, the branch, PR, head and what is committed or pushed, the files written, and
@@ -92,7 +96,8 @@ file from here on. Sections, in this order:
 
 **Project facts** opens with: *The kit's skills and agents read this repo's paths and commands
 from here. "None" means that skill step is skipped or uses its default.* Then one bullet per
-key, `- **Key:** value`, every key present, "none" written out where it is none:
+key, `- **Key:** value`, every key present, "none" written out where it is none. The one
+exception is Real-hardware ledger: only a native-app scheme has that line.
 
 | Key | What to write | Read by | When none |
 |---|---|---|---|
@@ -106,6 +111,18 @@ key, `- **Key:** value`, every key present, "none" written out where it is none:
 | Retros | Retro folder | retro | `docs/retros/` |
 | Bug classes of its own | The stack's recurring bug kinds beyond bug-fixing's (a Godot signal wired twice, a stale save version) | bug-fixing | bug-fixing's classes only |
 | Docs test | A test that checks the paths docs name, if one exists | retro | skipped |
+| Real-hardware ledger | Native-app schemes only: `docs/unproven.md`, written as below | self-review | no line |
+
+**The ledger** (native-app schemes only) lists what nobody has yet seen work on real hardware.
+Write `docs/unproven.md` with a title, then this paragraph with the platform filled in, and no
+entries yet:
+
+> What this app does that nobody has yet seen work on a real <platform> machine; CI's VMs
+> can't show it. A PR that leaves something unchecked on real hardware adds an entry here,
+> under an area heading (Capture, Colour, Install), numbered after the highest number so far.
+> Each entry says what is unproven and what a failure would look like, and ends with its PR
+> or commit. A run on real hardware deletes what held and swaps what broke for its bug
+> minion's number. Numbers are never reused.
 
 **Check it** before moving on: read each line as a session new to this repo would, against four
 tests.

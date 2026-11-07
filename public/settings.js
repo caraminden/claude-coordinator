@@ -879,7 +879,7 @@ function machineWorkspaces(m) {
       ? workspaces.map((w) => h('div', { class: 'machine-workspace small' },
         h('div', {}, h('strong', {}, w.name), ' ', h('code', {}, w.path), w.git_sync === false ? h('span', { class: 'muted' }, ' · git_sync off') : ''),
         w.read.length ? h('div', { class: 'muted' }, 'Also readable: ', w.read.join(', ')) : '',
-        h('ul', {}, w.tasks.map((t) => h('li', {}, h('code', {}, t.name), ': ', t.run.join(' '), t.about ? h('span', { class: 'muted' }, ` (${t.about})`) : '')))))
+        h('ul', {}, w.tasks.map((t) => h('li', {}, h('code', {}, t.name), ': ', t.run.join(' '), t.args ? ' …' : '', t.about ? h('span', { class: 'muted' }, ` (${t.about})`) : '')))))
       : h('details', { class: 'small' },
         h('summary', {}, 'No workspaces. Its owner lists them in machine-agent.json beside the agent'),
         h('p', { class: 'muted' }, 'Minions can check out pushed branches there and run only the tasks listed, with no shell. "git_sync": false keeps them from checking anything out in a workspace you keep on a branch yourself (an Obsidian vault with Obsidian Git, say). The agent picks up changes to the file by itself (agents set up before workspaces need setting up again with a new token).'),

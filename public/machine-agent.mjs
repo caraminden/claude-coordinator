@@ -70,19 +70,33 @@ function within(root, target) {
 }
 
 /**
- * Reads machine-agent.json: { workspaces: { <name>: { path, read?: [folders], git_sync?: false, tasks: { <name>: { run: [argv], about?, hints? } } } } }.
+ * Reads machine-agent.json: { screen_lock?: <file>, screenshots?: true, workspaces: { <name>: { path, read?: [folders], git_sync?: false,
+ * tasks: { <name>: { run: [argv], about?, hints?, args?: true, screen?: false } } } } }.
  * A bad workspace or task is left out with a problem saying why, so one typo doesn't take the rest down.
+ * screen_lock and screenshots are for a test box (tools/win-test-box/): one lock file its CI desktop jobs take too.
  */
 export function loadConfig(file, env = process.env) {
   const workspaces = new Map();
   const problems = [];
-  if (!existsSync(file)) return { workspaces, problems };
+  const none = { workspaces, problems, screenLock: null, screenshots: false };
+  if (!existsSync(file)) return none;
   let raw;
   try {
     raw = JSON.parse(readFileSync(file, 'utf8'));
   } catch (err) {
-    return { workspaces, problems: [`${file}: ${err.message}`] };
+    return { ...none, problems: [`${file}: ${err.message}`] };
   }
+  let screenLock = null;
+  if (raw?.screen_lock !== undefined) {
+    try {
+      const p = expand(String(raw.screen_lock), env);
+      screenLock = join(realDir(dirname(p)), basename(p));
+    } catch (err) {
+      problems.push(`screen_lock: ${err.message}, so nothing takes the screen lock`);
+    }
+  }
+  const screenshots = raw?.screenshots === true;
+  if (raw?.screenshots !== undefined && typeof raw.screenshots !== 'boolean') problems.push('"screenshots" must be true or false, so it is off');
   for (const [name, w] of Object.entries(raw?.workspaces ?? {})) {
     if (!NAME.test(name)) {
       problems.push(`workspace "${name}": names use letters, digits, - and _`);
@@ -117,7 +131,9 @@ export function loadConfig(file, env = process.env) {
             if (typeof h?.say !== 'string' || (!Number.isInteger(h.exit) && typeof h.match !== 'string')) throw new Error('each hint needs "say" and an "exit" code or a "match" pattern');
             return { exit: h.exit, match: typeof h.match === 'string' ? new RegExp(h.match, 'i') : null, say: h.say };
           });
-          tasks.set(tname, { run: t.run, about: typeof t.about === 'string' ? t.about : '', hints });
+          if (t.args !== undefined && typeof t.args !== 'boolean') throw new Error('"args" must be true or false');
+          if (t.screen !== undefined && typeof t.screen !== 'boolean') throw new Error('"screen" must be true or false');
+          tasks.set(tname, { run: t.run, about: typeof t.about === 'string' ? t.about : '', hints, args: t.args === true, screen: t.screen !== false });
         } catch (err) {
           bad(err.message);
         }
@@ -125,7 +141,7 @@ export function loadConfig(file, env = process.env) {
     }
     workspaces.set(name, { name, path, read, gitSync, tasks });
   }
-  return { workspaces, problems };
+  return { workspaces, problems, screenLock, screenshots };
 }
 
 const TOOLS = [
@@ -137,13 +153,18 @@ const TOOLS = [
   },
   {
     name: 'run_task',
-    description: 'Run one of the workspace\'s tasks (listed by the workspaces tool) in its folder. Waits up to `wait` seconds (default and most 50), then returns the result, or a job id to pass to the job tool. One job per workspace at a time.',
-    inputSchema: { type: 'object', properties: { workspace: { type: 'string' }, task: { type: 'string' }, wait: { type: 'number' } }, required: ['workspace', 'task'] },
+    description: 'Run one of the workspace\'s tasks (listed by the workspaces tool) in its folder. Waits up to `wait` seconds (default and most 50), then returns the result, or a job id to pass to the job tool. One job per workspace at a time. A task marked "takes arguments" appends `args` to its command (no shell); others refuse them.',
+    inputSchema: { type: 'object', properties: { workspace: { type: 'string' }, task: { type: 'string' }, wait: { type: 'number' }, args: { type: 'array', items: { type: 'string' }, description: 'Extra arguments, only for a task that takes them' } }, required: ['workspace', 'task'] },
   },
   {
     name: 'job',
     description: 'A task job\'s state, exit code and last output lines; waits up to `wait` seconds (default and most 50) for it to finish.',
     inputSchema: { type: 'object', properties: { id: { type: 'string' }, wait: { type: 'number' }, lines: { type: 'number', description: 'How many output lines to show, default 60' } }, required: ['id'] },
+  },
+  {
+    name: 'stop_job',
+    description: 'Stop a running task job (an app you launched, say) and everything it started, then show its last output.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
   },
   {
     name: 'read_file',
@@ -159,6 +180,11 @@ const TOOLS = [
     name: 'fetch_file',
     description: 'Copy a file (up to 20 MB, any kind: a zip, a save, a log) from a workspace or its read folders to the app\'s server, into your files folder there, and return its path. The bytes don\'t pass through this conversation.',
     inputSchema: { type: 'object', properties: { workspace: { type: 'string' }, path: { type: 'string' } }, required: ['workspace', 'path'] },
+  },
+  {
+    name: 'screenshot',
+    description: 'Take a PNG of this computer\'s screen, or of the first visible window whose title contains `window`, after `delay` seconds (most 30), and copy it to your files folder on the app\'s server; returns its path, which you can open to look at. Only on a computer whose owner turned screenshots on (a test box).',
+    inputSchema: { type: 'object', properties: { window: { type: 'string', description: 'Part of the window\'s title; leave out for the whole screen' }, delay: { type: 'number' } } },
   },
 ];
 
@@ -183,26 +209,191 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms).unref?.());
 const secondsSince = (t) => Math.round((Date.now() - t) / 1000);
 const waitFor = (v) => Math.min(WAIT_MAX, Math.max(0, Number.isFinite(v) ? v : WAIT_MAX));
 const size = (n) => (n < 1024 * 1024 ? `${Math.ceil(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+const ARGS_MAX = 64;
+const ARG_LENGTH_MAX = 4000;
+const SHOT_DELAY_MAX = 30;
+const LOCK_STALE_MS = 2 * 60 * 60_000; // past any job's 30 minutes or a desktop CI job's timeout
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+/**
+ * The test box's screen lock (#369): one file naming who has the screen, taken by the agent for a
+ * task or a screenshot and by the box's CI job hooks (tools/win-test-box/screen-lock.ps1), so no
+ * two of them put windows on the one screen at once. A holder whose process is gone, a lock older
+ * than LOCK_STALE_MS, or an unreadable one over a minute old is broken and taken over.
+ */
+export function takeScreenLock(file, what, who) {
+  const mine = { pid: process.pid, what, who, since: Date.now(), token: randomBytes(6).toString('hex') };
+  for (let tries = 0; tries < 3; tries++) {
+    try {
+      writeFileSync(file, JSON.stringify(mine), { flag: 'wx' });
+      return mine;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw new ToolError(`Could not take the screen lock ${file}: ${err.message}`);
+    }
+    let held = null;
+    let mtime = Date.now();
+    try {
+      mtime = statSync(file).mtimeMs;
+      held = JSON.parse(readFileSync(file, 'utf8'));
+    } catch {}
+    const valid = Number.isInteger(held?.pid) && Number.isFinite(held?.since);
+    const stale = valid ? !pidAlive(held.pid) || Date.now() - held.since > LOCK_STALE_MS : Date.now() - mtime > 60_000;
+    if (!stale) {
+      const since = valid ? held.since : mtime;
+      throw new ToolError(`The screen is busy: ${held?.what ?? 'something'} for ${held?.who ?? 'someone'}, started ${secondsSince(since)} s ago. Nothing was started. Try again in a few minutes.`);
+    }
+    rmSync(file, { force: true });
+  }
+  throw new ToolError(`Could not take the screen lock ${file}: it keeps coming back`);
+}
+
+/** Lets go of the screen lock if it is still ours. */
+export function releaseScreenLock(file, mine) {
+  try {
+    if (JSON.parse(readFileSync(file, 'utf8')).token === mine.token) rmSync(file, { force: true });
+  } catch {}
+}
+
+/** Who holds the screen lock now, or null. */
+function screenHolder(file) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// Reads the screen the way desktop tests do (GDI BitBlt with CAPTUREBLT, as Peek Auras'
+// screen-check.ps1), per-monitor DPI aware so 125% gives real pixels. C# 5: Windows PowerShell's compiler.
+const SCREENSHOT_PS = String.raw`$ErrorActionPreference = 'Stop'
+try {
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class CitadelShot {
+    [DllImport("user32.dll")] static extern IntPtr SetProcessDpiAwarenessContext(IntPtr value);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr GetDC(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
+    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+    [DllImport("gdi32.dll", SetLastError = true)] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+    [DllImport("gdi32.dll", SetLastError = true)] static extern IntPtr CreateCompatibleBitmap(IntPtr dc, int w, int h);
+    [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+    [DllImport("gdi32.dll", SetLastError = true)]
+    static extern bool BitBlt(IntPtr dest, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
+    delegate bool EnumProc(IntPtr hwnd, IntPtr param);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr param);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out RECT rect, int size);
+
+    const uint SRCCOPY_CAPTUREBLT = 0x00CC0020 | 0x40000000;
+
+    static Exception Why(string call) {
+        int e = Marshal.GetLastWin32Error();
+        return new Exception(call + ": " + new Win32Exception(e).Message + " (0x" + e.ToString("X8") + ")");
+    }
+
+    public static string Take(string file, string title) {
+        SetProcessDpiAwarenessContext(new IntPtr(-4));
+        int x = GetSystemMetrics(76), y = GetSystemMetrics(77), w = GetSystemMetrics(78), h = GetSystemMetrics(79);
+        string what = "the whole screen";
+        if (!String.IsNullOrEmpty(title)) {
+            IntPtr found = IntPtr.Zero;
+            string name = null;
+            EnumWindows(delegate (IntPtr hwnd, IntPtr param) {
+                if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return true;
+                StringBuilder text = new StringBuilder(512);
+                GetWindowText(hwnd, text, 512);
+                if (text.ToString().IndexOf(title, StringComparison.OrdinalIgnoreCase) < 0) return true;
+                found = hwnd;
+                name = text.ToString();
+                return false;
+            }, IntPtr.Zero);
+            if (found == IntPtr.Zero) throw new Exception("No visible window has '" + title + "' in its title");
+            RECT r;
+            if (DwmGetWindowAttribute(found, 9, out r, Marshal.SizeOf(typeof(RECT))) != 0) throw new Exception("Could not read where that window is");
+            x = r.Left; y = r.Top; w = r.Right - r.Left; h = r.Bottom - r.Top;
+            what = "window '" + name + "'";
+        }
+        if (w <= 0 || h <= 0) throw new Exception("Nothing to capture: " + what + " is " + w + "x" + h);
+        IntPtr screen = GetDC(IntPtr.Zero);
+        if (screen == IntPtr.Zero) throw Why("GetDC");
+        IntPtr memory = IntPtr.Zero, bitmap = IntPtr.Zero, old = IntPtr.Zero;
+        try {
+            memory = CreateCompatibleDC(screen);
+            if (memory == IntPtr.Zero) throw Why("CreateCompatibleDC");
+            bitmap = CreateCompatibleBitmap(screen, w, h);
+            if (bitmap == IntPtr.Zero) throw Why("CreateCompatibleBitmap");
+            old = SelectObject(memory, bitmap);
+            if (!BitBlt(memory, 0, 0, w, h, screen, x, y, SRCCOPY_CAPTUREBLT)) throw Why("BitBlt (a locked or disconnected screen refuses this)");
+            SelectObject(memory, old);
+            old = IntPtr.Zero;
+            using (Image image = Image.FromHbitmap(bitmap)) image.Save(file, ImageFormat.Png);
+            return what + ", " + w + "x" + h;
+        } finally {
+            if (old != IntPtr.Zero) SelectObject(memory, old);
+            if (bitmap != IntPtr.Zero) DeleteObject(bitmap);
+            if (memory != IntPtr.Zero) DeleteDC(memory);
+            ReleaseDC(IntPtr.Zero, screen);
+        }
+    }
+}
+'@
+[CitadelShot]::Take($env:CITADEL_SHOT_FILE, $env:CITADEL_SHOT_WINDOW)
+} catch {
+  $e = $_.Exception
+  while ($e.InnerException) { $e = $e.InnerException }
+  [Console]::Error.WriteLine($e.Message)
+  exit 1
+}`;
+
+/** Saves a PNG of the screen, or of one window, to file; says what it took. Windows only. */
+async function captureScreen(file, window) {
+  if (process.platform !== 'win32') throw new ToolError('screenshot works only on a Windows computer');
+  const r = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(SCREENSHOT_PS, 'utf16le').toString('base64')], {
+    env: { ...process.env, CITADEL_SHOT_FILE: file, CITADEL_SHOT_WINDOW: window },
+  });
+  if (r.code) throw new ToolError(`The screenshot failed: ${r.out}`);
+  return r.out;
+}
 
 /** The workspaces this computer offers, shared by every thread session: one lock and one job list. */
 export class WorkspaceHost {
-  constructor({ configFile, env = process.env, jobsDir }) {
+  constructor({ configFile, env = process.env, jobsDir, capture = captureScreen }) {
     this.configFile = configFile;
     this.env = env;
     this.jobsDir = jobsDir;
+    this.capture = capture;
     this.busy = new Map(); // workspace name -> { what, who, since, job? }
     this.jobs = new Map();
     this.reload();
   }
 
   reload() {
-    ({ workspaces: this.workspaces, problems: this.problems } = loadConfig(this.configFile, this.env));
+    ({ workspaces: this.workspaces, problems: this.problems, screenLock: this.screenLock, screenshots: this.screenshots } = loadConfig(this.configFile, this.env));
   }
 
   /** What the app shows on the Machines page. */
   summary() {
     return {
-      workspaces: [...this.workspaces.values()].map((w) => ({ name: w.name, path: w.path, read: w.read, git_sync: w.gitSync, tasks: [...w.tasks].map(([name, t]) => ({ name, run: t.run, about: t.about })) })),
+      workspaces: [...this.workspaces.values()].map((w) => ({ name: w.name, path: w.path, read: w.read, git_sync: w.gitSync, tasks: [...w.tasks].map(([name, t]) => ({ name, run: t.run, about: t.about, args: t.args })) })),
       problems: this.problems,
     };
   }
@@ -262,12 +453,19 @@ export class WorkspaceHost {
     switch (tool) {
       case 'workspaces': return this.list();
       case 'git_sync': return this.sync(this.workspace(args.workspace), String(args.ref ?? '').replace(/^origin\//, ''), who);
-      case 'run_task': return this.runTask(this.workspace(args.workspace), String(args.task ?? ''), who, waitFor(args.wait));
+      case 'run_task': return this.runTask(this.workspace(args.workspace), String(args.task ?? ''), who, waitFor(args.wait), args.args);
       case 'job': {
         const job = this.jobs.get(String(args.id ?? ''));
         if (!job) throw new ToolError(`No job ${args.id} here. Jobs are forgotten when the agent restarts; their logs stay in ${this.jobsDir}.`);
         return this.report(job, waitFor(args.wait), Number(args.lines) || 60);
       }
+      case 'stop_job': {
+        const job = this.jobs.get(String(args.id ?? ''));
+        if (!job) throw new ToolError(`No job ${args.id} here. Jobs are forgotten when the agent restarts.`);
+        if (!job.ended) job.stop(`Stopped by ${who}`);
+        return this.report(job, 0, 60);
+      }
+      case 'screenshot': return this.screenshot(String(args.window ?? ''), Number(args.delay) || 0, who, upload);
       case 'read_file': return this.read(this.workspace(args.workspace), args.path, Number(args.offset) || 1, Number(args.limit) || 400);
       case 'list_files': return this.listFiles(this.workspace(args.workspace), args.path);
       case 'fetch_file': return this.fetch(this.workspace(args.workspace), args.path, upload);
@@ -290,9 +488,14 @@ export class WorkspaceHost {
         `Local changes:\n${c.changes}`,
         `Busy: ${b ? `${b.what} for ${b.who}, ${secondsSince(b.since)} s${b.job ? ` (job ${b.job.id})` : ''}` : 'no'}`,
         'Tasks:',
-        ...[...w.tasks].map(([name, t]) => `- ${name}: ${t.run.join(' ')}${t.about ? ` (${t.about})` : ''}`),
+        ...[...w.tasks].map(([name, t]) => `- ${name}: ${t.run.join(' ')}${t.args ? ' …takes arguments' : ''}${t.about ? ` (${t.about})` : ''}`),
       ].filter(Boolean).join('\n'));
     }
+    if (this.screenLock) {
+      const held = screenHolder(this.screenLock);
+      parts.push(`Screen: ${held ? `busy, ${held.what} for ${held.who}` : 'free'}. Tasks that use it and screenshots wait their turn with this computer's CI desktop jobs.`);
+    }
+    if (this.screenshots) parts.push('Screenshots: on (the screenshot tool).');
     if (this.problems.length) parts.push(`Problems in this computer's config (left out above):\n${this.problems.join('\n')}`);
     return { text: parts.join('\n\n') };
   }
@@ -325,11 +528,24 @@ export class WorkspaceHost {
     }
   }
 
-  async runTask(w, name, who, wait) {
+  async runTask(w, name, who, wait, extra) {
     const task = w.tasks.get(name);
     if (!task) throw new ToolError(`Workspace ${w.name} has no task "${name}". Its tasks: ${[...w.tasks.keys()].join(', ') || 'none'}. Only this computer's owner can add one.`);
-    const argv = task.run.map((a) => expand(a, this.env));
+    if (extra !== undefined && !(Array.isArray(extra) && extra.length === 0)) {
+      if (!task.args) throw new ToolError(`Task ${name} takes no arguments; run it without args. Only this computer's owner can change that.`);
+      if (!Array.isArray(extra) || extra.length > ARGS_MAX || !extra.every((a) => typeof a === 'string' && a.length <= ARG_LENGTH_MAX && !a.includes('\0'))) {
+        throw new ToolError(`args must be a list of at most ${ARGS_MAX} strings`);
+      }
+    }
+    const argv = [...task.run.map((a) => expand(a, this.env)), ...(task.args && Array.isArray(extra) ? extra : [])];
     const lock = this.take(w, `task ${name}`, who);
+    let screen = null;
+    try {
+      if (this.screenLock && task.screen) screen = takeScreenLock(this.screenLock, `task ${name} in ${w.name}`, who);
+    } catch (err) {
+      this.release(w, lock);
+      throw err;
+    }
     const id = randomBytes(4).toString('hex');
     mkdirSync(this.jobsDir, { recursive: true });
     this.prune();
@@ -349,7 +565,12 @@ export class WorkspaceHost {
         if (job.partial) job.tail.push(job.partial);
         file.end(error ? `\n${error}\n` : `\nexit ${code}\n`);
         this.release(w, lock);
+        if (screen) releaseScreenLock(this.screenLock, screen);
         resolveDone();
+      };
+      job.stop = (why) => {
+        if (child) killTree(child);
+        finish(null, why);
       };
       const limit = setTimeout(() => {
         if (child) killTree(child);
@@ -427,6 +648,28 @@ export class WorkspaceHost {
     return { text: `${real}\n${rows.join('\n') || '(empty)'}${entries.length > 500 ? `\n…and ${entries.length - 500} more` : ''}` };
   }
 
+  async screenshot(window, delay, who, upload) {
+    if (!this.screenshots) throw new ToolError('Screenshots are off on this computer. Its owner turns them on with "screenshots": true in machine-agent.json (a test box has it).');
+    if (window.length > 200) throw new ToolError('window is part of a title: at most 200 characters');
+    if (!upload) throw new ToolError('This session has no way to send files to the app');
+    // A minion looking at the app its own job launched already has the screen.
+    const held = this.screenLock ? screenHolder(this.screenLock) : null;
+    const own = held && held.pid === process.pid && held.who === who;
+    const screen = this.screenLock && !own ? takeScreenLock(this.screenLock, 'a screenshot', who) : null;
+    try {
+      await sleep(Math.min(SHOT_DELAY_MAX, Math.max(0, delay)) * 1000);
+      mkdirSync(this.jobsDir, { recursive: true });
+      const file = join(this.jobsDir, `screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
+      const what = await this.capture(file, window);
+      const bytes = readFileSync(file);
+      rmSync(file, { force: true });
+      const dest = await upload(basename(file), bytes);
+      return { text: `Took ${what} (${size(bytes.length)}) and copied it to ${dest} on the app's server. Open that file to look at it.` };
+    } finally {
+      if (screen) releaseScreenLock(this.screenLock, screen);
+    }
+  }
+
   async fetch(w, p, upload) {
     const real = this.resolve(w, p);
     const st = statSync(real);
@@ -448,8 +691,9 @@ export async function workspaceReply(host, message, who, upload) {
     case 'ping':
       return reply({});
     case 'tools/list':
-      // No workspace takes git_sync: don't offer it.
-      return reply({ tools: [...host.workspaces.values()].some((w) => w.gitSync) || !host.workspaces.size ? TOOLS : TOOLS.filter((t) => t.name !== 'git_sync') });
+      // No workspace takes git_sync, or screenshots are off: don't offer them.
+      const sync = [...host.workspaces.values()].some((w) => w.gitSync) || !host.workspaces.size;
+      return reply({ tools: TOOLS.filter((t) => (t.name !== 'git_sync' || sync) && (t.name !== 'screenshot' || host.screenshots)) });
     case 'tools/call':
       try {
         const { text, isError } = await host.call(message.params?.name, message.params?.arguments ?? {}, who, upload);

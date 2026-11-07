@@ -80,8 +80,8 @@ file from here on. Sections, in this order:
    running it.
 2. **Working rules**: only this repo's own (its stack's traps, a file never to edit by hand).
    The Citadel-wide layer and the scheme instructions already reach every session, so nothing
-   of theirs is repeated. A native-app scheme (the plan has a Real hardware part) always has
-   one: *GitHub's hosted runners (`windows-latest` and the rest) are GPU-less VMs at 100%
+   of theirs is repeated. A native-app scheme (the plan names a Real hardware part or the
+   Real-hardware ledger) always has one: *GitHub's hosted runners (`windows-latest` and the rest) are GPU-less VMs at 100%
    display scaling with square window corners, so a desktop test passing there proves little;
    only a run on real hardware proves it.* Otherwise, when the repo has none yet, leave the
    section out.

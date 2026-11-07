@@ -86,7 +86,7 @@ test('a tune-up gets its own section: start from onboarding.md or the current st
     assert.match(text, /ask only what that leaves missing or may have changed/);
     for (const part of ['Add', 'Update', 'Retire', 'Instructions']) assert.match(text, new RegExp(`\\*\\*${part}:\\*\\*`), part);
     assert.match(text, /every repo copy the kit now covers \(`in_kit`\)/);
-    assert.match(text, /A native-app scheme .* with no Real-hardware ledger line gets one/);
+    assert.match(text, /A native-app scheme .* with no Real-hardware ledger line gets one, and the hosted-runner warning in Working rules/);
     assert.match(text, /as a line diff/);
     assert.match(text, /This is a tune-up: edit only, and delete only what the plan lists under Retire\./);
     assert.match(text, /propose_plan/);

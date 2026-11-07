@@ -302,6 +302,8 @@ interface TurnState {
   deployed?: true;
   /** Usage-limit resumes in a row that led to this turn. */
   limitTries?: number;
+  /** Network-outage resumes in a row that led to this turn (#366). */
+  netTries?: number;
   /** It runs on Codex (src/codex-turn.ts), not claude (#337). */
   codex?: true;
   /** A Claude turn that starts with the Codex turns before it: their thread is dropped once it succeeds. */
@@ -482,6 +484,43 @@ function clockTime(ms: number, tz?: string): string {
     return say(tz);
   } catch {
     return say();
+  }
+}
+
+/**
+ * Words for a turn that died because the network or the model's API was unreachable (#366): Claude
+ * Code's "API Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)" and
+ * "Connection error.", Node's socket and DNS codes, and Codex's "stream disconnected" / "error sending request".
+ */
+const NETWORK_ERROR = /\b(EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ENETDOWN)\b|can['’]t reach the api server|unable to connect to api|API Error: (Connection error|Request timed out)|stream disconnected|error sending request|failed to lookup address|dns error/i;
+/** Whether a failed turn's words say the network or the API was unreachable. An HTTP status means the server answered ("stream disconnected … unexpected status 401"): not an outage. */
+export function isNetworkFailure(text: string): boolean {
+  return NETWORK_ERROR.test(text) && !isAuthFailure(text) && !/\b(status|API Error:) [1-5]\d\d\b/i.test(text);
+}
+/** Network-outage resumes in a row before a thread is left in error for a person. */
+export const MAX_NET_RESUMES = 3;
+const NET_RESUMES = 'net-resumes';
+/** Threads waiting for the network to come back, in the settings table so the wait outlives a restart. */
+interface NetResume {
+  ticket: number;
+  /** Network resumes in a row this one will be. */
+  tries: number;
+  /** Messages queued behind the turn that died; they go into the resume. */
+  queued?: QueuedMessage[];
+}
+/** The minion's note while it waits: cleared by the next turn's start. */
+const NET_NOTE = 'Network outage: resumes once it is back';
+const RESUME_NET_PROMPT =
+  `Your last turn died because the network or the model's API was unreachable; it is reachable again now. A command may have half-run when the connection dropped (a land, a push, a deploy, a fetch), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps.`;
+
+/** Whether the API answers at all: any HTTP response counts, only a failure to connect (DNS, socket, 10 s timeout) doesn't. */
+export async function apiReachable(): Promise<boolean> {
+  try {
+    // shortcut: probes Anthropic's host only; a Codex turn that fails again on OpenAI's just waits once more.
+    await fetch('https://api.anthropic.com/', { method: 'HEAD', signal: AbortSignal.timeout(10_000) });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -931,6 +970,14 @@ export class Runner {
   limitFallbackMs = 60 * 60 * 1000;
   private limitTimer?: NodeJS.Timeout;
   private lastLimitResume = 0;
+  /** Whether the model's API can be reached; one probe for the whole server while any thread waits on the network (#366). */
+  netProbe: () => Promise<boolean> = apiReachable;
+  /** The first wait before probing, doubling after each failed probe up to netProbeMaxMs. */
+  netProbeMs = 30_000;
+  netProbeMaxMs = 5 * 60_000;
+  /** The wait before the next probe; null for netProbeMs, a fresh outage's first. */
+  netDelay: number | null = null;
+  private netTimer?: NodeJS.Timeout;
   /** When each account error last pushed: one push per error for everyone, not one per minion. */
   private accountPushes = new Map<string, number>();
   /** Copies a session into the database (src/sessions.ts); tests hold it open to race the next step against it. */
@@ -1055,6 +1102,8 @@ export class Runner {
 
   /** Stop following turns, for a server shutting down; they keep running, and the next server re-attaches. */
   detachAll() {
+    // The next server probes for the threads waiting on the network.
+    clearTimeout(this.netTimer);
     for (const t of this.turns.values()) {
       clearInterval(t.timer);
       clearTimeout(t.stopTimer);
@@ -1101,6 +1150,7 @@ export class Runner {
    */
   close(ticketId: number, text: string): Promise<void> {
     if (this.cancelLimitWait(ticketId)) this.queues.delete(ticketId);
+    this.cancelNetWait(ticketId);
     // A reopened minion shouldn't offer the go-ahead it had when dismissed.
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
     this.setStatus(ticketId, 'closed');
@@ -1318,6 +1368,8 @@ export class Runner {
     // Minions waiting on the usage limit keep waiting, with the messages held for them.
     for (const w of this.limitResumes()) if (w.queued?.length) this.queues.set(w.ticket, [...w.queued]);
     this.armLimitTimer();
+    // Threads waiting on the network keep waiting: the probe starts over (#366).
+    this.armNetProbe();
     // Folders of turns nobody follows any more and whose process is gone.
     try {
       const followed = new Set([...this.turns.values()].map((t) => t.dir));
@@ -1379,7 +1431,7 @@ export class Runner {
    * Start an auto-resume turn, after a restart or (limitTries > 0) the usage limit, with any messages
    * that were queued behind the cut-off one.
    */
-  private resume(ticketId: number, resumes: number, limitTries = 0, onCodex = false) {
+  private resume(ticketId: number, resumes: number, limitTries = 0, onCodex = false, netTries = 0) {
     // Someone's message got in first; its turn took the queue, and that is resume enough.
     if (this.isRunning(ticketId)) return;
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259).
@@ -1387,17 +1439,81 @@ export class Runner {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project || ticket.status === 'closed') return;
-      this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : limitTries ? 'Resumed after the usage limit reset' : 'Resumed after a server restart' });
+      // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
+      if (netTries && !this.netWait(ticketId)) return;
+      this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : limitTries ? 'Resumed after the usage limit reset' : netTries ? 'Resumed after a network outage' : 'Resumed after a server restart' });
       const batch = this.takeQueue(ticketId);
       // It carries on the interrupted turn, so it runs for that turn's person.
-      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : RESUME_PROMPT, images: [] }, ...batch], ticket.person_id ?? this.turnPerson(ticket, project, batch), resumes, limitTries);
+      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : limitTries ? RESUME_LIMIT_PROMPT : netTries ? RESUME_NET_PROMPT : RESUME_PROMPT, images: [] }, ...batch], ticket.person_id ?? this.turnPerson(ticket, project, batch), resumes, limitTries, netTries);
     });
   }
 
-  /** Everything queued for the minion's next turn, which starts now. */
+  /** Everything queued for the minion's next turn, which starts now: a network wait's held messages first, as that wait ends. */
   private takeQueue(ticketId: number): QueuedMessage[] {
     this.store.deleteSetting(waitingKey(ticketId));
-    return this.queues.get(ticketId)?.splice(0) ?? [];
+    const held = this.cancelNetWait(ticketId)?.queued ?? [];
+    return [...held, ...(this.queues.get(ticketId)?.splice(0) ?? [])];
+  }
+
+  private netResumes(): NetResume[] {
+    return this.store.getSetting<NetResume[]>(NET_RESUMES) ?? [];
+  }
+
+  /** The thread's network wait, if it has one. */
+  netWait(ticketId: number): NetResume | null {
+    return this.netResumes().find((w) => w.ticket === ticketId) ?? null;
+  }
+
+  /** Wait for the network, holding the messages queued behind the turn that died; one probe loop serves every waiting thread. */
+  private waitForNetwork(ticketId: number, tries: number) {
+    const list = this.netResumes().filter((w) => w.ticket !== ticketId);
+    const queued = this.queues.get(ticketId)?.splice(0);
+    list.push({ ticket: ticketId, tries, ...(queued?.length ? { queued } : {}) });
+    this.store.setSetting(NET_RESUMES, list);
+    this.armNetProbe();
+  }
+
+  /** End the thread's network wait (a resume, a person's message, a stop, a dismissal); returns the wait it had. */
+  private cancelNetWait(ticketId: number): NetResume | null {
+    const list = this.netResumes();
+    const w = list.find((x) => x.ticket === ticketId);
+    if (!w) return null;
+    const rest = list.filter((x) => x !== w);
+    if (rest.length) this.store.setSetting(NET_RESUMES, rest);
+    else this.store.deleteSetting(NET_RESUMES);
+    return w;
+  }
+
+  /** Probe after netDelay, unless a probe is already due or under way, or nobody waits. */
+  private armNetProbe() {
+    if (this.netTimer || !this.netResumes().length) return;
+    this.netTimer = setTimeout(() => this.probeNet(), this.netDelay ?? this.netProbeMs);
+    this.netTimer.unref();
+  }
+
+  /** Still down: wait twice as long, up to netProbeMaxMs. Back: resume every waiting thread, resumeGapMs apart. */
+  private async probeNet() {
+    let up = false;
+    try {
+      up = await this.netProbe();
+    } catch {
+      // A probe that throws is a probe that failed.
+    }
+    this.netTimer = undefined;
+    const waiting = this.netResumes();
+    if (!up && waiting.length) {
+      this.netDelay = Math.min((this.netDelay ?? this.netProbeMs) * 2, this.netProbeMaxMs);
+      return this.armNetProbe();
+    }
+    this.netDelay = null;
+    // Each keeps its place in the list until its own resume's turn starts, so a restart mid-stagger loses none.
+    waiting.forEach((w, i) => setTimeout(() => this.netResume(w.ticket), this.resumeGapMs * i).unref());
+  }
+
+  /** The wait stays saved until the resume's turn takes it (takeQueue), so a restart during the last turn's save still resumes. */
+  private netResume(ticketId: number) {
+    const w = this.netWait(ticketId);
+    if (w) this.resume(ticketId, 0, 0, false, w.tries);
   }
 
   private limitResumes(): LimitResume[] {
@@ -1679,6 +1795,13 @@ export class Runner {
   stop(ticketId: number): boolean {
     const live = this.turns.get(ticketId);
     if (!live) {
+      // Waiting on the network: a stop ends the wait, and as with a turn, its held messages go too.
+      if (this.cancelNetWait(ticketId)) {
+        this.store.updateTicket(ticketId, { note: 'Network outage: stopped, send a message to carry on' });
+        this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
+        this.broadcastTicket(ticketId);
+        return true;
+      }
       // Waiting on the usage limit: a stop ends the wait, and as with a turn, its held messages go too.
       if (!this.cancelLimitWait(ticketId)) return false;
       this.queues.delete(ticketId);
@@ -1779,7 +1902,7 @@ export class Runner {
     return ticket.person_id ?? project.owner_id;
   }
 
-  private startTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0) {
+  private startTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0, netTries = 0) {
     // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
     if (this.noTurns) {
       this.emit(ticket.id, 'note', { text: 'This is a preview: it shows the app on a copy of the data, but it never runs turns.' });
@@ -1819,7 +1942,7 @@ export class Runner {
     // Who asked for it (#255): its messages' askers, any non-admin of them if several, since a ride-along
     // ask is in the turn too; with none (GitHub, a notice), and on a resume, the last turn's carries on.
     const before = this.store.turnAsker(ticket.id);
-    const askers = [...(resumes || limitTries ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
+    const askers = [...(resumes || limitTries || netTries ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
     const asker = askers.find((a) => !this.store.getUser(a)?.admin) ?? askers[0] ?? before ?? person;
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now and lent
     // to the scheme, and the asker's own (#306): the one person this batch (or the turn it resumes) answers, so
@@ -1980,6 +2103,8 @@ export class Runner {
     if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, { state: ticket.state, note: ticket.note });
     else if (ticket.state && ticket.state !== 'pending-deploy') this.store.updateTicket(ticket.id, ticket.state === 'limited' ? { state: null, note: null } : { state: null });
     this.cancelLimitWait(ticket.id);
+    // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
+    if (ticket.note === NET_NOTE) this.store.updateTicket(ticket.id, { note: null });
     // One-tap replies answer the turn that offered them; a new turn makes them stale.
     if (ticket.replies) this.store.updateTicket(ticket.id, { replies: null });
 
@@ -2036,7 +2161,7 @@ export class Runner {
     }
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command, args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }),
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
@@ -2232,7 +2357,7 @@ export class Runner {
       const payer = this.payerOf(turn?.person);
       const usage = payer === null ? this.usage : this.store.getSetting<Usage>(usageKey(payer));
       const codexReset = turn?.codex && turn.person ? codexResetAt(this.store.getSetting<CodexUsage>(codexUsageKey(turn.person))) : undefined;
-      this.turnFailed(ticketId, killed || resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0, usage, codexReset);
+      this.turnFailed(ticketId, killed || resultError?.trim() || startError, stderr.slice(-10).join('\n'), code, turn?.limitTries ?? 0, usage, codexReset, turn?.netTries ?? 0);
     } else if (turn?.handBack) {
       // Claude has the Codex turns now.
       this.store.deleteSetting(codexThreadKey(ticketId));
@@ -2297,7 +2422,7 @@ export class Runner {
    * lines). A usage limit is a wait, not an error: no push, and it resumes after the reset. An account
    * problem needs a person: it blocks, never retries, and pushes once for everyone.
    */
-  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage, codexReset?: number | null) {
+  private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage, codexReset?: number | null, netTries = 0) {
     const exited = code ? `claude exited with code ${code}` : 'claude ended without finishing';
     const why = reason || stderr;
     const text = why ? `${why}${reason && stderr ? `\n${stderr}` : ''}\n(${exited})` : exited;
@@ -2331,8 +2456,17 @@ export class Runner {
       }
       return;
     }
-    const event = this.emit(ticketId, 'error', { text });
-    this.store.updateTicket(ticketId, { note: short(first) });
+    // Unreachable network or API: one probe loop waits for it to come back, then resumes (#366). No push: an outage hits everyone at once.
+    // Claude's own result words decide when it has them (why); stderr only when it has none.
+    const netDown = isNetworkFailure(why);
+    if (netDown && netTries < MAX_NET_RESUMES) {
+      this.waitForNetwork(ticketId, netTries + 1);
+      this.emit(ticketId, 'note', { text: `${text}\nThe network or the API was unreachable, so it resumes by itself once it's back; messages queued behind this turn go into that resume.` });
+      this.store.updateTicket(ticketId, { note: NET_NOTE });
+      return;
+    }
+    const event = this.emit(ticketId, 'error', { text: netDown ? `${text}\nIt has already resumed ${netTries} times in a row after a network outage, so it stopped retrying: send a message to carry on.` : text });
+    this.store.updateTicket(ticketId, { note: netDown ? `Network: stopped retrying after ${netTries} resumes` : short(first) });
     this.onTurnError(ticketId, text, event.id);
   }
 

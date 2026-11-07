@@ -80,7 +80,10 @@ interaction) but takes its colours from these tokens, never dataviz's placeholde
    `opacity` and `transform`, never layout (`width`, `height`, `top`, `left`, margins), and loop
    nothing but a spinner or skeleton. Set the end state yourself, never in `transitionend` or
    `animationend`: at 0s a transition fires no event.
-6. **External links open a new tab; nothing uses `target="_top"`.**
+6. **External links open a new tab (`_blank`, `rel=noopener`).** A link to a custom URL scheme
+   (`myapp://…`) needs `target="_top"`: inside the frame Citadel's CSP (`default-src 'self'`, so
+   `frame-src 'self'`) blocks it, and the top window hands it to the OS. Never `_top` for a plain
+   web link.
 7. **No inline styles in what a component writes** (`style=""`, `<style>`): Citadel's CSP and maybe
    yours refuse them. Use classes, or a constructed stylesheet adopted once.
 8. **Use the variables, never copied hex.**

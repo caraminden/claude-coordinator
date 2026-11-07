@@ -222,10 +222,10 @@ export class CiHealth {
     this.get = deps.get ?? ghGet;
   }
 
+  /** The first look comes a poll after start, so a restart (or a test's short-lived server) doesn't ask GitHub at once. */
   start() {
     this.timer ??= setInterval(() => void this.tick(), POLL_MS);
     this.timer.unref?.();
-    void this.tick();
   }
 
   stop() {

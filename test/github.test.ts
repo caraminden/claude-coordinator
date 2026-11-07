@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { GithubWatcher, decide, githubRepo, parseSnapshot, turnSpans, verdict, type Check, type PrSnapshot, type Remark } from '../src/github.ts';
+import { GithubWatcher, check as checkOf, decide, githubRepo, parseSnapshot, turnSpans, verdict, type Check, type PrSnapshot, type Remark } from '../src/github.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'github-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -139,6 +139,22 @@ test('CI: nothing while pending, a failure at once, a pass once everything finis
   assert.deepEqual(passed, ['CI passed on abc1234 in PR #12 (2 checks).']);
   const next = decide(pr({ headSha: 'fff0000', checks: [check('build', 'failed'), check('lint', 'failed')] }), seen, opts()).messages;
   assert.equal(next[0], 'CI failed on fff0000 in PR #12 — 2 checks:\n- build: https://ci/build\n- lint: https://ci/lint');
+});
+
+test('a job that never started says so, with GitHub\'s reason, apart from a red test (#368)', () => {
+  const billing = "The job was not started because recent account payments have failed or your spending limit needs to be increased.";
+  const url = 'https://github.com/caraminden/peek-auras/actions/runs/42005206342/job/127170097021';
+  const node = { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'FAILURE', detailsUrl: url, steps: { totalCount: 0 }, annotations: { nodes: [{ message: billing }] } };
+  assert.deepEqual(checkOf(node), { name: 'build', status: 'failed', url, notStarted: billing });
+  assert.equal(checkOf({ ...node, steps: { totalCount: 4 } }).notStarted, undefined, 'a red test ran steps');
+  assert.equal(checkOf({ ...node, detailsUrl: 'https://ci.example/build/1' }).notStarted, undefined, "another app's check has no steps to count");
+  assert.equal(checkOf({ ...node, conclusion: 'STARTUP_FAILURE' }).notStarted, undefined, 'a broken workflow file is the branch\'s to fix');
+
+  const dead: Check = { name: 'build', status: 'failed', url, notStarted: billing };
+  const alone = decide(pr({ checks: [dead] }), new Set(['baseline']), opts()).messages;
+  assert.deepEqual(alone, [`CI didn't start on abc1234 in PR #12 — build didn't start (GitHub says: "${billing}"): ${url}\nNo step ran, so this isn't a test failure.`]);
+  const mixed = decide(pr({ checks: [dead, check('lint', 'failed')] }), new Set(['baseline']), opts()).messages;
+  assert.deepEqual(mixed, [`CI failed on abc1234 in PR #12 — 2 checks:\n- build didn't start (GitHub says: "${billing}"): ${url}\n- lint: https://ci/lint`]);
 });
 
 test('merged or closed by someone is sent once; by the ticket\'s own turn it is not', () => {

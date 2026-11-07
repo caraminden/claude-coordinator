@@ -41,6 +41,8 @@ import { ContraptionTurns } from './src/contraption-turns.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens } from './src/ci-runner.ts';
+import { CiHealth } from './src/ci-health.ts';
+import { callMandate } from './src/mandate-items.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { llamaEmbed } from './src/memory.ts';
 import { DEPLOY_FAILURE, ticketRoutes } from './src/routes/tickets.ts';
@@ -634,6 +636,26 @@ if (!BOOT_CHECK || PREVIEW) {
 const github = new GithubWatcher(store, (ticketId, text) => runner.send(ticketId, GITHUB_NAME, text));
 github.as = githubOf;
 if (!BOOT_CHECK) github.start();
+// CI health (#368): a runner offline, jobs that never started, green that skipped jobs, or no verdict on main for
+// hours becomes a Mandate alert for every admin, from the scheme, and is cleared when it's over; no turn runs.
+const ciHealth = new CiHealth(store, {
+  as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
+  mandate: async (project, person, key, title) => {
+    const c = store.getContraption('mandate');
+    const identity = c && contraptions.signIdentity(c.name, person, { name: `scheme-${project.id}`, title: project.name });
+    if (!c || !identity) return false;
+    try {
+      const { status, answer } = await callMandate(c, identity, key, title === null ? undefined : { title, alert: true, link: `/c/#/p/${project.id}` });
+      // 403: she switched the scheme off in Mandate, which keeps it off; asking again each poll won't change that.
+      if (status === 200 || status === 403) return true;
+      console.error(`CI health: Mandate answered ${status} for ${person.name}'s ${key}:`, JSON.stringify(answer).slice(0, 300));
+    } catch (err: any) {
+      console.error(`CI health: ${err?.message ?? err}`);
+    }
+    return false;
+  },
+});
+if (!BOOT_CHECK) ciHealth.start();
 // Members already in schemes get their invites, and leavers' are withdrawn (#310); it settles, so later boots only retry what failed.
 if (!BOOT_CHECK) void safely('repo access sweep', () => repoAccess.sweep());
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);

@@ -29,6 +29,8 @@ export interface Check {
   name: string;
   status: 'pending' | 'passed' | 'failed';
   url: string | null;
+  /** An Actions job that failed without starting (no steps ran: a billing block, no runner): GitHub's reason, '' when it gave none. */
+  notStarted?: string;
 }
 
 /** Something said on the PR: a conversation comment, a review, or a comment on a line of code. */
@@ -119,10 +121,14 @@ export function decide(pr: PrSnapshot, seen: Set<string>, opts: { baseline: bool
       if (result === 'passed') return `CI passed on ${short(pr.headSha)} in PR #${pr.number} (${pr.checks.length} check${pr.checks.length === 1 ? '' : 's'}).`;
       const failed = pr.checks.filter((c) => c.status === 'failed');
       const pending = pr.checks.filter((c) => c.status === 'pending').length;
-      const head = `CI failed on ${short(pr.headSha)} in PR #${pr.number}${pending ? ` (${pending} still running)` : ''} — `;
+      // A job that never started (#368) isn't a red test: say so, with GitHub's reason, so no one hunts a bug for it.
+      const dead = failed.every((c) => c.notStarted !== undefined);
+      const name = (c: Check) => (c.notStarted === undefined ? c.name : `${c.name} didn't start${c.notStarted ? ` (GitHub says: "${excerpt(c.notStarted)}")` : ''}`);
+      const head = `CI ${dead ? "didn't start" : 'failed'} on ${short(pr.headSha)} in PR #${pr.number}${pending ? ` (${pending} still running)` : ''} — `;
+      const tail = dead ? `\nNo step ran, so this isn't a test failure.` : '';
       return failed.length === 1
-        ? `${head}${failed[0].name}: ${failed[0].url ?? pr.url}`
-        : `${head}${failed.length} checks:\n${failed.map((c) => `- ${c.name}: ${c.url ?? pr.url}`).join('\n')}`;
+        ? `${head}${name(failed[0])}: ${failed[0].url ?? pr.url}${tail}`
+        : `${head}${failed.length} checks:\n${failed.map((c) => `- ${name(c)}: ${c.url ?? pr.url}`).join('\n')}${tail}`;
     });
   }
 
@@ -186,7 +192,7 @@ const QUERY = `query($owner: String!, $name: String!, $branch: String!) {
         timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) { nodes { ... on ClosedEvent { actor { login } } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { contexts(first: 100) { nodes {
           __typename
-          ... on CheckRun { name status conclusion detailsUrl }
+          ... on CheckRun { name status conclusion detailsUrl steps(first: 1) { totalCount } annotations(first: 1) { nodes { message } } }
           ... on StatusContext { context state targetUrl }
         } } } } } }
         comments(last: 50) { nodes { databaseId author { login __typename } authorAssociation body createdAt url } }
@@ -207,7 +213,12 @@ export function check(node: any): Check {
     return { name: node.context, url: node.targetUrl ?? null, status: s === 'SUCCESS' ? 'passed' : s === 'PENDING' || s === 'EXPECTED' ? 'pending' : 'failed' };
   }
   const status = node.status !== 'COMPLETED' ? 'pending' : PASSED.has(node.conclusion) ? 'passed' : 'failed';
-  return { name: node.name, url: node.detailsUrl ?? null, status };
+  const out: Check = { name: node.name, url: node.detailsUrl ?? null, status };
+  // Only Actions jobs list steps; another app's check run has none even when it ran.
+  if (node.conclusion === 'FAILURE' && node.steps?.totalCount === 0 && /\/actions\/runs\//.test(node.detailsUrl ?? '')) {
+    out.notStarted = String(node.annotations?.nodes?.[0]?.message ?? '').replace(/\s+/g, ' ').trim();
+  }
+  return out;
 }
 
 function remark(kind: Remark['kind'], node: any, extra: Partial<Remark> = {}): Remark {

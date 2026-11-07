@@ -28,7 +28,8 @@
 
   It never touches another runner, never restarts or reboots the PC.
   Run it elevated (an admin PowerShell, or the CI runner agent, which runs as SYSTEM): installing a service needs it.
-  -Session needs a person's elevated PowerShell, not the agent: its logon task is for whoever runs it.
+  -Session needs a person's elevated PowerShell, not the agent: its logon task is for whoever runs it, so elevate as
+  the account whose session the runner should use, not another admin's.
 
 .PARAMETER Scheme
   The scheme's name ("Peek Auras"), its runner label ("peek-auras-ci") or its id.

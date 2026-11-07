@@ -74,7 +74,9 @@ if (-not $mine) {
 
 # Anyone can make a folder in C:\ and write a marker, but only an admin makes a service: run config.cmd only in a folder
 # that the repo's runner service runs from, so a planted folder never gets its config.cmd run as SYSTEM.
-# A session runner's stand-in for the service is its logon task, which only an admin makes for another user.
+# A session runner's stand-in for the service is its logon task "GitHub runner <label>" starting it from that folder.
+# shortcut: a standard user could make such a task for themselves beside a planted folder, which a service can't be;
+# fine on Cara's one-person PC (Citadel is for trusted friends), check the task's user is an admin if that changes.
 $owner, $repoName = $names.repo -split '/', 2
 $serviced = @(Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'actions.runner.%'" |
     Where-Object { $_.Name -like "actions.runner.$owner-$repoName.*" } |

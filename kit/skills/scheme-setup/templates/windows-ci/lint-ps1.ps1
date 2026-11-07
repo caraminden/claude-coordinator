@@ -26,6 +26,8 @@
 param([Parameter(Mandatory, ValueFromRemainingArguments)][string[]]$Path)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3
+# Anything that stops it is exit 2, never 1, so a broken lint never reads as findings (or, in CI, as none).
+trap { Write-Output "lint-ps1: couldn't run: $($_.Exception.Message)"; exit 2 }
 
 $pssa = Get-Module -ListAvailable PSScriptAnalyzer | Sort-Object Version -Descending | Select-Object -First 1
 if (-not $pssa) {

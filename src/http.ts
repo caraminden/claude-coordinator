@@ -91,10 +91,17 @@ export async function readJson(req: IncomingMessage, maxBytes = 1_000_000): Prom
  * installed one's scope). For a raw request URL: `{ redirect }` from the old root "/" (relative, so a
  * preview's copy stays under its /preview/N/; browsers keep the #route), `{ url }` with the /c taken off
  * for anything under /c/, so the front end's relative URLs (api/, app.js) reach the same routes; else null.
+ * A share from the phone's Share sheet (the manifest's share_target, #375) goes to the front end's #/share.
  */
 export function ownPath(url: string): { redirect: string } | { url: string } | null {
   const root = /^\/c?(\?.*)?$/.exec(url);
   if (root) return { redirect: `c/${root[1] ?? ''}` };
+  const share = /^\/c\/share(\?.*)?$/.exec(url);
+  if (share) {
+    // Re-encoded, so the Location header is plain ASCII whatever the share sent.
+    const q = new URLSearchParams(share[1] ?? '').toString();
+    return { redirect: `./#/share${q ? `?${q}` : ''}` };
+  }
   if (url.startsWith('/c/') && !/^\/c\/(apps|preview)\//.test(url)) return { url: url.slice(2) };
   return null;
 }

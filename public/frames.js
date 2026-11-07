@@ -7,8 +7,8 @@
 const frames = new Map();
 let box = null;
 
-/** Show contraption `name` (its frame made on first visit). */
-export function showFrame(name) {
+/** Show contraption `name` (its frame made on first visit), at address `src` if given: an open frame reloads there. */
+export function showFrame(name, src) {
   if (!box) {
     box = document.createElement('div');
     box.id = 'frames';
@@ -17,11 +17,11 @@ export function showFrame(name) {
   let frame = frames.get(name);
   if (!frame) {
     frame = document.createElement('iframe');
-    frame.src = `/apps/${name}/`;
+    frame.src = src ?? `/apps/${name}/`;
     frame.title = name;
     box.append(frame);
     frames.set(name, frame);
-  }
+  } else if (src) frame.src = src;
   for (const [n, f] of frames) f.hidden = n !== name;
   setFramed(true);
   frame.focus();
@@ -44,4 +44,22 @@ export function dropFrames() {
 function setFramed(on) {
   document.documentElement.classList.toggle('framed', on);
   for (const el of document.querySelectorAll('body > .topbar, body > main')) el.inert = on;
+}
+
+// The contraptions that take shares from the phone's Share sheet (#375), in order of preference. Only
+// Mandate so far, so a share goes straight to it; a second one would want a picker here.
+const SHARE_TAKERS = ['mandate'];
+
+/**
+ * Where a share goes (#/share?title=&text=&url=, from the manifest's share_target): the first of your
+ * contraptions `mine` (GET api/contraptions/mine) that takes shares, at its address with each field
+ * passed on as it came, as share_title, share_text and share_url; null when none of yours takes shares.
+ */
+export function shareTarget(search, mine) {
+  const name = SHARE_TAKERS.find((n) => mine?.some?.((c) => c.name === n));
+  if (!name) return null;
+  const got = new URLSearchParams(search);
+  const params = new URLSearchParams();
+  for (const k of ['title', 'text', 'url']) if (got.has(k)) params.set(`share_${k}`, got.get(k));
+  return { name, src: `/apps/${name}/?${params}` };
 }

@@ -16,7 +16,8 @@ import { renderModelPicker, uploadsRunning } from './composer.js';
 import { markdownElement } from './ui/markdown.js';
 import { iconSrc } from './schemes.js';
 import { hideRail, showRail } from './rail.js';
-import { dropFrames, framed, hideFrames, showFrame } from './frames.js';
+import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
+import { toast } from './ui/status.js';
 import { initAppSwitch } from './appswitch.js';
 import { codexHigh, codexLevel, codexTop, codexWindows, windowName } from './codexusage.js';
 
@@ -847,6 +848,7 @@ async function route() {
   let m;
   // A contraption in Citadel's window (frames.js): Citadel's page stays as it was underneath.
   if ((m = hash.match(/^#\/apps\/([a-z0-9][a-z0-9-]{0,31})$/))) return showFrame(m[1]);
+  if ((m = hash.match(/^#\/share(\?.*)?$/))) return takeShare(m[1] ?? '');
   hideFrames();
   // A jump left by a route that never opened its chat mustn't fire on a later, ordinary visit.
   if (pendingJump?.hash !== hash) pendingJump = null;
@@ -880,6 +882,23 @@ async function route() {
   } finally {
     if (seq === routeSeq) document.body.classList.remove('navigating');
   }
+}
+
+/** A share from the phone's Share sheet (#375): the contraption that takes it, filled in; else home, saying so. */
+async function takeShare(search) {
+  let mine = [];
+  try {
+    mine = await api('api/contraptions/mine');
+  } catch (err) {
+    if (err.message === 'Not logged in') return; // the login is showing; the share is still in the address for after
+  }
+  const to = shareTarget(search, mine);
+  if (!to) {
+    toast('Nothing here takes shares');
+    return replaceHash('#/');
+  }
+  showFrame(to.name, to.src);
+  replaceHash(`#/apps/${to.name}`);
 }
 
 window.addEventListener('hashchange', route);

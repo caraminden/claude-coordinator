@@ -7,6 +7,11 @@
   "scope": "/c/",
   "display": "standalone",
   "launch_handler": { "client_mode": ["focus-existing", "auto"] },
+  "share_target": {
+    "action": "/c/share",
+    "method": "GET",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  },
   "background_color": "#f6f5f2",
   "theme_color": "#ffffff",
   "icons": [

@@ -18,6 +18,13 @@ test('the old root redirects to /c/, keeping the query; /c/ paths reach the same
   assert.equal(ownPath('/cats'), null);
 });
 
+test("a share (the manifest's share_target) goes to the front end's #/share, its query re-encoded as plain ASCII", () => {
+  assert.deepEqual(ownPath('/c/share?title=T&text=a+b&url=https%3A%2F%2Fex.com%2F'), { redirect: './#/share?title=T&text=a+b&url=https%3A%2F%2Fex.com%2F' });
+  assert.deepEqual(ownPath('/c/share?text=caf\u00e9'), { redirect: './#/share?text=caf%C3%A9' });
+  assert.deepEqual(ownPath('/c/share'), { redirect: './#/share' });
+  assert.deepEqual(ownPath('/c/shared'), { url: '/shared' });
+});
+
 test("Citadel's manifest keeps its id and its scope leaves /apps/ to contraptions", () => {
   const m = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'public', 'manifest.webmanifest'), 'utf8'));
   // Changing the id would make every installed copy a different app (reinstall needed).

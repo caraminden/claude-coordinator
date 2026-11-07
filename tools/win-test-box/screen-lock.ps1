@@ -78,6 +78,8 @@ if ($Take) {
       # Someone else's lock is there; anything else (no folder, no access) is a real failure.
       if (-not (Test-Path $lock)) { throw }
     }
+    $raw = Get-Content $lock -Raw -ErrorAction SilentlyContinue
+    if ($null -eq $raw -and -not (Test-Path $lock)) { continue }  # let go of since we tried
     $held = Read-Lock
     $stale = if ($held -and $held.pid -is [ValueType] -and $held.since) {
       -not (Get-Process -Id $held.pid -ErrorAction SilentlyContinue) -or ((& $now) - $held.since) -gt $staleMs
@@ -90,7 +92,11 @@ if ($Take) {
       Write-Host "::warning::The screen was still held after 40 minutes ($($held.what) for $($held.who)); taking it."
       $stale = $true
     }
-    if ($stale) { Remove-Item $lock -Force -ErrorAction SilentlyContinue; continue }
+    if ($stale) {
+      # Only the lock we judged: another taker may have broken it and taken it since.
+      if ((Get-Content $lock -Raw -ErrorAction SilentlyContinue) -eq $raw) { Remove-Item $lock -Force -ErrorAction SilentlyContinue }
+      continue
+    }
     if (-not $told) { Write-Host "Waiting for the screen: $($held.what) for $($held.who) has it."; $told = $true }
     Start-Sleep -Seconds 5
   }

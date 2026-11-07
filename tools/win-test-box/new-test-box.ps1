@@ -66,6 +66,7 @@ $drive = Get-PSDrive ([IO.Path]::GetPathRoot($vhdDir).Substring(0, 1))
 $diskFreeGb = [Math]::Round($drive.Free / 1GB)
 Write-Host "  Disk: $diskFreeGb GB free on $($drive.Name):, where Hyper-V keeps disks ($vhdDir). The box's disk grows to about 60-90 GB, $DiskGB GB at most"
 if (-not $existing -and $diskFreeGb -lt 100) { Stop-With "$($drive.Name): has $diskFreeGb GB free; keep at least 100 GB free for the box. Move Hyper-V's disk folder (Hyper-V Settings) or free some space." }
+if (-not $existing -and (Test-Path $vhdPath)) { Stop-With "a disk from an earlier try is at $vhdPath, with no VM. Delete it (Remove-Item '$vhdPath') and run this again." }
 if (-not (Get-VMSwitch -Name $Switch -ErrorAction SilentlyContinue)) { Stop-With "there is no Hyper-V switch '$Switch'. Pass -Switch with one of: $((Get-VMSwitch).Name -join ', ')" }
 if (-not $existing -and -not $CheckOnly -and -not $IsoPath) { Stop-With 'pass -IsoPath with the Windows 11 ISO you downloaded.' }
 if (-not $existing -and $IsoPath -and -not (Test-Path $IsoPath)) { Stop-With "no ISO at $IsoPath. Download the Windows 11 disk image (ISO) from Microsoft's Windows 11 download page." }

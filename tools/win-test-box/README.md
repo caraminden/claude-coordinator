@@ -58,7 +58,7 @@ Everything is on her PC. Nothing here restarts it except step 1's restart, which
    - **Disk and VM:** it applies Windows 11 Home to a new disk with no Setup screens, creates the VM `citadel-test-box`, starts it and waits while `guest-setup.ps1` sets it up inside. That covers sign-in, never locking, 125%, the corners, Git, Node, mise and Tailscale. The box restarts itself once.
    - **Its password:** at the end it prints the box's sign-in, `citadel` and a password. Keep it in a password manager, then delete the `citadel-test-box.password.txt` it names.
    - **Options:** `-MemoryGB`, `-Cpus`, `-DiskGB`, `-Width`/`-Height` (default 1920x1080).
-   - **If it stops:** run it again. It picks up where it was.
+   - **If it stops:** run it again. Once the VM exists it picks up where it was. If it stopped before that, it says which half-made disk to delete first.
 
 4. **Open the box's window:** Hyper-V Manager, `citadel-test-box`, **Connect**. If it offers a size or "enhanced session", close that dialog: it's a basic session, the only kind that never locks the box.
 

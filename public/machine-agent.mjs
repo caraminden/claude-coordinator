@@ -199,10 +199,13 @@ function run(command, args, opts) {
   });
 }
 
-/** Ends a job's process and whatever it started (Godot under cmd.exe, say). */
+/** Ends a job's process and whatever it started (Godot under cmd.exe, say); resolves once that's done. */
 function killTree(child) {
-  if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-  else child.kill();
+  if (process.platform !== 'win32') {
+    child.kill();
+    return Promise.resolve();
+  }
+  return new Promise((done) => spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('close', done).on('error', done));
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms).unref?.());
@@ -238,11 +241,17 @@ export function takeScreenLock(file, what, who) {
     } catch (err) {
       if (err.code !== 'EEXIST') throw new ToolError(`Could not take the screen lock ${file}: ${err.message}`);
     }
-    let held = null;
-    let mtime = Date.now();
+    let raw;
+    let mtime;
     try {
       mtime = statSync(file).mtimeMs;
-      held = JSON.parse(readFileSync(file, 'utf8'));
+      raw = readFileSync(file, 'utf8');
+    } catch {
+      continue; // let go of between our try and now
+    }
+    let held = null;
+    try {
+      held = JSON.parse(raw);
     } catch {}
     const valid = Number.isInteger(held?.pid) && Number.isFinite(held?.since);
     const stale = valid ? !pidAlive(held.pid) || Date.now() - held.since > LOCK_STALE_MS : Date.now() - mtime > 60_000;
@@ -250,7 +259,10 @@ export function takeScreenLock(file, what, who) {
       const since = valid ? held.since : mtime;
       throw new ToolError(`The screen is busy: ${held?.what ?? 'something'} for ${held?.who ?? 'someone'}, started ${secondsSince(since)} s ago. Nothing was started. Try again in a few minutes.`);
     }
-    rmSync(file, { force: true });
+    // Only the lock we judged: another taker may have broken it and taken it since.
+    try {
+      if (readFileSync(file, 'utf8') === raw) rmSync(file, { force: true });
+    } catch {}
   }
   throw new ToolError(`Could not take the screen lock ${file}: it keeps coming back`);
 }
@@ -462,7 +474,7 @@ export class WorkspaceHost {
       case 'stop_job': {
         const job = this.jobs.get(String(args.id ?? ''));
         if (!job) throw new ToolError(`No job ${args.id} here. Jobs are forgotten when the agent restarts.`);
-        if (!job.ended) job.stop(`Stopped by ${who}`);
+        if (!job.ended) await job.stop(`Stopped by ${who}`);
         return this.report(job, 0, 60);
       }
       case 'screenshot': return this.screenshot(String(args.window ?? ''), Number(args.delay) || 0, who, upload);
@@ -568,8 +580,8 @@ export class WorkspaceHost {
         if (screen) releaseScreenLock(this.screenLock, screen);
         resolveDone();
       };
-      job.stop = (why) => {
-        if (child) killTree(child);
+      job.stop = async (why) => {
+        if (child) await killTree(child);
         finish(null, why);
       };
       const limit = setTimeout(() => {

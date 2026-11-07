@@ -8,7 +8,8 @@
     1. checks it's elevated and that Node 18+ and Git for Windows are here;
     2. makes C:\ProgramData\citadel-runner-agent, readable and writable only by Administrators and SYSTEM, so no
        unelevated program can change what the agent runs;
-    3. downloads runner-agent.mjs, add-runner.ps1, list-runners.ps1 and remove-runner.ps1 from Citadel into it
+    3. downloads runner-agent.mjs, add-runner.ps1, list-runners.ps1, remove-runner.ps1 and start-runner.ps1 (the
+       session runner's launcher, for add-runner.ps1 -Session by hand) from Citadel into it
        (the agent never downloads code itself: these copies are what it runs until you install again) and
        prints their SHA-256;
     4. keeps the machine token in a file there;
@@ -75,6 +76,8 @@ $files = [ordered]@{
   'add-runner.ps1'    = "$url/ci-runner/add-runner.ps1"
   'list-runners.ps1'  = "$url/ci-runner/list-runners.ps1"
   'remove-runner.ps1' = "$url/ci-runner/remove-runner.ps1"
+  # Not the agent's: add-runner.ps1 -Session, run by hand from this folder, copies it into a session runner (#370).
+  'start-runner.ps1'  = "$url/ci-runner/start-runner.ps1"
 }
 foreach ($name in $files.Keys) {
   $to = Join-Path $dir $name

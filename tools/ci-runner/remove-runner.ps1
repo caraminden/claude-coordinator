@@ -8,6 +8,8 @@
   each, it runs the runner's own `config.cmd remove` with a removal token Citadel mints with the scheme owner's
   GitHub login (about an hour, never stored), which takes the runner off GitHub and deletes its service, then
   deletes the folder. A runner GitHub won't remove keeps its folder, and the script says why.
+  A session runner (add-runner.ps1 -Session, #370) has no service: it is removed when its logon task, "GitHub runner
+  <its label>", starts it from that folder, and the task and the runner's processes go with it.
   It never touches another runner, never restarts or reboots the PC. Run it elevated (an admin PowerShell, or the
   CI runner agent, which runs as SYSTEM).
 
@@ -72,12 +74,20 @@ if (-not $mine) {
 
 # Anyone can make a folder in C:\ and write a marker, but only an admin makes a service: run config.cmd only in a folder
 # that the repo's runner service runs from, so a planted folder never gets its config.cmd run as SYSTEM.
+# A session runner's stand-in for the service is its logon task, which only an admin makes for another user.
 $owner, $repoName = $names.repo -split '/', 2
 $serviced = @(Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'actions.runner.%'" |
     Where-Object { $_.Name -like "actions.runner.$owner-$repoName.*" } |
     ForEach-Object { Split-Path (Split-Path ($_.PathName -replace '^"([^"]+)".*$', '$1') -Parent) -Parent })
+$tasks = @{}
+foreach ($d in $mine) {
+  $m = Get-Content -Raw (Join-Path $d.FullName '.citadel-runner') | ConvertFrom-Json
+  if (-not ($m.PSObject.Properties['mode'] -and $m.mode -eq 'session')) { continue }
+  $t = Get-ScheduledTask -TaskName "GitHub runner $($m.label)" -ErrorAction SilentlyContinue
+  if ($t -and @($t.Actions | Where-Object { $_.WorkingDirectory -eq $d.FullName }).Count) { $tasks[$d.FullName] = $t.TaskName; $serviced += $d.FullName }
+}
 $skipped = @($mine | Where-Object { $serviced -notcontains $_.FullName })
-foreach ($d in $skipped) { Write-Host "$($d.FullName) has a marker for $($names.repo) but no runner service of that repo runs from it, so it was left alone; look at it by hand." -ForegroundColor Yellow }
+foreach ($d in $skipped) { Write-Host "$($d.FullName) has a marker for $($names.repo) but no runner service or logon task of that repo runs from it, so it was left alone; look at it by hand." -ForegroundColor Yellow }
 $mine = @($mine | Where-Object { $serviced -contains $_.FullName })
 if (-not $mine) {
   if ($skipped) { Stop-With 'Nothing removed: see above.' }
@@ -88,6 +98,14 @@ $reg = Get-RunnerToken $true
 $failed = 0
 foreach ($d in $mine) {
   Write-Host "Removing the runner in $($d.FullName)"
+  $task = $tasks[$d.FullName]
+  if ($task) {
+    # Stopping the task ends the launcher, not the run.cmd it started on its desktop.
+    Stop-ScheduledTask -TaskName $task
+    Get-CimInstance -ClassName Win32_Process | Where-Object {
+      ($_.ExecutablePath -and $_.ExecutablePath -like "$($d.FullName)\*") -or ($_.CommandLine -and $_.CommandLine -like "*$($d.FullName)\run.cmd*")
+    } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  }
   Push-Location $d.FullName
   try {
     & .\config.cmd remove --unattended --token $reg.token
@@ -100,6 +118,7 @@ foreach ($d in $mine) {
     Write-Host "config.cmd remove failed (exit $code); $($d.FullName) stays. Its _diag folder says why." -ForegroundColor Red
     continue
   }
+  if ($task) { Unregister-ScheduledTask -TaskName $task -Confirm:$false; Write-Host "Removed the logon task '$task'" }
   Remove-Item -Recurse -Force $d.FullName
   Write-Host "Removed $($d.FullName)" -ForegroundColor Green
 }

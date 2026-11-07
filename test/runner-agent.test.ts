@@ -113,7 +113,7 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     assert.match(job.text, /token was ccm_…/);
     assert.doesNotMatch(job.text, new RegExp(made.data.token));
 
-    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1']) {
+    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1']) {
       assert.equal((await fetch(`${srv.base}/ci-runner/${name}`)).status, 200, name);
     }
     assert.match(await (await fetch(`${srv.base}/runner-agent.mjs`)).text(), /Citadel's CI runner agent/);

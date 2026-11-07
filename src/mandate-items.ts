@@ -10,7 +10,7 @@
 //     hook: true always, and link the minion's page. The number routes her ticks back (relay.ts schemeHook).
 //   - Mandate's status and body come back as { status, answer }; Citadel's own refusals are HTTP errors.
 import { APP_NAME } from './appname.ts';
-import type { Ticket } from './db.ts';
+import type { ContraptionRow, Ticket } from './db.ts';
 import { HttpError, json, readJson, type App, type Ctx } from './http.ts';
 
 /** Contraption names Citadel keeps for its schemes when it calls Mandate for one. */
@@ -60,26 +60,32 @@ export async function mandateItem({ req, res, app, params, caller }: Ctx) {
     body = { hook: true, link: `/c/#/p/${project.id}${ticket.number === null ? '' : `/t/${ticket.number}`}` };
     for (const f of FIELDS) if (given[f] !== undefined) body[f] = given[f];
   }
-  let status: number, answer: unknown;
+  const { status, answer } = await callMandate(mandate, identity, key, body);
+  // A put on a ticked or deleted item changes nothing in Mandate, so neither does it here.
+  if (status === 200 && body && typeof body.title === 'string' && (answer as any)?.state === 'open') store.setSetting(titleKey(project.id, user.id, key), body.title);
+  if (status === 200 && !body) store.deleteSetting(titleKey(project.id, user.id, key));
+  json(res, 200, { status, answer });
+}
+
+/**
+ * One put (with `body`) or clear (without) of item `key` in a person's Mandate, signed as `identity`, straight to
+ * Mandate's own service. Mandate's status and answer come back; a Mandate that is down or slow throws an HttpError.
+ */
+export async function callMandate(mandate: Pick<ContraptionRow, 'name' | 'title' | 'port'>, identity: string, key: string, body?: Record<string, unknown>): Promise<{ status: number; answer: unknown }> {
   try {
     const r = await fetch(`http://127.0.0.1:${mandate.port}/apps/${mandate.name}/app-api/items/${key}`, {
-      method: req.method,
+      method: body ? 'PUT' : 'DELETE',
       headers: { 'X-Citadel-Identity': identity, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body && JSON.stringify(body), redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    status = r.status;
     const text = await r.text();
     try {
-      answer = JSON.parse(text);
+      return { status: r.status, answer: JSON.parse(text) };
     } catch {
-      answer = text.slice(0, 2000);
+      return { status: r.status, answer: text.slice(0, 2000) };
     }
   } catch (err: any) {
     if (err?.name === 'TimeoutError') throw new HttpError(504, `${mandate.title} didn't answer within ${TIMEOUT_MS / 1000} s`);
     throw new HttpError(502, `${mandate.title} is not answering`);
   }
-  // A put on a ticked or deleted item changes nothing in Mandate, so neither does it here.
-  if (status === 200 && body && typeof body.title === 'string' && (answer as any)?.state === 'open') store.setSetting(titleKey(project.id, user.id, key), body.title);
-  if (status === 200 && !body) store.deleteSetting(titleKey(project.id, user.id, key));
-  json(res, 200, { status, answer });
 }

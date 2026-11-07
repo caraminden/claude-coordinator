@@ -11,7 +11,7 @@ runner serves one repo only, so each scheme's repo gets its own runner instance 
 | Folder | `C:\actions-runner-<repo>`, then `-2` … for more instances (up to 4), each with a `.citadel-runner` marker |
 | Label | `<scheme-slug>-ci`: the scheme's name in lowercase with dashes (`Peek Auras` → `peek-auras-ci`) |
 | Service | `actions.runner.<owner>-<repo>.DESKTOP-G248IJ8` (then `…-2` …), as NETWORK SERVICE, delayed automatic start, restart on failure; one job at a time |
-| `.env` | telemetry off, `C:\Program Files\Git\bin` first on PATH so `bash` steps run |
+| `.env` | telemetry off, `C:\Program Files\Git\bin` first on PATH so `bash` steps run, and tool folders of its own: `MISE_DATA_DIR`, `MISE_CACHE_DIR`, `MISE_STATE_DIR`, `RUSTUP_HOME` and `CARGO_HOME` under `<its folder>\tools\` (#370: runners sharing NETWORK SERVICE's one profile broke each other's mise and cargo on Peek Auras). Runners added before #370 don't have these; remove and add them again to get them |
 
 **Hard rules on that PC.** Never restart or reboot it (Windows Update is paused there). Never touch
 another scheme's runner, Delve's (`C:\actions-runner`, `-2`, `-3`, `-4`, `-perf`) above all.
@@ -49,8 +49,9 @@ What keeps the agent narrow:
 - **Locked-down folder.** Its folder, `C:\ProgramData\citadel-runner-agent`, is writable only by
   Administrators and SYSTEM.
 
-Session-mode runners (a hidden desktop for screen tests) aren't covered yet. They come from
-Peek Auras #83's working steps once those exist.
+Session runners (below) are added by hand, not by the agent: their logon task is for the person
+who runs `add-runner.ps1`, and the agent runs as SYSTEM. The agent's `list` shows them and its
+`remove` removes them.
 
 ## Install the runner agent (Cara, once)
 
@@ -103,10 +104,58 @@ Delve's runner.
 NETWORK SERVICE can read (Delve copies its Godot console exe for this). Then restart only that
 runner's service.
 
-**What has been tested.** The PowerShell scripts parse, and PSScriptAnalyzer passes with the
-Windows PowerShell 5.1 and PowerShell 7 rules. Apart from that, the Windows side hasn't run
-yet: the SYSTEM task, the folder lock, and the real `config.cmd` add and remove. The agent's
-job handling and the Citadel side have tests, with a fake PowerShell.
+**What has been tested.** Every script here passes the Windows CI kit's `.ps1` lint
+(`kit/skills/scheme-setup/templates/windows-ci/lint-ps1.ps1`: parse, type names and static
+members on Windows PowerShell 5.1 and 7, PSScriptAnalyzer with their compatibility rules), which
+`npm test` runs (`test/ps1-lint.test.ts`, with pwsh and PSScriptAnalyzer installed for cara on
+perigee; it skips where they're missing). Apart from that, the Windows side hasn't run here: the
+SYSTEM task, the folder lock, the real `config.cmd` add and remove, and session mode's logon task
+(Peek Auras' own setup script, which it copies, has run on Cara's PC). The agent's job handling
+and the Citadel side have tests, with a fake PowerShell.
+
+## Session runners (jobs that open windows)
+
+A service runs in session 0, which has no desktop: jobs that open windows, draw overlays or read
+the screen fail there. Those go to the scheme's one **session runner** (#370, Peek Auras' desktop
+runner and Delve's `delve-perf` shape), which runs as a person, in their logon session.
+
+| | The session runner |
+|---|---|
+| Folder, name | `C:\actions-runner-<repo>-desktop`, `<PC>-desktop`, with a `.citadel-runner` marker (`"mode": "session"`) |
+| Label | `<scheme-slug>-desktop` |
+| Runs as | whoever ran `add-runner.ps1 -Session`, only while they're logged on |
+| Started by | the logon task `GitHub runner <scheme-slug>-desktop`, through `conhost.exe --headless` and `start-runner.ps1` (Peek Auras' launcher), which restarts `run.cmd` a minute after it ends and logs each step to `launcher.log` in the folder |
+| Desktop | a hidden one named after the label, so nothing shows on screen; with `-Visible`, the person's own |
+
+Add it in an **elevated** PowerShell, logged on as the person whose session it uses (a Claude
+session on the PC needs Manual permissions for this, as for the fallback below). `start-runner.ps1`
+must sit beside `add-runner.ps1`: the agent's folder has both once the agent is installed again
+after #370, or download both:
+
+```powershell
+$u = '<the address the Machines page shows>'; $d = "$env:TEMP\citadel-ci"; mkdir -Force $d | Out-Null
+foreach ($f in 'add-runner.ps1', 'start-runner.ps1') { iwr "$u/ci-runner/$f" -UseBasicParsing -OutFile "$d\$f" }
+$env:CC_MACHINE_TOKEN = 'ccm_…'
+powershell -NoProfile -ExecutionPolicy Bypass -File "$d\add-runner.ps1" -Scheme "Peek Auras" -CitadelUrl $u -Session -Visible
+```
+
+- `-Session` adds the session runner and nothing else: no service runners, and it takes no
+  `-Count`. Build runners come from `ci_runners add` as before.
+- `-Visible` runs its jobs on the person's own desktop. **Screen tests need it**: a hidden desktop
+  refuses screen reads (`BitBlt`: "Access is denied") and capture. The session must also stay
+  unlocked; a locked PC refuses them too. Without `-Visible`, windows open on a hidden desktop that
+  nothing can read, which suits jobs that only need a desktop to exist.
+- Running it again with `-Session` rewrites the launcher and the logon task, stopping the runner's
+  old processes (and any job on it). That's how to switch `-Visible` on or off.
+- It refuses to run as SYSTEM, and refuses `-Visible` without `-Session`.
+
+**After Remote Desktop:** closing a Remote Desktop window leaves the session disconnected, with no
+screen, so screen reads fail. Before leaving, in an administrator PowerShell inside the session:
+`tscon ((Get-Process -Id $PID).SessionId) /dest:console`, which hands the session back to the PC's
+own monitor, unlocked.
+
+A scheme's `desktop.yml` checks the screen first and reports its desktop jobs as NOT RUN when it
+can't be read: the Windows CI kit, `kit/skills/scheme-setup/templates/windows-ci/`.
 
 ## Point the workflows at it
 

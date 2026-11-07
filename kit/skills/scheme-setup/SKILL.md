@@ -193,6 +193,11 @@ is online, or the job failed, put its words in your done note and tell the Taskm
 a bare hosted runner and, if the repo has workflows, `ci_runners` came back done with the runner
 Idle (or its failure is in your done note).
 
+**A Windows app's CI** starts from this skill's `templates/windows-ci/` when the plan gives the
+scheme Windows CI: its `README.md` says where each file goes, and its lint line joins the check
+commands in Project facts. Jobs that open windows need the session runner, which a person adds on
+the PC (`add-runner.ps1 -Session -Visible`, not `ci_runners`): name that step in your done note.
+
 ### 5. Adapt each skill the plan pulls in
 
 For each item on the adapt list:

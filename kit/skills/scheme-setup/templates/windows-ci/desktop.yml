@@ -1,0 +1,68 @@
+# Citadel's Windows CI kit (kit/skills/scheme-setup/templates/windows-ci/README.md), from Peek Auras' desktop.yml.
+# Copy to .github/workflows/desktop.yml, swap <scheme-slug> for the scheme's runner label stem, and fill in the tests.
+#
+# The Windows tests that need a desktop (they open windows, draw overlays, read or capture the screen), on the scheme's
+# one session runner (<scheme-slug>-desktop: tools/ci-runner/add-runner.ps1 -Session -Visible in Citadel's repo).
+# `screen` reads the whole screen first, as the tests do; the desktop jobs run this commit's tests only if it could,
+# and otherwise show as skipped with a "desktop tests NOT RUN" warning, never as green. A workflow of its own, apart
+# from windows.yml, so a desktop runner that is gone or busy holds only this workflow's concurrency group.
+# Anything that reads results (a status script, a try-it build) must treat this run's skipped jobs as NOT RUN, not
+# as passed: GitHub reports a run whose jobs were skipped as a success.
+name: desktop
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One group per workflow, never shared with windows.yml's.
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # A few seconds: whether the session runner can read its screen the way the tests do (tools/ci-win/screen-check.ps1).
+  # A locked PC, a Remote Desktop session left disconnected and a desktop that is never shown all refuse it, and then
+  # every desktop test would fail on that, not on the scheme's code.
+  screen:
+    if: github.event_name != 'pull_request' || vars.CI_RUNNER != 'github'
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'windows-latest' || fromJSON('["self-hosted", "<scheme-slug>-desktop"]') }}
+    timeout-minutes: 5
+    outputs:
+      screen: ${{ steps.screen.outputs.screen }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Screen check
+        id: screen
+        run: |
+          why=$(powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tools/ci-win/screen-check.ps1 2>&1) && rc=0 || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "screen=pass" >> "$GITHUB_OUTPUT"
+            echo "$RUNNER_NAME can read its screen"
+          elif [ "$rc" -ne 1 ]; then
+            # Exit 2 is the check itself broken, which is ours to fix, so the run goes red.
+            echo "::error title=screen check broken::$(echo $why)"
+            exit 1
+          else
+            echo "screen=fail" >> "$GITHUB_OUTPUT"
+            echo "::warning title=desktop tests NOT RUN::$RUNNER_NAME can't read its screen ($(echo $why)), so the desktop jobs are skipped. The PC is locked, or a Remote Desktop session was closed instead of handed back with tscon (Citadel's tools/ci-runner/README.md, session runners)."
+          fi
+
+  # One job per group of desktop tests; each waits for `screen` only.
+  desktop-tests:
+    needs: screen
+    if: needs.screen.outputs.screen == 'pass'
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'windows-latest' || fromJSON('["self-hosted", "<scheme-slug>-desktop"]') }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Desktop tests
+        run: echo "replace with the scheme's desktop tests" && exit 1

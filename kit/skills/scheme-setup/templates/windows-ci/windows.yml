@@ -1,0 +1,60 @@
+# Citadel's Windows CI kit (kit/skills/scheme-setup/templates/windows-ci/README.md), from Peek Auras' windows.yml.
+# Copy to .github/workflows/windows.yml, swap <scheme-slug> for the scheme's runner label stem, and fill in the build.
+#
+# Everything that needs no desktop runs here, on the scheme's build runners (<scheme-slug>-ci: Windows services under
+# NETWORK SERVICE on Cara's PC, `ci_runners add`). Jobs that open windows or read the screen are desktop.yml, a
+# workflow of its own on the session runner, so a desktop runner that is gone or busy never holds this workflow's
+# concurrency group, and main gets a build verdict on every push (Peek Auras, 2026-11-06).
+# Setting the repository variable CI_RUNNER to `github` sends main to GitHub's windows-latest (minutes billed at 2x
+# there, so pull requests are then skipped). Ask Cara before setting it.
+name: windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One group per workflow, never shared with desktop.yml's.
+  group: windows-${{ github.ref }}
+  # A run on main is never cancelled once it starts; a newer push to a PR replaces its run. GitHub keeps at most one
+  # pending run per group, so while the PC is busy or off only the newest commit waits.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || vars.CI_RUNNER != 'github'
+    runs-on: ${{ vars.CI_RUNNER == 'github' && 'windows-latest' || fromJSON('["self-hosted", "<scheme-slug>-ci"]') }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      # Every .ps1 in the repo parses, names only types that exist on Windows, and passes PSScriptAnalyzer
+      # (tools/ci-win/lint-ps1.ps1). Minions run the same lint on perigee before they push.
+      - name: Lint PowerShell
+        shell: powershell
+        run: |
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null
+            Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          }
+          $files = @(git ls-files '*.ps1')
+          if ($files) { powershell -NoProfile -ExecutionPolicy Bypass -File tools/ci-win/lint-ps1.ps1 @files; exit $LASTEXITCODE }
+      # desktop.yml's screen check compiles and runs here too: broken, it would only show as every desktop job NOT RUN.
+      # Exit 1 (no screen to read) is what a service gets; 2 is the check itself broken.
+      - name: Screen check compiles
+        run: |
+          rc=0; powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tools/ci-win/screen-check.ps1 || rc=$?
+          [ "$rc" -le 1 ]
+      # The scheme's own steps: toolchain setup, format, lint, the tests that need no desktop, the release build.
+      # The runner's .env already gives mise, rustup and cargo folders of its own (add-runner.ps1).
+      - name: Build and test
+        run: echo "replace with the scheme's build and tests" && exit 1

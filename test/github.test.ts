@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { GithubWatcher, check as checkOf, decide, githubRepo, parseSnapshot, turnSpans, verdict, type Check, type PrSnapshot, type Remark } from '../src/github.ts';
+import { GithubWatcher, NO_CHECKS_MS, STUCK_MS, check as checkOf, decide, githubRepo, parseSnapshot, turnSpans, verdict, type Check, type PrSnapshot, type Remark } from '../src/github.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'github-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -155,6 +155,81 @@ test('a job that never started says so, with GitHub\'s reason, apart from a red 
   assert.deepEqual(alone, [`CI didn't start on abc1234 in PR #12 — build didn't start (GitHub says: "${billing}"): ${url}\nNo step ran, so this isn't a test failure.`]);
   const mixed = decide(pr({ checks: [dead, check('lint', 'failed')] }), new Set(['baseline']), opts()).messages;
   assert.deepEqual(mixed, [`CI failed on abc1234 in PR #12 — 2 checks:\n- build didn't start (GitHub says: "${billing}"): ${url}\n- lint: https://ci/lint`]);
+});
+
+test('CI that never starts: no checks after the window says so once per commit, naming a conflict as the cause', () => {
+  const seen = new Set(['baseline']);
+  const ci = { hasCi: true, baseRef: 'main' };
+  // Too soon, or a repo with no workflows: nothing.
+  assert.deepEqual(decide(pr(ci), seen, opts({ headFor: NO_CHECKS_MS - 1 })).messages, []);
+  assert.deepEqual(decide(pr({ hasCi: false }), seen, opts({ headFor: NO_CHECKS_MS })).messages, []);
+
+  // GitHub hasn't worked out yet whether it conflicts: wait for that, so the cause isn't left out.
+  assert.deepEqual(decide(pr({ ...ci, mergeable: 'UNKNOWN' }), seen, opts({ headFor: NO_CHECKS_MS })).messages, []);
+  const conflict = decide(pr({ ...ci, mergeable: 'CONFLICTING' }), seen, opts({ headFor: NO_CHECKS_MS })).messages;
+  assert.deepEqual(conflict, ["CI hasn't started on abc1234 in PR #12: no checks after 10 minutes, because the PR conflicts with main and GitHub runs no pull_request workflows on a conflicting PR. Rebase onto main and push to get CI."]);
+  assert.deepEqual(decide(pr({ ...ci, mergeable: 'CONFLICTING' }), seen, opts({ headFor: 2 * NO_CHECKS_MS })).messages, [], 'once per commit');
+
+  const plain = decide(pr({ ...ci, headSha: 'fff0000', mergeable: 'MERGEABLE' }), seen, opts({ headFor: NO_CHECKS_MS })).messages;
+  assert.deepEqual(plain, ["CI hasn't started on fff0000 in PR #12: no checks after 10 minutes. If its workflows skip this change by design, nothing is wrong; otherwise look at https://github.com/o/r/pull/12/checks"]);
+  // Checks that then appear and finish are still news.
+  assert.deepEqual(decide(pr({ ...ci, headSha: 'fff0000', checks: [check('build', 'passed')] }), seen, opts({ headFor: NO_CHECKS_MS })).messages, ['CI passed on fff0000 in PR #12 (1 check).']);
+});
+
+test('CI stuck waiting for a runner says so once, and the verdict still comes after', () => {
+  const seen = new Set(['baseline']);
+  assert.equal(checkOf({ __typename: 'CheckRun', name: 'desktop', status: 'QUEUED', conclusion: null, detailsUrl: null }).queued, true);
+  assert.equal(checkOf({ __typename: 'CheckRun', name: 'build', status: 'IN_PROGRESS', conclusion: null, detailsUrl: null }).queued, undefined);
+  const waiting = [check('build', 'passed'), { ...check('desktop', 'pending'), queued: true as const }];
+  assert.deepEqual(decide(pr({ checks: waiting }), seen, opts({ stuck: [] })).messages, []);
+  const stuck = decide(pr({ checks: waiting }), seen, opts({ stuck: ['desktop'] })).messages;
+  assert.deepEqual(stuck, ["CI on abc1234 in PR #12 is stuck: desktop has waited 60 minutes for a runner. That isn't a test failure; you'll still hear when CI finishes."]);
+  assert.deepEqual(decide(pr({ checks: waiting }), seen, opts({ stuck: ['desktop'] })).messages, []);
+  assert.deepEqual(decide(pr({ checks: [check('build', 'passed'), check('desktop', 'passed')] }), seen, opts()).messages, ['CI passed on abc1234 in PR #12 (2 checks).']);
+});
+
+test('the snapshot carries whether the PR conflicts, its base and whether the repo has workflows', () => {
+  const data = (workflows: unknown) => ({ viewer: { login: 'cara' }, repository: { workflows, pullRequests: { nodes: [{ number: 67, url: 'u', state: 'OPEN', headRefOid: SHA, mergeable: 'CONFLICTING', baseRefName: 'main' }] } } });
+  const { pr: got } = parseSnapshot(data({ __typename: 'Tree' }));
+  assert.deepEqual([got!.mergeable, got!.baseRef, got!.hasCi, got!.checks], ['CONFLICTING', 'main', true, []]);
+  assert.equal(parseSnapshot(data(null)).pr!.hasCi, false);
+});
+
+test('the watcher times a head commit with no checks and a queued check from when it first saw them, a new push restarting the clock', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: T });
+  const store = new Store(join(root, 'nostart.db'));
+  const project = store.createProject('P', null);
+  const ticket = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(ticket.id, root, 'ticket/1-t');
+  const tk = store.getTicket(ticket.id)!;
+  let snapshot = pr({ hasCi: true, mergeable: 'CONFLICTING', baseRef: 'main' });
+  const sent: string[] = [];
+  const w = new GithubWatcher(store, (_id, text) => sent.push(text), async () => ({ pr: snapshot, self: 'cara' }));
+  await w.poll(tk, root, 'o/r'); // first look
+  t.mock.timers.tick(NO_CHECKS_MS - 1000);
+  await w.poll(tk, root, 'o/r');
+  assert.deepEqual(sent, []);
+  t.mock.timers.tick(1000);
+  await w.poll(tk, root, 'o/r');
+  await w.poll(tk, root, 'o/r');
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /^CI hasn't started on abc1234 in PR #12: no checks after 10 minutes, because the PR conflicts with main/);
+
+  // Rebased and pushed: the new commit's runs wait for a runner, timed from when they were first seen queued.
+  snapshot = pr({ headSha: 'fff0000', hasCi: true, checks: [{ ...check('desktop', 'pending'), queued: true }] });
+  await w.poll(tk, root, 'o/r');
+  t.mock.timers.tick(STUCK_MS - 1000);
+  await w.poll(tk, root, 'o/r');
+  assert.equal(sent.length, 1);
+  t.mock.timers.tick(1000);
+  await w.poll(tk, root, 'o/r');
+  await w.poll(tk, root, 'o/r');
+  assert.equal(sent.length, 2);
+  assert.match(sent[1], /^CI on fff0000 in PR #12 is stuck: desktop has waited 60 minutes/);
+  snapshot = pr({ headSha: 'fff0000', hasCi: true, checks: [check('desktop', 'failed')] });
+  await w.poll(tk, root, 'o/r');
+  assert.equal(sent.length, 3);
+  assert.match(sent[2], /^CI failed on fff0000/);
 });
 
 test('merged or closed by someone is sent once; by the ticket\'s own turn it is not', () => {

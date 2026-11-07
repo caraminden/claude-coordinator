@@ -21,6 +21,11 @@ const TICK_MS = 15_000;
 // The account's own comments this close to one of the ticket's turns count as the turn's
 // (GitHub's clock and ours differ a little, and the turn's last event lands after its last command).
 const TURN_MARGIN_MS = 30_000;
+// CI that never starts would leave a minion waiting forever, so it hears once per head commit when none of
+// the PR's checks appeared this long after the commit was first seen (a PR that conflicts with its base gets
+// no pull_request runs at all), or a check has sat queued for a runner this long.
+export const NO_CHECKS_MS = 10 * 60_000;
+export const STUCK_MS = 60 * 60_000;
 const EXCERPT = 200;
 // Only people with a say in the repo are forwarded word for word; anyone can comment on a public PR.
 const INSIDERS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
@@ -31,6 +36,8 @@ export interface Check {
   url: string | null;
   /** An Actions job that failed without starting (no steps ran: a billing block, no runner): GitHub's reason, '' when it gave none. */
   notStarted?: string;
+  /** A check run not yet started: waiting for a runner. */
+  queued?: true;
 }
 
 /** Something said on the PR: a conversation comment, a review, or a comment on a line of code. */
@@ -60,6 +67,11 @@ export interface PrSnapshot {
   closedBy: string | null;
   checks: Check[];
   remarks: Remark[];
+  /** GitHub's MERGEABLE, CONFLICTING or UNKNOWN (still working it out). */
+  mergeable?: string;
+  baseRef?: string;
+  /** The repo has Actions workflows on its default branch, so a PR with no checks is missing some. */
+  hasCi?: boolean;
 }
 
 /** The ticket's turns as time spans; `end` is Infinity for a turn still going. */
@@ -100,7 +112,11 @@ export function verdict(checks: Check[]): 'pending' | 'passed' | 'failed' | null
  * bot that answers every push can't keep a ticket busy. Remarks from outside the repo are only a
  * link, and what insiders wrote is quoted as data.
  */
-export function decide(pr: PrSnapshot, seen: Set<string>, opts: { baseline: boolean; self: string | string[] | null; spans: Span[] }): Decision {
+export function decide(
+  pr: PrSnapshot,
+  seen: Set<string>,
+  opts: { baseline: boolean; self: string | string[] | null; spans: Span[]; headFor?: number; stuck?: string[] },
+): Decision {
   const selves = opts.self === null ? null : [opts.self].flat().map((s) => s.toLowerCase());
   const messages: string[] = [];
   const handled: string[] = [];
@@ -129,6 +145,21 @@ export function decide(pr: PrSnapshot, seen: Set<string>, opts: { baseline: bool
       return failed.length === 1
         ? `${head}${name(failed[0])}: ${failed[0].url ?? pr.url}${tail}`
         : `${head}${failed.length} checks:\n${failed.map((c) => `- ${name(c)}: ${c.url ?? pr.url}`).join('\n')}${tail}`;
+    });
+  }
+  // GitHub works out `mergeable` when first asked, so an UNKNOWN waits for the next look rather than leave out the cause.
+  if (pr.state === 'OPEN' && !pr.checks.length && pr.hasCi && pr.mergeable !== 'UNKNOWN' && (opts.headFor ?? 0) >= NO_CHECKS_MS) {
+    consider(`nochecks:${pr.headSha}`, () => {
+      const head = `CI hasn't started on ${short(pr.headSha)} in PR #${pr.number}: no checks after ${NO_CHECKS_MS / 60_000} minutes`;
+      if (pr.mergeable === 'CONFLICTING') return `${head}, because the PR conflicts with ${pr.baseRef ?? 'its base'} and GitHub runs no pull_request workflows on a conflicting PR. Rebase onto ${pr.baseRef ?? 'its base'} and push to get CI.`;
+      return `${head}. If its workflows skip this change by design, nothing is wrong; otherwise look at ${pr.url}/checks`;
+    });
+  }
+  const stuck = result === 'pending' ? pr.checks.filter((c) => opts.stuck?.includes(c.name)) : [];
+  if (stuck.length) {
+    consider(`stuck:${pr.headSha}`, () => {
+      const names = stuck.map((c) => c.name).join(', ');
+      return `CI on ${short(pr.headSha)} in PR #${pr.number} is stuck: ${stuck.length === 1 ? `${names} has` : `${stuck.length} checks (${names}) have`} waited ${STUCK_MS / 60_000} minutes for a runner. That isn't a test failure; you'll still hear when CI finishes.`;
     });
   }
 
@@ -185,9 +216,10 @@ export function githubRepo(remote: string): string | null {
 const QUERY = `query($owner: String!, $name: String!, $branch: String!) {
   viewer { login }
   repository(owner: $owner, name: $name) {
+    workflows: object(expression: "HEAD:.github/workflows") { __typename }
     pullRequests(headRefName: $branch, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) {
       nodes {
-        number url state headRefOid mergedAt closedAt
+        number url state headRefOid mergedAt closedAt mergeable baseRefName
         mergedBy { login }
         timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) { nodes { ... on ClosedEvent { actor { login } } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { contexts(first: 100) { nodes {
@@ -214,6 +246,7 @@ export function check(node: any): Check {
   }
   const status = node.status !== 'COMPLETED' ? 'pending' : PASSED.has(node.conclusion) ? 'passed' : 'failed';
   const out: Check = { name: node.name, url: node.detailsUrl ?? null, status };
+  if (node.status === 'QUEUED') out.queued = true;
   // Only Actions jobs list steps; another app's check run has none even when it ran.
   if (node.conclusion === 'FAILURE' && node.steps?.totalCount === 0 && /\/actions\/runs\//.test(node.detailsUrl ?? '')) {
     out.notStarted = String(node.annotations?.nodes?.[0]?.message ?? '').replace(/\s+/g, ' ').trim();
@@ -259,6 +292,9 @@ export function parseSnapshot(data: any): { pr: PrSnapshot | null; self: string 
       closedBy: n.mergedBy?.login ?? n.timelineItems?.nodes?.[0]?.actor?.login ?? null,
       checks: (commit?.statusCheckRollup?.contexts?.nodes ?? []).map(check),
       remarks,
+      mergeable: n.mergeable,
+      baseRef: n.baseRefName,
+      hasCi: !!data.repository.workflows,
     },
   };
 }
@@ -287,6 +323,8 @@ interface Schedule {
   wait: number;
   /** What the last poll saw, to tell whether anything changed. */
   last: string;
+  /** The head commit, when this server first saw it, and when each of its checks was first seen queued. */
+  head?: { sha: string; at: number; queued: Record<string, number> };
 }
 
 /** Polls the open PRs of a project's tickets, one gh call at a time, and sends what's new into each ticket. */
@@ -362,7 +400,7 @@ export class GithubWatcher {
             return;
           }
           console.error(`GitHub poll of ticket ${ticket.id} failed:`, err.message);
-          this.schedule.set(ticket.id, { nextAt: Date.now() + MAX_OPEN_MS, wait: OPEN_MS, last: s?.last ?? '' });
+          this.schedule.set(ticket.id, { nextAt: Date.now() + MAX_OPEN_MS, wait: OPEN_MS, last: s?.last ?? '', head: s?.head });
         }
       }
     } finally {
@@ -395,7 +433,14 @@ export class GithubWatcher {
     // shortcut: only the person of its latest turn, not each turn's; fine while a minion's people rarely change.
     const linked = ticket.person_id ? this.store.getCredential(ticket.person_id, 'github') : null;
     const selves = linked ? [...(self ? [self] : []), (JSON.parse(linked.meta) as { login: string }).login] : self;
-    const { messages, handled } = decide(pr, seen, { baseline, self: selves, spans });
+    // shortcut: these clocks live in memory, so a restart starts them again; fine for a once-per-commit nudge.
+    const now = Date.now();
+    const head = prev?.head?.sha === pr.headSha ? prev.head : { sha: pr.headSha, at: now, queued: {} };
+    const queued: Record<string, number> = {};
+    for (const c of pr.checks) if (c.queued) queued[c.name] = head.queued[c.name] ?? now;
+    head.queued = queued;
+    const stuck = Object.keys(queued).filter((name) => now - queued[name] >= STUCK_MS);
+    const { messages, handled } = decide(pr, seen, { baseline, self: selves, spans, headFor: now - head.at, stuck });
     // Recorded before sending, so a crash in between drops a message rather than repeating it forever.
     if (handled.length) this.store.addGithubSeen(ticket.id, handled.map((k) => prefix + k), messages.length > 0);
     if (messages.length) this.send(ticket.id, messages.join('\n\n'));
@@ -406,6 +451,6 @@ export class GithubWatcher {
     const changed = !prev || prev.last !== last;
     const pending = verdict(pr.checks) === 'pending';
     const wait = !open ? NO_PR_MS : changed || pending ? OPEN_MS : Math.min((prev?.wait ?? OPEN_MS) * 2, MAX_OPEN_MS);
-    this.schedule.set(ticket.id, { nextAt: Date.now() + wait, wait, last });
+    this.schedule.set(ticket.id, { nextAt: Date.now() + wait, wait, last, head });
   }
 }

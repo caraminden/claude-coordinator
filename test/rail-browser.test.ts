@@ -73,11 +73,17 @@ const toc = (page: Page) => page.eval<string>(`(() => {
   const a = document.querySelector('.citadel-rail a[data-app="toc"]');
   return a ? (a.querySelector('img') ? 'img' : 'tile') : 'none';
 })()`);
-/** ToC's entry once it reads `want`, or what it reads after 2 s. */
+/** ToC's entry once it reads `want`, or what it reads after 10 s. */
 async function until(page: Page, want: string) {
   let got = '';
-  for (const end = Date.now() + 2000; (got = await toc(page)) !== want && Date.now() < end; await wait(25));
+  for (const end = Date.now() + 10_000; (got = await toc(page)) !== want && Date.now() < end; await wait(25));
   return got;
+}
+/** Wait until `expression` is truthy in the page; throws naming `what` after 10 s. */
+async function waitFor(page: Page, what: string, expression: string) {
+  for (const end = Date.now() + 10_000; !(await page.eval(expression)); await wait(25)) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+  }
 }
 const mark = (page: Page) => page.eval('document.querySelector(".citadel-rail").dataset.first = "1"');
 const sameRail = (page: Page) => page.eval<boolean>('document.querySelector(".citadel-rail")?.dataset.first === "1"');
@@ -113,19 +119,19 @@ const layer = (page: Page) => page.eval<string>(`(() => {
 })()`);
 async function untilLayer(page: Page, want: string) {
   let got = '';
-  for (const end = Date.now() + 3000; (got = await layer(page)) !== want && Date.now() < end; await wait(25));
+  for (const end = Date.now() + 10_000; (got = await layer(page)) !== want && Date.now() < end; await wait(25));
   return got;
 }
 
 test("in an installed app's window, another app opens in Citadel's layer over it, and picking this app there puts it away", { skip }, async () => {
   Object.assign(state, { tocUp: true, iconBroken: false, citadelDown: false });
   const page = await browser.page(base + '?installed', { width: 1000 });
-  await until(page, 'img');
+  assert.equal(await until(page, 'img'), 'img', 'the rail drew, ToC with its icon');
   assert.equal(await page.eval('document.querySelector(".citadel-rail a[target]")'), null, 'no new-window links any more');
   await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').click()`);
   assert.equal(await untilLayer(page, 'shown #/apps/toc inert'), 'shown #/apps/toc inert', "Citadel's page at ToC, over this one");
   const inFrame = (sel: string) => `document.querySelector('.citadel-layer iframe').contentDocument.querySelector(${JSON.stringify(sel)})`;
-  for (const end = Date.now() + 3000; !(await page.eval(`!!${inFrame('.citadel-rail a[data-app="peek"]')}`)) && Date.now() < end; await wait(25));
+  await waitFor(page, "Citadel's rail in the layer", `!!${inFrame('.citadel-rail a[data-app="peek"]')}`);
   await page.eval(`${inFrame('.citadel-rail a[data-app="peek"]')}.click()`);
   assert.equal(await untilLayer(page, 'hidden'), 'hidden', 'this app picked in the layer: back to its own page');
   await page.eval(`document.querySelector('.citadel-rail a[data-app=""]').click()`);
@@ -134,7 +140,7 @@ test("in an installed app's window, another app opens in Citadel's layer over it
 
 test("in a tab, the rail's entries stay plain links into Citadel", { skip }, async () => {
   const page = await browser.page(base, { width: 1000 });
-  await until(page, 'img');
+  assert.equal(await until(page, 'img'), 'img', 'the rail drew, ToC with its icon');
   assert.equal(await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').getAttribute('href')`), '/c/#/apps/toc');
   await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))`);
   assert.equal(await layer(page), 'none');
@@ -142,8 +148,10 @@ test("in a tab, the rail's entries stay plain links into Citadel", { skip }, asy
 
 test("Alt+\` switches apps on a contraption's own page too", { skip }, async () => {
   const page = await browser.page(base + '?installed', { width: 1000 });
-  await until(page, 'img');
-  for (const end = Date.now() + 3000; !(await page.eval('!!localStorage.getItem("citadel-app-switch:josh")')) && Date.now() < end; await wait(25));
+  assert.equal(await until(page, 'img'), 'img', 'the rail drew, ToC with its icon');
+  // The switcher records the app you're in once it knows who you are (appswitch.js initAppSwitch); each page has
+  // its own storage (browser.ts), so this is this page's switcher ready, not a key an earlier page left behind.
+  await waitFor(page, 'the switcher to know the person (citadel-app-switch:josh)', '!!localStorage.getItem("citadel-app-switch:josh")');
   const key = (type: string, key: string, code: string, modifiers: number) => page.send('Input.dispatchKeyEvent', { type, key, code, modifiers });
   await key('rawKeyDown', 'Alt', 'AltLeft', 1);
   await key('rawKeyDown', '`', 'Backquote', 1);
@@ -151,6 +159,6 @@ test("Alt+\` switches apps on a contraption's own page too", { skip }, async () 
   await key('keyUp', '`', 'Backquote', 1);
   await key('keyUp', 'Alt', 'AltLeft', 0);
   // Citadel (no hash yet: its first view) or ToC, whichever the switcher had picked.
-  for (const end = Date.now() + 3000; !(await layer(page)).startsWith('shown') && Date.now() < end; await wait(25));
+  await waitFor(page, 'the layer to open', `!!document.querySelector('.citadel-layer:not([hidden])')`);
   assert.match(await layer(page), /^shown (#\/apps\/toc)? ?inert$/, 'letting go of Alt opens the one picked, in the layer');
 });

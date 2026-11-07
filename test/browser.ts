@@ -70,7 +70,9 @@ export async function launch(bin: string): Promise<Browser> {
 
   return {
     async page(url, { width = 600, height = 400, touch = false, dark = false, scale = 1 } = {}) {
-      const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
+      // Each page in its own context, so localStorage and cookies never carry from one test's page to the next.
+      const { browserContextId } = await send('Target.createBrowserContext');
+      const { targetId } = await send('Target.createTarget', { url: 'about:blank', browserContextId });
       const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
       const s = (method: string, params: object = {}) => send(method, params, sessionId);
       await s('Runtime.enable');

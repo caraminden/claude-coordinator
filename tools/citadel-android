@@ -56,7 +56,8 @@ keep_screen() { printf '%s\t%s\n' "$(($(date +%s) + LEASE))" "$who" >"$holder"; 
 
 start_service() {
   local reply
-  if reply=$(exec 3<>"/dev/tcp/127.0.0.1/$STARTER" && timeout 20 cat <&3) 2>/dev/null; then
+  if reply=$(exec 2>/dev/null 3<>"/dev/tcp/127.0.0.1/$STARTER" && timeout 20 cat <&3); then
+    [ -n "$reply" ] || say "the starter on 127.0.0.1:$STARTER said nothing; on the host: journalctl --user -u 'citadel-android-starter@*' -n 20"
     [ -z "$reply" ] || say "$reply"
   elif [ ! -e /run/.containerenv ] && command -v systemctl >/dev/null; then
     systemctl --user start --no-block "$UNIT" || { say "can't start $UNIT: is deploy/$UNIT installed?"; exit 1; }
@@ -78,7 +79,7 @@ up() {
       poked=$SECONDS
     fi
     if [ $((SECONDS - t0)) -ge $BOOT_WAIT ]; then
-      say "not booted after ${BOOT_WAIT}s; on the host: journalctl --user -u $UNIT -n 50"
+      say "not booted after ${BOOT_WAIT}s; on the host: journalctl --user -u $UNIT -u 'citadel-android-starter@*' -n 50"
       exit 1
     fi
     sleep 2
@@ -103,24 +104,29 @@ serve() {
   pid=$!
   # `adb emu kill` shuts it down cleanly, which saves the quick-boot snapshot; plain signals are the fallback.
   stop() {
-    "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1
+    # 9>&-: an adb that starts a server mustn't leave it holding the screen lock.
+    "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 9>&-
     for _ in $(seq 100); do kill -0 "$pid" 2>/dev/null || return 0; sleep 1; done
     kill "$pid" 2>/dev/null
   }
   trap 'stop; exit 0' TERM INT
   local nap
+  idle() { echo $(($(date +%s) - $(stat -c %Y "$used" 2>/dev/null || echo 0))); }
   while kill -0 "$pid" 2>/dev/null; do
     # Wake on the emulator's exit too, so the service ends with it and a new `up` can start it again.
-    sleep 30 & nap=$!
+    sleep $((IDLE < 30 ? IDLE : 30)) & nap=$!
     wait -n "$pid" "$nap"
     kill "$nap" 2>/dev/null
-    local idle=$(($(date +%s) - $(stat -c %Y "$used" 2>/dev/null || echo 0)))
-    # Idle, and no step is running right now (a step holds the flock).
-    if [ "$idle" -ge "$IDLE" ] && (exec 9<>"$lock" && flock -n 9); then
-      echo "unused for ${idle}s; stopping"
+    [ "$(idle)" -ge "$IDLE" ] || continue
+    # No step is running (a step holds the flock), and none starts until the stop and its snapshot save are
+    # done: a caller arriving meanwhile waits on the lock, then its `up` starts the service again.
+    exec 9<>"$lock"
+    if flock -n 9 && [ "$(idle)" -ge "$IDLE" ]; then
+      echo "unused for $(idle)s; stopping"
       stop
-      break
+      exit 0
     fi
+    exec 9>&-
   done
   wait "$pid"
 }
@@ -130,7 +136,7 @@ down() {
   say "stopping the emulator (saving its quick-boot snapshot)"
   adb emu kill >/dev/null 2>&1
   local t0=$SECONDS
-  while adb get-state >/dev/null 2>&1 && [ $((SECONDS - t0)) -lt 60 ]; do sleep 1; done
+  while adb get-state >/dev/null 2>&1 && [ $((SECONDS - t0)) -lt 100 ]; do sleep 1; done
   : >"$holder"
 }
 

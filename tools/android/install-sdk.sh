@@ -11,6 +11,7 @@ JDK='java@temurin-21'
 PACKAGES=(
   'platform-tools'
   'build-tools/36.1.0'
+  'build-tools/35.0.0' # the Android Gradle Plugin 8.13's default (Capacitor 8): unpinned projects ask for it
   'platforms/android-36'
 )
 # The bootstrap cmdline-tools, from Google's repository2-3.xml (cmdline-tools;latest, revision 23.0),

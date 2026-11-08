@@ -104,7 +104,7 @@ NOASSERTION are ideas only, paraphrased; proprietary is skipped.
    goes, why, cost), skips grouped by reason, notes (licences, traps, what was not verified), every
    repo read with its pinned commit, the handoffs, and a decisions section.
 2. **Handoffs:** one per minion the work should become, in `handoffs/`, each with the ask, what to
-   take with source paths and pins, its check, and a risk label. Work for another scheme gets its
+   take with source paths and pins, its check, and a risk label. A handoff that copies files tells its minion to record them in THIRD_PARTY.md and, if that is the repo's first row, to get the check scheduled (`citadel:upstream-check`, "Getting a repo on the schedule"). Work for another scheme gets its
    handoff here and goes to your Taskmaster to pass on.
 3. **Pick card:** one `ask_question` card, recommended first: a multi-select question holds 2 to
    6 options and a card up to 4 questions, so group the handoffs by scheme or size, at most 6 per

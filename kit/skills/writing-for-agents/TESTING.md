@@ -60,4 +60,4 @@ Then the **licence**, from the repo's or the skill's own licence file:
 | CC-BY-SA, GPL | Paraphrase the ideas in our words; copying makes our file share-alike |
 | None, or proprietary | Paraphrase the ideas, or leave it |
 
-**Record** it in THIRD_PARTY.md: a copied file gets a row (path, source, pinned commit, local change) and the licence text; ideas paraphrased with no text copied go under "Mined, not copied" with source, commit and licence.
+**Record** it in THIRD_PARTY.md: a copied file gets a row (path, source, pinned commit, local change) and the licence text; ideas paraphrased with no text copied go under "Mined, not copied" with source, commit and licence. If it is the repo's first copy, get the check scheduled (`citadel:upstream-check`, "Getting a repo on the schedule").

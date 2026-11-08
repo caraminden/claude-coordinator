@@ -260,8 +260,8 @@ this table and, below it, each licence's full text:
 ```
 
 `Copied` is `unchanged` or `adapted: <what changed>`; `Checked` starts as the pinned commit and
-today's date; one row per copied path. If this is the file's first row, your done note asks the
-Taskmaster for the monthly upstream-check schedule. *Done when* every copied file has its row.
+today's date; one row per copied path. If this is the file's first row, get the schedule
+asked for as `citadel:upstream-check` says. *Done when* every copied file has its row.
 
 ### 8. Commit and merge
 

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ClaudeLink, containerPath, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
+import { ANDROID_JDK, ANDROID_SDK, androidEnv, ClaudeLink, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
 import { Containers, runArgs, specHash, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { CodexLink } from '../src/codex-link.ts';
@@ -124,6 +124,9 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   assert.equal(env.ANTHROPIC_API_KEY, undefined);
   assert.equal(env.CLAUDE_CONFIG_DIR, join(volume, '.claude'));
   assert.equal(env.COORDINATOR_CONTAINER, '1');
+  // The host's Android SDK and JDK (#379), where it has them (on perigee it does), at the same paths as on the host.
+  assert.equal(env.ANDROID_HOME, androidEnv(homedir()).ANDROID_HOME);
+  assert.equal(env.JAVA_HOME, androidEnv(homedir()).JAVA_HOME);
   // citadel-heavy (#325): pinned in the turn's folder, ahead of the image's tools, and its slots in the mounted projects folder.
   assert.match(env.PATH, /^[^:]*\/pin\/bin:.*:\/usr\/local\/bin:/);
   assert.match(env.CITADEL_HEAVY_DIR, /\/projects\/\.heavy$/);
@@ -378,7 +381,7 @@ test("a container turn has the host's tools: the image installs what schemes' sc
     const creds = new Credentials(store, 'x'.repeat(40));
     const link = new ClaudeLink(store, creds, join(root, 'data'), fake, new Containers(async () => ({ code: 0, stdout: '', stderr: '' })), 'citadel-claude-tools-');
     const mounts = link.spec(josh.id).mounts;
-    for (const d of ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright']) {
+    for (const d of ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright', '.local/share/android-sdk']) {
       assert.ok(mounts.some((m) => m.src === join(home, d) && m.dst === join(home, d) && m.ro), `${d} is mounted read-only`);
     }
     // The crate cache and the rest of the home stay the person's own.
@@ -394,6 +397,34 @@ test("a container turn has the host's tools: the image installs what schemes' sc
   }
   assert.equal(containerPath('/h/.dotnet:/h/.local/bin:/usr/local/bin:/usr/bin:/bin'), '/usr/local/bin:/usr/bin:/bin:/h/.dotnet:/h/.local/bin');
   assert.equal(containerPath(''), IMAGE_PATH.join(':'));
+});
+
+test("the host's Android toolchain (#379): turns get ANDROID_HOME and JAVA_HOME only once it's installed, and a container's ~/.gradle gets the host's no-daemon defaults", async () => {
+  const home = mkdtempSync(join(root, 'android-home-'));
+  assert.deepEqual(androidEnv(home, '/usr/bin'), {}, 'nothing installed: nothing set');
+  mkdirSync(join(home, ANDROID_SDK), { recursive: true });
+  assert.deepEqual(androidEnv(home, '/usr/bin'), {}, 'an SDK with no JDK builds nothing');
+  mkdirSync(join(home, ANDROID_JDK, 'bin'), { recursive: true });
+  const sdk = join(home, ANDROID_SDK);
+  assert.deepEqual(androidEnv(home, '/usr/bin'), { ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, JAVA_HOME: join(home, ANDROID_JDK), PATH: `/usr/bin:${join(home, ANDROID_JDK, 'bin')}` });
+  mkdirSync(join(home, '.gradle'));
+  writeFileSync(join(home, GRADLE_PROPS), 'org.gradle.daemon=false\n');
+  const vol = join(root, 'android-vol');
+  const fakeRun: RunCmd = async (_cmd, args) => {
+    if (args[0] === 'container' && args[1] === 'inspect') return { code: 0, stdout: 'true deadbeef', stderr: '' };
+    if (args[0] === 'volume' && args[1] === 'inspect') return { code: 0, stdout: vol + '\n', stderr: '' };
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const saved = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), fake, new Containers(fakeRun), 'citadel-claude-android-');
+    assert.ok(link.spec(josh.id).mounts.some((m) => m.src === sdk && m.dst === sdk && m.ro), 'the SDK is mounted read-only');
+    await link.ensure(josh.id);
+    assert.equal(readFileSync(join(vol, GRADLE_PROPS), 'utf8'), 'org.gradle.daemon=false\n');
+  } finally {
+    process.env.HOME = saved;
+  }
 });
 
 test("Godot's export templates are mounted only where the host has them, and the rest of its data folder stays the person's own (#290)", () => {

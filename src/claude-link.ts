@@ -6,7 +6,7 @@
 // Citadel's bookkeeping: container, volume path, email and plan.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
 import { Containers, specHash, type ContainerSpec, type Mount } from './containers.ts';
@@ -20,9 +20,22 @@ const CONTAINERFILE_DIR = join(import.meta.dirname, '..', 'deploy', 'claude-cont
  * Host tool folders a turn may need, mounted read-only where they exist: Delve's dotnet and Godot, mise and its
  * toolchains (its rust is rustup's, in ~/.cargo/bin and ~/.rustup; the rest of ~/.cargo, the crate cache, stays
  * the person's own), the Chromium Playwright downloads (Mandate's tools/shot.mjs), and Godot's export templates
- * (Delve's tools/windows-build.sh, #290; the rest of ~/.local/share/godot is editor state, the person's own).
+ * (Delve's tools/windows-build.sh, #290; the rest of ~/.local/share/godot is editor state, the person's own),
+ * and the Android SDK (#379).
  */
-export const TOOL_DIRS = ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright'];
+export const TOOL_DIRS = ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright', '.local/share/android-sdk'];
+/** The shared Android toolchain tools/android/install-sdk.sh puts on the host (#379): the SDK, mise's JDK 21 and Gradle's defaults. */
+export const ANDROID_SDK = '.local/share/android-sdk';
+export const ANDROID_JDK = '.local/share/mise/installs/java/temurin-21';
+export const GRADLE_PROPS = '.gradle/gradle.properties';
+
+/** What a turn needs to build an Android app, once the host has it: the same paths in a container, mounted read-only. */
+export function androidEnv(home: string, path = ''): Record<string, string> {
+  const sdk = join(home, ANDROID_SDK);
+  const jdk = join(home, ANDROID_JDK);
+  if (!existsSync(sdk) || !existsSync(jdk)) return {};
+  return { ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, JAVA_HOME: jdk, PATH: [path, join(jdk, 'bin')].filter(Boolean).join(delimiter) };
+}
 /**
  * The image's bin folders, first on a container turn's PATH: a tool the image installs wins over a host
  * wrapper in ~/.local/bin that can't run in a container (dot and xvfb-run there start a podman image, #247).
@@ -215,6 +228,11 @@ export class ClaudeLink {
     const vol = await this.containers.volumePath(spec.name);
     if (vol && this.serverLogin(uid)) this.store.setSetting(containerHomeKey(uid), vol);
     for (const m of spec.mounts) if (vol && !m.volume && m.dst.startsWith(this.home + '/')) mkdirSync(join(vol, relative(this.home, m.dst)), { recursive: true });
+    // Gradle's defaults (no daemon idling on 1 GB): the person's ~/.gradle is their own, so it gets the host's copy.
+    if (vol && existsSync(join(this.home, GRADLE_PROPS))) {
+      mkdirSync(join(vol, dirname(GRADLE_PROPS)), { recursive: true });
+      copyFileSync(join(this.home, GRADLE_PROPS), join(vol, GRADLE_PROPS));
+    }
     const now = await this.containers.status(spec.name);
     // shortcut: a changed spec (new image, a new scheme's memory) waits until no other turn runs in the container; a busy one keeps its old mounts meanwhile.
     // A starting turn already counts as one of the container's turns.

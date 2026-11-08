@@ -23,7 +23,7 @@ import { projectDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { previewKey } from './previews.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { CITADEL_REPLY_MS } from './access.ts';
-import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
+import { androidEnv, AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDir, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
@@ -2057,6 +2057,7 @@ export class Runner {
       // XDG_RUNTIME_DIR: without it every one fails, NuGet's restore included (#225).
       if (tmp) env.XDG_RUNTIME_DIR = tmp;
     }
+    env = { ...env, ...androidEnv(homedir(), env.PATH) };
     env = { ...env, ...this.heavyEnv(ticket, person), PATH: [join(pin, 'bin'), env.PATH].filter(Boolean).join(':') };
     // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
     if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;

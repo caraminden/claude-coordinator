@@ -8,8 +8,10 @@ its text is here; credited in `THIRD_PARTY.md`). The criteria are WCAG 2.2 and t
 
 ## Dialog (anything that blocks the page until it's answered)
 
-Citadel UI serves no dialog: use a native `<dialog>` opened with `showModal()`, which gives most of
-this list for free (the top layer, the rest of the page inert, Escape).
+Use the kit dialog ([base-parts.md](base-parts.md#dialog)): a native `<dialog class="cui-dialog">`
+opened with `showModal()`, which brings the top layer, the rest of the page inert, Escape, a pinned
+✕, a backdrop click that closes it, and a page that stays still behind it. The rest of this list is
+yours.
 
 - It has a name: `aria-labelledby` its heading, which says what it's for (4.1.2, 2.4.6).
 - Opening moves focus into it, to its heading (`tabindex="-1"`) or its first field (2.4.3).

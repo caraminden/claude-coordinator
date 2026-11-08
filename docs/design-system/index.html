@@ -423,6 +423,7 @@ window.COLOURS = [
         <tr><td><code>ui/composer.js</code></td><td>The message box: autogrow, Enter rules, IME-safe, list continuation, a failed send back in the box, Send that turns into Stop, drafts. Citadel's own composer is built on it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/tip.js</code></td><td>Tooltips: <code>data-tip</code> on anything, one <code>mountTips()</code> call. Hover, keyboard focus, a tap or a long press opens it; it sits below or above the thing, never over it; a slow body shows skeleton lines. Ported from Theory of Crafting (#296).</td><td>ES module; its look is <code>.cui-tip</code> in base.css</td></tr>
         <tr><td><code>ui/status.js</code></td><td>A steady status line (<code>statusSlot</code>: always drawn, 22px, one line cut off with an ellipsis and whole in a tooltip, a working spinner, a tone), steady labels (<code>steadyLabel</code>: a button as wide as its widest label), a <code>toast</code> in the top layer, and the same markup as HTML strings (<code>statusSlotHtml</code> and the like). A status change moves nothing (#298).</td><td>ES module; its look is <code>.cui-status</code> and <code>.cui-steady</code> in base.css</td></tr>
+        <tr><td><code>ui/dialog.js</code></td><td>The dialog: <code>cui-dialog</code> on a native <code>&lt;dialog&gt;</code>, <code>cui-dialog-head</code> on its header. The head and its ✕ stay at the top while the body scrolls; one <code>mountDialogs()</code> call closes it on a backdrop click (a drag out of it doesn't count); Escape as ever; the page behind doesn't scroll (#383).</td><td>ES module; its look is <code>.cui-dialog</code> in base.css</td></tr>
         <tr><td><code>drawers.js</code></td><td><code>NARROW</code> = 800: the phone breakpoint, exported once.</td><td>ES module, as today</td></tr>
       </tbody>
     </table></div>
@@ -675,6 +676,25 @@ background: var(--citadel-warn-tint);</code></pre></div>
         <p>A status change moves nothing (Cara, 2026-11-04: "set up rules that make sure status changes like that dont move any UI elements"). The status line is always drawn, 22px tall, empty when there's nothing to say; its text stays on one line, cut off with an ellipsis and whole in a tooltip (only while it's cut off). Working is a spinner and its words in the same line; a tone colours it. A button whose label changes stacks every label in one cell, so it keeps its widest label's width. Press Save: "Save" → "Saving…" → "Saved", and nothing around it shifts.</p>
         <p>In a card's header the slot is <code>cui-status-fill</code>: it takes what the row has left and never widens the card, so a long error is cut off on a phone. A tone can sit on one text (the error beside a chip). Something said in passing is a toast (press Copy link): the top layer, bottom centre, gone after 4s or a tap, so it takes no room at all.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/status.js</code> (<code>statusSlot</code>, <code>steadyLabel</code>, <code>toast</code>, and <code>statusSlotHtml</code>, <code>statusTextHtml</code>, <code>statusWorkingHtml</code>, <code>steadyLabelHtml</code> for views that draw HTML) · <code>.cui-status</code>, <code>.cui-status-text</code>, <code>.cui-status-fill</code>, <code>.cui-steady</code>, <code>.cui-toast</code> in <code>ui/base.css</code></p>
+      </div>
+    </div>
+    <h3>Dialog</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <div class="doc-row"><button type="button" class="cui-btn" id="dlg-open">Link to PC</button></div>
+        <dialog class="cui-dialog" id="dlg-demo" aria-labelledby="dlg-title">
+          <form method="dialog" class="cui-dialog-head"><h2 id="dlg-title">Link to PC</h2><button class="cui-btn cui-ghost cui-icon" aria-label="Close">✕</button></form>
+          <p>Scroll this body: the head and its ✕ stay at the top. A click on the dark backdrop closes it; select some text and let go on the backdrop, and it stays open. Escape closes it too.</p>
+          <ol>
+            <li>Open Peek on the PC.</li><li>Choose Settings, then Link a phone.</li><li>Type the six-letter code it shows.</li><li>Wait for the green tick.</li>
+            <li>Keep both on the same network.</li><li>A firewall prompt on the PC wants Allow.</li><li>The code lasts ten minutes.</li><li>Linked devices show under Settings.</li>
+            <li>Unlink one there to stop it syncing.</li><li>A second PC needs its own code.</li><li>Sync runs every few seconds while both are open.</li><li>Close this when you're done.</li>
+          </ol>
+        </dialog>
+      </div>
+      <div class="mk-about">
+        <p>Every modal is this dialog (Cara, 2026-11-08: "the X to close should stay at the top and clicking off the modal should close it"). A native <code>&lt;dialog&gt;</code> opened with <code>showModal()</code>: the head is sticky on the surface colour, spans the box and keeps equal room above and below its title and ✕; the body scrolls under it; the box fits the window (8px in on a phone) and the page behind stays still. Width 480px, or <code>--cui-dialog-width</code>.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/dialog.js</code> (<code>mountDialogs</code>) · <code>.cui-dialog</code>, <code>.cui-dialog-head</code> in <code>ui/base.css</code></p>
       </div>
     </div>
   </section>
@@ -954,6 +974,11 @@ row.innerHTML =
         <li><b>21.</b> A view worth coming back to has its own URL.</li>
       </ul>
     </div>
+
+    <div class="doc-rule">
+      <h3>22. Every modal is the kit dialog</h3>
+      <p class="doc-why">Cara, 2026-11-08: <q>the X to close should stay at the top and clicking off the modal should close it</q>. <code>cui-dialog</code> with <code>mountDialogs()</code>: the ✕ stays in view, a backdrop click and Escape close it. Shown live under Basic parts, Dialog.</p>
+    </div>
   </section>
 
   <section id="questions">
@@ -990,6 +1015,11 @@ row.innerHTML =
 .cui-scope .cui-tip-skel > .cui-skeleton { height: 0.8em; padding: 0; }
 .cui-scope .doc-tip-demo { margin: 0; }
 .cui-scope .doc-tip-thing { border-bottom: 1px dotted var(--citadel-muted); }
+/* Dialog (ui/dialog.js, base.css's cui-dialog). */
+.cui-scope .cui-dialog { --cui-dialog-pad: var(--citadel-space-4); box-sizing: border-box; width: min(480px, calc(100vw - 2 * var(--citadel-space-3))); max-width: none; max-height: min(420px, calc(100dvh - 2 * var(--citadel-space-3))); margin: auto; padding: 0 var(--cui-dialog-pad) var(--cui-dialog-pad); overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-lg); background: var(--citadel-surface); color: var(--citadel-text); font: var(--citadel-size-body)/1.45 var(--citadel-font); box-shadow: 0 12px 32px rgb(0 0 0 / 0.22); }
+.cui-scope .cui-dialog::backdrop { background: rgb(0 0 0 / 0.4); }
+.cui-scope .cui-dialog-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: var(--citadel-space-2); margin: 0 calc(-1 * var(--cui-dialog-pad)) var(--citadel-space-3); padding: var(--citadel-space-2) var(--citadel-space-2) var(--citadel-space-2) var(--cui-dialog-pad); background: var(--citadel-surface); border-bottom: 1px solid var(--citadel-border); }
+.cui-scope .cui-dialog-head > h2 { flex: 1; min-width: 0; margin: 0; font: 600 var(--citadel-size-h2)/1.3 var(--citadel-font); }
 /* Status line and steady label (ui/status.js, base.css's cui-status and cui-steady). */
 .cui-scope .cui-status { display: flex; align-items: center; gap: var(--citadel-space-2); box-sizing: border-box; height: 22px; min-width: 0; overflow: hidden; color: var(--citadel-muted); font: var(--citadel-size-small)/1.4 var(--citadel-font); }
 .cui-scope .cui-status[data-tone], .cui-scope .cui-status-text[data-tone] { color: color-mix(in srgb, var(--tone) 80%, var(--citadel-text)); }
@@ -1149,6 +1179,13 @@ row.innerHTML =
   let toastTimer = 0;
   const hideToast = () => { clearTimeout(toastTimer); if (toastPop.matches(':popover-open')) toastPop.hidePopover(); };
   toastPop.addEventListener('click', hideToast);
+  // Dialog: ui/dialog.js's mountDialogs(), copied: a press and release both on the backdrop close it.
+  const dlg = $('#dlg-demo');
+  const off = (e) => { const r = dlg.getBoundingClientRect(); return e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom; };
+  let dlgDown = false;
+  dlg.addEventListener('pointerdown', (e) => { dlgDown = e.target === dlg && off(e); });
+  dlg.addEventListener('click', (e) => { if (dlgDown && e.target === dlg && off(e)) dlg.close(); dlgDown = false; });
+  $('#dlg-open').addEventListener('click', () => dlg.showModal());
   $('#st-toast').addEventListener('click', () => { hideToast(); toastPop.showPopover(); toastTimer = setTimeout(hideToast, 4000); });
   for (const b of $$('[data-shift-demo]')) b.addEventListener('click', () => {
     const col = b.closest('.stage');

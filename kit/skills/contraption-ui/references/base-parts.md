@@ -14,6 +14,39 @@ Part of `citadel:contraption-ui` (its SKILL.md has the file list, tokens and rul
 Every rule sits in `:where()`, so any selector of yours wins: restyle by writing your own rule, no
 `!important`.
 
+## Dialog
+
+Every modal (rule 22), from `ui/base.css` and `ui/dialog.js`:
+
+```html
+<dialog class="cui-dialog" id="link" aria-labelledby="link-title">
+  <form method="dialog" class="cui-dialog-head">
+    <h2 id="link-title">Link to PC</h2>
+    <button class="cui-btn cui-ghost cui-icon" aria-label="Close">✕</button>
+  </form>
+  …the body: anything, as long as it likes…
+</dialog>
+<script type="module">
+  import { mountDialogs } from '/apps/_citadel/ui/dialog.js';
+  mountDialogs(); // once per page: every .cui-dialog, now and later
+  document.getElementById('open-link').onclick = () => document.getElementById('link').showModal();
+</script>
+```
+
+- **The head** stays at the top while the body scrolls, spans the box with a line under it, and keeps
+  equal room above and below the title and ✕. It must be the dialog's first child. The ✕ in a
+  `<form method="dialog">` closes it with no script; a `<div class="cui-dialog-head">` works too, with
+  your own `onclick` that calls `close()`.
+- **A click on the backdrop** closes it: a press and release both outside the box, so selecting text and
+  letting go on the backdrop leaves it open. It goes through `requestClose()` where the browser has it,
+  so a `cancel` listener that calls `preventDefault()` (unsaved changes) keeps it open, as it does for Escape.
+- **It fits the window:** 480 px wide (`--cui-dialog-width: 560px` on it for another), 12 px in from each
+  edge, 8 px on a phone; the page behind doesn't scroll while it's open.
+- **Open it with `showModal()`.** `show()` gives a non-modal box with no backdrop, no Escape and no lock.
+- The body's padding is the dialog's own (`--cui-dialog-pad`, 16 px, 12 px on a phone); a footer of
+  buttons is a plain row at the end of the body, scrolling with it.
+- Naming it and moving focus are yours: [component-checks.md](component-checks.md#dialog-anything-that-blocks-the-page-until-its-answered).
+
 **Switch** (an on/off setting that takes effect at once; a choice sent with a form stays a checkbox):
 
 ```html

@@ -33,6 +33,7 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | `ui/composer.js` (+ `.d.ts`) | The message box under a chat | ES module import, needs base.css; [references/composer.md](references/composer.md) |
 | `ui/chat.js` (+ `.d.ts`) | The chat log: your messages, replies, tool runs, Grunt rows, reply chips, the working line, messages sent mid-turn | ES module import, needs base.css; [references/chat.md](references/chat.md) |
 | `ui/tip.js` (+ `.d.ts`) | Tooltips: `data-tip` on anything, opened on hover, focus, a tap or a long press | ES module import, needs base.css; [references/tooltip.md](references/tooltip.md) |
+| `ui/dialog.js` (+ `.d.ts`) | The dialog: every modal. Its head and ✕ stay at the top while the body scrolls; a backdrop click and Escape close it | `cui-dialog` in base.css, `mountDialogs()` once; [references/base-parts.md](references/base-parts.md#dialog) |
 | `ui/status.js` (+ `.d.ts`) | A status line that's always there, a button label that keeps its width, a toast, and the headless check that nothing moved | ES module import, needs base.css; [references/status.md](references/status.md) |
 | Your `manifest.webmanifest` | Installing your app on its own, beside Citadel's | [references/installing.md](references/installing.md) |
 
@@ -136,6 +137,10 @@ interaction) but takes its colours from these tokens, never dataviz's placeholde
 21. **A view worth coming back to has its own URL.** A tab, item or filter someone would share,
     reload or go Back to updates the URL (`history.pushState`; `replaceState` for small steps), and
     that URL opens the same view.
+22. **Every modal is the kit dialog.** Cara, 2026-11-08: "the X to close should stay at the top and
+    clicking off the modal should close it". A `<dialog class="cui-dialog">` with a `cui-dialog-head`,
+    opened with `showModal()`, and `mountDialogs()` from `ui/dialog.js` called once: the ✕ stays in
+    view however long the body, a click on the backdrop closes it, Escape too.
 
 A self-review counts a break of these rules, and anything hand-rolled that the library serves, as a
 finding (`citadel:self-review`, "UI findings").
@@ -146,9 +151,9 @@ finding (`citadel:self-review`, "UI findings").
 - Adding or reviewing an animation or transition: [references/motion.md](references/motion.md).
 - A view that draws names, counts or lists, before its screenshots: [references/worst-case-data.md](references/worst-case-data.md).
 - A page or part of your own nearly done: [references/craft-floor.md](references/craft-floor.md).
-- Building a dialog, tooltip, live region, drawer or disclosure by hand: [references/component-checks.md](references/component-checks.md).
+- A dialog (its focus and naming are yours), or a tooltip, live region, drawer or disclosure built by hand: [references/component-checks.md](references/component-checks.md).
 - A new page, view or flow, or a request to QA an app: [references/dogfood.md](references/dogfood.md).
 
-Each rule shown right and wrong (14 to 21 listed, no demo yet), with every part drawn live in both modes: Citadel's living
+Each rule shown right and wrong (14 to 22 listed, no demo yet), with every part drawn live in both modes: Citadel's living
 design-system home, `docs/design-system/index.html` in Citadel's repo (Citadel's minions keep it
 true; ask your Taskmaster for a copy if you need the page itself).

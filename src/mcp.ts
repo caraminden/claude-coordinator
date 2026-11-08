@@ -64,6 +64,9 @@ const EFFORT = {
   enum: ['low', 'medium', 'high', 'xhigh', 'max', null],
   description: "The effort for the minion's turns, as in its composer. Leave it out (or null) for the scheme's default effort.",
 };
+// What a schedule's runs start with (#387): Sonnet or medium suits a mechanical checkup.
+const SCHEDULE_MODEL = { ...MODEL, description: 'The model each run starts with; null (or left out) for the default. Sonnet suits a mechanical checkup.' };
+const SCHEDULE_EFFORT = { ...EFFORT, description: "The effort each run starts with; null (or left out) for the scheme's default effort." };
 const WORKFLOW = {
   type: ['boolean', 'null'],
   description: "true lets the minion's turns call Claude Code's Workflow tool (scripted fan-out of agents), as in its composer; off by default, since it adds about 2k tokens to every API call. Set it when creating the minion: flipping it later breaks its prompt cache once.",
@@ -344,6 +347,8 @@ const TOOLS = [
         cron: { type: 'string', description: 'Five cron fields (minute hour day-of-month month day-of-week), e.g. "0 3 * * *" for 03:00 daily, "0 9 * * 1" for Mondays 09:00; or @hourly, @daily, @weekly' },
         brief: { type: 'string', description: "The run's first message: what to check and what counts as worth reporting" },
         type: { type: 'string', description: 'The `type` property each run gets (default chore)' },
+        model: SCHEDULE_MODEL,
+        effort: SCHEDULE_EFFORT,
       },
       required: ['name', 'cron', 'brief'],
     },
@@ -359,6 +364,8 @@ const TOOLS = [
         cron: { type: 'string' },
         brief: { type: 'string' },
         type: { type: 'string' },
+        model: SCHEDULE_MODEL,
+        effort: SCHEDULE_EFFORT,
         paused: { type: 'boolean', description: 'true pauses it, false resumes it' },
       },
       required: ['schedule_id'],
@@ -1295,12 +1302,12 @@ async function runTool(name: string, args: any): Promise<string> {
       return schedules.length ? schedules.map(scheduleLine).join('\n') : 'Nothing scheduled.';
     }
     case 'schedule_minion': {
-      const s = await call('POST', `/api/projects/${PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type });
+      const s = await call('POST', `/api/projects/${PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort });
       return `Scheduled. ${scheduleLine(s)}`;
     }
     case 'update_schedule': {
       const { schedule_id, ...patch } = args;
-      needOne(patch, ['name', 'cron', 'brief', 'type', 'paused'], 'update_schedule');
+      needOne(patch, ['name', 'cron', 'brief', 'type', 'model', 'effort', 'paused'], 'update_schedule');
       return `Updated. ${scheduleLine(await call('PATCH', `/api/schedules/${Number(schedule_id)}`, patch))}`;
     }
     case 'delete_schedule':
@@ -1333,7 +1340,8 @@ function scheduleLine(s: any): string {
   const at = (ms: number) => new Date(ms).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
   const next = s.paused ? 'paused' : `next ${at(s.next_run_at)}`;
   const last = s.last_run_at ? `last run ${at(s.last_run_at)}${s.last_number != null ? ` (#${s.last_number})` : ''}` : 'no run yet';
-  return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}; ${next}; ${last}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
+  const runsAs = `model ${s.model ?? 'default'}, effort ${s.effort ?? "the scheme's default"}`;
+  return `[${s.id}] ${s.name}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}; ${next}; ${last}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
 }
 
 function toolList() {

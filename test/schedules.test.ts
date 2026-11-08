@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { describeCron, nextRun, parseCron, pinForOwner, runBrief } from '../src/schedules.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { describeCron, nextRun, parseCron, pinForOwner, runBrief, runMinion, Schedules, SCHEDULES_SCHEMA } from '../src/schedules.ts';
 
 // Local wall-clock times, since schedules run in the server's time zone.
 const at = (y: number, mo: number, d: number, h = 0, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime();
@@ -113,4 +114,29 @@ test("a scheduled run's minion is pinned for the scheme's owner alone, an unpin 
   const orphan = store.createTicket({ project_id: ownerless.id, kind: 'ticket', title: 'Nightly', permission_mode: 'default', created_by: 'Citadel' });
   assert.equal(pinForOwner(store, orphan.id), null);
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM ticket_pins WHERE ticket_id = ?').get(orphan.id)!.n, 0, 'no owner, no pin for anyone');
+});
+
+test("a run starts with its schedule's model and effort, null being the scheme's default (#387)", () => {
+  const store = new Store(':memory:');
+  const p = store.createProject('One', null).id;
+  const base = { project_id: p, name: 'Upstream check', cron: '0 9 1 * *', brief: 'b', type: 'chore', created_by: 'Cara' };
+  const plain = store.schedules.create(base);
+  assert.deepEqual([plain.model, plain.effort], [null, null]);
+  const cheap = store.schedules.create({ ...base, model: 'claude-sonnet-5-5', effort: 'medium' });
+  assert.deepEqual(runMinion(cheap, { name: 'Cara', disabled_at: null }), { title: 'Upstream check', model: 'claude-sonnet-5-5', effort: 'medium', props: { type: 'chore', assigned: 'Cara' } });
+  assert.deepEqual(runMinion(plain, undefined), { title: 'Upstream check', model: null, effort: null, props: { type: 'chore' } });
+  // A change to one leaves the other; null goes back to the default.
+  assert.deepEqual([store.schedules.update(cheap.id, { effort: 'low' })].map((s) => [s.model, s.effort]), [['claude-sonnet-5-5', 'low']]);
+  assert.deepEqual([store.schedules.update(cheap.id, { model: null })].map((s) => [s.model, s.effort]), [[null, 'low']]);
+});
+
+test('a schedules table from before model and effort gets both columns, its rows keeping the defaults (#387)', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE projects (id INTEGER PRIMARY KEY); INSERT INTO projects (id) VALUES (1);');
+  db.exec(SCHEDULES_SCHEMA.replace('  model TEXT,\n  effort TEXT,\n', ''));
+  assert.ok(!(db.prepare('PRAGMA table_info(schedules)').all() as { name: string }[]).some((c) => c.name === 'model'), 'the old shape has no model');
+  db.prepare("INSERT INTO schedules (project_id, name, cron, brief, created_by, created_at) VALUES (1, 'Old', '@daily', 'b', 'Cara', 0)").run();
+  const old = new Schedules(db).list(1)[0];
+  assert.deepEqual([old.name, old.model, old.effort], ['Old', null, null]);
+  new Schedules(db); // a second start finds them there
 });

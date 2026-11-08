@@ -1,7 +1,7 @@
 // Scheduled minions: a saved brief that starts on a cron schedule. The schedule lives in the app
 // (this table plus a timer in the server), since minions can't install systemd timers.
 import type { DatabaseSync } from 'node:sqlite';
-import type { Store } from './db.ts';
+import type { Store, User } from './db.ts';
 import { HttpError } from './http.ts';
 
 export interface Schedule {
@@ -15,6 +15,9 @@ export interface Schedule {
   brief: string;
   /** The `type` property each run's minion gets. */
   type: string;
+  /** The model and effort each run starts with (src/db.ts MODELS, EFFORTS); null for the scheme's default. */
+  model: string | null;
+  effort: string | null;
   paused: number;
   /** When it is next due (ms); null while paused. */
   next_run_at: number | null;
@@ -35,6 +38,8 @@ CREATE TABLE IF NOT EXISTS schedules (
   cron TEXT NOT NULL,
   brief TEXT NOT NULL,
   type TEXT NOT NULL DEFAULT 'chore',
+  model TEXT,
+  effort TEXT,
   paused INTEGER NOT NULL DEFAULT 0,
   next_run_at INTEGER,
   last_run_at INTEGER,
@@ -140,6 +145,9 @@ export class Schedules {
   constructor(db: DatabaseSync) {
     this.db = db;
     db.exec(SCHEDULES_SCHEMA);
+    // Columns added after the table (#387), for databases created before them.
+    const cols = (db.prepare('PRAGMA table_info(schedules)').all() as { name: string }[]).map((c) => c.name);
+    for (const c of ['model', 'effort']) if (!cols.includes(c)) db.exec(`ALTER TABLE schedules ADD COLUMN ${c} TEXT`);
   }
 
   list(projectId: number): Schedule[] {
@@ -162,20 +170,22 @@ export class Schedules {
     return next;
   }
 
-  create(s: Pick<Schedule, 'project_id' | 'name' | 'cron' | 'brief' | 'type' | 'created_by'>, now = Date.now()): Schedule {
+  create(s: Pick<Schedule, 'project_id' | 'name' | 'cron' | 'brief' | 'type' | 'created_by'> & Partial<Pick<Schedule, 'model' | 'effort'>>, now = Date.now()): Schedule {
     const r = this.db
-      .prepare('INSERT INTO schedules (project_id, name, cron, brief, type, next_run_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(s.project_id, s.name, s.cron.trim(), s.brief, s.type, this.next(s.cron, now), s.created_by, now);
+      .prepare('INSERT INTO schedules (project_id, name, cron, brief, type, model, effort, next_run_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.project_id, s.name, s.cron.trim(), s.brief, s.type, s.model ?? null, s.effort ?? null, this.next(s.cron, now), s.created_by, now);
     return this.get(Number(r.lastInsertRowid))!;
   }
 
   /** Change a schedule. A new cron or a resume counts the next run from now; a pause clears it. */
-  update(id: number, patch: Partial<Pick<Schedule, 'name' | 'cron' | 'brief' | 'type'>> & { paused?: boolean }, now = Date.now()): Schedule {
+  update(id: number, patch: Partial<Pick<Schedule, 'name' | 'cron' | 'brief' | 'type' | 'model' | 'effort'>> & { paused?: boolean }, now = Date.now()): Schedule {
     const old = this.get(id);
     if (!old) throw new ScheduleError('No such schedule');
     const s = { ...old, ...patch, cron: (patch.cron ?? old.cron).trim(), paused: patch.paused === undefined ? old.paused : Number(patch.paused) };
     const next = s.paused ? null : patch.cron !== undefined || (old.paused && !s.paused) ? this.next(s.cron, now) : old.next_run_at;
-    this.db.prepare('UPDATE schedules SET name = ?, cron = ?, brief = ?, type = ?, paused = ?, next_run_at = ? WHERE id = ?').run(s.name, s.cron, s.brief, s.type, s.paused, next, id);
+    this.db
+      .prepare('UPDATE schedules SET name = ?, cron = ?, brief = ?, type = ?, model = ?, effort = ?, paused = ?, next_run_at = ? WHERE id = ?')
+      .run(s.name, s.cron, s.brief, s.type, s.model, s.effort, s.paused, next, id);
     return this.get(id)!;
   }
 
@@ -216,6 +226,11 @@ export function pinForOwner(store: Pick<Store, 'getTicket' | 'getProject' | 'get
   if (!owner || owner.disabled_at) return null;
   store.setTicketPinned(owner.name, ticketId, true);
   return owner.name;
+}
+
+/** The minion a run starts: its title, type and model and effort (null: the scheme's defaults), assigned to the schedule's maker while they're around. */
+export function runMinion(s: Schedule, maker: Pick<User, 'name' | 'disabled_at'> | undefined) {
+  return { title: s.name, model: s.model, effort: s.effort, props: { type: s.type, ...(maker && !maker.disabled_at ? { assigned: maker.name } : {}) } };
 }
 
 /** The first message of a run's minion: what it is, how to file itself away when there is nothing to report, then the brief. */

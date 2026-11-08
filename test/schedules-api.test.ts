@@ -60,6 +60,14 @@ test('people and the Taskmaster manage schedules; minions and other schemes cann
 
   assert.equal((await call(url, { method: 'POST', body: { ...nightly, cron: 'nightly' } })).status, 400);
   assert.equal((await call(url, { method: 'POST', body: { ...nightly, brief: '' } })).status, 400);
+  // Model and effort (#387): checked like a new minion's; null is the scheme's default.
+  assert.deepEqual([mine.data.model, mine.data.effort], [null, null]);
+  assert.equal((await call(url, { method: 'POST', body: { ...nightly, model: 'gpt-4' } })).status, 400);
+  assert.equal((await call(`/api/schedules/${mine.data.id}`, { method: 'PATCH', body: { effort: 'huge' } })).status, 400);
+  const cheap = await call(`/api/schedules/${mine.data.id}`, { method: 'PATCH', body: { model: 'claude-sonnet-5-5', effort: 'medium' } });
+  assert.deepEqual([cheap.status, cheap.data.model, cheap.data.effort], [200, 'claude-sonnet-5-5', 'medium']);
+  const back = await call(`/api/schedules/${mine.data.id}`, { method: 'PATCH', body: { model: null } });
+  assert.deepEqual([back.data.model, back.data.effort], [null, 'medium']);
   const paused = await call(`/api/schedules/${mine.data.id}`, { method: 'PATCH', body: { paused: true } });
   assert.deepEqual([paused.status, paused.data.paused, paused.data.next_run_at], [200, 1, null]);
   assert.equal((await call(`/api/schedules/${tm.data.id}`, { method: 'DELETE', as: page.coordinator.id })).status, 200);
@@ -90,9 +98,10 @@ test("the Taskmaster's schedule tools", async () => {
     mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: rid, method: 'tools/call', params: { name, arguments: args } }) + '\n');
   });
   assert.equal(await tool('list_schedules', {}), 'Nothing scheduled.');
-  assert.match(await tool('schedule_minion', { name: 'Nightly', cron: '@daily', brief: 'Check main' }), /^Scheduled\. \[\d+\] Nightly: Every day at 00:00 \(`@daily`\), type chore; next /);
+  assert.match(await tool('schedule_minion', { name: 'Nightly', cron: '@daily', brief: 'Check main', model: 'claude-sonnet-5-5' }), /^Scheduled\. \[\d+\] Nightly: Every day at 00:00 \(`@daily`\), type chore, model claude-sonnet-5-5, effort the scheme's default; next /);
   const id = Number((await tool('list_schedules', {})).match(/^\[(\d+)\]/)![1]);
   assert.match(await tool('update_schedule', { schedule_id: id, paused: true }), /; paused; no run yet$/);
+  assert.match(await tool('update_schedule', { schedule_id: id, model: null, effort: 'medium' }), /, model default, effort medium; paused;/);
   assert.equal(await tool('delete_schedule', { schedule_id: id }), 'Deleted.');
   mcp.kill();
 });

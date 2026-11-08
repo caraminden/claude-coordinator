@@ -104,12 +104,15 @@ export function kickoff(name: string, code: string, by: string, about: string): 
 
 /** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
 function scheduleFields(app: App, projectId: number, body: any, all: boolean) {
-  const out: { name?: string; cron?: string; brief?: string; type?: string } = {};
+  const out: { name?: string; cron?: string; brief?: string; type?: string; model?: string | null; effort?: string | null } = {};
   if (all || body.name !== undefined) out.name = str(body.name, 'Name', 80);
   if (all || body.cron !== undefined) out.cron = str(body.cron, 'cron', 100);
   if (all || body.brief !== undefined) out.brief = str(body.brief, 'Brief', 100_000);
   // Each run's minion gets this type; checked against the registry now so a run can't fail on it later.
   if (all || body.type !== undefined) out.type = app.store.props.check(projectId, { type: body.type ?? 'chore' }).type?.[0] ?? 'chore';
+  // What each run starts with; null (or left out on create) is the scheme's default.
+  if (all || body.model !== undefined) out.model = oneOf(body.model ?? null, MODELS, 'Model');
+  if (all || body.effort !== undefined) out.effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
   return out;
 }
 

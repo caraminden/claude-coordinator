@@ -381,7 +381,7 @@ const CODEX_MODELS = [
   ['gpt-6-luna', 'GPT-6 Luna'],
 ];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
-const modelName = (id) => [...MODELS, ...CODEX_MODELS].find(([m]) => m === id)?.[1] ?? id;
+export const modelName = (id) => [...MODELS, ...CODEX_MODELS].find(([m]) => m === id)?.[1] ?? id;
 /** Why Codex can't be picked here, briefly, or null. */
 function codexBlocked() {
   if (!codex) return 'sign in first';

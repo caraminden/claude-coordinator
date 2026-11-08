@@ -1,6 +1,7 @@
 // The scheme's scheduled minions (src/schedules.ts), shown in the Minions panel in place of the list
 // by the clock in its header.
 import { ago, api, h, view } from './core.js';
+import { modelName } from './composer.js';
 
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -11,11 +12,17 @@ function scheduleRow(s) {
   return h('li', { class: `schedule${s.paused ? ' paused' : ''}` },
     h('div', { class: 'row' }, h('strong', { class: 'name' }, s.name), h('span', { class: 'spacer' }),
       s.paused ? h('span', { class: 'chip' }, 'paused') : h('span', { class: 'muted small', title: new Date(s.next_run_at).toString() }, 'next ', when(s.next_run_at))),
-    h('div', { class: 'muted small' }, h('span', { title: `cron: ${s.cron} (server time)` }, s.when), ' · last run ', last),
+    h('div', { class: 'muted small' }, h('span', { title: `cron: ${s.cron} (server time)` }, s.when), runsAs(s), ' · last run ', last),
     s.last_error ? h('p', { class: 'error small' }, "Last run didn't start: ", s.last_error) : '',
     h('div', { class: 'row schedule-actions' },
       h('button', { type: 'button', class: 'secondary small', onclick: () => change(s, 'PATCH', { paused: !s.paused }) }, s.paused ? 'Resume' : 'Pause'),
       h('button', { type: 'button', class: 'secondary small', onclick: () => confirm(`Delete the schedule "${s.name}"? Minions it already started stay.`) && change(s, 'DELETE') }, 'Delete')));
+}
+
+/** The model and effort each run starts with, when the schedule sets them; nothing for the scheme's defaults. */
+function runsAs(s) {
+  const set = [s.model && modelName(s.model), s.effort && `${s.effort} effort`].filter(Boolean);
+  return set.length ? [' · ', h('span', { title: 'What each run starts with' }, set.join(', '))] : '';
 }
 
 async function change(s, method, body) {

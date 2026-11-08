@@ -5,7 +5,7 @@ import { openStartScheme, renderSidebar } from './sidebar.js';
 import { showProject, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
 import { onArtifactData } from './bridge-host.js';
-import { appendEvent, jumpToEvent, refreshBranch, renderBranch, renderTicketHead } from './thread.js';
+import { appendEvent, jumpToEvent, refreshBranch, renderBranch, renderCardJump, renderTicketHead } from './thread.js';
 import { replaceHash } from './navstack.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
 import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket, refreshInbox, refreshSchemeCounts } from './inbox.js';
@@ -341,6 +341,7 @@ document.addEventListener('scroll', (e) => {
   if (e.target !== document && e.target !== chatScroller()) return;
   followChat = atBottom();
   document.querySelector('.to-latest')?.toggleAttribute('hidden', followChat);
+  renderCardJump();
 }, { passive: true, capture: true });
 export function scrollToBottom() {
   const el = chatScroller();

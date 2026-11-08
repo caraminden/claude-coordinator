@@ -124,6 +124,7 @@ function renderHistory() {
       'This is the Taskmaster for this scheme. It keeps track of the minions on the left and can create, message, rename and dismiss them for you.'));
   }
   for (const ev of page.events) appendEvent(ev, false);
+  renderCardJump();
   view.pendingMessages = pending;
   const at = [...log.children].find((el) => Number(el.dataset.at) > view.openedSeenAt);
   at?.before(h('div', { class: 'unread-divider', role: 'separator' }, h('span', {}, 'New')));
@@ -229,7 +230,11 @@ export function chatSection(chatId, ticket) {
   const latest = h('button', { type: 'button', class: 'small secondary to-latest', title: 'Jump to the latest', 'aria-label': 'Jump to the latest', hidden: true },
     h('span', { 'aria-hidden': 'true' }, '↓'), h('span', { class: 'wide-only' }, ' Latest'));
   latest.addEventListener('click', scrollToBottom);
-  form.querySelector('.row > .add-image').after(latest);
+  // A card still waiting on people, out of sight (#382): this takes you to it, oldest first.
+  const toCard = h('button', { type: 'button', class: 'small secondary to-card', title: 'Jump to a card waiting on you', 'aria-label': 'Jump to a card waiting on you', hidden: true },
+    h('span', { 'aria-hidden': 'true' }, '↑'), ' Card');
+  toCard.addEventListener('click', jumpToOpenCard);
+  form.querySelector('.row > .add-image').after(latest, toCard);
   // One-tap replies sit at the top of the composer, so they stay in view with it (renderTicketHead fills them).
   // Whose plan your message runs on, only when that's news (public/payer.js); under the replies, right over the box.
   form.prepend(h('div', { id: 'chat-payer', hidden: true }));
@@ -890,6 +895,39 @@ export function appendEvent(event, scroll = true) {
   for (const { text, fate } of settle) settleText(text, fate);
   renderTyping();
   if (scroll && followChat) scrollToBottom();
+  if (scroll) renderCardJump();
+}
+
+/** The chat's cards still waiting on people that are out of sight (above the thread bar or under the composer), oldest first. */
+function openCardsOutOfView() {
+  const log = document.getElementById('log');
+  if (!log) return [];
+  const top = document.getElementById('ticket-head')?.getBoundingClientRect().bottom ?? 0;
+  const bottom = log.parentElement.querySelector('.composer')?.getBoundingClientRect().top ?? innerHeight;
+  return [...log.querySelectorAll('.qcard:not(.answered)')].filter((el) => {
+    const r = el.getBoundingClientRect();
+    return r.bottom <= top || r.top >= bottom;
+  });
+}
+
+/** Show the composer's Card button while a waiting card is out of sight, pointing the way to it. */
+export function renderCardJump() {
+  const btn = document.querySelector('.composer .to-card');
+  if (!btn) return;
+  const card = openCardsOutOfView()[0];
+  btn.hidden = !card;
+  if (card) btn.firstChild.textContent = card.getBoundingClientRect().top < 0 ? '↑' : '↓';
+}
+
+/** Scroll the oldest waiting card that's out of sight to just under the thread bar, and flash it. */
+function jumpToOpenCard() {
+  const card = openCardsOutOfView()[0];
+  if (!card) return;
+  const top = document.getElementById('ticket-head')?.getBoundingClientRect().bottom ?? 0;
+  (chatScroller() ?? window).scrollBy({ top: card.getBoundingClientRect().top - top - 8, behavior: 'smooth' });
+  card.classList.remove('jumped');
+  void card.offsetWidth; // restart the flash on a second jump to the same card
+  card.classList.add('jumped');
 }
 
 /**

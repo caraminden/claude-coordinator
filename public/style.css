@@ -425,7 +425,7 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .composer .row { margin-top: 0.5rem; }
 .composer button.small { padding: 0.2rem 0.65rem; font-size: 0.85em; }
 /* Latest stays in the composer's button row at every width, so it never covers chat words (#212, #231). */
-.composer .to-latest[hidden] { display: none; }
+.composer :is(.to-latest, .to-card)[hidden] { display: none; }
 /* One-tap replies (public/replies.js): outlined pills that send their text, above the composer. */
 .replies { display: flex; flex-wrap: wrap; gap: 0.35rem; min-width: 0; }
 button.reply-chip { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line)); border-radius: 999px; padding: 0.25rem 0.75rem; font-size: 0.85em; font-weight: 600; line-height: 1.3; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -929,7 +929,7 @@ mark.find.current { background: var(--waiting); color: #fff; }
 @media (max-width: 800px) {
   /* Phones: Add image, the settings button and Send (with its ▾ mid-turn) share one line. */
   .composer .row { position: relative; gap: 0.5rem; flex-wrap: nowrap; }
-  .composer .row > .add-image, .composer .row > .to-latest, .composer .settings-picker, .composer .send-group { flex: none; }
+  .composer .row > .add-image, .composer .row > .to-latest, .composer .row > .to-card, .composer .settings-picker, .composer .send-group { flex: none; }
   .composer .settings-picker { display: inline-flex; }
   .composer button.settings-button { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h); padding: 0.2rem 0.6rem; }
   .composer button.settings-button .gear { font-size: 1.15em; line-height: 1; }
@@ -991,7 +991,7 @@ mark.find.current { background: var(--waiting); color: #fff; }
 /* Attach, the pickers and Send (with its ▾) share one height, content centred; taller on phones to stay tappable. */
 .composer { --control-h: 2rem; }
 @media (max-width: 800px) { .composer { --control-h: 2.5rem; } }
-.composer button.add-image, .composer button.to-latest, .composer select.picker, .composer .send-group > button { height: var(--control-h); padding-top: 0.2rem; padding-bottom: 0.2rem; }
+.composer button.add-image, .composer button.to-latest, .composer button.to-card, .composer select.picker, .composer .send-group > button { height: var(--control-h); padding-top: 0.2rem; padding-bottom: 0.2rem; }
 
 /* Question cards: Claude's multiple-choice questions, answered with a click */
 .qcard { border: 1px solid color-mix(in srgb, var(--running) 45%, var(--line)); border-radius: 10px; background: var(--panel); padding: 0.6rem 0.85rem; display: flex; flex-direction: column; gap: 0.75rem; }

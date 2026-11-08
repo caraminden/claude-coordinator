@@ -1,0 +1,13 @@
+# Starts citadel-android.service when a turn's `citadel-android up` connects (#381). Container turns share the
+# host's network but can't reach the host's systemd, so this loopback port is their way in. It only starts
+# the emulator; stopping goes through adb (`citadel-android down`) or the idle timer.
+[Unit]
+Description=Starter for Citadel's shared Android emulator (loopback)
+
+[Socket]
+ListenStream=127.0.0.1:18590
+Accept=yes
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

@@ -85,6 +85,9 @@ if (existsSync(KIT_SOURCE)) cpSync(KIT_SOURCE, KIT, { recursive: true });
 export const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
 const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
 if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
+/** citadel-android (tools/), the shared headless emulator (#381), on every turn's PATH the same way. */
+const ANDROID_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-android');
+if (existsSync(ANDROID_SOURCE)) cpSync(ANDROID_SOURCE, join(MCP_DIR, 'bin', 'citadel-android'));
 /** citadel-codex-review (#330): a read-only Codex review on the person's own login, pinned with its driver like citadel-heavy. */
 export const CODEX_REVIEW = pinnedCopy('codex-review.ts');
 /** Codex turns (#337): the shim a turn runs in place of claude when it runs on Codex. */

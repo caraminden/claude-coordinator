@@ -1,0 +1,18 @@
+# Citadel's shared headless Android emulator (#381): the `citadel` AVD from tools/android/install-sdk.sh.
+# Never enabled: `citadel-android up` starts it (on the host, or through citadel-android-starter.socket from
+# a container turn), and it stops itself after 15 minutes with no citadel-android call. perigee is short of RAM.
+[Unit]
+Description=Citadel's shared headless Android emulator (stops itself when idle)
+
+[Service]
+Type=simple
+Environment=ANDROID_HOME=%h/.local/share/android-sdk
+Environment=CITADEL_HEAVY_DIR=%h/.local/share/claude-coordinator/projects/.heavy
+ExecStart=%h/claude-coordinator/tools/citadel-android serve
+# TERM to the serve loop, which shuts the emulator down cleanly (saving quick boot); the rest after that.
+KillMode=mixed
+TimeoutStopSec=120
+Nice=5
+# -memory 2048 runs at about 3.9 GB resident (guest RAM plus SwiftShader); past MemoryHigh it pages rather than squeezing the rest of perigee.
+MemoryHigh=4500M
+MemoryMax=5500M

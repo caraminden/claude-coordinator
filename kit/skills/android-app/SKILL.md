@@ -1,6 +1,6 @@
 ---
 name: android-app
-description: Build, sign and ship an Android app (a Capacitor shell or plain Gradle) on perigee's shared Android toolchain. Use when a turn runs gradlew, changes compileSdk, the Android Gradle Plugin or build-tools, makes a release APK, or wires an app's update banner. Not for the emulator, which isn't set up yet.
+description: Build, sign and ship an Android app (a Capacitor shell or plain Gradle) on perigee's shared Android toolchain. Use when a turn runs gradlew, changes compileSdk, the Android Gradle Plugin or build-tools, makes a release APK, wires an app's update banner, or tries an APK or a page on the shared emulator (citadel-android).
 ---
 
 # Android app
@@ -61,4 +61,31 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
 
 ## Emulator
 
-Not set up yet. Test on a real phone with the debug APK until it is.
+One headless emulator for every scheme: the `citadel` AVD (Android 36, Google APIs, x86_64, a
+1080×2400 phone), driven by `citadel-android`, which is on every turn's PATH, host and container
+alike:
+
+```
+citadel-android up                 # boot it (quick boot ~6s, cold ~25s) and wait until it's ready
+citadel-android install app/build/outputs/apk/debug/app-debug.apk
+citadel-android open https://cara.apps.webplatformisbestplatform.net/c/   # in Chrome
+citadel-android shot "$TMPDIR/shot.png"                                    # then Read the PNG
+citadel-android offline on         # airplane mode; `offline off` to undo
+citadel-android down               # when you're done
+```
+
+- `install`, `open` and `offline` boot it first if needed. Run your app with
+  `adb -s emulator-5554 shell monkey -p <applicationId> 1`; plain `adb -s emulator-5554 ...` works
+  for anything else (logcat, input), from containers too.
+- **One screen.** Each call takes the screen lock, and you keep the screen for 2 minutes after each
+  call, so your install, open and shot run back to back. Anyone else waits, and it says whose turn
+  holds it. Don't work around a wait: it ends when the holder's lease runs out or it runs `down`.
+- **Run `down` when you're done.** It holds about 4 GB of RAM while up. It also stops itself after
+  15 minutes with no `citadel-android` call.
+- The phone keeps its state between boots (apps, Chrome tabs, logins), from every scheme that used
+  it. Don't rely on a clean device; uninstall what you need gone.
+- It's a Citadel page or app without its cookie, so expect a sign-in page.
+- **"nothing listens on 127.0.0.1:18590"** or **"can't start citadel-android.service"**: the host's
+  units aren't installed. Ask your Taskmaster; Cara installs them (Citadel's `deploy/`).
+- It renders in software (SwiftShader, no GPU) with guest Vulkan off: fine for screenshots and
+  flows, not for frame rates or graphics bugs. Test those on a real phone.

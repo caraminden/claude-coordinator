@@ -274,6 +274,18 @@ systemctl --user daemon-reload
 systemctl --user enable --now citadel-watchdog.timer
 ```
 
+**Android emulator.** `tools/citadel-android` (on every turn's PATH) drives one shared headless
+emulator, the `citadel` AVD that `tools/android/install-sdk.sh` makes. `deploy/citadel-android.service`
+runs it on demand and stops it after 15 idle minutes; it is never enabled. Container turns can't
+reach the host's systemd, so `citadel-android-starter.socket` listens on `127.0.0.1:18590` and
+starts the service when `citadel-android up` connects. The `citadel:android-app` kit skill has the loop.
+
+```sh
+ln -s ~/claude-coordinator/deploy/citadel-android{.service,-starter.socket,-starter@.service} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now citadel-android-starter.socket
+```
+
 **Semantic memory.** `deploy/citadel-embed.service` runs llama-server with
 Qwen3-Embedding-0.6B on `127.0.0.1:21434`, at nice 10 on 4 threads. Every minute the
 server embeds what was said since its last pass in the indexed schemes, and minions and

@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# The shared headless Android emulator on perigee (#381), one AVD (`citadel`) for every scheme:
+#   citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | down
+# The emulator runs in the user service citadel-android.service (deploy/), never always-on: perigee is
+# short of RAM, so `serve` (its main process) stops it after IDLE seconds with no citadel-android call.
+# Container turns share the host's network, so their adb reaches the host's adb server on 127.0.0.1:5037,
+# but they can't start a host unit: `up` connects to citadel-android-starter.socket on 127.0.0.1:$STARTER,
+# which starts the service. On the host without that socket it falls back to systemctl --user.
+# The screen is one lock in citadel-heavy's folder ($CITADEL_HEAVY_DIR): each step holds a flock, and its
+# holder keeps the screen for LEASE seconds after a step, so its next step (install, open, shot) comes
+# before anyone else's. Others wait and say for whom; nothing ever kills another holder's work.
+set -uo pipefail
+
+say() { echo "citadel-android: $*" >&2; }
+SDK=${ANDROID_HOME:-$HOME/.local/share/android-sdk}
+ADB="$SDK/platform-tools/adb"
+AVD=citadel
+CONSOLE=5554
+SERIAL="emulator-$CONSOLE"
+STARTER=18590
+UNIT=citadel-android.service
+IDLE=${CITADEL_ANDROID_IDLE:-900}
+LEASE=120
+BOOT_WAIT=360
+ADB_PORT=${ANDROID_ADB_SERVER_PORT:-5037} # adb's own variable
+dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
+who=${CITADEL_HEAVY_WHO:-$(id -un 2>/dev/null || echo someone)}
+lock="$dir/android.lock" holder="$dir/android.who" used="$dir/android.used"
+
+adb() { "$ADB" -s "$SERIAL" "$@"; }
+port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+booted() { port_open "$ADB_PORT" && [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; }
+# The adb server must be the service's: one started from a container has another key, and the emulator refuses it.
+need_server() { port_open "$ADB_PORT" || { say "the emulator isn't up; run citadel-android up"; exit 1; }; }
+
+# Holder file: "<until epoch>\t<who>". Taking the screen waits while another holder's lease runs.
+take_screen() {
+  mkdir -p "$dir" && exec 9<>"$lock" || { say "no lock folder at $dir"; exit 1; }
+  local until name told=-60 since=$SECONDS
+  while :; do
+    if ! flock -n 9; then
+      [ $((SECONDS - told)) -lt 60 ] || { say "waiting for the screen: $(cut -f2 "$holder" 2>/dev/null) has a step running"; told=$SECONDS; }
+      flock 9
+    fi
+    IFS=$'\t' read -r until name 2>/dev/null <"$holder" || until=0
+    if [ -z "${name:-}" ] || [ "$name" = "$who" ] || [ "${until:-0}" -le "$(date +%s)" ]; then break; fi
+    flock -u 9
+    [ $((SECONDS - told)) -lt 60 ] || { say "waiting for the screen: $name has it (for up to $((until - $(date +%s)))s more, longer if it keeps using it); waited $(((SECONDS - since) / 60)) min"; told=$SECONDS; }
+    sleep 2
+  done
+  printf '%s\t%s\n' "$(($(date +%s) + LEASE))" "$who" >"$holder"
+  touch "$used"
+}
+# After a step: the lease runs from now, and the flock goes when the process exits.
+keep_screen() { printf '%s\t%s\n' "$(($(date +%s) + LEASE))" "$who" >"$holder"; touch "$used"; }
+
+start_service() {
+  local reply
+  if reply=$(exec 3<>"/dev/tcp/127.0.0.1/$STARTER" && timeout 20 cat <&3) 2>/dev/null; then
+    [ -z "$reply" ] || say "$reply"
+  elif [ ! -e /run/.containerenv ] && command -v systemctl >/dev/null; then
+    systemctl --user start --no-block "$UNIT" || { say "can't start $UNIT: is deploy/$UNIT installed?"; exit 1; }
+  else
+    say "nothing listens on 127.0.0.1:$STARTER to start the emulator: citadel-android-starter.socket isn't installed or running on the host"
+    exit 1
+  fi
+}
+
+up() {
+  booted && return 0
+  say "starting the emulator ($AVD); a quick boot takes seconds, a cold one a few minutes"
+  start_service
+  local t0=$SECONDS poked=$SECONDS
+  until booted; do
+    # A service still winding down from a `down` or the idle stop ignores the start: ask again once it's gone.
+    if [ $((SECONDS - poked)) -ge 15 ] && ! { port_open "$ADB_PORT" && adb get-state >/dev/null 2>&1; }; then
+      start_service >/dev/null 2>&1
+      poked=$SECONDS
+    fi
+    if [ $((SECONDS - t0)) -ge $BOOT_WAIT ]; then
+      say "not booted after ${BOOT_WAIT}s; on the host: journalctl --user -u $UNIT -n 50"
+      exit 1
+    fi
+    sleep 2
+  done
+  # Once per boot, cheap: keep the screen on and unlocked, and skip Chrome's first-run pages so `open` lands on the URL.
+  adb shell 'svc power stayon true; settings put system screen_off_timeout 2147483647; wm dismiss-keyguard' >/dev/null 2>&1
+  adb shell 'echo "_ --disable-fre --no-default-browser-check --no-first-run" > /data/local/tmp/chrome-command-line' >/dev/null 2>&1
+  adb shell am set-debug-app --persistent com.android.chrome >/dev/null 2>&1
+  adb shell pm grant com.android.chrome android.permission.POST_NOTIFICATIONS >/dev/null 2>&1
+  say "up after $((SECONDS - t0))s ($SERIAL)"
+}
+
+# The service's main process: the adb server and the emulator, stopped after IDLE seconds unused.
+serve() {
+  local emu="$SDK/emulator/emulator" pid
+  mkdir -p "$dir" && touch "$used"
+  "$ADB" start-server
+  # Saving the quick-boot snapshot writes ~2.6 GB and took 17s here; the emulator's default 20s cut one short.
+  export ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL=90
+  "$emu" -avd "$AVD" -port "$CONSOLE" -no-window -no-audio -no-boot-anim -no-metrics \
+    -gpu swiftshader_indirect -feature -Vulkan -memory 2048 -cores 2 &
+  pid=$!
+  # `adb emu kill` shuts it down cleanly, which saves the quick-boot snapshot; plain signals are the fallback.
+  stop() {
+    "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1
+    for _ in $(seq 100); do kill -0 "$pid" 2>/dev/null || return 0; sleep 1; done
+    kill "$pid" 2>/dev/null
+  }
+  trap 'stop; exit 0' TERM INT
+  local nap
+  while kill -0 "$pid" 2>/dev/null; do
+    # Wake on the emulator's exit too, so the service ends with it and a new `up` can start it again.
+    sleep 30 & nap=$!
+    wait -n "$pid" "$nap"
+    kill "$nap" 2>/dev/null
+    local idle=$(($(date +%s) - $(stat -c %Y "$used" 2>/dev/null || echo 0)))
+    # Idle, and no step is running right now (a step holds the flock).
+    if [ "$idle" -ge "$IDLE" ] && (exec 9<>"$lock" && flock -n 9); then
+      echo "unused for ${idle}s; stopping"
+      stop
+      break
+    fi
+  done
+  wait "$pid"
+}
+
+down() {
+  if ! port_open "$ADB_PORT" || ! adb get-state >/dev/null 2>&1; then say "not running"; return 0; fi
+  say "stopping the emulator (saving its quick-boot snapshot)"
+  adb emu kill >/dev/null 2>&1
+  local t0=$SECONDS
+  while adb get-state >/dev/null 2>&1 && [ $((SECONDS - t0)) -lt 60 ]; do sleep 1; done
+  : >"$holder"
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  serve) serve ;;
+  up) take_screen; up; keep_screen ;;
+  install)
+    [ $# -eq 1 ] && [ -f "$1" ] || { say "usage: citadel-android install <file.apk>"; exit 2; }
+    take_screen; up; need_server; adb install -r -t "$1"; s=$?; keep_screen; exit $s ;;
+  open)
+    [ $# -eq 1 ] || { say "usage: citadel-android open <url>"; exit 2; }
+    take_screen; up; need_server; adb shell am start -W -a android.intent.action.VIEW --es com.android.browser.application_id citadel -d "'${1//\'/}'" >/dev/null; s=$?; keep_screen; exit $s ;;
+  shot)
+    [ $# -eq 1 ] || { say "usage: citadel-android shot <file.png>"; exit 2; }
+    take_screen; need_server
+    adb exec-out screencap -p >"$1" && [ -s "$1" ]; s=$?
+    keep_screen
+    [ $s = 0 ] && say "saved $1" || say "screenshot failed"
+    exit $s ;;
+  offline)
+    case "${1:-}" in on) m=enable ;; off) m=disable ;; *) say "usage: citadel-android offline on|off"; exit 2 ;; esac
+    take_screen; up; need_server; adb shell cmd connectivity airplane-mode "$m"; s=$?; keep_screen; exit $s ;;
+  down) take_screen; down ;;
+  *)
+    say "usage: citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | down"
+    exit 2 ;;
+esac

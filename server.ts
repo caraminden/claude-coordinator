@@ -28,7 +28,7 @@ import { errorText } from './src/scheme-repo.ts';
 import { catchUpTicketDir, createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { describeCron, runBrief, type Schedule } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, HttpError, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App, type SharedFile } from './src/http.ts';
+import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App, type SharedFile } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { appRoutes } from './src/routes/app.ts';
 import { pushRoutes } from './src/routes/push.ts';
@@ -795,7 +795,11 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     const url = requestUrl(req);
     const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
     if (url.pathname.startsWith('/api/')) {
-      await routes(app, req, res, url, auth.session(req));
+      const session = auth.session(req);
+      // A route's own Set-Cookie (logout's clearing one) goes in writeHead, which wins over this.
+      const renewed = auth.renewal(session, isSecure(req));
+      if (renewed) res.setHeader('Set-Cookie', renewed);
+      await routes(app, req, res, url, session);
     } else if (/^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/.test(url.pathname)) {
       // The app rail, phone drawers (and their types), the Alt+` switcher the rail loads, colours and Citadel UI (public/ui/) for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
       await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length), true);

@@ -61,3 +61,31 @@ test('an agent token lives for its turn: the next turn or closing the minion kil
   gone.add(7);
   assert.equal(report(last), undefined);
 });
+
+test('a session over 7 days old is renewed on use; a newer one, a disabled person\'s, an agent\'s or a preview\'s is not', (t) => {
+  const DAY = 86400_000;
+  const people = new Map<number, any>([[1, { id: 1, name: 'Cara', disabled_at: null }], [2, { id: 2, name: 'Olive', disabled_at: Date.now() }]]);
+  const users = { getUser: (id: number) => people.get(id), findUser: () => undefined } as any;
+  const auth = new Auth('a-password-long-enough', 'x'.repeat(32), undefined, users);
+  const now = Date.now();
+  /** A request carrying a cookie issued `days` ago. */
+  const aged = (a: Auth, id: number, days: number) => {
+    const clock = t.mock.method(Date, 'now', () => now - days * DAY);
+    const cookie = a.issueCookie({ id, name: people.get(id).name }, false).split(';')[0];
+    clock.mock.restore();
+    return { headers: { cookie } } as any;
+  };
+  const renewed = auth.renewal(auth.session(aged(auth, 1, 8)), true);
+  assert.match(renewed ?? '', /^cc_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=2592000; Secure$/);
+  const fresh = auth.session({ headers: { cookie: renewed!.split(';')[0] } } as any)!;
+  assert.equal(fresh.uid, 1);
+  assert.ok(fresh.exp > now + 29 * DAY, 'the new cookie runs a full 30 days from now');
+  assert.equal(auth.renewal(fresh, true), null, 'and is not renewed again on the next request');
+
+  assert.equal(auth.renewal(auth.session(aged(auth, 1, 1)), false), null, 'a day-old session is left alone');
+  assert.equal(auth.session(aged(auth, 2, 8)), null, 'a disabled person is signed out');
+  assert.equal(auth.renewal(auth.session(aged(auth, 2, 8)), false), null, 'and gets no fresh cookie');
+  assert.equal(auth.renewal({ name: 'Taskmaster', exp: Infinity, agent: 7 }, false), null);
+  const preview = new Auth('a-password-long-enough', 'x'.repeat(32));
+  assert.equal(preview.renewal(preview.session(aged(preview, 1, 8)), false), null, 'without the people table nobody is renewed');
+});

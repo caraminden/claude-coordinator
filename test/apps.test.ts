@@ -9,8 +9,9 @@ import type { Duplex } from 'node:stream';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { isOpenPath } from '../src/apps.ts';
+import { Auth } from '../src/auth.ts';
 import { verifyIdentity } from '../src/contraptions.ts';
-import { agentToken, bootServer, freePort, until, type Booted } from './helpers.ts';
+import { agentToken, bootServer, freePort, PASSWORD, SECRET, until, type Booted } from './helpers.ts';
 
 let srv: Booted;
 let pub = '';
@@ -236,6 +237,38 @@ test('a refused upload is read to its end, so a client that reads after sending 
 test('a contraption can set its own cookies, never Citadel\'s session', async () => {
   const res = await get('/apps/stub/cookie', asCara());
   assert.deepEqual(res.headers.getSetCookie(), ['stub=1; Path=/apps/stub/']);
+});
+
+/** Cara's session cookie as it was issued `days` ago. */
+function agedCookie(days: number): string {
+  const real = Date.now;
+  Date.now = () => real() - days * 86400_000;
+  try {
+    return new Auth(PASSWORD, SECRET).issueCookie({ id: cara, name: 'Cara' }, false).split(';')[0];
+  } finally {
+    Date.now = real;
+  }
+}
+const sessionCookies = (res: Response) => res.headers.getSetCookie().filter((c) => c.startsWith('cc_session='));
+
+test('using an app or the API with a session over 7 days old renews it; logout still signs out', async () => {
+  const old = agedCookie(8);
+  const page = await get('/apps/stub/cookie', { Cookie: old, Accept: 'text/html' });
+  assert.equal(page.status, 200);
+  const [renewed, ...more] = sessionCookies(page);
+  assert.equal(more.length, 0);
+  assert.match(renewed ?? '', /^cc_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=2592000$/);
+  assert.ok(page.headers.getSetCookie().includes('stub=1; Path=/apps/stub/'), 'the contraption\'s own cookies still go through');
+  assert.equal(lastSeen().headers.cookie, undefined, 'the contraption never sees the session, old or new');
+  const me = await get('/api/me', { Cookie: renewed.split(';')[0] });
+  assert.equal((await me.json()).id, cara, 'the fresh cookie signs Cara in');
+  assert.deepEqual(sessionCookies(me), [], 'and is not renewed again');
+
+  assert.equal(sessionCookies(await get('/api/me', { Cookie: old })).length, 1, 'the API renews too');
+  assert.deepEqual(sessionCookies(await get('/apps/stub/hello', { Cookie: agedCookie(1) })), [], 'a day-old session is left alone');
+  assert.deepEqual(sessionCookies(await get('/api/me', { Cookie: agedCookie(1) })), []);
+  const out = await get('/api/logout', { Cookie: old }, { method: 'POST' });
+  assert.deepEqual(sessionCookies(out), ['cc_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'], 'logout clears the cookie and renews nothing');
 });
 
 test('the rail and drawers: their scripts are served to contraptions, and lists only what you are enabled for', async () => {

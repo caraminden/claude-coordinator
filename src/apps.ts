@@ -18,7 +18,7 @@ import { APP_NAME } from './appname.ts';
 import { COOKIE, type Auth } from './auth.ts';
 import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
-import { requestUrl } from './http.ts';
+import { isSecure, requestUrl } from './http.ts';
 import { answerRaw, forward, forwardUpgrade, type ForwardOptions } from './proxy.ts';
 
 export const APPS_PATH = /^\/apps\/([^/]*)(\/.*)?$/;
@@ -39,7 +39,8 @@ const page = (title: string, text: string) =>
   `<body style="font:16px system-ui;padding:2rem;text-align:center"><p>${escape(text)}</p><p><a href="/c/">Open ${APP_NAME}</a></p></body>`;
 
 type Refusal = { status: number; reason: string; headers: OutgoingHttpHeaders; body: string };
-type Admitted = { row: ContraptionRow; path: string; headers: OutgoingHttpHeaders; uid: number | null };
+/** renewed: a fresh session cookie for the person (Auth.renewal), added to the contraption's answer. */
+type Admitted = { row: ContraptionRow; path: string; headers: OutgoingHttpHeaders; uid: number | null; renewed?: string | null };
 
 const html = { 'X-Content-Type-Options': 'nosniff', 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' };
 const text = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' };
@@ -72,7 +73,7 @@ export class AppProxy {
     const a = this.admit(req);
     if ('status' in a) return void res.writeHead(a.status, a.headers).end(a.body);
     this.track(res, a);
-    forward(req, res, a.row.port, a.path, a.headers, this.options(a.row));
+    forward(req, res, a.row.port, a.path, a.headers, this.options(a.row, a.renewed));
   }
 
   /** Serve an /apps/... request that asks to upgrade (a websocket): the same gate, then a tunnel. */
@@ -90,13 +91,14 @@ export class AppProxy {
     conn.once('close', () => this.open.delete(conn));
   }
 
-  private options(row: ContraptionRow): ForwardOptions {
+  private options(row: ContraptionRow, renewed?: string | null): ForwardOptions {
     return {
       what: row.title,
       maxBody: MAX_BODY,
       // A contraption may set its own cookies, never Citadel's session.
       answer: (h) => {
         if (h['set-cookie']) h['set-cookie'] = h['set-cookie'].filter((c) => !c.trimStart().startsWith(`${COOKIE}=`));
+        if (renewed) h['set-cookie'] = [...(h['set-cookie'] ?? []), renewed];
       },
     };
   }
@@ -138,6 +140,6 @@ export class AppProxy {
     const identity = this.contraptions.signIdentity(row.name, user);
     if (!identity) return { status: 503, reason: 'Service Unavailable', headers: text, body: `${row.title}'s keys don't open; an admin can rotate them in Settings → Contraptions` };
     headers['x-citadel-identity'] = identity;
-    return { row, path, headers, uid: user.id };
+    return { row, path, headers, uid: user.id, renewed: this.auth.renewal(session, isSecure(req)) };
   }
 }

@@ -12,6 +12,8 @@ const INVITE_DAYS = 7;
 
 export const COOKIE = 'cc_session';
 const SESSION_DAYS = 30;
+/** A session older than this gets a fresh cookie on its next request, so only 30 days unused signs someone out. */
+const RENEW_DAYS = 7;
 const MAX_FAILURES = 10;
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 /** How long an HTML page's frame can keep loading its sibling files: through a workday. */
@@ -151,6 +153,14 @@ export class Auth {
     const payload = Buffer.from(JSON.stringify(session)).toString('base64url');
     const value = `${payload}.${this.sign(payload)}`;
     return `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure ? '; Secure' : ''}`;
+  }
+
+  /** A fresh cookie for a signed-in person whose session is over RENEW_DAYS old, else null. */
+  renewal(session: Session | null, secure: boolean): string | null {
+    // Without the people table (a preview's signer) nobody is renewed; agents carry no cookie.
+    if (!this.users || !session || session.agent !== undefined || session.uid === undefined) return null;
+    const old = session.exp - Date.now() < (SESSION_DAYS - RENEW_DAYS) * 86400_000;
+    return old ? this.issueCookie({ id: session.uid, name: session.name }, secure) : null;
   }
 
   clearCookie(): string {

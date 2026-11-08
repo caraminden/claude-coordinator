@@ -109,7 +109,7 @@ const TICKET_ID = { type: 'integer', description: 'Minion number in this scheme,
 const ASK_QUESTION = {
   name: 'ask_question',
   description:
-    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for real decisions with clear options, instead of listing choices in prose. Every question marks the option you would pick with `recommended: true` (exactly one, or any number on a multiSelect question): the card shows it as "(Recommended)", and a question without one is refused. Put it first. For visual choices (art, UI, layouts, animations), make each take as an image, GIF or short video first and give each option its `image`: the card then shows them as a gallery to pick from. After calling it, finish your turn with a short reply and wait: the card shows below your reply (say "the card below", never "above"), and the answers arrive as the next message.',
+    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for real decisions with clear options, instead of listing choices in prose. Every question marks the option you would pick with `recommended: true` (exactly one, or any number on a multiSelect question): the card shows it as "(Recommended)", and a question without one is refused. Put it first. For visual choices (art, UI, layouts, animations), make each take as an image, GIF or short video first and give each option its `image`: the card then shows them as a gallery to pick from. After calling it, finish your turn with a short reply and wait: the card shows below your reply (say "the card below", never "above"), and the answers arrive as the next message. A card from an earlier turn that is still open sits above your later replies: name it or say "above", never "below".',
   inputSchema: {
     type: 'object',
     properties: {
@@ -164,7 +164,7 @@ const SETTLE_QUESTION = {
 const PROPOSE_PLAN = {
   name: 'propose_plan',
   description:
-    'Post a plan in this chat as a card people answer with Approve or Revise, for a run-back before code or any plan that needs a go. Only a person can approve it. After calling it, finish your turn with a short reply and write no code: the card shows below your reply (say "the card below", never "above"), and the go (Approve) or the notes to revise it come as the next message. To revise, call propose_plan again with the whole new plan; the old card shows as superseded.',
+    'Post a plan in this chat as a card people answer with Approve or Revise, for a run-back before code or any plan that needs a go. Only a person can approve it. After calling it, finish your turn with a short reply and write no code: the card shows below your reply (say "the card below", never "above"), and the go (Approve) or the notes to revise it come as the next message. To revise, call propose_plan again with the whole new plan; the old card shows as superseded. A card from an earlier turn that is still open sits above your later replies: name it or say "above", never "below".',
   inputSchema: {
     type: 'object',
     properties: {

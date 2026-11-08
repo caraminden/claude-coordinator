@@ -22,6 +22,9 @@
       "listEnter",
       "mountComposer"
     ],
+    "dialog.js": [
+      "mountDialogs"
+    ],
     "status.js": [
       "statusSlot",
       "statusSlotHtml",
@@ -66,6 +69,8 @@
       "cui-choice",
       "cui-choices",
       "cui-danger",
+      "cui-dialog",
+      "cui-dialog-head",
       "cui-ghost",
       "cui-icon",
       "cui-input",

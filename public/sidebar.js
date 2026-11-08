@@ -119,13 +119,11 @@ async function linkedRepo(form, onLinked) {
 
 /** The new-scheme form in a modal: a centred box on desktop, a sheet along the bottom on phones. */
 export function openNewScheme() {
-  const dialog = h('dialog', { class: 'new-scheme' },
-    h('div', { class: 'row' }, h('h2', {}, 'New scheme'), h('span', { class: 'spacer' }),
+  const dialog = h('dialog', { class: 'cui-dialog new-scheme', 'aria-label': 'New scheme' },
+    h('div', { class: 'cui-dialog-head' }, h('h2', {}, 'New scheme'),
       h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
     newSchemeForm());
   dialog.addEventListener('close', () => dialog.remove());
-  // A tap on the backdrop (the dialog itself, outside its content box) closes it.
-  dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
   document.body.append(dialog);
   dialog.showModal();
 }

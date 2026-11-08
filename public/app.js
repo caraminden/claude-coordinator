@@ -3,6 +3,7 @@
 import { api, app, h, reloadNow, renderInvite, renderUsage, start, usage, view } from './core.js';
 import { renderSidebar } from './sidebar.js';
 import { initDrawers } from './drawers.js';
+import { mountDialogs } from './ui/dialog.js';
 
 // ---------- boot ----------
 
@@ -15,6 +16,8 @@ new ResizeObserver(() => {
   const r = topbar.getBoundingClientRect();
   document.documentElement.style.setProperty('--topbar-h', `${r.width > r.height ? r.height : 0}px`);
 }).observe(topbar);
+// A click on a dialog's backdrop closes it (the kit's cui-dialog).
+mountDialogs();
 // Phones: edge swipes pull out the overview (left) and threads (right) panels as drawers. Views redraw
 // the panels, so they're found afresh each time; the chat (the split's last child) is held still.
 initDrawers({

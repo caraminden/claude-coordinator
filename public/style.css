@@ -153,8 +153,8 @@ h2 { font-size: 1.15rem; margin: 0; }
 /* New scheme: a modal box on desktop, a sheet along the bottom on phones; the scheme switcher's menu. */
 .card.new-scheme { max-width: 480px; margin: 10vh auto; }
 .card.new-scheme h2 { margin-bottom: 1rem; }
-dialog.new-scheme { width: min(440px, calc(100vw - 2rem)); padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); }
-dialog.new-scheme::backdrop { background: rgb(0 0 0 / 0.4); }
+/* The dialogs are the kit's cui-dialog (ui/base.css): head pinned, backdrop click closes (ui/dialog.js). */
+dialog.new-scheme { --cui-dialog-width: 440px; }
 .sidebar.show-schedules > :not(summary, .schedules-pane) { display: none; }
 :is(.shelf, .sidebar) > summary .schedules-btn[aria-pressed='true'] { color: var(--accent); }
 .schedule-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
@@ -165,8 +165,7 @@ dialog.new-scheme::backdrop { background: rgb(0 0 0 / 0.4); }
 .schedule .error { margin: 0.2rem 0 0; }
 .schedule-actions { gap: 0.4rem; margin-top: 0.3rem; }
 .schedule-actions button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
-dialog.new-scheme > .row { margin-bottom: 0.75rem; }
-dialog.new-scheme .close { min-width: 32px; min-height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; color: var(--muted); font-size: 1.3rem; line-height: 1; }
+dialog.new-scheme .close { min-width: var(--citadel-control-h); min-height: var(--citadel-control-h); padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; color: var(--muted); font-size: 1.3rem; line-height: 1; }
 dialog.new-scheme form > :last-child { margin-bottom: 0; }
 /* The code source: one radio a line, the picked one's URL or folder field under it. */
 .new-scheme fieldset.sources { border: 0; padding: 0; margin: 0 0 0.75rem; min-width: 0; }
@@ -187,8 +186,8 @@ dialog.new-scheme form > :last-child { margin-bottom: 0; }
 .brief-start > button.secondary.armed { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .brief-start > button.options { background: none; border: 0; color: var(--muted); font-weight: normal; padding: 0 0.6rem; }
 .brief-start > button.options:hover { color: var(--ink); }
-dialog.start-brief { width: min(560px, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow-y: auto; }
-dialog.start-brief .from { margin: -0.4rem 0 0.9rem; }
+dialog.start-brief { --cui-dialog-width: 560px; }
+dialog.start-brief .from { margin: 0 0 0.9rem; }
 .start-brief-form .label { margin-bottom: 0.75rem; color: var(--muted); font-size: 0.9em; }
 .start-brief-form .label .row { margin-top: 0.25rem; gap: 0.5rem; flex-wrap: nowrap; }
 .start-brief-form .label input { width: 6rem; flex: none; }

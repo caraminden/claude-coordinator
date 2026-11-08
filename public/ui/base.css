@@ -26,7 +26,11 @@
              row, cui-status-fill takes what's left without widening it. ui/status.js's statusSlot() writes it.
    Toast:    ui/status.js's toast("Copied") shows div.cui-toast (a popover at the bottom centre) for a few seconds.
    Steady:   <button class="cui-btn"><span class="cui-steady"><span>Save</span><span hidden>Saving…</span></span></button>:
-             every label in one cell, one shown, so the button keeps its widest label's width (ui/status.js's steadyLabel()). */
+             every label in one cell, one shown, so the button keeps its widest label's width (ui/status.js's steadyLabel()).
+   Dialog:   <dialog class="cui-dialog" aria-labelledby="t"><form method="dialog" class="cui-dialog-head"><h2 id="t">…</h2>
+             <button class="cui-btn cui-ghost cui-icon" aria-label="Close">✕</button></form>…body…</dialog>, opened with
+             showModal(): the head stays at the top while the rest scrolls, and the page behind doesn't scroll.
+             ui/dialog.js's mountDialogs() closes it on a backdrop click; --cui-dialog-width sets its width (480px). */
 
 /* Buttons: every variant the same height, content centred, so the room above and below is equal. */
 :where(.cui-btn) {
@@ -251,6 +255,37 @@
 @starting-style { :where(.cui-toast:popover-open) { opacity: 0; } }
 /* What the toast says, again, for a screen reader: a live region that's always there, so it's announced. */
 :where(.cui-toast-say) { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Dialog: a native <dialog> opened with showModal(). The dialog itself scrolls, with no top padding, so its head
+   (sticky, spanning the full width, on the surface colour) stays at the top with its ✕ while the body scrolls
+   under it; scroll-padding keeps a focused field from hiding under the head. It fits the window, never the
+   page behind it scrolls, and ui/dialog.js closes it on a backdrop click. */
+:where(.cui-dialog) {
+  --cui-dialog-pad: var(--citadel-space-4);
+  box-sizing: border-box; width: min(var(--cui-dialog-width, 480px), calc(100vw - 2 * var(--citadel-space-3)));
+  max-width: none; max-height: calc(100dvh - 2 * var(--citadel-space-3)); margin: auto;
+  padding: 0 var(--cui-dialog-pad) var(--cui-dialog-pad); overflow-y: auto; overscroll-behavior: contain;
+  scroll-padding-top: calc(var(--citadel-control-h) + 3 * var(--citadel-space-2));
+  border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-lg);
+  background: var(--citadel-surface); color: var(--citadel-text); font: var(--citadel-size-body)/1.45 var(--citadel-font);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.22);
+}
+:where(.cui-dialog)::backdrop { background: rgb(0 0 0 / 0.4); }
+:where(html:has(.cui-dialog:modal)) { overflow: hidden; }
+:where(.cui-dialog-head) {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: var(--citadel-space-2);
+  margin: 0 calc(-1 * var(--cui-dialog-pad)) var(--citadel-space-3);
+  padding: var(--citadel-space-2) var(--citadel-space-2) var(--citadel-space-2) var(--cui-dialog-pad);
+  background: var(--citadel-surface); border-bottom: 1px solid var(--citadel-border);
+}
+:where(.cui-dialog-head > :is(h1, h2, h3, h4)) { flex: 1; min-width: 0; margin: 0; font: 600 var(--citadel-size-h2)/1.3 var(--citadel-font); overflow-wrap: anywhere; }
+:where(.cui-dialog-head > .cui-btn:last-child) { flex: none; margin-inline-start: auto; }
+@media (max-width: 800px) {
+  :where(.cui-dialog) {
+    --cui-dialog-pad: var(--citadel-space-3);
+    width: calc(100vw - 2 * var(--citadel-space-2)); max-height: calc(100dvh - 2 * var(--citadel-space-2));
+  }
+}
 
 /* A long press on a tipped link or button shows its tip, not the phone's own menu or a selection. */
 @media (pointer: coarse) { :where([data-tip]:is(a, button, [role="button"])) { -webkit-touch-callout: none; user-select: none; } }

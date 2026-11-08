@@ -119,13 +119,12 @@ async function openSheet(slot, brief, file) {
     err,
     h('div', { class: 'row sheet-actions' }, h('span', { class: 'spacer' }),
       h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel'), btn));
-  const dialog = h('dialog', { class: 'new-scheme start-brief', 'aria-label': 'Start a minion' },
-    h('div', { class: 'row' }, h('h2', {}, 'Start a minion'), h('span', { class: 'spacer' }),
+  const dialog = h('dialog', { class: 'cui-dialog new-scheme start-brief', 'aria-label': 'Start a minion' },
+    h('div', { class: 'cui-dialog-head' }, h('h2', {}, 'Start a minion'),
       h('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
     h('p', { class: 'muted small from' }, `From ${brief.heading || 'the handoff'} in ${file.name}`),
     form);
   dialog.addEventListener('close', () => dialog.remove());
-  dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     btn.disabled = true;

@@ -26,7 +26,7 @@ import { AppProxy } from './src/apps.ts';
 import { type Chain, githubPrs, LiveWaiters, runsRepo } from './src/wake.ts';
 import { errorText } from './src/scheme-repo.ts';
 import { catchUpTicketDir, createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
-import { describeCron, runBrief, type Schedule } from './src/schedules.ts';
+import { describeCron, pinForOwner, runBrief, type Schedule } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App, type SharedFile } from './src/http.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
@@ -364,6 +364,8 @@ async function startScheduled(s: Schedule, now: number) {
     const maker = store.findUser('name', s.created_by);
     const { id, number } = await newMinion(project, { title: s.name, props: { type: s.type, ...(maker && !maker.disabled_at ? { assigned: maker.name } : {}) } }, APP_NAME);
     store.updateTicket(id, { person_id: maker?.id ?? null });
+    const pinnedFor = pinForOwner(store, id);
+    if (pinnedFor) broadcast({ type: 'ticket_pin', name: pinnedFor, projectId: project.id, ticketId: id, pinned: true });
     store.schedules.ran(s.id, { ticketId: id }, now);
     runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });
     runner.send(id, APP_NAME, runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })), [], { brief: true });

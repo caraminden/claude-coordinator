@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { describeCron, nextRun, parseCron, runBrief } from '../src/schedules.ts';
+import { describeCron, nextRun, parseCron, pinForOwner, runBrief } from '../src/schedules.ts';
 
 // Local wall-clock times, since schedules run in the server's time zone.
 const at = (y: number, mo: number, d: number, h = 0, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime();
@@ -84,4 +84,33 @@ test("a run's brief says how to file a quiet run away without a ping, then gives
   assert.match(text, /close_self/);
   assert.match(text, /leaving state null/);
   assert.ok(text.endsWith('\n\nIs main healthy?'));
+});
+
+test("a scheduled run's minion is pinned for the scheme's owner alone, an unpin sticks, and no owner means no pin (#384)", () => {
+  const store = new Store(':memory:');
+  const cara = store.createUser({ name: 'Cara', login: 'cara' });
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const owned = store.createProject('Owned', null, cara.id);
+  store.addMember(owned.id, josh.id);
+  const run = () => store.createTicket({ project_id: owned.id, kind: 'ticket', title: 'Nightly', permission_mode: 'default', created_by: 'Citadel' });
+
+  const first = run();
+  assert.equal(pinForOwner(store, first.id), 'Cara');
+  assert.deepEqual(store.pinnedTickets('Cara', owned.id), [first.id]);
+  assert.deepEqual(store.pinnedTickets('Josh', owned.id), [], 'only the owner gets the pin');
+
+  // Cara unpins it; the next run pins only its own minion, not the one she unpinned.
+  store.setTicketPinned('Cara', first.id, false);
+  const second = run();
+  pinForOwner(store, second.id);
+  assert.deepEqual(store.pinnedTickets('Cara', owned.id), [second.id]);
+
+  // Closing a minion leaves a person's pin as it is, and so this one.
+  store.updateTicket(second.id, { status: 'closed' });
+  assert.equal(store.isTicketPinned('Cara', second.id), true);
+
+  const ownerless = store.createProject('Ownerless', null);
+  const orphan = store.createTicket({ project_id: ownerless.id, kind: 'ticket', title: 'Nightly', permission_mode: 'default', created_by: 'Citadel' });
+  assert.equal(pinForOwner(store, orphan.id), null);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM ticket_pins WHERE ticket_id = ?').get(orphan.id)!.n, 0, 'no owner, no pin for anyone');
 });

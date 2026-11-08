@@ -1,6 +1,7 @@
 // Scheduled minions: a saved brief that starts on a cron schedule. The schedule lives in the app
 // (this table plus a timer in the server), since minions can't install systemd timers.
 import type { DatabaseSync } from 'node:sqlite';
+import type { Store } from './db.ts';
 import { HttpError } from './http.ts';
 
 export interface Schedule {
@@ -201,6 +202,20 @@ export class Schedules {
       this.db.prepare('UPDATE schedules SET last_error = ?, next_run_at = ? WHERE id = ?').run(outcome.error, next, id);
     }
   }
+}
+
+/**
+ * Pin a run's minion for the scheme's owner, as if they'd pinned it (#384; Cara, 2026-11-08: "Lets have them default to
+ * pinned for the scheme owner"), since no person started it. Only at the start: an unpin sticks. No owner, or one who's
+ * been removed, pins for nobody. Returns whose pin it is, for the broadcast.
+ */
+export function pinForOwner(store: Pick<Store, 'getTicket' | 'getProject' | 'getUser' | 'setTicketPinned'>, ticketId: number): string | null {
+  const ticket = store.getTicket(ticketId);
+  const ownerId = ticket && store.getProject(ticket.project_id)?.owner_id;
+  const owner = ownerId != null ? store.getUser(ownerId) : undefined;
+  if (!owner || owner.disabled_at) return null;
+  store.setTicketPinned(owner.name, ticketId, true);
+  return owner.name;
 }
 
 /** The first message of a run's minion: what it is, how to file itself away when there is nothing to report, then the brief. */

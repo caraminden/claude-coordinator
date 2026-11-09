@@ -1953,7 +1953,8 @@ export class Runner {
   /** A fresh start's next step, if it needs a turn of its own: the handoff ask, or the /compact fallback. */
   private freshStep(ticketId: number): QueuedMessage | null {
     const f = this.store.getSetting<FreshState>(freshKey(ticketId));
-    if (!f || f.summary) return null;
+    // After a network outage, its resume (holding any queued messages) goes first: a step now would fail too and replace that wait.
+    if (!f || f.summary || this.netWait(ticketId)) return null;
     return f.compact ? { author: 'System', text: COMPACT_COMMAND, images: [], fresh: 'compact' } : { author: 'System', text: handoffPrompt(f.why), images: [], fresh: 'handoff' };
   }
 

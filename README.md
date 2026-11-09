@@ -339,6 +339,9 @@ mounted turns folder, against the same worktree path; that copy checks the hook 
 sign-in itself. A host turn also starts that container if it stopped. It reads the person's Codex
 usage first and skips the review when the 5-hour or weekly window is 80% used or
 running ahead of an even pace to its reset, so reviews never max out their plan.
+`--image <path>` (repeatable, #408) attaches a screenshot or art sheet as one of Codex's
+local image inputs, for critique's cross-family pass on visual work; it takes only image
+files inside the worktree or the turn's shared folders.
 
 **People's own GitHub.** With an OAuth App set up, each person links their GitHub
 in Settings → Your account, and a turn pushes and opens pull requests as the

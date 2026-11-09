@@ -112,12 +112,14 @@ from another family, re-judges them read-only:
 
 1. `citadel-codex-review --check` prints `ready`; otherwise skip and note `Codex: skipped: not set
    up`.
-2. The artifacts are text (a diff, text, rows). Codex can't see images yet: note `Codex: skipped:
-   images`.
-3. Write `$TMPDIR/critic-codex-brief.md`: "Follow `<kit>/agents/critic.md` as the critic, in round 1."
-   with the rubric path and each passed item's brief and artifact paths. Run
-   `citadel-codex-review --timeout 540 < "$TMPDIR/critic-codex-brief.md"` (Bash timeout 600000).
-   A non-zero exit skips it with its reason (exit 4: the person's Codex usage is ahead of pace).
+2. Write `$TMPDIR/critic-codex-brief.md`: "Follow `<kit>/agents/critic.md` as the critic, in round 1."
+   with the rubric path and each passed item's brief and artifact paths. Images (screenshots, art
+   sheets) can't be opened by Codex's tools: attach each with `--image <path>` (png, jpg, gif or
+   webp, in your worktree or shared folder) and list them in the brief in the same order, as "the
+   attached images, in order: <paths>".
+3. Run `citadel-codex-review --timeout 540 [--image <path>]... < "$TMPDIR/critic-codex-brief.md"`
+   (Bash timeout 600000). A non-zero exit skips it with its reason (exit 4: the person's Codex usage
+   is ahead of pace; exit 2: an image it refused, which it names).
 
 An item Codex fails goes back to step 4 with its findings, and doesn't count against `max_rounds`.
 

@@ -462,7 +462,10 @@ function inPage(opts) {
   for (const el of all) {
     const tip = el.getAttribute('title') || el.getAttribute('data-tip') || '';
     const m = URLISH.exec(tip);
-    if (!m || el.closest('a[href]') || el.querySelector('a[href]') || !visible(el)) continue;
+    if (!m) continue;
+    // Fine when a link to that address is right there: the element itself, around it or inside it.
+    const linked = [el.closest('a[href]'), ...el.querySelectorAll('a[href]')].some((a) => a && (a.getAttribute('href') === m[0] || a.href === m[0]));
+    if (linked || !visible(el)) continue;
     out.push({ check: 'bare-link', selector: sel(el), text: snip(m[0]), why: 'a URL or DOI only in a tooltip: show it as a link' });
   }
 

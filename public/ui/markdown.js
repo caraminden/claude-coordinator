@@ -54,32 +54,33 @@ const defaultLink = (href, html) => (/^(https?:\/\/|mailto:)/i.test(href)
  * A bare http(s) URL or DOI ("10.1234/x", "doi:10.1234/x") in escaped text. Each ends at a space, a
  * tag, a quote or a held-out marker; a DOI needs no "doi:" but can't sit inside a path or a number.
  */
-const BARE = /(?<![\w/])(https?:\/\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>"'\u0000\u0001])+)|(?<![\w/.:-])(doi:\s?)?(10\.\d{4,9}\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>"'\u0000\u0001])+)/gi;
+const BARE = /(?<![A-Za-z0-9/])(https?:\/\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>"'\u0000\u0001])+)|(?<![A-Za-z0-9/.:-])(doi:\s?)?(10\.\d{4,9}\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>"'\u0000\u0001])+)/gi;
 
 /**
- * A bare link's end without the marks that end the sentence or emphasis around it ("x/**." keeps
- * "x/"); a ")" or "]" stays when it closes one inside it, and "&amp;" stays whole.
+ * A bare link's end without the marks that end the sentence around it, and in markdown (`md`) the
+ * emphasis around it too ("x/**." keeps "x/", as GitHub does); a ")" or "]" stays when it closes one
+ * inside it, and "&amp;" stays whole.
  */
-function trimBare(s) {
+function trimBare(s, md) {
   let end = s.length;
   for (;;) {
     const c = s[end - 1];
     const part = s.slice(0, end);
     if (part.endsWith('&amp;')) return part;
-    if (/[*_~.,:;!?]/.test(c)) end--;
+    if (/[.,:;!?]/.test(c) || (md && /[*_~]/.test(c))) end--;
     else if ((c === ')' || c === ']') && part.split(c).length > part.split(c === ')' ? '(' : '[').length) end--;
     else return part;
   }
 }
 
-/** Escaped text with its bare URLs and DOIs as `link(href, html)`; `held` wraps each link's HTML (see inline()). */
-function linkBare(s, link, held = (html) => html) {
-  return s.replace(BARE, (m, url, doiPrefix, doi) => {
-    const kept = trimBare(m);
+/** Escaped text with its bare URLs and DOIs as `link(href, html)`; in markdown, `held` holds each link's HTML out (see inline()). */
+function linkBare(s, link, held = null) {
+  return s.replace(BARE, (m, url, doiPrefix) => {
+    const kept = trimBare(m, !!held);
     // What's left must still point somewhere: not "https://" or "10.1234/" alone.
     if (url ? /^https?:\/\/$/i.test(kept) : !/\/[^/]/.test(kept)) return m;
     const href = url ? unescapeHtml(kept) : `https://doi.org/${unescapeHtml(kept.slice(doiPrefix?.length ?? 0)).split('/').map(encodeURIComponent).join('/')}`;
-    return held(link(href, kept)) + m.slice(kept.length);
+    return (held ?? String)(link(href, kept)) + m.slice(kept.length);
   });
 }
 

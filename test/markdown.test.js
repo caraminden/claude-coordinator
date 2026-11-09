@@ -237,6 +237,8 @@ test('linkify: bare URLs and DOIs in plain text become new-tab links, everything
   // It never injects HTML: tags are escaped and a quote ends a URL.
   assert.equal(linkify('<b>x</b> https://a.b/"onmouseover=alert(1)'), `&lt;b&gt;x&lt;/b&gt; ${ext('https://a.b/')}&quot;onmouseover=alert(1)`);
   assert.equal(linkify('https:// alone'), 'https:// alone');
+  // Outside markdown a trailing "_" or "*" is part of the address.
+  assert.equal(linkify('https://x.io/item_'), ext('https://x.io/item_'));
   assert.equal(linkify(null), '');
 });
 
@@ -250,6 +252,8 @@ test('markdown autolinks bare URLs and DOIs through the link hook, not inside li
   assert.equal(md('[l](https://a.b) <https://c.d/e> `https://code` https://f.g/h_i_j, doi:10.1234/x_y_z.'),
     `<p>${ext('https://a.b', 'l')} ${ext('https://c.d/e')} <code>https://code</code> ${ext('https://f.g/h_i_j')}, ${ext('https://doi.org/10.1234/x_y_z', 'doi:10.1234/x_y_z')}.</p>`);
   assert.equal(md('(see https://x.io/a)'), `<p>(see ${ext('https://x.io/a')})</p>`);
+  // Emphasis by underscores around a URL or DOI still links it.
+  assert.equal(md('_https://a.io/x_ and __doi:10.1234/ab__'), `<p><em>${ext('https://a.io/x')}</em> and <strong>${ext('https://doi.org/10.1234/ab', 'doi:10.1234/ab')}</strong></p>`);
   const seen = [];
   md('at https://x.io and 10.1234/q', { link: (href, html) => (seen.push([href, html]), html) });
   assert.deepEqual(seen, [['https://x.io', 'https://x.io'], ['https://doi.org/10.1234/q', '10.1234/q']]);

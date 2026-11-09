@@ -33,7 +33,7 @@ const PAGES: Record<string, string> = {
 <div id="clip" style="width:80px;height:20px;overflow:hidden;white-space:nowrap">${'cut off text '.repeat(4)}</div>
 <div id="outer" style="border:1px solid #888;padding:2px;width:300px"><textarea id="ta" style="border:1px solid #888;width:100%;box-sizing:border-box;display:block"></textarea></div>
 <div id="wide" style="width:1600px;height:4px"></div>
-<p id="bare">see https://x.io/a. or doi:10.1000/xyz</p> <span id="tipped" title="https://x.io/b">the ref</span>
+<p id="bare">see https://x.io/a. or doi:10.1000/xyz</p> <span id="tipped" title="https://x.io/b">the ref</span> <div id="tipwrap" title="https://x.io/src"><a href="/help">Help</a></div>
 <dialog id="d" style="max-height:200px;overflow:auto;padding:0"><button class="btn" aria-label="Close" id="close">✕</button><div style="height:600px">body</div></dialog>
 <script>document.getElementById('d').show()</script>`,
   // Rule 23: one button shows its result at once; the other disables every control until the server answers.
@@ -90,6 +90,7 @@ test('each planted defect is found, with its numbers', { skip }, async () => {
   assert.ok(has(desk, 'close-scrolls', '#close'));
   assert.equal(desk.find((f: any) => f.check === 'bare-link' && f.selector === '#bare')?.text, 'https://x.io/a');
   assert.ok(has(desk, 'bare-link', '#tipped'));
+  assert.ok(has(desk, 'bare-link', '#tipwrap'), 'a link inside to somewhere else does not make the tooltip\'s address clickable');
   assert.equal(r.ok, false);
 });
 

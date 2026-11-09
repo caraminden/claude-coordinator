@@ -21,8 +21,9 @@ so their `subagent_type` is `citadel:<name>` (`citadel:check-runner`, `citadel:f
   research legwork, regeneration, reviewer passes); `haiku` for bulk reads; the
   `citadel:check-runner` agent runs on `haiku` at `low` effort (its answer is a verdict). Only a
   Grunt that judges (`citadel:critic`, `citadel:fresh-eyes`, `citadel:finding-checker`) inherits
-  the session's model, except the two on a high-risk self-review: `citadel:reviewer` and
-  `citadel:finding-checker` there run on `fable` (`claude-fable-5-2`) at `medium`, set per call. On Delve's art critic Opus caught about 9 of 13 of Cara's notes, Sonnet 5.
+  the session's model: on Delve's art critic Opus caught about 9 of 13 of Cara's notes, Sonnet 5.
+  The exception: on a high-risk self-review `citadel:reviewer` and `citadel:finding-checker` run
+  on `fable` (`claude-fable-5-2`) at `medium`, set per call.
 - Turn count beats token price: the cheapest model took 2 to 3 times the turns on multi-step work
   in obra/superpowers' subagent-driven-development. Use `haiku` only when the brief holds
   everything the Grunt needs.

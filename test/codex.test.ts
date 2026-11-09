@@ -380,6 +380,8 @@ const turnDir = join(root, 'turn-1');
 mkdirSync(join(turnDir, 'pin'), { recursive: true });
 const driver = join(turnDir, 'pin', 'codex-review.ts');
 writeFileSync(driver, readFileSync(join(import.meta.dirname, '..', 'src', 'codex-review.ts')));
+mkdirSync(join(turnDir, 'pin', 'kit', 'agents'), { recursive: true });
+writeFileSync(join(turnDir, 'pin', 'kit', 'agents', 'reviewer.md'), 'the reviewer rules');
 const podBin = join(root, 'podbin');
 const podLog = join(root, 'podman.jsonl');
 mkdirSync(podBin, { recursive: true });
@@ -403,7 +405,8 @@ for (; i < args.length; i++) {
 const [name, cmd, script, ...rest] = args.slice(i);
 const stdin = rest.includes('--check') ? '' : fs.readFileSync(0, 'utf8');
 const cfgFile = env.CITADEL_CODEX_TRIPWIRE;
-log({ args, name, cmd, script, rest, cwd, env, stdin, cfg: JSON.parse(fs.readFileSync(cfgFile, 'utf8')), writable: (fs.statSync(cfgFile).mode & 0o222) !== 0, files: fs.readdirSync(dirname(cfgFile)).sort() });
+const kitRef = /Follow (\\S+)/.exec(stdin)?.[1] ?? null;
+log({ args, name, cmd, script, rest, cwd, env, stdin, kitRef, kitSeen: kitRef && fs.existsSync(kitRef) ? fs.readFileSync(kitRef, 'utf8') : null, cfg: JSON.parse(fs.readFileSync(cfgFile, 'utf8')), writable: (fs.statSync(cfgFile).mode & 0o222) !== 0, files: fs.readdirSync(dirname(cfgFile)).sort() });
 if (mode === 'run') {
   // The copy, run as it would be in a container whose image has no hook.
   const r = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [script, ...rest], { cwd, env: { PATH: process.env.PATH, ...env }, input: stdin });
@@ -437,7 +440,7 @@ test("a host turn's review runs in the Codex container the runner named, read-on
   assert.equal(check.status, 0);
   assert.equal(check.stdout, 'ready\n');
 
-  const r = cli(['--timeout', '60'], 'ok', hostTurn, 'Review the diff.\n');
+  const r = cli(['--timeout', '60'], 'ok', hostTurn, `Follow ${join(turnDir, 'pin', 'kit')}/agents/reviewer.md then review the diff.\n`);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, 'REVIEW OK\n');
   assert.match(r.stderr, /^Codex usage: 5-hour 10%, weekly 3%$/m);
@@ -447,12 +450,15 @@ test("a host turn's review runs in the Codex container the runner named, read-on
   assert.equal(call.cmd, 'node');
   assert.equal(call.cwd, root, "in the turn's own folder, which the container mounts at the same path");
   assert.deepEqual(call.rest, ['--timeout', '60']);
-  assert.equal(call.stdin, 'Review the diff.\n');
+  // The brief's kit is the turn's pinned one, which the container can't see: it reads the copy beside the driver.
+  assert.equal(call.kitRef, join(dirname(call.script), 'kit', 'agents', 'reviewer.md'));
+  assert.equal(call.stdin, `Follow ${call.kitRef} then review the diff.\n`);
+  assert.equal(call.kitSeen, 'the reviewer rules');
   assert.equal(call.env.HOME, '/home/u', "the container's environment, not the host turn's");
   assert.equal(call.env.FAKE_PODMAN, undefined);
   // Its files sit in the person's mounted turns folder: the driver, the tripwire, and a review-mode config.
   assert.ok(call.script.startsWith(personTurns + '/review-'), call.script);
-  assert.deepEqual(call.files, ['codex-review.ts', 'codex-tripwire.json', 'tripwire.ts']);
+  assert.deepEqual(call.files, ['codex-review.ts', 'codex-tripwire.json', 'kit', 'tripwire.ts']);
   assert.deepEqual(call.cfg, { script: join(dirname(call.script), 'tripwire.ts'), config }, 'the container turns\' review mode: no container, no turn mode');
   assert.equal(call.writable, false, 'read-only, as the runner writes it');
   assert.deepEqual(readdirSync(personTurns), [], 'the copy goes once the review ends');

@@ -13,7 +13,7 @@
 // #398) has no hook, so when the runner names the login's Codex container (#341) in the turn's Codex
 // config, the review runs there instead (inContainer), and that copy checks the hook for itself.
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -226,8 +226,9 @@ const PODMAN_FAILED = new Set([125, 126, 127]);
  * Run this review in the container `cfg.container` names (#398), for a host turn: its turn folder isn't
  * mounted there, so this driver and the turn's pinned tripwire are copied into the person's turns folder
  * with a review-mode Codex config (the container turns' one: Bash only, read-only), and `podman exec` runs
- * the copy in `cwd` (the worktree, mounted at the same path) with the same arguments and stdin. That copy
- * checks the hook, the config and the sign-in itself, so the exit codes and the `Codex usage:` line are
+ * the copy in `cwd` (the worktree, mounted at the same path) with the same arguments and brief. The turn's
+ * pinned kit is copied too, and the brief's paths into it point at the copy: its `Follow <kit>/agents/reviewer.md`
+ * line would otherwise name a folder the container can't see. That copy checks the hook, the config and the sign-in itself, so the exit codes and the `Codex usage:` line are
  * the container's own; a container that isn't there is exit 3. The copy is removed once it ends.
  */
 export function inContainer(args: string[], cfg: CodexConfig & { container: ReviewContainer }, cwd: string, podman = 'podman'): Promise<number> {
@@ -235,12 +236,18 @@ export function inContainer(args: string[], cfg: CodexConfig & { container: Revi
   const check = args.includes('--check');
   let dir = '';
   const file = () => join(dir, 'codex-tripwire.json');
+  const kit = join(dirname(fileURLToPath(import.meta.url)), 'kit');
+  let brief = check ? null : readFileSync(0, 'utf8');
   try {
     mkdirSync(c.turnsDir, { recursive: true });
     dir = mkdtempSync(join(c.turnsDir, 'review-'));
     copyPinned(fileURLToPath(import.meta.url), dir);
     copyPinned(cfg.script, dir);
     writeFileSync(file(), JSON.stringify({ script: join(dir, basename(cfg.script)), config: cfg.config }), { mode: 0o444 });
+    if (brief !== null && existsSync(kit)) {
+      cpSync(kit, join(dir, 'kit'), { recursive: true });
+      brief = brief.replaceAll(kit, join(dir, 'kit'));
+    }
   } catch (err: any) {
     if (dir) rmSync(dir, { recursive: true, force: true });
     return Promise.resolve(fail(check, `Couldn't set up the review for Codex's container (${c.name}): ${err.message}`));
@@ -264,7 +271,11 @@ export function inContainer(args: string[], cfg: CodexConfig & { container: Revi
       child.kill('SIGTERM');
       end(143);
     };
-    const child = spawn(podman, argv, { stdio: ['inherit', 'inherit', 'pipe'] });
+    const child = spawn(podman, argv, { stdio: [brief === null ? 'inherit' : 'pipe', 'inherit', 'pipe'] });
+    if (brief !== null) {
+      child.stdin!.on('error', () => {});
+      child.stdin!.end(brief);
+    }
     for (const s of SIGNALS) process.on(s, stop);
     child.stderr.on('data', (b) => {
       if (!check) process.stderr.write(b);

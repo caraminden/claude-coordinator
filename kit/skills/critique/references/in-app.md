@@ -30,14 +30,19 @@ frontmatter) and saves it with every verdict.
 | Field | Value | Why |
 |---|---|---|
 | `person` | the person the item belongs to | It runs on their own plan, and counts against the app's `turn_cap` a day. |
-| `session` | `grade-1` ... `grade-3`, from a small pool | A busy name refuses a second turn; a few names let items grade at once. |
+| `session` | `grade-1` ... `grade-3`, from a small pool | A busy name refuses a second turn; a few names let items grade at once. On `busy`, try the next name. |
 | `fresh` | `true` | One item's grade never leaks into the next. |
 | `system` | the rubric's body, then the output contract (section 3) | |
 | `prompt` | the item, the ask it answered, and its source, each under its own label, the source with locations (`line 41:`, `row 812:`) | |
 | `model` | `haiku` per item; a Codex model for a gate (section 6) | |
 | `mcp` | `[]` | Blind: the grader sees only the prompt. It can't read the app's data or fetch the source again. |
-| `agents`, `webSearch` | `false` | Same. |
+| `agents`, `webSearch` | `false` | No Grunts, no web. |
 | `timeoutSec` | `60` | |
+
+**Not quite blind yet:** Citadel adds the person's online machines to every contraption turn as MCP
+tools, with a note in the system prompt, whatever `mcp` says (`src/contraption-turns.ts`). So the
+output contract also says "call no tools", and the app discards a grade whose turn sent any `tool`
+event, and grades again once.
 
 The prompt holds what the item's reader would see and the source, never how the agent made it: no
 reasoning, no chat, no tool log. The one exception is an excuse: when the item says it couldn't do
@@ -49,7 +54,7 @@ along on every turn, so measure before trusting the report's ~$0.001 an item on 
 
 ## 3. The verdict, as JSON
 
-The output contract, at the end of the system prompt: reply with one JSON object and nothing else.
+The output contract, at the end of the system prompt: call no tools, and reply with one JSON object and nothing else.
 
 ```json
 {
@@ -65,20 +70,25 @@ The output contract, at the end of the system prompt: reply with one JSON object
       "plain": "one sentence for the person, no rubric words"
     }
   ],
+  "findings": [
+    { "blocker": 4, "plain": "these three proposals are one change: merge them" }
+  ],
   "asked": "did_it | partly | no",
   "excuse": "true | false | cant_check | none"
 }
 ```
 
 `flag` when any blocker fires, `cant_check` when the source given can't settle the item, else
-`pass`. Item-level findings that aren't about one claim (blocker 4's split or merge) go in a claim
-with `"id": "item"`.
+`pass`. `findings` holds the blockers that aren't one claim's verdict (a split or merge, a misquote),
+each with its number in the rubric; empty when there are none.
 
 On the app's side, before saving:
 
 1. **Parse** the last model message (the `text` events whose `message` is the last id). Bad JSON or
    a missing key: one retry, fresh; then save `{ "verdict": "error" }` and show "couldn't check".
-   A grader error never blocks the person.
+   A grader error never blocks the person. So does an error event: `busy` on every name, `limit`
+   (the person's plan or the app's `turn_cap`), `timeout`, `no_plan`. Show "couldn't check" and let
+   the person grade again later.
 2. **Check each span is in the source,** as written (case and spacing aside). Free, and it catches
    the grader quoting what isn't there: a span that isn't found turns its claim into `cant_check`,
    with `"grader_misquote": true` saved.
@@ -87,7 +97,8 @@ On the app's side, before saving:
 
 A row per grade, keyed by the item: the JSON, the rubric version, the model asked for, the time, and
 later the person's action. A re-grade adds a row; nothing is overwritten. The verdict lives in the
-app's own store: Citadel keeps no turn content.
+app's own store. Citadel keeps no turn content, but the turn is a session in the person's own
+Claude folder, item and source included, as their own chats with the app are.
 
 ## 5. Show it in plain words
 

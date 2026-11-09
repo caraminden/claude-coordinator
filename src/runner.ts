@@ -371,6 +371,8 @@ export interface FreshState { why: string; summary?: string; compact?: true; aut
 const freshKey = (ticketId: number) => `fresh:${ticketId}`;
 /** The handoff a fresh session's first turn starts from, kept until that session exists. */
 const handoffKey = (ticketId: number) => `handoff:${ticketId}`;
+/** The note the server last wrote about a failed or stopped turn, which the next turn that ends well clears (#428). */
+const failNoteKey = (ticketId: number) => `failnote:${ticketId}`;
 /** Idle this long, a Taskmaster's prompt cache (1 hour) is still warm, so its handoff turn reads it cheaply. */
 export const FRESH_IDLE_MS = 55 * 60_000;
 /** Past this much context (tokens), a Taskmaster starts fresh by itself: as its turn ends (#423), or idle (#406). */
@@ -1924,7 +1926,7 @@ export class Runner {
     if (!live) {
       // Waiting on the network: a stop ends the wait, and as with a turn, its held messages go too.
       if (this.cancelNetWait(ticketId)) {
-        this.store.updateTicket(ticketId, { note: 'Network outage: stopped, send a message to carry on' });
+        this.setFailNote(ticketId, { note: 'Network outage: stopped, send a message to carry on' });
         this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
         this.broadcastTicket(ticketId);
         return true;
@@ -1932,7 +1934,7 @@ export class Runner {
       // Waiting on the usage limit: a stop ends the wait, and as with a turn, its held messages go too.
       if (!this.cancelLimitWait(ticketId)) return false;
       this.queues.delete(ticketId);
-      this.store.updateTicket(ticketId, { note: 'Usage limit: stopped, send a message to carry on' });
+      this.setFailNote(ticketId, { note: 'Usage limit: stopped, send a message to carry on' });
       this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
       this.broadcastTicket(ticketId);
       return true;
@@ -2620,6 +2622,7 @@ export class Runner {
     const parkedAs = this.parkedAs.get(ticketId);
     this.parkedAs.delete(ticketId);
     if (parkedAs && status !== 'error' && this.heldFor(ticketId)) this.store.updateTicket(ticketId, parkedAs);
+    if (status === 'idle' && !stopped && !signal) this.clearFailNote(ticketId);
     const closing = this.closing.has(ticketId);
     const reason = this.closing.get(ticketId);
     this.closing.delete(ticketId);
@@ -2674,6 +2677,20 @@ export class Runner {
    * lines). A usage limit is a wait, not an error: no push, and it resumes after the reset. An account
    * problem needs a person: it blocks, never retries, and pushes once for everyone.
    */
+  /** Write a note about a failure, remembered so the next turn that ends well can clear it. */
+  private setFailNote(ticketId: number, fields: { note: string; state?: string }) {
+    this.store.updateTicket(ticketId, fields);
+    this.store.setSetting(failNoteKey(ticketId), fields.note);
+  }
+
+  /** A turn ended well: the failure note goes, unless something (the agent, a person) has replaced it since. */
+  private clearFailNote(ticketId: number) {
+    const note = this.store.getSetting<string>(failNoteKey(ticketId));
+    if (note === null) return;
+    this.store.deleteSetting(failNoteKey(ticketId));
+    if (this.store.getTicket(ticketId)?.note === note) this.store.updateTicket(ticketId, { note: null });
+  }
+
   private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage, codexReset?: number | null, netTries = 0) {
     const exited = code ? `claude exited with code ${code}` : 'claude ended without finishing';
     const why = reason || stderr;
@@ -2700,7 +2717,7 @@ export class Runner {
     }
     if (reason && ACCOUNT_ERROR.test(reason)) {
       this.emit(ticketId, 'error', { text: `${text}\nThis needs a person to sort out the Claude account; it won't retry by itself.` });
-      if (!keepState) this.store.updateTicket(ticketId, { state: 'blocked', note: short(`Needs a person: ${first.replace(/^API Error: \d+ /, '')}`) });
+      if (!keepState) this.setFailNote(ticketId, { state: 'blocked', note: short(`Needs a person: ${first.replace(/^API Error: \d+ /, '')}`) });
       const last = this.accountPushes.get(first);
       if (last === undefined || Date.now() - last > 60 * 60 * 1000) {
         this.accountPushes.set(first, Date.now());
@@ -2718,7 +2735,7 @@ export class Runner {
       return;
     }
     const event = this.emit(ticketId, 'error', { text: netDown ? `${text}\nIt has already resumed ${netTries} times in a row after a network outage, so it stopped retrying: send a message to carry on.` : text });
-    this.store.updateTicket(ticketId, { note: netDown ? `Network: stopped retrying after ${netTries} resumes` : short(first) });
+    this.setFailNote(ticketId, { note: netDown ? `Network: stopped retrying after ${netTries} resumes` : short(first) });
     this.onTurnError(ticketId, text, event.id);
   }
 

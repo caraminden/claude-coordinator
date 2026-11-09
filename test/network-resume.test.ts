@@ -177,6 +177,22 @@ test('other failures never wait on the network', async () => {
   pushes.length = 0;
 });
 
+test("a turn that ends well clears the failure note a failed turn left, and only that note (#428)", async () => {
+  const id = minion();
+  assert.equal((await turn(id, 'ok')).note, 'before', "a note the agent set stays through a turn that doesn't touch it");
+  assert.equal((await turn(id, 'API Error: 529 Overloaded')).note, 'API Error: 529 Overloaded');
+  assert.equal((await turn(id, 'ok', 'again')).note, null, 'the next good turn clears it');
+  // A note set after the failure (the agent's set_thread_status, a person's update_ticket) is not the server's to clear.
+  await turn(id, 'API Error: 529 Overloaded');
+  store.updateTicket(id, { note: 'waiting on Josh' });
+  assert.equal((await turn(id, 'ok', 'again')).note, 'waiting on Josh');
+  // An account error blocks with a note; the next good turn clears both.
+  assert.equal((await turn(id, 'API Error: 403 This organization has been disabled.')).state, 'blocked');
+  const t = await turn(id, 'ok', 'fixed it');
+  assert.deepEqual([t.state, t.note], [null, null]);
+  pushes.length = 0;
+});
+
 test(`it stops retrying after ${MAX_NET_RESUMES} network resumes in a row`, async () => {
   up = true;
   const id = minion();
@@ -234,6 +250,7 @@ test('a stop or a dismissal ends the wait', async () => {
   up = true;
   await sleep(200);
   assert.equal(turnsRun(), before, 'neither resumed');
+  assert.equal((await turn(a, 'ok', 'carry on')).note, null, "the stop's note goes with the next good turn");
 });
 
 test('the wait and its held messages outlive a restart while the network is still down', async () => {

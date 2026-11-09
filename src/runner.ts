@@ -2023,8 +2023,10 @@ export class Runner {
       if (fresh) {
         const ended = this.startTurn(project, ticket, [fresh], this.turnPerson(ticket, project, []));
         if (this.isRunning(ticketId)) return ended;
-        // No turn started (a preview, a refused place): drop it, or the idle lane would ask again at once.
+        // No turn started (a preview, a refused place): drop it, or the idle lane would ask again at once,
+        // and forget its size, or the idle check would ask again each minute.
         this.store.deleteSetting(freshKey(ticketId));
+        this.store.deleteSetting(contextKey(ticketId));
         this.emit(ticketId, 'note', { text: 'The fresh start could not run a turn, so the Taskmaster keeps its session.' });
       }
       // Everything queued while the last turn ran goes into one turn.

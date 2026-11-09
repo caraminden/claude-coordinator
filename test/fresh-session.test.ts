@@ -208,3 +208,23 @@ test('the idle sweep starts fresh only past the idle time and the context size',
   await endTurn(due, 'ok');
   await waitIdle(due);
 });
+
+test('a fresh start that cannot run a turn gives up once, not every minute', async () => {
+  const id = taskmaster();
+  const now = Date.now();
+  store.setSetting(`context:${id}`, FRESH_CONTEXT_TOKENS + 1);
+  store.recordTurn(id, { event_id: null, session_id: 'old', ended_at: now - FRESH_IDLE_MS, session_cost_usd: 0, duration_ms: 1, usage: {} } as any);
+  runner.placeFor = () => ({ refused: 'No Claude login for this turn.' });
+  try {
+    runner.freshSweep(now);
+    await new Promise((r) => setTimeout(r, 50)); // its lane frees up
+    runner.freshSweep(now + 60_000);
+    await new Promise((r) => setTimeout(r, 50));
+  } finally {
+    runner.placeFor = undefined;
+  }
+  assert.equal(runner.isRunning(id), false);
+  assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);
+  assert.equal(notes(id).filter((t) => t.startsWith('Starting a fresh session')).length, 1);
+  assert.ok(notes(id).includes('The fresh start could not run a turn, so the Taskmaster keeps its session.'));
+});

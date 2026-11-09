@@ -4,7 +4,10 @@
 // over stdio, and prints Codex's final message.
 //
 //   citadel-codex-review --check            exit 0 when a review can run here, else 3 and why
-//   citadel-codex-review [--timeout s] < brief.md
+//   citadel-codex-review [--timeout s] [--image path]... < brief.md
+//
+// --image (#408) attaches a screenshot or art sheet for Codex to see, from the review's folder or the
+// turn's shared folders only (images()).
 //
 // Exits 0 with the review on stdout, 3 when it can't run here, 4 when it's skipped to save the
 // person's Codex usage (overPace), 1 when the turn fails, 124 on timeout.
@@ -15,7 +18,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REQUIREMENTS = '/etc/codex/requirements.toml';
@@ -40,7 +43,7 @@ export function notReady(env: Record<string, string | undefined> = process.env, 
   return null;
 }
 
-export const DEVELOPER_INSTRUCTIONS = 'You are a read-only code reviewer for Citadel. Read the code with shell commands (git, rg, sed, cat); never edit, create or delete a file, and never run tests, builds, installs or network commands. A Citadel tripwire blocks some commands and says why: take that as final and carry on without it. Reply with the review only, in the format the brief asks for.';
+export const DEVELOPER_INSTRUCTIONS = 'You are a read-only reviewer for Citadel, of code or of the work in the images attached to the brief. Read the code with shell commands (git, rg, sed, cat); never edit, create or delete a file, and never run tests, builds, installs or network commands. A Citadel tripwire blocks some commands and says why: take that as final and carry on without it. Reply with the review only, in the format the brief asks for.';
 
 export interface RateWindow {
   usedPercent: number;
@@ -79,6 +82,39 @@ export function overPace(limits: RateLimits | null | undefined, now = Date.now()
   return null;
 }
 
+const IMAGE_TYPES = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
+
+/**
+ * The `--image` paths in `args`, resolved, or why one can't go to Codex (#408): an image file (png, jpg,
+ * gif, webp) inside `cwd` (the worktree) or the turn's shared folders, so a review can't attach a file
+ * from anywhere else on the box.
+ */
+export function images(args: string[], cwd: string, env: Record<string, string | undefined> = process.env): { paths: string[] } | { error: string } {
+  const roots = [cwd, env.COORDINATOR_SHARED_DIR, env.COORDINATOR_FILES_DIR].flatMap((d) => {
+    try {
+      return d ? [realpathSync(d)] : [];
+    } catch {
+      return [];
+    }
+  });
+  const paths: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== '--image') continue;
+    const p = args[++i];
+    if (!p) return { error: '--image needs a path' };
+    let real: string;
+    try {
+      real = realpathSync(resolve(cwd, p));
+    } catch {
+      return { error: `no image at ${p}` };
+    }
+    if (!IMAGE_TYPES.has(extname(real).toLowerCase())) return { error: `${p} isn't a png, jpg, gif or webp image` };
+    if (!roots.some((r) => { const rel = relative(r, real); return rel && !rel.startsWith('..') && !isAbsolute(rel); })) return { error: `${p} is outside this worktree and the shared folders, so it can't go to Codex` };
+    paths.push(real);
+  }
+  return { paths };
+}
+
 /** "5-hour 12%, weekly 30%": the person's Codex usage, for the self-review report line. */
 export function usageLine(limits: RateLimits | null | undefined): string {
   return [limits?.primary, limits?.secondary].filter((w): w is RateWindow => !!w && typeof w.usedPercent === 'number').map((w) => `${windowName(w)} ${w.usedPercent}%`).join(', ');
@@ -86,10 +122,11 @@ export function usageLine(limits: RateLimits | null | undefined): string {
 
 /**
  * Run one review: start a read-only, ephemeral thread in `cwd`, send `brief`, and resolve with Codex's
- * last message. Approval requests are declined (the sandbox already refuses writes). It first reads the
- * person's Codex usage and skips (code 4) when overPace says so; `usage` is the latest usage line.
+ * last message, with `images` (absolute paths) attached after it. Approval requests are declined (the sandbox
+ * already refuses writes). It first reads the person's Codex usage and skips (code 4) when overPace says so;
+ * `usage` is the latest usage line.
  */
-export function review(brief: string, opts: { cwd: string; timeoutMs: number; bin?: string; env?: Record<string, string | undefined>; now?: () => number }): Promise<{ code: number; text: string; usage: string }> {
+export function review(brief: string, opts: { cwd: string; timeoutMs: number; images?: string[]; bin?: string; env?: Record<string, string | undefined>; now?: () => number }): Promise<{ code: number; text: string; usage: string }> {
   const bin = opts.bin ?? 'codex';
   // file: the login stays in ~/.codex/auth.json (there's no keyring in a container); no history: CODEX_HOME grows fast otherwise.
   const child = spawn(bin, ['app-server', '-c', 'cli_auth_credentials_store="file"', '-c', 'history.persistence="none"'], { cwd: opts.cwd, env: opts.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -165,7 +202,7 @@ export function review(brief: string, opts: { cwd: string; timeoutMs: number; bi
       const why = overPace(limits, opts.now?.());
       if (why) return finish(4, `Skipped to save your Codex plan: ${why}.`);
       const { thread } = await call('thread/start', { cwd: opts.cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true, developerInstructions: DEVELOPER_INSTRUCTIONS });
-      await call('turn/start', { threadId: thread.id, input: [{ type: 'text', text: brief, text_elements: [] }] });
+      await call('turn/start', { threadId: thread.id, input: [{ type: 'text', text: brief, text_elements: [] }, ...(opts.images ?? []).map((path) => ({ type: 'localImage', path }))] });
     })().catch((err) => finish(1, `${err.message}${tail(stderr)}`));
   });
 }
@@ -253,7 +290,9 @@ export function inContainer(args: string[], cfg: CodexConfig & { container: Revi
     return Promise.resolve(fail(check, `Couldn't set up the review for Codex's container (${c.name}): ${err.message}`));
   }
   const driver = join(dir, basename(fileURLToPath(import.meta.url)));
-  const env = { ...c.env, CITADEL_CODEX_TRIPWIRE: file() };
+  // The shared folders too, so the copy can check --image paths against them (the container mounts them at the same paths).
+  const shared = Object.fromEntries((['COORDINATOR_SHARED_DIR', 'COORDINATOR_FILES_DIR'] as const).flatMap((k) => (process.env[k] ? [[k, process.env[k]!]] : [])));
+  const env = { ...c.env, ...shared, CITADEL_CODEX_TRIPWIRE: file() };
   const argv = ['exec', '-i', '-w', cwd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), c.name, 'node', driver, ...args];
   return new Promise((resolve) => {
     let stderr = '';
@@ -304,6 +343,11 @@ function tail(s: string): string {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
+  const imgs = args.includes('--check') ? { paths: [] } : images(args, process.cwd());
+  if ('error' in imgs) {
+    process.stderr.write(`citadel-codex-review: ${imgs.error}\n`);
+    process.exit(2);
+  }
   // A host turn (#398): no hook here, so the review goes to the Codex container the runner named, never runs here.
   const cfg = hooked() ? null : runnerConfig();
   if (cfg?.container) process.exit(await inContainer(args, cfg as CodexConfig & { container: ReviewContainer }, process.cwd()));
@@ -320,10 +364,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const timeoutMs = (t >= 0 ? Number(args[t + 1]) : 900) * 1000;
   const brief = readFileSync(0, 'utf8').trim();
   if (!brief || !(timeoutMs > 0)) {
-    process.stderr.write('usage: citadel-codex-review [--timeout seconds] < brief.md   (or --check)\n');
+    process.stderr.write('usage: citadel-codex-review [--timeout seconds] [--image path]... < brief.md   (or --check)\n');
     process.exit(2);
   }
-  const r = await review(brief, { cwd: process.cwd(), timeoutMs, bin: process.env.CITADEL_CODEX_BIN });
+  const r = await review(brief, { cwd: process.cwd(), timeoutMs, images: imgs.paths, bin: process.env.CITADEL_CODEX_BIN });
   (r.code ? process.stderr : process.stdout).write(r.text + '\n');
   if (r.usage) process.stderr.write(`Codex usage: ${r.usage}\n`);
   process.exit(r.code);

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { imageHash, type ClaudeLink } from '../src/claude-link.ts';
 import { CodexLink, deviceCode } from '../src/codex-link.ts';
 import { Containers } from '../src/containers.ts';
-import { notReady, overPace, review, usageLine } from '../src/codex-review.ts';
+import { images, notReady, overPace, review, usageLine } from '../src/codex-review.ts';
 // @ts-expect-error: a plain .mjs, shipped into the image as is.
 import { patchPaths } from '../deploy/claude-container/codex/citadel-hook.mjs';
 
@@ -247,6 +247,36 @@ test('a review starts a read-only, ephemeral thread with no approvals, declines 
   assert.deepEqual(msgs.find((m) => m.id === 900).result, { decision: 'decline' });
 });
 
+test('images go to Codex after the brief, as local image inputs (#408)', async () => {
+  rmSync(fakeLog, { force: true });
+  const r = await review('Judge the sheet.', { cwd: root, timeoutMs: 10_000, images: ['/w/a.png', '/s/b.webp'], bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'ok' } });
+  assert.equal(r.code, 0);
+  assert.deepEqual(logged().find((m) => m.method === 'turn/start').params.input.slice(1), [
+    { type: 'localImage', path: '/w/a.png' },
+    { type: 'localImage', path: '/s/b.webp' },
+  ]);
+});
+
+test("--image takes only image files in the review's folder or the turn's shared folders (#408)", () => {
+  const w = join(root, 'img-worktree');
+  const shared = join(root, 'img-shared');
+  const outside = join(root, 'img-outside');
+  for (const d of [join(w, 'shots'), shared, outside]) mkdirSync(d, { recursive: true });
+  for (const f of [join(w, 'shots', 'a.png'), join(shared, 'b.JPG'), join(outside, 'c.png'), join(w, 'notes.txt')]) writeFileSync(f, 'x');
+  symlinkSync(join(outside, 'c.png'), join(w, 'sneaky.png'));
+  const env = { COORDINATOR_SHARED_DIR: shared };
+  const at = (...a: string[]) => realpathSync(join(...a));
+  assert.deepEqual(images(['--timeout', '60', '--image', 'shots/a.png', '--image', join(shared, 'b.JPG')], w, env), { paths: [at(w, 'shots', 'a.png'), at(shared, 'b.JPG')] });
+  assert.deepEqual(images(['--timeout', '60'], w, env), { paths: [] });
+  const why = (args: string[]) => (images(args, w, env) as { error: string }).error;
+  assert.match(why(['--image', join(outside, 'c.png')]), /outside this worktree and the shared folders/);
+  assert.match(why(['--image', 'sneaky.png']), /outside/, 'a link out of the worktree is judged by where it points');
+  assert.match(why(['--image', 'notes.txt']), /isn't a png, jpg, gif or webp/);
+  assert.match(why(['--image', 'shots/missing.png']), /no image at shots\/missing.png/);
+  assert.match(why(['--image']), /needs a path/);
+  assert.match((images(['--image', join(shared, 'b.JPG')], w, {}) as { error: string }).error, /outside/, 'no shared folder in the env: only the worktree');
+});
+
 test("a failed Codex turn says why (a usage limit, say), and a stuck one times out and is stopped", async () => {
   const failed = await review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'fail' } });
   assert.equal(failed.code, 1);
@@ -430,9 +460,9 @@ const podCalls = () => {
     return [];
   }
 };
-function cli(args: string[], fake: string | null, cfg: string, input = '') {
+function cli(args: string[], fake: string | null, cfg: string, input = '', extra: Record<string, string> = {}) {
   rmSync(podLog, { force: true });
-  return spawnSync(process.execPath, [driver, ...args], { cwd: root, input, encoding: 'utf8', env: { PATH: `${podBin}:${process.env.PATH}`, CITADEL_CODEX_TRIPWIRE: cfg, ...(fake ? { FAKE_PODMAN: fake } : {}) } });
+  return spawnSync(process.execPath, [driver, ...args], { cwd: root, input, encoding: 'utf8', env: { PATH: `${podBin}:${process.env.PATH}`, CITADEL_CODEX_TRIPWIRE: cfg, ...(fake ? { FAKE_PODMAN: fake } : {}), ...extra } });
 }
 
 test("a host turn's review runs in the Codex container the runner named, read-only, with the brief, exit code and usage line passed through (#398)", { skip: notReady({}) === null && 'this machine has the hook' }, () => {
@@ -497,4 +527,29 @@ test("a host turn's review is exit 3 with the reason when the container isn't si
     assert.match(args[0] === '--check' ? r.stdout : r.stderr, /managed tripwire hook isn't installed/);
   }
   assert.equal(podCalls().length, 0, 'never execs into a container the runner didn\'t name');
+});
+
+test("a host turn's images go to the Codex container as --image, with the shared folders to check them against; a bad one stops before podman (#408)", { skip: notReady({}) === null && 'this machine has the hook' }, () => {
+  const shared = join(root, 'host-shared');
+  mkdirSync(shared, { recursive: true });
+  writeFileSync(join(root, 'shot.png'), 'x');
+  writeFileSync(join(shared, 'sheet.webp'), 'x');
+  const r = cli(['--timeout', '60', '--image', 'shot.png', '--image', join(shared, 'sheet.webp')], 'ok', hostTurn, 'brief', { COORDINATOR_SHARED_DIR: shared });
+  assert.equal(r.status, 0, r.stderr);
+  const [call] = podCalls();
+  assert.deepEqual(call.rest, ['--timeout', '60', '--image', 'shot.png', '--image', join(shared, 'sheet.webp')]);
+  assert.equal(call.cwd, root);
+  assert.equal(call.env.COORDINATOR_SHARED_DIR, shared);
+
+  const bad = cli(['--image', '/etc/hostname.png'], 'ok', hostTurn, 'brief', { COORDINATOR_SHARED_DIR: shared });
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /no image at \/etc\/hostname.png/);
+  // Outside the worktree (the review's cwd) with no shared folder to cover it.
+  const elsewhere = mkdtempSync(join(tmpdir(), 'codex-elsewhere-'));
+  after(() => rmSync(elsewhere, { recursive: true, force: true }));
+  writeFileSync(join(elsewhere, 'x.png'), 'x');
+  const outside = cli(['--image', join(elsewhere, 'x.png')], 'ok', hostTurn, 'brief', { COORDINATOR_SHARED_DIR: shared });
+  assert.equal(outside.status, 2);
+  assert.match(outside.stderr, /outside this worktree and the shared folders/);
+  assert.equal(podCalls().length, 0);
 });

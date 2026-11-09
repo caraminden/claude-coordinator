@@ -337,6 +337,23 @@ test('a message that arrives once a fresh start Citadel asked for is pending sti
   assert.equal(store.getTicket(id)!.session_id, null);
 });
 
+test('a message sent during an automatic handoff turn that writes none goes before the compaction', { timeout: 20_000 }, async () => {
+  const id = taskmaster();
+  const count = callCount();
+  assert.equal(runner.requestFresh(id, 'test', true), null);
+  await started(id);
+  runner.send(id, 'Josh', 'waiting');
+  await endTurn(id, 'ok');
+  await started(id);
+  assert.match((await prompts(count, 2))[1], /\[Josh\]: waiting/);
+  await endTurn(id, 'ok');
+  await started(id);
+  assert.match((await prompts(count, 3))[2], /^\/compact /);
+  await endTurn(id, 'ok');
+  await waitIdle(id);
+  assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);
+});
+
 test('a handoff and compaction that leave it big do not loop; the next real turn hands off again', { timeout: 20_000 }, async () => {
   const id = taskmaster();
   try {

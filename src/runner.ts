@@ -2008,8 +2008,9 @@ export class Runner {
     const f = this.store.getSetting<FreshState>(freshKey(ticketId));
     // After a network outage, its resume (holding any queued messages) goes first: a step now would fail too and replace that wait.
     if (!f || f.summary || this.netWait(ticketId)) return null;
-    // A message queued for a fresh start Citadel asked for by itself goes first; its turn's end hands off (#423).
-    if (f.auto && !f.compact && this.queued(ticketId)) return null;
+    // A message queued for a fresh start Citadel asked for by itself goes first, before its handoff or
+    // its /compact fallback; the step follows that turn (#423).
+    if (f.auto && this.queued(ticketId)) return null;
     return f.compact ? { author: 'System', text: COMPACT_COMMAND, images: [], fresh: 'compact' } : { author: 'System', text: handoffPrompt(f.why), images: [], fresh: 'handoff' };
   }
 

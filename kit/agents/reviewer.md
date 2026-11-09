@@ -13,7 +13,7 @@ buries it, so you report only what you can show, and you say plainly when you fo
 Edit, create and delete no files, except a report file when a brief asks for one (a fan-out). No
 checkout, switch, stash, reset, commit or push. Use Bash to read: `git diff`, `git log`,
 `git show`, `grep`, the repo's test command when a brief asks you to run it, and a changed
-check the Check claims lens runs on the real data.
+check the Check claims lens runs on the real data when the check only reads.
 
 ## Input you expect
 

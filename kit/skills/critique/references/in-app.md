@@ -37,12 +37,8 @@ frontmatter) and saves it with every verdict.
 | `model` | `haiku` per item; a Codex model for a gate (section 6) | |
 | `mcp` | `[]` | Blind: the grader sees only the prompt. It can't read the app's data or fetch the source again. |
 | `agents`, `webSearch` | `false` | No Grunts, no web. |
+| `machines` | `false` | Leaves out the person's online machines, which every turn otherwise gets as MCP tools with a note in the system prompt. |
 | `timeoutSec` | `60` | |
-
-**Not quite blind yet:** Citadel adds the person's online machines to every contraption turn as MCP
-tools, with a note in the system prompt, whatever `mcp` says (`src/contraption-turns.ts`). So the
-output contract also says "call no tools", and the app discards a grade whose turn sent any `tool`
-event, and grades again once.
 
 The prompt holds what the item's reader would see and the source, never how the agent made it: no
 reasoning, no chat, no tool log. The one exception is an excuse: when the item says it couldn't do
@@ -54,7 +50,7 @@ along on every turn, so measure before trusting the report's ~$0.001 an item on 
 
 ## 3. The verdict, as JSON
 
-The output contract, at the end of the system prompt: call no tools, and reply with one JSON object and nothing else.
+The output contract, at the end of the system prompt: reply with one JSON object and nothing else.
 
 ```json
 {
@@ -95,7 +91,7 @@ On the app's side, before saving:
 
 ## 4. Save it beside the item
 
-A row per grade, keyed by the item: the JSON, the rubric version, the model asked for, the time, and
+A row per grade, keyed by the item: the JSON, the rubric version, the model that ran (`end`'s `provider` and `model`), the time, and
 later the person's action. A re-grade adds a row; nothing is overwritten. The verdict lives in the
 app's own store. Citadel keeps no turn content, but the turn is a session in the person's own
 Claude folder, item and source included, as their own chats with the app are.
@@ -119,10 +115,11 @@ On the item's own screen, next to the item, using Citadel UI (`citadel:contrapti
   rubric.
 - **A gate that accepts a fact** (Transdata accepting a row, ToC promoting a tier): a Codex model
   (`gpt-6.1-sol`; the names are in `src/codex.ts`), another family from the Claude agent that wrote
-  it, since a judge favours its own family's text. Two catches in the turn API today: a Codex ask
-  from a person whose container has no Codex signed in runs Claude's default model instead, and a
-  person's "Enable Codex override" turns a Haiku ask into Codex. The turn's events don't say which
-  ran, so save the model *asked for* and show "Checked by Codex" only once Citadel reports it.
+  it, since a judge favours its own family's text. What runs may not be what you asked: a Codex ask
+  from a person who hasn't linked Codex falls back to the app's `default_model` (or Claude Code's
+  default), and a person's "Enable Codex override" turns a Haiku ask into Codex. `start` says which
+  runs (`provider`, `model`): a gate whose `start.provider` isn't `codex` cancels the turn and shows
+  "couldn't check" rather than accept a Claude grade of Claude's work. Name the grader from `end`.
 - **Never Opus per item.**
 
 ## 7. Calibrate from what people did

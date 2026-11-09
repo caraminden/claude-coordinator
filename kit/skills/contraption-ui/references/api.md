@@ -202,6 +202,7 @@ Body up to 4,000,000 bytes:
   "mcp": [{ "name": "mandate", "path": "/apps/mandate/mcp", "headers": { "Authorization": "Bearer <a token you minted for this turn>" } }],
   "agents": { "max": 3, "model": "haiku" },
   "webSearch": false,
+  "machines": true,
   "timeoutSec": 180
 }
 ```
@@ -218,6 +219,7 @@ Body up to 4,000,000 bytes:
 | `mcp` | | Up to 10 servers: `name` (`^[A-Za-z0-9_-]{1,40}$`, unique), `path` (on your port, starting with `/`, at most 200 printable characters), `headers` (an object of header names matching `^[A-Za-z0-9-]{1,100}$` to values of at most 8,192 characters with no line breaks) |
 | `agents` | | `false` (default) or `{ max, model }`: lets the agent start Grunts (the Agent tool), at most `max` (1 to 10, default 1) at once, nested ones included; `model` defaults to the turn's |
 | `webSearch` | | `true` adds WebSearch and WebFetch for the agent and its Grunts; default `false`. WebFetch puts a web page in front of the model, so keep your write tools behind the person's explicit asks on such turns |
+| `machines` | | `false` leaves out the person's online machines and the system prompt's note on them; default `true`. For a turn that must see only its prompt, such as a blind grader |
 | `timeoutSec` | | 1 to 900, default 180 |
 
 Each `mcp` server is reached as `http://127.0.0.1:$PORT<path>` (streamable HTTP) with your headers
@@ -226,8 +228,8 @@ path on your port, so include your base path if your server routes under it. Che
 there: Citadel passes it through and never reads it.
 
 **What the agent can use** (tested): your MCP servers' tools (`mcp__<name>__<tool>`), the person's
-own machines that are online (their MCP servers, as `mcp__<machine>`; a server of yours with the
-same name wins and the machine is left out), Agent if `agents` is set, and WebSearch and WebFetch
+own machines that are online unless `machines` is `false` (their MCP servers, as `mcp__<machine>`;
+a server of yours with the same name wins and the machine is left out), Agent if `agents` is set, and WebSearch and WebFetch
 if `webSearch` is `true`. Nothing else: no shell, no files, no Citadel or scheme tools, no user
 settings, CLAUDE.md, memory, skills or plugins. Each (contraption, person) gets an empty scratch
 folder as its working directory.
@@ -237,7 +239,8 @@ Codex in the person's container when they've linked Codex; otherwise the turn fa
 `default_model` (or Claude Code's default if that's a Codex id too). A person who switched on
 "Enable Codex override" in Citadel's settings gets every turn on Codex, a Claude pick mapped by
 tier (Opus/Fable to `gpt-6-astra`, Haiku to `gpt-6-luna`, the rest to `gpt-6.1-sol`). The events
-are the same either way, and a session moves between the two with its history carried over.
+are the same either way, and a session moves between the two with its history carried over. So
+the model that runs may not be the one you asked for: `start` and `end` say which ran (tested).
 
 **Sessions.** A name maps to one conversation per (contraption, person) and resumes it on the next
 turn. `fresh: true`, or a conversation Citadel can no longer find (the person relinked their
@@ -253,13 +256,13 @@ last event is always `end` or `error`, then the stream closes.
 
 | Event | Data |
 |---|---|
-| `start` | `{ turn, session, claudeSession }`. `turn` is the id for cancel and messages |
+| `start` | `{ turn, session, claudeSession, provider, model }`. `turn` is the id for cancel and messages. `provider` is `claude` or `codex`, and `model` the one that runs, after any fallback or override: as you asked (`haiku`), or `null` for Claude Code's default |
 | `text` | `{ delta, parent: null, message }`: the top-level agent's words, streamed. A new `message` id is a new model message (a new paragraph either side of a tool call); never glue two messages' deltas. Grunts' words are never streamed |
 | `tool` | `{ id, name, input, parent }`: `parent` is `null` at the top level, or the `id` of the Agent call whose Grunt made this call |
 | `tool_result` | `{ id, ok, parent }`, no content (your tool produced it) |
 | `compacted` | `{}`: the conversation was compacted |
 | `taken` | `{ id }`: the agent read a mid-turn message, `id` as its send returned |
-| `end` | `{ stop, usage: { input, output, cacheRead, cacheWrite } }`; usage adds up every reply in the turn |
+| `end` | `{ stop, usage: { input, output, cacheRead, cacheWrite }, provider, model }`; usage adds up every reply in the turn, and `model` is the full name the agent reported (`claude-haiku-…`), else as in `start` |
 | `error` | `{ code, message }`, `message` written for a person |
 
 A Grunt that starts its own Grunt shows that Agent call under its own row, but the inner Grunt's
@@ -483,7 +486,8 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
-- **2026-11-08:** `ui/optimistic.js`'s `optimistic({ key, apply, send, undo, label })` for clicks
+- **2026-11-08:** Turns' `start` and `end` say which `provider` and `model` ran, and `machines:
+  false` leaves the person's machines out of a turn. `ui/optimistic.js`'s `optimistic({ key, apply, send, undo, label })` for clicks
   that show their result at once and roll back with a Retry toast; `toast()` takes `action` and
   `onHide`. `ui/dialog.js`'s `mountDialogs()` and the `cui-dialog` part.
 - **2026-11-07:** Using an app renews a Citadel session older than 7 days (a `Set-Cookie` on

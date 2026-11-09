@@ -65,7 +65,8 @@ take().then((m) => {
   const dir = path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
   fs.mkdirSync(dir, { recursive: true });
   fs.appendFileSync(path.join(dir, session + '.jsonl'), JSON.stringify({ prompt }) + '\\n');
-  out({ type: 'system', subtype: 'init', session_id: session, tools: [] });
+  // claude's init names the model it runs in full (#409).
+  out({ type: 'system', subtype: 'init', session_id: session, tools: [], model: 'claude-' + (opt('--model') ?? 'default') + '-test' });
   if (prompt.includes('slow')) return setInterval(() => {}, 1000);
   // Ignores SIGTERM, so only the SIGKILL ends it.
   if (prompt.includes('stubborn')) { process.on('SIGTERM', () => {}); return setInterval(() => {}, 1000); }
@@ -230,6 +231,8 @@ test('a turn has only the contraption\'s MCP and no built-in tools, settings, CL
   assert.equal(start.event, 'start');
   assert.equal(start.data.session, 'acolyte');
   assert.match(start.data.claudeSession, /^[0-9a-f-]{36}$/);
+  assert.equal(start.data.provider, 'claude');
+  assert.equal(start.data.model, 'haiku', 'what it runs, as asked: here the registry\'s default');
   assert.equal(evs.filter((e) => e.event === 'text').map((e) => e.data.delta).join(''), 'Moved it to Thursday.');
   // Each piece names its message, streamed or not, so an app can split "Moved it" from " to Thursday.".
   assert.deepEqual(evs.filter((e) => e.event === 'text').map((e) => [e.data.message, e.data.delta]), [['m1', 'Moved '], ['m1', 'it'], ['m2', ' to Thursday.']]);
@@ -237,7 +240,7 @@ test('a turn has only the contraption\'s MCP and no built-in tools, settings, CL
     { event: 'tool', data: { id: 'tu1', name: 'mcp__mandate__move', input: { to: 'Thursday' }, parent: null } },
     { event: 'tool_result', data: { id: 'tu1', ok: true, parent: null } },
     { event: 'compacted', data: {} },
-    { event: 'end', data: { stop: 'end_turn', usage: { input: 10, output: 5, cacheRead: 100, cacheWrite: 20 } } },
+    { event: 'end', data: { stop: 'end_turn', usage: { input: 10, output: 5, cacheRead: 100, cacheWrite: 20 }, provider: 'claude', model: 'claude-haiku-test' } },
   ]);
   // The turn's folder (prompt, system prompt, MCP token) is gone once it ends.
   assert.deepEqual(readdirSync(join(data, 'run', 'contraption-turns')), []);
@@ -442,7 +445,7 @@ test('a running turn takes a message from its own person, says when claude took 
   assert.deepEqual(evs[taken].data, { id: out.id }, 'one taken event, for the message');
   assert.equal(evs.filter((e) => e.event === 'taken').length, 1, 'not for the prompt');
   assert.ok(evs.findIndex((e) => e.event === 'text' && e.data.delta === 'Heard: Make it Friday.') > taken, 'claude read it after taking it in');
-  assert.deepEqual(evs.at(-1), { event: 'end', data: { stop: 'end_turn', usage: { input: 4, output: 6, cacheRead: 5, cacheWrite: 0 } } }, 'both replies\' usage');
+  assert.deepEqual(evs.at(-1), { event: 'end', data: { stop: 'end_turn', usage: { input: 4, output: 6, cacheRead: 5, cacheWrite: 0 }, provider: 'claude', model: 'claude-haiku-test' } }, 'both replies\' usage');
   assert.deepEqual(turns.steer(mandate.id, id, cara.id, 'Too late.'), { steered: false, reason: 'ended' });
   assert.equal(turns.steer(mandate.id, id, josh.id, 'Too late.'), 'other_person');
   assert.equal(turns.steer(mandate.id, 99_999, cara.id, 'Hi.'), null);
@@ -510,6 +513,34 @@ test('deleting a session forgets the name and deletes its transcript', async () 
   assert.equal(turns.deleteSession(mandate, cara.id, 'aura-gone'), 'missing');
 });
 
+test("a Codex pick the person can't run falls back to the app's default, or Claude's own, and start says so (#409)", async () => {
+  // codexWhy says Codex isn't set up, as it does by default here.
+  const start = (evs: Ev[]) => [evs[0].data.provider, evs[0].data.model];
+  assert.deepEqual(start(await turn(mandate, { person: josh.id, session: 'no-codex', model: 'gpt-6-luna' })), ['claude', 'haiku']);
+  const own = await turn(peek, { person: josh.id, session: 'no-codex', model: 'gpt-6-luna' });
+  assert.deepEqual(start(own), ['claude', null], "no model: the account's default");
+  assert.equal(own.at(-1)!.data.model, 'claude-default-test', 'end names it in full, from claude');
+});
+
+test('a turn gets the person\'s online machines and a note on them, unless it asks for machines: false (#306, #409)', async () => {
+  turns.machines = () => [{ id: 7, name: 'perigee-godot', token_hash: '', created_by: 'Cara', created_at: 0, last_seen_at: 0, notes: 'Never restart it.', workspace_tools: 0, scoped: 0 }];
+  try {
+    await turn(mandate, { session: 'with-machines', system: 'You grade.', mcp: [{ name: 'mandate', path: '/mcp' }] });
+    let run = lastRun();
+    assert.deepEqual(Object.keys(JSON.parse(run.mcp).mcpServers), ['mandate', 'perigee-godot']);
+    assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate', 'mcp__perigee-godot']);
+    assert.match(run.system, /^You grade\.\n\nConnected machines: perigee-godot[\s\S]*Never restart it\./);
+
+    await turn(mandate, { session: 'blind', system: 'You grade.', mcp: [{ name: 'mandate', path: '/mcp' }], machines: false });
+    run = lastRun();
+    assert.deepEqual(Object.keys(JSON.parse(run.mcp).mcpServers), ['mandate']);
+    assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate']);
+    assert.equal(run.system, 'You grade.');
+  } finally {
+    turns.machines = () => [];
+  }
+});
+
 test('requests are checked before anything runs', () => {
   const bad = (body: object) => assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'p', ...body }, mandate), (e: any) => e.code === 'bad_request');
   bad({ person: 'one' });
@@ -522,11 +553,13 @@ test('requests are checked before anything runs', () => {
   bad({ mcp: [{ name: 'a', path: '/mcp' }, { name: 'a', path: '/other' }] });
   bad({ agents: { max: 50 } });
   bad({ webSearch: 'yes' });
+  bad({ machines: 'no' });
   bad({ compactWindow: 5 });
   bad({ timeoutSec: 0 });
   bad({ timeoutSec: 901 }); // a running turn holds back Citadel's restarts
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p', agents: false }, mandate).agents, false);
   assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p' }, mandate).webSearch, false, 'off unless asked');
+  assert.equal(parseTurn({ person: 1, session: 's', prompt: 'p' }, mandate).machines, true, 'on unless turned off');
   assert.deepEqual(parseTurn({ person: 1, session: 's', prompt: 'p', agents: { max: 3 } }, mandate).agents, { max: 3, model: null });
 });
 
@@ -619,6 +652,9 @@ test("on Codex (#337) a contraption turn runs the shim in its own mode with only
   try {
     const evs = await turn(mandate, { person: josh.id, session: 'on-codex', prompt: 'CODEX ASK one', mcp: [{ name: 'mandate', path: '/mcp' }] });
     assert.equal(evs.at(-1)!.event, 'end', JSON.stringify(evs));
+    // The override turned the app's haiku into Codex, and start and end say so (#409).
+    assert.deepEqual([evs[0].data.provider, evs[0].data.model], ['codex', 'gpt-6-luna']);
+    assert.deepEqual([evs.at(-1)!.data.provider, evs.at(-1)!.data.model], ['codex', 'gpt-6-luna']);
     assert.ok(evs.some((e) => e.event === 'text' && e.data.delta.includes('CODEX MOVED IT')));
     const calls = readFileSync(codexLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     assert.equal(calls[0].tripwire.mode, 'contraption');

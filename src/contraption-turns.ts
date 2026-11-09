@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path';
 import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
 import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
-import { claudeParts, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
+import { claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './runner.ts';
 import { claudeConfigDir, projectSlug } from './sessions.ts';
 
@@ -86,6 +86,8 @@ export interface TurnRequest {
   agents: { max: number; model: string | null } | false;
   /** WebSearch and WebFetch, off unless the contraption asks (#332). */
   webSearch: boolean;
+  /** The person's online machines as MCP tools, with the system prompt's note on them (#306); `machines: false` drops both (#409). */
+  machines: boolean;
   timeoutSec: number;
 }
 
@@ -152,10 +154,11 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
     agents = { max: int(a.max, 'agents.max', 1, 10, 1), model: a.model ?? null };
   }
   if (body.webSearch !== undefined && typeof body.webSearch !== 'boolean') bad('webSearch must be true or false');
+  if (body.machines !== undefined && typeof body.machines !== 'boolean') bad('machines must be true or false');
   return {
     person: body.person, session: body.session, fresh: body.fresh === true, prompt: body.prompt, system: body.system ?? '', model,
     compactWindow: int(body.compactWindow, 'compactWindow', 10_000, 1_000_000, DEFAULT_COMPACT_WINDOW), mcp, agents,
-    webSearch: body.webSearch === true, timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
+    webSearch: body.webSearch === true, machines: body.machines !== false, timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
   };
 }
 
@@ -431,6 +434,9 @@ export class ContraptionTurns {
     // Codex (#337): a Codex pick, or the person's "Enable Codex override", once their container has Codex; else Claude's default.
     const codex = wantCodex && !at.host && !this.codexWhy(req.person);
     if (isCodexModel(req.model) && !codex) req = { ...req, model: isCodexModel(c.default_model) ? null : c.default_model };
+    // What runs, for start and end (#409): a Codex pick the person can't run falls back above, and the override turns any pick into Codex.
+    const provider = codex ? 'codex' : 'claude';
+    let model: string | null = codex ? codexModelFor(req.model) : req.model;
     const ckey = codexKey(c.id, req.person, req.session);
     const logFile = codexLogFile(where.onHost, req.session);
     if (req.fresh) this.dropCodex(ckey, logFile);
@@ -456,7 +462,7 @@ export class ContraptionTurns {
     const secret = (name: string, text: string) => writeFileSync(join(dir.onHost, name), text, { mode: 0o600 });
     const config: { mcpServers: Record<string, object> } = mcpConfig(c.port, req.mcp);
     // The person's own machines (#306), through the same stand-in minion turns use; a contraption server's name wins.
-    const machines = this.machines(req.person).filter((m) => !req.mcp.some((s) => s.name === m.name));
+    const machines = !req.machines ? [] : this.machines(req.person).filter((m) => !req.mcp.some((s) => s.name === m.name));
     live.machines = machines.map((m) => m.id);
     if (machines.length) {
       secret('machine-mcp.ts', MACHINE_MCP);
@@ -523,7 +529,7 @@ export class ContraptionTurns {
 
     const child = spawn(cmd, cmdArgs, { cwd: at.host ? where.cwd : undefined, env: at.host ? env : turnEnv(this.env), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     live.child = child;
-    emit('start', { turn: live.id, session: req.session, claudeSession });
+    emit('start', { turn: live.id, session: req.session, claudeSession, provider, model });
     child.stdin!.on('error', () => {}); // claude exited without reading it all
     // Open until the reply is out, as the turn wrapper keeps a minion turn's: steer() writes to it meanwhile.
     child.stdin!.write(userLine(prompt));
@@ -541,6 +547,8 @@ export class ContraptionTurns {
     const handle = (ev: any) => {
       // A Grunt's events name the Agent call that started it; the top level's name none.
       const parent = ev.parent_tool_use_id ? String(ev.parent_tool_use_id) : null;
+      // The full name of the model it runs (an alias, or none for the account's default, in start), for end.
+      if (ev.type === 'system' && ev.subtype === 'init' && !parent && typeof ev.model === 'string' && MODEL.test(ev.model)) model = ev.model;
       if (ev.type === 'codex_waiting') {
         waited = true;
       } else if (ev.type === 'codex_rate_limits') {
@@ -644,7 +652,7 @@ export class ContraptionTurns {
     if (live.stopped === 'timeout') return error('timeout', `The turn ran past ${req.timeoutSec} seconds and was stopped${waited ? `: ${CODEX_WAITING}` : ''}`);
     if (live.stopped === 'canceled') return error('canceled', 'The turn was stopped');
     if (result && !result.is_error) {
-      emit('end', { stop: result.stop_reason ?? result.subtype ?? 'end_turn', usage: total });
+      emit('end', { stop: result.stop_reason ?? result.subtype ?? 'end_turn', usage: total, provider, model });
       return { outcome: 'end', usage };
     }
     const why = [typeof result?.result === 'string' ? result.result : '', ...(Array.isArray(result?.errors) ? result.errors.map(String) : []), stderr].join('\n').trim();

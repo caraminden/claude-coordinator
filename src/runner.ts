@@ -98,7 +98,7 @@ export const CODEX_TURN = pinnedCopy('codex-turn.ts');
 const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
 if (existsSync(CODEX_REVIEW_BIN)) cpSync(CODEX_REVIEW_BIN, join(MCP_DIR, 'bin', 'citadel-codex-review'));
 /** The minion prompt's line on citadel-heavy. */
-export const HEAVY_LINE = 'Heavy builds and full test suites (a whole-workspace `cargo build`, `test`, `check` or `clippy`, a cross-target or release build, a full `npm test`) go through `citadel-heavy <command...>`: a few host-wide slots, so it may queue. Give it a long timeout or run it in the background. Leave quick single-crate checks, dev servers and watchers out, and don\'t wrap a script that takes its own lock (tools/land.sh): wrap the step inside it.';
+export const HEAVY_LINE = 'Heavy builds and full test suites (a whole-workspace `cargo build`, `test`, `check` or `clippy`, a cross-target or release build, a full `npm test`) go through `citadel-heavy <command...>`, as in `citadel-heavy cargo test --workspace`: a few host-wide slots, so it may queue. Give it a long timeout or run it in the background. Leave quick single-crate checks, dev servers and watchers out, and don\'t wrap a script that takes its own lock (tools/land.sh): wrap the step inside it.';
 /** A build's default parallelism in turns, so the few heavy jobs at once (citadel-heavy's 2 slots) leave cores for the rest. */
 export const TURN_BUILD_JOBS = '4';
 /** The slice turn units run in; its name puts it under citadel.slice, which deploy/citadel.slice caps. */

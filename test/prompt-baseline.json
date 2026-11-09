@@ -29,7 +29,7 @@
   "Scratch files go in $TMPDIR (your own temp folder, also a wo": 381,
   "Stop your own processes by pid (`$!` when you start one, or ": 254,
   "While your own background job runs (tests, a build, a dev se": 296,
-  "Heavy builds and full test suites (a whole-workspace `cargo ": 435,
+  "Heavy builds and full test suites (a whole-workspace `cargo ": 481,
   "After you deploy with tools/deploy.sh, set state pending-dep": 491,
   "When the minion's work is done and should be dismissed with ": 490,
   "Once your change is live, or deployed and waiting in pending": 378,

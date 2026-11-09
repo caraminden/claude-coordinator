@@ -168,6 +168,20 @@ dialog.new-scheme { --cui-dialog-width: 440px; }
 dialog.new-scheme .close { min-width: var(--citadel-control-h); min-height: var(--citadel-control-h); padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; color: var(--muted); font-size: 1.3rem; line-height: 1; }
 dialog.new-scheme form > :last-child { margin-bottom: 0; }
 /* The code source: one radio a line, the picked one's URL or folder field under it. */
+/* Ultra review (#432): its dialog, and its card in the chat (busy until the findings land). */
+dialog.ultra-review { --cui-dialog-width: 520px; }
+.ultra-review .ur-modes { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.75rem; }
+.ultra-review label.ur-mode { display: flex; align-items: center; gap: 0.5rem; color: var(--ink); }
+.ultra-review label.ur-mode input { width: auto; margin: 0; }
+.ultra-review label.ur-mode:has(input:disabled) { color: var(--muted); }
+.ultra-review .ur-paths textarea { font-family: var(--mono); font-size: 0.9em; }
+.ultra-review .ur-size { min-height: 1.4em; overflow-wrap: anywhere; }
+.ultra-review .ur-over, .ur-card .ur-fail { color: var(--error); }
+.ultra-review .ur-cost { font-size: 0.9em; }
+.ur-card .qtitle code, .ultra-review code { overflow-wrap: anywhere; }
+.ur-card.failed { border-color: color-mix(in srgb, var(--error) 45%, var(--line)); }
+.ur-card .ur-findings { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; margin: 0.4rem 0 0; font-size: 0.85em; }
+.ur-card .ur-status summary { cursor: pointer; color: var(--ink); }
 .new-scheme fieldset.sources { border: 0; padding: 0; margin: 0 0 0.75rem; min-width: 0; }
 .new-scheme fieldset.sources legend { padding: 0; margin-bottom: 0.25rem; color: var(--muted); font-size: 0.9em; }
 .new-scheme label.source { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; margin-bottom: 0.3rem; color: var(--ink); font-size: 0.95em; }

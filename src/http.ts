@@ -20,6 +20,7 @@ import type { Pusher, PushTrigger } from './push.ts';
 import type { Runner } from './runner.ts';
 import type { Schedule } from './schedules.ts';
 import type { Embed } from './memory.ts';
+import type { UltraReviews } from './ultrareview.ts';
 import type { Chain, LiveWaiters } from './wake.ts';
 
 /** An answer with a status: what any route or module throws to refuse a request. */
@@ -213,6 +214,8 @@ export interface App {
   contraptionTurns: ContraptionTurns;
   /** land.sh runs for container turns' land tool (src/land.ts). */
   landings: Landings;
+  /** Ultra reviews people start on their own Claude login (src/ultrareview.ts, #432). */
+  ultrareviews: UltraReviews;
   /** Open event streams (GET /api/stream), with whose they are. */
   clients: Map<ServerResponse, Session>;
   /** Semantic memory's model (#331): what embeds a search, and which schemes are indexed. */

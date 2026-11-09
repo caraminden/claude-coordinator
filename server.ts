@@ -13,6 +13,7 @@ import { claudeRefusal, lendsMachine, machinesFor, mayReceive, ownerAsked, messa
 import { ClaudeLink } from './src/claude-link.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { Landings } from './src/land.ts';
+import { UltraReviews } from './src/ultrareview.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
 import { branchStatus, shipLine, type BranchStatus } from './src/branch.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
@@ -20,7 +21,7 @@ import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { Store, type Artifact, type Project, type Ticket } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
-import { Runner, slimEvent } from './src/runner.ts';
+import { Runner, slimEvent, turnEnv } from './src/runner.ts';
 import { Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
@@ -266,10 +267,15 @@ services.drain = (row) => contraptionTurns.drain(row.id);
 // A contraption turn gets its person's own machines that are online (#306), never a shared one.
 contraptionTurns.machines = (person) => machines.online().filter((m) => m.owner_id !== null && m.servers.includes('mcp') && ownerAsked(store, m.owner_id, [person], null));
 contraptionTurns.apiUrl = () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`;
-claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container);
+const ultrareviews = new UltraReviews({
+  claudeBin: process.env.CLAUDE_BIN ?? 'claude', place: (uid) => claudeLink.place(uid), scratch: (uid) => claudeLink.turnsDir(uid),
+  emit: (ticketId, kind, data) => runner.emit(ticketId, kind, data), getSetting: (k) => store.getSetting(k), setSetting: (k, v) => store.setSetting(k, v), hostEnv: turnEnv(process.env),
+});
+ultrareviews.recover();
+claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container);
 const landings = new Landings();
-// Contraption turns and app deploys run as the server's children: a restart waits for them like landings.
-runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs();
+// Contraption turns, app deploys and ultra reviews run as the server's children: a restart waits for them like landings.
+runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = messagePerson(store);
 runner.githubFor = (person, dir) => githubLink.forTurn(person ? store.getUser(person) ?? null : null, dir);
@@ -779,7 +785,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services,
+  store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
   dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
   get assetVersion() {

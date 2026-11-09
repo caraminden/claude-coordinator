@@ -121,6 +121,9 @@ const NETWORK = new Set(['curl', 'wget', 'http', 'https', 'xh', 'websocat', 'soc
 
 // A process's environment holds whatever secrets it started with (the service's password and session secret).
 const ENVIRON = /^\/proc\/[^/]+(\/task\/[^/]+)?\/environ$/;
+const ULTRAREVIEW_WHY = "An ultra review is billed to a person's Claude account (a free run, then about $5-25 in usage credits), so only a person starts one: the Ultra review button at the top of a chat. Ask them to run it.";
+/** `claude ultrareview`, or a `/ultrareview` or `/code-review ultra` prompt handed to claude. */
+const ULTRAREVIEW_ARG = /^ultrareview$|(^|\s)\/(ultrareview|code-review\s+ultra)\b/;
 const ENVIRON_WHY = "A process's environment can hold the live service's password and session secret. To find your dev server, take the pid from `ss -ltnp 'sport = :<your port>'` (or `$!` when you start it) and check `readlink /proc/<pid>/cwd`.";
 const GH_TOKEN_WHY = "That is Cara's GitHub login; gh and git use it on their own.";
 // Each turn gets its person's GitHub token, or none (#182); these would reach another account's login.
@@ -956,6 +959,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const args = words.slice(i + 1);
   const vars = new Set([...st.vars, ...assigned.keys()]);
 
+  if (name === 'claude' && args.some((w) => ULTRAREVIEW_ARG.test(w.text))) return hard(`\`claude ultrareview\` is blocked. ${ULTRAREVIEW_WHY}`);
   if (/^(export|declare|local|readonly|typeset|unset)$/.test(name)) {
     const gh = args.map((w) => w.text.split('=')[0]).find((v) => GH_VARS.test(v));
     if (gh) return hard(`${name === 'unset' ? 'Unsetting' : 'Setting'} ${gh} is blocked. ${GH_ENV_WHY}`);
@@ -1201,6 +1205,11 @@ export function tripwire(input: any, cfg: TripwireConfig): Verdict | null {
     if (!cfg.ask) return hard(v.reason);
     if (explanation(ti)) return v;
     return hard(`${v.reason} A person can approve this one call on a card, but only with an explanation: if the work really needs it, retry once with a Bash description of at least ${MIN_EXPLANATION} characters that says why (e.g. "Delete the DB copies Cara OK'd in #54").`);
+  }
+  if (tool === 'Skill') {
+    const skill = String(ti.skill ?? '');
+    if (/(^|:)ultrareview$/.test(skill) || (/(^|:)code-review$/.test(skill) && /(^|\s)ultra\b/.test(String(ti.args ?? '')))) return hard(`The ${skill} skill's ultra review is blocked. ${ULTRAREVIEW_WHY}`);
+    return null;
   }
   const file = ti.file_path ?? ti.notebook_path ?? ti.path;
   if (typeof file !== 'string' || !file) return null;

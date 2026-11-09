@@ -16,8 +16,9 @@ import { tripwireConfig } from '../runner.ts';
 import { runsRepo } from '../wake.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
+import { cleanPaths, defaultBranch, diffSize, LIMITS, writeFindings, type ReviewSpec } from '../ultrareview.ts';
 import { sendIdOf, sendOnce } from '../send-ids.ts';
-import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
+import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { ensureCoordinator } from './projects.ts';
 
@@ -30,6 +31,8 @@ function pluginPicks(store: App['store'], ticket: { kind: string; project_id: nu
     throw new HttpError(400, err.message);
   }
 }
+
+const ULTRAREVIEW_REFUSE = 'Only a person can start an ultra review: it is billed to their own Claude account';
 
 // How long one wait for an approval card's outcome holds the request open.
 const APPROVAL_POLL_MS = 25_000;
@@ -110,7 +113,65 @@ function personWrote({ app: { store, runner }, caller, session, ticket }: Ctx) {
   for (const t of minions) runner.continueLoop(t.id, session.name);
 }
 
+/**
+ * What an ultra review would review (#432): a minion's branch against the default branch, or an area of
+ * the scheme's repo (`paths`), with how big its diff is. 400 with the reason when there's nothing to review.
+ */
+async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawPaths: unknown): Promise<{ spec: ReviewSpec; size: { files: number; lines: number } }> {
+  const repo = app.store.getProject(ticket.project_id)?.repo_dir;
+  if (!repo) throw new HttpError(400, 'This scheme has no repo to review');
+  const base = await defaultBranch(repo);
+  let spec: ReviewSpec;
+  if (mode === 'branch') {
+    if (ticket.kind !== 'ticket' || !ticket.branch) throw new HttpError(400, 'Only a minion with a branch has a branch to review');
+    spec = { mode, repo, base, branch: ticket.branch };
+  } else if (mode === 'area') {
+    try {
+      spec = { mode, repo, base, paths: cleanPaths(rawPaths) };
+    } catch (err: any) {
+      throw new HttpError(400, err.message);
+    }
+  } else throw new HttpError(400, 'mode must be branch or area');
+  let size;
+  try {
+    size = await diffSize(spec);
+  } catch (err: any) {
+    throw new HttpError(400, String(err?.stderr || err?.message).trim().split('\n')[0]);
+  }
+  if (!size.files) throw new HttpError(400, spec.mode === 'branch' ? `Nothing to review: ${spec.branch} has no changes against ${base}` : 'Nothing to review: those paths hold no files');
+  return { spec, size };
+}
+
 export const ticketRoutes: Route[] = [
+  {
+    // An ultra review's size, before the person confirms (#432). Person-only like starting one.
+    method: 'GET', path: '/api/tickets/:ticket/ultrareview', who: ['person'], refuse: ULTRAREVIEW_REFUSE,
+    async handler({ res, url, app, session, ticket }) {
+      const paths = url.searchParams.getAll('path');
+      const { spec, size } = await ultrareviewSpec(app, ticket, url.searchParams.get('mode'), paths);
+      const linked = !!(session.uid && app.claude.place(session.uid));
+      return json(res, 200, { mode: spec.mode, base: spec.base, ...(spec.mode === 'branch' ? { branch: spec.branch } : { paths: spec.paths }), size, limits: LIMITS, linked, running: !!session.uid && app.ultrareviews.busy(session.uid) });
+    },
+  },
+  {
+    // Start an ultra review on the clicker's own Claude login (#432). It spends a free run or usage credits,
+    // so it is person-only: no minion, Taskmaster, schedule or contraption reaches this route, and the
+    // body must carry the confirmation the button shows.
+    method: 'POST', path: '/api/tickets/:ticket/ultrareview', who: ['person'], refuse: ULTRAREVIEW_REFUSE,
+    async handler({ req, res, app, session, ticket }) {
+      if (!session.uid) throw new HttpError(403, 'Sign in as yourself to run an ultra review: it runs on your own Claude login');
+      const body = await readJson(req);
+      if (body.confirm !== true) throw new HttpError(400, 'Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after');
+      const { spec, size } = await ultrareviewSpec(app, ticket, body.mode, body.paths);
+      const row = app.store.getTicket(ticket.id)!;
+      try {
+        const ev = await app.ultrareviews.start(ticket.id, session.uid, session.name, spec, size, (text) => writeFindings(app.sharedDir(row), spec, text));
+        return json(res, 202, ev);
+      } catch (err: any) {
+        throw new HttpError(409, err.message);
+      }
+    },
+  },
   {
     method: 'GET', path: '/api/tickets/:ticket', who: ['person', 'taskmaster', 'minion'],
     async handler(ctx) {

@@ -663,3 +663,18 @@ test("a minion can write in its TMPDIR, its scheme's tmp folder (#218)", () => {
   assert.equal(tripwire({ tool_name: 'Write', tool_input: { file_path: `${tmp}/out.txt`, content: 'x' }, cwd: worktree }, { ...cfg, ask: true }), null);
   for (const command of [`echo hi > ${tmp}/x.txt`, `cp a ${tmp}/`, `mkdir -p ${tmp}/b && cd ${tmp}/b && dotnet build`, `rm -rf ${tmp}/b`]) assert.equal(bash(command), null, command);
 });
+
+test('no turn launches an ultra review: it is billed to a person, so only their click starts one (#432)', () => {
+  for (const command of ['claude ultrareview', 'claude ultrareview main --json --trust-workspace', 'cd /tmp && claude ultrareview 12', 'claude -p "/code-review ultra"', "claude -p '/ultrareview main'", '/home/cara/.local/bin/claude ultrareview']) {
+    const v = verdict(command);
+    assert.ok(v && !v.ask, command);
+    assert.match(v.reason, /ultra review is billed/, command);
+  }
+  for (const command of ['claude --version', 'echo ultrareview', 'grep -rn ultrareview src', 'claude -p "/code-review high"']) assert.equal(verdict(command), null, command);
+  const skill = (skill: string, args?: string) => tripwire({ tool_name: 'Skill', tool_input: { skill, args } }, cfg);
+  assert.match(skill('code-review', 'ultra')!.reason, /billed/);
+  assert.match(skill('code-review', 'ultra 123 --post')!.reason, /billed/);
+  assert.match(skill('ultrareview')!.reason, /billed/);
+  assert.equal(skill('code-review', 'high'), null);
+  assert.equal(skill('citadel:self-review'), null);
+});

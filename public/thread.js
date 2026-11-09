@@ -13,6 +13,7 @@ import { optimistic } from './ui/optimistic.js';
 import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
 import { askHeader } from './askcard.js';
+import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerChip, payerLine } from './payer.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
@@ -392,6 +393,7 @@ export function renderTicketHead() {
       location.hash = `#/p/${t.project_id}`;
     }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
   }
+  actions.unshift(ultraButton(t));
   const state = (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '');
   // Titled too, since a narrow line may cut it short. While Claude works,
   // a cut-short state shows dots that count up instead of "Cla…".
@@ -852,6 +854,14 @@ export function appendEvent(event, scroll = true) {
     }
   } else if (event.kind === 'plan_result') {
     view.cards.get(data.id)?.settle(data);
+  } else if (event.kind === 'ultrareview') {
+    const card = ultraCard(data);
+    view.cards.set(data.id, card);
+    nodes.push(card);
+  } else if (event.kind === 'ultrareview_result') {
+    const card = view.cards.get(data.id);
+    if (card?.settle) card.settle(data);
+    else nodes.push(ultraResult(data));
   } else if (event.kind === 'loop_paused') {
     nodes.push(loopCard(data));
   } else if (event.kind === 'loop_continued') {

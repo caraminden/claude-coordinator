@@ -117,7 +117,7 @@ export function tripwireConfig(projectId: number, claudeConfig: string, ask: boo
 export function tripwireHooks(projectId: number, claudeConfig: string, ask = false, script = TRIPWIRE) {
   const config = tripwireConfig(projectId, claudeConfig, ask);
   const command = [process.execPath, script, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
-  return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob)$', hooks: [{ type: 'command', command, timeout: 10 }] }] };
+  return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$', hooks: [{ type: 'command', command, timeout: 10 }] }] };
 }
 
 /**

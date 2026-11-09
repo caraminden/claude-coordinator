@@ -665,7 +665,7 @@ test("a minion can write in its TMPDIR, its scheme's tmp folder (#218)", () => {
 });
 
 test('no turn launches an ultra review: it is billed to a person, so only their click starts one (#432)', () => {
-  for (const command of ['claude ultrareview', 'claude ultrareview main --json --trust-workspace', 'cd /tmp && claude ultrareview 12', 'claude -p "/code-review ultra"', "claude -p '/ultrareview main'", '/home/cara/.local/bin/claude ultrareview']) {
+  for (const command of ['claude ultrareview', 'claude ultrareview main --json --trust-workspace', 'cd /tmp && claude ultrareview 12', 'claude -p "/code-review ultra"', "claude -p '/ultrareview main'", '/home/cara/.local/bin/claude ultrareview', 'a=ultrareview; claude "$a" main --trust-workspace', 'claude "$(echo ultrareview)"', 'claude $UNKNOWN_SUB']) {
     const v = verdict(command);
     assert.ok(v && !v.ask, command);
     assert.match(v.reason, /ultra review is billed/, command);

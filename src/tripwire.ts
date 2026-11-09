@@ -959,7 +959,13 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const args = words.slice(i + 1);
   const vars = new Set([...st.vars, ...assigned.keys()]);
 
-  if (name === 'claude' && args.some((w) => ULTRAREVIEW_ARG.test(w.text))) return hard(`\`claude ultrareview\` is blocked. ${ULTRAREVIEW_WHY}`);
+  if (name === 'claude') {
+    // Through known variables too (`a=ultrareview; claude "$a"`); a word it can't know might be the subcommand.
+    const words = args.flatMap((w) => expand(w, st, cfg));
+    if (words.some((w) => ULTRAREVIEW_ARG.test(w.text))) return hard(`\`claude ultrareview\` is blocked. ${ULTRAREVIEW_WHY}`);
+    const blind = words.find((w) => w.unknown);
+    if (blind) return hard(`\`claude\` with ${shown(blind)}, a word the tripwire can't read, is blocked: it could launch an ultra review. Write the arguments out. ${ULTRAREVIEW_WHY}`);
+  }
   if (/^(export|declare|local|readonly|typeset|unset)$/.test(name)) {
     const gh = args.map((w) => w.text.split('=')[0]).find((v) => GH_VARS.test(v));
     if (gh) return hard(`${name === 'unset' ? 'Unsetting' : 'Setting'} ${gh} is blocked. ${GH_ENV_WHY}`);

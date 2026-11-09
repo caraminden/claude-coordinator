@@ -13,7 +13,7 @@ let srv: Booted;
 before(async () => {
   srv = await bootServer();
 });
-after(() => srv.stop());
+after(() => srv?.stop());
 
 /** A GET with the path sent exactly as given (fetch would normalise it). */
 function rawGet(path: string): Promise<number> {

@@ -95,7 +95,7 @@ export class Memory {
   constructor(store: Store) {
     this.store = store;
     this.db = store.db;
-    this.db.exec(MEMORY_SCHEMA);
+    this.db.exec(`BEGIN; ${MEMORY_SCHEMA} COMMIT;`);
   }
 
   /**

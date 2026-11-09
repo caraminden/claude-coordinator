@@ -758,7 +758,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     'Tool calls and their output are not shown in the chat, only in that readout, so put anything people need to see in your reply text.',
     ...CHAT_FACTS,
     'Send TaskUpdate and set_thread_status in the same message as a real tool call (a Read, Edit, Bash and so on), never on their own: a call that only updates the task list or status costs a whole extra round trip. Mark a task completed and start the next one in the same message as that next step\'s first real call.',
-    'When you need people to decide between clear options, ask with the `ask_question` tool (mcp__thread) instead of listing choices in prose: it shows a card they answer with a click, below your reply (write "the card below", never "above"; a card from an earlier turn that is still open sits above your later replies, so name it or say "above"). Then end your turn; the answers arrive as the next message. If someone types a reply instead, judge whether it answers the card; if it does (or a newer card replaced it), call `settle_question` so the card stops waiting on people and stops holding the minion open.',
+    'When you need people to decide between clear options, ask with the `ask_question` tool (mcp__thread) instead of listing choices in prose: it shows a card they answer with a click, below your reply, even when asked early in a long turn (write "the card below", never "above"; a card from an earlier turn that is still open sits above your later replies, so name it or say "above"). Then end your turn; the answers arrive as the next message. If someone types a reply instead, judge whether it answers the card; if it does (or a newer card replaced it), call `settle_question` so the card stops waiting on people and stops holding the minion open.',
     'When people want to hear your plan before you build, post it with the `propose_plan` tool (mcp__thread): a card with Approve and Revise that only a person can approve, shown below your reply. Then end your turn and write no code until the go arrives as the next message.',
     'The scheme\'s minions list groups minions by type, plus any groups the scheme sets, and shows each as one line: number, short title, state, note. Keep yours accurate with the `set_thread_status` tool (mcp__thread):',
     '- title: the short ask, about 30 characters ("Usage bar in the top bar"), no number, type, build or emoji. Your starting title may just be the opening words of the first message; replace it early in your first turn with the short ask.',
@@ -884,7 +884,7 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
     memoryDir
       ? `You can read and write files (Read, Write, Edit) in the scheme's shared folder, described below, and in ${memoryDir}, the scheme's Claude Code memory that its minions load too. Keep what is worth remembering across conversations in the memory as short topic files with an index in MEMORY.md. You still cannot run shell commands.`
       : '',
-    'When you need people to decide between clear options, ask with your `ask_question` tool: it shows a card in this chat, below your reply, they answer with a click. A card from an earlier turn that is still open sits above your later replies, so name it or say "above", never "below". Then end your turn; the answers arrive as the next message.',
+    'When you need people to decide between clear options, ask with your `ask_question` tool: it shows a card in this chat, below your reply even when asked early in a long turn, that they answer with a click. A card from an earlier turn that is still open sits above your later replies, so name it or say "above", never "below". Then end your turn; the answers arrive as the next message.',
     'When a plan needs a person\'s go before you act on it (a setup, a batch of minions), post it with your `propose_plan` tool: a card with Approve and Revise that only a person can approve, below your reply. Then end your turn and act on none of it until the go arrives as the next message.',
     'Minions can message you with their `message_coordinator` tool; those arrive named by the minion, like "[#12 Some title]: ...". Do what they ask when it is yours to do (relay to another minion with message_ticket, start a minion from a handoff), and do not reply to a minion just to acknowledge it.',
     'Every message to an idle or parked minion wakes it and reloads its whole context, and after an hour idle its prompt cache has lapsed, so that reload is paid in full. So never message one just to pass on news (another minion shipped, a rule changed, an FYI), including relays a minion asks you for: a minion waiting on a deploy gets wake_when_live, and other news waits for the next message you have to send it anyway. Message an idle minion only when it has to act now or a person asks you to. Answer questions about a minion ("is #N merged?", "are we good?") yourself with read_ticket rather than asking it. The same holds for other schemes\' Taskmasters: news for one goes with message_taskmaster\'s wake: false.',
@@ -2921,11 +2921,15 @@ export class Runner {
     return row;
   }
 
-  /** A minion's cards waiting on people, oldest first, each with the link that opens it (#400). */
-  cardLinks(ticket: Ticket): CardLink[] {
+  /** A minion's cards waiting on people, oldest first, each with the link that opens it (#400); `placed` adds where each sits (CardLink.below). */
+  cardLinks(ticket: Ticket, placed = false): CardLink[] {
     if (ticket.status === 'closed') return [];
     const minion = ticket.kind === 'coordinator' ? null : ticket.number;
-    const link = (kind: CardLink['kind'], data: unknown, eventId: number): CardLink => ({ minion, kind, label: cardLabel(kind, data), href: cardHref(ticket, eventId) });
+    const link = (kind: CardLink['kind'], data: unknown, eventId: number): CardLink => ({
+      minion, kind, label: cardLabel(kind, data), href: cardHref(ticket, eventId),
+      // Only question and plan cards are held under the turn's words (public/thread.js heldCards).
+      ...(placed ? { below: kind !== 'approval' && this.store.heldBelow(ticket.id, eventId) } : {}),
+    });
     const asks = this.approvals.pending().filter((a) => a.ticketId === ticket.id).flatMap((a) => {
       const eventId = this.store.cardEventId(ticket.id, 'approval', (a.card as { id: string }).id);
       return eventId == null ? [] : [{ at: a.at, card: link('approval', a.card, eventId) }];
@@ -2938,7 +2942,7 @@ export class Runner {
   private writeRefs(file: string, ticket: Ticket) {
     const project = this.store.getProject(ticket.project_id)!;
     const tickets = this.store.listTickets(project.id);
-    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => this.cardLinks(t)) };
+    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => this.cardLinks(t, t.id === ticket.id)) };
     // Whole or not at all: the link check may read it mid-turn.
     writeFileSync(`${file}.new`, JSON.stringify(schemeRefs(project, this.store.listProjects(), tickets, cards)));
     renameSync(`${file}.new`, file);

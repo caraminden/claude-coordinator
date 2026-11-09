@@ -4,13 +4,14 @@
 // (ticketRoots in routes/files.ts), and sends the reply back once if any link wouldn't open. The
 // same send-back carries the wording check's findings (src/wording.ts): a reserved word used in another sense,
 // the cross-scheme link check's (src/scheme-refs.ts): a bare #N that likely means another scheme's minion,
-// and the card link check's (src/card-links.ts): a card waiting on people mentioned without its link.
+// and the card link check's (src/card-links.ts): a card waiting on people mentioned without its link, or
+// linked as "above" or "below" when it sits the other way.
 //
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
-import { explainCards, unlinkedCards } from './card-links.ts';
+import { explainCards, explainMisplaced, misplacedCards, unlinkedCards } from './card-links.ts';
 import { explainStrays, readRefs, strayRefs } from './scheme-refs.ts';
 import { CODE, explain, misusedWords } from './wording.ts';
 
@@ -61,7 +62,8 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const refs = readRefs(cfg.refs);
   const strays = refs ? strayRefs(input.last_assistant_message, refs) : [];
   const cards = refs?.cards ? unlinkedCards(input.last_assistant_message, refs.cards, refs.self ?? null) : [];
-  if (!broken.length && !misused.length && !strays.length && !cards.length) return null;
+  const misplaced = refs?.cards ? misplacedCards(input.last_assistant_message, refs.cards, refs.self ?? null) : [];
+  if (!broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length) return null;
   if (cfg.nudged) {
     try {
       writeFileSync(cfg.nudged, prompt);
@@ -83,7 +85,7 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
     : '';
   const wording = misused.length ? `${explain(misused)}\n` : '';
   const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';
-  const card = cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '';
+  const card = (cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '') + (misplaced.length ? `${explainMisplaced(misplaced)}\n` : '');
   return { decision: 'block', reason: `${SENT_BACK}\n${links}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
 }
 

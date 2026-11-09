@@ -1632,6 +1632,12 @@ export class Store {
     return n <= within ? id : null;
   }
 
+  /** Whether the chat still shows card event `eventId` under its turn's words: no message and no turn end since (public/thread.js heldCards). */
+  heldBelow(ticketId: number, eventId: number): boolean {
+    return !this.db.prepare("SELECT 1 FROM events WHERE ticket_id = ? AND id > ? AND (kind = 'user_message' OR (kind = 'claude' AND json_extract(data, '$.type') = 'result')) LIMIT 1")
+      .get(ticketId, eventId);
+  }
+
   /** The id of the chat event that posted a minion's card `cardId` of `kind`, or null if there's none. */
   cardEventId(ticketId: number, kind: string, cardId: string): number | null {
     const row = this.db.prepare("SELECT id FROM events WHERE ticket_id = ? AND kind = ? AND json_extract(data, '$.id') = ? ORDER BY id DESC LIMIT 1")

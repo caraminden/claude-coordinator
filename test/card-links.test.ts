@@ -6,7 +6,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { cardHref, cardLabel, unlinkedCards, type CardLink } from '../src/card-links.ts';
+import { cardHref, cardLabel, misplacedCards, unlinkedCards, type CardLink } from '../src/card-links.ts';
 import { Store } from '../src/db.ts';
 import { check, SENT_BACK } from '../src/link-check.ts';
 import { Runner } from '../src/runner.ts';
@@ -106,4 +106,73 @@ test('a minion\'s view lists its waiting cards with links, and a card posted mid
   runner.emit(minion.id, 'user_message', { author: 'Cara', text: 'Approved', plan: { planId: 'p1' } });
   (runner as any).turns.delete(tm.id);
   assert.ok(!hasPlan());
+});
+
+// Direction words (#412; Cara, 2026-11-09: "minion 6 from transdata said "card above" but the card was
+// below"). Transdata #6 asked at 06:13, kept working, and wrote its reply at 06:22: the chat keeps a
+// turn's question and plan cards under that turn's words, so the card sat below the reply.
+const transdata6 = 'One question is open first: [the card above](#/p/7/t/6?e=349108) asks whose email address goes in the "mailto".';
+const held = { minion: 6, kind: 'question', label: 'Crossref mailto', href: '#/p/7/t/6?e=349108', below: true } satisfies CardLink;
+const earlier = { minion: 6, kind: 'plan', label: 'Build it', href: '#/p/7/t/6?e=300', below: false } satisfies CardLink;
+const wrong = (text: string, list: CardLink[] = [held, earlier]) => misplacedCards(text, list, 6).map((w) => [w.card.href, w.said]);
+
+test('flags a direction word that contradicts where this chat\'s card sits', () => {
+  assert.deepEqual(wrong(transdata6), [['#/p/7/t/6?e=349108', 'above']]);
+  // The word right after the link counts too.
+  assert.deepEqual(wrong('Answer [the card](#/p/7/t/6?e=349108) above.'), [['#/p/7/t/6?e=349108', 'above']]);
+  // An earlier turn's card sits above this reply.
+  assert.deepEqual(wrong('[The plan card below](#/p/7/t/6?e=300) still waits.'), [['#/p/7/t/6?e=300', 'below']]);
+});
+
+test('lets through the right word, no word, other chats\' cards and snapshots without positions', () => {
+  for (const ok of [
+    transdata6.replace('above', 'below'),
+    '[The plan card above](#/p/7/t/6?e=300) still waits.',
+    'Answer [the card](#/p/7/t/6?e=349108) when you can.',
+    '`[the card above](#/p/7/t/6?e=349108)`',
+  ]) assert.deepEqual(wrong(ok), [], ok);
+  // Another minion's card: no direction relative to this reply.
+  assert.deepEqual(misplacedCards('[#394\'s card above](#/p/7/t/394?e=11)', [{ ...held, minion: 394, href: '#/p/7/t/394?e=11' }], 6), []);
+  const { below: _, ...unknown } = held;
+  assert.deepEqual(wrong(transdata6, [unknown]), []);
+});
+
+test('the link check sends back the Transdata #6 reply, saying the card is below', async () => {
+  const dir = join(root, 'turn-412');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'scheme-refs.json'), JSON.stringify({ scheme: 'Transdata', others: [], minions: {}, self: 6, cards: [held] } satisfies SchemeRefs));
+  const cfg = { cwd: dir, roots: [dir], nudged: join(dir, 'nudged'), refs: join(dir, 'scheme-refs.json') };
+  const verdict = await check({ last_assistant_message: transdata6, prompt_id: 'p1' }, cfg);
+  assert.equal(verdict?.decision, 'block');
+  assert.match(verdict!.reason, /calls question card "Crossref mailto" \(#\/p\/7\/t\/6\?e=349108\) "above", but it sits below this reply/);
+  assert.equal(await check({ last_assistant_message: transdata6.replace('above', 'below'), prompt_id: 'p2' }, cfg), null);
+});
+
+test('a turn\'s snapshot marks its own cards below until a person writes or the turn ends', () => {
+  const fake = join(root, 'claude-412');
+  writeFileSync(fake, '#!/bin/sh\nexit 0\n');
+  chmodSync(fake, 0o755);
+  const store = new Store(join(root, 'db-412.sqlite'));
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const p = store.createProject('Transdata', null);
+  const minion = store.createTicket({ project_id: p.id, title: 'Citations', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  const other = store.createTicket({ project_id: p.id, title: 'Other', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  const file = join(root, 'refs-412.json');
+  const snap = (t = minion) => {
+    (runner as any).writeRefs(file, store.getTicket(t.id)!);
+    return (JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs).cards!.map((c) => [c.minion, c.kind, c.below]);
+  };
+  // Asked mid-turn, then more work: still below the turn's words.
+  runner.emit(minion.id, 'question', { id: 'q1', questions: [{ header: 'Crossref mailto', question: 'Whose?' }] });
+  runner.emit(minion.id, 'claude', { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Testing meanwhile.' }] } });
+  assert.deepEqual(snap(), [[minion.number, 'question', true]]);
+  // Another minion's snapshot doesn't place it.
+  assert.deepEqual(snap(other), [[minion.number, 'question', undefined]]);
+  // The turn ended: the next turn's words go under it.
+  runner.emit(minion.id, 'claude', { type: 'result', subtype: 'success', is_error: false });
+  runner.emit(minion.id, 'plan', { id: 'p1', summary: 'Build it', plan: 'x', status: 'pending' });
+  assert.deepEqual(snap(), [[minion.number, 'question', false], [minion.number, 'plan', true]]);
+  // A message mid-turn lets go of it too (a person's would answer it; the Taskmaster's leaves it waiting).
+  runner.emit(minion.id, 'user_message', { author: 'Taskmaster', text: 'Also check PubMed' });
+  assert.deepEqual(snap(), [[minion.number, 'question', false], [minion.number, 'plan', false]]);
 });

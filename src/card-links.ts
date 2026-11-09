@@ -13,6 +13,11 @@ export interface CardLink {
   label: string;
   /** The in-app address: "#/p/2/t/394?e=123". */
   href: string;
+  /**
+   * In a turn's snapshot, on its own chat's cards: whether the card sits below the reply that ends the
+   * turn (Store.heldBelow), so the link check can catch "the card above" on one that's below (#412).
+   */
+  below?: boolean;
 }
 
 /** The chat address that opens `ticket`'s card posted as chat event `eventId` (public/core.js jumpHref). */
@@ -65,9 +70,39 @@ export function unlinkedCards(text: string, cards: CardLink[], self: number | nu
   return [...missing.values()];
 }
 
+/** A link to a card with a direction word in its text or right after it: "[the card above](…)", "[the card](…) below". */
+const POINTED = /\[([^\]]*)\]\([^)\s]*\?e=(\d+)\)(\s+(?:above|below)\b)?/giu;
+
+/**
+ * This chat's cards that `text` links with "above" or "below" where the card sits the other way: a
+ * card asked early in a long turn still sits below that turn's reply (Transdata #6, #412).
+ */
+export function misplacedCards(text: string, cards: CardLink[], self: number | null): { card: CardLink; said: 'above' | 'below' }[] {
+  const own = new Map(cards.filter((c) => c.minion === self && c.below !== undefined).map((c) => [Number(/\?e=(\d+)$/.exec(c.href)?.[1]), c]));
+  const wrong = new Map<CardLink, 'above' | 'below'>();
+  for (const m of text.replace(CODE, ' ').matchAll(POINTED)) {
+    const card = own.get(Number(m[2]));
+    const said = /\b(above|below)\b/i.exec(`${m[1]} ${m[3] ?? ''}`)?.[1].toLowerCase() as 'above' | 'below' | undefined;
+    if (card && said && (said === 'below') !== card.below) wrong.set(card, said);
+  }
+  return [...wrong].map(([card, said]) => ({ card, said }));
+}
+
+/** The send-back's lines for misplaced cards. */
+export function explainMisplaced(wrong: { card: CardLink; said: 'above' | 'below' }[]): string {
+  const lines = ['Your reply points the wrong way to a card:'];
+  for (const { card, said } of wrong) {
+    const name = `${card.kind} card${card.label ? ` "${card.label}"` : ''} (${card.href})`;
+    lines.push(card.below
+      ? `- It calls ${name} "${said}", but it sits below this reply: the chat keeps this turn's question and plan cards under the turn's words until someone writes or the turn ends, however early you asked. Say "below".`
+      : `- It calls ${name} "${said}", but it sits above this reply: it was posted before this turn's words (an earlier turn, or before someone wrote). Say "above".`);
+  }
+  return lines.join('\n');
+}
+
 /** The send-back's lines for these: each card and the link to put on its mention. */
 export function explainCards(missing: CardLink[][], self: number | null): string {
-  const lines = ['Your reply mentions a card waiting on people without linking it. Make each mention of a card a link to it, e.g. [the card above](#/p/2/t/394?e=123), so it opens that card:'];
+  const lines = ['Your reply mentions a card waiting on people without linking it. Make each mention of a card a link to it, e.g. [the card](#/p/2/t/394?e=123), so it opens that card:'];
   for (const group of missing) {
     for (const c of group) lines.push(`- ${c.minion === self ? "This chat's" : c.minion == null ? "The Taskmaster's" : `#${c.minion}'s`} ${c.kind} card${c.label ? ` "${c.label}"` : ''}: ${c.href}`);
   }

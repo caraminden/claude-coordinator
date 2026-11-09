@@ -20,7 +20,7 @@ export function payerChip(t) {
 
 /** Over the composer: the payer's limit is hit, you haven't linked a plan, or your message would switch the payer. Null when none applies. */
 export function payerLine(t, sendText) {
-  if (!account || t.status === 'closed') return null;
+  if (!account || t.status === 'closed') return coldLine(t);
   const cost = loadCost(t);
   if (t.state === 'limited' && t.payer) {
     const other = account.turns && !mine(t);
@@ -47,5 +47,17 @@ export function payerLine(t, sendText) {
     return h('div', { class: 'payer-line' }, 'Sends on ', h('b', {}, 'your plan'), week ? ` (${week})` : '',
       `. This minion last ran on ${t.payer.name}'s: the first turn re-reads it${cost ? `, ${cost} of usage` : ''}.`);
   }
-  return null;
+  return coldLine(t);
+}
+
+/** Idle this long, its prompt cache (1 hour) has lapsed and the next turn re-reads its whole context. */
+const COLD_MS = 60 * 60_000;
+const idleText = (ms) => (ms < 2 * 3_600_000 ? `${Math.round(ms / 60_000)} min` : ms < 48 * 3_600_000 ? `${Math.round(ms / 3_600_000)}h` : `${Math.round(ms / 86_400_000)} days`);
+
+/** A quiet hint on a cold minion or Taskmaster (#413), so people can batch what they say. Only a hint: it never blocks the send. */
+export function coldLine(t, now = Date.now()) {
+  const idle = t.last_turn_end ? now - t.last_turn_end : 0;
+  if (t.status === 'running' || !t.session_id || !t.context_tokens || idle <= COLD_MS) return null;
+  return h('div', { class: 'payer-line cold', title: 'Its prompt cache lasts an hour, so the next turn re-reads its whole context. Held mail rides along with your message.' },
+    `Cold, idle ${idleText(idle)}: replying re-reads its ${Math.round(t.context_tokens / 1000)}k context, about ${loadCost(t).replace('~', '')}. Say it all in one message.`);
 }

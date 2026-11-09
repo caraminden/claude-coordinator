@@ -24,6 +24,9 @@ const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
 const HOME_CONTRAPTIONS = (process.env.COORDINATOR_HOME_CONTRAPTIONS ?? '').split(',').filter(Boolean);
 const MAX_TEXT = 4000;
 /** What message_ticket and message_coordinator say when the loop guard holds a message. */
+/** Cold hold (#413): what the sender is told, and the urgent flag the three message tools share. */
+const COLD = (who: string) => `Left as held mail: ${who} has been idle over 55 minutes, so its prompt cache has lapsed and waking it would re-read its whole context. It shows in its chat now and reaches it with its next turn: a person's message, or within 3 hours. Do not resend it. If it must act now after all, send a short follow-up with urgent: true, which wakes it with this one too.`;
+const URGENT = { type: 'boolean', description: 'true: wake it even when it is cold (idle over 55 minutes). Only when it must act now: you are blocked on it, or it is a person\'s go, pick or run-back to pass on. Otherwise a cold one gets the message as held mail, read on its next turn (a person\'s message, or within 3 hours)' };
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
 
 const WAKE_DESCRIPTION =
@@ -295,12 +298,13 @@ const TOOLS = [
   },
   {
     name: 'message_ticket',
-    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. After 6 messages either way with one minion in 10 minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
+    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. A minion idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person\'s message, or within 3 hours), unless it is urgent. After 6 messages either way with one minion in 10 minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
     inputSchema: {
       type: 'object',
       properties: {
         ticket_id: TICKET_ID,
         text: { type: 'string' },
+        urgent: URGENT,
         start_now: { type: 'boolean', description: 'For a minion parked on start_after: true starts it now, its held brief first, then this message. Without it, the message gets an answer and the minion stays parked.' },
       },
       required: ['ticket_id', 'text'],
@@ -309,13 +313,14 @@ const TOOLS = [
   {
     name: 'message_taskmaster',
     description:
-      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with wake: false, which shows in its chat at once and reaches it on its next turn, whoever wakes it. For long text, write a file in your scheme's shared folder and send it with file and a one-line summary. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
+      "Send a message to another scheme's Taskmaster: for work that touches both schemes, such as asking it to start or brief a minion there, or answering it. By default it wakes that Taskmaster, which reloads its whole context: do that only when it has to act now. News, FYIs and answers that need nothing now (\"#388 is live\", \"the rule changed\") go with wake: false, which shows in its chat at once and reaches it on its next turn, whoever wakes it. One idle over 55 minutes (cold) gets even a waking message as held mail, unless it is urgent. For long text, write a file in your scheme's shared folder and send it with file and a one-line summary. You reach the schemes the person you work for is in, and always the Citadel scheme's Taskmaster, for Citadel bug reports and feature asks. It acts in its own scheme; you cannot reach its minions. Its messages to you arrive as \"[Taskmaster of <scheme>]: ...\". Not for acknowledgements. After 6 messages either way between you in 10 minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
         scheme: { type: 'string', description: 'The other scheme, by name or id; a wrong one lists them' },
         text: { type: 'string', description: 'Self-contained: it cannot see your scheme, so say which scheme\'s minion #N is. Short: anything longer than a paragraph goes in file' },
-        wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn' },
+        wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn (held mail if it is cold, unless urgent)' },
+        urgent: URGENT,
         file: { type: 'string', description: 'A file in your scheme\'s shared folder (absolute, or relative to that folder), at most 2 MB. Copied into the other scheme\'s shared folder under inbox/, where its Taskmaster and minions can read it; the message tells it the path' },
       },
       required: ['scheme', 'text'],
@@ -935,8 +940,8 @@ const THREAD_TOOLS = [
   {
     name: 'message_coordinator',
     description:
-      "Send a message to this scheme's Taskmaster, waking it: for what only it can do, such as passing information to another minion (#N), starting a new minion from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly. After 6 messages either way in 10 minutes, the next is held until a person continues.",
-    inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What you need, self-contained: name minions as #N and give file paths in full' } }, required: ['text'] },
+      "Send a message to this scheme's Taskmaster, waking it: for what only it can do, such as passing information to another minion (#N), starting a new minion from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
+    inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What you need, self-contained: name minions as #N and give file paths in full' }, urgent: URGENT }, required: ['text'] },
   },
   {
     name: 'wake_when_live',
@@ -1194,15 +1199,15 @@ async function runTool(name: string, args: any): Promise<string> {
       const ticketId = await id(args);
       // Already started (its leader just shipped) or never parked: say so, and deliver the message anyway.
       const early = args.start_now === true ? await call('POST', `/api/tickets/${ticketId}/start`, {}).then(() => 'Started early, its brief first. ', (e) => `Not started early: ${e.message}. `) : '';
-      const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text });
-      return early + (t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`);
+      const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text, ...(args.urgent === true ? { urgent: true } : {}) });
+      return early + (t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`);
     }
     case 'message_taskmaster': {
-      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, text: args.text, ...(args.wake === false ? { wake: false } : {}), ...(args.file ? { file: args.file } : {}) });
+      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, text: args.text, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
       const copied = r.file ? ` The file is at ${r.file} in its shared folder.` : '';
       const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
       if (r.held) return `Held, not delivered: you and the Taskmaster of ${r.scheme} have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it.${copied} ${ask}`;
-      const how = args.wake === false ? `Left as held mail: the Taskmaster of ${r.scheme} reads it on its next turn.` : `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.`;
+      const how = r.cold ? COLD(`the Taskmaster of ${r.scheme}`) : args.wake === false ? `Left as held mail: the Taskmaster of ${r.scheme} reads it on its next turn.` : `Sent. The Taskmaster of ${r.scheme} runs it now, or after its current turn.`;
       return `${how}${copied}${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':
@@ -1258,9 +1263,11 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'set_thread_status':
       if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}${tagNote(args)}`;
-    case 'message_coordinator':
-      if ((await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text })).held) return `Held, not delivered: ${HELD}`;
-      return 'Sent. The Taskmaster runs it now, or after its current turn.';
+    case 'message_coordinator': {
+      const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text, ...(args.urgent === true ? { urgent: true } : {}) });
+      if (r.held) return `Held, not delivered: ${HELD}`;
+      return r.cold ? COLD('the Taskmaster') : 'Sent. The Taskmaster runs it now, or after its current turn.';
+    }
     case 'start_preview': {
       const { url } = await call('POST', `/api/tickets/${TICKET}/preview`, {});
       return `The preview is up at ${url}. Post that link in your reply (the minion's view also shows an Open preview button) and set state try.`;

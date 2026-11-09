@@ -437,6 +437,12 @@ const savingKey = (ticketId: number) => `saving:${ticketId}`;
 const waitingKey = (ticketId: number) => `waiting:${ticketId}`;
 /** Held mail (#405): message_taskmaster's wake: false messages, waiting for the receiving Taskmaster's next turn. */
 const mailKey = (ticketId: number) => `mail:${ticketId}`;
+/** Cold hold (#413): when the first machine message held for a cold session was held, for the cap. */
+const coldKey = (ticketId: number) => `cold:${ticketId}`;
+/** Idle this long, a session's prompt cache (1 hour) is about to lapse, so a machine message to it waits (#413). */
+export const COLD_MS = 55 * 60_000;
+/** The longest a message held for a cold session waits before it wakes the session anyway. */
+export const COLD_HOLD_MAX_MS = 3 * 3600_000;
 
 /** Taskmaster↔minion messages (both ways) one minion may exchange per LOOP_WINDOW_MS before the next waits for a person. */
 export const LOOP_LIMIT = 6;
@@ -775,7 +781,7 @@ export function systemPrompt(project: Project, ticket: Ticket, filesDir: string 
     ...(deploys ? ['After you deploy with tools/deploy.sh, set state pending-deploy and do not call close_self: a successful deploy dismisses the minion once it is live and your turn has ended (the restart does not interrupt your turn), and a failed one leaves it open with the error. pending-deploy means the deploy is all that is left: in a later turn, when someone still needs you (helping them use the change, an open question, more work), set another state or null, even while the deploy is still waiting.'] : []),
     'When the minion\'s work is done and should be dismissed with nothing to deploy, call the `close_self` tool (mcp__thread) near the end of your turn: the minion is dismissed once the turn ends, keeping its worktree and branch, and any new message reopens it. Do not dismiss a minion whose result is something for people to read (a report, research, write-up, plan or doc): leave it open in state ready until someone has read it and says it can be dismissed, even if its brief says to dismiss.',
     `${deploys ? 'Once your change is live, or deployed and waiting in pending-deploy,' : 'Once your work is finished'} and nothing is left for a person to answer, try or read, end the minion in that same turn (${deploys ? 'pending-deploy after tools/deploy.sh, close_self otherwise' : 'close_self'}): do not leave it in state ready for a "looks good" or an "are we good?". People ask the Taskmaster those, and it answers from read_ticket without waking you.`,
-    'You cannot message other minions directly. When something needs the scheme\'s Taskmaster (passing information to another minion, starting a new minion, a decision for it), message it with the `message_coordinator` tool (mcp__thread) with a self-contained message. For work in another scheme, ask your Taskmaster the same way: it can pass it to that scheme\'s Taskmaster.',
+    'You cannot message other minions directly. When something needs the scheme\'s Taskmaster (passing information to another minion, starting a new minion, a decision for it), message it with the `message_coordinator` tool (mcp__thread) with a self-contained message. For work in another scheme, ask your Taskmaster the same way: it can pass it to that scheme\'s Taskmaster. A Taskmaster idle over 55 minutes gets your message as held mail, read on its next turn (a person\'s message, or within 3 hours), since waking it re-reads its whole context; mark it `urgent` only when it must act now: you are blocked on it, or it carries a person\'s go, pick or run-back.',
     'When you and the Taskmaster disagree and you are proven wrong (by a test, git, the live state, a person), strike through your incorrect words with the `strike_text` tool (mcp__thread), quoting them exactly from your reply or your message to it, then say what is right: in your reply, also write the wrong words as `~~…~~` with the fix right after. Only strike your own words, and only once the evidence is in.',
     'When a person asks you to pin (or unpin) an artifact, use `pin_artifact` or `unpin_artifact` (mcp__thread) with their login as requested_by; `list_artifacts` finds it by title. Never pin on your own initiative.',
     'An HTML page you make can save people\'s picks and notes with `window.claude.use(\'db\')` (as on claude.ai), `localStorage` or `citadel.storage`, and `citadel.send(text)` puts text in the comment box under it for a person to send; read what a page saved with the `artifact_data` tool (mcp__thread). Before making a design document, review page or mock, use the `citadel:docs-and-mocks` skill.',
@@ -888,7 +894,7 @@ function coordinatorPrompt(project: Project, ticketsDir: string, memoryDir: stri
     'When you need people to decide between clear options, ask with your `ask_question` tool: it shows a card in this chat, below your reply even when asked early in a long turn, that they answer with a click. A card from an earlier turn that is still open sits above your later replies, so name it or say "above", never "below". Then end your turn; the answers arrive as the next message.',
     'When a plan needs a person\'s go before you act on it (a setup, a batch of minions), post it with your `propose_plan` tool: a card with Approve and Revise that only a person can approve, below your reply. Then end your turn and act on none of it until the go arrives as the next message.',
     'Minions can message you with their `message_coordinator` tool; those arrive named by the minion, like "[#12 Some title]: ...". Do what they ask when it is yours to do (relay to another minion with message_ticket, start a minion from a handoff), and do not reply to a minion just to acknowledge it.',
-    'Every message to an idle or parked minion wakes it and reloads its whole context, and after an hour idle its prompt cache has lapsed, so that reload is paid in full. So never message one just to pass on news (another minion shipped, a rule changed, an FYI), including relays a minion asks you for: a minion waiting on a deploy gets wake_when_live, and other news waits for the next message you have to send it anyway. Message an idle minion only when it has to act now or a person asks you to. Answer questions about a minion ("is #N merged?", "are we good?") yourself with read_ticket rather than asking it. The same holds for other schemes\' Taskmasters: news for one goes with message_taskmaster\'s wake: false.',
+    'Every message to an idle or parked minion wakes it and reloads its whole context, and after an hour idle its prompt cache has lapsed, so that reload is paid in full. So never message one just to pass on news (another minion shipped, a rule changed, an FYI), including relays a minion asks you for: a minion waiting on a deploy gets wake_when_live, and other news waits for the next message you have to send it anyway. Message an idle minion only when it has to act now or a person asks you to. Answer questions about a minion ("is #N merged?", "are we good?") yourself with read_ticket rather than asking it. The same holds for other schemes\' Taskmasters: news for one goes with message_taskmaster\'s wake: false. A minion or Taskmaster idle over 55 minutes (cold) gets even a waking message as held mail, read on its next turn (a person\'s message, or within 3 hours); pass `urgent` to message_ticket or message_taskmaster only when it must act now: it blocks work, or it carries a person\'s go, pick or run-back.',
     'When you and a minion (or another scheme\'s Taskmaster) disagree and you are proven wrong (by its evidence, git, the live state, a person), strike through your incorrect words with your `strike_text` tool, quoting them exactly from your reply or your message to it, then say what is right: in your reply, also write the wrong words as `~~…~~` with the fix right after. Only strike your own words, and only once the evidence is in.',
     'When a person asks you to pin (or unpin) an artifact, use `pin_artifact` or `unpin_artifact` with their login as requested_by; `list_artifacts` finds it by title. Never pin on your own initiative.',
     'Before making a design document, review page or mock, use the `citadel:docs-and-mocks` skill.',
@@ -1188,6 +1194,8 @@ export class Runner {
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
       payer: this.payerView(ticket.person_id),
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
+      // When its last turn ended, for the composer's cold-wake hint (#413).
+      last_turn_end: this.store.lastTurnEnd(ticket.id),
       // A Taskmaster's fresh start under way (#406), which hides the chat's Fresh session button.
       fresh_pending: !!this.store.getSetting<FreshState>(freshKey(ticket.id)),
       // What "Default" means in the composer: the effort a turn gets when the ticket has none of its own.
@@ -1508,6 +1516,7 @@ export class Runner {
     // Held mail rides along after what woke the turn, so the turn is still that message's.
     const mail = this.store.getSetting<QueuedMessage[]>(mailKey(ticketId)) ?? [];
     if (mail.length) this.store.deleteSetting(mailKey(ticketId));
+    this.store.deleteSetting(coldKey(ticketId));
     return [...held, ...(this.queues.get(ticketId)?.splice(0) ?? []), ...mail];
   }
 
@@ -1734,13 +1743,14 @@ export class Runner {
   /**
    * A message between a minion and its Taskmaster, either way (`to` is the receiving ticket). Up to
    * LOOP_LIMIT per LOOP_WINDOW_MS go through; after that each is held, with a note in both chats asking
-   * a person to continue, until continueLoop. Returns whether it was held.
+   * a person to continue, until continueLoop. Returns whether it was held: true by the loop guard,
+   * 'cold' as mail for a cold receiver (#413), which `urgent` overrides.
    */
-  relay(minionId: number, to: number, author: string, text: string): boolean {
+  relay(minionId: number, to: number, author: string, text: string, urgent = false): boolean | 'cold' {
     const minion = this.store.getTicket(minionId)!;
     const from = to === minionId ? this.store.getCoordinator(minion.project_id)?.id : minionId;
-    const { held } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from);
-    if (!held) return false;
+    const { held, cold } = this.guard(loopKey(minionId), LOOP_LIMIT, LOOP_WINDOW_MS, to, author, text, to === minionId, from, false, urgent);
+    if (!held) return cold ? 'cold' : false;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
     const note = held === 1
       ? `Paused: #${minion.number} and the ${AGENT_NAME} have exchanged ${LOOP_LIMIT} messages in the last ${LOOP_WINDOW_MS / 60_000} minutes, so ${what} is held until a person continues.`
@@ -1755,8 +1765,8 @@ export class Runner {
    * runaway exchange within a few turns but not work spread out over an hour. Past that each is held,
    * with a note in both chats, until a person continues in either. `left` is how many more may go now.
    */
-  relayTaskmaster(from: number, to: number, author: string, text: string, wake = true, attached = ''): { held: boolean; left: number } {
-    const { held, left } = this.guard(pairKey(from, to), TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, to, author, asData(author, text) + attached, false, from, !wake);
+  relayTaskmaster(from: number, to: number, author: string, text: string, wake = true, attached = '', urgent = false): { held: boolean; left: number; cold?: true } {
+    const { held, left, cold } = this.guard(pairKey(from, to), TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, to, author, asData(author, text) + attached, false, from, !wake, urgent);
     if (held) {
       const [a, b] = [from, to].map((id) => this.store.getProject(this.store.getTicket(id)!.project_id)!.name);
       const what = `${a}'s message to ${b} ("${clip(text)}")`;
@@ -1766,7 +1776,7 @@ export class Runner {
       // Each chat's note names its own Taskmaster, whose Continue releases all its held exchanges.
       for (const id of [from, to]) this.emit(id, 'loop_paused', { minion: id, text: note });
     }
-    return { held: held > 0, left };
+    return { held: held > 0, left, ...(cold ? { cold: true as const } : {}) };
   }
 
   /**
@@ -1774,8 +1784,9 @@ export class Runner {
    * the receiver's next turn, whoever wakes it, after that turn's own messages, labelled with its sender
    * and time. It carries no person, so it never decides whose turn that is.
    */
-  private mail(to: number, author: string, text: string, from?: number) {
-    const row = this.emit(to, 'user_message', { author, text, mail: true, ...(from ? { from } : {}) });
+  private mail(to: number, author: string, text: string, from?: number, cold = false) {
+    const row = this.emit(to, 'user_message', { author, text, mail: true, ...(cold ? { cold: true } : {}), ...(from ? { from } : {}) });
+    if (cold && !this.store.getSetting<number>(coldKey(to))) this.store.setSetting(coldKey(to), this.now());
     const sent = new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ');
     const list = this.store.getSetting<QueuedMessage[]>(mailKey(to)) ?? [];
     list.push({ author: `Held mail from ${author}, sent ${sent} UTC`, text, images: [], id: row.id, asker: null });
@@ -1783,20 +1794,55 @@ export class Runner {
   }
 
   /** Count a message against the loop at `key`: send it (steering a running turn with `steer`; as held mail with `mail`), or hold it once `limit` went in `windowMs` (or one is held already). `held` is how many wait now (0 if it went), `left` how many more may go. */
-  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean, from?: number, mail = false): { held: number; left: number } {
+  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean, from?: number, mail = false, urgent = false): { held: number; left: number; cold: boolean } {
     const loop = this.store.getSetting<LoopState>(key) ?? { sent: [], held: [] };
     const now = this.now();
     loop.sent = loop.sent.filter((t) => now - t < windowMs);
     if (!loop.held.length && loop.sent.length < limit) {
       loop.sent.push(now);
       this.store.setSetting(key, loop);
-      if (mail) this.mail(to, author, text, from);
+      // Every message through here is machine-made, so a cold receiver gets it as mail unless it's urgent (#413).
+      const cold = !mail && !urgent && this.cold(to);
+      if (mail || cold) this.mail(to, author, text, from, cold);
       else this.send(to, author, text, [], { from }, steer);
-      return { held: 0, left: limit - loop.sent.length };
+      return { held: 0, left: limit - loop.sent.length, cold };
     }
     loop.held.push({ to, author, text, from, asker: this.personOf?.(author, from) ?? null, ...(mail ? { mail: true as const } : {}) });
     this.store.setSetting(key, loop);
-    return { held: loop.held.length, left: 0 };
+    return { held: loop.held.length, left: 0, cold: false };
+  }
+
+  /**
+   * Cold (#413): the session has a prompt cache to lose (a session, no turn running, waiting or queued)
+   * and its last turn ended over COLD_MS ago, so waking it re-writes its whole context.
+   */
+  cold(ticketId: number): boolean {
+    const t = this.store.getTicket(ticketId);
+    if (!t?.session_id || this.isRunning(ticketId) || this.queued(ticketId) || this.lanes.busy(ticketId) || this.limitWait(ticketId) || this.netWait(ticketId)) return false;
+    const ended = this.store.lastTurnEnd(ticketId);
+    return !!ended && this.now() - ended > COLD_MS;
+  }
+
+  /**
+   * Mail held for a cold session wakes it once the first has waited COLD_HOLD_MAX_MS, or at once if the
+   * session went fresh meanwhile (nothing left to re-read). A person's message takes it sooner. Run every minute.
+   */
+  coldSweep(now = this.now()) {
+    if (this.noTurns) return;
+    for (const p of this.store.listProjects()) {
+      for (const t of this.store.listTickets(p.id)) {
+        const since = this.store.getSetting<number>(coldKey(t.id));
+        if (!since || (t.session_id && now - since < COLD_HOLD_MAX_MS)) continue;
+        if (this.isRunning(t.id) || this.lanes.busy(t.id)) continue;
+        const mail = this.store.getSetting<QueuedMessage[]>(mailKey(t.id)) ?? [];
+        this.store.deleteSetting(coldKey(t.id));
+        if (!mail.length) continue;
+        this.store.deleteSetting(mailKey(t.id));
+        this.emit(t.id, 'note', { text: t.session_id ? `Held mail has waited ${COLD_HOLD_MAX_MS / 3_600_000} hours, so it runs now.` : 'Held mail runs now: the session is fresh, so waking it is cheap.' });
+        this.queues.set(t.id, [...(this.queues.get(t.id) ?? []), ...mail]);
+        this.next(t.id);
+      }
+    }
   }
 
   /**

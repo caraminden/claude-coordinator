@@ -820,7 +820,7 @@ export function appendEvent(event, scroll = true) {
       if (data.author === me && !data.comment) bubble.sent = { text: data.text ?? '', images: data.images ?? [], files: data.files ?? [] };
       stamped(bubble, event);
       if (data.steered) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'Sent into the turn that was running: Claude read it between steps' }, 'into the running turn'));
-      if (data.mail) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: "Sent without waking: it is read on this Taskmaster's next turn, whoever starts it" }, 'held mail'));
+      if (data.mail) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: data.cold ? 'Held because this chat was idle over 55 minutes, so waking it would re-read its whole context: it is read on the next turn, with a person\'s message or within 3 hours' : "Sent without waking: it is read on this Taskmaster's next turn, whoever starts it" }, 'held mail'));
       markQueued(bubble, view.ticket);
       nodes.push(bubble);
     }
@@ -1716,6 +1716,18 @@ export function renderTyping() {
       t.queued ? [sep(), h('span', { class: 'queued', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, `${t.queued} queued`)] : ''));
   if (wasHidden && followChat) scrollToBottom();
 }
+
+/** The cold-wake hint (#413) shows up an hour after the last turn and counts on, without waiting for a broadcast; other payer lines are left alone. */
+setInterval(() => {
+  const t = view?.ticket;
+  const chat = document.getElementById('ticket-head')?.closest('.chat');
+  const slot = chat?.querySelector('#chat-payer');
+  const form = chat?.querySelector('.composer');
+  if (!t || !slot || !form || (slot.firstChild && !slot.querySelector('.cold'))) return;
+  const line = payerLine(t, form.sendText);
+  slot.hidden = !line;
+  slot.replaceChildren(line ?? '');
+}, 60_000);
 
 /** Ticks the turn timer without rebuilding the line (and without re-announcing it to screen readers). */
 setInterval(() => {

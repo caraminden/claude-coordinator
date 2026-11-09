@@ -252,7 +252,7 @@ export const ticketRoutes: Route[] = [
         const files = await messageFiles(app, ticket, body.files);
         // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
         if (caller && ticket.kind !== 'coordinator') {
-          held = runner.relay(id, id, session.name, text);
+          held = runner.relay(id, id, session.name, text, body.urgent === true);
           return;
         }
         // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
@@ -578,11 +578,13 @@ export const ticketRoutes: Route[] = [
       const { id } = ticket;
       const { store, runner } = app;
       // A thread asks its project's coordinator for something only the coordinator can do (message_coordinator).
-      const text = str((await readJson(req)).text, 'Message', 10_000);
+      const body = await readJson(req);
+      const text = str(body.text, 'Message', 10_000);
       const coordinator = await ensureCoordinator(app, store.getProject(ticket.project_id)!);
-      if (runner.relay(id, coordinator.id, `#${ticket.number} ${ticket.title}`, text)) return json(res, 202, { sent: false, held: true });
-      runner.emit(id, 'note', { text: `Sent the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
-      return json(res, 202, { sent: true });
+      const held = runner.relay(id, coordinator.id, `#${ticket.number} ${ticket.title}`, text, body.urgent === true);
+      if (held === true) return json(res, 202, { sent: false, held: true });
+      runner.emit(id, 'note', { text: `${held ? 'Left held mail for' : 'Sent'} the Taskmaster: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
+      return json(res, 202, { sent: true, ...(held ? { cold: true } : {}) });
     },
   },
   {

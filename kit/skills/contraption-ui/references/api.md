@@ -114,7 +114,7 @@ path matches when it equals an open path or sits under it; a path containing `%2
 | Citadel can't open your signing key | 503 |
 | Enabled | Forwarded with a fresh `X-Citadel-Identity` |
 
-All tested. When someone is disabled, their open streams and websockets are closed within about
+All but the 503 are tested. When someone is disabled, their open streams and websockets are closed within about
 2 s (tested).
 
 Your pages share Citadel's origin. Inside Citadel's window they're shown in a same-origin frame
@@ -215,7 +215,7 @@ Body up to 4,000,000 bytes:
 | `system` | | Text appended to the agent's system prompt; default none |
 | `model` | | `^[\w.\[\]-]{1,60}$`; default the registry's `default_model`, else Claude Code's default. Per call, so each turn may pick its own |
 | `compactWindow` | | Tokens before the conversation compacts: 10,000 to 1,000,000, default 40,000 |
-| `mcp` | | Up to 10 servers: `name` (`^[A-Za-z0-9_-]{1,40}$`, unique), `path` (on your port, starting with `/`, at most 200 printable characters), `headers` (an object of plain header values, each at most 8,192 characters with no line breaks) |
+| `mcp` | | Up to 10 servers: `name` (`^[A-Za-z0-9_-]{1,40}$`, unique), `path` (on your port, starting with `/`, at most 200 printable characters), `headers` (an object of header names matching `^[A-Za-z0-9-]{1,100}$` to values of at most 8,192 characters with no line breaks) |
 | `agents` | | `false` (default) or `{ max, model }`: lets the agent start Grunts (the Agent tool), at most `max` (1 to 10, default 1) at once, nested ones included; `model` defaults to the turn's |
 | `webSearch` | | `true` adds WebSearch and WebFetch for the agent and its Grunts; default `false`. WebFetch puts a web page in front of the model, so keep your write tools behind the person's explicit asks on such turns |
 | `timeoutSec` | | 1 to 900, default 180 |
@@ -323,7 +323,7 @@ Body `{ "person": 3, "text": "…" }`, the turn's own person (tested).
 | `text` | Required for `bug` and `feature`, at most 10,000 characters; optional for `data` |
 | `summary` | One line, at most 200 characters, shown in the Taskmaster's chat under a header with the whole ask behind a toggle. Default: the text's first sentence |
 | `item` | One line, at most 100: what the ask is about (an aura, a list), shown in the header |
-| `files` | Up to 20, each `{ name, data }` with `data` base64; at most 16 MiB decoded in all (413 past it) |
+| `files` | Up to 20, each `{ name, data }` with `data` base64; at most 16 MiB decoded in all (413 past it). The whole request body is capped at about 23 MB (16 MiB in base64 plus 1 MB) |
 
 - **Bug and feature** go into the home scheme Taskmaster's chat, waking it, labelled with your app,
   the person and whether they're a member of that scheme. A non-member's feature ask is a proposal
@@ -355,7 +355,7 @@ key and `X-Citadel-Person: <user id>`. The query string is kept. Checks, in orde
 `X-Citadel-Identity` signed with **its own** key, carrying `from` (your name) and `fromTitle`
 (tested). Your key and your `X-Citadel-*` headers never reach it. Its status, `Content-Type` and
 body come back untouched, redirects included (not followed). 502 when it's down, 504 after 10 s
-with no answer (tested). Citadel keeps no body.
+with no answer (tested); 503 when Citadel can't open `<to>`'s signing key. Citadel keeps no body.
 
 To be called, have an admin list your paths in `relay_paths` (like `/app-api/`), and check `from`
 on every one of them.
@@ -507,8 +507,9 @@ Newest first.
   - `ui/tip.js` (tooltips) and `ui/status.js` (`statusSlot`, `steadyLabel`, `toast`).
   - The rail retries a greyed-out app every 15 s, and an installed app's rail opens other apps in
     its own window.
-- **2026-11-03:** `cui-switch`, `cui-busy` and skeletons in `ui/base.css`; `mountChat`'s `block()`
-  gets the whole `tool_result` data.
+- **2026-11-03:** Your service restarts after any exit (`Restart=always`), not only a failure, so
+  a server that exits 0 comes back too. `cui-switch`, `cui-busy` and skeletons in `ui/base.css`;
+  `mountChat`'s `block()` gets the whole `tool_result` data.
 - **2026-11-02**, possibly already in a copy from that day:
   - `text` events carry `message`; `tool`, `tool_result` and `text` carry `parent`.
   - Citadel UI served at `/apps/_citadel/ui/` (`markdown.js`, `chat.js`, `composer.js`,

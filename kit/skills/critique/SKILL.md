@@ -34,6 +34,9 @@ Read each rubric the Rubrics line names (frontmatter first) and keep those whose
   them says the critic didn't judge it;
 - `schedule:` your brief is that schedule's run.
 
+`in-app:` never matches here: the app runs that part itself ([`references/in-app.md`](references/in-app.md)).
+The rubric's other `when:` parts still match as above.
+
 *Done when* every named rubric is kept or skipped with its reason.
 
 ## 2. Brief, then artifacts, then checks

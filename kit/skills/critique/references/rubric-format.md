@@ -24,7 +24,7 @@ because people's verdicts are written into it (the skill's step 9).
 |---|---|---|---|
 | `name` | yes | kebab-case | Names the rubric in result lines: `ui-screenshots critic: pass (round 1)`. |
 | `judges` | yes | one line | What it judges, from what: "front-end changes, from desktop and phone screenshots". |
-| `when` | yes | one or more of `diff: <glob>, <glob>` · `creative: <what>` · `schedule: <cadence>`, joined with ` \| ` | When it runs. `diff:` matches the changed paths of the branch (self-review). `creative:` a new piece, take or rework that makes creative choices (docs-and-mocks, or the scheme's own creative loop); a small change to a design a person already saw skips it. `schedule:` a scheduled minion runs it. |
+| `when` | yes | one or more of `diff: <glob>, <glob>` · `creative: <what>` · `schedule: <cadence>` · `in-app: <the app's step>`, joined with ` \| ` | When it runs. `diff:` matches the changed paths of the branch (self-review). `creative:` a new piece, take or rework that makes creative choices (docs-and-mocks, or the scheme's own creative loop); a small change to a design a person already saw skips it. `schedule:` a scheduled minion runs it. `in-app:` a contraption runs it on its own agent's output ([`in-app.md`](in-app.md)); minions use it only to calibrate. A starter says `set by the extending rubric`. |
 | `input` | yes | one line | The artifacts the critic gets and how to make them: "screenshots at 1440 and 390 wide", "the diff", "each claim with its source rows". |
 | `checks` | no | `[<command>, ...]` | Scripts run before any model looks, from the repo root. A non-zero exit is fixed first. Mechanical rules (sizes, lint, link resolution) belong here, not in Blockers. |
 | `mode` | no | `blind` (default) · `informed` | Blind: the critic sees the artifacts, the brief and the rubric only. Informed: it may also read the source the brief names (a rule critic over a diff). Taste rubrics stay blind. |
@@ -68,6 +68,8 @@ The critic reads the starter first, then this file:
 - frontmatter: this file's keys win, the starter fills the rest;
 - Blockers: the starter's, then this file's, numbered on (`S1`... for the starter's, `1`... here);
 - every other section adds to the starter's.
+
+A starter leaves `when:` (and often `input:`) to the file that extends it, which must set them.
 
 A scheme that disagrees with a starter blocker says so in its own Notes ("S3 doesn't apply here:
 <why>"); the critic skips it.

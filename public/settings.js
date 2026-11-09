@@ -202,17 +202,17 @@ export function renderGithubStrip() {
 }
 
 /**
- * The overview's header: the project name with a ✎ that turns it into a text field in place.
- * Enter or ✓ saves; Esc or tapping away cancels. It sits in the panel's <summary>, so its own
- * clicks and keys must not collapse the panel or close the phone drawer.
+ * The overview's header: the project name is a button that turns it into a text field in place
+ * (on a collapsed panel it opens the panel instead). Enter or ✓ saves; Esc or tapping away cancels.
+ * It sits in the panel's <summary>, so its own clicks and keys must not collapse the panel or close
+ * the phone drawer.
  */
 export function projectTitle(project) {
   const wrap = h('span', { class: 'project-title' });
   const show = () => {
     wrap.replaceChildren(
       schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project),
-      h('span', { class: 'label', 'data-project-name': project.id }, view.project.name),
-      h('button', { type: 'button', class: 'rename', 'aria-label': 'Rename scheme', title: 'Rename scheme (its repo stays as it is)', onclick: edit }, '✎'),
+      h('button', { type: 'button', class: 'label', 'data-project-name': project.id, title: 'Rename scheme (its repo stays as it is)', onclick: edit }, view.project.name),
       h('span', { class: 'spacer' }),
       h('button', { type: 'button', class: 'rename switch', 'aria-label': 'Switch scheme', title: 'Switch scheme', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: (e) => toggleSchemeMenu(e.currentTarget) }, '⇅'),
       h('button', { type: 'button', class: 'rename add', 'aria-label': 'New scheme', title: 'New scheme', onclick: openNewScheme }, '+'));
@@ -220,6 +220,8 @@ export function projectTitle(project) {
   // Every label showing the name changes now; the server's broadcast confirms it, and a refusal puts the old name back.
   const rename = (name) => onProjectUpdate({ ...(view.projectId === project.id ? view.project : project), name });
   const edit = () => {
+    const panel = wrap.closest('details');
+    if (panel && !panel.open) { panel.open = true; return; }
     const input = h('input', { class: 'rename-input', value: view.project.name, maxlength: '80', 'aria-label': 'Scheme name' });
     const save = () => {
       const name = input.value.trim(); // as the server stores it

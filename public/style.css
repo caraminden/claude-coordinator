@@ -513,16 +513,15 @@ a.file-chip:hover { border-color: var(--muted); }
 .nav-item:hover { background: var(--panel); }
 .nav-item.active { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); font-weight: 600; }
 .shelf > summary .project-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.25rem; }
-.shelf > summary .project-title .label { flex: 0 1 auto; }
+.shelf > summary .project-title .label { flex: 0 1 auto; background: none; border: 0; border-radius: 6px; padding: 0.2rem 0.35rem; margin-left: -0.35rem; color: inherit; font-weight: inherit; text-align: start; }
+.shelf[open] > summary .project-title .label:is(:hover, :focus-visible) { background: var(--panel); color: var(--accent); }
+/* The name's text lines up with the panel's edge, or sits just after the scheme's icon. */
+.shelf > summary .project-title .scheme-icon:not([hidden]) + .label { margin-left: -0.25rem; }
+.shelf:not([open]) > summary .project-title .label { padding: 0; margin: 0; }
 :is(.shelf, .sidebar) > summary .rename { flex: none; min-width: 32px; min-height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 6px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
 :is(.shelf, .sidebar) > summary .rename:is(:hover, :focus-visible) { color: var(--accent); background: var(--panel); }
 .shelf > summary .rename-input { flex: 1; min-width: 0; font-weight: 650; padding: 0.25rem 0.4rem; user-select: text; -webkit-user-select: text; }
 :is(.shelf, .sidebar):not([open]) > summary .rename { display: none; }
-/* Mouse and trackpad: the pencil shows on hover; touch screens have no hover, so it stays. */
-@media (hover: hover) and (pointer: fine) {
-  .shelf > summary .label + .rename { opacity: 0; }
-  .shelf > summary:hover .rename, .shelf > summary .rename:focus-visible { opacity: 1; }
-}
 .shelf .column h3 .browse { font-size: 0.85em; text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--accent); text-decoration: none; }
 .shelf .column h3 .more:hover, .shelf .column h3 .browse:hover, .shelf .column h3 .browse.active { text-decoration: underline; }
 .shelf .sub { margin-top: 0.6rem; }

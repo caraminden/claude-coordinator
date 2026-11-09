@@ -884,7 +884,7 @@ export function appendEvent(event, scroll = true) {
     // A Taskmaster's fresh Claude session (#406), with the handoff it starts from behind the toggle.
     nodes.push(h('details', { class: 'note detail fresh', title: data.why ? `Why: ${data.why}` : null }, h('summary', {}, 'Fresh session started; summary'), markdown(data.summary, event.ticket_id)));
   } else if (event.kind === 'error') {
-    nodes.push(h('div', { class: 'note error' }, data.text));
+    nodes.push(h('div', { class: 'note error' }, threadRefs(data.text)));
   } else if (grunt && data.type === 'assistant') {
     for (const block of data.message?.content ?? []) if (block.type === 'text' && block.text.trim()) addGruntText(log, grunt, block.text, data, event);
   } else if (event.kind === 'claude') {

@@ -1,5 +1,5 @@
 // The scheme's property registry: the Settings link's review count, the Properties tab and a minion's property chip.
-import { api, h, icon, me, view } from './core.js';
+import { api, h, icon, me, threadRefs, view } from './core.js';
 import { settingsTabs, tuneUpButton } from './settings.js';
 import { filterChoices, samePicks, valueCounts, viewPicks } from './propfilter.js';
 import { renderSidebar } from './sidebar.js';
@@ -355,7 +355,7 @@ async function renderPropertiesPage() {
         h('span', { class: 'pv' }, v.value),
         v.aliases.length ? h('span', { class: 'muted small' }, `also ${v.aliases.join(', ')}`) : '',
         flag ? h('span', { class: 'pv-flag' }, flag === 'new' ? `new · ${v.created_by}` : `proposed · ${v.created_by}`) : '',
-        v.description ? h('span', { class: 'muted small pv-desc' }, v.description) : '',
+        v.description ? h('span', { class: 'muted small pv-desc' }, threadRefs(v.description)) : '',
         h('span', { class: 'spacer' }), ...actions);
     };
     const addForm = () => {
@@ -379,7 +379,7 @@ async function renderPropertiesPage() {
         h('span', { class: 'muted small' }, `${kind}${k.status === 'proposed' ? ` · proposed by ${k.created_by}` : ''}`),
         h('span', { class: 'spacer' }),
         edit && k.status === 'proposed' ? [btn(approveKey, waiting ? 'Make it and its values usable; archive or merge single values after' : 'Make it usable', () => review(k, null, 'approve')), btn('Reject', 'Drop the proposal', () => review(k, null, 'reject'))] : ''),
-      k.description ? h('p', { class: 'muted small prop-desc' }, k.description) : '',
+      k.description ? h('p', { class: 'muted small prop-desc' }, threadRefs(k.description)) : '',
       values.length ? h('div', { class: 'pv-list' }, values.map(valueChip)) : '',
       archived.length ? h('p', { class: 'muted small' }, 'Archived: ', archived.map((v) => [v.value, ' ', edit ? btn('Restore', `Offer ${v.value} again`, () => review(k, v, 'restore')) : '', ' '])) : '',
       edit && k.value_kind === 'enum' && k.status !== 'archived' ? addForm() : '');

@@ -83,6 +83,12 @@ ignored finding as a note, never a blocker.
    an empty page (2026-11-09); Cara: "a big wall of white/black text is never going to be what we
    want out of our UIs".
 
+9. **Every link is clickable.** A URL, DOI or reference to another page or item is a link, in sight:
+   no bare URL or DOI as plain text, no link only in a tooltip (rule 6). Code is exempt. See it: a
+   `bare-link` finding (the text and why); in the shot, an address in body-coloured text with no
+   link styling. Seen: links in The Trans Agenda's app that couldn't be clicked (2026-11-09); Cara:
+   "no reason to have a link you cant click".
+
 ## Watch-list
 
 - Meaning carried by colour alone: a red dot with no word (rule 17).
@@ -98,6 +104,7 @@ ignored finding as a note, never a blocker.
 
 | Date | Minion | About | Words |
 |---|---|---|---|
+| 2026-11-09 | Citadel #434 | links (rule 6) | Cara: "no reason to have a link you cant click" |
 | 2026-11-09 | Citadel #419 | a first UI's look (blocker 8) | Cara: "a big wall of white/black text is never going to be what we want out of our UIs" |
 | 2026-11-08 | Citadel #388 | clicks (rule 23) | Cara: "assume things will work instantly, but recover later if there was an issue" |
 | 2026-11-08 | Citadel #383 | dialogs (rule 22) | Cara: "the X to close should stay at the top and clicking off the modal should close it" |

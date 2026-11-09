@@ -2,7 +2,7 @@
 // shared/project/markdown-parity-audit-2026-10.md), plus what chat relies on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderMarkdown, slug } from '../public/ui/markdown.js';
+import { linkify, linkifyHtml, renderMarkdown, slug } from '../public/ui/markdown.js';
 import { linkThreadRefs, linkUrls } from '../public/threadrefs.js';
 import { struckSource } from '../public/strike.js';
 
@@ -104,7 +104,7 @@ test('links go through the hook with their target unescaped and their text rende
   assert.deepEqual(seen, ['decisions.md', '../a/b.md#sec', 'https://x.io/?a=1&b=2']);
   // The default: web links open, anything else is inert.
   assert.equal(md('[w](https://a.b) [f](f.md)'),
-    '<p><a href="https://a.b" target="_blank" rel="noopener">w</a> <span class="cui-link" title="f.md">f</span></p>');
+    '<p><a href="https://a.b" target="_blank" rel="noopener noreferrer">w</a> <span class="cui-link" title="f.md">f</span></p>');
 });
 
 test('headings carry GitHub\'s slug, deduplicated', () => {
@@ -126,9 +126,9 @@ test('emphasis: underscores, bold italic, and what must stay plain', () => {
 
 test('emphasis never reaches into URLs or link targets', () => {
   assert.equal(chat('see https://x.io/a_b_c and https://x.io/*y*'),
-    '<p>see <a href="https://x.io/a_b_c" target="_blank" rel="noopener">https://x.io/a_b_c</a> and <a href="https://x.io/*y*" target="_blank" rel="noopener">https://x.io/*y*</a></p>');
+    '<p>see <a href="https://x.io/a_b_c" target="_blank" rel="noopener noreferrer">https://x.io/a_b_c</a> and <a href="https://x.io/*y" target="_blank" rel="noopener noreferrer">https://x.io/*y</a>*</p>');
   assert.equal(chat('up at **https://x.io/p/198/**. Done'),
-    '<p>up at <strong><a href="https://x.io/p/198/" target="_blank" rel="noopener">https://x.io/p/198/</a></strong>. Done</p>');
+    '<p>up at <strong><a href="https://x.io/p/198/" target="_blank" rel="noopener noreferrer">https://x.io/p/198/</a></strong>. Done</p>');
 });
 
 test('hard breaks: backslash or two spaces in a doc, every line in chat', () => {
@@ -159,13 +159,13 @@ test('a NUL or \\u0001 in the text can neither hang the render nor reach held HT
   assert.equal(md('a\u0000b `c\u0000d`'), '<p>a�b <code>c�d</code></p>');
   const image = (href, alt) => `<img src="${href}" alt="${alt}">`;
   assert.equal(md('![\u00001\u0000](p.png) [x](http://e/"onerror=1)', { image }),
-    '<p><img src="p.png" alt="�1�"> <a href="http://e/&quot;onerror=1" target="_blank" rel="noopener">x</a></p>');
+    '<p><img src="p.png" alt="�1�"> <a href="http://e/&quot;onerror=1" target="_blank" rel="noopener noreferrer">x</a></p>');
 });
 
 test('a linked image keeps its picture, and alt text is plain', () => {
   const image = (href, alt) => `<img src="${href}" alt="${alt}">`;
   assert.equal(md('[![badge](b.png)](https://x.io)', { image }),
-    '<p><a href="https://x.io" target="_blank" rel="noopener"><img src="b.png" alt="badge"></a></p>');
+    '<p><a href="https://x.io" target="_blank" rel="noopener noreferrer"><img src="b.png" alt="badge"></a></p>');
   assert.equal(md('![a `x` b](u.png)', { image }), '<p><img src="u.png" alt="a x b"></p>');
 });
 
@@ -215,9 +215,46 @@ test('headingBase: a reply\'s # is an h3 by default, a document passes 1, and le
 });
 
 test('default links: http(s) and mailto open a new tab, never _top; anything else is inert', () => {
-  assert.equal(renderMarkdown('[a](mailto:x@y.z)'), '<p><a href="mailto:x@y.z" target="_blank" rel="noopener">a</a></p>');
+  assert.equal(renderMarkdown('[a](mailto:x@y.z)'), '<p><a href="mailto:x@y.z" target="_blank" rel="noopener noreferrer">a</a></p>');
   assert.equal(renderMarkdown('[a](javascript:alert)'), '<p><span class="cui-link" title="javascript:alert">a</span></p>');
   assert.doesNotMatch(renderMarkdown('[a](https://x.y) https://z.w'), /_top/);
+});
+
+const ext = (href, text = href) => `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+
+test('linkify: bare URLs and DOIs in plain text become new-tab links, everything else escaped', () => {
+  // Trailing punctuation ends the sentence, not the URL.
+  assert.equal(linkify('see https://x.io/a.'), `see ${ext('https://x.io/a')}.`);
+  assert.equal(linkify('Is it https://x.io/a?b=1&c=2?'), `Is it ${ext('https://x.io/a?b=1&amp;c=2')}?`);
+  // A URL inside parentheses leaves the closing one out, but keeps one it opened itself.
+  assert.equal(linkify('(see https://x.io/a)'), `(see ${ext('https://x.io/a')})`);
+  assert.equal(linkify('(https://en.wikipedia.org/wiki/Foo_(bar))'), `(${ext('https://en.wikipedia.org/wiki/Foo_(bar)')})`);
+  // DOIs, bare or with "doi:", go to doi.org; one inside a path or a version number doesn't.
+  assert.equal(linkify('doi:10.1000/xyz123, then 10.1016/S0140-6736(20)30183-5.'),
+    `${ext('https://doi.org/10.1000/xyz123', 'doi:10.1000/xyz123')}, then ${ext('https://doi.org/10.1016/S0140-6736(20)30183-5', '10.1016/S0140-6736(20)30183-5')}.`);
+  assert.equal(linkify('DOI: 10.1234/a<b>'), `${ext('https://doi.org/10.1234/a', 'DOI: 10.1234/a')}&lt;b&gt;`);
+  assert.equal(linkify('a/10.1234/x and v1.10.1234/y and 10.1234/'), 'a/10.1234/x and v1.10.1234/y and 10.1234/');
+  // It never injects HTML: tags are escaped and a quote ends a URL.
+  assert.equal(linkify('<b>x</b> https://a.b/"onmouseover=alert(1)'), `&lt;b&gt;x&lt;/b&gt; ${ext('https://a.b/')}&quot;onmouseover=alert(1)`);
+  assert.equal(linkify('https:// alone'), 'https:// alone');
+  assert.equal(linkify(null), '');
+});
+
+test('linkifyHtml: links bare URLs in text, leaves tags, existing links and code alone', () => {
+  assert.equal(linkifyHtml('<a href="https://x.y">https://x.y</a> <code>https://c.d</code> <pre>10.1234/p</pre> <em>https://e.f</em>'),
+    `<a href="https://x.y">https://x.y</a> <code>https://c.d</code> <pre>10.1234/p</pre> <em>${ext('https://e.f')}</em>`);
+  assert.equal(linkifyHtml('<img alt="https://x.y" src="a.png">'), '<img alt="https://x.y" src="a.png">');
+});
+
+test('markdown autolinks bare URLs and DOIs through the link hook, not inside links or code', () => {
+  assert.equal(md('[l](https://a.b) <https://c.d/e> `https://code` https://f.g/h_i_j, doi:10.1234/x_y_z.'),
+    `<p>${ext('https://a.b', 'l')} ${ext('https://c.d/e')} <code>https://code</code> ${ext('https://f.g/h_i_j')}, ${ext('https://doi.org/10.1234/x_y_z', 'doi:10.1234/x_y_z')}.</p>`);
+  assert.equal(md('(see https://x.io/a)'), `<p>(see ${ext('https://x.io/a')})</p>`);
+  const seen = [];
+  md('at https://x.io and 10.1234/q', { link: (href, html) => (seen.push([href, html]), html) });
+  assert.deepEqual(seen, [['https://x.io', 'https://x.io'], ['https://doi.org/10.1234/q', '10.1234/q']]);
+  // An image's alt is text, so a URL in it isn't a link.
+  assert.equal(md('![see https://x.y](p.png)'), '<p><span class="cui-alt">[image: see https://x.y]</span></p>');
 });
 
 test('markdownLine: one line per block, "• " for items, no links, emphasis kept', () => {

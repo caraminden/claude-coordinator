@@ -29,7 +29,7 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 |---|---|---|
 | `theme.css` | Every token below as `--citadel-*`, light and dark | `<link rel="stylesheet">`, first; [Tokens](#tokens-themecss) below |
 | `ui/base.css` | Buttons, inputs, chips, notices, switches, spinner, busy regions, skeletons, focus ring, as `cui-*` classes | `<link rel="stylesheet">` after theme.css; [references/base-parts.md](references/base-parts.md) |
-| `ui/markdown.js` (+ `.d.ts`) | An agent's markdown as safe HTML, streaming-aware, Copy on code blocks | ES module import; [references/markdown.md](references/markdown.md) |
+| `ui/markdown.js` (+ `.d.ts`) | An agent's markdown as safe HTML, streaming-aware, Copy on code blocks; `linkify` for plain text with URLs and DOIs | ES module import; [references/markdown.md](references/markdown.md) |
 | `rail.js`, `drawers.js` (+ `.d.ts`) | The app rail; phone drawers (`NARROW`, the 800 px breakpoint) | [rail-and-drawers.md](rail-and-drawers.md) |
 | `ui/composer.js` (+ `.d.ts`) | The message box under a chat | ES module import, needs base.css; [references/composer.md](references/composer.md) |
 | `ui/chat.js` (+ `.d.ts`) | The chat log: your messages, replies, tool runs, Grunt rows, reply chips, the working line, messages sent mid-turn | ES module import, needs base.css; [references/chat.md](references/chat.md) |
@@ -125,7 +125,11 @@ fails a view that's a wall of plain text (`citadel:critique`).
    `opacity` and `transform`, never layout (`width`, `height`, `top`, `left`, margins), and loop
    nothing but a spinner or skeleton. Set the end state yourself, never in `transitionend` or
    `animationend`: at 0s a transition fires no event.
-6. **External links open a new tab (`_blank`, `rel=noopener`).** A link to a custom URL scheme
+6. **Every link is clickable.** Cara, 2026-11-09: "no reason to have a link you cant click". A URL,
+   DOI or reference to another page or item is an `<a href>`, in sight, never plain text or only a
+   `title`/`data-tip`. Text from data (a record, a note, an agent's words) goes through `linkify(text)`
+   from `ui/markdown.js` (`linkifyHtml` for HTML you built); its markdown renderer links them already.
+   External links open a new tab (`_blank`, `rel="noopener noreferrer"`). A custom URL scheme
    (`myapp://…`) needs `target="_top"`: inside the frame Citadel's CSP (`default-src 'self'`, so
    `frame-src 'self'`) blocks it, and the top window hands it to the OS. Never `_top` for a plain
    web link.

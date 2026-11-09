@@ -7,6 +7,7 @@
 //   clip           text cut off by its box, or spilling out of it
 //   double-border  an element and one inside it both drawing a line on the same edge
 //   close-scrolls  an open dialog whose close button scrolls away with its body
+//   bare-link      a URL or DOI shown as plain text, or only in a title or data-tip (outside code)
 //   click-*        with --click: a click that shows nothing at once, or disables or covers other controls
 // Each finding names a selector and the numbers. Exit 0 clean, 1 findings, 2 a usage or browser error.
 // No installs: it drives Playwright's chrome-headless-shell (or --chrome) over the DevTools protocol on a
@@ -446,6 +447,23 @@ function inPage(opts) {
       }
       if (s.position === 'sticky' || s.position === 'fixed') break; // pinned below the scroller (a modal dialog is fixed and may scroll itself)
     }
+  }
+
+  // 7. a URL or DOI a person can't click: plain text outside a link or code, or only in a tooltip
+  const URLISH = /https?:\/\/[^\s"'<>]+[^\s"'<>.,:;!?)\]]|(?<![\w/.:-])(?:doi:\s?)?10\.\d{4,9}\/[^\s"'<>]*[^\s"'<>.,:;!?)\]]/i;
+  const NOT_TEXT = 'a[href], code, pre, kbd, samp, textarea, input, select, script, style, [contenteditable]';
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n; (n = walker.nextNode());) {
+    const el = n.parentElement;
+    const m = URLISH.exec(n.data);
+    if (!m || !el || el.closest(NOT_TEXT) || !inScope(el) || !visible(el)) continue;
+    out.push({ check: 'bare-link', selector: sel(el), text: snip(m[0]), why: 'a URL or DOI as plain text: make it a link (linkify in ui/markdown.js)' });
+  }
+  for (const el of all) {
+    const tip = el.getAttribute('title') || el.getAttribute('data-tip') || '';
+    const m = URLISH.exec(tip);
+    if (!m || el.closest('a[href]') || el.querySelector('a[href]') || !visible(el)) continue;
+    out.push({ check: 'bare-link', selector: sel(el), text: snip(m[0]), why: 'a URL or DOI only in a tooltip: show it as a link' });
   }
 
   // Group repeats (40 rows with the same short button) into one finding with a count.

@@ -10,6 +10,8 @@
     ],
     "markdown.js": [
       "copyText",
+      "linkify",
+      "linkifyHtml",
       "markdownElement",
       "markdownLine",
       "renderMarkdown",
@@ -205,7 +207,7 @@
     "table with alignment": "<div class=\"cui-table\"><table><thead><tr><th>a</th><th class=\"cui-al-c\">b</th><th class=\"cui-al-r\">c</th></tr></thead><tbody><tr><td>1</td><td class=\"cui-al-c\">2</td><td class=\"cui-al-r\">3</td></tr></tbody></table></div>",
     "code fence": "<pre><code class=\"language-js\">const a = &quot;&lt;b&gt;&quot;;</code></pre>",
     "quote and rule": "<blockquote><p>quoted more</p></blockquote><hr><p>after</p>",
-    "links: http, mailto, relative, bare": "<p><a href=\"https://example.com/a?b=1&amp;c=2\" target=\"_blank\" rel=\"noopener\">web</a> <a href=\"mailto:a@b.c\" target=\"_blank\" rel=\"noopener\">mail</a> <span class=\"cui-link\" title=\"notes.md\">file</span> https://example.com/x.</p>",
+    "links: http, mailto, relative, bare": "<p><a href=\"https://example.com/a?b=1&amp;c=2\" target=\"_blank\" rel=\"noopener noreferrer\">web</a> <a href=\"mailto:a@b.c\" target=\"_blank\" rel=\"noopener noreferrer\">mail</a> <span class=\"cui-link\" title=\"notes.md\">file</span> <a href=\"https://example.com/x\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com/x</a>.</p>",
     "image without a hook": "<p><span class=\"cui-alt\">[image: a chart]</span></p>",
     "streaming: half table held back": "<p>Pieces:</p><div class=\"cui-table\"><table><thead><tr><th>Piece</th><th>Gives</th></tr></thead><tbody></tbody></table></div>",
     "streaming: header waits for its separator": "<p>Pieces:</p>",

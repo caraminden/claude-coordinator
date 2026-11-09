@@ -13,7 +13,7 @@ import { onSchedulesChanged } from './schedules.js';
 import { onHiddenChanged } from './hidden.js';
 import { inAppHash, jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute } from './threadrefs.js';
 import { renderModelPicker, uploadsRunning } from './composer.js';
-import { markdownElement } from './ui/markdown.js';
+import { linkifyHtml, markdownElement } from './ui/markdown.js';
 import { iconSrc } from './schemes.js';
 import { hideRail, showRail } from './rail.js';
 import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
@@ -262,10 +262,10 @@ function threadRefsHtml(html) {
   }, view.projects, prRefRoute);
 }
 
-/** Plain text as nodes, with its "#12"s linked (see threadRefsHtml). */
+/** Plain text as nodes, with its URLs, DOIs and "#12"s linked (see threadRefsHtml and linkUrls). */
 export function threadRefs(text) {
   const span = document.createElement('span');
-  span.innerHTML = threadRefsHtml(escapeHtml(String(text ?? '')));
+  span.innerHTML = threadRefsHtml(linkifyHtml(linkUrls(escapeHtml(String(text ?? '')), location, (url) => prUrlRoute(unescapeHtml(url)))));
   return [...span.childNodes];
 }
 
@@ -306,7 +306,8 @@ export function markdownDoc(src, opts = {}) {
       ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img src="${escapeHtml(url)}" alt="${alt}" title="${alt}" loading="lazy"></a>`
       : `<span class="muted">[image: ${alt}]</span>`;
   };
-  const text = (html) => threadRefsHtml(linkUrls(html, location, (url) => prUrlRoute(unescapeHtml(url))));
+  // Bare URLs and DOIs already came through `link` (ui/markdown.js), so only #N is left to link.
+  const text = threadRefsHtml;
   // Citadel UI's element (ui/markdown.js), so Citadel and the apps draw markdown with one stylesheet;
   // .md carries Citadel's own extras (file cards, chat headings in style.css). Headings as written.
   const div = markdownElement(src, { link, image, text, breaks, headingBase: 1 });

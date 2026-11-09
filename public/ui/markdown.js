@@ -47,8 +47,57 @@ export function slug(html) {
 
 /** The default link: http(s) and mailto open a new tab, never `_top` (that would take Citadel's whole window); anything else is inert. */
 const defaultLink = (href, html) => (/^(https?:\/\/|mailto:)/i.test(href)
-  ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${html}</a>`
+  ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${html}</a>`
   : `<span class="cui-link" title="${escapeHtml(href)}">${html}</span>`);
+
+/**
+ * A bare http(s) URL or DOI ("10.1234/x", "doi:10.1234/x") in escaped text. Each ends at a space, a
+ * tag, a quote or a held-out marker; a DOI needs no "doi:" but can't sit inside a path or a number.
+ */
+const BARE = /(?<![\w/])(https?:\/\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>"'\u0000\u0001])+)|(?<![\w/.:-])(doi:\s?)?(10\.\d{4,9}\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>"'\u0000\u0001])+)/gi;
+
+/**
+ * A bare link's end without the marks that end the sentence or emphasis around it ("x/**." keeps
+ * "x/"); a ")" or "]" stays when it closes one inside it, and "&amp;" stays whole.
+ */
+function trimBare(s) {
+  let end = s.length;
+  for (;;) {
+    const c = s[end - 1];
+    const part = s.slice(0, end);
+    if (part.endsWith('&amp;')) return part;
+    if (/[*_~.,:;!?]/.test(c)) end--;
+    else if ((c === ')' || c === ']') && part.split(c).length > part.split(c === ')' ? '(' : '[').length) end--;
+    else return part;
+  }
+}
+
+/** Escaped text with its bare URLs and DOIs as `link(href, html)`; `held` wraps each link's HTML (see inline()). */
+function linkBare(s, link, held = (html) => html) {
+  return s.replace(BARE, (m, url, doiPrefix, doi) => {
+    const kept = trimBare(m);
+    // What's left must still point somewhere: not "https://" or "10.1234/" alone.
+    if (url ? /^https?:\/\/$/i.test(kept) : !/\/[^/]/.test(kept)) return m;
+    const href = url ? unescapeHtml(kept) : `https://doi.org/${unescapeHtml(kept.slice(doiPrefix?.length ?? 0)).split('/').map(encodeURIComponent).join('/')}`;
+    return held(link(href, kept)) + m.slice(kept.length);
+  });
+}
+
+/**
+ * Plain text (a record's field, a note) as HTML: everything escaped, its bare http(s) URLs and DOIs
+ * linked, opening a new tab. DOIs go to https://doi.org/.
+ */
+export function linkify(text) {
+  return linkBare(escapeHtml(String(text ?? '')), defaultLink);
+}
+
+/**
+ * HTML you made (already escaped) with the bare URLs and DOIs in its text linked as linkify's. Tags,
+ * links (<a>…</a>) and code (<code>, <pre>) are left as they are.
+ */
+export function linkifyHtml(html) {
+  return String(html ?? '').replace(/(<(a|code|pre)\b[\s\S]*?<\/\2>|<[^>]*>)|([^<]+)/gi, (all, tag, _name, text) => (tag ? all : linkBare(text, defaultLink)));
+}
 
 /**
  * While a reply is still arriving, its end may hold half of something: a table row or a header whose
@@ -89,9 +138,10 @@ function mendStreaming(src) {
  * - `headingBase`: the level a `#` is drawn as (default 3, so a reply's headings sit under the
  *   page's own; a document passes 1);
  * and hooks, each given the target unescaped and the text as HTML:
- * - `link(href, html)`: a link's HTML (default: http(s) and mailto open a new tab, anything else is inert);
+ * - `link(href, html)`: a link's HTML, for `[text](href)`, `<https://…>` and bare URLs and DOIs (a DOI's href is
+ *   its https://doi.org/ address). Default: http(s) and mailto open a new tab, anything else is inert;
  * - `image(href, alt, title)`: an image's HTML (default: its alt text);
- * - `text(html)`: runs over the inline HTML outside code and links, e.g. to link bare URLs and #N.
+ * - `text(html)`: runs over the inline HTML outside code and links, e.g. to link #N.
  */
 export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s, breaks = false, streaming = false, headingBase = 3 } = {}) {
   image ??= (_href, alt) => `<span class="cui-alt">[image: ${alt}]</span>`;
@@ -114,7 +164,6 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
     const hold = (html) => `\u0000${held.push(html) - 1}\u0000`;
     // An image's alt is an attribute, so what was held in it comes back as text.
     const plain = (html) => html.replace(/\u0000(\d+)\u0000/g, (_, i) => held[i].replace(/<[^>]*>/g, ''));
-    const urls = [];
     let s = escapeHtml(t)
       .replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (_, _ticks, c) => hold(`<code>${/^ .*[^ ].* $/.test(c) ? c.slice(1, -1) : c}</code>`))
       // shortcut: only the escapes Markdown needs, not all punctuation, so Windows paths like
@@ -124,12 +173,10 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
       // Images first, so a linked image ("[![alt](a.png)](https://x)") keeps its picture.
       .replace(new RegExp(`!${LINK.source}`, 'g'), (_, alt, href, title) => hold(image(unescapeHtml(href), plain(alt), title ?? null)))
       .replace(LINK, (_, label, href) => hold(link(unescapeHtml(href), emphasis(label))))
-      // A URL's trailing marks stay outside it: "**https://x/**." is bold, then a full stop.
-      .replace(/https?:\/\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>\u0000])+/gi, (url) => {
-        const tail = /[*_~.,:;!?]*$/.exec(url)[0];
-        return `\u0001${urls.push(url.slice(0, url.length - tail.length)) - 1}\u0001${tail}`;
-      });
-    s = text(emphasis(s).replace(/\u0001(\d+)\u0001/g, (_, i) => urls[i]));
+      // "<https://x>", then bare URLs and DOIs, go through `link` too. Their trailing marks stay
+      // outside: "**https://x/**." is bold, then a full stop.
+      .replace(/&lt;(https?:\/\/(?:(?!&lt;|&gt;)[^\s<>\u0000])+)&gt;/gi, (_, url) => hold(link(unescapeHtml(url), url)));
+    s = text(emphasis(linkBare(s, link, hold)));
     while (s.includes('\u0000')) s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => held[i]);
     return s;
   };
@@ -252,7 +299,7 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
     return out.join('');
   };
 
-  // \0 and \1 mark held-out pieces inside inline(), so the text itself can't carry them.
+  // \0 marks held-out pieces inside inline(), so the text itself can't carry it (nor \1, which once did too).
   let lines = src.replace(/[\u0000\u0001]/g, '\uFFFD').replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '').split('\n');
   let front = '';
   // YAML front matter stays apart from the doc, as GitHub keeps it.

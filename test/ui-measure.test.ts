@@ -25,6 +25,7 @@ const PAGES: Record<string, string> = {
 <div style="width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis" data-tip-overflow>${'Truncated on purpose '.repeat(3)}</div>
 <dialog id="d" style="padding:12px"><div style="position:sticky;top:0"><button class="btn" aria-label="Close">✕</button></div><div style="height:900px">body</div></dialog>
 <div style="overflow-x:auto"><table><tr><td style="white-space:nowrap">${'wide cell '.repeat(40)}</td></tr></table></div>
+<p>A <a href="https://x.io/a">https://x.io/a</a>, <a href="https://x.io/b" title="https://x.io/b">a titled one</a>, <code>curl https://x.io/c</code>, version 1.10.1234/5.</p>
 </main><script>document.getElementById('d').show()</script>`,
   '/broken': `${STYLE}
 <span class="chip" id="lop" style="padding:2px 10px 10px">lopsided</span>
@@ -32,6 +33,7 @@ const PAGES: Record<string, string> = {
 <div id="clip" style="width:80px;height:20px;overflow:hidden;white-space:nowrap">${'cut off text '.repeat(4)}</div>
 <div id="outer" style="border:1px solid #888;padding:2px;width:300px"><textarea id="ta" style="border:1px solid #888;width:100%;box-sizing:border-box;display:block"></textarea></div>
 <div id="wide" style="width:1600px;height:4px"></div>
+<p id="bare">see https://x.io/a. or doi:10.1000/xyz</p> <span id="tipped" title="https://x.io/b">the ref</span>
 <dialog id="d" style="max-height:200px;overflow:auto;padding:0"><button class="btn" aria-label="Close" id="close">✕</button><div style="height:600px">body</div></dialog>
 <script>document.getElementById('d').show()</script>`,
   // Rule 23: one button shows its result at once; the other disables every control until the server answers.
@@ -86,6 +88,8 @@ test('each planted defect is found, with its numbers', { skip }, async () => {
   const dbl = desk.find((f: any) => f.check === 'double-border');
   assert.ok(dbl && dbl.selector === '#ta' && dbl.outer === '#outer', JSON.stringify(dbl));
   assert.ok(has(desk, 'close-scrolls', '#close'));
+  assert.equal(desk.find((f: any) => f.check === 'bare-link' && f.selector === '#bare')?.text, 'https://x.io/a');
+  assert.ok(has(desk, 'bare-link', '#tipped'));
   assert.equal(r.ok, false);
 });
 

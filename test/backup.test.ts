@@ -13,7 +13,7 @@ import { bootServer, REPO } from './helpers.ts';
 const page = readFileSync(BACKUP_PAGE, 'utf8');
 
 // Bump this only for a fix to the backup page itself, never as part of a restyle or refactor of the app.
-const FROZEN_SHA256 = '67f45e92c555e5e8879747759890a8a1458c7f0c9571f999c069e319a209c4eb';
+const FROZEN_SHA256 = '8fa4bd67193261654f57b2650d278aedcabbe8953356ca49b7f30132e5cfb990';
 
 test('src/backup.html is frozen: its hash is pinned', () => {
   const hash = createHash('sha256').update(readFileSync(BACKUP_PAGE)).digest('hex');

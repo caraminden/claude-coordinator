@@ -170,6 +170,7 @@ dialog.new-scheme form > :last-child { margin-bottom: 0; }
 /* The code source: one radio a line, the picked one's URL or folder field under it. */
 /* Ultra review (#432): its dialog, and its card in the chat (busy until the findings land). */
 dialog.ultra-review { --cui-dialog-width: 520px; }
+.ultra-review .ur-paths[hidden] { display: none; }
 .ultra-review .ur-modes { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.75rem; }
 .ultra-review label.ur-mode { display: flex; align-items: center; gap: 0.5rem; color: var(--ink); }
 .ultra-review label.ur-mode input { width: auto; margin: 0; }

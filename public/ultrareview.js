@@ -103,7 +103,7 @@ function openDialog(t) {
   (hasBranch ? btn : paths).focus();
 }
 
-const what = (d) => (d.mode === 'branch' ? h('span', {}, 'branch ', h('code', {}, d.branch), ' against ', h('code', {}, d.base)) : h('span', {}, 'area ', d.paths.map((p, i) => [i ? ', ' : '', h('code', {}, p)])));
+const what = (d) => (d.mode === 'branch' ? h('span', {}, 'branch ', h('code', {}, d.branch), ' against ', h('code', {}, d.base)) : h('span', {}, 'area ', d.paths.flatMap((p, i) => [i ? ', ' : '', h('code', {}, p)])));
 
 /** The chat's card for a review: busy until its result settles it with the findings, or why it failed. */
 export function ultraCard(data) {

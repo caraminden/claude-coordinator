@@ -14,6 +14,10 @@ Citadel's own behaviour and the kit itself. So the live files are the kit (skill
 tools a doc tells an agent to run (`tools/`, and the `citadel-*` commands on PATH, read with
 `command -v` and the script), and scheme-setup's Project facts table for every key a kit doc reads.
 
+## Blockers
+
+None of its own yet: the starter's S1 to S6 apply.
+
 ## Known blind spots
 
 - `kit/skills/critique/rubrics/example.md` is made up on purpose: skip it.

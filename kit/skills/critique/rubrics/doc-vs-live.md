@@ -32,8 +32,8 @@ run reports and fixes nothing (`max_rounds: 1`): people pick which drift to fix 
    the code and cite the line that agrees or differs. Seen: none yet.
 4. **Numbers match their source.** A default, limit, timeout, count, model, price or date the doc
    gives matches the constant, config or measurement it comes from. See it: grep the code or the
-   cited source for the value. Seen: Citadel's October retro found the cost figures its rules used
-   were about 5x too high.
+   cited source for the value. Seen: Citadel #50's cost figures were about 5x too high (it summed the
+   session's running total, not each turn's), found by Citadel's October 2026 retro.
 5. **Lists are whole.** A doc that lists a set ("today's hooks", "the scripts", "every key") names
    every live member and none that are gone. See it: list the folder or registry the set lives in
    and compare both ways. Seen: Threadspace's handbook, far behind the live scripts.

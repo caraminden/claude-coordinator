@@ -483,10 +483,10 @@ function editPersonNote(t) {
     noteEdit = null;
     const mine = text ? { text, by: me, at: Date.now() } : undefined;
     optimistic({
-      key: `note:${t.id}`,
+      sets: `note:${t.id}`,
       apply: () => show(mine),
       send: () => api(`api/tickets/${t.id}/person-note`, { method: 'PUT', body: { text } }),
-      undo: () => view.personNotes?.[t.id] === mine && show(was), // unless a later save changed it again
+      undo: () => view.personNotes?.[t.id] === mine && show(was), // unless something else changed it since
       label: `save the note on ${threadLabel(t)}`,
     });
   };
@@ -511,10 +511,10 @@ function pinButton(t) {
   // The stream says so too, maybe later; a click after this one redraws first, so it unpins again.
   const show = (on) => onTicketPin({ name: me, projectId: t.project_id, ticketId: t.id, pinned: on });
   const toggle = () => optimistic({
-    key: `pin:${t.id}`,
+    sets: `pin:${t.id}`,
     apply: () => show(!pinned),
     send: () => api(`api/tickets/${t.id}/pin`, { method: 'PUT', body: { pinned: !pinned } }),
-    undo: () => !!view.pins?.includes(t.id) !== pinned && show(pinned), // unless a later click changed it again
+    undo: () => !!view.pins?.includes(t.id) !== pinned && show(pinned), // unless something else changed it since
     label: `${pinned ? 'unpin' : 'pin'} ${threadLabel(t)}`,
   });
   return h('button', { type: 'button', class: `note-btn pin-btn${pinned ? ' on' : ''}`, title: pinned ? 'Unpin from the top of your list' : 'Pin to the top of your list (only you see your pins)', 'aria-label': pinned ? 'Unpin' : 'Pin', 'aria-pressed': String(!!pinned), onclick: toggle },
@@ -538,10 +538,10 @@ function setStatus(t, status) {
     if (view?.id === t.id) renderTicketHead();
   };
   optimistic({
-    key: `status:${t.id}`,
+    sets: `status:${t.id}`,
     apply: () => show(status),
     send: () => api(`api/tickets/${t.id}/status`, { method: 'POST', body: { status } }),
-    undo: () => t.status === status && show(was), // unless a later click changed it again
+    undo: () => t.status === status && show(was), // unless something else changed it since
     label: `${status === 'closed' ? 'dismiss' : 'reopen'} ${threadLabel(t)}`,
   });
 }

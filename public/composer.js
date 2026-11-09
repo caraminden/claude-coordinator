@@ -576,9 +576,10 @@ function setTicketField(chatId, field, value, shown) {
   const mine = Array.isArray(value) ? value.join('\n') : value;
   optimistic({
     key: `pickers:${chatId}`,
+    sets: `pickers:${chatId}:${field}`, // per field: a model that goes through doesn't stand for a failed effort
     apply: () => show(mine),
     send: () => api(`api/tickets/${chatId}`, { method: 'PATCH', body: { [field]: value } }),
-    undo: () => t[field] === mine && show(was), // unless a later pick changed it again
+    undo: () => t[field] === mine && show(was), // unless something else changed it since
     label: `set ${field === 'plugin_dirs' ? 'plugins' : field} to ${shown}`,
   });
 }

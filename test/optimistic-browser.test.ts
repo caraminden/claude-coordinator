@@ -33,6 +33,14 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
     send: () => new Promise((ok, no) => { reqs.push({ id, ok, no }); log.push('send ' + id); }),
     undo: (err) => { delete document.getElementById(id).dataset.done; log.push('undo ' + id + ' ' + err.message); },
   });
+  // set(v): an action that sets one value (a pin, a status) to v, and whose undo puts back what it saw before.
+  window.value = 0;
+  window.set = (v, key) => { const was = value; return optimistic({
+    key, sets: 'v', label: 'set ' + v,
+    apply: () => (window.value = v),
+    send: () => new Promise((ok, no) => reqs.push({ id: 'v' + v, ok, no })),
+    undo: () => (window.value = was),
+  }); };
   window.ok = (n) => reqs[n].ok(n);
   window.no = (n) => reqs[n].no(new Error('nope'));
   window.settle = () => new Promise((r) => setTimeout(r, 0));
@@ -125,6 +133,43 @@ test('Retry runs apply and send again and settles the first promise; failures wh
   await page.eval(`act('a'), settle()`);
   await page.eval('no(5), settle()');
   assert.equal(await page.eval('toastText()'), 'Couldn\'t reject a: nopeRetry');
+});
+
+test('clicks that set one thing end on what the server took, whatever order they fail and go through in', { skip }, async () => {
+  const page = await open();
+  for (const n of [2, 3]) {
+    for (let bits = 0; bits < 2 ** n; bits++) {
+      const outcomes = [...Array(n)].map((_, i) => ((bits >> i) & 1 ? 'ok' : 'no'));
+      // Click n times at once (values 1..n from 0), then the server answers each, in click order.
+      await page.eval(`value = 0; reqs = []; for (let v = 1; v <= ${n}; v++) set(v); null`);
+      for (let i = 0; i < n; i++) {
+        await page.eval(`${outcomes[i]}(${i}), settle()`);
+        if (i < n - 1) assert.equal(await page.eval('value'), n, `${outcomes}: the newest click shows while a later one is on its way (after ${i + 1})`);
+      }
+      const took = outcomes.lastIndexOf('ok') + 1; // the value the server last took, or 0 when it took none
+      assert.equal(await page.eval('value'), took, `${outcomes}: ends on what the server took`);
+      assert.equal(await page.eval('reqs.length'), n, `${outcomes}: one send a click, one after another`);
+    }
+  }
+});
+
+test('one thing\'s failure waits for its later clicks, and its Retry counts as the newest click', { skip }, async () => {
+  const page = await open();
+  // set(1) fails while set(2) is on its way; Retry sends 1 again behind it; 2 fails, the retried 1 goes.
+  await page.eval('set(1), set(2), null');
+  await page.eval('no(0), settle()');
+  assert.equal(await page.eval('value'), 2);
+  await click(page, '.cui-toast-action');
+  assert.equal(await page.eval('settle().then(() => value)'), 1);
+  await page.eval('no(1), settle()');
+  assert.equal(await page.eval('value'), 1, 'the retried 1 is on its way, so 2\'s failure waits');
+  await page.eval('ok(2), settle()');
+  assert.equal(await page.eval('value'), 1);
+  // Under a key shared with other things, it still waits only for its own later clicks.
+  await page.eval(`value = 0; reqs = []; set(1, 'k'), act('a', 'k'), null`);
+  await page.eval('no(0), settle()');
+  assert.equal(await page.eval('value'), 0, 'no later click of its own: rolled back at once');
+  await page.eval('ok(1), settle()');
 });
 
 test('a send that throws, or no key, label or undo, still recovers; another toast makes a failure final', { skip }, async () => {

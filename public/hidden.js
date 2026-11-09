@@ -16,10 +16,10 @@ export function setHidden(p, hidden) {
     redrawHidden();
   };
   optimistic({
-    key: `hidden:${p.id}`,
+    sets: `hidden:${p.id}`,
     apply: () => show(hidden),
     send: () => api(`api/projects/${p.id}/hidden`, { method: 'PUT', body: { hidden } }),
-    undo: () => !!p.hidden === hidden && show(!hidden), // unless a later click changed it again
+    undo: () => !!p.hidden === hidden && show(!hidden), // unless something else changed it since
     label: `${hidden ? 'hide' : 'unhide'} ${p.name}`,
   }).then(() => refreshHidden(), () => {}); // a failure already said so in its toast
 }

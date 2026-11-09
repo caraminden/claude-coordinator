@@ -53,10 +53,10 @@ function assignPicker(t) {
       note.textContent = text;
     };
     optimistic({
-      key: `assign:${t.id}`,
+      sets: `assign:${t.id}`,
       apply: () => show(name, name ? 'Saved' : 'Unassigned'),
       send: () => api(`api/tickets/${t.id}/properties`, { method: 'PUT', body: { properties: { assigned: name || null } } }),
-      undo: () => current === name && show(was, ''), // unless a later change replaced it
+      undo: () => current === name && show(was, ''), // unless something else changed it since
       label: name ? `assign it to ${name}` : 'unassign it',
     });
   });

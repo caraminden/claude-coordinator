@@ -13,6 +13,9 @@
 // send at once, side by side. When a send fails, that action alone is rolled back (undo) and a toast says
 // what failed and why, with a Retry that runs apply and send again. Failures that land while that toast is up
 // join it, so its one Retry covers them all (ten quick rejects with the server down: one toast, one Retry).
+// Actions that set one thing (a pin, a status) say so with the same `sets`: then a failure waits while a later
+// one is on its way, one that goes through drops the failures before it, and a failure with nothing after it
+// rolls them all back, newest first, to what the server last took (#399: pin fails, unpin fails ends unpinned).
 // The promise it returns settles once per action, Retries included: with the first send that goes through,
 // or with the last error once its failure toast goes without a Retry.
 
@@ -20,6 +23,7 @@ import { toast } from './status.js';
 
 const tails = new Map(); // key → a promise that settles when the key's last queued send does
 let failed = null; // the attempts the showing failure toast's Retry would run again
+const open = new Map(); // sets → its actions not yet gone through or rolled back, oldest first: { action, err? }
 
 /** Call send() now, as a promise even if it throws or returns a plain value. */
 function start(send) {
@@ -76,13 +80,39 @@ function fail(attempt) {
 
 function run(action, settle) {
   action.apply?.();
-  queue(action.key, action.send).then(settle.ok, (err) => {
-    try {
-      action.undo?.(err);
-    } finally {
-      fail({ action, settle, err });
+  const mine = { action };
+  let list = [mine]; // without `sets` it stands alone
+  if (action.sets != null) {
+    list = open.get(action.sets) ?? [];
+    open.set(action.sets, list);
+    list.push(mine);
+  }
+  const forget = (n) => {
+    list.splice(0, n);
+    if (!list.length && open.get(action.sets) === list) open.delete(action.sets);
+  };
+  queue(action.key ?? action.sets, action.send).then((value) => {
+    forget(list.indexOf(mine) + 1); // it stands, so the failures before it need no rolling back
+    settle.ok(value);
+  }, (err) => {
+    mine.err = err;
+    // While a later one is on its way, it decides what stands; with none, roll back to what the server last took.
+    if (list.at(-1) === mine) {
+      const back = list.slice().reverse();
+      forget(list.length);
+      for (const a of back) if ('err' in a) undo(a);
     }
+    fail({ action, settle, err });
   });
+}
+
+/** Roll back one failed action; one undo throwing (its item gone in a redraw) still lets the older ones run. */
+function undo({ action, err }) {
+  try {
+    action.undo?.(err);
+  } catch (ex) {
+    reportError(ex);
+  }
 }
 
 /**

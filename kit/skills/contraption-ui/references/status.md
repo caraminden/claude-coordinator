@@ -106,6 +106,13 @@ rejectButton.onclick = () => optimistic({
   When each response redraws a whole view (the server sends the whole list back), give every action in
   that view one key (`workshop:${patch}`): with a key per item, two answers can land out of order and the
   older one redraws over the newer.
+- **`sets`: actions that each set one thing** (pin then unpin, a status, a picker's value) name it
+  alike (`sets: \`pin:${id}\``), and it serves as their key unless they have one. Then a failure waits
+  while a later click of it is on its way; one that goes through drops the failures before it; and a
+  failure with nothing after it rolls them all back, newest first, to what the server last took. Without
+  it, pin fails then unpin fails ends showing pinned: unpin's undo puts back the pin the server refused.
+  Each `undo` still puts back what its own click saw. Not for independent things under one key (messages,
+  separate items): their failures must roll back whatever comes after.
 - **`send` must reject on failure.** `fetch` resolves on a 500, so check `res.ok` and throw.
 - **On failure:** `undo(err)`, then a danger toast (`Couldn't <label>: <error message>`) with Retry, which
   runs `apply` and `send` again. Name the item in the label, so the toast says which one failed. Failures

@@ -100,12 +100,12 @@ function setPinned(a, pinned) {
   };
   const projectId = view.projectId;
   optimistic({
-    key: `artifact-pin:${a.id ?? a.path}`,
+    sets: `artifact-pin:${a.id ?? a.path}`,
     apply: () => show(pinned ? { pinned_at: Date.now(), pinned_by: me } : { pinned_at: null, pinned_by: null }),
     send: () => (a.id
       ? api(`api/artifacts/${a.id}/pin`, { method: 'POST', body: { pinned } })
       : api(`api/projects/${projectId}/shared/pin`, { method: 'POST', body: { path: a.path, pinned } })),
-    undo: () => !!a.pinned_at === pinned && show(was), // unless a later click changed it again
+    undo: () => !!a.pinned_at === pinned && show(was), // unless something else changed it since
     label: `${pinned ? 'pin' : 'unpin'} ${a.name}`,
   }).then(() => refreshArtifacts(), () => {}); // a failure already said so in its toast
 }

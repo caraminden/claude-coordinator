@@ -31,9 +31,10 @@ function pause(s, row) {
   };
   optimistic({
     key: `schedule:${s.id}`,
+    sets: `schedule-paused:${s.id}`,
     apply: () => show(!was),
     send: () => api(`api/schedules/${s.id}`, { method: 'PATCH', body: { paused: !was } }),
-    undo: () => s.paused !== was && show(was), // unless a later click changed it again
+    undo: () => s.paused !== was && show(was), // unless something else changed it since
     label: `${was ? 'resume' : 'pause'} the schedule "${s.name}"`,
   });
 }

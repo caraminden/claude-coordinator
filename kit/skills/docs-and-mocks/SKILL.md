@@ -78,7 +78,9 @@ when look variants belong in the real app instead, in [`prototypes.md`](prototyp
 7. **Show it:** link the page as a card and the screenshots inline, say in one line what to
    pick, and end the turn waiting on the picks.
 8. **Read the picks** with the `artifact_data` tool on the page's path: `db/<collection>/<id>` =
-   `{ v, note, by, at }`. Picks sent with Send also arrive as a comment message.
+   `{ v, note, by, at }`. Picks sent with Send also arrive as a comment message. A page saves them
+   through `window.claude.use('db')` (as on claude.ai), `localStorage` or `citadel.storage`, and
+   `citadel.send(text)` puts text in the comment box under it ([`mockkit.md`](mockkit.md)).
 9. **Write the decision back into the page:** status `decided`, the person's words quoted with the
    date in its decisions log, the losing takes left in place. A page replaced by a newer one gets
    status `superseded` and a banner linking it. Where pages live and how a living home stays true:

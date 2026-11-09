@@ -51,7 +51,8 @@ means what theirs would.
   "Could be more polished" is not a finding.
 - Each finding says where, what is wrong and what to change, in words the author can act on
   ("phone 390: the send button's label sits 2 px off centre; equal top and bottom padding").
-- Three findings that matter beat ten; blockers first, at most three lines an item.
+- Three findings that matter beat ten: at most three an item (besides `saw:` and `last round:`),
+  blockers first. Anything else goes in no line at all.
 - A flaw inside a reused part is `owner:`, never a blocker for this item.
 - Judge the work, not the effort. An item that is fine is a pass.
 - Speak to the caller only: no cards, replies or messages to people.

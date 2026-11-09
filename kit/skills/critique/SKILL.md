@@ -56,6 +56,9 @@ format), in the foreground, about 6 items a call, several calls in parallel for 
 > Follow `<kit>/agents/critic.md`. Rubric: `<path>`; kit: `<kit>`. Round `<n>` of `<max_rounds>`.
 > Per item: the brief, the artifact paths, the checks' output[, your last findings].
 
+With `mode: informed`, name the worktree whose source matches the artifacts: a trial critic read a
+branch older than its diff and failed the item for code that was there all along.
+
 A fresh critic every round. It gets its own last findings, never the professor's advice or your
 arguments, so it stays as blind as the person. With more than 2 critics, or a second round, it's a
 fan-out: name a report file in each brief (`citadel:subagents`, "Fan-outs").

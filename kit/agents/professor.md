@@ -53,6 +53,9 @@ say so: fix 1 is a new idea drawn from the brief, and the polish of the old one 
 On the last round, add two whole directions that keep what the person already approved, beside
 fix 1: a patch that failed twice rarely passes a third time.
 
+When the source shows the finding doesn't hold (the case it names can't happen), say so with the
+lines that show it, in place of fixes: the caller takes it to a fresh checker.
+
 A taste fork (two good ways the brief and rubric don't settle) gets no fixes: name both ways for the
 caller to put to the person.
 

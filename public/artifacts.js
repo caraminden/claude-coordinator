@@ -105,9 +105,9 @@ function setPinned(a, pinned) {
     send: () => (a.id
       ? api(`api/artifacts/${a.id}/pin`, { method: 'POST', body: { pinned } })
       : api(`api/projects/${projectId}/shared/pin`, { method: 'POST', body: { path: a.path, pinned } })),
-    undo: () => show(was),
+    undo: () => !!a.pinned_at === pinned && show(was), // unless a later click changed it again
     label: `${pinned ? 'pin' : 'unpin'} ${a.name}`,
-  }).then(() => refreshArtifacts());
+  }).then(() => refreshArtifacts(), () => {}); // a failure already said so in its toast
 }
 
 function pinButton(a) {

@@ -484,11 +484,12 @@ function editPersonNote(t) {
     const was = view.personNotes?.[t.id];
     const text = input.value.replace(/\s+/g, ' ').trim(); // as the server stores it
     noteEdit = null;
+    const mine = text ? { text, by: me, at: Date.now() } : undefined;
     optimistic({
       key: `note:${t.id}`,
-      apply: () => show(text ? { text, by: me, at: Date.now() } : null),
+      apply: () => show(mine),
       send: () => api(`api/tickets/${t.id}/person-note`, { method: 'PUT', body: { text } }),
-      undo: () => show(was),
+      undo: () => view.personNotes?.[t.id] === mine && show(was), // unless a later save changed it again
       label: `save the note on ${threadLabel(t)}`,
     });
   };
@@ -516,7 +517,7 @@ function pinButton(t) {
     key: `pin:${t.id}`,
     apply: () => show(!pinned),
     send: () => api(`api/tickets/${t.id}/pin`, { method: 'PUT', body: { pinned: !pinned } }),
-    undo: () => show(pinned),
+    undo: () => !!view.pins?.includes(t.id) !== pinned && show(pinned), // unless a later click changed it again
     label: `${pinned ? 'unpin' : 'pin'} ${threadLabel(t)}`,
   });
   return h('button', { type: 'button', class: `note-btn pin-btn${pinned ? ' on' : ''}`, title: pinned ? 'Unpin from the top of your list' : 'Pin to the top of your list (only you see your pins)', 'aria-label': pinned ? 'Unpin' : 'Pin', 'aria-pressed': String(!!pinned), onclick: toggle },
@@ -543,7 +544,7 @@ function setStatus(t, status) {
     key: `status:${t.id}`,
     apply: () => show(status),
     send: () => api(`api/tickets/${t.id}/status`, { method: 'POST', body: { status } }),
-    undo: () => show(was),
+    undo: () => t.status === status && show(was), // unless a later click changed it again
     label: `${status === 'closed' ? 'dismiss' : 'reopen'} ${threadLabel(t)}`,
   });
 }
@@ -1181,7 +1182,7 @@ function approvalCard(ticketId, card) {
         status.textContent = '';
       },
       label: allow ? 'approve that call' : 'deny that call',
-    }).then(() => view?.id === ticketId && catchUpEvents().catch(() => {}));
+    }).then(() => view?.id === ticketId && catchUpEvents().catch(() => {}), () => {});
   };
   approve.addEventListener('click', () => decide(true));
   deny.addEventListener('click', () => decide(false));
@@ -1307,7 +1308,7 @@ function planCard(ticketId, card) {
       view.ticket = ticket;
       renderTicketHead();
       catchUpEvents().catch(() => {});
-    });
+    }, () => {}); // a failure already said so in its toast
   };
   approve.addEventListener('click', () => decide('approve'));
   revise.addEventListener('click', () => editing(true));
@@ -1433,7 +1434,7 @@ function questionCard(ticketId, card) {
       view.ticket = ticket;
       renderTicketHead();
       catchUpEvents().catch(() => {});
-    });
+    }, () => {}); // a failure already said so in its toast
   };
   sendBtn.addEventListener('click', send);
 

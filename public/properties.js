@@ -56,7 +56,7 @@ function assignPicker(t) {
       key: `assign:${t.id}`,
       apply: () => show(name, name ? 'Saved' : 'Unassigned'),
       send: () => api(`api/tickets/${t.id}/properties`, { method: 'PUT', body: { properties: { assigned: name || null } } }),
-      undo: () => show(was, ''),
+      undo: () => current === name && show(was, ''), // unless a later change replaced it
       label: name ? `assign it to ${name}` : 'unassign it',
     });
   });

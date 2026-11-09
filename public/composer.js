@@ -394,7 +394,7 @@ function codexBlocked() {
 function modelPicker(chatId) {
   const save = (field) => (e) => {
     const value = field === 'workflow' ? e.target.value === 'on' : e.target.value || null;
-    setTicketField(chatId, field, value, value ?? 'the default');
+    setTicketField(chatId, field, value, field === 'workflow' ? (value ? 'on' : 'off') : value ?? 'the default');
   };
   const model = h('select', { class: 'picker', id: 'model-picker', title: 'Model for this minion', 'aria-label': 'Model for this minion', onchange: save('model') });
   const effort = h('select', { class: 'picker', id: 'effort-picker', title: 'Effort for this minion', 'aria-label': 'Effort for this minion', onchange: save('effort') });
@@ -495,11 +495,12 @@ function setTicketField(chatId, field, value, shown) {
     t[field] = v;
     if (view?.ticket === t) renderModelPicker();
   };
+  const mine = Array.isArray(value) ? value.join('\n') : value;
   optimistic({
     key: `pickers:${chatId}`,
-    apply: () => show(Array.isArray(value) ? value.join('\n') : value),
+    apply: () => show(mine),
     send: () => api(`api/tickets/${chatId}`, { method: 'PATCH', body: { [field]: value } }),
-    undo: () => show(was),
+    undo: () => t[field] === mine && show(was), // unless a later pick changed it again
     label: `set ${field === 'plugin_dirs' ? 'plugins' : field} to ${shown}`,
   });
 }

@@ -33,7 +33,7 @@ function pause(s, row) {
     key: `schedule:${s.id}`,
     apply: () => show(!was),
     send: () => api(`api/schedules/${s.id}`, { method: 'PATCH', body: { paused: !was } }),
-    undo: () => show(was),
+    undo: () => s.paused !== was && show(was), // unless a later click changed it again
     label: `${was ? 'resume' : 'pause'} the schedule "${s.name}"`,
   });
 }

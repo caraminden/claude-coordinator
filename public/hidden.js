@@ -19,9 +19,9 @@ export function setHidden(p, hidden) {
     key: `hidden:${p.id}`,
     apply: () => show(hidden),
     send: () => api(`api/projects/${p.id}/hidden`, { method: 'PUT', body: { hidden } }),
-    undo: () => show(!hidden),
+    undo: () => !!p.hidden === hidden && show(!hidden), // unless a later click changed it again
     label: `${hidden ? 'hide' : 'unhide'} ${p.name}`,
-  }).then(() => refreshHidden());
+  }).then(() => refreshHidden(), () => {}); // a failure already said so in its toast
 }
 
 /** A hide changed for someone (this tab or another of theirs): only theirs redraws. */

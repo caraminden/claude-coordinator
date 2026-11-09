@@ -7,7 +7,10 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 self.addEventListener('fetch', (event) => {
   if (event.request.mode !== 'navigate') return;
   // Contraptions under /apps/ bring their own worker, if any (src/apps.ts); this one keeps out of them.
-  if (new URL(event.request.url).pathname.startsWith('/apps/')) return;
+  const path = new URL(event.request.url).pathname;
+  if (path.startsWith('/apps/')) return;
+  // Nor the backup chat (src/backup.html), which must load however broken the app's own files are.
+  if (path === '/backup' || path.startsWith('/backup/')) return;
   event.respondWith(fetch(event.request).catch(() => new Response(
     '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Offline</title>' +
     '<body style="font:16px system-ui;padding:2rem;text-align:center">%APP_NAME% can\'t be reached right now. ' +

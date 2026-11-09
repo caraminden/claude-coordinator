@@ -23,6 +23,7 @@ import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
+import { isBackupPath, serveBackup } from './src/backup.ts';
 import { type Chain, githubPrs, LiveWaiters, runsRepo } from './src/wake.ts';
 import { errorText } from './src/scheme-repo.ts';
 import { catchUpTicketDir, createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
@@ -787,6 +788,9 @@ const app: App = {
 };
 const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes, ...contraptionRoutes]);
 
+// The scheme the backup chat at /backup talks to: Citadel's own.
+const BACKUP_SCHEME = 2;
+
 // Contraptions' own services under /apps/<name>/ (src/apps.ts).
 const apps = new AppProxy(store, contraptions, auth);
 
@@ -800,7 +804,10 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     } else if (own) req.url = own.url;
     const url = requestUrl(req);
     const preview = previews && /^\/preview\/(\d+)(\/.*)?$/.exec(url.pathname);
-    if (url.pathname.startsWith('/api/')) {
+    // The frozen backup chat with the Citadel scheme's (2) Taskmaster, ahead of everything else (src/backup.ts).
+    if (isBackupPath(url.pathname)) {
+      await serveBackup(app, BACKUP_SCHEME, req, res, url);
+    } else if (url.pathname.startsWith('/api/')) {
       const session = auth.session(req);
       // A route's own Set-Cookie (logout's clearing one) goes in writeHead, which wins over this.
       const renewed = auth.renewal(session, isSecure(req));

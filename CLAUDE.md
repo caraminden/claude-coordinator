@@ -15,6 +15,8 @@ directly; there are no dependencies and no build step.
   it inside the turn with one blocking command rather than ending the turn: a minion's turn is one
   `claude -p` process, the board shows it idle once that exits, and the job may not outlive it.
 - Never put `effort` on a skill (Grunts: the `citadel:subagents` skill).
+- `src/backup.html` and `src/backup.ts` (the /backup chat with the Taskmaster, for when the front end breaks) are
+  frozen on purpose: leave them out of restyles and refactors; `test/backup.test.ts` pins the page's hash.
 
 ## Compact instructions
 

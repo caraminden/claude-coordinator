@@ -3,7 +3,7 @@
 // with its input and output in a turn folder the server tails, so a server restart doesn't stop it.
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { APP_NAME } from './appname.ts';
@@ -161,8 +161,8 @@ export function schemeRefs(project: Project, projects: Project[], tickets: Ticke
   return { scheme: project.name, others: projects.filter((p) => p.id !== project.id).map((p) => p.name), minions, ...cards };
 }
 
-/** The chat event kinds that post or settle a card waiting on people. */
-const CARD_KINDS = new Set(['question', 'plan', 'approval', 'question_result', 'plan_result', 'approval_result']);
+/** The chat event kinds that post or settle a card waiting on people (a person's message answers one). */
+const CARD_KINDS = new Set(['question', 'plan', 'approval', 'question_result', 'plan_result', 'approval_result', 'user_message']);
 
 /**
  * The parts of this server's environment a turn inherits. Anything else (MACHINES_URL, PORT, HOST,
@@ -2770,7 +2770,9 @@ export class Runner {
     const project = this.store.getProject(ticket.project_id)!;
     const tickets = this.store.listTickets(project.id);
     const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => this.cardLinks(t)) };
-    writeFileSync(file, JSON.stringify(schemeRefs(project, this.store.listProjects(), tickets, cards)));
+    // Whole or not at all: the link check may read it mid-turn.
+    writeFileSync(`${file}.new`, JSON.stringify(schemeRefs(project, this.store.listProjects(), tickets, cards)));
+    renameSync(`${file}.new`, file);
   }
 
   /** A card was posted or settled in `ticketId`'s chat: the running turns of its scheme get it in their snapshot, so the link check knows it. */

@@ -98,8 +98,12 @@ test('a minion\'s view lists its waiting cards with links, and a card posted mid
   writeFileSync(join(dir, 'scheme-refs.json'), '{}');
   (runner as any).turns.set(tm.id, { dir });
   const plan = runner.emit(minion.id, 'plan', { id: 'p1', summary: 'Build it', plan: 'x', status: 'pending' });
-  const snap: SchemeRefs = JSON.parse(readFileSync(join(dir, 'scheme-refs.json'), 'utf8'));
+  const snap = (): SchemeRefs => JSON.parse(readFileSync(join(dir, 'scheme-refs.json'), 'utf8'));
+  const hasPlan = () => snap().cards!.some((c) => c.kind === 'plan' && c.minion === minion.number && c.href === `${at}?e=${plan.id}`);
+  assert.equal(snap().self, tm.number);
+  assert.ok(hasPlan());
+  // A person's answer settles it there too.
+  runner.emit(minion.id, 'user_message', { author: 'Cara', text: 'Approved', plan: { planId: 'p1' } });
   (runner as any).turns.delete(tm.id);
-  assert.equal(snap.self, tm.number);
-  assert.ok(snap.cards!.some((c) => c.kind === 'plan' && c.minion === minion.number && c.href === `${at}?e=${plan.id}`));
+  assert.ok(!hasPlan());
 });

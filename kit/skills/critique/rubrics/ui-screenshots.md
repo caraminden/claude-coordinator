@@ -11,6 +11,7 @@ max_rounds: 2
 cross_family: off
 gate: advisory
 person: Cara
+calibrated: "2026-11-08, sonnet, images only: 6/6 known misses hit, 0/4 clean pages failed (1/4 before blocker 4 named the focus-ring case)"
 ---
 # UI screenshots
 
@@ -53,7 +54,9 @@ ignored finding as a note, never a blocker.
    row; #361, the Plugins checkboxes on phones.
 4. **One line per edge.** A box and something inside it never both draw a border, outline or ring on
    the same edge. See it: a `double-border` finding (the two selectors, the sides and the gap); in the
-   shot, two parallel lines a few px apart. Seen: Mandate #61, the chat box drawn with a double
+   shot, two parallel lines a few px apart, one of them hugging something inside the box (a field
+   inside a composer). A focus ring drawn a few px outside a box's own border is one part's ring, not
+   two lines: Citadel UI's composer does it on purpose. Seen: Mandate #61, the chat box drawn with a double
    outline, which sat in screenshots for days before a person spotted it.
 5. **The close button stays in view.** A dialog's ✕ stays at the top however long its body, and a
    click on the backdrop closes it (the kit dialog, rule 22). See it: a `close-scrolls` finding; in a
@@ -94,6 +97,13 @@ ignored finding as a note, never a blocker.
 
 | Item | Verdict | Why |
 |---|---|---|
+| Mandate #61 before, desktop and phone, composer focused | another round (hit) | blocker 4: the field's own border inside the composer's ring; the script's `double-border` also finds it on a rebuilt page |
+| Citadel #212 before, phone | another round (hit) | blocker 7: the Latest pill over the chat |
+| Citadel #289 switch table before, and the old reset row | another round (hit, both) | blocker 3 and the watch-list's row height; it missed the stray scrollbar |
+| Citadel phone chat, 2026-11-08 | another round (hit) | blocker 2: the relay row's time out of its bubble, which the script measured at 48 px |
+| Peek's dialog before #175 | not shot; the script's `close-scrolls` finds it on a rebuilt page, and passes the pinned one | blocker 5 |
+| Mandate #61 after, desktop | another round, then pass | a false alarm: it read the composer's own ring as a second line, so blocker 4 now says a ring outside a box's border is one line; re-run blind, it passed and still failed the before shot |
+| Citadel #212 after, #289 after, Peek's dialog after | pass | clean controls |
 
 ## Known blind spots
 

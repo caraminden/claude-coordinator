@@ -6,22 +6,34 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { firstSend, forgetSend, sendIdOf } from '../src/send-ids.ts';
+import { sendIdOf, sendOnce } from '../src/send-ids.ts';
 import { bootServer, until, type Booted } from './helpers.ts';
 import { chromium, launch, type Browser, type Page } from './browser.ts';
 
-test('a sendId is taken once per chat, forgotten after a failed send, and dropped after ten minutes', () => {
+test('a sendId is sent once per chat; a repeat shares the first one\'s outcome; a failed one is forgotten', async () => {
   assert.equal(sendIdOf(''), undefined);
   assert.equal(sendIdOf(7), undefined);
   assert.equal(sendIdOf('x'.repeat(101)), undefined);
-  assert.equal(firstSend(1, undefined), true, 'untagged messages always go');
-  assert.equal(firstSend(1, undefined), true);
-  assert.equal(firstSend(1, 'a', 1000), true);
-  assert.equal(firstSend(1, 'a', 2000), false, 'a retry of one taken');
-  assert.equal(firstSend(2, 'a', 2000), true, 'per chat');
-  forgetSend(1, 'a');
-  assert.equal(firstSend(1, 'a', 3000), true, 'its send failed, so the retry goes');
-  assert.equal(firstSend(1, 'a', 3000 + 10 * 60_000), true, 'old ones are forgotten');
+  const sent: string[] = [];
+  const ok = (what: string) => async () => void sent.push(what);
+  await sendOnce(1, undefined, ok('untagged'));
+  await sendOnce(1, undefined, ok('untagged'));
+  await sendOnce(1, 'a', ok('a'), 1000);
+  await sendOnce(1, 'a', ok('a again'), 2000);
+  await sendOnce(2, 'a', ok('a in chat 2'), 2000);
+  assert.deepEqual(sent, ['untagged', 'untagged', 'a', 'a in chat 2']);
+
+  // A retry while the first is still running waits for it, and fails with it, so it never says "sent" for a lost one.
+  let fail!: (err: Error) => void;
+  const first = sendOnce(1, 'b', () => new Promise((_, no) => (fail = no)), 3000);
+  const retry = sendOnce(1, 'b', ok('b retry'), 3000);
+  fail(new Error('disk full'));
+  await assert.rejects(first, /disk full/);
+  await assert.rejects(retry, /disk full/);
+  await sendOnce(1, 'b', ok('b'), 4000);
+  assert.deepEqual(sent.slice(-1), ['b'], 'forgotten after failing, so the next retry goes');
+  await sendOnce(1, 'a', ok('a after ten minutes'), 1000 + 10 * 60_000);
+  assert.deepEqual(sent.slice(-1), ['a after ten minutes'], 'old ones are forgotten');
 });
 
 const bin = chromium();

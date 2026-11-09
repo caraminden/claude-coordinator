@@ -331,6 +331,31 @@ test("the server login gets a Codex-only container (#341): its Codex turns go th
   assert.ok(!log.some((c) => c.join(' ').includes('volume rm')), 'it has no Claude link, so its volume stays');
 });
 
+test("a host turn wakes the server login's stopped Codex container for its reviews, and never replaces a running one, stale or not (#398)", async () => {
+  const log: string[][] = [];
+  const vol = join(root, 'wake-vol');
+  let running = 'true';
+  const fakeRun: RunCmd = async (cmd, args) => {
+    log.push([cmd, ...args]);
+    if (cmd === 'systemd-run') running = 'true';
+    if (args[0] === 'container' && args[1] === 'inspect') return { code: 0, stdout: `${running} deadbeef`, stderr: '' };
+    if (args[0] === 'volume' && args[1] === 'inspect') return { code: 0, stdout: vol + '\n', stderr: '' };
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), fake, new Containers(fakeRun), 'citadel-claude-wake-');
+  const owner = store.createUser({ name: 'Owner398', login: 'owner398', admin: true, server_login: true });
+  await link.wakeCodex(owner.id);
+  assert.equal(log.length, 0, 'no Codex container yet: nothing to wake');
+  await link.ensure(owner.id);
+  log.length = 0;
+  await link.wakeCodex(owner.id);
+  assert.ok(!log.some((c) => c[0] === 'systemd-run' || c.includes('stop') || c.includes('rm')), `a running one is left alone, though its spec is stale: ${JSON.stringify(log)}`);
+  running = 'false';
+  await link.wakeCodex(owner.id);
+  assert.ok(log.some((c) => c[0] === 'systemd-run'), 'a stopped one is started again');
+  await link.wakeCodex(josh.id);
+});
+
 test("a person's container mounts their own turns' files, never another person's or the host's (#241)", async () => {
   const fakeRun: RunCmd = async (_cmd, args) => {
     if (args[0] === 'container' && args[1] === 'inspect') return { code: 0, stdout: 'true deadbeef', stderr: '' };

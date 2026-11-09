@@ -254,6 +254,8 @@ const codexReady = (uid: number) => {
 runner.codexReady = codexReady;
 // The server login's owner signs in to Codex in a container of its own, and its Codex turns run there (#341).
 runner.codexPlaceFor = (uid) => claudeLink.codexPlace(uid);
+// Its host turns' Codex reviews run in that container too (#398), so a host turn starts it if it isn't running.
+runner.wakeCodex = (uid) => void claudeLink.wakeCodex(uid).catch((err) => console.error(`Starting the Codex container for a review failed: ${err.message}`));
 // Contraptions' turns (the turn API): on the same Claude a person's minion turns use, never anyone else's.
 const contraptionTurns = new ContraptionTurns(store, contraptions, claudeLink, { dataDir: DATA_DIR, claudeBin: process.env.CLAUDE_BIN ?? 'claude' });
 contraptionTurns.noTurns = PREVIEW;

@@ -43,7 +43,8 @@ and worktree, and the numbered Must and Should findings, without the reviewer's 
 returns `N: CONFIRMED|REFUTED: <evidence>`. Drop what it refutes.
 
 **Codex second opinion (light and deep):** when `citadel-codex-review --check` prints `ready`
-(the turn's person has signed in to Codex in their container), Codex, a model from another family
+(the turn's person has signed in to Codex in their container, or for the server login's host
+turns, in its Codex container), Codex, a model from another family
 on their own ChatGPT plan, reviews the same diff read-only. Start the reviewer, then in the same
 message run `citadel-codex-review --timeout 540 < "$TMPDIR/review-brief.md"` (Bash timeout
 600000); the brief's `Follow` line points Codex at the reviewer's rules. Its findings join the

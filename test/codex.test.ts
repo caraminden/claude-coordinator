@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { imageHash, type ClaudeLink } from '../src/claude-link.ts';
 import { CodexLink, deviceCode } from '../src/codex-link.ts';
@@ -371,4 +371,111 @@ test('a review reads Codex usage first: it skips (exit 4) when over pace, and ru
   const unknown = await review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'no-limits' } });
   assert.equal(unknown.code, 0);
   assert.equal(unknown.usage, '');
+});
+
+// Host turns (#398): no hook on the host, so a review goes to the Codex container the runner named in the
+// turn's Codex config. A fake podman plays the container: FAKE_PODMAN picks what it does with the exec.
+const driver = join(import.meta.dirname, '..', 'src', 'codex-review.ts');
+const podBin = join(root, 'podbin');
+const podLog = join(root, 'podman.jsonl');
+mkdirSync(podBin, { recursive: true });
+writeFileSync(
+  join(podBin, 'podman'),
+  `#!${process.execPath}
+const fs = require('node:fs');
+const { dirname } = require('node:path');
+const args = process.argv.slice(2);
+const log = (m) => fs.appendFileSync(${JSON.stringify(podLog)}, JSON.stringify(m) + '\\n');
+const mode = process.env.FAKE_PODMAN;
+if (mode === 'gone') { log({ args }); process.stderr.write('Error: no container with name or ID "x" found: no such container\\n'); process.exit(125); }
+let i = 1, cwd = null;
+const env = {};
+for (; i < args.length; i++) {
+  if (args[i] === '-i') continue;
+  if (args[i] === '-w') { cwd = args[++i]; continue; }
+  if (args[i] === '-e') { const [k, ...v] = args[++i].split('='); env[k] = v.join('='); continue; }
+  break;
+}
+const [name, cmd, script, ...rest] = args.slice(i);
+const stdin = rest.includes('--check') ? '' : fs.readFileSync(0, 'utf8');
+const cfgFile = env.CITADEL_CODEX_TRIPWIRE;
+log({ args, name, cmd, script, rest, cwd, env, stdin, cfg: JSON.parse(fs.readFileSync(cfgFile, 'utf8')), writable: (fs.statSync(cfgFile).mode & 0o222) !== 0, files: fs.readdirSync(dirname(cfgFile)).sort() });
+if (mode === 'run') {
+  // The copy, run as it would be in a container whose image has no hook.
+  const r = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [script, ...rest], { cwd, env: { PATH: process.env.PATH, ...env }, input: stdin });
+  process.stdout.write(r.stdout); process.stderr.write(r.stderr); process.exit(r.status);
+}
+if (mode === 'signed-out') { process.stdout.write("This person hasn't signed in to Codex in their container yet.\\n"); process.exit(3); }
+process.stdout.write(rest.includes('--check') ? 'ready\\n' : 'REVIEW OK\\n');
+if (!rest.includes('--check')) process.stderr.write('Codex usage: 5-hour 10%, weekly 3%\\n');
+process.exit(0);
+`,
+);
+chmodSync(join(podBin, 'podman'), 0o755);
+const personTurns = join(root, 'run', 'turns', 'person-1');
+const container = { name: 'citadel-claude-test-1', turnsDir: personTurns, env: { HOME: '/home/u', PATH: '/usr/local/bin:/usr/bin' } };
+const hostTurn = configFile({ script: tripwire, config, container });
+const podCalls = () => {
+  try {
+    return readFileSync(podLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  } catch {
+    return [];
+  }
+};
+function cli(args: string[], fake: string | null, cfg: string, input = '') {
+  rmSync(podLog, { force: true });
+  return spawnSync(process.execPath, [driver, ...args], { cwd: root, input, encoding: 'utf8', env: { PATH: `${podBin}:${process.env.PATH}`, CITADEL_CODEX_TRIPWIRE: cfg, ...(fake ? { FAKE_PODMAN: fake } : {}) } });
+}
+
+test("a host turn's review runs in the Codex container the runner named, read-only, with the brief, exit code and usage line passed through (#398)", { skip: notReady({}) === null && 'this machine has the hook' }, () => {
+  const check = cli(['--check'], 'ok', hostTurn);
+  assert.equal(check.status, 0);
+  assert.equal(check.stdout, 'ready\n');
+
+  const r = cli(['--timeout', '60'], 'ok', hostTurn, 'Review the diff.\n');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'REVIEW OK\n');
+  assert.match(r.stderr, /^Codex usage: 5-hour 10%, weekly 3%$/m);
+  const [call] = podCalls();
+  assert.deepEqual(call.args.slice(0, 2), ['exec', '-i']);
+  assert.equal(call.name, container.name);
+  assert.equal(call.cmd, 'node');
+  assert.equal(call.cwd, root, "in the turn's own folder, which the container mounts at the same path");
+  assert.deepEqual(call.rest, ['--timeout', '60']);
+  assert.equal(call.stdin, 'Review the diff.\n');
+  assert.equal(call.env.HOME, '/home/u', "the container's environment, not the host turn's");
+  assert.equal(call.env.FAKE_PODMAN, undefined);
+  // Its files sit in the person's mounted turns folder: the driver, the tripwire, and a review-mode config.
+  assert.ok(call.script.startsWith(personTurns + '/review-'), call.script);
+  assert.deepEqual(call.files, ['codex-review.ts', 'codex-tripwire.json', 'tripwire.ts']);
+  assert.deepEqual(call.cfg, { script: join(dirname(call.script), 'tripwire.ts'), config }, 'the container turns\' review mode: no container, no turn mode');
+  assert.equal(call.writable, false, 'read-only, as the runner writes it');
+  assert.deepEqual(readdirSync(personTurns), [], 'the copy goes once the review ends');
+});
+
+test("a host turn's review is exit 3 with the reason when the container isn't signed in, isn't running, or has no hook; never Codex on the host (#398)", { skip: notReady({}) === null && 'this machine has the hook' }, () => {
+  const out = cli(['--check'], 'signed-out', hostTurn);
+  assert.equal(out.status, 3);
+  assert.match(out.stdout, /hasn't signed in to Codex/);
+
+  const gone = cli(['--check'], 'gone', hostTurn);
+  assert.equal(gone.status, 3);
+  assert.match(gone.stdout, /Codex's container \(citadel-claude-test-1\) isn't running[\s\S]*no such container/);
+  const goneRun = cli([], 'gone', hostTurn, 'brief');
+  assert.equal(goneRun.status, 3);
+  assert.match(goneRun.stderr, /isn't running/);
+
+  // The real copy, in a "container" without the managed hook: it refuses rather than run Codex unhooked.
+  for (const args of [['--check'], ['--timeout', '60']]) {
+    const r = cli(args, 'run', hostTurn, 'brief');
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(args[0] === '--check' ? r.stdout : r.stderr, /managed tripwire hook isn't installed/);
+  }
+  assert.deepEqual(readdirSync(personTurns), []);
+
+  // A host turn the runner named no container for (anyone else, or before the Codex sign-in): exit 3, no podman.
+  const plain = cli(['--check'], 'ok', good);
+  assert.equal(plain.status, 3);
+  assert.match(plain.stdout, /managed tripwire hook isn't installed/);
+  assert.equal(podCalls().length, 0);
 });

@@ -1036,6 +1036,8 @@ export class Runner {
   codexReady?: (person: number) => string | null;
   /** Where the server login's Codex turns run: its own container (#341), or null before there is one. */
   codexPlaceFor?: (person: number) => TurnPlace | null;
+  /** Start the server login's Codex container if it isn't running, for its host turns' Codex reviews (#398). */
+  wakeCodex?: (person: number) => void;
   /** A container turn's Claude sign-in was refused, so that person has to link again. */
   onAuthFailure?: (person: number) => void;
 
@@ -2034,8 +2036,14 @@ export class Runner {
     const tripwire = tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE));
     // Codex's managed hook (deploy/claude-container/codex) reads the turn's tripwire from this file: its command can't carry it.
     // A Codex turn's own run is checked in turn mode: its patches and MCP calls too, with no cards, and never its own folder.
+    // A host turn has no hook, so the server login's Codex reviews run in its Codex container (#398): named here, where
+    // the turn can't change it, and woken if it stopped (a reboot) without replacing one a review may be running in.
+    const codexAt = place.host && person !== null ? this.codexPlaceFor?.(person) ?? null : null;
+    const reviewAt = codexAt && !codexAt.host ? codexAt : null;
+    if (reviewAt) this.wakeCodex?.(person!);
+    const container = reviewAt ? { container: { name: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } } : {};
     const codexTripwire = join(dir, 'codex-tripwire.json');
-    writeFileSync(codexTripwire, JSON.stringify({ script: pinned(TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(process.env), false), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}) }), { mode: 0o444 });
+    writeFileSync(codexTripwire, JSON.stringify({ script: pinned(TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(process.env), false), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), { mode: 0o444 });
     const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
       hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
     };

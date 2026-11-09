@@ -9,23 +9,30 @@
 // Exits 0 with the review on stdout, 3 when it can't run here, 4 when it's skipped to save the
 // person's Codex usage (overPace), 1 when the turn fails, 124 on timeout.
 // It refuses to start without the managed tripwire hook (deploy/claude-container/codex), so Codex
-// never runs unguarded: on the host, or in a container built before it.
-import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+// never runs unguarded: on the host, or in a container built before it. A host turn (the server login's,
+// #398) has no hook, so when the runner names the login's Codex container (#341) in the turn's Codex
+// config, the review runs there instead (inContainer), and that copy checks the hook for itself.
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REQUIREMENTS = '/etc/codex/requirements.toml';
 const HOOK = '/etc/codex/citadel-hook.mjs';
 
-/** Why a review can't run here, or null. Only checks that files exist: the login is never read. */
-export function notReady(env: Record<string, string | undefined> = process.env, requirements = REQUIREMENTS): string | null {
+/** Whether Codex's managed tripwire hook is installed here, so Codex can't run without it. */
+export function hooked(requirements = REQUIREMENTS): boolean {
   let req = '';
   try {
     req = readFileSync(requirements, 'utf8');
   } catch {}
-  if (!req.includes(HOOK) || !/^allow_managed_hooks_only\s*=\s*true/m.test(req)) return `Codex's managed tripwire hook isn't installed here (${requirements}): Codex runs only in a person's container, built from deploy/claude-container.`;
+  return req.includes(HOOK) && /^allow_managed_hooks_only\s*=\s*true/m.test(req);
+}
+
+/** Why a review can't run here, or null. Only checks that files exist: the login is never read. */
+export function notReady(env: Record<string, string | undefined> = process.env, requirements = REQUIREMENTS): string | null {
+  if (!hooked(requirements)) return `Codex's managed tripwire hook isn't installed here (${requirements}): Codex runs only in a person's container, built from deploy/claude-container (for the server login's host turns, in its Codex container once it has signed in to Codex in Settings → Your account).`;
   const cfg = env.CITADEL_CODEX_TRIPWIRE;
   if (!cfg || !existsSync(cfg)) return 'This turn has no Codex tripwire config (CITADEL_CODEX_TRIPWIRE): it started before Codex reviews existed.';
   const home = env.CODEX_HOME || join(env.HOME || homedir(), '.codex');
@@ -163,6 +170,107 @@ export function review(brief: string, opts: { cwd: string; timeoutMs: number; bi
   });
 }
 
+/** Where a host turn's review runs instead (#398): the server login's Codex container, as the runner wrote it in the turn's Codex config. */
+export interface ReviewContainer {
+  /** The container's name (citadel-claude-<id>). */
+  name: string;
+  /** The person's turns folder, mounted in the container at the same path: the review's files go there. */
+  turnsDir: string;
+  /** The container turns' environment (HOME, PATH, ...), never the host turn's own. */
+  env: Record<string, string>;
+}
+export interface CodexConfig {
+  script: string;
+  config: unknown;
+  container?: ReviewContainer;
+}
+
+/** The turn's Codex config (CITADEL_CODEX_TRIPWIRE, written read-only by the runner), or null. */
+export function turnConfig(env: Record<string, string | undefined> = process.env): CodexConfig | null {
+  try {
+    const cfg = JSON.parse(readFileSync(env.CITADEL_CODEX_TRIPWIRE!, 'utf8'));
+    return typeof cfg?.script === 'string' ? cfg : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Copy a pinned file and the ./ files it imports into `to`, as src/runner.ts pins them. */
+function copyPinned(file: string, to: string) {
+  const dest = join(to, basename(file));
+  if (existsSync(dest)) return;
+  const source = readFileSync(file, 'utf8');
+  writeFileSync(dest, source);
+  for (const [, dep] of source.matchAll(/from '\.\/([^']+)'/g)) copyPinned(join(dirname(file), dep), to);
+}
+
+/** podman exec's own failures: 125 podman (no such container), 126 and 127 the command or its folder. */
+const PODMAN_FAILED = new Set([125, 126, 127]);
+
+/**
+ * Run this review in the container `cfg.container` names (#398), for a host turn: its turn folder isn't
+ * mounted there, so this driver and the turn's pinned tripwire are copied into the person's turns folder
+ * with a review-mode Codex config (the container turns' one: Bash only, read-only), and `podman exec` runs
+ * the copy in `cwd` (the worktree, mounted at the same path) with the same arguments and stdin. That copy
+ * checks the hook, the config and the sign-in itself, so the exit codes and the `Codex usage:` line are
+ * the container's own; a container that isn't there is exit 3. The copy is removed once it ends.
+ */
+export function inContainer(args: string[], cfg: CodexConfig & { container: ReviewContainer }, cwd: string, podman = 'podman'): Promise<number> {
+  const c = cfg.container;
+  const check = args.includes('--check');
+  let dir = '';
+  const file = () => join(dir, 'codex-tripwire.json');
+  try {
+    mkdirSync(c.turnsDir, { recursive: true });
+    dir = mkdtempSync(join(c.turnsDir, 'review-'));
+    copyPinned(fileURLToPath(import.meta.url), dir);
+    copyPinned(cfg.script, dir);
+    writeFileSync(file(), JSON.stringify({ script: join(dir, basename(cfg.script)), config: cfg.config }), { mode: 0o444 });
+  } catch (err: any) {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    return Promise.resolve(fail(check, `Couldn't set up the review for Codex's container (${c.name}): ${err.message}`));
+  }
+  const driver = join(dir, basename(fileURLToPath(import.meta.url)));
+  const env = { ...c.env, CITADEL_CODEX_TRIPWIRE: file() };
+  const argv = ['exec', '-i', '-w', cwd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), c.name, 'node', driver, ...args];
+  return new Promise((resolve) => {
+    let stderr = '';
+    let done = false;
+    const end = (code: number) => {
+      if (done) return;
+      done = true;
+      for (const s of SIGNALS) process.off(s, stop);
+      rmSync(dir, { recursive: true, force: true });
+      resolve(code);
+    };
+    // The Bash call was stopped: stop the copy too, so it doesn't go on spending the person's Codex plan.
+    const stop = () => {
+      spawnSync(podman, ['exec', c.name, 'pkill', '-f', '--', driver], { stdio: 'ignore', timeout: 10_000 });
+      child.kill('SIGTERM');
+      end(143);
+    };
+    const child = spawn(podman, argv, { stdio: ['inherit', 'inherit', 'pipe'] });
+    for (const s of SIGNALS) process.on(s, stop);
+    child.stderr.on('data', (b) => {
+      if (!check) process.stderr.write(b);
+      stderr = (stderr + b).slice(-4000);
+    });
+    child.on('error', (err) => end(fail(check, `Couldn't run podman for Codex's container (${c.name}): ${err.message}`)));
+    child.on('close', (code) => {
+      if (code !== null && !PODMAN_FAILED.has(code)) return end(code);
+      end(fail(check, `Codex's container (${c.name}) isn't running or can't see this folder, so the review can't run there: it starts again with the next Codex turn or sign-in.${check ? tail(stderr) : ''}`));
+    });
+  });
+}
+
+const SIGNALS = ['SIGTERM', 'SIGINT', 'SIGHUP'] as const;
+
+/** Exit 3 with why: on stdout for --check, as the plain run prints it, else on stderr. */
+function fail(check: boolean, why: string): number {
+  (check ? process.stdout : process.stderr).write(`${check ? '' : 'citadel-codex-review: '}${why}\n`);
+  return 3;
+}
+
 function tail(s: string): string {
   const t = s.trim().split('\n').slice(-5).join('\n');
   return t ? `\n${t}` : '';
@@ -170,6 +278,9 @@ function tail(s: string): string {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
+  // A host turn (#398): no hook here, so the review goes to the Codex container the runner named, never runs here.
+  const cfg = hooked() ? null : turnConfig();
+  if (cfg?.container) process.exit(await inContainer(args, cfg as CodexConfig & { container: ReviewContainer }, process.cwd()));
   const why = notReady();
   if (args.includes('--check')) {
     process.stdout.write(why ? `${why}\n` : 'ready\n');

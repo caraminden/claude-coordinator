@@ -330,8 +330,13 @@ login stays in `~/.codex/auth.json` in their volume, which the tripwire won't le
 turn read. The image's `/etc/codex/requirements.toml` (`deploy/claude-container/codex/`)
 runs Citadel's tripwire as Codex's only hook, failing closed: the hook reads the
 turn's config from the file `$CITADEL_CODEX_TRIPWIRE` names, allows shell commands
-only, and blocks the tripwire's ask tier. A review won't start on the host or in a
-container built before this, which have no managed hook. It reads the person's Codex
+only, and blocks the tripwire's ask tier. A review won't run on the host or in a
+container built before this, which have no managed hook. The server login's turns run
+on the host, so once it has signed in to Codex (#341's Codex container), the runner
+names that container in their Codex config and a review from them runs there (#398):
+`podman exec` of a copy of the driver and the turn's tripwire, put in the person's
+mounted turns folder, against the same worktree path; that copy checks the hook and
+sign-in itself. A host turn also starts that container if it stopped. It reads the person's Codex
 usage first and skips the review when the 5-hour or weekly window is 80% used or
 running ahead of an even pace to its reset, so reviews never max out their plan.
 

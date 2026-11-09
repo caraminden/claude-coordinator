@@ -271,6 +271,15 @@ export class ClaudeLink {
     return { host: false, container: this.name(uid), configDir: claudeConfigDir(process.env), home, turnsDir: this.turnsDir(uid), env: this.containerEnv(), ensure: () => this.ensure(uid, true) };
   }
 
+  /**
+   * Start the server login's Codex container if it isn't running (#398): its host turns' Codex reviews run
+   * there. Never replaces a running one, stale or not, since a review may be running in it that busy() can't see.
+   */
+  async wakeCodex(uid: number): Promise<void> {
+    if (!this.codexPlace(uid) || this.starting.has(uid)) return;
+    if ((await this.containers.status(this.name(uid))).state !== 'running') await this.ensure(uid);
+  }
+
   private containerEnv(): Record<string, string> {
     return { HOME: this.home, PATH: containerPath(process.env.PATH), CLAUDE_CONFIG_DIR: join(this.home, '.claude'), DISABLE_AUTOUPDATER: '1' };
   }

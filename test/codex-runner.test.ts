@@ -46,7 +46,9 @@ const dir = join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replac
 require('node:readline').createInterface({ input: process.stdin }).once('line', (line) => {
   const text = JSON.parse(line).message.content.map((b) => b.text ?? '').join('\\n');
   const model = args.includes('--model') ? args[args.indexOf('--model') + 1] : null;
-  record({ resume, model, text });
+  // The turn's Codex config, which names the container a host turn's Codex review runs in (#398).
+  const codex = process.env.CITADEL_CODEX_TRIPWIRE ? JSON.parse(readFileSync(process.env.CITADEL_CODEX_TRIPWIRE, 'utf8')) : null;
+  record({ resume, model, text, codex });
   if (existsSync(${JSON.stringify(mode)}) && readFileSync(${JSON.stringify(mode)}, 'utf8') === 'claude-limit') {
     console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your session limit · resets 3pm (UTC)" }));
     process.exit(1);
@@ -278,6 +280,36 @@ test("switching on carries a minion waiting out Claude's limit on at once, on Co
   r.cancelLimitWait(t.id);
   r.setCodexSwitch(josh.id, false);
   rmSync(mode, { force: true });
+});
+
+test("the server login's host turns name its Codex container for their Codex reviews and wake it; nobody else's turn does (#398)", async () => {
+  rmSync(seen, { force: true });
+  rmSync(mode, { force: true });
+  const r = runner();
+  const woken: number[] = [];
+  r.wakeCodex = (uid) => woken.push(uid);
+  const t = minion(12);
+  r.send(t.id, 'Cara', 'review this');
+  await until(() => turnStarts().length === 1 && idle(t.id)());
+  const host = calls().find((c) => c.who === 'claude');
+  assert.deepEqual(host.codex.container, { name: caraPlace.container, turnsDir: caraPlace.turnsDir, env: caraPlace.env });
+  assert.equal(host.codex.mode, undefined, 'the review-mode config, as container turns get it');
+  assert.deepEqual(woken, [cara.id]);
+
+  caraContainer = false;
+  try {
+    r.send(t.id, 'Cara', 'again, before her Codex sign-in');
+    await until(() => turnStarts().length === 2 && idle(t.id)());
+    assert.equal(calls().filter((c) => c.who === 'claude')[1].codex.container, undefined);
+  } finally {
+    caraContainer = true;
+  }
+
+  const j = minion(13);
+  r.send(j.id, 'Josh', 'his turn, in his own container');
+  await until(() => turnStarts().length === 3 && idle(j.id)());
+  assert.equal(calls().filter((c) => c.who === 'claude')[2].codex.container, undefined);
+  assert.deepEqual(woken, [cara.id]);
 });
 
 test('every Codex model can be picked for a minion', async () => {

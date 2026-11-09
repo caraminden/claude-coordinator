@@ -388,6 +388,8 @@ async function runDueSchedules() {
   }
 }
 if (!BOOT_CHECK) setInterval(() => void safely('schedules', runDueSchedules), 30_000).unref();
+// Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
+if (!BOOT_CHECK && !PREVIEW) setInterval(() => void safely('fresh sessions', () => runner.freshSweep()), 60_000).unref();
 // Dismissed minions' build output (#336): those dismissed before clearing on dismissal, or whose clearing
 // failed. Off the boot's hot path, then daily. A preview's rows point at the live worktrees, so never there.
 if (!BOOT_CHECK && !PREVIEW) {

@@ -1791,6 +1791,12 @@ export class Store {
     return this.db.prepare('SELECT * FROM turns WHERE ticket_id = ? ORDER BY id').all(ticketId) as unknown as Turn[];
   }
 
+  /** When a ticket's last finished turn ended (ms), or null before its first. */
+  lastTurnEnd(ticketId: number): number | null {
+    const r = this.db.prepare('SELECT ended_at FROM turns WHERE ticket_id = ? ORDER BY id DESC LIMIT 1').get(ticketId) as { ended_at: number } | undefined;
+    return r?.ended_at ?? null;
+  }
+
   /** What a ticket's turns have cost so far. */
   ticketCost(ticketId: number): number {
     return (this.db.prepare('SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE ticket_id = ?').get(ticketId) as { c: number }).c;

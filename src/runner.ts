@@ -277,6 +277,7 @@ interface QueuedMessage {
   from?: number; // the minion or Taskmaster that relayed it, whose turn's person it carries
   typed?: boolean; // a signed-in person sent it from the chat; only these can be a go to merge (#201)
   asker?: number | null; // whose ask it is (Store.turnAsker), taken when it was sent; null for no person's
+  fresh?: 'handoff' | 'compact'; // a Taskmaster's fresh-start step (#406), which runs alone
 }
 
 /**
@@ -331,6 +332,10 @@ interface TurnState {
   container?: string;
   /** The people's own machines it got at its start (#306): the only owned ones it may open (routes/machines.ts). */
   owned?: number[];
+  /** A Taskmaster's fresh-start step (#406): messages wait behind it rather than steer in. */
+  fresh?: 'handoff' | 'compact';
+  /** Its prompt carried a fresh session's handoff, which goes once the session exists. */
+  handoff?: true;
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
@@ -354,6 +359,20 @@ interface LiveTurn {
 
 /** A minion's context size at its last turn's last API call (tokens), for what switching its payer costs. */
 const contextKey = (ticketId: number) => `context:${ticketId}`;
+
+/**
+ * A Taskmaster's fresh start (#406): asked for (why), its handoff once the old session wrote it with
+ * fresh_session, and `compact` once the handoff failed and a /compact turn falls back on.
+ */
+export interface FreshState { why: string; summary?: string; compact?: true }
+const freshKey = (ticketId: number) => `fresh:${ticketId}`;
+/** The handoff a fresh session's first turn starts from, kept until that session exists. */
+const handoffKey = (ticketId: number) => `handoff:${ticketId}`;
+/** Idle this long, a Taskmaster's prompt cache (1 hour) is still warm, so its handoff turn reads it cheaply. */
+export const FRESH_IDLE_MS = 55 * 60_000;
+/** Past this much context (tokens), an idle Taskmaster starts fresh by itself. */
+export const FRESH_CONTEXT_TOKENS = 150_000;
+const HANDOFF_MAX = 20_000;
 
 /** Where a person's own plan usage is kept (their container turns'), apart from the server login's `usage`. */
 export const usageKey = (person: number) => `usage:user:${person}`;
@@ -542,6 +561,20 @@ const RESUME_CODEX_PROMPT =
 
 const RESUME_PROMPT =
   `The ${APP_NAME} server restarted while you were working, which interrupted your last turn. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
+
+/** What a Taskmaster's handoff turn is asked (#406). */
+export const handoffPrompt = (why: string) =>
+  `${APP_NAME} is starting you a fresh Claude session (${why}): your next turn begins from a short handoff instead of this whole conversation. People's chat history stays as it is; only your context resets. Before that:
+1. Save to your memory files anything durable that so far lives only in this chat: decisions with who made them and when, standing rules, facts you'd look up again.
+2. Call fresh_session with your handoff: every open ask and who made it, relays you still owe, cards waiting on people, who is parked on what, and what you promised to do next. Facts, not history: memory and the minions' own records (read_ticket, list_tickets) carry the rest.
+Do nothing else this turn, and reply in one line.`;
+
+/** Where a fresh session's first turn starts (#406). */
+export const freshStartText = (handoff: string) =>
+  `This is a fresh Claude session: ${APP_NAME} reset your context (people's chat history is unchanged). Your memory loads as usual. Your previous session's handoff:\n\n${handoff}`;
+
+/** The fallback when a handoff turn fails (#406): Claude Code's own compaction, kept to what a handoff holds. */
+const COMPACT_COMMAND = '/compact Keep every open ask and who made it, relays still owed, cards waiting on people, who is parked on what, and promised next steps.';
 
 /** One turn's prompt as a stream-json user message, so pasted images reach Claude as images. */
 export function promptMessage(batch: QueuedMessage[]): string {
@@ -1154,6 +1187,8 @@ export class Runner {
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
       payer: this.payerView(ticket.person_id),
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
+      // A Taskmaster's fresh start under way (#406), which hides the chat's Fresh session button.
+      fresh_pending: !!this.store.getSetting<FreshState>(freshKey(ticket.id)),
       // What "Default" means in the composer: the effort a turn gets when the ticket has none of its own.
       default_effort: turnSettings({ ...ticket, effort: null }, this.store.getProject(ticket.project_id) ?? { default_effort: '' }).effort,
       // What the composer's Plugins picker offers (#361): the scheme's optional plugin folders, for a minion.
@@ -1634,7 +1669,8 @@ export class Runner {
     // Nor one someone else asked for (#255): a non-member's relay runs as the owner, whose message waits.
     // Nor one typed for by someone else (#295): its process carries their CITADEL_PERSON_ID, which can't change mid-turn.
     const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker) || (extra.typed && turn.typedBy && turn.typedBy !== person)));
-    const steers = !!(steer && live && turn && !turn.result && !otherPerson && existsSync(join(live.dir, 'steer.jsonl')));
+    // Nor a Taskmaster's fresh-start step: what's said now goes to the fresh session.
+    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !otherPerson && existsSync(join(live.dir, 'steer.jsonl')));
     const row = this.emit(ticketId, 'user_message', {
       author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}),
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}),
@@ -1887,22 +1923,110 @@ export class Runner {
     if (live.unit && (!pid || sig === 'SIGKILL')) execFile('systemctl', ['--user', 'stop', live.unit], () => {});
   }
 
+  /**
+   * Start a Taskmaster on a fresh Claude session (#406): a handoff turn on the old session first (once
+   * any running turn ends), then the next turn starts a new session from that handoff. Returns why it
+   * can't, or null.
+   */
+  requestFresh(ticketId: number, why: string): string | null {
+    const ticket = this.store.getTicket(ticketId);
+    if (ticket?.kind !== 'coordinator') return 'Only a Taskmaster starts fresh sessions';
+    if (!ticket.session_id) return 'Its session is already fresh';
+    if (this.store.getSetting<FreshState>(freshKey(ticketId))) return 'A fresh start is already under way';
+    this.store.setSetting(freshKey(ticketId), { why });
+    this.emit(ticketId, 'note', { text: `Starting a fresh session (${why}): the Taskmaster writes its handoff first${this.isRunning(ticketId) ? ', once this turn ends' : ''}.` });
+    if (!this.isRunning(ticketId)) this.next(ticketId);
+    this.broadcastTicket(ticketId);
+    return null;
+  }
+
+  /** The handoff a Taskmaster's running turn wrote (fresh_session): its session resets as the turn ends. */
+  recordHandoff(ticketId: number, summary: string): string | null {
+    const ticket = this.store.getTicket(ticketId);
+    if (ticket?.kind !== 'coordinator') return 'Only a Taskmaster starts fresh sessions';
+    if (!this.isRunning(ticketId)) return 'Only a running turn can hand off';
+    const was = this.store.getSetting<FreshState>(freshKey(ticketId));
+    this.store.setSetting(freshKey(ticketId), { why: was?.why ?? 'the Taskmaster asked for it', summary: summary.slice(0, HANDOFF_MAX) });
+    return null;
+  }
+
+  /** A fresh start's next step, if it needs a turn of its own: the handoff ask, or the /compact fallback. */
+  private freshStep(ticketId: number): QueuedMessage | null {
+    const f = this.store.getSetting<FreshState>(freshKey(ticketId));
+    if (!f || f.summary) return null;
+    return f.compact ? { author: 'System', text: COMPACT_COMMAND, images: [], fresh: 'compact' } : { author: 'System', text: handoffPrompt(f.why), images: [], fresh: 'handoff' };
+  }
+
+  /**
+   * A fresh-start step's turn ended (wrapUp). A handoff resets the session; a handoff turn without one
+   * falls back on compaction, unless it was stopped; a compaction ends the fresh start either way.
+   */
+  private endFresh(ticketId: number, turn: TurnState | null, ok: boolean, stopped: boolean) {
+    const f = this.store.getSetting<FreshState>(freshKey(ticketId));
+    if (!f) return;
+    if (f.summary) {
+      this.store.deleteSetting(freshKey(ticketId));
+      this.store.setSetting(handoffKey(ticketId), f.summary);
+      this.store.deleteSetting(contextKey(ticketId));
+      this.store.updateTicket(ticketId, { session_id: null });
+      this.emit(ticketId, 'fresh', { summary: f.summary, why: f.why });
+    } else if (turn?.fresh === 'handoff' && stopped) {
+      this.store.deleteSetting(freshKey(ticketId));
+      this.emit(ticketId, 'note', { text: 'The handoff turn was stopped, so the fresh start is off: the Taskmaster keeps its session.' });
+    } else if (turn?.fresh === 'handoff') {
+      this.store.setSetting(freshKey(ticketId), { ...f, compact: true });
+      this.emit(ticketId, 'note', { text: `No handoff came back${ok ? '' : ' (the turn failed)'}, so the Taskmaster compacts its session instead.` });
+    } else if (turn?.fresh === 'compact') {
+      this.store.deleteSetting(freshKey(ticketId));
+      // Its size is unknown until its next turn, which keeps the idle check from asking again meanwhile.
+      this.store.deleteSetting(contextKey(ticketId));
+      this.emit(ticketId, 'note', { text: ok ? 'Compacted the Taskmaster\'s session instead of a fresh start.' : 'Compacting failed too, so the Taskmaster keeps its session as it was.' });
+    }
+  }
+
+  /**
+   * Taskmasters idle FRESH_IDLE_MS with more than FRESH_CONTEXT_TOKENS of context start fresh (#406),
+   * while their prompt cache is still warm. One that missed that window (a restart) still does: its
+   * next wake would re-read the whole context anyway. Run every minute.
+   */
+  freshSweep(now = Date.now()) {
+    if (this.noTurns) return;
+    for (const p of this.store.listProjects()) {
+      for (const t of this.store.listTickets(p.id)) {
+        if (t.kind !== 'coordinator' || !t.session_id || t.status !== 'idle' || this.isRunning(t.id) || this.queued(t.id) || this.lanes.busy(t.id) || this.limitWait(t.id) || this.netWait(t.id)) continue;
+        const size = this.store.getSetting<number>(contextKey(t.id));
+        const ended = this.store.lastTurnEnd(t.id);
+        if (!size || size <= FRESH_CONTEXT_TOKENS || !ended || now - ended < FRESH_IDLE_MS) continue;
+        this.requestFresh(t.id, `idle ${Math.round((now - ended) / 60_000)} minutes with ${Math.round(size / 1000)}k tokens of context`);
+      }
+    }
+  }
+
   private next(ticketId: number) {
     const q = this.queues.get(ticketId);
-    if (!q?.length) return;
+    if (!q?.length && !this.freshStep(ticketId)) return;
     // Waiting for the usage limit to reset: the messages go into the resume, not a turn that would fail at once.
     if (this.holdForLimit(ticketId)) return;
     // One step at a time per minion (src/lanes.ts): the lane calls next() again once it is free. Its last
     // turn's save above all: a turn on another login restores from that save (#250).
     if (this.lanes.busy(ticketId)) {
       // A running turn keeps its queue in its own record; in the gap after it, they're kept here (#259).
-      if (!this.isRunning(ticketId)) this.store.setSetting(waitingKey(ticketId), q);
+      if (!this.isRunning(ticketId) && q?.length) this.store.setSetting(waitingKey(ticketId), q);
       return;
     }
     this.lanes.run(ticketId, 'turn', () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project) return;
+      // A Taskmaster's fresh-start step runs first and alone; the queue waits for the fresh session.
+      const fresh = this.freshStep(ticketId);
+      if (fresh) {
+        const ended = this.startTurn(project, ticket, [fresh], this.turnPerson(ticket, project, []));
+        if (this.isRunning(ticketId)) return ended;
+        // No turn started (a preview, a refused place): drop it, or the idle lane would ask again at once.
+        this.store.deleteSetting(freshKey(ticketId));
+        this.emit(ticketId, 'note', { text: 'The fresh start could not run a turn, so the Taskmaster keeps its session.' });
+      }
       // Everything queued while the last turn ran goes into one turn.
       const batch = this.takeQueue(ticketId);
       if (batch.length) return this.startTurn(project, ticket, batch, this.turnPerson(ticket, project, batch));
@@ -2115,7 +2239,12 @@ export class Runner {
     // Back on Claude after Codex turns: they come first, verbatim, and their thread goes once this turn succeeds.
     const codexThread = this.store.getSetting<CodexThread>(codexThreadKey(ticket.id));
     const handBack = !codex && codexThread ? [{ author: 'System', text: toClaudePreamble(fitLog(readParts(codexThread.log))), images: [] }] : [];
-    const prompt = promptMessage([...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...handBack, ...batch]);
+    // A Taskmaster's fresh-start step (#406): /compact must be the prompt's whole text for Claude Code to run it.
+    const step = batch[0]?.fresh;
+    // A fresh session's first turn starts from the old session's handoff.
+    const handoff = !step && !ticket.session_id ? this.store.getSetting<string>(handoffKey(ticket.id)) : null;
+    const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
+      : promptMessage([...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...handBack, ...batch]);
     if (asker !== null && asker !== person) this.store.setSetting(askerKey(ticket.id), asker);
     else this.store.deleteSetting(askerKey(ticket.id));
     if (person !== ticket.person_id) {
@@ -2205,7 +2334,7 @@ export class Runner {
     }
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command, args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
-    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }),
+    const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
@@ -2409,6 +2538,9 @@ export class Runner {
     // A hand-back turn that failed or was stopped may still have done work Codex's thread never saw: the next Codex turn starts a new one from the hand-over.
     const back = turn?.handBack ? this.store.getSetting<CodexThread>(codexThreadKey(ticketId)) : null;
     if (back?.thread) this.store.setSetting(codexThreadKey(ticketId), { ...back, thread: null });
+    // A fresh session's handoff is in its transcript once the session exists (#406); then the fresh start's own step, if any.
+    if (turn?.handoff && this.store.getTicket(ticketId)?.session_id) this.store.deleteSetting(handoffKey(ticketId));
+    this.endFresh(ticketId, turn ?? null, status === 'idle' && !stopped && !signal, stopped);
     // Still parked after answering: the row stays parked, whatever state the turn set. A failed turn keeps its error note.
     const parkedAs = this.parkedAs.get(ticketId);
     this.parkedAs.delete(ticketId);

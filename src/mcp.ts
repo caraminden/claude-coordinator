@@ -335,6 +335,11 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID, ...WAKE_PROPS }, required: ['ticket_id', 'reason'] },
   },
   {
+    name: 'fresh_session',
+    description: `Hand off to a fresh Claude session of yours: when this turn ends, your context resets and your next turn starts from \`summary\` (plus your system prompt and memory) instead of this whole conversation. People's chat history stays as it is. Use it when ${APP_NAME} asks for a handoff, or on your own when your context is long and mostly stale. First save to your memory files anything durable that lives only in this chat. Then pass every open ask and who made it, relays you still owe, cards waiting on people, who is parked on what, and what you promised next: facts, not history.`,
+    inputSchema: { type: 'object', properties: { summary: { type: 'string', description: 'The handoff your next session starts from, at most 20,000 characters' } }, required: ['summary'] },
+  },
+  {
     name: 'list_schedules',
     description: "List this scheme's scheduled minions: when each runs, when it runs next, and its last run.",
     inputSchema: { type: 'object', properties: {} },
@@ -1325,6 +1330,9 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Closed. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed' }))}`;
     case 'reopen_ticket':
       return `Reopened. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'idle' }))}`;
+    case 'fresh_session':
+      await call('POST', `/api/tickets/${TICKET}/fresh-session`, { summary: args.summary });
+      return 'Handoff saved: your session resets when this turn ends, and your next turn starts from it. Reply in one line and end the turn.';
     case 'stop_ticket': {
       const { stopped } = await call('POST', `/api/tickets/${await id(args)}/stop`, {});
       return stopped ? 'Stopped.' : 'That minion was not running.';

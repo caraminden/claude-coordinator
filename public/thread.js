@@ -380,7 +380,10 @@ export function renderTicketHead() {
   if (t.status === 'running' || t.limit_resume_at) {
     actions.push(h('button', { class: 'secondary act-stop', title: t.limit_resume_at ? 'Don\'t resume after the usage limit resets' : undefined, onclick: () => api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} }).catch((e) => alertNote(e.message)) }, 'Stop'));
   } else if (coord) {
-    // The coordinator stays open for the life of the project.
+    // The coordinator stays open for the life of the project; its Claude session can start fresh (#406).
+    if (t.session_id && !t.fresh_pending) {
+      actions.push(h('button', { class: 'secondary act-fresh', title: 'Start the Taskmaster on a fresh Claude session: it writes a handoff, then its next turn starts from that instead of this whole conversation', onclick: () => freshSession(t) }, 'Fresh', h('span', { class: 'wide-only' }, ' session')));
+    }
   } else if (t.status === 'closed') {
     actions.push(h('button', { class: 'secondary act-reopen', onclick: () => setStatus(t, 'idle') }, 'Reopen minion'));
   } else {
@@ -426,6 +429,22 @@ export function renderTicketHead() {
   const send = document.querySelector('.composer button[type=submit]');
   if (send) send.title = t.status === 'running' ? 'Runs after the current turn' : '';
   scheduleProgress();
+}
+
+/** Ask for a Taskmaster's fresh session (#406): the button goes at once, and comes back if the server refuses. */
+function freshSession(t) {
+  if (!confirm('Start the Taskmaster on a fresh session? It saves what lasts to memory and writes a handoff, then its context resets. The chat stays as it is.')) return;
+  const mark = (on) => {
+    if (view.ticket?.id !== t.id) return;
+    view.ticket.fresh_pending = on;
+    renderTicketHead();
+  };
+  optimistic({
+    label: 'start a fresh session',
+    apply: () => mark(true),
+    send: () => api(`api/tickets/${t.id}/fresh-session`, { method: 'POST', body: {} }),
+    undo: () => mark(false),
+  });
 }
 
 // Phones put ‹ › × on the line under the title, so turning a tablet across the breakpoint redraws the bar.
@@ -850,6 +869,9 @@ export function appendEvent(event, scroll = true) {
     // A note with output under it (a CI runner add or remove, #339) keeps it collapsed, line breaks and all.
     else if (short != null && data.detail) nodes.push(h('details', { class: 'note detail' }, h('summary', {}, threadRefs(short)), h('pre', {}, data.detail)));
     else if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
+  } else if (event.kind === 'fresh') {
+    // A Taskmaster's fresh Claude session (#406), with the handoff it starts from behind the toggle.
+    nodes.push(h('details', { class: 'note detail fresh', title: data.why ? `Why: ${data.why}` : null }, h('summary', {}, 'Fresh session started; summary'), markdown(data.summary, event.ticket_id)));
   } else if (event.kind === 'error') {
     nodes.push(h('div', { class: 'note error' }, data.text));
   } else if (grunt && data.type === 'assistant') {

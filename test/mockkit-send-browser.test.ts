@@ -1,0 +1,132 @@
+// The mock kit's Send dock in a real browser (headless Chromium, test/browser.ts), against a stubbed Citadel
+// bridge: pressing Send again for picks that were already sent must not post them again (#420), also after a
+// reload; a changed pick sends again; a failed send rolls back with a toast and Retry.
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
+import { after, before, test } from 'node:test';
+import { chromium, launch, type Browser, type Page } from './browser.ts';
+
+const bin = chromium();
+const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
+const starter = join(import.meta.dirname, '..', 'kit', 'skills', 'docs-and-mocks', 'starter');
+
+// `fail` makes the next send reject; the stubbed bridge counts and records every post in window.posts.
+const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Take page</title><link rel="stylesheet" href="/mockkit.css">
+<script>
+  window.posts = []; window.fail = false;
+  const docs = new Map();
+  window.claude = { use: async () => ({ collection: () => ({
+    onSnapshot: (cb) => { window.snap = () => cb({ docs: [...docs].map(([id, d]) => ({ id, data: () => d })) }); window.snap(); },
+    doc: (id) => ({ set: async (d) => { docs.set(id, d); window.snap(); }, delete: async () => { docs.delete(id); window.snap(); } }),
+  }) }) };
+  window.citadel = {
+    info: async () => ({ person: 'cara' }),
+    send: async (text) => { await new Promise((r) => setTimeout(r, 120)); if (window.fail) { window.fail = false; throw new Error('boom'); } window.posts.push(text); return { sent: true, to: '#419' }; },
+  };
+</script>
+<script src="/mockkit.js"></script>
+<body class="mk"><main class="mk-page">
+  <section data-pick="a" data-title="Take A"><h2>Take A</h2></section>
+  <section data-pick="b" data-title="Take B"><h2>Take B</h2></section>
+</main>
+<script>mock.picks({ options: [{ v: 'pick', label: 'Pick this', done: 'Picked' }] }); mock.ready.then(() => setTimeout(() => (window.ready = true), 50));</script>`;
+
+let server: Server;
+let browser: Browser;
+let base = '';
+
+before(async () => {
+  if (skip) return;
+  server = createServer((req, res) => {
+    const path = new URL(req.url ?? '/', 'http://x').pathname;
+    if (path === '/') return res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
+    if (path === '/mockkit.js' || path === '/mockkit.css') {
+      return res.writeHead(200, { 'content-type': path.endsWith('js') ? 'text/javascript' : 'text/css' }).end(readFileSync(join(starter, path)));
+    }
+    res.writeHead(404).end();
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+  browser = await launch(bin!);
+});
+
+after(async () => {
+  await browser?.close();
+  await new Promise((r) => (server ? server.close(r) : r(null)));
+});
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const click = async (page: Page, sel: string) => { const c = await page.centre(sel); await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: c.x, y: c.y, button: 'left', clickCount: 1 }); await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: c.x, y: c.y, button: 'left', clickCount: 1 }); };
+const posts = (page: Page) => page.eval<string[]>('window.posts');
+const send = (page: Page) => click(page, '.mk-dock > button');
+const label = (page: Page) => page.eval<string>('document.querySelector(".mk-dock > button").textContent');
+const disabled = (page: Page) => page.eval<boolean>('document.querySelector(".mk-dock > button").disabled');
+
+test('pressing Send again for the same picks posts nothing more, and the button stays Sent and disabled', { skip }, async () => {
+  const page = await browser.page(base);
+  await click(page, '[data-pick="a"] [data-v="pick"]');
+  await send(page);
+  await wait(250);
+  assert.equal((await posts(page)).length, 1);
+  assert.equal(await disabled(page), true, 'no second press is possible');
+  assert.match(await label(page), /Sent/);
+  await page.eval('document.querySelector(".mk-dock > button").click()'); // even a scripted click
+  await wait(250);
+  assert.equal((await posts(page)).length, 1);
+});
+
+test('a changed pick or note makes Send ready again, and the new text posts once', { skip }, async () => {
+  const page = await browser.page(base);
+  await click(page, '[data-pick="a"] [data-v="pick"]');
+  await send(page);
+  await wait(250);
+  await click(page, '[data-pick="b"] [data-v="pick"]');
+  assert.equal(await disabled(page), false);
+  assert.doesNotMatch(await label(page), /Sent/);
+  await send(page);
+  await wait(250);
+  const p = await posts(page);
+  assert.equal(p.length, 2);
+  assert.notEqual(p[0], p[1]);
+  // Going back to the exact text already sent is not a change worth a second post either.
+  await send(page).catch(() => {});
+  await wait(100);
+  assert.equal((await posts(page)).length, 2);
+});
+
+test('after a reload the same picks are still Sent and cannot post again', { skip }, async () => {
+  const page = await browser.page(base);
+  await click(page, '[data-pick="a"] [data-v="pick"]');
+  await send(page);
+  await wait(250);
+  // The stub's picks live in memory, so put the same pick back after reloading, as the saved ones would be.
+  await page.eval(`(() => { location.reload(); })()`).catch(() => {});
+  await wait(500);
+  for (const end = Date.now() + 5000; !(await page.eval('!!window.ready').catch(() => false)) && Date.now() < end; await wait(50));
+  await click(page, '[data-pick="a"] [data-v="pick"]');
+  await wait(100);
+  // Same text as before the reload, apart from who/when, which the summary leaves out.
+  assert.equal(await disabled(page), true);
+  assert.match(await label(page), /Sent/);
+});
+
+test('a failed send rolls back to ready, with a toast whose Retry posts it', { skip }, async () => {
+  const page = await browser.page(base);
+  await click(page, '[data-pick="a"] [data-v="pick"]');
+  await page.eval('window.fail = true');
+  await send(page);
+  await wait(10);
+  assert.match(await label(page), /Sent/, 'shows Sent at once');
+  await wait(300);
+  assert.equal(await page.eval('!!document.querySelector(".mk-toast")'), true);
+  assert.equal(await disabled(page), false);
+  assert.doesNotMatch(await label(page), /Sent/);
+  await click(page, '.mk-toast .primary');
+  await wait(300);
+  assert.equal((await posts(page)).length, 1);
+  assert.equal(await disabled(page), true);
+});

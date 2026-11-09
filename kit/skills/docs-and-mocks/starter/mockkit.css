@@ -183,7 +183,7 @@ body.mk {
 .mk-pickbar button[aria-pressed="true"] { background: var(--mk-good); border-color: var(--mk-good); color: var(--mk-panel); font-weight: 600; }
 .mk-pickbar button[aria-pressed="true"][data-v="cut"], .mk-pickbar button[aria-pressed="true"][data-v="no"] { background: var(--mk-bad); border-color: var(--mk-bad); }
 .mk-pickbar button[aria-pressed="true"][data-v="rework"], .mk-pickbar button[aria-pressed="true"][data-v="maybe"] { background: var(--mk-warn); border-color: var(--mk-warn); }
-.mk-pickbar button:disabled { opacity: 0.55; cursor: default; }
+.mk-pickbar button:disabled, .mk-btn:disabled { opacity: 0.55; cursor: default; }
 .mk-pickbar input {
   flex: 1 1 12rem; min-width: 0; padding: 0.35rem 0.6rem; line-height: 1.3; font-size: 0.88rem;
   border: 1px solid var(--mk-line); border-radius: var(--mk-radius-sm); background: var(--mk-bg);

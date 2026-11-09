@@ -147,22 +147,30 @@
     let text = null;
     let sent = null;
     let saving = false;
-    let inFlight = null; // the text being sent now: pressing Send again for the same picks doesn't post twice
+    let btn = null;
+    // The text last sent, kept across reloads: the same picks are never posted twice from one page.
+    const KEY = `mockkit-sent:${location.pathname}`;
+    let lastSent = null;
+    try { lastSent = localStorage.getItem(KEY); } catch { /* storage blocked: stays in memory only */ }
+    const remember = (v) => {
+      lastSent = v;
+      try { v == null ? localStorage.removeItem(KEY) : localStorage.setItem(KEY, v); } catch { /* as above */ }
+    };
 
-    // Shows Sent at once; a failure takes it back and says why, with Retry.
+    // Shows Sent at once and stays Sent until a pick or note changes; a failure takes it back and says why, with Retry.
     async function send(body) {
-      if (inFlight === body) return;
-      inFlight = body;
+      if (lastSent === body) return;
+      remember(body);
       toastNode?.remove();
-      sent.textContent = 'Sent ✓';
+      dock.paint();
       try {
         const r = await window.citadel.send(body);
         sent.textContent = `Sent to ${r?.to ?? 'the minion'} ✓`;
       } catch (e) {
+        if (lastSent === body) remember(null);
         sent.textContent = '';
+        dock.paint();
         toast(`Couldn't send your picks: ${e.message}`, () => send(body));
-      } finally {
-        if (inFlight === body) inFlight = null;
       }
     }
 
@@ -170,7 +178,7 @@
       mount(isSaving) {
         saving = isSaving;
         if (node) return this.paint();
-        const btn = el('button', { type: 'button', class: 'mk-btn primary' }, saving ? 'Send picks to the minion' : 'Copy picks');
+        btn = el('button', { type: 'button', class: 'mk-btn primary' }, '');
         text = el('span', { class: 'mk-dock-text' });
         sent = el('span', { class: 'mk-sent', 'aria-live': 'polite' });
         node = el('div', { class: 'mk-dock' }, text, sent, btn);
@@ -204,6 +212,10 @@
         for (const s of sets) for (const d of s.docs.values()) { if (d.v) picked++; if (d.note) notes++; }
         const where = saving ? 'saved for the minion to read' : 'not saved or sent: open this page from Citadel to send';
         node.classList.toggle('stuck', picked + notes > 0);
+        const done = saving && lastSent != null && summary() === lastSent;
+        btn.disabled = done;
+        btn.textContent = done ? 'Sent ✓' : saving ? 'Send picks to the minion' : 'Copy picks';
+        if (!done && /^Sent/.test(sent.textContent)) sent.textContent = '';
         text.innerHTML = picked || notes
           ? `<b>${picked}</b> picked${notes ? `, <b>${notes}</b> with notes` : ''} · ${where}`
           : `Nothing picked yet · ${saving ? 'picks save as you make them' : where}`;

@@ -789,7 +789,8 @@ export function appendEvent(event, scroll = true) {
     if (data.author === me && data.sendId) {
       // Our own message, already shown when it was sent: swap in the server's copy, found by its sendId (#392).
       const i = view.pendingMessages.findIndex((m) => m.sendId === data.sendId);
-      const m = i >= 0 && view.pendingMessages.splice(i, 1)[0];
+      // null, not false, when it isn't ours to swap (a reload replays every message): ?. passes false through.
+      const m = i >= 0 ? view.pendingMessages.splice(i, 1)[0] : null;
       m?.el.remove();
       // Marked not sent when its reply was lost, yet it went: nothing left to send, and a Retry now does nothing.
       if (m?.state === 'failed') {

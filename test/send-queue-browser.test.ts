@@ -163,6 +163,15 @@ for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
   });
 }
 
+test('a chat whose history holds your own sent message opens after a reload', { skip }, async () => {
+  // The replay finds no bubble on its way for it; that once threw "reading 'remove'" and blanked the app.
+  const t = await minion('Reload');
+  await srv.call(`/api/tickets/${t.id}/messages`, { text: 'mine', sendId: 'reload-1' });
+  await until('the turn to end', async () => (await srv.call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
+  const page = await open(1280, t);
+  await wait(page, 'its message', `!!${bubble('mine')}`);
+});
+
 test('a message the server took after its send failed is marked sent, and a Retry then adds no copy', { skip }, async () => {
   const t = await minion('Lost reply');
   const page = await open(1280, t);

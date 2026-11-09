@@ -64,7 +64,9 @@ and commit. You own the call: a finding you judge wrong or out of scope goes in 
 list with a reason, not silently away. Comments from a person, a GitHub review or Codex go
 through "Receiving review" in `references/lenses.md` part 2. On a UI change, also check your own
 desktop and phone screenshots for what the Grunt can't see: equal top and bottom padding,
-nothing clipped or scrolling sideways, phone tap targets `--citadel-control-h` tall. When the
+nothing clipped or scrolling sideways, phone tap targets `--citadel-control-h` tall.
+`node <kit>/skills/critique/scripts/ui-measure.mjs <url> --shots <dir>` takes both shots and
+measures those for you (its `--help` says how), with or without a rubric. When the
 change draws data (names, counts, lists), take those screenshots again with worst-case data in
 a dev copy (`citadel:contraption-ui`, `references/worst-case-data.md`) and fix what it breaks; a
 new page, view or flow also gets that skill's dogfood pass (`references/dogfood.md`).

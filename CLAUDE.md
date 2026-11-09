@@ -51,6 +51,7 @@ skill step is skipped or uses its default.
 - **Decisions log (ADRs):** none yet; the first goes in `docs/adr/`.
 - **Retros:** none yet; the first goes in `docs/retros/`.
 - **Bug classes of its own:** none beyond the bug-fixing skill's.
+- **Rubrics:** docs/rubrics/
 
 ## Skills, subagents (Grunts) and rules
 

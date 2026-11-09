@@ -82,7 +82,7 @@ export interface AppInstructions {
 
 /** Models a thread can be set to (null = Claude Code's default), and effort levels for `claude --effort`. */
 // Codex's (#337) run in the person's own container, signed in to Codex (src/codex.ts CODEX_MODELS).
-export const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'] as const;
+export const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-fable-5-2', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'] as const;
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 /** ready: done, ready to merge or pick up · try: ready for people to try · parked: on hold on purpose ·

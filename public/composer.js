@@ -452,6 +452,7 @@ const MODELS = [
   ['claude-sonnet-5-5', 'Sonnet 5.5'],
   ['claude-haiku-5-5', 'Haiku 5.5'],
   ['claude-fable-5-1', 'Fable 5.1'],
+  ['claude-fable-5-2', 'Fable 5.2'],
 ];
 // Codex's (#337, src/codex.ts CODEX_MODELS): one-off picks, for people whose own container is signed in to Codex.
 const CODEX_MODELS = [

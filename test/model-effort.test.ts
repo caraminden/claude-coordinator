@@ -196,3 +196,13 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
     api.close();
   }
 });
+
+test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and the composer, beside 5.1', async () => {
+  const { MODELS } = await import('../src/db.ts');
+  const { readFileSync } = await import('node:fs');
+  for (const id of ['claude-fable-5-1', 'claude-fable-5-2']) {
+    assert.ok((MODELS as readonly string[]).includes(id), `MODELS has ${id}`);
+    assert.ok(readFileSync(join(repo, 'src/mcp.ts'), 'utf8').includes(`'${id}'`), `the MCP enum has ${id}`);
+  }
+  assert.ok(readFileSync(join(repo, 'public/composer.js'), 'utf8').includes("['claude-fable-5-2', 'Fable 5.2']"), 'the composer lists it');
+});

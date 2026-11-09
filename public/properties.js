@@ -242,8 +242,14 @@ function deleteView(v) {
 /** This person saved or deleted a view in this scheme, maybe in another tab. */
 export function onViewsChanged(projectId, name) {
   if (name !== me || view?.kind !== 'project' || projectId !== view.projectId || propFilter.projectId !== projectId) return;
-  propFilter.views = null;
-  renderPropFilter();
+  if (!propFilter.views) return renderPropFilter(); // not loaded yet: it loads them
+  // The chips stay as they are until the list comes, and a save or delete clicked meanwhile keeps its own.
+  const before = propFilter.views;
+  api(`api/projects/${projectId}/views`).then((views) => {
+    if (propFilter.projectId !== projectId || propFilter.views !== before) return;
+    propFilter.views = views;
+    renderSavedViews();
+  }, () => {});
 }
 
 /** Whether people on this scheme's page change a key: its own keys, and global ones only on Citadel's. */

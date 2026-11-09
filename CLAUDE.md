@@ -46,6 +46,7 @@ skill step is skipped or uses its default.
   with every app: it means an app-visible change to `public/ui/` or theme.css. Additive only.
 - **Agent instructions:** the prompt text in `src/runner.ts` and the MCP tool descriptions in
   `src/mcp.ts`, besides the kit, `CLAUDE.md` and `.claude/`.
+- **Rubrics:** docs/rubrics/
 - **Glossary:** none. The names people read (Scheme, Taskmaster, Minion, Grunt) are in the scheme
   instructions; code keeps the old identifiers.
 - **Decisions log (ADRs):** none yet; the first goes in `docs/adr/`.

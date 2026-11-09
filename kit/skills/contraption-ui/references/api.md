@@ -333,9 +333,9 @@ Body `{ "person": 3, "text": "…" }`, the turn's own person (tested).
   the person and whether they're a member of that scheme. A non-member's feature ask is a proposal
   only, built once a member says go; their bug reports are worked as usual. Answers `202 { scheme,
   member, proposal, files }`. Your app never sees the Taskmaster's reply.
-- **Straight to a minion** (`minion: N`): the ask goes into minion #N's chat, labelled and shown
-  as above, and wakes it as a person's message does, as that person; if a turn is running it waits
-  for the next one. The Taskmaster isn't told or woken. `kind` stays required and only labels it
+- **Straight to a minion** (`minion: N`): the ask goes into minion #N's chat under the person's
+  name, with the same header and summary, and wakes it as their message would: the turn runs as
+  them; if a turn is running it waits for the next one. The Taskmaster isn't told or woken. `kind` stays required and only labels it
   (bug report or feature ask). Members of the home scheme only (admins count): a non-member gets
   403, since their feature ask is only a proposal. 404 when the home scheme has no minion #N (a
   number from another scheme counts as none); 409 when #N is dismissed, which stays dismissed until

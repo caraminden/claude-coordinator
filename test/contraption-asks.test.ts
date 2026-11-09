@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { askSummary, README_INBOX_LINE, safeName, saveAskFiles } from '../src/contraption-asks.ts';
 import { askHeader } from '../public/askcard.js';
+import { messagePerson } from '../src/access.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
@@ -226,7 +227,9 @@ test('POST /api/contraptions/asks with minion (#416): straight to that minion, m
   assert.deepEqual(r.body, { scheme: 'Theory of Crafting', minion: 1, member: true, proposal: false, files: ['inbox/toc/rachel/brief.md'] });
   assert.equal(readFileSync(join(projectSharedDir(data, ToC.id), 'inbox', 'toc', 'rachel', 'brief.md'), 'utf8'), '# Brief');
   const m = said(acolyte.id).at(-1)!;
-  assert.equal(m.author, 'Contraption ToC, for Rachel, a Theory of Crafting member');
+  // Her own name, so the turn runs as her (runner.turnPerson goes by author), on her Claude and GitHub.
+  assert.equal(m.author, 'Rachel');
+  assert.equal(messagePerson(store)(m.author), Rachel.id);
   assert.match(m.text, /^A feature ask from the ToC contraption \(toc\), sent by Rachel \(rachel\)/);
   assert.match(m.text, /> Show the rune cost\./);
   assert.match(m.text, /Files they sent, in this scheme's shared folder: inbox\/toc\/rachel\/brief\.md/);

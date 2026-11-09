@@ -68,6 +68,8 @@ test('the onboarding section is in the prompt only while setup is under way', ()
       // Native-app schemes (#371): the kind, and a plan part only they get.
       assert.match(text, /native app \(desktop or phone\)/);
       assert.match(text, /\*\*Real hardware \(native-app schemes only; leave it out for any other kind\):\*\*.*`windows-latest` proves little.*Real-hardware ledger: docs\/unproven\.md.*\*\*First run on real hardware\*\*/);
+      // Critic rubrics (#393): the plan offers citadel:critique's starters, and none is a choice.
+      assert.match(text, /\*\*Critic rubrics:\*\* the starters in citadel:critique's `rubrics\/`.*"none fit yet"/);
     }
   }
 });
@@ -87,6 +89,7 @@ test('a tune-up gets its own section: start from onboarding.md or the current st
     for (const part of ['Add', 'Update', 'Retire', 'Instructions']) assert.match(text, new RegExp(`\\*\\*${part}:\\*\\*`), part);
     assert.match(text, /every repo copy the kit now covers \(`in_kit`\)/);
     assert.match(text, /A native-app scheme .* with no Real-hardware ledger line gets one, and the hosted-runner warning in Working rules/);
+    assert.match(text, /\*\*Critic rubrics:\*\* when the Project facts have no Rubrics line, the starters in citadel:critique's `rubrics\/`/);
     assert.match(text, /as a line diff/);
     assert.match(text, /This is a tune-up: edit only, and delete only what the plan lists under Retire\./);
     assert.match(text, /propose_plan/);

@@ -112,6 +112,7 @@ exception is Real-hardware ledger: only a native-app scheme has that line.
 | Bug classes of its own | The stack's recurring bug kinds beyond bug-fixing's (a Godot signal wired twice, a stale save version) | bug-fixing | bug-fixing's classes only |
 | Agent instructions | Prompts, guides and tool descriptions an agent reads beyond the kit, `CLAUDE.md`, `AGENTS.md` and `.claude/` (an app's system prompt, a guides folder) | self-review (Agent instructions lens) | those alone |
 | Docs test | A test that checks the paths docs name, if one exists | retro | skipped |
+| Rubrics | The critic rubrics the plan names, as `citadel:critique`'s `references/rubric-format.md` says: paths separated by `;`. A starter the plan picks becomes a file in the repo (`docs/rubrics/<name>.md`) that `extends:` it, with empty sections for people's notes | critique, self-review, docs-and-mocks | none: no critic runs |
 | Real-hardware ledger | Native-app schemes only: `docs/unproven.md`, written as below | self-review | no line |
 
 **The ledger** (native-app schemes only) lists what nobody has yet seen work on real hardware.

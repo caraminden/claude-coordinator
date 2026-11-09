@@ -62,6 +62,9 @@ when look variants belong in the real app instead, in [`prototypes.md`](prototyp
 4. **Make live what the feel decides** (hover details, collapsed sections, filters, toggles, a
    state switch), and always a pick bar where a choice is asked. Art stays images; long motion is a
    clip beside the page. The kit's API is in [`mockkit.md`](mockkit.md).
+   **Critic first:** when Project facts' `Rubrics:` names one whose `when:` has `creative:` and
+   covers these takes, run `citadel:critique` on them before showing anyone, and lay the page out by
+   its verdicts ([`kinds.md`](kinds.md), "Critic lines"). No Rubrics line: no critic, no change.
 5. **Check it in Citadel's viewer** at the size it is judged at: a mock of a scheme's own app or
    game screen at that screen's real size and scale, by the scheme's own rules (its CLAUDE.md or
    Project facts); a Citadel-facing page or doc at phone width. Every page also gets one light

@@ -68,6 +68,11 @@ change draws data (names, counts, lists), take those screenshots again with wors
 a dev copy (`citadel:contraption-ui`, `references/worst-case-data.md`) and fix what it breaks; a
 new page, view or flow also gets that skill's dogfood pass (`references/dogfood.md`).
 
+When Project facts names **Rubrics**, run `citadel:critique` for each one whose `when:` matches
+this diff, after the reviewer's fixes. Its blockers are findings like the reviewer's: fixed, or in
+"Not fixed" with a reason; a `gate: blocks-ready` rubric holds the change until it passes or a
+person decides. The critic doesn't set the label: you do, in 4.
+
 When Project facts names a **Real-hardware ledger**, everything this change does that wasn't
 seen working on real hardware gets an entry there, committed with the change, as the ledger's
 header says. The reply and the PR's "not verified" name those entry numbers, where a bare "not
@@ -99,7 +104,8 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   with the label in a few words, within its 60 characters (`risk medium: runner retries`), and
   the final reply has one line:
   `Risk: medium: <reason>. Door: two-way · Blast radius: server. Not fixed: <finding: why>` (or
-  `Not fixed: nothing`). Every claim in it and in the reply meets "Evidence before claims" in
+  `Not fixed: nothing`), and a critic's result line under it when one ran
+  (`ui-screenshots critic: pass (round 1)`). Every claim in it and in the reply meets "Evidence before claims" in
   `references/lenses.md` part 2. A PR's description carries the same Door and Blast radius.
 - **High:** stop before merging. Post the same line, the findings you fixed in one line each,
   and an `ask_question` card "Merge and ship this high-risk change?" (Merge and ship /

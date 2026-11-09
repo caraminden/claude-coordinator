@@ -1,0 +1,168 @@
+---
+name: critique
+description: >
+  The blind-critic loop: a citadel:critic Grunt judges finished work against the scheme's rubric,
+  the author fixes, citadel:professor teaches on stubborn fails, and a person gets what the rounds
+  can't settle. Use when self-review or docs-and-mocks finds a rubric whose `when:` matches, when a
+  person asks for a critic on some work, when a person's verdict differs from a critic's, and to
+  write or calibrate a rubric.
+---
+
+# Critique
+
+The author who made something checks it against what it meant to make, and misses what a person
+then sees at a glance. Delve's art loop found that a blind critic, holding the person's own rubric,
+catches most of it before they look: on a blind trial, an Opus critic caught about 9 of Cara's 13
+notes. This skill is that loop for any scheme, any kind of work. Delve's art-review skill is where it
+came from (Cara, 2026-10-24, Delve thread 168; lifted into the kit 2026-11-08, Citadel #390 and
+#393).
+
+The repo's CLAUDE.md, Project facts, names the rubrics: `**Rubrics:** <path>; <path>`. No line, or
+`none`, and this skill does nothing. The rubric format, with what every key means:
+[`references/rubric-format.md`](references/rubric-format.md).
+
+`<kit>` below is the absolute path two folders up from this skill's base directory (shown when it
+loaded). Every Grunt brief starts with the Grunt line from your system prompt, quoted whole.
+
+## 1. Pick the rubrics
+
+Read each rubric the Rubrics line names (frontmatter first) and keep those whose `when:` matches:
+
+- `diff:` a changed path of `git diff --name-only main...HEAD` matches a glob;
+- `creative:` the work is a new piece, take or rework that makes creative choices. A small change to
+  a design a person already saw (a size, a colour, one detail they named) skips it, and what you show
+  them says the critic didn't judge it;
+- `schedule:` your brief is that schedule's run.
+
+*Done when* every named rubric is kept or skipped with its reason.
+
+## 2. Brief, then artifacts, then checks
+
+1. **Write a brief per item:** what it is, what it should read as or do, its size or place, and the
+   picks and notes of a person's it keeps. Leave out source, history and your reasons for it: the
+   critic judges what it sees, not what you meant. Where a rubric rule pulls against the person's
+   words for this item, their words win and the brief says so.
+2. **Make the artifacts** the rubric's `input:` names, each labelled so a finding can point into it
+   (frame numbers, viewport widths, line numbers). Read an animation as frames, never as one still.
+3. **Run the `checks:`** from the repo root. Fix every failure before any model looks, and keep the
+   output for the critic.
+4. **Look yourself** at each artifact once and fix what is obvious. This doesn't replace the critic.
+
+## 3. Run the critic
+
+Start a `citadel:critic` Grunt per batch: `model` and `effort` from the rubric (defaults in the
+format), in the foreground, about 6 items a call, several calls in parallel for a bigger set. Brief:
+
+> Follow `<kit>/agents/critic.md`. Rubric: `<path>`; kit: `<kit>`. Round `<n>` of `<max_rounds>`.
+> Per item: the brief, the artifact paths, the checks' output[, your last findings].
+
+A fresh critic every round. It gets its own last findings, never the professor's advice or your
+arguments, so it stays as blind as the person. With more than 2 critics, or a second round, it's a
+fan-out: name a report file in each brief (`citadel:subagents`, "Fan-outs").
+
+## 4. Act on each verdict
+
+- **pass:** done for this item.
+- **another round:** fix the blockers, remake the artifacts, and run round n+1 on these items only.
+  A finding you think wrong goes to a fresh Grunt with the finding and the evidence, not your
+  argument: `citadel:finding-checker` for code, a fresh critic for anything else. Drop it only on
+  that Grunt's word, and log why.
+- **ask <person>:** the item goes to the person as a question card with both ways named. Its
+  findings stay open.
+
+## 5. The professor, on stubborn fails
+
+A **stubborn fail** is an item that failed on its score alone (no blocker, under the mark), or failed
+its second round. A plain blocker on a first fail is yours to fix.
+
+1. **Group by cause.** Stubborn fails whose findings name the same cause (the same rule broken the
+   same way) are one cause. Call `citadel:professor` once per cause, with the two or three plainest
+   items, and apply its fix to every item that has it. On Delve, 24 fails that shared one cause never
+   got a professor, and 26 hit frames reached Cara unfixed.
+2. **Brief it:** "Follow `<kit>/agents/professor.md`." with the cause quoted, per item the brief,
+   every critic report so far and your line on what changed between them, the latest artifacts and
+   checks' output, the source paths that made it, the rubric, its `playbook:` and `<kit>`. At most 3
+   items a call; on the last round, say so.
+3. **Apply fix 1,** remake the artifacts and run the next critic round as usual.
+4. **Playbook:** when the rubric has one, write the entry once the next round is judged: the
+   finding's kind, the fix, before and after, the critic's verdict; the person's verdict makes it
+   proven or sent back.
+
+## 6. The last round
+
+When an item reaches its last round (`max_rounds`, default 3) still failing, tell the critic it is the
+last round: it gives two whole directions it would pass, as does the professor beside its fix. Make
+one, keeping what the person already approved. A patch that failed twice rarely passes a third time.
+
+After the last round, the item goes to the person as it is, with its open findings and the two
+directions. A hard item costs one question, not an endless loop.
+
+## 7. Cross-family final gate
+
+Only when the rubric says `cross_family: final`, once, on the items the critic passed. Codex, a model
+from another family, re-judges them read-only:
+
+1. `citadel-codex-review --check` prints `ready`; otherwise skip and note `Codex: skipped: not set
+   up`.
+2. The artifacts are text (a diff, text, rows). Codex can't see images yet: note `Codex: skipped:
+   images`.
+3. Write `$TMPDIR/critic-codex-brief.md`: "Follow `<kit>/agents/critic.md` as the critic, in round 1."
+   with the rubric path and each passed item's brief and artifact paths. Run
+   `citadel-codex-review --timeout 540 < "$TMPDIR/critic-codex-brief.md"` (Bash timeout 600000).
+   A non-zero exit skips it with its reason (exit 4: the person's Codex usage is ahead of pace).
+
+An item Codex fails goes back to step 4 with its findings, and doesn't count against `max_rounds`.
+
+## 8. Log and report
+
+Log every round in your own shared folder (the per-minion one your prompt names) as `critic.md`: per
+item, per round, the verdict, the score, the findings, what changed, and a professor line when one
+ran: `professor: <cause> → <fix 1 in a few words>; applied: all / part / none (<why>); next round:
+<verdict>`. Step 9 reads it when a person's verdict comes in.
+
+The result goes to people as one line per rubric, in the ready note when it fits and in the reply:
+
+- `<name> critic: pass (round 1)`
+- `<name> critic: 2 blockers fixed, 1 not fixed: <why>`
+- `<name> critic: after 3 rounds, still: <finding>` (the item went to the person)
+- `<name> critic: skipped: <why>`
+
+With `gate: advisory` (the default), open blockers are handled like reviewer findings: fixed, or
+listed under "Not fixed: <why>". With `gate: blocks-ready`, the work isn't ready while an item has
+open blockers and no person's decision. On a review page, each take shows its critic line and the
+takes sort by verdict (`citadel:docs-and-mocks`, its `kinds.md`, "Critic lines").
+
+*Done when* every item passed, went to the person, or is listed as not fixed with a reason, and the
+result line is written.
+
+## 9. Learn from the person
+
+The step that makes the critic better each week. Whenever a person gives a verdict on work a critic
+judged (a note, an approval, a pick on a review page read with `artifact_data`, a sent-back item),
+check `critic.md` and write the rubric that turn, in the minion's open PR (or the next one):
+
+- **Their words:** a row in Notes, dated, with the minion and what it was about. A pick between
+  takes ("B for this") is a pick, not taste: leave it out.
+- **They flagged something the critic passed:** a Known blind spots line: the date, the item, what
+  the critic said, what they saw, and what to look for next time.
+- **They passed something the critic failed:** a Notes row with their words, and narrow the Blocker
+  it fired on so it wouldn't fire again.
+- **They called it perfect, or sent a whole set back:** a Calibration board row with the artifact
+  path and their verdict.
+- **A pattern they flag twice:** a Watch-list line; a third time, a Blocker.
+- **An item the professor helped:** its playbook entry, proven or sent back with their words.
+
+Never reword or drop a person's past words in a rubric. Tell them in one line what changed in it.
+
+## Writing and calibrating a rubric
+
+A new rubric starts from the format and, where one fits, `extends:` a starter in `<kit>/skills/critique/rubrics/`.
+Before a scheme relies on it, and again when the rubric or the critic's model changes, run the blind
+trial in [`references/calibrate.md`](references/calibrate.md) and record the result in `calibrated:`.
+
+## Cost
+
+A critic round on Opus is about $1.10 for six image items (an image is about w×h/750 tokens, so a
+1440×900 screenshot is about 1.7k); on Sonnet, about $0.30. A professor call is about $1 on Opus,
+which is why it runs only on stubborn fails and once per cause. Skip the critic on a remake that
+changes nothing it would see.

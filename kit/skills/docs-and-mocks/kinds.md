@@ -23,6 +23,14 @@ People pick between takes, or give each item a verdict.
   and name, and `mock.picks({ collection: 'marks', options: ['keep', 'rework', 'cut'] })`.
 - **Below the boards:** what every take shares, so no board's note has to repeat it.
 - **The dock** comes by itself: counts and Send.
+- **Critic lines,** when `citadel:critique` judged the takes: each board's note ends with the
+  critic's line ("passed in round 2, cool 4", or "after 3 rounds, still: <finding>"), and an
+  `ask <person>` verdict becomes that board's question. The boards go in three sections, in this
+  order: **Shortlist** (the critic's passes, or the closest it got, the heading saying so), **One more
+  pass** (good ideas a round could fix), **Rejected by the critic** (the rest, each with its one-line
+  reason). Every take shows at full colour and size: the heading sets them apart. Cara (2026-10-30,
+  Delve #61): "I like that you showed me what the critic rejected in case I liked it ... but dont grey
+  it out like you did, just make sure to put it in a separate section or something."
 
 ## Design doc
 

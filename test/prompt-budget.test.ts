@@ -62,3 +62,12 @@ test('the growth list names a line that grew and one that is new', () => {
   const now = lineSizes(`Keep this.\n${tripwire}a, b, c, d\nA new rule.`);
   assert.deepEqual(growth(was, now), ['  +12 (new) "A new rule.…"', `  +6 "${tripwire.slice(0, 60)}…"`]);
 });
+
+test('saving instructions says what they cost, the same in the settings page and the Taskmaster tools', async () => {
+  const { instructionCost } = await import('../src/prompt-cost.ts');
+  const page = (await import('../public/prompt-cost.js')).instructionCost;
+  assert.equal(instructionCost('x'.repeat(11_664)), 'These instructions are about 2.9k tokens; each 1k costs about $11 a week across minions.');
+  assert.equal(instructionCost('x'.repeat(400)), 'These instructions are about 100 tokens; each 1k costs about $11 a week across minions.');
+  assert.equal(instructionCost('  '), '');
+  for (const n of [0, 400, 11_664, 16_000]) assert.equal(page('x'.repeat(n)), instructionCost('x'.repeat(n)));
+});

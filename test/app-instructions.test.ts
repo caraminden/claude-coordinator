@@ -135,6 +135,7 @@ test('the MCP tools: listed only for the Citadel scheme\'s Taskmaster, and refus
 
   const set = await mcp(CitadelTM, 'tools/call', { name: 'set_app_instructions', arguments: { instructions: 'Three rules.' } }, true);
   assert.ok(!set.isError, set.content[0].text);
+  assert.equal(set.content[0].text, 'Saved (12 characters). These instructions are about 3 tokens; each 1k costs about $11 a week across minions.');
   const got = await mcp(CitadelTM, 'tools/call', { name: 'get_app_instructions', arguments: {} }, true);
   assert.match(got.content[0].text, /Three rules\./);
 

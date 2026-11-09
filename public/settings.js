@@ -4,6 +4,7 @@ import { agentLog, DEFAULT_CLAUDE_MCP, machineSetup, machineSetupBackground, mac
 import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
+import { instructionCost } from './prompt-cost.js';
 
 // ---------- push notifications ----------
 
@@ -494,7 +495,7 @@ export function appInstructionsEditor() {
     };
     optimistic({
       key: 'app-instructions',
-      apply: () => show(mine, 'Saved. Every scheme picks this up on its next turn.'),
+      apply: () => show(mine, `Saved. Every scheme picks this up on its next turn. ${instructionCost(mine.text)}`),
       send: () => api('api/app/instructions', { method: 'PUT', body: { text: mine.text } }),
       undo: () => appInstructions === mine && show(was, 'Not saved.'), // unless a later save changed it again
       label: 'save the Citadel-wide instructions',
@@ -597,7 +598,7 @@ export function instructionsEditor() {
   save.onclick = () => {
     const instructions = textarea.value;
     saveProject(p, { instructions, instructions_updated_by: me, instructions_updated_at: Date.now() }, { instructions }, 'save the instructions', (saved) => {
-      status.textContent = saved ? 'Saved. Minions pick this up on their next turn.' : 'Not saved.';
+      status.textContent = saved ? `Saved. Minions pick this up on their next turn. ${instructionCost(instructions)}` : 'Not saved.';
       renderInstructionsHead();
       sync();
     }).then(() => loadHistory(), () => {});

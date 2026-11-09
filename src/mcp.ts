@@ -4,6 +4,7 @@
 import { createInterface } from 'node:readline';
 import { APP_NAME } from './appname.ts';
 import { cardText, type CardLink } from './card-links.ts';
+import { instructionCost } from './prompt-cost.ts';
 
 const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
 const TOKEN = process.env.COORDINATOR_TOKEN ?? '';
@@ -1129,7 +1130,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'set_app_instructions': {
       const app = await call('PUT', '/api/app/instructions', { text: wholeText(args) });
-      return app.text ? `Saved (${app.text.length} characters).` : `Cleared the ${APP_NAME}-wide instructions.`;
+      return app.text ? `Saved (${app.text.length} characters). ${instructionCost(app.text)}` : `Cleared the ${APP_NAME}-wide instructions.`;
     }
     case 'list_contraptions': {
       const all = await call('GET', '/api/contraptions');
@@ -1187,7 +1188,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return `New keys written; the old ones stopped working. Restart its service so it reads them.\n${contraptionText(await call('POST', `${contraptionPath(args)}/keys`, {}))}`;
     case 'set_project_instructions': {
       const project = await call('PATCH', `/api/projects/${PROJECT}`, { instructions: wholeText(args) });
-      return project.instructions ? `Saved (${project.instructions.length} characters).` : 'Cleared the scheme instructions.';
+      return project.instructions ? `Saved (${project.instructions.length} characters). ${instructionCost(project.instructions)}` : 'Cleared the scheme instructions.';
     }
     case 'message_ticket': {
       const ticketId = await id(args);

@@ -111,6 +111,7 @@ exception is Real-hardware ledger: only a native-app scheme has that line.
 | Retros | Retro folder | retro | `docs/retros/` |
 | Bug classes of its own | The stack's recurring bug kinds beyond bug-fixing's (a Godot signal wired twice, a stale save version) | bug-fixing | bug-fixing's classes only |
 | Agent instructions | Prompts, guides and tool descriptions an agent reads beyond the kit, `CLAUDE.md`, `AGENTS.md` and `.claude/` (an app's system prompt, a guides folder) | self-review (Agent instructions lens) | those alone |
+| Numbered things | What minions number in parallel and could both take the same "next" of: migration files, a version, ledger ids. Entries split by `;`: `files <glob with NNNN>`, `ids <glob> "<regex>"`, `version <glob> "<regex>"` (the format is in `land.sh`'s header). Only with `tools/land.sh`, which refuses a landing that clashes | land.sh | no check |
 | Docs test | A test that checks the paths docs name, if one exists | retro | skipped |
 | Rubrics | The critic rubrics the plan names, as `citadel:critique`'s `references/rubric-format.md` says: paths separated by `;`. A starter the plan picks becomes a file in the repo (`docs/rubrics/<name>.md`) that `extends:` it, with empty sections for people's notes | critique, self-review, docs-and-mocks | none: no critic runs |
 | Real-hardware ledger | Native-app schemes only: `docs/unproven.md`, written as below | self-review | no line |
@@ -159,7 +160,10 @@ in `guard.sh`, to the `case` in `pre-push`, and to `BRANCH` in `land.sh`.
 When the plan names `tools/land.sh` as the pusher, copy `land.sh` there too (executable) and
 set its `CHECK` line to the check command from Project facts, or `true` while there is none
 (your done note says so). It rebases, runs the check, fast-forwards the main checkout and
-pushes main; read its header.
+pushes main; read its header. Before the check it refuses a branch that takes a migration
+number, version or ledger id main already has, as the Numbered things line names them: look for
+each (`git log --diff-filter=A` on a migrations folder, version lines, numbered ledger entries), and
+check each regex matches what it should (`perl -ne 'print "$1\n" if /<regex>/' <file>`).
 
 `--install` sets `core.hooksPath` in the repo's shared config, so the main checkout gets the
 hook once your merge brings `.githooks/` there. Then prove it:

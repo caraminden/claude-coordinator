@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 
 // The scheme-setup kit skill's land.sh template, on throwaway repos: a scheme repo on main with the
@@ -36,6 +36,7 @@ function setup() {
   const wt = join(dir, 'wt');
   git(main, 'worktree', 'add', '-q', '-b', 'ticket/1-x', wt);
   const commit = (where: string, file: string, text: string) => {
+    mkdirSync(dirname(join(where, file)), { recursive: true });
     writeFileSync(join(where, file), text);
     git(where, 'add', '-A');
     git(where, 'commit', '-qm', `${file}: ${text.trim()}`);
@@ -97,4 +98,99 @@ test('the pre-push template refuses a push to main from the same clone', () => {
   const res = spawnSync('git', ['push', '-q', 'origin', 'main'], { cwd: r.main, encoding: 'utf8', env });
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /push to main refused/);
+});
+
+// The numbered-things check: a scheme whose Project facts name its migrations, a version and a ledger.
+// The line wraps onto a second line, as Project facts bullets do.
+const facts = [
+  '## Project facts',
+  '',
+  '- **Check commands:** none.',
+  '- **Numbered things:** `files db/migrations/NNNN-*.sql`; `ids docs/ledger.md "^- \\*\\*U(\\d+)\\."`;',
+  '  `version addons/*/*.toc "^## Version: (.+)"`',
+  '- **Glossary:** none.',
+  '',
+].join('\n');
+const ledger = (open: string, proven: string) => `# Ledger\n\n## Open\n\n${open}\n## Proven\n\n${proven}\n## End\n`;
+function numbered() {
+  const r = setup();
+  r.commit(r.main, 'CLAUDE.md', facts);
+  r.commit(r.main, 'db/migrations/0001-base.sql', 'create\n');
+  r.commit(r.main, 'docs/ledger.md', ledger('- **U1.** one\n', '- **U2.** two\n'));
+  r.commit(r.main, 'addons/beacon/beacon.toc', '## Title: Beacon\n## Version: 0.2.0\n');
+  git(r.wt, 'rebase', '-q', 'main');
+  return r;
+}
+function refused(r: ReturnType<typeof setup>, res: ReturnType<typeof r.run>, mine: string, main: string, says: RegExp) {
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, says);
+  assert.match(res.stderr, /takes a number main already has .*back where it was\. Renumber yours past main's highest/);
+  assert.equal(git(r.main, 'rev-parse', 'main'), main, 'main untouched');
+  assert.equal(git(r.wt, 'rev-parse', 'HEAD'), mine, 'the branch is put back unrebased');
+  assert.equal(git(r.wt, 'status', '--porcelain'), '');
+}
+
+test('numbered things: a migration number main already has is refused, naming both files', () => {
+  const r = numbered();
+  r.commit(r.wt, 'db/migrations/0002-mine.sql', 'mine\n');
+  r.commit(r.main, 'db/migrations/0002-theirs.sql', 'theirs\n');
+  const mine = git(r.wt, 'rev-parse', 'HEAD');
+  const main = git(r.main, 'rev-parse', 'main');
+  refused(r, r.run(), mine, main, /db\/migrations\/0002-mine\.sql takes number 2, which db\/migrations\/0002-theirs\.sql already has \(the highest so far is 2\)/);
+});
+
+test('numbered things: two identical version bumps, which git merges silently, are refused and stay refused', () => {
+  const r = numbered();
+  r.commit(r.wt, 'addons/beacon/beacon.toc', '## Title: Beacon\n## Version: 0.2.1\n');
+  r.commit(r.wt, 'mine.lua', 'x\n');
+  // Main's bump comes second, or it would be the very same commit as the branch's (same parent, message and second).
+  r.commit(r.main, 'theirs.lua', 'y\n');
+  r.commit(r.main, 'addons/beacon/beacon.toc', '## Title: Beacon\n## Version: 0.2.1\n');
+  const mine = git(r.wt, 'rev-parse', 'HEAD');
+  const main = git(r.main, 'rev-parse', 'main');
+  const says = /addons\/beacon\/beacon\.toc: this branch moves its version from 0\.2\.0 to 0\.2\.1, but main moved it to 0\.2\.1/;
+  refused(r, r.run(), mine, main, says);
+  // Running it again without renumbering is refused again, since the branch went back unrebased.
+  refused(r, r.run(), mine, main, says);
+  // Bumped past main's, it lands.
+  git(r.wt, 'rebase', '-q', '-X', 'theirs', 'main');
+  r.commit(r.wt, 'addons/beacon/beacon.toc', '## Title: Beacon\n## Version: 0.2.2\n');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(r.main, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+});
+
+test('numbered things: a ledger id main already has is refused, even in another section', () => {
+  const r = numbered();
+  r.commit(r.wt, 'docs/ledger.md', ledger('- **U1.** one\n- **U3.** mine\n', '- **U2.** two\n'));
+  r.commit(r.main, 'docs/ledger.md', ledger('- **U1.** one\n', '- **U2.** two\n- **U3.** theirs\n'));
+  const mine = git(r.wt, 'rev-parse', 'HEAD');
+  const main = git(r.main, 'rev-parse', 'main');
+  refused(r, r.run(), mine, main, /docs\/ledger\.md has id 3 twice: this branch adds one and main already has it \(the highest so far is 3\)/);
+});
+
+test('numbered things: new numbers past main\'s, a version only the branch bumps and edits to old entries land', () => {
+  const r = numbered();
+  r.commit(r.main, 'db/migrations/0002-theirs.sql', 'theirs\n');
+  r.commit(r.main, 'docs/ledger.md', ledger('- **U1.** one\n', '- **U2.** two\n- **U3.** theirs\n'));
+  r.commit(r.wt, 'db/migrations/0003-mine.sql', 'mine\n');
+  r.commit(r.wt, 'docs/ledger.md', ledger('- **U1.** one, reworded\n- **U4.** mine\n', '- **U2.** two\n'));
+  r.commit(r.wt, 'addons/beacon/beacon.toc', '## Title: Beacon\n## Version: 0.2.1\n');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(r.main, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+});
+
+test('numbered things: a line that does not parse refuses and names it; "none" checks nothing', () => {
+  const r = numbered();
+  r.commit(r.wt, 'CLAUDE.md', facts.replace('`files db/migrations/NNNN-*.sql`', '`files db/migrations/*.sql`'));
+  const mine = git(r.wt, 'rev-parse', 'HEAD');
+  const res = r.run();
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /does not parse: "files db\/migrations\/\*\.sql": files takes one glob with NNNN/);
+  assert.equal(git(r.wt, 'rev-parse', 'HEAD'), mine);
+  r.commit(r.wt, 'CLAUDE.md', '- **Numbered things:** none.\n');
+  r.commit(r.wt, 'db/migrations/0001-again.sql', 'dup\n');
+  const ok = r.run();
+  assert.equal(ok.status, 0, ok.stderr);
 });

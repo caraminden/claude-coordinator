@@ -517,7 +517,6 @@ a.file-chip:hover { border-color: var(--muted); }
   .shelf > summary .label + .rename { opacity: 0; }
   .shelf > summary:hover .rename, .shelf > summary .rename:focus-visible { opacity: 1; }
 }
-.rename-error { margin: -0.2rem 0 0.5rem; }
 .shelf .column h3 .browse { font-size: 0.85em; text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--accent); text-decoration: none; }
 .shelf .column h3 .more:hover, .shelf .column h3 .browse:hover, .shelf .column h3 .browse.active { text-decoration: underline; }
 .shelf .sub { margin-top: 0.6rem; }

@@ -1,8 +1,9 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
-import { account, ago, api, h, icon, listGroupsOf, openHash, schemeIcon, view } from './core.js';
+import { account, ago, api, h, icon, listGroupsOf, me, openHash, schemeIcon, view } from './core.js';
 import { agentLog, DEFAULT_CLAUDE_MCP, machineSetup, machineSetupBackground, machineSetupRunnerAgent, machineSetupWindows, workspaceName } from './machine-setup.js';
 import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
 import { copyText } from './ui/markdown.js';
+import { optimistic } from './ui/optimistic.js';
 
 // ---------- push notifications ----------
 
@@ -206,10 +207,7 @@ export function renderGithubStrip() {
  */
 export function projectTitle(project) {
   const wrap = h('span', { class: 'project-title' });
-  const err = h('p', { class: 'error small rename-error', role: 'alert', hidden: true });
   const show = () => {
-    err.hidden = true;
-    err.remove();
     wrap.replaceChildren(
       schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project),
       h('span', { class: 'label', 'data-project-name': project.id }, view.project.name),
@@ -218,23 +216,22 @@ export function projectTitle(project) {
       h('button', { type: 'button', class: 'rename switch', 'aria-label': 'Switch scheme', title: 'Switch scheme', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: (e) => toggleSchemeMenu(e.currentTarget) }, '⇅'),
       h('button', { type: 'button', class: 'rename add', 'aria-label': 'New scheme', title: 'New scheme', onclick: openNewScheme }, '+'));
   };
+  // Every label showing the name changes now; the server's broadcast confirms it, and a refusal puts the old name back.
+  const rename = (name) => onProjectUpdate({ ...(view.projectId === project.id ? view.project : project), name });
   const edit = () => {
-    let saving = false;
     const input = h('input', { class: 'rename-input', value: view.project.name, maxlength: '80', 'aria-label': 'Scheme name' });
-    const save = async () => {
-      if (saving) return;
-      if (input.value.trim() === view.project.name) return show();
-      saving = true;
-      try {
-        onProjectUpdate(await api(`api/projects/${project.id}`, { method: 'PATCH', body: { name: input.value } }));
-        show();
-      } catch (ex) {
-        err.textContent = ex.message;
-        err.hidden = false;
-        wrap.closest('summary').after(err);
-        input.focus();
-      }
-      saving = false;
+    const save = () => {
+      const name = input.value.trim(); // as the server stores it
+      const was = view.project.name;
+      show();
+      if (!name || name === was) return;
+      optimistic({
+        key: `scheme-name:${project.id}`,
+        apply: () => rename(name),
+        send: () => api(`api/projects/${project.id}`, { method: 'PATCH', body: { name } }),
+        undo: () => (view.projects?.find((p) => p.id === project.id)?.name ?? view.project?.name) === name && rename(was), // unless a later rename changed it again
+        label: `rename the scheme to ${name}`,
+      });
     };
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); save(); }
@@ -242,7 +239,7 @@ export function projectTitle(project) {
     });
     // A space let through to the <summary> would collapse the panel in some browsers.
     input.addEventListener('keyup', (e) => { if (e.key === ' ') e.preventDefault(); });
-    input.addEventListener('blur', () => { if (!saving) show(); });
+    input.addEventListener('blur', () => input.isConnected && show());
     wrap.replaceChildren(input,
       // mousedown kept from blurring the field, so the tap reaches save instead of cancelling.
       h('button', { type: 'button', class: 'rename', 'aria-label': 'Save name', onmousedown: (e) => e.preventDefault(), onclick: save }, '✓'));
@@ -291,6 +288,35 @@ export function tuneUpButton() {
   return b;
 }
 
+/**
+ * Save some of a scheme's settings optimistically: `mine` (the fields as the page shows them saved) goes into
+ * view.project at once and shown(true) redraws; the PATCH sends `body` behind it. A refusal puts the old values
+ * back, unless a later save changed them again, and shown(false) says so; the page's fields keep what was typed,
+ * so they read as drafts again. The server's own copy replaces ours once it answers, unless a later save is pending.
+ */
+function saveProject(p, mine, body, label, shown) {
+  const was = Object.fromEntries(Object.keys(mine).map((k) => [k, view.project?.[k]]));
+  const ours = () => view.project?.id === p.id && Object.entries(mine).every(([k, v]) => view.project[k] === v);
+  const result = optimistic({
+    key: `scheme-settings:${p.id}`,
+    apply: () => {
+      if (view.project?.id === p.id) Object.assign(view.project, mine);
+      renderSidebar();
+      shown(true);
+    },
+    send: () => api(`api/projects/${p.id}`, { method: 'PATCH', body }),
+    undo: () => {
+      if (!ours()) return; // a later save changed them again
+      Object.assign(view.project, was);
+      renderSidebar();
+      shown(false);
+    },
+    label,
+  });
+  result.then((project) => ours() && onProjectUpdate(project), () => {}); // a failure already said so in its toast
+  return result;
+}
+
 /** Main panel: the project's approval rules, plugin folders and list groups. */
 export function approvalsEditor() {
   const p = view.project;
@@ -326,24 +352,17 @@ export function approvalsEditor() {
     status.textContent = '';
     sync();
   });
-  save.onclick = async () => {
-    save.disabled = true;
-    status.textContent = 'Saving…';
-    try {
-      const body = { approval_rules: rules.value, plugin_dirs: dirs.value, optional_plugin_dirs: optional.value };
-      // Only when edited: a group whose value was archived since mustn't block saving the rules.
-      if (!same(groups.value, settingText(view.project, 'list_groups'))) body.list_groups = splitLines(groups.value);
-      view.project = await api(`api/projects/${p.id}`, { method: 'PATCH', body });
-      rules.value = view.project.approval_rules;
-      dirs.value = view.project.plugin_dirs;
-      optional.value = view.project.optional_plugin_dirs ?? '';
-      groups.value = settingText(view.project, 'list_groups');
-      renderSidebar();
-      status.textContent = 'Saved. Minions pick this up on their next turn.';
-    } catch (err) {
-      status.textContent = err.message;
-    }
-    sync();
+  // Saved at once: the fields stop counting as drafts and the sidebar shows new groups; a refusal turns them
+  // back into drafts (the text stays in the fields) with a toast to retry.
+  save.onclick = () => {
+    const body = { approval_rules: rules.value, plugin_dirs: dirs.value, optional_plugin_dirs: optional.value };
+    // Only when edited: a group whose value was archived since mustn't block saving the rules.
+    if (!same(groups.value, settingText(view.project, 'list_groups'))) body.list_groups = splitLines(groups.value);
+    const mine = { ...body, ...(body.list_groups ? { list_groups: JSON.stringify(body.list_groups) } : {}) };
+    saveProject(p, mine, body, 'save the settings', (saved) => {
+      status.textContent = saved ? 'Saved. Minions pick this up on their next turn.' : 'Not saved.';
+      sync();
+    });
   };
   discard.onclick = () => {
     rules.value = view.project.approval_rules ?? '';
@@ -463,19 +482,28 @@ export function appInstructionsEditor() {
     sync();
   });
   const [history, loadHistory] = recentChanges('api/app/instructions/history');
-  save.onclick = async () => {
-    save.disabled = true;
-    status.textContent = 'Saving…';
-    try {
-      appInstructions = await api('api/app/instructions', { method: 'PUT', body: { text: textarea.value } });
-      textarea.value = appInstructions.text;
-      status.textContent = 'Saved. Every scheme picks this up on its next turn.';
+  // Saved at once; a refusal puts the last saved text back as the saved one, and the field keeps what was typed as a draft.
+  save.onclick = () => {
+    const was = appInstructions;
+    const mine = { ...appInstructions, text: textarea.value, by: me, at: Date.now() };
+    const show = (a, said) => {
+      appInstructions = a;
+      status.textContent = said;
       renderAppInstructionsHead();
+      sync();
+    };
+    optimistic({
+      key: 'app-instructions',
+      apply: () => show(mine, 'Saved. Every scheme picks this up on its next turn.'),
+      send: () => api('api/app/instructions', { method: 'PUT', body: { text: mine.text } }),
+      undo: () => appInstructions === mine && show(was, 'Not saved.'), // unless a later save changed it again
+      label: 'save the Citadel-wide instructions',
+    }).then((a) => {
+      if (appInstructions !== mine) return;
+      if (textarea.value === mine.text) textarea.value = a.text; // as the server keeps it
+      show(a, status.textContent);
       loadHistory();
-    } catch (err) {
-      status.textContent = err.message;
-    }
-    sync();
+    }, () => {});
   };
   discard.onclick = () => {
     textarea.value = saved();
@@ -516,20 +544,23 @@ function githubOwnerField() {
   const status = h('span', { class: 'muted', role: 'status' });
   const save = h('button', { type: 'button', class: 'secondary' }, 'Save');
   const show = (s) => {
-    input.value = s.github_owner ?? '';
+    input.value = saved = s.github_owner ?? '';
     input.placeholder = s.github_owner_default ?? 'caraminden';
     input.disabled = false;
   };
-  save.onclick = async () => {
-    save.disabled = true;
-    try {
-      show(await api('api/app/settings', { method: 'PUT', body: { github_owner: input.value } }));
-      status.textContent = 'Saved.';
-    } catch (err) {
-      status.textContent = err.message;
-    }
-    save.disabled = false;
+  let saved = null; // the owner as last saved, so a refusal can say the field no longer matches it
+  save.onclick = () => {
+    const was = saved;
+    const mine = input.value.trim();
+    optimistic({
+      key: 'github-owner',
+      apply: () => { saved = mine; status.textContent = 'Saved.'; },
+      send: () => api('api/app/settings', { method: 'PUT', body: { github_owner: mine } }),
+      undo: () => { if (saved === mine) { saved = was; status.textContent = 'Not saved.'; } }, // unless a later save changed it again
+      label: `make ${mine || 'the default'} the GitHub owner`,
+    });
   };
+  input.addEventListener('input', () => { status.textContent = ''; });
   api('api/app/settings').then(show, (err) => { status.textContent = `Could not load it: ${err.message}`; });
   return h('div', { class: 'github-owner' },
     h('h3', { class: 'settings-label' }, 'GitHub owner for new schemes'),
@@ -563,19 +594,13 @@ export function instructionsEditor() {
     status.textContent = '';
     sync();
   });
-  save.onclick = async () => {
-    save.disabled = true;
-    status.textContent = 'Saving…';
-    try {
-      view.project = await api(`api/projects/${p.id}`, { method: 'PATCH', body: { instructions: textarea.value } });
-      textarea.value = view.project.instructions;
-      status.textContent = 'Saved. Minions pick this up on their next turn.';
+  save.onclick = () => {
+    const instructions = textarea.value;
+    saveProject(p, { instructions, instructions_updated_by: me, instructions_updated_at: Date.now() }, { instructions }, 'save the instructions', (saved) => {
+      status.textContent = saved ? 'Saved. Minions pick this up on their next turn.' : 'Not saved.';
       renderInstructionsHead();
-      loadHistory();
-    } catch (err) {
-      status.textContent = err.message;
-    }
-    sync();
+      sync();
+    }).then(() => loadHistory(), () => {});
   };
   discard.onclick = () => {
     textarea.value = view.project.instructions ?? '';
@@ -800,25 +825,34 @@ function renderMachineList() {
       renderMachineSetup();
     };
     const remove = h('button', { type: 'button', class: 'secondary small' }, 'Remove');
-    remove.onclick = async () => {
+    remove.onclick = () => {
       if (!confirm(`Remove ${m.name}? Minions lose its tools and its token stops working.`)) return;
-      await api(`api/machines/${m.id}`, { method: 'DELETE' }).catch((err) => alert(err.message));
-      if (view.machineToken?.id === m.id) view.machineToken = null;
-      renderMachineSetup();
+      const at = view.machines.findIndex((x) => x.id === m.id);
+      optimistic({
+        key: `machine:${m.id}`,
+        apply: () => {
+          if (view.machineToken?.id === m.id) view.machineToken = null;
+          onMachinesUpdate(view.machines.filter((x) => x.id !== m.id));
+          renderMachineSetup();
+        },
+        send: () => api(`api/machines/${m.id}`, { method: 'DELETE' }),
+        undo: () => view.machines.some((x) => x.id === m.id) || onMachinesUpdate(view.machines.toSpliced(at, 0, m)),
+        label: `remove ${m.name}`,
+      });
     };
     const notes = h('textarea', { rows: 4, maxlength: 2000, placeholder: 'What minions should know: never restart it, where the repo is cloned, what to check first…' });
     notes.value = m.notes ?? '';
     const saved = h('span', { class: 'muted small', role: 'status' });
+    const summary = h('summary', {});
+    const summarize = (text) => { summary.textContent = text ? `Notes: ${text.split('\n')[0]}` : 'Add notes for minions'; };
+    summarize(m.notes);
     const save = h('button', { type: 'button', class: 'small' }, 'Save notes');
-    save.onclick = async () => {
-      saved.textContent = 'Saving…';
-      try {
-        await api(`api/machines/${m.id}`, { method: 'PATCH', body: { notes: notes.value } });
-        saved.textContent = 'Saved; minions get them from their next turn.';
-      } catch (err) {
-        saved.textContent = err.message;
-      }
-    };
+    // The field keeps what was typed either way; a refusal only says it isn't saved.
+    save.onclick = () => patchMachine(m, { notes: notes.value }, `save the notes on ${m.name}`, (ok, x) => {
+      summarize(x.notes);
+      saved.textContent = ok ? 'Saved; minions get them from their next turn.' : 'Not saved.';
+    });
+    notes.addEventListener('input', () => { saved.textContent = ''; });
     // Keep an open notes editor open (and its draft) when the list re-renders for a status change.
     const old = document.querySelector(`.machine-notes[data-id="${m.id}"]`);
     const editing = old?.open;
@@ -835,8 +869,7 @@ function renderMachineList() {
       m.owner_id === null ? machineLending(m) : h('div', { class: 'machine-lending' },
         h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Used by'), h('span', {}, `turns ${m.created_by} asks for, in schemes they are in, and their contraptions`))),
       h('details', { class: 'machine-notes', 'data-id': m.id, open: editing },
-        h('summary', {}, m.notes ? `Notes: ${m.notes.split('\n')[0]}` : 'Add notes for minions'),
-        notes, h('div', { class: 'row' }, save, saved)));
+        summary, notes, h('div', { class: 'row' }, save, saved)));
   }));
 }
 
@@ -861,17 +894,8 @@ const WORKSPACE_EXAMPLE = `{
 /** A machine's workspace tools: the switch, and the workspaces and tasks its agent reports. */
 function machineWorkspaces(m) {
   const toggle = h('input', { type: 'checkbox', checked: m.workspace_tools });
-  const status = h('span', { class: 'muted small', role: 'status' });
-  toggle.onchange = async () => {
-    status.textContent = 'Saving…';
-    try {
-      await api(`api/machines/${m.id}`, { method: 'PATCH', body: { workspace_tools: toggle.checked } });
-      status.textContent = '';
-    } catch (err) {
-      toggle.checked = !toggle.checked;
-      status.textContent = err.message;
-    }
-  };
+  toggle.onchange = () => patchMachine(m, { workspace_tools: toggle.checked }, `switch workspace tools ${toggle.checked ? 'on' : 'off'} for ${m.name}`,
+    (ok, x) => { toggle.checked = !!x.workspace_tools; });
   const workspaces = m.workspaces ?? [];
   const reported = !m.online
     ? h('p', { class: 'muted small' }, 'Shows the workspaces its agent offers once it connects.')
@@ -886,24 +910,31 @@ function machineWorkspaces(m) {
         h('pre', {}, WORKSPACE_EXAMPLE));
   return h('div', { class: 'machine-workspaces' },
     h('label', { class: 'row small', title: 'Lets minions in every scheme check out pushed branches and run the listed tasks on this computer' },
-      toggle, h('span', {}, 'Workspace tools for minions'), status),
+      toggle, h('span', {}, 'Workspace tools for minions')),
     reported,
     ...(m.problems ?? []).map((p) => h('p', { class: 'error small' }, p)));
 }
 
+/**
+ * Change a machine's fields at once and PATCH them behind; shown(ok, machine) redraws what shows them. A refusal
+ * puts the old values back, unless a later change replaced them; the server's broadcast then has the last word.
+ */
+function patchMachine(m, fields, label, shown) {
+  const now = () => view.machines?.find((x) => x.id === m.id) ?? m;
+  const was = Object.fromEntries(Object.keys(fields).map((k) => [k, now()[k]]));
+  const set = (vals, ok) => shown(ok, Object.assign(now(), vals));
+  optimistic({
+    key: `machine:${m.id}`,
+    apply: () => set(fields, true),
+    send: () => api(`api/machines/${m.id}`, { method: 'PATCH', body: fields }),
+    undo: () => Object.entries(fields).every(([k, v]) => now()[k] === v) && set(was, false), // unless a later change replaced them
+    label,
+  });
+}
+
 /** Which schemes' minions get a shared machine: every admin-owned scheme (the default), or only the ones ticked (#303). */
 function machineLending(m) {
-  const status = h('span', { class: 'muted small', role: 'status' });
-  const save = async (projects) => {
-    status.textContent = 'Saving…';
-    try {
-      await api(`api/machines/${m.id}`, { method: 'PATCH', body: { projects } });
-      status.textContent = '';
-    } catch (err) {
-      status.textContent = err.message;
-      renderMachineList();
-    }
-  };
+  const save = (projects) => patchMachine(m, { projects }, `change which schemes get ${m.name}`, renderMachineList);
   const choice = (scoped, label, title) => {
     const radio = h('input', { type: 'radio', name: `lend-${m.id}`, checked: scoped === (m.projects !== null) });
     // "Only these" starts with none ticked, so grants left from before never come back by themselves.
@@ -917,7 +948,7 @@ function machineLending(m) {
     return h('label', { class: 'row small' }, box, h('span', {}, p.name));
   });
   return h('div', { class: 'machine-lending', 'data-id': m.id },
-    h('div', { class: 'row small' }, h('span', { class: 'muted' }, 'Lend to'), status),
+    h('div', { class: 'row small' }, h('span', { class: 'muted' }, 'Lend to')),
     choice(false, 'Every scheme an admin owns', 'Minions in every scheme an admin owns get it, as for every machine before'),
     choice(true, 'Only these schemes', 'Only the ticked schemes\' minions get it, whoever owns the scheme; Taskmasters never do'),
     m.projects === null ? '' : h('div', { class: 'schemes' }, ...schemes,

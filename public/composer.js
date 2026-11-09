@@ -252,14 +252,22 @@ export function composer(chatId, ticket) {
   };
   // A one-tap reply (replies.js) sends its text the same way, leaving any draft in the box alone.
   form.sendText = (text) => send(text);
-  /** A queued message taken back to edit (thread.js): its text goes in ahead of any draft, its attachments with it. */
+  /**
+   * A queued message taken back to edit (thread.js): its text goes in ahead of any draft, its attachments with it.
+   * Returns how to take the text back out (the take-back was refused), which does nothing once it has been edited.
+   */
   form.editBack = (text, saved = []) => {
     const draft = textarea.value.trim();
+    const before = box.value;
     box.value = draft ? `${text}\n${draft}` : text;
+    const put = box.value;
     attachments.restore(saved);
     textarea.focus();
     textarea.setSelectionRange(text.length, text.length);
+    return () => { if (box.value === put) box.value = before; };
   };
+  /** More of a taken-back message's attachments, once they have loaded (thread.js). */
+  form.attach = (saved) => attachments.restore(saved);
   return form;
 }
 

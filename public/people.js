@@ -3,6 +3,7 @@ import { account, api, codexToggle, codexWindowsBlock, h, icon, setCodex, view }
 import { settingsTabs } from './settings.js';
 import { hideButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';
+import { optimistic } from './ui/optimistic.js';
 
 /** Whether you may change this scheme's members and settings: its owner, or an admin. */
 export const ownsScheme = (project) => !!account && (account.admin || project.owner_id === account.id);
@@ -38,24 +39,37 @@ export function membersPage() {
   const list = h('div', { class: 'people-list' });
   const pick = h('select', { 'aria-label': 'Person to add' });
   const add = h('form', { class: 'row people-add' }, pick, h('button', { type: 'submit' }, 'Add'));
+  let shown = [];
+  // Adding and removing show at once; the server's list replaces ours when it answers, and a refusal reloads
+  // it, since a GitHub refusal still took the person out of the scheme.
+  const change = (next, send, label, people) => optimistic({
+    key: `members:${p.id}`,
+    apply: () => render(next(shown), people),
+    send,
+    undo: () => api(`api/projects/${p.id}/members`).then((members) => render(members, people), () => {}),
+    label,
+  }).then((members) => render(members, people), () => {});
   const render = (members, people) => {
+    shown = members;
     const inIt = new Set(members.map((m) => m.id));
     list.replaceChildren(...members.map((m) => h('div', { class: 'person-row' },
       h('span', { class: 'text' }, h('span', { class: 'name' }, m.name), h('span', { class: 'meta' }, m.owner ? `${m.login} · owner` : m.login), githubLine(m)),
       owns && !m.owner && h('button', {
         type: 'button', class: 'secondary small',
-        onclick: async () => {
+        onclick: () => {
           if (!confirm(`Take ${m.name} out of ${p.name}? They stop seeing it at once.`)) return;
-          // A GitHub refusal still took them out of the scheme: show it, then the list as it is now.
-          render(await api(`api/projects/${p.id}/members/${m.id}`, { method: 'DELETE' }).catch((err) => (fail(err), api(`api/projects/${p.id}/members`))).catch(fail) ?? members, people);
+          change((list) => list.filter((x) => x.id !== m.id), () => api(`api/projects/${p.id}/members/${m.id}`, { method: 'DELETE' }), `take ${m.name} out of ${p.name}`, people);
         },
       }, 'Remove'))));
     const others = people.filter((x) => !inIt.has(x.id));
     pick.replaceChildren(...others.map((x) => h('option', { value: x.id }, `${x.name} (${x.login})`)));
     add.hidden = !owns || !others.length;
-    add.onsubmit = async (e) => {
+    add.onsubmit = (e) => {
       e.preventDefault();
-      render(await api(`api/projects/${p.id}/members`, { method: 'POST', body: { person: Number(pick.value) } }).catch(fail) ?? members, people);
+      const who = people.find((x) => x.id === Number(pick.value));
+      if (!who) return;
+      change((list) => [...list, { id: who.id, name: who.name, login: who.login, owner: false }],
+        () => api(`api/projects/${p.id}/members`, { method: 'POST', body: { person: who.id } }), `add ${who.name} to ${p.name}`, people);
     };
   };
   Promise.all([api(`api/projects/${p.id}/members`), api('api/people')]).then(([members, people]) => render(members, people)).catch(fail);
@@ -92,12 +106,26 @@ export function peoplePage() {
   const link = h('div');
   const list = h('div', { class: 'people-list' });
   const show = (who, token, what) => link.replaceChildren(linkBox(who, token, what));
-  const render = (people) => list.replaceChildren(...people.map((u) => {
+  let shown = [];
+  const render = (people) => (shown = people, list.replaceChildren(...people.map((u) => {
     // An admin with no password of their own signs in with the shared one (COORDINATOR_PASSWORD).
     const state = u.disabled ? 'disabled' : u.invite_open ? (u.has_password ? 'reset link open' : 'invited')
       : u.has_password ? '' : u.admin ? 'shared password only' : 'invite expired';
-    const patch = async (body) => render(await api(`api/people/${u.id}`, { method: 'PATCH', body }).then(() => api('api/people')).catch(fail) ?? people);
-    const turns = u.server_login_owner && h('input', { type: 'checkbox', checked: u.server_login, onchange: (e) => patch({ server_login: e.target.checked }) });
+    // Shows at once and sends behind; a refusal puts the old value back, unless a later click changed it again.
+    const patch = (body, label) => {
+      const now = () => shown.find((x) => x.id === u.id);
+      const was = Object.fromEntries(Object.keys(body).map((k) => [k, (now() ?? u)[k]]));
+      const set = (vals) => now() && render(shown.map((x) => (x.id === u.id ? { ...x, ...vals } : x)));
+      optimistic({
+        key: `person:${u.id}`,
+        apply: () => set(body),
+        send: () => api(`api/people/${u.id}`, { method: 'PATCH', body }),
+        undo: () => Object.entries(body).every(([k, v]) => now()?.[k] === v) && set(was),
+        label,
+      });
+    };
+    const turns = u.server_login_owner && h('input', { type: 'checkbox', checked: u.server_login,
+      onchange: (e) => patch({ server_login: e.target.checked }, `switch ${u.name}'s turns to ${e.target.checked ? 'the server login' : 'their own Claude'}`) });
     const claude = u.server_login ? 'Claude: server login' : u.claude === 'linked' ? 'Claude linked' : u.claude === 'expired' ? 'Claude needs linking again' : 'Claude not linked';
     const self = u.id === account?.id;
     return h('div', { class: 'person-row' },
@@ -113,16 +141,25 @@ export function peoplePage() {
           if (r) { show(u, r.token, u.has_password ? 'Password reset' : 'Invite'); render(await api('api/people')); }
         },
       }, u.has_password ? 'Reset link' : u.admin ? 'Set-password link' : 'New invite'),
-      !self && h('button', { type: 'button', class: 'secondary small', onclick: () => patch({ disabled: !u.disabled }) }, u.disabled ? 'Enable' : 'Disable'),
+      !self && h('button', { type: 'button', class: 'secondary small', onclick: () => patch({ disabled: !u.disabled }, `${u.disabled ? 'enable' : 'disable'} ${u.name}`) }, u.disabled ? 'Enable' : 'Disable'),
       !self && h('button', {
         type: 'button', class: 'secondary small',
-        onclick: async () => {
+        onclick: () => {
           if (!confirm(`Remove ${u.name} from Citadel? Schemes they own become yours; their messages stay.`)) return;
-          await api(`api/people/${u.id}`, { method: 'DELETE' }).catch(fail);
-          render(await api('api/people'));
+          let at = -1;
+          optimistic({
+            key: `person:${u.id}`,
+            apply: () => {
+              at = shown.findIndex((x) => x.id === u.id);
+              render(shown.filter((x) => x.id !== u.id));
+            },
+            send: () => api(`api/people/${u.id}`, { method: 'DELETE' }),
+            undo: () => at >= 0 && !shown.some((x) => x.id === u.id) && render(shown.toSpliced(Math.min(at, shown.length), 0, u)),
+            label: `remove ${u.name}`,
+          });
         },
       }, 'Remove')));
-  }));
+  })));
   const form = h('form', { class: 'machine-add' },
     h('label', {}, 'Name', name), h('label', {}, 'Login', login),
     h('button', { type: 'submit' }, 'Invite'), status);

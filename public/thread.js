@@ -799,11 +799,7 @@ export function appendEvent(event, scroll = true) {
     }
   } else if (event.kind === 'unqueued') {
     const bubble = log.querySelector(`[data-event="${data.id}"]`);
-    if (bubble) {
-      bubble.querySelector('.queued-tag')?.remove();
-      bubble.classList.add('withdrawn');
-      bubble.querySelector('.who').append(h('span', { class: 'msg-tag' }, `taken back by ${data.by}`));
-    }
+    if (bubble) showTakenBack(bubble, data.by, false);
   } else if (event.kind === 'question') {
     nodes.push(stamped(questionCard(event.ticket_id, data), event));
   } else if (event.kind === 'approval') {
@@ -1548,43 +1544,66 @@ function machineAuthor(author) {
  * take it back into the message box to fix and resend; it loses them once sent.
  */
 function markQueued(bubble, ticket) {
+  if (bubble.classList.contains('withdrawn')) return; // taken back, or being taken back from this tab
   const id = Number(bubble.dataset.event);
   const queued = !!ticket?.queued_ids?.includes(id);
   const tag = bubble.querySelector('.queued-tag');
   if (!queued) return tag?.remove();
   if (tag) return;
-  const edit = bubble.sent && h('button', { type: 'button', class: 'take-back', title: 'Take back to edit', 'aria-label': 'Take back to edit',
-    onclick: async (e) => {
+  // Both show at once and send behind; a refusal (the turn took it meanwhile) puts the bubble back as it is now.
+  const takeBack = (label, apply, send, undo = () => {}) => optimistic({
+    key: `unqueue:${id}`,
+    apply: () => {
+      showTakenBack(bubble, me);
+      apply();
+    },
+    send,
+    undo: () => {
+      if (!bubble.querySelector('.taken-back-tag.mine')) return; // the server's own "taken back" came meanwhile
+      bubble.classList.remove('withdrawn');
+      bubble.querySelector('.taken-back-tag')?.remove();
+      markQueued(bubble, view?.id === ticket.id ? view.ticket : ticket);
+      undo();
+    },
+    label,
+  });
+  const unqueue = () => api(`api/tickets/${ticket.id}/unqueue`, { method: 'POST', body: { id } });
+  const sent = bubble.sent;
+  let takeOut;
+  const edit = sent && h('button', { type: 'button', class: 'take-back', title: 'Take back to edit', 'aria-label': 'Take back to edit',
+    onclick: (e) => {
       e.preventDefault();
-      const btn = e.currentTarget;
-      btn.disabled = true;
-      try {
-        // Images first: if one won't load, the message stays queued rather than coming back without it.
-        const images = await Promise.all(bubble.sent.images.map((name) => imageData(`api/tickets/${ticket.id}/images/${encodeURIComponent(name)}`)));
-        await api(`api/tickets/${ticket.id}/unqueue`, { method: 'POST', body: { id } });
+      takeBack('take back the message to edit', () => {
         const form = view?.id === ticket.id && document.querySelector('.composer');
-        if (form) form.editBack(bubble.sent.text, [...images, ...bubble.sent.files.map((upload) => ({ upload }))]);
+        // Its files go in now; its images once they have loaded, below.
+        if (form) takeOut = form.editBack(sent.text, sent.files.map((upload) => ({ upload })));
         else {
-          // Moved to another chat meanwhile: the text waits in this chat's draft (attachments stay in the struck bubble).
+          // A Retry from another chat: the text waits in this chat's draft (attachments stay in the struck bubble).
           const draft = loadDraft(`cc-draft:${ticket.id}`)?.trim();
-          saveDraft(`cc-draft:${ticket.id}`, draft ? `${bubble.sent.text}\n${draft}` : bubble.sent.text);
+          saveDraft(`cc-draft:${ticket.id}`, draft ? `${sent.text}\n${draft}` : sent.text);
+          takeOut = null;
         }
-      } catch (err) {
-        btn.disabled = false;
-        alertNote(err.message);
-      }
+      }, async () => {
+        // Images first: if one won't load, the message stays queued rather than coming back without it.
+        const images = await Promise.all(sent.images.map((name) => imageData(`api/tickets/${ticket.id}/images/${encodeURIComponent(name)}`)));
+        await unqueue();
+        if (takeOut && view?.id === ticket.id) document.querySelector('.composer')?.attach(images);
+      }, () => takeOut?.());
     } }, '✎');
   bubble.querySelector('.who').append(h('span', { class: 'msg-tag queued-tag' }, 'queued for the next turn', edit ?? '',
     h('button', { type: 'button', class: 'take-back', title: 'Take back this message', 'aria-label': 'Take back this message',
       onclick: (e) => {
         e.preventDefault(); // a Taskmaster message's ✕ sits in its <summary>
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        api(`api/tickets/${ticket.id}/unqueue`, { method: 'POST', body: { id } }).catch((err) => {
-          btn.disabled = false;
-          alertNote(err.message);
-        });
+        takeBack('take back the message', () => {}, unqueue);
       } }, '✕')));
+}
+
+/** A message struck through as taken back, by the server's word or (class mine) this tab's click while it sends. */
+function showTakenBack(bubble, by, mine = true) {
+  bubble.querySelector('.queued-tag')?.remove();
+  bubble.querySelector('.taken-back-tag')?.remove();
+  bubble.classList.add('withdrawn');
+  bubble.querySelector('.who').append(h('span', { class: `msg-tag taken-back-tag${mine ? ' mine' : ''}` }, `taken back by ${by}`));
 }
 
 export function userBubble(author, text, imageSrcs, about = null, event = null, files = []) {

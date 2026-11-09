@@ -183,27 +183,60 @@ function renderSavedViews() {
   el.replaceChildren(...chips, unsaved ? h('button', { type: 'button', class: 'secondary small sv-save', onclick: saveView }, '＋ Save view') : '');
 }
 
-async function saveView() {
+// Saving and deleting show in the chips at once; the server's list replaces ours once it answers, unless a
+// later save or delete changed ours since, and a refusal puts that one view back as it was.
+function changeViews(next, send, undo, label) {
+  const projectId = propFilter.projectId;
+  let mine;
+  const show = (views) => {
+    if (propFilter.projectId !== projectId) return;
+    propFilter.views = mine = views;
+    renderSavedViews();
+  };
+  optimistic({
+    key: `views:${projectId}`,
+    apply: () => show(next(propFilter.views)),
+    send: () => send(projectId),
+    undo: () => propFilter.projectId === projectId && propFilter.views && show(undo(propFilter.views)),
+    label,
+  }).then((views) => propFilter.views === mine && show(views), () => {});
+}
+
+function saveView() {
   const name = prompt('Name this view (only you see it):')?.trim();
   if (!name) return;
   if (propFilter.views.some((v) => v.name === name) && !confirm(`Replace the view "${name}" with what's ticked now?`)) return;
   const picks = Object.fromEntries([...propFilter.picks].map(([k, set]) => [k, [...set]]));
-  const projectId = propFilter.projectId;
-  const views = await api(`api/projects/${projectId}/views`, { method: 'POST', body: { name, picks } }).catch((err) => alert(`Could not save the view: ${err.message}`));
-  if (views && propFilter.projectId === projectId) {
-    propFilter.views = views;
-    renderSavedViews();
-  }
+  const mine = { name, picks };
+  let replaced;
+  changeViews(
+    (views) => {
+      replaced = views.find((v) => v.name === name);
+      return replaced ? views.map((v) => (v === replaced ? mine : v)) : [...views, mine].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    },
+    async (projectId) => {
+      const views = await api(`api/projects/${projectId}/views`, { method: 'POST', body: { name, picks } });
+      mine.id = views.find((v) => v.name === name)?.id; // a delete queued behind this one needs it
+      return views;
+    },
+    // Unless a later save or delete replaced it.
+    (views) => (views.includes(mine) ? (replaced ? views.map((v) => (v === mine ? replaced : v)) : views.filter((v) => v !== mine)) : views),
+    `save the view "${name}"`);
 }
 
-async function deleteView(v) {
+function deleteView(v) {
   if (!confirm(`Delete the view "${v.name}"? What's ticked stays ticked.`)) return;
-  const projectId = propFilter.projectId;
-  const views = await api(`api/projects/${projectId}/views/${v.id}`, { method: 'DELETE' }).catch((err) => alert(`Could not delete the view: ${err.message}`));
-  if (views && propFilter.projectId === projectId) {
-    propFilter.views = views;
-    renderSavedViews();
-  }
+  let at = -1;
+  changeViews(
+    (views) => {
+      at = views.indexOf(v);
+      return views.filter((x) => x !== v);
+    },
+    // A view whose save never reached the server (it failed behind this) has nothing to delete there.
+    (projectId) => (v.id ? api(`api/projects/${projectId}/views/${v.id}`, { method: 'DELETE' }) : propFilter.views),
+    // Back where it was, unless a later save under its name took its place or its own save never went through.
+    (views) => (at < 0 || !v.id || views.some((x) => x.name === v.name) ? views : views.toSpliced(Math.min(at, views.length), 0, v)),
+    `delete the view "${v.name}"`);
 }
 
 /** This person saved or deleted a view in this scheme, maybe in another tab. */

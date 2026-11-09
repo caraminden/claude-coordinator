@@ -3,6 +3,7 @@
 import { account, api, h, icon, view } from './core.js';
 import { settingsTabs } from './settings.js';
 import { showRail } from './rail.js';
+import { optimistic } from './ui/optimistic.js';
 
 const fail = (err) => alert(err.message);
 const when = (ms) => new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
@@ -110,19 +111,21 @@ function card(c, people, replace) {
     field('Branch', 'branch', c.branch, { placeholder: 'main' }),
     field('Folder', 'folder', c.folder, { placeholder: `~/apps/${c.name}`, wide: true }),
     h('button', { type: 'submit' }, 'Save'), status);
-  form.onsubmit = async (e) => {
+  // Saved at once (the form keeps what was typed); the server's copy redraws the card, and a refusal says it isn't.
+  form.onsubmit = (e) => {
     e.preventDefault();
     const v = Object.fromEntries(new FormData(form));
-    status.textContent = 'Saving…';
-    try {
-      replace(await api(`api/contraptions/${c.name}`, { method: 'PATCH', body: {
+    optimistic({
+      key: `contraption:${c.name}`,
+      apply: () => { status.textContent = 'Saved.'; },
+      send: () => api(`api/contraptions/${c.name}`, { method: 'PATCH', body: {
         ...v, port: Number(v.port), home_scheme: v.home_scheme ? Number(v.home_scheme) : null,
         open_paths: v.open_paths.split(/[\s,]+/).filter(Boolean),
         relay_paths: v.relay_paths.split(/[\s,]+/).filter(Boolean),
-      } }));
-    } catch (err) {
-      status.textContent = err.message;
-    }
+      } }),
+      undo: () => { status.textContent = 'Not saved.'; },
+      label: `save ${c.title}'s settings`,
+    }).then(replace, () => {});
   };
   const enabled = new Set(c.people);
   const rotate = h('button', { type: 'button', class: 'secondary small' }, 'Rotate keys');
@@ -139,11 +142,24 @@ function card(c, people, replace) {
       ...people.filter((u) => !u.disabled).map((u) => h('label', { class: 'small turns-toggle' },
         h('input', {
           type: 'checkbox', checked: enabled.has(u.id),
-          onchange: async (e) => {
-            const r = await api(`api/contraptions/${c.name}/people/${u.id}`, { method: 'PUT', body: { enabled: e.target.checked } }).catch(fail);
-            if (r) replace(r);
-            else e.target.checked = !e.target.checked;
-            if (r && u.id === account?.id) showRail(); // enabling yourself: the rail appears now
+          // The box shows it at once (and c.people, for a redraw meanwhile); a refusal unticks (or ticks) it
+          // again, unless a later click changed it. No redraw after: the box already shows what the server has.
+          onchange: (e) => {
+            const box = e.target;
+            const on = box.checked;
+            const show = (yes) => {
+              box.checked = yes;
+              c.people = yes ? [...new Set([...c.people, u.id])] : c.people.filter((id) => id !== u.id);
+            };
+            optimistic({
+              key: `contraption-people:${c.name}:${u.id}`,
+              apply: () => show(on),
+              send: () => api(`api/contraptions/${c.name}/people/${u.id}`, { method: 'PUT', body: { enabled: on } }),
+              undo: () => c.people.includes(u.id) === on && show(!on),
+              label: `${on ? 'enable' : 'disable'} ${c.title} for ${u.name}`,
+            }).then(() => {
+              if (u.id === account?.id) showRail(); // enabling yourself: the rail appears now
+            }, () => {});
           },
         }), u.name))),
     servicePanel(c),

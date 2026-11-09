@@ -288,7 +288,9 @@ function listen(cookie: string) {
 
 test("each person's meter shows their own plan: the stream's hello and usage news go to the payer alone (#219)", async () => {
   // Josh's plan's usage, as his container turns record it (src/runner.ts, usageKey).
-  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'));
+  // The server is running and writes to this file too: wait out its write lock, as its own Store does
+  // (src/db.ts), instead of failing at once with "database is locked" (#402).
+  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'), { timeout: 5000 });
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(`usage:user:${people.Josh.id}`, JSON.stringify({ weekly: { utilization: 0.22, resetsAt: null, status: 'allowed' }, session: null, updatedAt: 1 }));
   db.close();
   const cara = listen(people.Cara.cookie);

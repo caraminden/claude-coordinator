@@ -4,7 +4,11 @@ Part of `citadel:contraption-ui` (its SKILL.md has the file list, tokens and rul
 
 Each contraption installs as its own app beside Citadel's, all on Citadel's one origin, so Chrome
 tells them apart only by the manifest (Cara, 2026-11-04: "I want each app to be able to install
-independently"). The starter's `manifest.webmanifest` has the shape; replace `my-app` and add the icons.
+independently"), and every contraption ships one with a rail icon (Cara, 2026-11-09: "both of these
+should be the default behavior for new contraptions"). The starter has both: `manifest.webmanifest`
+(replace `my-app`), `icon.svg` and `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, which are
+stand-ins to redraw (render the PNGs from your SVG, e.g. `rsvg-convert -w 512 icon.svg -o icon-512.png`;
+the maskable one without the rounded corners, its mark inside the middle 80%).
 
 - **`id` and `scope` are `/apps/<name>/`**, written root-absolute with the trailing slash. A relative
   `id` resolves against the origin, not the manifest, so `"./"` is `/`: Citadel's id.
@@ -21,6 +25,7 @@ The app rail has an **Install <your title>** button for you, framed in Citadel o
 which picks the way this browser can install you (the browser's dialog, your page in a new tab or in
 Chrome itself, or the iOS Share hint; [rail-and-drawers.md](../rail-and-drawers.md), "Installing you"). Opened from Citadel's
 rail, your page is in a frame and Chrome only sees Citadel's page, so that button is the way in.
-Every deploy checks the above and logs `Warning (installing as its own app): …` lines when it's wrong
-(Citadel's `src/pwa-check.ts`). Full detail and the Android caveats:
+Every deploy checks the above (Citadel's `src/pwa-check.ts`) and fills an empty registry icon from
+your manifest; what's wrong comes back as **To do** lines, and goes to your home scheme's Taskmaster
+(references/api.md, "Running and deploying"). Full detail and the Android caveats:
 `shared/project/specs/contraptions/app-rail.md`, "Installing your contraption as its own app".

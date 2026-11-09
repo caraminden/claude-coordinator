@@ -547,7 +547,7 @@ const APP_INSTRUCTION_TOOLS = [
 const CONTRAPTION_FIELDS = {
   title: { type: 'string', description: 'What people see, at most 60 characters.' },
   port: { type: 'integer', description: "The port its own service listens on, on Citadel's machine (1024-65535)." },
-  icon: { type: ['string', 'null'], description: 'Its icon, a path on its service starting with /, like /icons/icon.svg.' },
+  icon: { type: ['string', 'null'], description: "Its rail icon, a path on its service from its base, starting with /, like /icon.svg (the contraption-ui starter's). Every contraption has one: left empty, the rail shows its first letter until a deploy fills it from its web manifest's icons." },
   default_model: { type: ['string', 'null'], description: 'The model its turns use unless it names one, like haiku.' },
   open_paths: { type: 'array', items: { type: 'string' }, description: 'Paths on its service anyone may open without signing in (at most 20), like /link.' },
   relay_paths: {
@@ -615,7 +615,7 @@ const CONTRAPTION_TOOLS = [
 /** Deploying a contraption from its repo: for Citadel's Taskmaster on an admin's turn, and a contraption's home scheme. */
 const DEPLOY_CONTRAPTION = {
   name: 'deploy_contraption',
-  description: `Deploy a contraption from its GitHub repo, as ${APP_NAME} runs it: clone its folder, or fetch and fast-forward its branch (refused if the folder has local changes or other commits), run the build steps in its citadel-app.json (niced, with a time limit), rewrite its units and restart it, then check its health. Before the restart it waits up to 3 minutes for the contraption's running agent turns to end (holding new ones until it is healthy again); past that it restarts anyway and names the turns it cut. If anything after the fast-forward fails, it rolls back to the commit before, builds that and restarts it. Waits for the outcome (builds can take minutes) and returns what it did and the end of the log. Push the commit to the registered branch first: it deploys what is on GitHub, not a worktree.${HOME_CONTRAPTIONS.length ? ` This scheme may deploy: ${HOME_CONTRAPTIONS.join(', ')}.` : ` Only on a turn a ${APP_NAME} admin asked for.`}`,
+  description: `Deploy a contraption from its GitHub repo, as ${APP_NAME} runs it: clone its folder, or fetch and fast-forward its branch (refused if the folder has local changes or other commits), run the build steps in its citadel-app.json (niced, with a time limit), rewrite its units and restart it, then check its health. Before the restart it waits up to 3 minutes for the contraption's running agent turns to end (holding new ones until it is healthy again); past that it restarts anyway and names the turns it cut. If anything after the fast-forward fails, it rolls back to the commit before, builds that and restarts it. Waits for the outcome (builds can take minutes) and returns what it did and the end of the log. Once deployed it checks the app has a rail icon (filling an empty one from its web manifest) and installs as its own app, and lists what's missing first as To do: a deploy never fails on those, but they are work to finish. Push the commit to the registered branch first: it deploys what is on GitHub, not a worktree.${HOME_CONTRAPTIONS.length ? ` This scheme may deploy: ${HOME_CONTRAPTIONS.join(', ')}.` : ` Only on a turn a ${APP_NAME} admin asked for.`}`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -695,10 +695,16 @@ function readText(app: string, command: string | undefined, r: { status: number;
 }
 
 /** A deploy as the tools show it. */
+/** What register_contraption says when it has no icon (#418). */
+const NO_ICON = 'To do: it has no icon, so the rail shows its first letter. Every contraption ships one with a web manifest (the citadel:contraption-ui starter has both): set icon with update_contraption, like /icon.svg, or deploy it and an empty icon is filled from its manifest.';
+
 function deployText(d: any): string {
   if (!d) return 'No deploy since the server started.';
   const head = `${d.name}: ${d.state}${d.state === 'running' ? '' : ` after ${Math.round(((d.finished_at ?? Date.now()) - d.started_at) / 1000)}s`} (${d.repo} ${d.branch}, asked by ${d.by}${d.from || d.to ? `; ${d.from?.slice(0, 9) ?? 'new'} → ${d.to?.slice(0, 9) ?? '?'}` : ''})`;
-  return [head, ...d.said.map((l: string) => `- ${l}`), `Log: ${d.log}`, ...(d.state === 'running' ? [] : ['Last lines of the log:', d.tail ?? ''])].join('\n');
+  // First, so they read as work left, not one log line among many (#418).
+  const todo: string[] = d.todo ?? [];
+  return [head, ...(todo.length ? ['To do: deployed, but it still lacks these. Get them done (a minion of its home scheme), then deploy again:', ...todo.map((t) => `- ${t}`), 'What it did:'] : []),
+    ...d.said.filter((l: string) => !l.startsWith('To do: ')).map((l: string) => `- ${l}`), `Log: ${d.log}`, ...(d.state === 'running' ? [] : ['Last lines of the log:', d.tail ?? ''])].join('\n');
 }
 
 /** A service's state as the tools show it. */
@@ -1141,8 +1147,10 @@ async function runTool(name: string, args: any): Promise<string> {
       const all = await call('GET', '/api/contraptions');
       return all.length ? all.map(contraptionText).join('\n') : 'No contraptions registered yet.';
     }
-    case 'register_contraption':
-      return `Registered. Its service reads its keys from the key folder.\n${contraptionText(await call('POST', '/api/contraptions', args))}`;
+    case 'register_contraption': {
+      const c = await call('POST', '/api/contraptions', args);
+      return `Registered. Its service reads its keys from the key folder.${c.icon ? '' : `\n${NO_ICON}`}\n${contraptionText(c)}`;
+    }
     case 'update_contraption': {
       const { name, ...fields } = args;
       return `Saved.\n${contraptionText(await call('PATCH', contraptionPath(args), fields))}`;

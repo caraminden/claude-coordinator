@@ -128,6 +128,24 @@ async function service<T>(work: () => Promise<T> | T): Promise<T> {
  * The contraption a deploy call names, if the caller may deploy it: an admin; Citadel's Taskmaster on a
  * turn an admin asked for; or a Taskmaster or minion of its home scheme. Anyone else learns nothing of it.
  */
+/** The to-do list each contraption's home Taskmaster was last sent, so a deploy that changes nothing wakes no one. */
+const lastTodo = new Map<string, string>();
+
+/**
+ * A deployed app's to-dos (#418: no rail icon, or a web manifest that won't install it) to its home scheme's
+ * Taskmaster, as the person who deployed it. Not when that Taskmaster deployed it (its tool answer lists
+ * them), nor when it was sent the same list already.
+ */
+function deployTodo(app: App, c: ContraptionRow, caller: Ctx['caller'], asker: number | null, todo: string[]) {
+  const key = todo.join('\n');
+  if (lastTodo.get(c.name) === key) return;
+  lastTodo.set(c.name, key);
+  const scheme = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme);
+  if (!scheme || (caller?.kind === 'coordinator' && caller.project_id === scheme.id)) return;
+  const text = `To do for ${c.title} (${c.name}): it deployed, but it still lacks what every contraption ships with, a rail icon and a web manifest that installs it as its own app:\n${todo.map((t) => `- ${t}`).join('\n')}\n\nIf no minion is on it yet, start one: the citadel:contraption-ui skill's references/installing.md and its starter's icon files say how. Then deploy again, which checks.`;
+  ensureCoordinator(app, scheme).then((taskmaster) => app.runner.send(taskmaster.id, APP_NAME, text, [], { asker })).catch(() => {});
+}
+
 function deployable(app: App, name: string, caller: Ctx['caller']): ContraptionRow {
   const c = app.store.getContraption(name);
   if (!caller) {
@@ -331,7 +349,16 @@ export const contraptionRoutes: Route[] = [
       const uid = session.uid ?? (caller ? app.store.turnAsker(caller.id) : null);
       const person = typeof uid === 'number' ? app.store.getUser(uid) : undefined;
       const identity = person ? () => app.contraptions.signIdentity(c.name, person) : undefined;
-      return service(async () => json(res, 202, app.services.deploy(c, by, app.store.listContraptions(), identity)));
+      const hooks = {
+        // Only into an empty icon: one set by hand meanwhile stays.
+        setIcon: (icon: string) => {
+          if (app.store.getContraption(c.name)?.icon) return false;
+          app.store.updateContraption(c.name, { icon });
+          return true;
+        },
+        todo: (todo: string[]) => deployTodo(app, c, caller, person?.id ?? null, todo),
+      };
+      return service(async () => json(res, 202, app.services.deploy(c, by, app.store.listContraptions(), identity, hooks)));
     },
   },
   {

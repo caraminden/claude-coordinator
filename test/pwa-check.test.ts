@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { installProblems } from '../src/pwa-check.ts';
+import { installCheck, installProblems } from '../src/pwa-check.ts';
 
 /** A contraption serving these paths and its two icons (others 404). */
 const app = (files: Record<string, string | object>) => async (path: string) => {
@@ -66,4 +66,17 @@ test("what else Chrome needs to offer Install: a name, an installable display, a
   assert.match((await withManifest({ ...good, name: undefined })).join('\n'), /no name or short_name/);
   assert.match((await withManifest({ ...good, name: ' ' })).join('\n'), /no name or short_name/);
   assert.match((await withManifest({ ...good, display: 'browser' })).join('\n'), /display is "browser"/);
+});
+
+test('the check also names the icon to register: its first PNG icon that loads, as a path from its base (#418)', async () => {
+  const check = (m: object, files = {}) => installCheck('toc', app({ '/apps/toc/': page('<link rel="manifest" href="m.json">'), '/apps/toc/m.json': m, ...files }));
+  assert.deepEqual(await check(good), { problems: [], icon: '/i192.png' });
+  // The 192 doesn't load: the 512 serves, and the 192's problem stays.
+  const gone = await check({ ...good, icons: [{ src: 'gone.png', sizes: '192x192' }, { src: 'i512.png', sizes: '512x512' }] });
+  assert.equal(gone.icon, '/i512.png');
+  assert.match(gone.problems.join('\n'), /192 px icon \/apps\/toc\/gone\.png answered 404/);
+  // An SVG alone, an icon served elsewhere, or no manifest: nothing to register.
+  assert.equal((await check({ ...good, icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml' }] })).icon, null);
+  assert.equal((await check({ ...good, icons: [{ src: 'https://elsewhere.example/i.png', sizes: '512x512' }] })).icon, null);
+  assert.deepEqual((await installCheck('toc', app({ '/apps/toc/': page('') }))).icon, null);
 });

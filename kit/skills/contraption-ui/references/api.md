@@ -47,7 +47,7 @@ an admin's turn (`register_contraption`, `update_contraption`, `set_contraption_
 | `name` | Slug in every path and the key folder; never changes | `^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`; not `mine`, `turns`, `sessions`, `asks`, `relay` or `scheme-<n>` |
 | `title` | Shown in the rail and in Citadel's messages | 1 to 60 characters |
 | `port` | Your server's port on 127.0.0.1 | 1024 to 65535 |
-| `icon` | A path for the rail's tile | Starts with `/` |
+| `icon` | A path for the rail's tile, from your base, like `/icon.svg` | Starts with `/`. Every contraption has one: left empty, a deploy fills it from your manifest's first PNG icon |
 | `home_scheme` | The scheme that builds it: asks go there, its minions deploy it | A scheme id |
 | `open_paths` | Paths reached without a login or identity | Up to 20, each starting with `/`, relative to your base |
 | `relay_paths` | Paths other contraptions may call through the relay | As `open_paths`; empty means none |
@@ -464,8 +464,15 @@ GitHub, so push first. A deploy (tested):
 
 If 2 to 4 fail, it resets to the commit it ran before, builds that and restarts it (`rolled back`);
 a first deploy has nothing to roll back to (`failed`). The tool returns what happened and the end
-of the log. After a good deploy it checks your page installs as its own app and logs any problem
-as a warning (rules in references/installing.md).
+of the log. After a good deploy it checks the two things every contraption ships with (Cara,
+2026-11-09: "both of these should be the default behavior for new contraptions"):
+
+- **A rail icon.** An empty registry `icon` is set to your manifest's first PNG icon that loads.
+- **A web manifest that installs you as your own app** (rules in references/installing.md).
+
+What's still missing comes back first in the tool's answer as **To do** lines, shows under the
+deploy in Settings, and goes to your home scheme's Taskmaster as a to-do (once per new list, and not
+when that Taskmaster deployed it itself). It never fails the deploy, so a first shell can ship.
 
 Service status, start, stop, restart, its journal and installing over a hand-made unit are
 admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_service`).
@@ -496,6 +503,9 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-09:** Every contraption ships a rail icon and a web manifest: the starter has both
+  (stand-in icons to redraw), a deploy fills an empty registry icon from your manifest, and what's
+  still missing is a To do for your home scheme's Taskmaster rather than a warning in the log.
 - **2026-11-08:** Asks take `minion: N` to go straight to one of your home scheme's minions,
   members only, with no Taskmaster in the path.
 - **2026-11-08:** Turns' `start` and `end` say which `provider` and `model` ran, and `machines:

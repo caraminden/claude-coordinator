@@ -42,6 +42,17 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 [starter/](starter/index.html) (`index.html`, `app.css`, `app.js`) wires theme.css, base.css, the
 rail, drawers, a status line, a chat and a composer; start a new contraption's page from it.
 
+**A new contraption ships an icon and a web manifest from its first deploy** (Cara, 2026-11-09:
+"both of these should be the default behavior for new contraptions"). Copy the whole starter folder,
+so you have `manifest.webmanifest` and the icons, then:
+
+1. Replace `my-app` and `My app` in `manifest.webmanifest` (`id`, `start_url` and `scope` stay
+   `/apps/<name>/`, `display` stays `standalone`).
+2. Redraw `icon.svg` and render the three PNGs from it ([references/installing.md](references/installing.md)).
+3. Serve the folder under your base path, so `/apps/<name>/manifest.webmanifest` and the icons load.
+4. Register `icon` as `/icon.svg`. Left empty, a deploy fills it from the manifest.
+5. Deploy and clear any **To do** lines it hands back.
+
 The API is stable: names and options are only ever added, and Citadel's tests hold them. A real
 break would ship as a new file (`ui/chat2.js`) beside the old one. Types: point TypeScript at the
 served `.d.ts` (copy it into your repo's types folder, or `declare module` it) rather than writing

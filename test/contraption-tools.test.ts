@@ -85,6 +85,7 @@ test('Citadel\'s Taskmaster registers and enables a contraption just as Settings
 
   const reg = await tool(CitadelTM, 'register_contraption', { name: 'mandate', ...MANDATE });
   assert.equal(reg.isError, false, reg.text);
+  assert.doesNotMatch(reg.text, /To do/, 'it has an icon');
   assert.match(reg.text, new RegExp(`key folder ${keysDir('mandate')}`));
   noKeys(reg.text, 'mandate');
   // The same through the settings page's route, to compare rows and files.
@@ -137,6 +138,12 @@ test('Citadel\'s Taskmaster registers and enables a contraption just as Settings
   assert.match(list.text, /^twin: Mandate/m);
   noKeys(list.text, 'mandate');
   noKeys(list.text, 'twin');
+
+  // Registered without an icon: the answer says it's a to-do (#418), and still registers it.
+  const bare = await tool(CitadelTM, 'register_contraption', { name: 'bare', title: 'Bare', port: 7399 });
+  assert.equal(bare.isError, false, bare.text);
+  assert.match(bare.text, /To do: it has no icon.*update_contraption.*filled from its manifest/);
+  assert.match(bare.text, /^bare: Bare/m);
 });
 
 test('a turn someone who isn\'t an admin asked for is refused, and changes nothing', async () => {

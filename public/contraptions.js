@@ -65,12 +65,14 @@ function servicePanel(c) {
   };
   // Its last deploy, followed while it runs.
   const deployLine = h('div', { class: 'small' });
+  const deployTodo = h('ul', { class: 'small', 'aria-label': 'Still to do after its deploy' });
   const deployLog = h('pre', { hidden: true });
   const deployBtn = h('button', { type: 'button', class: 'secondary small', hidden: !c.repo, title: c.repo ? `Fetch ${c.repo} ${c.branch || 'main'}, build, restart; rolls back if it fails` : '' }, 'Deploy');
   const showDeploy = (d) => {
     deployBtn.disabled = d?.state === 'running';
     if (!d) return;
-    deployLine.textContent = `Deploy by ${d.by}: ${d.state}${d.to ? ` at ${d.to.slice(0, 9)}` : ''} · ${d.said.at(-1) ?? ''}`;
+    deployLine.textContent = `Deploy by ${d.by}: ${d.state}${d.to ? ` at ${d.to.slice(0, 9)}` : ''} · ${d.said.filter((l) => !l.startsWith('To do: ')).at(-1) ?? ''}`;
+    deployTodo.replaceChildren(...(d.todo ?? []).map((t) => h('li', {}, h('strong', {}, 'To do: '), t)));
     deployLog.textContent = d.tail ?? '';
     deployLog.hidden = d.state === 'running' || d.state === 'deployed' || !d.tail;
     if (d.state === 'running') setTimeout(() => deployLine.isConnected && api(`api/contraptions/${c.name}/deploy`).then(showDeploy).catch(() => {}), 3000);
@@ -88,7 +90,7 @@ function servicePanel(c) {
     line.textContent = `Service: ${err.message}`;
   });
   if (c.repo) api(`api/contraptions/${c.name}/deploy`).then(showDeploy).catch(() => {});
-  return h('div', { class: 'contraption-service' }, h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), buttons, deployBtn), notes, status, log, deployLine, deployLog);
+  return h('div', { class: 'contraption-service' }, h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), buttons, deployBtn), notes, status, log, deployLine, deployTodo, deployLog);
 }
 
 /** One contraption: who it's enabled for, its settings, its service and its keys. */
@@ -101,7 +103,7 @@ function card(c, people, replace) {
   const form = h('form', { class: 'machine-add' },
     field('Title', 'title', c.title, { required: true, maxlength: 60 }),
     field('Port', 'port', c.port, { type: 'number', min: 1024, max: 65535, required: true }),
-    field('Icon', 'icon', c.icon, { placeholder: '/icon.svg' }),
+    field('Icon', 'icon', c.icon, { placeholder: '/icon.svg', title: 'Every contraption has one. Empty: the rail shows its first letter until a deploy fills it from its web manifest.' }),
     h('label', {}, 'Home scheme', scheme),
     field('Default model', 'default_model', c.default_model, { placeholder: 'haiku' }),
     field('Turns per person per day', 'turn_cap', c.turn_cap, { type: 'number', min: 1, placeholder: 'no cap' }),
@@ -178,17 +180,20 @@ export function contraptionsPage() {
   const name = h('input', { name: 'name', placeholder: 'mandate', required: true, maxlength: 32, pattern: '[a-z0-9]([a-z0-9-]*[a-z0-9])?', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
   const title = h('input', { name: 'title', placeholder: 'Mandate', required: true, maxlength: 60, autocomplete: 'off' });
   const port = h('input', { name: 'port', type: 'number', min: 1024, max: 65535, placeholder: '9101', required: true });
+  const iconIn = h('input', { name: 'icon', placeholder: '/icon.svg', autocomplete: 'off', spellcheck: 'false', title: 'A path on its service, from its base. Empty: the rail shows its first letter until a deploy fills it from its web manifest.' });
   const status = h('span', { class: 'muted', role: 'status' });
   const form = h('form', { class: 'machine-add' },
-    h('label', {}, 'Name', name), h('label', {}, 'Title', title), h('label', {}, 'Port', port),
+    h('label', {}, 'Name', name), h('label', {}, 'Title', title), h('label', {}, 'Port', port), h('label', {}, 'Icon', iconIn),
     h('button', { type: 'submit' }, 'Register'), status);
   form.onsubmit = async (e) => {
     e.preventDefault();
     status.textContent = 'Registering…';
     try {
-      all = [...all, await api('api/contraptions', { method: 'POST', body: { name: name.value.trim(), title: title.value.trim(), port: Number(port.value) } })];
+      const c = await api('api/contraptions', { method: 'POST', body: { name: name.value.trim(), title: title.value.trim(), port: Number(port.value), icon: iconIn.value.trim() || null } });
+      all = [...all, c];
       form.reset();
-      status.textContent = '';
+      // Every contraption ships an icon and a web manifest (#418): say so while it has none.
+      status.textContent = c.icon ? '' : `Registered without an icon: the rail shows "${c.title[0]}" until you set one or a deploy fills it from its web manifest.`;
       render();
     } catch (err) {
       status.textContent = err.message;

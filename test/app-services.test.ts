@@ -445,13 +445,62 @@ test("a deploy checks, as the person deploying, that the app installs as its own
     services.deploy(c, 'Cara', [], () => 'v1.signed.header');
     const d = await done(name);
     assert.equal(d.state, 'deployed', 'a warning, never a failure');
-    assert.ok(d.said.some((l) => /^Warning \(installing as its own app\): .*points outside/.test(l)), d.said.join('\n'));
+    assert.ok(d.said.some((l) => /^To do: .*points outside/.test(l)), d.said.join('\n'));
+    assert.ok(d.todo.some((l) => /points outside/.test(l)), 'a to-do, listed apart from the steps');
     assert.ok(seen.includes('v1.signed.header'));
     // Without an identity (no person to read its page as) it isn't checked.
     seen.length = 0;
     services.deploy(c, 'Cara');
-    assert.ok(!(await done(name)).said.some((l) => /^Warning/.test(l)));
+    assert.ok(!(await done(name)).said.some((l) => /points outside/.test(l)));
     assert.ok(!seen.includes('v1.signed.header'));
+  } finally {
+    svc.close();
+  }
+});
+
+test('a deploy fills an empty rail icon from its manifest, and hands back what it still lacks as to-dos (#418)', async () => {
+  const name = `app${++repoN}`;
+  const r = remote(`cara/${name}`);
+  r.push({ 'citadel-app.json': appManifest([]) });
+  const home = `/apps/${name}/`;
+  let manifest: object | null = null;
+  const files: Record<string, string> = { [`${home}icon-192.png`]: 'png', [`${home}icon-512.png`]: 'png' };
+  const svc = createHttpServer((req, res) => {
+    if (req.url === home) return res.end(manifest ? '<link rel="manifest" href="manifest.webmanifest">' : '<title>shell</title>');
+    if (req.url === `${home}manifest.webmanifest` && manifest) return res.end(JSON.stringify(manifest));
+    if (req.url! in files) return res.end(files[req.url!]);
+    res.statusCode = 404;
+    res.end('no');
+  });
+  await new Promise<void>((ok) => svc.listen(0, '127.0.0.1', ok));
+  try {
+    const c = { ...row(name, (svc.address() as any).port), icon: null, repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    const icons: string[] = [];
+    const todos: string[][] = [];
+    const hooks = (took: boolean) => ({ setIcon: (icon: string) => (icons.push(icon), took), todo: (t: string[]) => todos.push(t) });
+    // Its first shell: no manifest, no icon. It still deploys, with both as to-dos.
+    services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks(true));
+    let d = await done(name);
+    assert.equal(d.state, 'deployed');
+    assert.equal(d.todo.length, 2, d.todo.join('\n'));
+    assert.match(d.todo[0], /no rail icon/);
+    assert.match(d.todo[1], /no <link rel="manifest">/);
+    assert.deepEqual(todos, [d.todo]);
+    assert.deepEqual(icons, [], 'nothing to fill it from');
+    // With an installable manifest, the empty icon is filled from it and nothing is left to do.
+    manifest = { id: home, start_url: home, scope: home, name: 'App', display: 'standalone', icons: [{ src: 'icon-192.png', sizes: '192x192', type: 'image/png' }, { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }] };
+    todos.length = 0;
+    services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks(true));
+    d = await done(name);
+    assert.deepEqual([d.todo, todos, icons], [[], [], ['/icon-192.png']]);
+    assert.ok(d.said.includes('Rail icon set to /icon-192.png, the first icon in its manifest.'), d.said.join('\n'));
+    // Someone set one meanwhile (setIcon refuses): the row this deploy started from had none, so it says so.
+    services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks(false));
+    assert.match((await done(name)).todo.join('\n'), /no rail icon/);
+    // A registered icon: nothing to fill, nothing to do.
+    icons.length = 0;
+    services.deploy({ ...c, icon: '/icon.svg' }, 'Cara', [], () => 'v1.signed.header', hooks(true));
+    assert.deepEqual([(await done(name)).todo, icons], [[], []]);
   } finally {
     svc.close();
   }

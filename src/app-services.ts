@@ -15,7 +15,7 @@ import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { ContraptionRow } from './db.ts';
-import { installProblems } from './pwa-check.ts';
+import { installCheck } from './pwa-check.ts';
 
 /** The manifest's file name, in the app's folder. */
 export const MANIFEST = 'citadel-app.json';
@@ -206,8 +206,18 @@ export interface DeployView {
   finished_at: number | null;
   /** What it did, a line per step. */
   said: string[];
+  /** What the app still lacks once deployed (#418): no rail icon, or a manifest that won't install. Also in said, as "To do: …". */
+  todo: string[];
   /** Its whole log: git's and the build's output. */
   log: string;
+}
+
+/** What a deploy hands back to its caller once it's deployed (#418). */
+export interface DeployHooks {
+  /** Set the registry's icon, if it's still empty; true when it took. */
+  setIcon?: (icon: string) => boolean;
+  /** What the deployed app still lacks: no rail icon, or a web manifest that won't install. */
+  todo?: (todo: string[]) => void;
 }
 
 export class ServiceError extends Error {
@@ -503,18 +513,20 @@ export class AppServices {
    * and restart it, then check its health. A failure after the fast-forward rolls back to the commit
    * before, builds that, and restarts it. Starts it and returns at once; lastDeploy follows it. With
    * `identity` (a fresh X-Citadel-Identity header for the person deploying), a deployed app's page and
-   * manifest are checked for installing as its own app (src/pwa-check.ts), any problem logged as a warning.
+   * manifest are checked for installing as its own app (src/pwa-check.ts). A registry entry with no icon
+   * gets its manifest's first icon (`hooks.setIcon`, answering whether it took). What's still missing goes
+   * in `todo` and to `hooks.todo` (#418): a to-do, never a failure, so an app can ship its first shell.
    */
-  deploy(row: ContraptionRow, by: string, all: ContraptionRow[] = [], identity?: () => string | null): DeployView {
+  deploy(row: ContraptionRow, by: string, all: ContraptionRow[] = [], identity?: () => string | null, hooks: DeployHooks = {}): DeployView {
     this.guard();
     if (!row.repo) throw new ServiceError(409, `${row.title} has no repo set: an admin sets one (owner/name) in Settings → Contraptions first.`);
     if (this.busy.has(row.name)) throw new ServiceError(409, `${row.name} is being installed or deployed already: wait for that to finish.`);
     this.busy.add(row.name);
     const started = Date.now();
     const log = join(this.opts.logDir, row.name, `${new Date(started).toISOString().replace(/[:.]/g, '-')}.log`);
-    const view: DeployView = { name: row.name, state: 'running', by, repo: row.repo, branch: row.branch ?? 'main', from: null, to: null, started_at: started, finished_at: null, said: [], log };
+    const view: DeployView = { name: row.name, state: 'running', by, repo: row.repo, branch: row.branch ?? 'main', from: null, to: null, started_at: started, finished_at: null, said: [], todo: [], log };
     this.deploys.set(row.name, view);
-    void this.deployNow(row, view, all, identity)
+    void this.deployNow(row, view, all, identity, hooks)
       .catch((err) => {
         view.said.push(`Failed: ${err.message}`);
         view.state = 'failed';
@@ -541,7 +553,7 @@ export class AppServices {
     return { ...env, PATH: toolPath(this.opts.home), GIT_TERMINAL_PROMPT: '0', MISE_TRUSTED_CONFIG_PATHS: folder };
   }
 
-  private async deployNow(row: ContraptionRow, view: DeployView, all: ContraptionRow[], identity?: () => string | null) {
+  private async deployNow(row: ContraptionRow, view: DeployView, all: ContraptionRow[], identity?: () => string | null, hooks: DeployHooks = {}) {
     const folder = this.folder(row);
     const env = this.buildEnv(folder);
     await mkdir(dirname(view.log), { recursive: true });
@@ -643,10 +655,17 @@ export class AppServices {
     }
     // After the try, so nothing here can roll back a deploy that worked.
     const header = identity?.();
-    if (!header) return;
-    const get = (path: string) => fetch(`http://127.0.0.1:${row.port}${path}`, { headers: { 'x-citadel-identity': header, accept: 'text/html' }, signal: AbortSignal.timeout(5000) });
-    const problems = await installProblems(row.name, get).catch((err) => [`Couldn't check how it installs: ${err.message}`]);
-    for (const p of problems) await say(`Warning (installing as its own app): ${p}`);
+    const get = (path: string) => fetch(`http://127.0.0.1:${row.port}${path}`, { headers: { 'x-citadel-identity': header!, accept: 'text/html' }, signal: AbortSignal.timeout(5000) });
+    // Without a person to read its page as, only the registry's icon is checked.
+    const found = header
+      ? await installCheck(row.name, get).catch((err) => ({ problems: [`Couldn't check how it installs: ${err.message}`], icon: null }))
+      : { problems: [], icon: null };
+    const todo = found.problems;
+    if (!row.icon && found.icon && hooks.setIcon?.(found.icon)) await say(`Rail icon set to ${found.icon}, the first icon in its manifest.`);
+    else if (!row.icon) todo.unshift(`It has no rail icon, so the rail shows its first letter. Serve one and register it (update_contraption's icon, or Settings → Contraptions), or list 192 and 512 px PNG icons in its web manifest and deploy again: an empty icon is filled from there.`);
+    view.todo = todo;
+    for (const t of todo) await say(`To do: ${t}`);
+    if (todo.length) hooks.todo?.(todo);
   }
 
   /** Wait for its service to be active and its health path (or port) to answer, twice, a few seconds apart. */

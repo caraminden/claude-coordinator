@@ -23,10 +23,10 @@ const APP_INSTRUCTIONS = process.env.COORDINATOR_APP_INSTRUCTIONS === '1';
 // The contraptions whose home is this scheme (#266): it may deploy them.
 const HOME_CONTRAPTIONS = (process.env.COORDINATOR_HOME_CONTRAPTIONS ?? '').split(',').filter(Boolean);
 const MAX_TEXT = 4000;
-/** What message_ticket and message_coordinator say when the loop guard holds a message. */
 /** Cold hold (#413): what the sender is told, and the urgent flag the three message tools share. */
-const COLD = (who: string) => `Left as held mail: ${who} has been idle over 55 minutes, so its prompt cache has lapsed and waking it would re-read its whole context. It shows in its chat now and reaches it with its next turn: a person's message, or within 3 hours. Do not resend it. If it must act now after all, send a short follow-up with urgent: true, which wakes it with this one too.`;
+const COLD = (who: string) => `Left as held mail: ${who} has been idle over 55 minutes, so its prompt cache (1 hour) is lapsing and waking it would re-read its whole context. It shows in its chat now and reaches it with its next turn: a person's message, or within 3 hours. Do not resend it. If it must act now after all, send a short follow-up with urgent: true, which wakes it with this one too.`;
 const URGENT = { type: 'boolean', description: 'true: wake it even when it is cold (idle over 55 minutes). Only when it must act now: you are blocked on it, or it is a person\'s go, pick or run-back to pass on. Otherwise a cold one gets the message as held mail, read on its next turn (a person\'s message, or within 3 hours)' };
+/** What message_ticket and message_coordinator say when the loop guard holds a message. */
 const HELD = 'the minion and the Taskmaster have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it; finish your turn.';
 
 const WAKE_DESCRIPTION =

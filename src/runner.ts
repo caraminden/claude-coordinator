@@ -1789,7 +1789,8 @@ export class Runner {
     if (cold && !this.store.getSetting<number>(coldKey(to))) this.store.setSetting(coldKey(to), this.now());
     const sent = new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ');
     const list = this.store.getSetting<QueuedMessage[]>(mailKey(to)) ?? [];
-    list.push({ author: `Held mail from ${author}, sent ${sent} UTC`, text, images: [], id: row.id, asker: null });
+    // Cold mail is a relay delayed (#413), so it keeps its sender's person, as the relay would have; asked-for mail carries none.
+    list.push({ author: `Held mail from ${author}, sent ${sent} UTC`, text, images: [], id: row.id, ...(cold && from ? { from } : {}), asker: cold ? this.personOf?.(author, from) ?? null : null });
     this.store.setSetting(mailKey(to), list);
   }
 
@@ -1814,18 +1815,20 @@ export class Runner {
 
   /**
    * Cold (#413): the session has a prompt cache to lose (a session, no turn running, waiting or queued)
-   * and its last turn ended over COLD_MS ago, so waking it re-writes its whole context.
+   * and its last turn ended over COLD_MS ago, so waking it re-writes its whole context. A dismissed
+   * minion never is: a message to one is follow-up work, which reopens it as before.
    */
   cold(ticketId: number): boolean {
     const t = this.store.getTicket(ticketId);
-    if (!t?.session_id || this.isRunning(ticketId) || this.queued(ticketId) || this.lanes.busy(ticketId) || this.limitWait(ticketId) || this.netWait(ticketId)) return false;
+    if (!t?.session_id || t.status === 'closed' || this.isRunning(ticketId) || this.queued(ticketId) || this.lanes.busy(ticketId) || this.limitWait(ticketId) || this.netWait(ticketId)) return false;
     const ended = this.store.lastTurnEnd(ticketId);
     return !!ended && this.now() - ended > COLD_MS;
   }
 
   /**
    * Mail held for a cold session wakes it once the first has waited COLD_HOLD_MAX_MS, or at once if the
-   * session went fresh meanwhile (nothing left to re-read). A person's message takes it sooner. Run every minute.
+   * session went fresh meanwhile (nothing left to re-read), but never a dismissed minion. A person's
+   * message takes it sooner. Run every minute.
    */
   coldSweep(now = this.now()) {
     if (this.noTurns) return;
@@ -1836,7 +1839,8 @@ export class Runner {
         if (this.isRunning(t.id) || this.lanes.busy(t.id)) continue;
         const mail = this.store.getSetting<QueuedMessage[]>(mailKey(t.id)) ?? [];
         this.store.deleteSetting(coldKey(t.id));
-        if (!mail.length) continue;
+        // A dismissed minion isn't reopened by the cap: its mail waits for a person's message.
+        if (!mail.length || t.status === 'closed') continue;
         this.store.deleteSetting(mailKey(t.id));
         this.emit(t.id, 'note', { text: t.session_id ? `Held mail has waited ${COLD_HOLD_MAX_MS / 3_600_000} hours, so it runs now.` : 'Held mail runs now: the session is fresh, so waking it is cheap.' });
         this.queues.set(t.id, [...(this.queues.get(t.id) ?? []), ...mail]);

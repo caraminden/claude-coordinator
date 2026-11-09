@@ -155,3 +155,38 @@ test('the sweep delivers held mail at once to a session that went fresh meanwhil
   await until('the turn', async () => promptCount() > before);
   await idle(tm.id);
 });
+
+test('a dismissed minion is never cold: a message reopens it as before; one dismissed after its mail was held is not reopened by the cap', async () => {
+  const tm = ticket('coordinator', 0);
+  const gone = ticket('ticket', 5 * 3_600_000, tm.project_id);
+  store.updateTicket(gone.id, { status: 'closed' });
+  assert.equal(runner.cold(gone.id), false);
+
+  const minion = ticket('ticket', 2 * 3_600_000, tm.project_id);
+  assert.equal(runner.relay(minion.id, minion.id, 'Taskmaster', '#12 shipped, FYI'), 'cold');
+  store.updateTicket(minion.id, { status: 'closed' });
+  const before = promptCount();
+  runner.coldSweep(NOW + COLD_HOLD_MAX_MS);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(promptCount(), before, 'the cap must not reopen a dismissed minion');
+  assert.equal(runner.isRunning(minion.id), false);
+  assert.ok(store.getSetting(`mail:${minion.id}`), 'its mail waits for a person');
+  assert.equal(store.getSetting(`cold:${minion.id}`), null);
+});
+
+test("cold mail keeps its sender's person, so a turn the cap starts runs as the relay would have", () => {
+  const tm = ticket('coordinator', 2 * 3_600_000);
+  const minion = ticket('ticket', 0, tm.project_id);
+  const seen: [string, number | undefined][] = [];
+  runner.personOf = (author, from) => (seen.push([author, from]), from === minion.id ? 42 : null);
+  try {
+    runner.relay(minion.id, tm.id, `#${minion.number} M`, 'my PR is up');
+    const [held] = store.getSetting<{ from?: number; asker?: number | null }[]>(`mail:${tm.id}`)!;
+    assert.equal(held.from, minion.id);
+    assert.equal(held.asker, 42);
+  } finally {
+    runner.personOf = undefined;
+    store.deleteSetting(`mail:${tm.id}`);
+    store.deleteSetting(`cold:${tm.id}`);
+  }
+});

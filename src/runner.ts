@@ -208,6 +208,8 @@ export const LEAN_CONTEXT = { syncClaudeAiSkills: false, disableClaudeAiConnecto
  * command's output it keeps.
  */
 export const TURN_SETTINGS = { autoCompactWindow: 250_000, bashOutputMaxChars: 12_000 };
+/** A Taskmaster's compact window (#423): a backstop, as it hands off past FRESH_CONTEXT_TOKENS anyway. */
+export const TASKMASTER_COMPACT_WINDOW = 180_000;
 /**
  * Read rules every turn gets, so the Read, Grep and Glob tools can't open a login or a transcript
  * (#185): the Claude login, SSH keys, the service's env file, the GitHub login, a runner's sign-in,
@@ -362,15 +364,16 @@ const contextKey = (ticketId: number) => `context:${ticketId}`;
 
 /**
  * A Taskmaster's fresh start (#406): asked for (why), its handoff once the old session wrote it with
- * fresh_session, and `compact` once the handoff failed and a /compact turn falls back on.
+ * fresh_session, and `compact` once the handoff failed and a /compact turn falls back on. `auto`: Citadel
+ * asked for it by itself (turn end or idle), so a message queued meanwhile goes first.
  */
-export interface FreshState { why: string; summary?: string; compact?: true }
+export interface FreshState { why: string; summary?: string; compact?: true; auto?: true }
 const freshKey = (ticketId: number) => `fresh:${ticketId}`;
 /** The handoff a fresh session's first turn starts from, kept until that session exists. */
 const handoffKey = (ticketId: number) => `handoff:${ticketId}`;
 /** Idle this long, a Taskmaster's prompt cache (1 hour) is still warm, so its handoff turn reads it cheaply. */
 export const FRESH_IDLE_MS = 55 * 60_000;
-/** Past this much context (tokens), an idle Taskmaster starts fresh by itself. */
+/** Past this much context (tokens), a Taskmaster starts fresh by itself: as its turn ends (#423), or idle (#406). */
 export const FRESH_CONTEXT_TOKENS = 150_000;
 const HANDOFF_MAX = 20_000;
 
@@ -1978,12 +1981,12 @@ export class Runner {
    * any running turn ends), then the next turn starts a new session from that handoff. Returns why it
    * can't, or null.
    */
-  requestFresh(ticketId: number, why: string): string | null {
+  requestFresh(ticketId: number, why: string, auto = false): string | null {
     const ticket = this.store.getTicket(ticketId);
     if (ticket?.kind !== 'coordinator') return 'Only a Taskmaster starts fresh sessions';
     if (!ticket.session_id) return 'Its session is already fresh';
     if (this.store.getSetting<FreshState>(freshKey(ticketId))) return 'A fresh start is already under way';
-    this.store.setSetting(freshKey(ticketId), { why });
+    this.store.setSetting(freshKey(ticketId), { why, ...(auto ? { auto: true as const } : {}) });
     this.emit(ticketId, 'note', { text: `Starting a fresh session (${why}): the Taskmaster writes its handoff first${this.isRunning(ticketId) ? ', once this turn ends' : ''}.` });
     if (!this.isRunning(ticketId)) this.next(ticketId);
     this.broadcastTicket(ticketId);
@@ -2005,6 +2008,8 @@ export class Runner {
     const f = this.store.getSetting<FreshState>(freshKey(ticketId));
     // After a network outage, its resume (holding any queued messages) goes first: a step now would fail too and replace that wait.
     if (!f || f.summary || this.netWait(ticketId)) return null;
+    // A message queued for a fresh start Citadel asked for by itself goes first; its turn's end hands off (#423).
+    if (f.auto && !f.compact && this.queued(ticketId)) return null;
     return f.compact ? { author: 'System', text: COMPACT_COMMAND, images: [], fresh: 'compact' } : { author: 'System', text: handoffPrompt(f.why), images: [], fresh: 'handoff' };
   }
 
@@ -2048,9 +2053,22 @@ export class Runner {
         const size = this.store.getSetting<number>(contextKey(t.id));
         const ended = this.store.lastTurnEnd(t.id);
         if (!size || size <= FRESH_CONTEXT_TOKENS || !ended || now - ended < FRESH_IDLE_MS) continue;
-        this.requestFresh(t.id, `idle ${Math.round((now - ended) / 60_000)} minutes with ${Math.round(size / 1000)}k tokens of context`);
+        this.requestFresh(t.id, `idle ${Math.round((now - ended) / 60_000)} minutes with ${Math.round(size / 1000)}k tokens of context`, true);
       }
     }
+  }
+
+  /**
+   * A Taskmaster whose turn ended past FRESH_CONTEXT_TOKENS starts fresh at once (#423), not only once idle.
+   * Not while messages wait (the last of their turns hands off) or on a usage-limit or network wait, and
+   * never after a fresh-start step's own turn: one that leaves it big waits for the next real turn.
+   */
+  private freshAtTurnEnd(ticketId: number, turn: TurnState) {
+    if (turn.fresh || this.queued(ticketId) || this.limitWait(ticketId) || this.netWait(ticketId)) return;
+    const t = this.store.getTicket(ticketId);
+    const size = this.store.getSetting<number>(contextKey(ticketId));
+    if (t?.kind !== 'coordinator' || !t.session_id || !size || size <= FRESH_CONTEXT_TOKENS) return;
+    this.requestFresh(ticketId, `${Math.round(size / 1000)}k tokens of context at the end of a turn`, true);
   }
 
   private next(ticketId: number) {
@@ -2069,7 +2087,8 @@ export class Runner {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project) return;
-      // A Taskmaster's fresh-start step runs first and alone; the queue waits for the fresh session.
+      // A Taskmaster's fresh-start step runs first and alone; the queue waits for the fresh session
+      // (but goes before a handoff Citadel asked for by itself: freshStep).
       const fresh = this.freshStep(ticketId);
       if (fresh) {
         const ended = this.startTurn(project, ticket, [fresh], this.turnPerson(ticket, project, []));
@@ -2253,6 +2272,7 @@ export class Runner {
       const { permissions, ...rest } = access.settings;
       Object.assign(settings, rest);
       settings.permissions = { ...permissions, deny: [...permissions.deny, ...deny] };
+      settings.autoCompactWindow = TASKMASTER_COMPACT_WINDOW;
     }
     settings.permissions.allow = [...(settings.permissions.allow ?? []), ...Object.keys(servers).map((name) => `mcp__${name}`)];
     // As a file: the Taskmaster's git rules (one per worktree) outgrew Linux's 128 KiB cap on one argument (E2BIG).
@@ -2609,6 +2629,7 @@ export class Runner {
       if (keep) this.emit(ticketId, 'note', { text: `Claude asked to dismiss this minion, but ${keep}, so it stays open.` });
       this.setStatus(ticketId, status);
     }
+    if (turn && status === 'idle' && !stopped && !signal && !closing) this.freshAtTurnEnd(ticketId, turn);
     // A failed or stopped turn leaves it open; a queued message makes deployLive wait for that turn too.
     if (this.deployedMidTurn.delete(ticketId) && status === 'idle' && !stopped && !signal && !closing) this.deployLive(ticketId);
     rmSync(live.dir, { recursive: true, force: true });

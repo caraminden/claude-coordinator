@@ -132,7 +132,7 @@ test("each minion's and Taskmaster's turn gets its own private temp folder in it
 
 test('a Taskmaster turn defaults to opus at high effort, and keeps a choice people made', async () => {
   const t = await turn('coordinator', 'connected');
-  assert.equal(t.settings.autoCompactWindow, 250000);
+  assert.equal(t.settings.autoCompactWindow, 180000, "a Taskmaster's backstop under a minion's 250k (#423)");
   assert.equal(t.flag('--model'), 'opus');
   assert.equal(t.flag('--effort'), 'high');
   const chosen = await turn('coordinator', 'connected', { model: 'sonnet', effort: 'medium' });
@@ -140,7 +140,7 @@ test('a Taskmaster turn defaults to opus at high effort, and keeps a choice peop
   assert.equal(chosen.flag('--effort'), 'medium');
 });
 
-test('every turn of every scheme loads its own pinned copy of the kit, and shares the compact window and output cap', async () => {
+test('every turn of every scheme loads its own pinned copy of the kit, and shares the compact window (a Taskmaster\'s smaller) and output cap', async () => {
   const a = store.createProject(`Kit A ${Math.random()}`, null);
   const b = store.createProject(`Kit B ${Math.random()}`, null);
   store.setProjectSettings(b.id, { plugin_dirs: 'tools/mods/x' });
@@ -152,7 +152,7 @@ test('every turn of every scheme loads its own pinned copy of the kit, and share
     assert.equal(basename(kit), 'kit');
     // The turn's own folder (beside its settings), not the server's copy a restart sweeps, nor the repo.
     assert.equal(dirname(dirname(kit)), dirname(t.flag('--settings')));
-    assert.equal(t.settings.autoCompactWindow, 250000);
+    assert.equal(t.settings.autoCompactWindow, t === turns[2] ? 180000 : 250000);
     assert.equal(t.settings.bashOutputMaxChars, 12000);
   }
 });

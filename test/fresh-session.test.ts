@@ -1,5 +1,5 @@
 // A Taskmaster's fresh Claude session (#406): the handoff turn, the reset, the fresh session's first
-// prompt, the /compact fallback, Stop, and the idle sweep that starts it by itself.
+// prompt, the /compact fallback, Stop, and the idle sweep and turn end (#423) that start it by itself.
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,7 +18,7 @@ after(async () => {
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const calls = join(root, 'calls.jsonl');
 // A stand-in for `claude -p`: logs its argv and prompt, says which session it runs (the one it resumes,
-// else a new one), reports a context size, then ends the turn once the release file says ok or error.
+// else a new one), reports a context size (20k, or the size file's), then ends the turn once the release file says ok or error.
 const fake = join(root, 'claude-fake');
 writeFileSync(
   fake,
@@ -34,7 +34,9 @@ process.stdin.on('data', (d) => {
   if (!input.includes('\\n')) return;
   appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, prompt: JSON.parse(input.split('\\n')[0]).message.content }) + '\\n');
   console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: session }));
-  console.log(JSON.stringify({ type: 'assistant', session_id: session, message: { content: [], usage: { input_tokens: 10, cache_read_input_tokens: 20000 } } }));
+  const sizeFile = ${JSON.stringify(join(root, 'size'))};
+  const size = existsSync(sizeFile) ? Number(readFileSync(sizeFile, 'utf8')) - 10 : 20000;
+  console.log(JSON.stringify({ type: 'assistant', session_id: session, message: { content: [], usage: { input_tokens: 10, cache_read_input_tokens: size } } }));
 });
 const wait = setInterval(() => {
   const release = ${JSON.stringify(join(root, 'release'))};
@@ -227,4 +229,147 @@ test('a fresh start that cannot run a turn gives up once, not every minute', asy
   assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);
   assert.equal(notes(id).filter((t) => t.startsWith('Starting a fresh session')).length, 1);
   assert.ok(notes(id).includes('The fresh start could not run a turn, so the Taskmaster keeps its session.'));
+});
+
+/** Every turn's reported context size from now on (the fake reads it as the turn starts). */
+const contextSize = (tokens: number | null) => (tokens === null ? rmSync(join(root, 'size'), { force: true }) : writeFileSync(join(root, 'size'), String(tokens)));
+// A timeout each, so one that never hands off fails rather than waits.
+const freshNotes = (id: number) => notes(id).filter((t) => t.startsWith('Starting a fresh session'));
+/** The prompts of the turns started since count, once there are want of them. */
+async function prompts(count: number, want: number) {
+  while (callCount() < count + want) await new Promise((r) => setTimeout(r, 20));
+  return readFileSync(calls, 'utf8').split('\n').filter(Boolean).slice(count).map((l) => promptText(JSON.parse(l).prompt));
+}
+
+test('a Taskmaster turn that ends past 150k hands off at once; one at 150k does not (#423)', { timeout: 20_000 }, async () => {
+  try {
+    const small = taskmaster();
+    contextSize(FRESH_CONTEXT_TOKENS);
+    runner.send(small, 'Cara', 'hi');
+    await started(small);
+    await endTurn(small, 'ok');
+    await waitIdle(small);
+    await new Promise((r) => setTimeout(r, 100)); // its save, after which a fresh start would run
+    assert.equal(runner.isRunning(small), false);
+    assert.equal(runner.view(store.getTicket(small)!).fresh_pending, false);
+
+    const big = taskmaster();
+    contextSize(FRESH_CONTEXT_TOKENS + 1);
+    const count = callCount();
+    runner.send(big, 'Cara', 'hi');
+    await started(big);
+    await endTurn(big, 'ok');
+    await started(big);
+    assert.match((await prompts(count, 2))[1], /150k tokens of context at the end of a turn[\s\S]*Call fresh_session/);
+    assert.deepEqual(freshNotes(big), ['Starting a fresh session (150k tokens of context at the end of a turn): the Taskmaster writes its handoff first.']);
+    assert.equal(runner.recordHandoff(big, 'Nothing open.'), null);
+    await endTurn(big, 'ok');
+    await waitIdle(big);
+    assert.equal(store.getTicket(big)!.session_id, null);
+  } finally {
+    contextSize(null);
+  }
+});
+
+test("a minion's turn past 150k never hands off", { timeout: 20_000 }, async () => {
+  const project = store.createProject(`Minion ${++n}`, null);
+  const t = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+  const cwd = join(root, `m${n}`);
+  mkdirSync(cwd, { recursive: true });
+  store.setTicketDir(t.id, cwd, null);
+  try {
+    contextSize(FRESH_CONTEXT_TOKENS + 1);
+    runner.send(t.id, 'Cara', 'hi');
+    await started(t.id);
+    await endTurn(t.id, 'ok');
+    await waitIdle(t.id);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(runner.isRunning(t.id), false);
+    assert.equal(store.getSetting(`fresh:${t.id}`), null);
+  } finally {
+    contextSize(null);
+  }
+});
+
+test('messages queued during a big turn run first, and the last of their turns hands off', { timeout: 20_000 }, async () => {
+  const id = taskmaster();
+  try {
+    contextSize(FRESH_CONTEXT_TOKENS + 1);
+    const count = callCount();
+    runner.send(id, 'Cara', 'first');
+    await started(id);
+    runner.send(id, 'Josh', 'waiting');
+    assert.equal(runner.queued(id), 1);
+    await endTurn(id, 'ok');
+    await started(id);
+    assert.match((await prompts(count, 2))[1], /\[Josh\]: waiting/);
+    assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);
+    await endTurn(id, 'ok');
+    await started(id);
+    assert.match((await prompts(count, 3))[2], /end of a turn[\s\S]*Call fresh_session/);
+    // Let it run out: no handoff, then the compaction.
+    await endTurn(id, 'ok');
+    await started(id);
+    await endTurn(id, 'ok');
+    await waitIdle(id);
+  } finally {
+    contextSize(null);
+  }
+});
+
+test('a message that arrives once a fresh start Citadel asked for is pending still goes first', { timeout: 20_000 }, async () => {
+  const id = taskmaster();
+  const count = callCount();
+  runner.send(id, 'Cara', 'first');
+  await started(id);
+  // As the idle sweep or a turn's end asks: the message queued meanwhile isn't held behind the handoff.
+  assert.equal(runner.requestFresh(id, 'test', true), null);
+  runner.send(id, 'Josh', 'waiting');
+  await endTurn(id, 'ok');
+  await started(id);
+  assert.match((await prompts(count, 2))[1], /\[Josh\]: waiting/);
+  await endTurn(id, 'ok');
+  await started(id);
+  assert.match((await prompts(count, 3))[2], /Call fresh_session/);
+  assert.equal(runner.recordHandoff(id, 'Nothing open.'), null);
+  await endTurn(id, 'ok');
+  await waitIdle(id);
+  assert.equal(store.getTicket(id)!.session_id, null);
+});
+
+test('a handoff and compaction that leave it big do not loop; the next real turn hands off again', { timeout: 20_000 }, async () => {
+  const id = taskmaster();
+  try {
+    contextSize(FRESH_CONTEXT_TOKENS + 1);
+    const count = callCount();
+    runner.send(id, 'Cara', 'hi');
+    await started(id);
+    await endTurn(id, 'ok');
+    // The handoff turn writes no handoff, so the compaction; both still report a big context.
+    await started(id);
+    await endTurn(id, 'ok');
+    await started(id);
+    await endTurn(id, 'ok');
+    await waitIdle(id);
+    await new Promise((r) => setTimeout(r, 150)); // its save, after which another fresh start would run
+    assert.equal(runner.isRunning(id), false);
+    assert.equal(callCount(), count + 3, 'the turn, the handoff and the compaction, and nothing after');
+    assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);
+    assert.equal(freshNotes(id).length, 1);
+    // The idle check doesn't ask again either: the compaction left its size unknown.
+    runner.freshSweep(Date.now() + FRESH_IDLE_MS);
+    assert.equal(runner.view(store.getTicket(id)!).fresh_pending, false);
+    // A real turn that still ends big hands off again.
+    runner.send(id, 'Cara', 'more');
+    await started(id);
+    await endTurn(id, 'ok');
+    await started(id);
+    assert.equal(freshNotes(id).length, 2);
+    await endTurn(id, 'ok');
+    await started(id);
+    await endTurn(id, 'ok');
+    await waitIdle(id);
+  } finally {
+    contextSize(null);
+  }
 });

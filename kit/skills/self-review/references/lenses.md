@@ -72,7 +72,7 @@ nothing? Write `No findings.` Never invent one to fill the list.
 | Access and secrets | a file Project facts lists as auth or access control, or code that reads a secret or decides who may do what |
 | Smells | a new module, or over about 100 new lines of logic |
 | Agent instructions | text an agent reads as instructions: the Citadel kit, `CLAUDE.md`, `AGENTS.md`, `.claude/`, or a prompt, guide or tool description Project facts lists under "Agent instructions" |
-| Check claims | a check added or changed: a test, an eval, a lint or audit script, a grep or count whose result someone acts on |
+| Check claims | a check added or changed: anything that reports pass or fail, a problem list or a count (a test, an eval, a lint, audit or check script, a grep), or a Project facts check command |
 | UI findings, in `<kit>/skills/self-review/SKILL.md` | a file in the front end, as Project facts names it |
 
 #### Error handling
@@ -178,6 +178,9 @@ fix:
   passes. It should report what it scanned, or fail on zero.
 - **Exit code:** a check that prints a problem and still exits 0 is a check no test run, CI or
   land script will ever stop on.
+
+The audit line for this lens names the run: `Check claims: ran <command>: it says <its result>;
+the data has <your count>`, or why it wasn't run.
 
 ## Part 2: for the minion
 

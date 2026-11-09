@@ -170,6 +170,8 @@ $('login').addEventListener('submit', async function (ev) {
   }
 });
 
+// Its own worker (scope /backup), so a broken worker of the app's never handles this page again in this browser.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/backup/sw.js', { scope: '/backup' }).catch(function () {});
 document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
 poll();
 </script>

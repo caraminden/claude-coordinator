@@ -14,17 +14,28 @@ const PAGE_HEADERS = {
   'Content-Type': 'text/html; charset=utf-8',
   'Cache-Control': 'no-store',
   // Its own policy: the app's (SECURITY_HEADERS) blocks the page's inline script and style.
-  'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
 };
+// shortcut: a poll takes the newest 200 lines after its cursor, so more than that between two polls skips the oldest; page through if that ever matters.
 const LINES = 200;
+
+// The backup page's own service worker, frozen too. Scoped to /backup, it outranks the app's worker (scope /) for
+// every /backup request once the page has loaded once, and it has no fetch handler, so they all go to the network.
+export const BACKUP_WORKER = `// Citadel's backup chat worker (#410, src/backup.ts): frozen; no fetch handler on purpose.
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+`;
 
 export const isBackupPath = (path: string) => path === '/backup' || path.startsWith('/backup/');
 
 /** One chat line as plain text: who said it and what, with no markdown or cards. */
 export function chatLine(e: EventRow) {
-  const data = JSON.parse(e.data);
+  let data: any = {};
+  try {
+    data = JSON.parse(e.data);
+  } catch {} // one bad row must not stop the whole chat loading
   const base = { id: e.id, kind: e.kind, at: e.created_at };
   if (e.kind === 'user_message') return { ...base, author: String(data.author ?? ''), text: String(data.text ?? '') };
   if (e.kind === 'claude') {
@@ -43,6 +54,10 @@ export async function serveBackup(app: { store: Store; runner: Runner; auth: Aut
     const body = await readFile(BACKUP_PAGE);
     res.writeHead(200, { ...PAGE_HEADERS, 'Content-Length': body.length });
     return void res.end(method === 'HEAD' ? undefined : body);
+  }
+  if (url.pathname === '/backup/sw.js' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/backup', 'X-Content-Type-Options': 'nosniff' });
+    return void res.end(BACKUP_WORKER);
   }
   const session = auth.session(req);
   if (!session || session.agent !== undefined) throw new HttpError(401, 'Not logged in');
@@ -70,6 +85,7 @@ export async function serveBackup(app: { store: Store; runner: Runner; auth: Aut
     if (text.length > 100_000) throw new HttpError(413, 'That message is too long');
     // As the main chat sends a person's typed message: it steers a running turn, and lifts the loop guard.
     runner.send(taskmaster.id, session.name, text, [], { typed: true }, true);
+    runner.personWrote(taskmaster.id);
     for (const t of store.listTickets(projectId)) runner.continueLoop(t.id, session.name);
     return json(res, 202, { running: runner.isRunning(taskmaster.id) });
   }

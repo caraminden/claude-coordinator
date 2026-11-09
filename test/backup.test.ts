@@ -6,14 +6,14 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { BACKUP_PAGE, chatLine } from '../src/backup.ts';
+import { BACKUP_PAGE, BACKUP_WORKER, chatLine } from '../src/backup.ts';
 import { Store } from '../src/db.ts';
 import { bootServer, REPO } from './helpers.ts';
 
 const page = readFileSync(BACKUP_PAGE, 'utf8');
 
 // Bump this only for a fix to the backup page itself, never as part of a restyle or refactor of the app.
-const FROZEN_SHA256 = '8fa4bd67193261654f57b2650d278aedcabbe8953356ca49b7f30132e5cfb990';
+const FROZEN_SHA256 = '808196cfee5dc645efaeecffc79aeba5f33ddd7bbaa2927a9a3722edc309d61c';
 
 test('src/backup.html is frozen: its hash is pinned', () => {
   const hash = createHash('sha256').update(readFileSync(BACKUP_PAGE)).digest('hex');
@@ -45,6 +45,14 @@ test("the app's service worker leaves /backup to the network", () => {
   assert.equal(answered('https://citadel.example/c/'), true, 'the check itself still sees app page loads');
 });
 
+test("/backup has its own worker, which outranks the app's for /backup and lets every request through", () => {
+  // The page registers it with the narrower scope, which wins over the app's worker (scope /) for /backup.
+  assert.match(page, /navigator\.serviceWorker\.register\('\/backup\/sw\.js', \{ scope: '\/backup' \}\)/);
+  const listeners: Record<string, unknown> = {};
+  new Function('self', BACKUP_WORKER)({ addEventListener: (type: string, fn: unknown) => (listeners[type] = fn) });
+  assert.deepEqual(Object.keys(listeners).sort(), ['activate', 'install'], 'no fetch handler: nothing to break');
+});
+
 test('chat lines: messages, notes, errors and reply text only, as plain text', () => {
   const root = mkdtempSync(join(tmpdir(), 'backup-'));
   after(() => rmSync(root, { recursive: true, force: true }));
@@ -70,6 +78,8 @@ test('chat lines: messages, notes, errors and reply text only, as plain text', (
   // The newest `limit`, oldest first; and only after the cursor.
   assert.deepEqual(store.chatTextEvents(t.id, 0, 2).map((e) => e.id), [ids[4], ids[5]]);
   assert.deepEqual(store.chatTextEvents(t.id, ids[3], 10).map((e) => e.id), [ids[4], ids[5]]);
+  // A row that isn't JSON still makes a line rather than failing the whole read.
+  assert.equal(chatLine({ id: 9, ticket_id: t.id, kind: 'note', data: '{oops', created_at: 0 }).text, '');
 });
 
 test('/backup serves the page and sends to and reads from the Citadel scheme (2) Taskmaster', async () => {
@@ -85,9 +95,14 @@ test('/backup serves the page and sends to and reads from the Citadel scheme (2)
     const res = await fetch(srv.base + path);
     assert.equal(res.status, 200);
     assert.match(res.headers.get('content-type')!, /text\/html/);
-    assert.match(res.headers.get('content-security-policy')!, /script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'/);
+    assert.match(res.headers.get('content-security-policy')!, /script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; worker-src 'self'/);
     assert.equal(await res.text(), page);
   }
+  const worker = await fetch(`${srv.base}/backup/sw.js`);
+  assert.equal(worker.status, 200);
+  assert.match(worker.headers.get('content-type')!, /javascript/);
+  assert.equal(worker.headers.get('service-worker-allowed'), '/backup');
+  assert.equal(await worker.text(), BACKUP_WORKER);
   // Its calls need a person signed in.
   assert.equal((await fetch(`${srv.base}/backup/messages`)).status, 401);
   assert.equal((await fetch(`${srv.base}/backup/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"text":"hi"}' })).status, 401);

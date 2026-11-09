@@ -15,6 +15,7 @@ import { tripwireConfig } from '../runner.ts';
 import { runsRepo } from '../wake.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
+import { firstSend, forgetSend, sendIdOf } from '../send-ids.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { ensureCoordinator } from './projects.ts';
@@ -243,14 +244,23 @@ export const ticketRoutes: Route[] = [
       const body = await readJson(req, 45_000_000);
       const attached = (Array.isArray(body.images) && body.images.length > 0) || (Array.isArray(body.files) && body.files.length > 0);
       const text = attached && (typeof body.text !== 'string' || !body.text.trim()) ? '' : str(body.text, 'Message', 100_000);
-      const files = await messageFiles(app, ticket, body.files);
-      // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
-      if (caller && ticket.kind !== 'coordinator') {
-        return json(res, 202, { ...ticketView(app, id), held: runner.relay(id, id, session.name, text) });
+      // A retry of a message already taken (its reply lost on the way) is answered, not sent again (send-ids.ts).
+      const sendId = caller ? undefined : sendIdOf(body.sendId);
+      if (!firstSend(id, sendId)) return json(res, 202, ticketView(app, id));
+      try {
+        const files = await messageFiles(app, ticket, body.files);
+        // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
+        if (caller && ticket.kind !== 'coordinator') {
+          return json(res, 202, { ...ticketView(app, id), held: runner.relay(id, id, session.name, text) });
+        }
+        // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
+        // Only here is a message a person's own typed words, the one kind that can be a go to merge (#201).
+        // Its sendId goes on the message too, so the chat swaps in the server's copy for that exact message.
+        runner.send(id, session.name, text, await saveImages(app, ticket, body.images), caller ? {} : { typed: true, ...(sendId ? { sendId } : {}) }, !caller && body.after !== true, files);
+      } catch (err) {
+        forgetSend(id, sendId);
+        throw err;
       }
-      // Mid-turn, a person's message steers the running turn unless they chose "Send after this turn".
-      // Only here is a message a person's own typed words, the one kind that can be a go to merge (#201).
-      runner.send(id, session.name, text, await saveImages(app, ticket, body.images), caller ? {} : { typed: true }, !caller && body.after !== true, files);
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },

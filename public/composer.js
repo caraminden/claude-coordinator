@@ -53,6 +53,42 @@ export function composerPlaceholder(ticket) {
   return ask + keys;
 }
 
+// ---------- messages on their way ----------
+
+// Each chat's messages on their way or not sent, oldest first, as { el, text, sendId, saved, state, retry }.
+// The chat shows them below its history (thread.js chatView), so they outlive redraws and switching chats.
+const outboxes = new Map();
+export function outbox(chatId) {
+  let box = outboxes.get(chatId);
+  if (!box) outboxes.set(chatId, (box = []));
+  return box;
+}
+const onTheWay = new Map(); // chatId → sends started and not yet answered, for "Claude is thinking…"
+const chatOpen = (chatId) => view?.kind === 'project' && view.id === chatId;
+
+/** Mark a message that didn't reach the server: "not sent", with Retry and a ✎ to take it back into the box. */
+function notSent(chatId, entry) {
+  entry.state = 'failed';
+  const { el } = entry;
+  el.classList.replace('pending', 'not-sent');
+  el.querySelector('.who')?.append(h('span', { class: 'msg-tag unsent-tag' }, 'not sent',
+    h('button', { type: 'button', class: 'take-back', title: 'Send it again', 'aria-label': 'Send it again', onclick: () => entry.retry() }, '↻'),
+    h('button', { type: 'button', class: 'take-back', title: 'Take back to edit', 'aria-label': 'Take back to edit', onclick: () => {
+      if (entry.state !== 'failed') return;
+      entry.state = 'taken back';
+      setSending(sending - 1);
+      el.remove();
+      const box = outbox(chatId);
+      if (box.includes(entry)) box.splice(box.indexOf(entry), 1);
+      const form = chatOpen(chatId) && document.querySelector('.composer');
+      if (form?.editBack) return form.editBack(entry.text, entry.saved);
+      // Moved to another chat meanwhile: the text waits in this chat's draft, the attachments in its box.
+      const draft = loadDraft(`cc-draft:${chatId}`)?.trim();
+      saveDraft(`cc-draft:${chatId}`, draft ? `${entry.text}\n${draft}` : entry.text);
+      chatAttachments(chatId).restore(entry.saved);
+    } }, '✎')));
+}
+
 /** The message box under a chat: text, pasted images, model and effort, and Send. */
 export function composer(chatId, ticket) {
   const attachments = chatAttachments(chatId);
@@ -67,14 +103,11 @@ export function composer(chatId, ticket) {
       if (attachments.uploading) return alertNote('Still uploading a file; send once it shows its size.'), false;
       return !!text || attachments.items.length > 0;
     },
+    // Returns at once, so Send never waits (#392): a failed message stays in the chat with Retry and Edit, not back in the box.
     send: (text) => {
       const sent = attachments.items.slice();
       attachments.remove(sent);
-      return send(text, sent, after).catch((ex) => {
-        // Not sent: the core puts the text back; the attachments come back here.
-        attachments.restore([...sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data })), ...sent.filter((i) => i.upload).map(({ upload }) => ({ upload }))]);
-        throw ex;
-      });
+      send(text, sent, after);
     },
     onError: (ex) => alertNote(ex.message),
   });
@@ -144,46 +177,78 @@ export function composer(chatId, ticket) {
     e.preventDefault();
     attachments.add(files);
   });
-  /** Send a message, showing it straight away; on failure it comes back out of the chat and the promise rejects. */
-  const send = async (text, sent = [], queue = false) => {
-    sendBtn.disabled = moreBtn.disabled = true;
-    setSending(sending + 1);
+  /**
+   * Send a message, showing it straight away. Send never waits: a chat's messages go one after another in
+   * the order sent (optimistic's key), each tagged with a sendId the server takes once, however often it's
+   * retried (src/send-ids.ts). One that fails stays in the chat marked not sent, with Retry and Edit, and
+   * the ones after it still go. The promise settles as optimistic()'s does.
+   */
+  const send = (text, sent = [], queue = false) => {
     const images = sent.filter((i) => i.data).map(({ mediaType, data }) => ({ mediaType, data }));
     const uploads = sent.filter((i) => i.upload).map((i) => i.upload);
     const files = uploads.map(({ name, type }) => ({ name, type }));
-    // Show the message and "Claude is thinking…" straight away; the
-    // server's copy of the message replaces this one when it arrives.
-    const pending = userBubble(me, text, images.map(({ mediaType, data }) => base64Url(mediaType, data)), null, null,
+    // The server's copy of the message replaces this one when it arrives (thread.js, by sendId).
+    const el = userBubble(me, text, images.map(({ mediaType, data }) => base64Url(mediaType, data)), null, null,
       uploads.map((u) => ({ ...u, href: uploadUrl(chatId, u.name) })));
-    pending.classList.add('pending');
-    view.pendingMessages.push({ el: pending, text });
-    document.getElementById('log').append(pending);
-    view.sendingTo = chatId;
-    renderTyping();
-    scrollToBottom();
-    try {
-      const ticket = await api(`api/tickets/${chatId}/messages`, { method: 'POST', body: { text, images, ...(files.length ? { files } : {}), ...(queue ? { after: true } : {}) } });
-      // Show the message now even if the live stream is down; duplicates are skipped by id.
-      if (view?.kind === 'project' && view.id === chatId) {
-        // You just sent something, so follow the reply.
-        scrollToBottom();
-        view.ticket = ticket;
-        renderTicketHead();
-        catchUpEvents().catch(() => {});
-      }
-    } catch (ex) {
-      pending.remove();
-      if (view?.id === chatId) view.pendingMessages = view.pendingMessages.filter((m) => m.el !== pending);
-      throw ex;
-    } finally {
-      if (view?.sendingTo === chatId) {
-        view.sendingTo = null;
-        renderTyping();
-      }
-      sendBtn.disabled = moreBtn.disabled = false;
-      setSending(sending - 1);
-      reloadWhenIdle();
-    }
+    const entry = { el, text, sendId: crypto.randomUUID(), saved: [...images, ...uploads.map((upload) => ({ upload }))], state: 'new' };
+    const body = { text, images, ...(files.length ? { files } : {}), ...(queue ? { after: true } : {}), sendId: entry.sendId };
+    setSending(sending + 1); // until it's in or taken back: a reload now would lose it
+    entry.retry = () => optimistic({
+      key: `send:${chatId}`,
+      label: 'send your message',
+      apply: () => {
+        // A Retry of one sending again already, or taken back to edit, does nothing.
+        if (entry.state !== 'new' && entry.state !== 'failed') throw new Error(`already ${entry.state}`);
+        entry.state = 'sending';
+        el.classList.replace('not-sent', 'pending') || el.classList.add('pending');
+        el.querySelector('.unsent-tag')?.remove();
+        // Last in the chat, as it reaches the server after the ones already on their way.
+        const box = outbox(chatId);
+        if (box.includes(entry)) box.splice(box.indexOf(entry), 1);
+        box.push(entry);
+        onTheWay.set(chatId, (onTheWay.get(chatId) ?? 0) + 1);
+        if (chatOpen(chatId)) {
+          document.getElementById('log')?.append(el);
+          view.sendingTo = chatId;
+          renderTyping();
+          scrollToBottom();
+        }
+      },
+      send: async () => {
+        try {
+          const ticket = await api(`api/tickets/${chatId}/messages`, { method: 'POST', body });
+          if (entry.state === 'sending') {
+            entry.state = 'sent';
+            setSending(sending - 1);
+          }
+          // Show the message now even if the live stream is down; duplicates are skipped by id.
+          if (chatOpen(chatId)) {
+            // You just sent something, so follow the reply.
+            scrollToBottom();
+            view.ticket = ticket;
+            renderTicketHead();
+            catchUpEvents().catch(() => {});
+          }
+          return ticket;
+        } finally {
+          const left = onTheWay.get(chatId) - 1;
+          left ? onTheWay.set(chatId, left) : onTheWay.delete(chatId);
+          if (!left && view?.sendingTo === chatId) {
+            view.sendingTo = null;
+            renderTyping();
+          }
+          reloadWhenIdle();
+        }
+      },
+      undo: () => {
+        if (entry.state !== 'sending') return;
+        if (outbox(chatId).includes(entry)) return notSent(chatId, entry);
+        // The server's copy came back already (thread.js swapped it in): it went, whatever the reply said.
+        entry.state = 'sent';
+        setSending(sending - 1);
+      },
+    });
+    return entry.retry();
   };
   // A one-tap reply (replies.js) sends its text the same way, leaving any draft in the box alone.
   form.sendText = (text) => send(text);

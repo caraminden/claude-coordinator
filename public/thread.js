@@ -1,6 +1,6 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, takeJump, taskmasterLabel, taskmasterName, threadFullName, threadLabel, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
-import { alertNote, composer, composerPlaceholder, loadDraft, renderModelPicker, saveDraft } from './composer.js';
+import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
 import { renderSidebar, rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
@@ -29,7 +29,7 @@ export function chatView(chatId, ticket) {
     turnActions: [], // actions of the current (or last) turn, in order
     typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite', role: 'button', tabindex: '0' }), // below the chat log
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
-    pendingMessages: [], // { el, text } shown on send, replaced by the server's copy
+    pendingMessages: chatId ? outbox(chatId) : [], // messages on their way or not sent (composer.js), replaced by the server's copy
     cards: new Map(), // question card id -> { el, markAnswered }; plan card id -> { el, settle }; approval card id -> { settle }
     heldCards: [], // this turn's question and plan cards, kept below the words that explain them
     branchEl: h('span', { class: 'branch-status', hidden: true }), // PR / branch state, on the newest turn-end line
@@ -107,15 +107,12 @@ export async function mountChat(chatId, ticket, page) {
 function renderHistory() {
   const log = document.getElementById('log');
   const page = view.page;
-  // Held aside while replaying, so an older message of yours can't be taken for one still on its way.
-  const pending = view.pendingMessages;
-  const keep = [...pending.map((m) => m.el), document.getElementById('recap')].filter(Boolean);
+  const recap = document.getElementById('recap');
   Object.assign(view, {
     lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
     actions: new Map(), turnActions: [], cards: new Map(), heldCards: [], gruntStarts: new Map(),
     // The session started on an earlier page, if there is one.
     sawInit: page.more, latestReply: null, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, pendingRequest: [], turnRequest: undefined,
-    pendingMessages: [],
   });
   const earlier = page.more && h('button', { type: 'button', class: 'small secondary', onclick: (e) => showEarlier(e.currentTarget) }, 'Load earlier');
   log.replaceChildren(...(earlier ? [h('div', { class: 'load-earlier' }, earlier)] : []));
@@ -126,10 +123,10 @@ function renderHistory() {
   }
   for (const ev of page.events) appendEvent(ev, false);
   renderCardJump();
-  view.pendingMessages = pending;
   const at = [...log.children].find((el) => Number(el.dataset.at) > view.openedSeenAt);
   at?.before(h('div', { class: 'unread-divider', role: 'separator' }, h('span', {}, 'New')));
-  log.append(...keep);
+  // Messages still on their way or not sent; the replay swapped out any that reached the server meanwhile, by sendId.
+  log.append(...view.pendingMessages.map((m) => m.el), ...(recap ? [recap] : []));
   renderProgress();
 }
 
@@ -770,10 +767,10 @@ export function appendEvent(event, scroll = true) {
   if (event.kind === 'user_message') {
     // Narration after a message goes in a row below it, not back into the one above.
     view.narrationEl = null;
-    if (data.author === me && view.pendingMessages.length) {
-      // Our own message, already shown when it was sent: swap in the server's copy.
-      const i = Math.max(0, view.pendingMessages.findIndex((m) => m.text === (data.text ?? '')));
-      view.pendingMessages.splice(i, 1)[0].el.remove();
+    if (data.author === me && data.sendId) {
+      // Our own message, already shown when it was sent: swap in the server's copy, found by its sendId (#392).
+      const i = view.pendingMessages.findIndex((m) => m.sendId === data.sendId);
+      if (i >= 0) view.pendingMessages.splice(i, 1)[0].el.remove();
     }
     // An answer to a question card or a plan's go shows in the card itself; the chat only gets a
     // line pointing back up when messages below have pushed the card out of the way.
@@ -909,7 +906,8 @@ export function appendEvent(event, scroll = true) {
   // turn's words until someone answers or the turn ends.
   const held = view.heldCards.find((el) => el.isConnected);
   if (held && event.kind === 'claude' && data.type === 'assistant') held.before(...nodes);
-  else log.append(...nodes);
+  // Your messages not in the server's history yet (on their way, or not sent) stay below everything that is.
+  else log.append(...nodes, ...view.pendingMessages.map((m) => m.el));
   if (event.kind === 'question' || event.kind === 'plan') view.heldCards.push(...nodes);
   else if (event.kind === 'user_message' || (event.kind === 'claude' && data.type === 'result')) view.heldCards = [];
   for (const { text, fate } of settle) settleText(text, fate);

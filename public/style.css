@@ -734,6 +734,9 @@ body:has(.split) main { padding-top: calc(1.25rem + env(safe-area-inset-top, 0px
 body:has(.split) .ticket-head { top: max(0px, calc(env(safe-area-inset-top, 0px) + var(--banner-h, 0px) - 1px)); }
 body:has(.split) .update-banner { top: env(safe-area-inset-top, 0px); }
 .msg.user.pending { opacity: 0.7; }
+/* A message that didn't reach the server (composer.js notSent): kept, with ↻ and ✎ in its who-line. */
+.msg.user.not-sent { border-color: var(--error); }
+.msg .who .unsent-tag { color: var(--error); }
 
 /* Files a thread links in its reply: a card, or the image or video itself; both open the file view. */
 .md .file-card { display: inline-flex; align-items: center; gap: 0.6rem; max-width: 100%; margin: 0.25rem 0; padding: 0.45rem 0.7rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); text-decoration: none; vertical-align: middle; }

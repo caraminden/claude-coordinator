@@ -2355,6 +2355,8 @@ export class Runner {
     this.cancelLimitWait(ticket.id);
     // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
     if (ticket.note === NET_NOTE) this.store.updateTicket(ticket.id, { note: null });
+    // A Taskmaster's note is only ever the server's word on how its last turn failed or stopped: a new turn makes it stale (#428).
+    else if (ticket.kind === 'coordinator' && ticket.note) this.store.updateTicket(ticket.id, { note: null });
     // One-tap replies answer the turn that offered them; a new turn makes them stale.
     if (ticket.replies) this.store.updateTicket(ticket.id, { replies: null });
 

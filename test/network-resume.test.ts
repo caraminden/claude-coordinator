@@ -201,6 +201,18 @@ test("a turn that ends well clears the failure note a failed turn left, and only
   pushes.length = 0;
 });
 
+test("a Taskmaster's note only ever says how its last turn failed, so its next turn clears it, however it got there (#428)", async () => {
+  const tm = store.createTicket({ project_id: project.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(tm.id, root, null);
+  // A note left from before the fix, with nothing remembering the server wrote it.
+  store.updateTicket(tm.id, { status: 'idle', note: 'Could not start claude: citadel-claude-2: Error: container …' });
+  const before = turnsRun();
+  writeFileSync(release, 'ok');
+  runner.send(tm.id, 'Cara', 'hi');
+  await until(() => turnsRun() > before && !runner.isRunning(tm.id), 'the turn to run');
+  assert.equal(store.getTicket(tm.id)!.note, null);
+});
+
 test(`it stops retrying after ${MAX_NET_RESUMES} network resumes in a row`, async () => {
   up = true;
   const id = minion();

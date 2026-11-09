@@ -209,6 +209,8 @@
      * Taskmaster), as the person, from a click or key press only. Resolves { sent: true, to: '#N' }.
      */
     send: async (text) => {
+      // A click in a tab never reaches the viewer, so the page checks it here too: a page never sends by itself.
+      if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
       if (!(await ready)) throw new Error(NO_VIEWER);
       const r = await request('send', { text: String(text) });
       // Pages made before #417 (kit v1, hand-rolled ones) then say the text waits in the comment box; it was sent.

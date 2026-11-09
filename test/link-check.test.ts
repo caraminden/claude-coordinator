@@ -110,7 +110,13 @@ test('the hook script prints a block decision, or nothing', () => {
 test('a linked page with its own clipboard or send button is sent back; a kit page passes (#417)', async () => {
   const kit = '<link rel="stylesheet" href="mockkit.css"><script src="mockkit.js"></script><script>mock.picks({ collection: "picks" });</script>';
   writeFileSync(join(mine, 'kit.html'), kit);
+  // The kit's own script sends and copies; that's the one way to.
+  writeFileSync(join(mine, 'mockkit.js'), 'await window.citadel.send(body); document.execCommand("copy")');
   assert.equal(await reply(`[takes](${mine}/kit.html)`), null);
+  // A button of its own in a script beside the page counts.
+  writeFileSync(join(mine, 'answers.js'), 'navigator.clipboard.writeText(t)');
+  writeFileSync(join(mine, 'split.html'), '<script src="answers.js"></script>');
+  assert.equal((await reply(`[takes](${mine}/split.html)`))?.decision, 'block');
   for (const [name, js] of [['clip', 'navigator.clipboard.writeText(t)'], ['exec', "document.execCommand('copy')"], ['send', 'await window.citadel.send(picksText())']]) {
     writeFileSync(join(mine, `${name}.html`), `<button id="send">Send</button><script>${js}</script>`);
     const v = await reply(`[takes](${mine}/${name}.html) and [plan](docs/plan.md)`);

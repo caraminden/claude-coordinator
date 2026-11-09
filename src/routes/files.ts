@@ -502,7 +502,8 @@ export const fileRoutes: Route[] = [
       const { about, text } = commentMessage(to.cwd && abs.startsWith(to.cwd + sep) ? abs.slice(to.cwd.length + 1) : abs, str(body.text, 'Answer', 10_000));
       app.runner.send(to.id, session.name, text, [], { comment: { path: abs, about } });
       app.runner.personWrote(to.id);
-      app.runner.continueLoop(to.id, session.name);
+      // As in the chat: writing to the Taskmaster continues the loop guard for every minion of the scheme.
+      for (const t of to.kind === 'coordinator' ? app.store.listTickets(project.id) : [to]) app.runner.continueLoop(t.id, session.name);
       return json(res, 202, { to: { id: to.id, kind: to.kind, number: to.number, label: to.kind === 'coordinator' ? 'the Taskmaster' : `#${to.number ?? to.id}` } });
     },
   },

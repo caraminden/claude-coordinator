@@ -10,6 +10,7 @@
 //
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
 import { explainCards, explainMisplaced, misplacedCards, unlinkedCards } from './card-links.ts';
@@ -47,13 +48,30 @@ const HAND_ROLLED = /navigator\.clipboard|execCommand\(\s*['"]copy['"]|citadel\.
 const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 
 /** The HTML pages `text` links that hand-roll an answer or copy button, as absolute paths. */
+/** Whether the page, or a local script it loads other than the kit's own mockkit.js, has an answer or copy button of its own. */
+function rolledOwn(file: string): boolean {
+  if (statSync(file).size > MAX_PAGE_BYTES) return false;
+  const html = readFileSync(file, 'utf8');
+  if (HAND_ROLLED.test(html)) return true;
+  for (const [, src] of html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"':?#]+)["']/gi)) {
+    if (basename(src) === 'mockkit.js') continue;
+    try {
+      const js = join(dirname(file), src);
+      if (statSync(js).size <= MAX_PAGE_BYTES && HAND_ROLLED.test(readFileSync(js, 'utf8'))) return true;
+    } catch {
+      // A missing script is the page's own problem.
+    }
+  }
+  return false;
+}
+
 export async function handRolledPages(text: string, cfg: LinkCheckConfig): Promise<string[]> {
   const pages: string[] = [];
   for (const abs of linkedPaths([text.replace(CODE, '')], cfg.cwd)) {
     if (fileType(abs)?.kind !== 'html') continue;
     const found = await resolveFile(abs, cfg.cwd, cfg.roots);
     try {
-      if (found && statSync(found.file).size <= MAX_PAGE_BYTES && HAND_ROLLED.test(readFileSync(found.file, 'utf8'))) pages.push(abs);
+      if (found && rolledOwn(found.file)) pages.push(abs);
     } catch {
       // Unreadable: the broken-link check speaks for it.
     }

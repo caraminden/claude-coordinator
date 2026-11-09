@@ -344,7 +344,8 @@ export const contraptionRoutes: Route[] = [
   {
     // A bug report or feature ask from a contraption's server, as one of its people: files into the home
     // scheme's shared folder, the ask to its Taskmaster, waking it. A data ask (#318) only files: its files
-    // and a sidecar holding its words, with no message and no wake.
+    // and a sidecar holding its words, with no message and no wake. With `minion`, a member's ask goes
+    // straight to that minion instead (#416).
     method: 'POST', path: '/api/contraptions/asks', who: 'contraption',
     async handler({ req, res, app, contraption: c }) {
       // Base64 is 4/3 of the files, plus room for the text.
@@ -353,6 +354,9 @@ export const contraptionRoutes: Route[] = [
       if (!person || !app.contraptions.enabled(c.name, person.id)) throw new HttpError(403, `${c.title} isn't enabled for that person`);
       const kind = oneOf(body.kind, ['bug', 'feature', 'data'], 'Kind') as 'bug' | 'feature' | 'data' | null;
       if (!kind) throw new HttpError(400, 'Kind is required: bug, feature or data');
+      const minion = body.minion ?? null;
+      if (minion !== null && (!Number.isInteger(minion) || minion < 1)) throw new HttpError(400, 'Minion must be a minion number');
+      if (minion !== null && kind === 'data') throw new HttpError(400, 'A data ask goes to no one: send a bug or feature to a minion');
       // A contraption stuck in a loop would wake the Taskmaster on every call, or fill the disk with data.
       const key = `${c.name}:${person.id}${kind === 'data' ? ':data' : ''}`;
       const limit = kind === 'data' ? DATA_ASK_LIMIT : ASK_LIMIT;
@@ -375,6 +379,19 @@ export const contraptionRoutes: Route[] = [
         const record = { contraption: c.name, person: person.login, item, summary, text, files: paths, at };
         const [sidecar] = saveAskFiles(shared, c.name, person.login, [{ name: `${at.replace(/[:.]/g, '-')}-ask.json`, data: Buffer.from(`${JSON.stringify(record, null, 2)}\n`) }]);
         return json(res, 202, { scheme: scheme.name, member, proposal: false, files: paths, sidecar });
+      }
+      // Straight to one minion of the home scheme (#416), with no Taskmaster in the path: members only,
+      // since a non-member's feature ask is only a proposal for the Taskmaster to weigh.
+      if (minion !== null) {
+        if (!member) throw new HttpError(403, `${person.name} isn't a ${scheme.name} member, so can't send to a minion directly: leave out minion to send the ask to the Taskmaster`);
+        const t = app.store.getTicketByNumber(scheme.id, minion);
+        if (!t || t.kind === 'coordinator') throw new HttpError(404, `No minion #${minion} in ${scheme.name}`);
+        if (t.status === 'closed') throw new HttpError(409, `#${minion} in ${scheme.name} is dismissed: a person reopens it first`);
+        askTimes.set(key, [...recent, Date.now()]);
+        const paths = saveAskFiles(shared, c.name, person.login, files);
+        const ask = askMessage(c, scheme, person, member, kind, text!, paths, item);
+        app.runner.send(t.id, ask.author, ask.text, [], { asker: person.id, ask: { kind, contraption: c.title, person: person.name, member, summary, ...(item ? { item } : {}) } });
+        return json(res, 202, { scheme: scheme.name, minion: t.number, member, proposal: false, files: paths });
       }
       const taskmaster = await ensureCoordinator(app, scheme);
       askTimes.set(key, [...recent, Date.now()]);

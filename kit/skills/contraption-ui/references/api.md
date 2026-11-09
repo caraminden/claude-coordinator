@@ -327,11 +327,21 @@ Body `{ "person": 3, "text": "…" }`, the turn's own person (tested).
 | `summary` | One line, at most 200 characters, shown in the Taskmaster's chat under a header with the whole ask behind a toggle. Default: the text's first sentence |
 | `item` | One line, at most 100: what the ask is about (an aura, a list), shown in the header |
 | `files` | Up to 20, each `{ name, data }` with `data` base64; at most 16 MiB decoded in all (413 past it). The whole request body is capped at about 23 MB (16 MiB in base64 plus 1 MB) |
+| `minion` | Optional: a minion number in your home scheme. A `bug` or `feature` ask goes straight to that minion instead of the Taskmaster (below); 400 with `data` or anything but a whole number from 1 |
 
 - **Bug and feature** go into the home scheme Taskmaster's chat, waking it, labelled with your app,
   the person and whether they're a member of that scheme. A non-member's feature ask is a proposal
   only, built once a member says go; their bug reports are worked as usual. Answers `202 { scheme,
   member, proposal, files }`. Your app never sees the Taskmaster's reply.
+- **Straight to a minion** (`minion: N`): the ask goes into minion #N's chat, labelled and shown
+  as above, and wakes it as a person's message does, as that person; if a turn is running it waits
+  for the next one. The Taskmaster isn't told or woken. `kind` stays required and only labels it
+  (bug report or feature ask). Members of the home scheme only (admins count): a non-member gets
+  403, since their feature ask is only a proposal. 404 when the home scheme has no minion #N (a
+  number from another scheme counts as none); 409 when #N is dismissed, which stays dismissed until
+  a person reopens it. A minion parked on `start_after` answers the ask but keeps its brief held.
+  Answers `202 { scheme, minion, member: true, proposal: false, files }`. It shares the bug and
+  feature rate limit, and isn't a go to merge: only words a person types in Citadel are.
 - **Data** only files: no message, no wake. It writes a `<time>-ask.json` beside the files holding
   `{ contraption, person, item, summary, text, files, at }`. It needs at least one of files, text,
   summary or item (400). Answers `202 { scheme, member, proposal: false, files, sidecar }`.
@@ -486,6 +496,8 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-08:** Asks take `minion: N` to go straight to one of your home scheme's minions,
+  members only, with no Taskmaster in the path.
 - **2026-11-08:** Turns' `start` and `end` say which `provider` and `model` ran, and `machines:
   false` leaves the person's machines out of a turn. `ui/optimistic.js`'s `optimistic({ key, apply, send, undo, label })` for clicks
   that show their result at once and roll back with a Retry toast; `toast()` takes `action` and

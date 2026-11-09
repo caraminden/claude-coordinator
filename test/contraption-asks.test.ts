@@ -198,3 +198,67 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   for (let i = 2; i < 60; i++) assert.equal((await ask({ person: Josh.id, kind: 'data', text: `save ${i}` })).status, 202, `save ${i}`);
   assert.equal((await ask({ person: Josh.id, kind: 'data', text: 'one too many' })).status, 429);
 });
+
+test('POST /api/contraptions/asks with minion (#416): straight to that minion, members only, no Taskmaster', { timeout: 60_000 }, async () => {
+  // Its own scheme and contraption, so the rate limit counts from zero.
+  const ToC = store.createProject('Theory of Crafting', null, Cara.id);
+  store.addMember(ToC.id, Rachel.id);
+  const toc = keys.register({ name: 'toc', title: 'ToC', port: 9103, icon: null, home_scheme: ToC.id, open_paths: '[]', default_model: null, turn_cap: null });
+  for (const u of [Josh, Rachel]) store.setContraptionUser(toc.id, u.id, true, Cara.id);
+  const tocKey = readFileSync(join(data, 'contraptions', 'toc', 'contraption.key'), 'utf8');
+  const minion = (title: string, project_id = ToC.id) => store.createTicket({ project_id, title, permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  const acolyte = minion('Acolyte');
+  const gone = minion('Dismissed');
+  store.updateTicket(gone.id, { status: 'closed' });
+  for (let i = 0; i < 5; i++) minion(`Peek ${i}`, Peek.id); // #5 exists in Peek Auras only
+  const srv = await bootServer({ root });
+  after(() => srv.proc.kill());
+  const ask = async (body: object) => {
+    const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tocKey}` }, body: JSON.stringify(body) });
+    return { status: res.status, body: await res.json() };
+  };
+  const said = (id: number) => store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data) as { author: string; text: string; ask?: Record<string, unknown> });
+
+  // Rachel, a member: her brief reaches #1 as her ask, its file in her inbox, and the Taskmaster hears nothing.
+  const brief = { person: Rachel.id, kind: 'feature', minion: acolyte.number, text: 'Brief: rune tooltips.\n\nShow the rune cost.', files: [{ name: 'brief.md', data: b64('# Brief') }] };
+  let r = await ask(brief);
+  assert.equal(r.status, 202, JSON.stringify(r.body));
+  assert.deepEqual(r.body, { scheme: 'Theory of Crafting', minion: 1, member: true, proposal: false, files: ['inbox/toc/rachel/brief.md'] });
+  assert.equal(readFileSync(join(projectSharedDir(data, ToC.id), 'inbox', 'toc', 'rachel', 'brief.md'), 'utf8'), '# Brief');
+  const m = said(acolyte.id).at(-1)!;
+  assert.equal(m.author, 'Contraption ToC, for Rachel, a Theory of Crafting member');
+  assert.match(m.text, /^A feature ask from the ToC contraption \(toc\), sent by Rachel \(rachel\)/);
+  assert.match(m.text, /> Show the rune cost\./);
+  assert.match(m.text, /Files they sent, in this scheme's shared folder: inbox\/toc\/rachel\/brief\.md/);
+  assert.deepEqual(m.ask, { kind: 'feature', contraption: 'ToC', person: 'Rachel', member: true, summary: 'Brief: rune tooltips.' });
+  assert.equal(store.getCoordinator(ToC.id), undefined, 'no Taskmaster made or woken');
+
+  // A non-member is refused, even for a bug; nothing is sent or filed.
+  r = await ask({ ...brief, person: Josh.id, kind: 'bug' });
+  assert.equal(r.status, 403);
+  assert.match(r.body.error, /Josh isn't a Theory of Crafting member/);
+  assert.equal(existsSync(join(projectSharedDir(data, ToC.id), 'inbox', 'toc', 'josh')), false);
+  // A number not in the home scheme (only Peek Auras has #5), or none at all, is a 404.
+  for (const n of [5, 99]) {
+    r = await ask({ ...brief, minion: n, files: [] });
+    assert.equal(r.status, 404, String(n));
+    assert.equal(r.body.error, `No minion #${n} in Theory of Crafting`);
+  }
+  // A dismissed minion is a 409, left closed.
+  r = await ask({ ...brief, minion: gone.number, files: [] });
+  assert.equal(r.status, 409);
+  assert.match(r.body.error, /#2 in Theory of Crafting is dismissed/);
+  assert.equal(store.getTicket(gone.id)!.status, 'closed');
+  assert.equal(said(gone.id).length, 0);
+  // Not a number, or a data ask: 400.
+  for (const bad of ['1', 0, 1.5, -1]) assert.equal((await ask({ ...brief, minion: bad, files: [] })).status, 400, String(bad));
+  assert.equal((await ask({ ...brief, kind: 'data', files: [] })).status, 400);
+
+  // The refusals cost nothing; the bug/feature limit is shared with Taskmaster asks: 10 in 10 minutes in all.
+  for (let i = 0; i < 8; i++) assert.equal((await ask({ ...brief, files: [], text: `again ${i}` })).status, 202, `again ${i}`);
+  assert.equal((await ask({ person: Rachel.id, kind: 'bug', text: 'to the Taskmaster' })).status, 202);
+  r = await ask({ ...brief, files: [], text: 'one too many' });
+  assert.equal(r.status, 429);
+  assert.equal(said(acolyte.id).filter((e) => e.text.includes('one too many')).length, 0);
+  assert.equal(said(acolyte.id).length, 9);
+});

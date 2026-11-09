@@ -110,6 +110,7 @@ exception is Real-hardware ledger: only a native-app scheme has that line.
 | Decisions log (ADRs) | Path and format | bug-fixing, domain-modeling, fresh-eyes, retro, improve-codebase-architecture | first ADR goes in `docs/adr/` |
 | Retros | Retro folder | retro | `docs/retros/` |
 | Bug classes of its own | The stack's recurring bug kinds beyond bug-fixing's (a Godot signal wired twice, a stale save version) | bug-fixing | bug-fixing's classes only |
+| Agent instructions | Prompts, guides and tool descriptions an agent reads beyond the kit, `CLAUDE.md`, `AGENTS.md` and `.claude/` (an app's system prompt, a guides folder) | self-review (Agent instructions lens) | those alone |
 | Docs test | A test that checks the paths docs name, if one exists | retro | skipped |
 | Real-hardware ledger | Native-app schemes only: `docs/unproven.md`, written as below | self-review | no line |
 

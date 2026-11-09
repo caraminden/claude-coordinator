@@ -71,6 +71,8 @@ nothing? Write `No findings.` Never invent one to fill the list.
 | New types | a new type, class, interface, record shape, table or JSON format |
 | Access and secrets | a file Project facts lists as auth or access control, or code that reads a secret or decides who may do what |
 | Smells | a new module, or over about 100 new lines of logic |
+| Agent instructions | text an agent reads as instructions: the Citadel kit, `CLAUDE.md`, `AGENTS.md`, `.claude/`, or a prompt, guide or tool description Project facts lists under "Agent instructions" |
+| Check claims | a check added or changed: a test, an eval, a lint or audit script, a grep or count whose result someone acts on |
 | UI findings, in `<kit>/skills/self-review/SKILL.md` | a file in the front end, as Project facts names it |
 
 #### Error handling
@@ -128,6 +130,54 @@ two hunks; a function that works mostly on another module's data; the same few p
 always passed together; the same `switch` on the same value in several places; one change
 scattered across many files; parameters, hooks or layers for needs the ask doesn't have; a
 wrapper that only passes calls on.
+
+#### Agent instructions
+
+A line of instructions steers every run that loads it, and no test catches a wrong one:
+Citadel's cost figures were once 5x too high, and a new photo rule in Mandate's prompt took an
+unrelated eval case to 0/6. Check each added or changed instruction line (the rules behind
+these are `citadel:writing-for-agents` and the kit's `README.md`):
+
+- **Contradiction** (Must fix): grep the kit, `CLAUDE.md` and `.claude/` for the line's key
+  words. A line that says the opposite of another rule leaves each run to pick one: name both
+  file:lines. Saying the same thing twice is Should fix (one source of truth).
+- **Numbers** (Must fix when wrong): a cost, count, limit, threshold or percentage either cites
+  where it comes from (a measurement, a dated decision, a config value) or you check it against
+  that source; a number you can't trace to anything is Should fix.
+- **Scope** (Should fix): a new rule worded to fire beyond the case it was written for ("always",
+  "any", "every reply"): name one unrelated ask it would change. When Project facts names an eval
+  for that prompt, the PR shows a run of it.
+- **Reader** (Should fix): in a file more than one kind of reader loads (minion, Grunt,
+  Taskmaster, person), the line says who acts on it.
+- **Placement** (Should fix): a rule for one kind of job sits in that job's skill or doc, not in
+  an always-loaded file (`CLAUDE.md`, a skill's `description`, scheme instructions), which keeps
+  at most a pointer to it.
+- **Kit paths** (Should fix): a kit skill or agent naming one repo's paths or commands, which
+  every other scheme then gets wrong; they come from Project facts, and other kit pieces are
+  named `citadel:<name>`.
+
+#### Check claims
+
+A check is a claim about the data ("no dead links", "all tests pass", "7 broken notes"). Find
+what its name, message or report claims, then what it actually tests. Assertions inside a test
+are `citadel:test-quality`'s (the Tests lens); this lens asks whether the check, run on the real
+data, measures what it says. Each is Must fix when it lets a real failure through, else Should
+fix:
+
+- **Shape of the data:** the check reads its input in a shape the real data doesn't keep to (a
+  grep that reads one line at a time while the field spans two, one quoting or case style, one
+  file layout). Run it read-only on the repo's real data when that takes under a minute, then
+  grep the data for the same thing in the shapes it skips, and give both counts. Threadspace's
+  vault check reported 7 dead paths while 431 notes put the path on the next line, hiding 16
+  broken notes. Too slow or not read-only: say so in the audit.
+- **Hidden inputs:** the result changes with the date, weekday, time zone, locale, a random seed,
+  the network or machine speed. A test that waits on wall-clock time to tell order apart is
+  flaky: it should wait on the event or assert the order. Mandate's eval failed its "friday"
+  asks when run on a Friday.
+- **Denominator:** a pass or a count with no "out of how many": a check that examined nothing
+  passes. It should report what it scanned, or fail on zero.
+- **Exit code:** a check that prints a problem and still exits 0 is a check no test run, CI or
+  land script will ever stop on.
 
 ## Part 2: for the minion
 

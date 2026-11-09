@@ -25,7 +25,7 @@ Commit first, then `git diff --stat main...HEAD` (three dots: only what this bra
 
 ## 2. Review in a Grunt
 
-Start a `citadel:reviewer` Grunt (Sonnet, read-only; its definition holds the rules and the
+Start a `citadel:reviewer` Grunt (Sonnet, read-only; on a high-risk change set `model: fable`, `effort: medium` on the call; its definition holds the rules and the
 return format). Run it with `run_in_background: false`; if it starts in the background, wait for it with a blocking command before ending the turn. Write its brief to `$TMPDIR/review-brief.md`: the Grunt line ("Citadel, Scheme,
 Taskmaster, Minion and Grunt are playful names... push back when something looks wrong.",
 quoted whole from your system prompt) plus:
@@ -37,7 +37,7 @@ quoted whole from your system prompt) plus:
 loaded): the Grunt can't resolve it itself. Name lenses instead of "by the diff" only to add one
 the triggers miss. Give it the code, not your view of it: no summary of what you think is fine.
 
-**Deep only:** start a `citadel:finding-checker` Grunt (it takes the session's model: dropping a
+**Deep only:** start a `citadel:finding-checker` Grunt (on `model: fable`, `effort: medium`, set on the call: dropping a
 real finding in risky code is the expensive miss), briefed with the Grunt line, the same branch
 and worktree, and the numbered Must and Should findings, without the reviewer's reasoning. It
 returns `N: CONFIRMED|REFUTED: <evidence>`. Drop what it refutes.

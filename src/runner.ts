@@ -2672,11 +2672,6 @@ export class Runner {
     }
   }
 
-  /**
-   * Say why a turn failed, leading with Claude's own words (its result's error, else its last stderr
-   * lines). A usage limit is a wait, not an error: no push, and it resumes after the reset. An account
-   * problem needs a person: it blocks, never retries, and pushes once for everyone.
-   */
   /** Write a note about a failure, remembered so the next turn that ends well can clear it. */
   private setFailNote(ticketId: number, fields: { note: string; state?: string }) {
     this.store.updateTicket(ticketId, fields);
@@ -2691,6 +2686,11 @@ export class Runner {
     if (this.store.getTicket(ticketId)?.note === note) this.store.updateTicket(ticketId, { note: null });
   }
 
+  /**
+   * Say why a turn failed, leading with Claude's own words (its result's error, else its last stderr
+   * lines). A usage limit is a wait, not an error: no push, and it resumes after the reset. An account
+   * problem needs a person: it blocks, never retries, and pushes once for everyone.
+   */
   private turnFailed(ticketId: number, reason: string | null, stderr: string, code: number | null, limitTries: number, usage = this.usage, codexReset?: number | null, netTries = 0) {
     const exited = code ? `claude exited with code ${code}` : 'claude ended without finishing';
     const why = reason || stderr;

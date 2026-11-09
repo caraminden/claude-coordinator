@@ -29,12 +29,14 @@ refuse() { say "$*"; exit 1; }
 #   - **Numbered things:** files src/db/migrations/NNNN-*.sql; ids docs/unproven.md "\*\*U(\d+)\.";
 #     version addons/*/*.toc "^## Version: (.+)"
 # files: the digits in place of NNNN in a file name; two files with one number clash.
-# ids: what the regex's group matches, line by line, across the glob's files; an id twice clashes.
+# ids: what the regex's group matches, line by line, across the glob's files; an id the branch
+#   makes appear twice clashes (duplicates main already had are left alone).
 # version: the first match in each file; it clashes when the branch and main both changed it since
 #   the branch started. In globs, * and ? stop at '/'. Backticks are ignored.
 # Args: the revisions main is, the branch started from and the branch was before the rebase. Prints
 # one line per clash and exits 1; exits 0 when there are none and 2 when the line doesn't parse.
 numbered_clashes() {
+  # No single quote anywhere in the Perl, comments included: it would end the bash string.
   perl -e '
     use strict; use warnings;
     my ($facts, $main, $fork, $pre) = @ARGV;
@@ -94,17 +96,14 @@ numbered_clashes() {
       my $path_re = glob_re($glob, 0);
       my @matched = grep { $_ =~ $path_re } sort keys %head;
       if ($kind eq "ids") {
-        my (%count, %new);
+        # A clash is an id the branch has more of than main, past one: old duplicates on main are left alone.
+        my (%count, %was, %where);
         for my $f (@matched) {
-          $count{norm($_)}++ for map { /$re/g } split /\n/, git_or_die("show", "HEAD:$f");
-          my $hunk = 0;
-          for (split /\n/, git_or_die("diff", "--no-renames", "-U0", $main, "HEAD", "--", $f)) {
-            $hunk ||= /^@@/; next unless $hunk && s/^\+//;
-            $new{norm($_)} = $f for /$re/g;
-          }
+          for (map { /$re/g } split /\n/, git_or_die("show", "HEAD:$f")) { $count{norm($_)}++; $where{norm($_)} = $f }
+          $was{norm($_)}++ for map { /$re/g } split /\n/, git("show", "$main:$f") // "";
         }
-        push @clashes, "$new{$_} has id $_ twice: this branch adds one and main already has it" . highest(keys %count)
-          for grep { $count{$_} > 1 } sort keys %new;
+        push @clashes, "$where{$_} has id $_ " . ($was{$_} ? "twice: this branch adds one and main already has it" : "$count{$_} times, all from this branch") . highest(keys %count)
+          for grep { $count{$_} > 1 && $count{$_} > ($was{$_} // 0) } sort keys %count;
         next;
       }
       for my $f (@matched) {

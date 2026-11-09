@@ -171,10 +171,13 @@ test('numbered things: a ledger id main already has is refused, even in another 
 
 test('numbered things: new numbers past main\'s, a version only the branch bumps and edits to old entries land', () => {
   const r = numbered();
+  // A duplicate main already had is not this branch's to fix, even when the branch edits that entry.
+  r.commit(r.main, 'docs/ledger.md', ledger('- **U1.** one\n- **U1.** old duplicate\n', '- **U2.** two\n'));
+  git(r.wt, 'rebase', '-q', 'main');
   r.commit(r.main, 'db/migrations/0002-theirs.sql', 'theirs\n');
-  r.commit(r.main, 'docs/ledger.md', ledger('- **U1.** one\n', '- **U2.** two\n- **U3.** theirs\n'));
+  r.commit(r.main, 'docs/ledger.md', ledger('- **U1.** one\n- **U1.** old duplicate\n', '- **U2.** two\n- **U3.** theirs\n'));
   r.commit(r.wt, 'db/migrations/0003-mine.sql', 'mine\n');
-  r.commit(r.wt, 'docs/ledger.md', ledger('- **U1.** one, reworded\n- **U4.** mine\n', '- **U2.** two\n'));
+  r.commit(r.wt, 'docs/ledger.md', ledger('- **U1.** one, reworded\n- **U1.** old duplicate\n- **U4.** mine\n', '- **U2.** two\n'));
   r.commit(r.wt, 'addons/beacon/beacon.toc', '## Title: Beacon\n## Version: 0.2.1\n');
   const res = r.run();
   assert.equal(res.status, 0, res.stderr);

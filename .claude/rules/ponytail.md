@@ -59,3 +59,5 @@ and those disagree, they win.
 strings, cookies, headers) and anything read back from Claude's stream-json output: refuse
 what would crash, hang, or reach a shell, a path or SQL unescaped. Keep those checks when
 moving code.
+
+`rm`, `sed -i` and `>` need a literal path or `"$TMPDIR/..."`; a variable the tripwire can't see is refused.

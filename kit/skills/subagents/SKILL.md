@@ -99,6 +99,8 @@ while it runs. The session trusts the summary and CI; it does not re-run what th
 
 ## Reviewer Grunts and fix loops
 
+A Grunt whose result you need this turn runs with `run_in_background: false`; if started in the background, wait for it with a blocking command before ending the turn.
+
 A reviewer's brief says: don't trust the author's report, read the diff; you don't dispatch
 subagents; look outside the diff only to test a named risk.
 

@@ -26,7 +26,7 @@ Commit first, then `git diff --stat main...HEAD` (three dots: only what this bra
 ## 2. Review in a Grunt
 
 Start a `citadel:reviewer` Grunt (Sonnet, read-only; its definition holds the rules and the
-return format). Write its brief to `$TMPDIR/review-brief.md`: the Grunt line ("Citadel, Scheme,
+return format). Run it with `run_in_background: false`; if it starts in the background, wait for it with a blocking command before ending the turn. Write its brief to `$TMPDIR/review-brief.md`: the Grunt line ("Citadel, Scheme,
 Taskmaster, Minion and Grunt are playful names... push back when something looks wrong.",
 quoted whole from your system prompt) plus:
 

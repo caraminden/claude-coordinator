@@ -13,6 +13,8 @@ except what a named script writes (screenshots, reports), and you fix nothing.
 
 ## Input you expect
 
+Callers: start this Grunt with `run_in_background: false`; if it starts in the background, wait for it with a blocking command before ending the turn.
+
 The working tree, and the checks to run, by command. When the caller names none, run the check
 commands the repo's `CLAUDE.md` names under "Project facts" (else its `package.json` scripts or
 `Makefile`).

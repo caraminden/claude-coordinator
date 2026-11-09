@@ -93,6 +93,9 @@ function servicePanel(c) {
   return h('div', { class: 'contraption-service' }, h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), buttons, deployBtn), notes, status, log, deployLine, deployTodo, deployLog);
 }
 
+// Split so src/icons.ts doesn't take it for Citadel's own icon and append ?v=<hash>.
+const ICON_HINT = '/icon' + '.svg';
+
 /** One contraption: who it's enabled for, its settings, its service and its keys. */
 function card(c, people, replace) {
   const field = (label, name, value, attrs = {}) => h('label', { class: attrs.wide ? 'wide' : '' }, label,
@@ -103,7 +106,7 @@ function card(c, people, replace) {
   const form = h('form', { class: 'machine-add' },
     field('Title', 'title', c.title, { required: true, maxlength: 60 }),
     field('Port', 'port', c.port, { type: 'number', min: 1024, max: 65535, required: true }),
-    field('Icon', 'icon', c.icon, { placeholder: '/icon.svg', title: 'Every contraption has one. Empty: the rail shows its first letter until a deploy fills it from its web manifest.' }),
+    field('Icon', 'icon', c.icon, { placeholder: ICON_HINT, title: 'Every contraption has one. Empty: the rail shows its first letter until a deploy fills it from its web manifest.' }),
     h('label', {}, 'Home scheme', scheme),
     field('Default model', 'default_model', c.default_model, { placeholder: 'haiku' }),
     field('Turns per person per day', 'turn_cap', c.turn_cap, { type: 'number', min: 1, placeholder: 'no cap' }),
@@ -180,7 +183,7 @@ export function contraptionsPage() {
   const name = h('input', { name: 'name', placeholder: 'mandate', required: true, maxlength: 32, pattern: '[a-z0-9]([a-z0-9-]*[a-z0-9])?', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
   const title = h('input', { name: 'title', placeholder: 'Mandate', required: true, maxlength: 60, autocomplete: 'off' });
   const port = h('input', { name: 'port', type: 'number', min: 1024, max: 65535, placeholder: '9101', required: true });
-  const iconIn = h('input', { name: 'icon', placeholder: '/icon.svg', autocomplete: 'off', spellcheck: 'false', title: 'A path on its service, from its base. Empty: the rail shows its first letter until a deploy fills it from its web manifest.' });
+  const iconIn = h('input', { name: 'icon', placeholder: ICON_HINT, autocomplete: 'off', spellcheck: 'false', title: 'A path on its service, from its base. Empty: the rail shows its first letter until a deploy fills it from its web manifest.' });
   const status = h('span', { class: 'muted', role: 'status' });
   const form = h('form', { class: 'machine-add' },
     h('label', {}, 'Name', name), h('label', {}, 'Title', title), h('label', {}, 'Port', port), h('label', {}, 'Icon', iconIn),

@@ -136,6 +136,18 @@ test('a send that throws, or no key, label or undo, still recovers; another toas
   assert.equal(await page.eval('settle().then(() => toastText())'), 'Couldn\'t saveRetry', 'no error, no colon');
 });
 
+test('on Retry, an apply that throws (its item gone) settles that action and the others still retry', { skip }, async () => {
+  const page = await open();
+  await page.eval(`window.out = {}; let first = true;
+    optimistic({ label: 'x', apply: () => { if (!first) throw new Error('gone'); first = false; }, send: () => Promise.reject(new Error('down')) }).catch((e) => (out.x = e.message));
+    act('a').then((v) => (out.a = 'ok ' + v)); null`);
+  await page.eval('no(0), settle()');
+  await click(page, '.cui-toast-action');
+  assert.deepEqual(await page.eval('settle().then(() => reqs.map((r) => r.id))'), ['a', 'a']);
+  await page.eval('ok(1), settle()');
+  assert.deepEqual(await page.eval('out'), { x: 'gone', a: 'ok 1' });
+});
+
 for (const [label, opts] of [['desktop', { width: 900, height: 600 }], ['phone, dark', { width: 390, height: 700, touch: true, dark: true }]] as const) {
   test(`${label}: a toast's action sits beside its text with equal room above and below`, { skip }, async () => {
     const page = await open(opts);

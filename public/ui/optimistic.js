@@ -56,7 +56,14 @@ function fail(attempt) {
       label: 'Retry',
       run: () => {
         retried = true;
-        for (const a of all) run(a.action, a.settle);
+        // One apply() throwing (its item gone in a redraw) settles that one and still retries the rest.
+        for (const a of all) {
+          try {
+            run(a.action, a.settle);
+          } catch (err) {
+            a.settle.no(err);
+          }
+        }
       },
     },
     onHide: () => {

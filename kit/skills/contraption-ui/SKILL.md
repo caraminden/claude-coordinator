@@ -4,6 +4,7 @@ description: >
   Citadel UI: the components, tokens and design rules Citadel serves to every contraption (an app
   under /apps/<name>/). Use for any front-end work in one: a new page, a chat or an agent's
   markdown, a form, a tooltip, a busy or saved status, colours and spacing, the rail or phone layout.
+  Also the contraption API reference for its server: identity header, turns, asks, relay, deploy.
 ---
 
 # Citadel UI in a contraption
@@ -154,6 +155,9 @@ finding (`citadel:self-review`, "UI findings").
 
 ## Read on demand
 
+- Anything between your app and Citadel (the proxy, `X-Citadel-Identity`, the turn API and its
+  events, asks, the relay, `/app-api/read`, `citadel-app.json` and deploys, env vars, limits):
+  [references/api.md](references/api.md), the current spec. Prefer it over any pasted copy.
 - Using a part from the table above: its file in the table's last column, before writing the code.
 - Adding or reviewing an animation or transition: [references/motion.md](references/motion.md).
 - A view that draws names, counts or lists, before its screenshots: [references/worst-case-data.md](references/worst-case-data.md).

@@ -26,7 +26,8 @@ was made. In `mode: informed` you may also read the source files the brief names
 - **For something built from parts made earlier:** each reused part's known flaws and who owns it.
 - **Round 2 and later:** your last round's findings per item. Check each, and raise anything new only
   if it is a blocker.
-- **The last round,** when the brief says so: an item that failed twice also gets two directions.
+- **"The next round is the last",** when the brief says so: each item you fail also gets two
+  directions.
 
 A missing brief: judge what the artifact shows, and say the brief was missing.
 
@@ -78,6 +79,6 @@ there and return 3 lines: the verdicts in one line, the path, one headline.
 - note: <where>: <what would lift it>
 - owner: <reused part>: <its flaw>; <whose it is>
 - last round: <each earlier finding: fixed / not fixed>
-- direction A / B: <a whole other way you would pass>   (last round only)
+- direction A / B: <a whole other way you would pass>   (when the next round is the last)
 - ask <person>: <way A> / <way B>   (only with that verdict)
 ```

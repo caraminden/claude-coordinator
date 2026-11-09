@@ -53,8 +53,8 @@ Read each rubric the Rubrics line names (frontmatter first) and keep those whose
 Start a `citadel:critic` Grunt per batch: `model` and `effort` from the rubric (defaults in the
 format), in the foreground, about 6 items a call, several calls in parallel for a bigger set. Brief:
 
-> Follow `<kit>/agents/critic.md`. Rubric: `<path>`; kit: `<kit>`. Round `<n>` of `<max_rounds>`.
-> Per item: the brief, the artifact paths, the checks' output[, your last findings].
+> Follow `<kit>/agents/critic.md`. Rubric: `<path>`; kit: `<kit>`. Round `<n>` of `<max_rounds>`[; the next round is the last].
+> Per item: the brief, the artifact paths, the checks' output[, the critic's last findings].
 
 With `mode: informed`, name the worktree whose source matches the artifacts: a trial critic read a
 branch older than its diff and failed the item for code that was there all along.
@@ -85,20 +85,22 @@ its second round. A plain blocker on a first fail is yours to fix.
 2. **Brief it:** "Follow `<kit>/agents/professor.md`." with the cause quoted, per item the brief,
    every critic report so far and your line on what changed between them, the latest artifacts and
    checks' output, the source paths that made it, the rubric, its `playbook:` and `<kit>`. At most 3
-   items a call; on the last round, say so.
+   items a call; when the next round is the last, say so.
 3. **Apply fix 1,** remake the artifacts and run the next critic round as usual.
 4. **Playbook:** when the rubric has one, write the entry once the next round is judged: the
    finding's kind, the fix, before and after, the critic's verdict; the person's verdict makes it
    proven or sent back.
 
-## 6. The last round
+## 6. Before the last round
 
-When an item reaches its last round (`max_rounds`, default 3) still failing, tell the critic it is the
-last round: it gives two whole directions it would pass, as does the professor beside its fix. Make
-one, keeping what the person already approved. A patch that failed twice rarely passes a third time.
+A patch that failed twice rarely passes a third time. So when the round you're about to run comes
+right before an item's last (round `max_rounds` - 1, default 2), tell the critic "the next round is
+the last": for each item it fails, it gives two whole directions it would pass, and the professor,
+which that second fail calls, gives two beside its fix. Make the direction that keeps what the person
+already approved, and the last round judges it.
 
-After the last round, the item goes to the person as it is, with its open findings and the two
-directions. A hard item costs one question, not an endless loop.
+An item still failing after its last round goes to the person as the last round judged it, with its
+open findings and the directions it was given. A hard item costs one question, not an endless loop.
 
 ## 7. Cross-family final gate
 

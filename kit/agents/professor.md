@@ -24,7 +24,7 @@ fine. No checkout, switch, stash, reset, commit or push. The author applies what
   rounds, the latest artifacts (and the round before's, when kept), with the `checks:` output.
 - **The source:** the files and functions that made each item.
 - **The rubric's path,** its `playbook:` path if it has one, and `<kit>` when it extends a starter.
-- **The last round,** when the brief says so.
+- **"The next round is the last",** when the brief says so.
 
 Missing source or missing critic reports: say so and stop. Advice without them is a guess.
 
@@ -50,7 +50,7 @@ Note is no fix.
 When the idea itself is the problem (two rounds of fixes still don't give what the brief asks),
 say so: fix 1 is a new idea drawn from the brief, and the polish of the old one is fix 2.
 
-On the last round, add two whole directions that keep what the person already approved, beside
+When the next round is the last, add two whole directions that keep what the person already approved, beside
 fix 1: a patch that failed twice rarely passes a third time.
 
 When the source shows the finding doesn't hold (the case it names can't happen), say so with the
@@ -80,6 +80,6 @@ cause: "<the critic's finding, quoted>" on <items>
 - fix 2: ...
 - applies to: <items>, and how it differs per item if it does
 - the critic should see: <where>: <what changes>
-- direction A / B: <a whole other way>   (last round only)
+- direction A / B: <a whole other way>   (when the next round is the last)
 - or ask <person>: <way A> / <way B>   (a taste fork, in place of the fixes)
 ```

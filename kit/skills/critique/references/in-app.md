@@ -48,8 +48,8 @@ The prompt holds what the item's reader would see and the source, never how the 
 reasoning, no chat, no tool log. The one exception is an excuse: when the item says it couldn't do
 part of the ask, give the evidence for that (the fetch's status and URL) under its own label.
 
-One item a turn, with all its claims. Items that share one source may go up to 6 a turn, each with
-its own verdict. Read the cost off the `end` event's `usage`: Claude Code's own system prompt rides
+One item a turn, with all its claims. Items that share one source may go up to 6 a turn: then the
+reply is a JSON array of section 3's object, one per item, each with the item's id. Read the cost off the `end` event's `usage`: Claude Code's own system prompt rides
 along on every turn, so measure before trusting the report's ~$0.001 an item on Haiku.
 
 ## 3. The verdict, as JSON

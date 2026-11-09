@@ -42,6 +42,11 @@ const all = () => document.querySelectorAll('button');
 document.getElementById('good').onclick = () => { document.getElementById('list').insertAdjacentHTML('beforeend', '<li>new</li>'); fetch('/slow'); };
 document.getElementById('bad').onclick = async () => { all().forEach((b) => (b.disabled = true)); await fetch('/slow'); all().forEach((b) => (b.disabled = false)); };
 </script>`,
+  // A modal dialog (position: fixed, scrolling itself) whose head scrolls away, rebuilt from Peek's before #175.
+  ...Object.fromEntries(['static', 'sticky'].map((pos) => [`/modal-${pos}`, `${STYLE}
+<dialog id="m" style="width:400px;max-height:300px;padding:0"><div style="display:flex;padding:8px;position:${pos};top:0;background:#fff">
+<h2 style="flex:1;margin:0;font-size:15px">Your PC</h2><button class="btn" aria-label="Close" id="x">✕</button></div><div style="height:900px">body</div></dialog>
+<script>document.getElementById('m').showModal()</script>`])),
 };
 
 let server: Server;
@@ -95,4 +100,9 @@ test('--click flags a click that disables the other controls, not one that shows
   assert.ok(bad.some((f: any) => f.check === 'click-froze' && f.disabled?.length === 2), JSON.stringify(bad));
   const good = at(await measure(opts('/clicks', { widths: [1440], click: '#good' })), 1440);
   assert.deepEqual(good.filter((f: any) => f.check.startsWith('click')), []);
+});
+
+test("a modal dialog's ✕ that scrolls away is found, and a pinned one isn't", { skip }, async () => {
+  assert.ok(has(at(await measure(opts('/modal-static', { widths: [1440] })), 1440), 'close-scrolls', '#x'));
+  assert.ok(!has(at(await measure(opts('/modal-sticky', { widths: [1440] })), 1440), 'close-scrolls', '#x'));
 });

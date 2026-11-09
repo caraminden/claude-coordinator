@@ -435,11 +435,11 @@ function inPage(opts) {
     if (!btn) continue;
     for (let e = btn.parentElement; e; e = e === dlg ? null : e.parentElement) {
       const s = css(e);
-      if (s.position === 'sticky' || s.position === 'fixed') break;
       if (/(auto|scroll)/.test(s.overflowY) && e.scrollHeight > e.clientHeight + 1) {
         out.push({ check: 'close-scrolls', selector: sel(btn), scroller: sel(e), text: snip(btn.getAttribute('aria-label') || btn.textContent), scroll_height: e.scrollHeight, client_height: e.clientHeight, why: 'the close button sits inside the part that scrolls, so it scrolls out of view' });
         break;
       }
+      if (s.position === 'sticky' || s.position === 'fixed') break; // pinned below the scroller (a modal dialog is fixed and may scroll itself)
     }
   }
 

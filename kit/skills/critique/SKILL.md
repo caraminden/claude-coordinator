@@ -57,9 +57,11 @@ Start a `citadel:critic` Grunt per batch: `model` and `effort` from the rubric (
 format), in the foreground, about 6 items a call, several calls in parallel for a bigger set. Brief:
 
 > Follow `<kit>/agents/critic.md`. Rubric: `<path>`; kit: `<kit>`. Round `<n>` of `<max_rounds>`[; the next round is the last].
+> [Max findings: `<max_findings>` an item.]
 > Per item: the brief, the artifact paths, the checks' output[, the critic's last findings].
 
-With `mode: informed`, name the worktree whose source matches the artifacts: a trial critic read a
+Add the "Max findings" line only when the rubric sets `max_findings` (the critic defaults to 3). With
+`mode: informed`, name the worktree whose source matches the artifacts: a trial critic read a
 branch older than its diff and failed the item for code that was there all along.
 
 A fresh critic every round. It gets its own last findings, never the professor's advice or your

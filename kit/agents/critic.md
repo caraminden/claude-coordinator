@@ -26,6 +26,7 @@ was made. In `mode: informed` you may also read the source files the brief names
 - **For something built from parts made earlier:** each reused part's known flaws and who owns it.
 - **Round 2 and later:** your last round's findings per item. Check each, and raise anything new only
   if it is a blocker.
+- **The findings cap,** `max findings: <n>` per item, from the rubric's `max_findings`; absent, 3.
 - **"The next round is the last",** when the brief says so: each item you fail also gets two
   directions.
 
@@ -52,8 +53,9 @@ means what theirs would.
   "Could be more polished" is not a finding.
 - Each finding says where, what is wrong and what to change, in words the author can act on
   ("phone 390: the send button's label sits 2 px off centre; equal top and bottom padding").
-- Three findings that matter beat ten: at most three an item (besides `saw:` and `last round:`),
-  blockers first. Anything else goes in no line at all.
+- Findings that matter beat many: at most the brief's `max findings` an item (3 when the brief names
+  none; besides `saw:` and `last round:`), ranked most important first, blockers first. Anything
+  else goes in no line at all.
 - A flaw inside a reused part is `owner:`, never a blocker for this item.
 - Judge the work, not the effort. An item that is fine is a pass.
 - Speak to the caller only: no cards, replies or messages to people.

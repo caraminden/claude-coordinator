@@ -5,22 +5,19 @@ kit's tokens and parts; nothing is a new library.
 
 ## 1. The accent
 
-One line in your `app.css`, after theme.css loads, on `:root` (not a container, so the focus ring,
+Your app's own colour (from its icon, say), as a light and a dark value: the one hex pair an app
+owns. In your `app.css`, after theme.css loads, on `:root` (not a container, so the focus ring,
 `cui-primary`, `cui-choice` and switches all follow it):
-
-```css
-:root { --citadel-accent: var(--citadel-violet); }   /* or var(--citadel-info) */
-```
-
-A tone token switches with dark mode by itself and already passes against `--citadel-on-accent`.
-Never `ok`, `warn` or `danger`: those mean a status, and a green Save button reads as "done".
-
-Your own colour (from your icon, say) is a light and a dark value, the one hex pair an app owns:
 
 ```css
 :root { --citadel-accent: #0f766e; }
 @media (prefers-color-scheme: dark) { :root { --citadel-accent: #2dd4bf; } }
 ```
+
+Pick a hue none of the tones use (teal, pink, indigo), so a primary button never reads as a status.
+Short of one, `var(--citadel-violet)` works and switches with dark mode by itself; then violet is
+the accent and stays off your chips. Never `ok`, `warn`, `danger` or `info`: those mean a status,
+and a green Save button reads as "done", a blue one as "running".
 
 Check both against `--citadel-on-accent` (white in light, `#1d1c1a` in dark) at 4.5:1 or better,
 and against `--citadel-surface` at 3:1 (a link, a ring). Dark wants the lighter shade.

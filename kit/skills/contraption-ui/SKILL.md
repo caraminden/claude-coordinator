@@ -91,9 +91,10 @@ UIs". A new page or view meets all eight before its first screenshot; a view tha
 needs 1, 7 and 8, as the chat's parts carry their own look. The code for each:
 [references/first-look.md](references/first-look.md).
 
-1. **Its own accent.** One `--citadel-accent` on `:root` in your CSS: a tone (`violet`, `info`) or
-   your own light and dark pair. Never `ok`, `warn` or `danger`, and not Citadel's orange: the app
-   should look like itself. Primary buttons, the current tab, links and what's selected wear it.
+1. **Its own accent.** One `--citadel-accent` on `:root` in your CSS: your own light and dark pair
+   in a hue no tone uses, or `violet` kept off your chips. Never a status tone (`ok`, `warn`,
+   `danger`, `info`), and not Citadel's orange: the app should look like itself. Primary buttons,
+   the current tab, links and what's selected wear it.
 2. **Cards group the content.** `bg` is the page; each list, form, pane or panel sits on a
    `surface` card with the border and `radius`, and the top bar is `surface`. No text sits loose on `bg`.
 3. **At least three levels of type** on any view with content: an `h1` title, a heading per card,

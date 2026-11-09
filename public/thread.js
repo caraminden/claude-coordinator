@@ -1,5 +1,5 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, takeJump, taskmasterLabel, taskmasterName, threadFullName, threadLabel, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
+import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, statusLabel, takeJump, taskmasterLabel, taskmasterName, threadFullName, threadLabel, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
 import { renderSidebar, rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
@@ -770,7 +770,13 @@ export function appendEvent(event, scroll = true) {
     if (data.author === me && data.sendId) {
       // Our own message, already shown when it was sent: swap in the server's copy, found by its sendId (#392).
       const i = view.pendingMessages.findIndex((m) => m.sendId === data.sendId);
-      if (i >= 0) view.pendingMessages.splice(i, 1)[0].el.remove();
+      const m = i >= 0 && view.pendingMessages.splice(i, 1)[0];
+      m?.el.remove();
+      // Marked not sent when its reply was lost, yet it went: nothing left to send, and a Retry now does nothing.
+      if (m?.state === 'failed') {
+        m.state = 'sent';
+        setSending(sending - 1);
+      }
     }
     // An answer to a question card or a plan's go shows in the card itself; the chat only gets a
     // line pointing back up when messages below have pushed the card out of the way.

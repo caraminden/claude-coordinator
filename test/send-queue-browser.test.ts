@@ -78,7 +78,9 @@ const HOLD = `(() => {
   const real = window.fetch;
   window.fetch = (url, opts) => {
     if (!(opts?.method === 'POST' && /\\/messages$/.test(String(url)))) return real(url, opts);
-    return new Promise((ok, no) => held.push({ body: JSON.parse(opts.body), go: () => real(url, opts).then(ok, no), fail: () => no(new TypeError('Failed to fetch')) }));
+    return new Promise((ok, no) => held.push({ body: JSON.parse(opts.body), go: () => real(url, opts).then(ok, no), fail: () => no(new TypeError('Failed to fetch')),
+      // The server takes it but the reply is lost: the failure lands first, the server's copy after.
+      lose: () => { no(new TypeError('Failed to fetch')); real(url, opts); } }));
   };
 })()`;
 
@@ -160,3 +162,23 @@ for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
     assert.deepEqual(await texts(t.id), ['hi', 'one', 'three', 'two']);
   });
 }
+
+test('a message the server took after its send failed is marked sent, and a Retry then adds no copy', { skip }, async () => {
+  const t = await minion('Lost reply');
+  const page = await open(1280, t);
+  await type(page, 'lost');
+  await wait(page, 'the send', 'held.length === 1');
+  await page.eval('held[0].lose()');
+  await until('the server to have it', async () => (await texts(t.id)).length === 2);
+  await wait(page, 'the server\'s copy swapped in', 'document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length === 0');
+  const sending = `import(new URL('core.js', location.href)).then((m) => m.sending)`;
+  assert.equal(await page.eval(sending), 0, 'nothing left sending, so the page can reload when idle');
+  // The failure toast's Retry is still up: it has nothing to send again.
+  await page.eval(`document.querySelector('.cui-toast-action').click()`);
+  await page.eval('new Promise((r) => setTimeout(r, 300))');
+  assert.equal(await page.eval('held.length'), 1, 'not sent again');
+  assert.equal(await page.eval('document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length'), 0, 'no second bubble');
+  assert.equal(await page.eval(`[...document.querySelectorAll('#log .msg.user')].filter((m) => m.textContent.includes('lost')).length`), 1);
+  assert.equal(await page.eval(sending), 0);
+  assert.deepEqual(await texts(t.id), ['hi', 'lost']);
+});

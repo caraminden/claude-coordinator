@@ -309,7 +309,10 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .msg.coord > summary::-webkit-details-marker { display: none; }
 .msg.coord > summary::before { content: '▸'; flex: none; }
 .msg.coord[open] > summary::before { content: '▾'; }
-.msg.coord > summary .who { flex: none; margin: 0; font-size: inherit; }
+.msg.coord > summary .who { flex: 0 1 auto; display: flex; align-items: baseline; min-width: 0; margin: 0; font-size: inherit; }
+/* A long sender ("Peek Auras Taskmaster, for Cara, a Citadel member") gives way, so its time and tags stay in the row. */
+.msg.coord > summary .who > .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.coord > summary .who > :not(.name) { flex: none; }
 .msg.coord > summary .preview { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .msg.coord[open] > summary .preview { display: none; }
 .msg.coord > .msg { border: 0; background: none; padding: 0 0.85rem 0.6rem; }

@@ -971,7 +971,7 @@ function addGruntText(log, id, text, data, event) {
   } else {
     const name = gruntName(view.actions.get(id)?.block.input);
     line = h('details', { class: 'msg coord grunt', 'data-grunt': id, 'data-at': event.created_at },
-      h('summary', {}, stepMark('done'), h('span', { class: 'who' }, `Grunt · ${name}`), h('span', { class: 'preview' }), h('span', { class: 'dur' })),
+      h('summary', {}, stepMark('done'), h('span', { class: 'who' }, h('span', { class: 'name' }, `Grunt · ${name}`)), h('span', { class: 'preview' }), h('span', { class: 'dur' })),
       h('div', { class: 'msg grunt-body' }, body));
     Object.assign(line, { start, name });
   }
@@ -1636,7 +1636,7 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
   if (who && event?.brief) msg.querySelector('.who').textContent = who;
   else if (who) {
     msg.querySelector('.who').remove();
-    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, who), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
+    return h('details', { class: 'msg user coord' }, h('summary', {}, h('span', { class: 'who' }, h('span', { class: 'name' }, who)), h('span', { class: 'preview' }, previewNodes(text, event?.strikes))), msg);
   }
   return msg;
 }

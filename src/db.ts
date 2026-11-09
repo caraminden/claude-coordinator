@@ -1607,9 +1607,14 @@ export class Store {
     return this.openCardsWhere('t.project_id = ?', projectId);
   }
 
+  /** One minion's open cards (openCards), oldest first. */
+  openCardsOf(ticketId: number): EventRow[] {
+    return this.openCardsWhere('e.ticket_id = ?', ticketId);
+  }
+
   /** When the oldest of a minion's open cards (openCards) was posted, or null with none. */
   openCardAt(ticketId: number): number | null {
-    return this.openCardsWhere('e.ticket_id = ?', ticketId)[0]?.created_at ?? null;
+    return this.openCardsOf(ticketId)[0]?.created_at ?? null;
   }
 
   /** The event id of the oldest of a minion's open cards (openCards) with at most `within` events after it, or null. */

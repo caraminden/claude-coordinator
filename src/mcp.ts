@@ -3,6 +3,7 @@
 // Started by claude from the coordinator's --mcp-config; configured by environment.
 import { createInterface } from 'node:readline';
 import { APP_NAME } from './appname.ts';
+import { cardText, type CardLink } from './card-links.ts';
 
 const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
 const TOKEN = process.env.COORDINATOR_TOKEN ?? '';
@@ -112,7 +113,7 @@ const TICKET_ID = { type: 'integer', description: 'Minion number in this scheme,
 const ASK_QUESTION = {
   name: 'ask_question',
   description:
-    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for real decisions with clear options, instead of listing choices in prose. Every question marks the option you would pick with `recommended: true` (exactly one, or any number on a multiSelect question): the card shows it as "(Recommended)", and a question without one is refused. Put it first. For visual choices (art, UI, layouts, animations), make each take as an image, GIF or short video first and give each option its `image`: the card then shows them as a gallery to pick from. After calling it, finish your turn with a short reply and wait: the card shows below your reply (say "the card below", never "above"), and the answers arrive as the next message. A card from an earlier turn that is still open sits above your later replies: name it or say "above", never "below".',
+    'Ask people in this chat 1 to 4 multiple-choice questions, shown as a card they answer with a click (they can also type their own answer). Use it for real decisions with clear options, instead of listing choices in prose. Every question marks the option you would pick with `recommended: true` (exactly one, or any number on a multiSelect question): the card shows it as "(Recommended)", and a question without one is refused. Put it first. For visual choices (art, UI, layouts, animations), make each take as an image, GIF or short video first and give each option its `image`: the card then shows them as a gallery to pick from. After calling it, finish your turn with a short reply and wait: the card shows below your reply (say "the card below", never "above"), and the answers arrive as the next message. A card from an earlier turn that is still open sits above your later replies: name it or say "above", never "below". The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -167,7 +168,7 @@ const SETTLE_QUESTION = {
 const PROPOSE_PLAN = {
   name: 'propose_plan',
   description:
-    'Post a plan in this chat as a card people answer with Approve or Revise, for a run-back before code or any plan that needs a go. Only a person can approve it. After calling it, finish your turn with a short reply and write no code: the card shows below your reply (say "the card below", never "above"), and the go (Approve) or the notes to revise it come as the next message. To revise, call propose_plan again with the whole new plan; the old card shows as superseded. A card from an earlier turn that is still open sits above your later replies: name it or say "above", never "below".',
+    'Post a plan in this chat as a card people answer with Approve or Revise, for a run-back before code or any plan that needs a go. Only a person can approve it. After calling it, finish your turn with a short reply and write no code: the card shows below your reply (say "the card below", never "above"), and the go (Approve) or the notes to revise it come as the next message. To revise, call propose_plan again with the whole new plan; the old card shows as superseded. A card from an earlier turn that is still open sits above your later replies: name it or say "above", never "below". The result gives the card\'s link: make every mention of the card a link to it, as in [the plan card below](#/p/2/t/12?e=345).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -229,7 +230,7 @@ const ARTIFACT_TOOLS = [
 
 const LIST_TICKETS = {
   name: 'list_tickets',
-  description: 'List the minions in this scheme with their status and latest activity.',
+  description: 'List the minions in this scheme with their status and latest activity, and the link to each card waiting on people (link a card wherever you mention it).',
   inputSchema: {
     type: 'object',
     properties: { include_closed: { type: 'boolean', description: 'Include dismissed minions (default false)' } },
@@ -255,7 +256,7 @@ const TOOLS = [
   LIST_TICKETS,
   {
     name: 'read_ticket',
-    description: "Read a minion's details and the most recent messages in its conversation.",
+    description: "Read a minion's details, the link to each of its cards waiting on people (link a card wherever you mention it) and the most recent messages in its conversation.",
     inputSchema: {
       type: 'object',
       properties: { ticket_id: TICKET_ID, last: { type: 'integer', description: 'How many recent entries to return (default 10, max 50)' } },
@@ -823,6 +824,8 @@ function ticketLine(t: any): string {
     `by ${t.created_by}`,
     t.parent ? `from #${t.parent}` : '',
     t.last_activity ? `latest: ${t.last_activity}` : '',
+    // Each waiting card with its link (#400), so a mention of it can link it.
+    ...(t.open_cards ?? []).map((c: CardLink) => `waiting: ${cardText(c)}`),
   ].filter(Boolean).join(' | ');
 }
 
@@ -1196,8 +1199,8 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}${tagNote(args)}`;
     case 'ask_question': {
-      const { id: questionId } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
-      return `The question card (id ${questionId}) is in the chat. End your turn now with a short reply; the answers will come as the next message.`;
+      const { id: questionId, href } = await call('POST', `/api/tickets/${TICKET}/questions`, { questions: args.questions });
+      return `The question card (id ${questionId}) is in the chat${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the card below](${href})` : ''}. End your turn now with a short reply; the answers will come as the next message.`;
     }
     case 'settle_question': {
       const { settled } = await call('POST', `/api/tickets/${TICKET}/settle`, { questionId: args.question_id ?? null });
@@ -1238,9 +1241,10 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!items.length) return 'Nothing in the catalogue.';
       return items.map((c: any) => `${c.kind} ${c.name} (${c.source})${c.in_kit && c.source !== 'kit' ? ' [kit has one]' : ''}: ${c.description || 'no description'}`).join('\n');
     }
-    case 'propose_plan':
-      await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan });
-      return 'The plan card is in the chat. End your turn now with a short reply and write no code; the go or the notes to revise it will come as the next message.';
+    case 'propose_plan': {
+      const { href } = await call('POST', `/api/tickets/${TICKET}/plans`, { summary: args.summary, plan: args.plan });
+      return `The plan card is in the chat${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as the next message.`;
+    }
     case 'set_thread_status':
       if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}${tagNote(args)}`;

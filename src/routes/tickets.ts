@@ -5,6 +5,7 @@ import { isAbsolute, join, sep } from 'node:path';
 import { cleanPluginPicks, lines, mcpMerge, mergeTarget, plainMerge } from '../approvals.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { commentMessage, optionImageProblem } from '../artifacts.ts';
+import { cardHref } from '../card-links.ts';
 import { EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { originRepo } from '../github.ts';
 import { historyPage } from '../history.ts';
@@ -316,7 +317,7 @@ export const ticketRoutes: Route[] = [
       const event = runner.emit(id, 'question', { id: questionId, questions });
       runner.broadcastTicket(id);
       app.notify(id, { kind: 'question', questions, eventId: event.id });
-      return json(res, 201, { id: questionId });
+      return json(res, 201, { id: questionId, href: cardHref(ticket, event.id) });
     },
   },
   {
@@ -408,7 +409,7 @@ export const ticketRoutes: Route[] = [
       const event = runner.emit(id, 'plan', { id: planId, summary, plan, status: 'pending' });
       runner.broadcastTicket(id);
       app.notify(id, { kind: 'plan', summary, eventId: event.id });
-      return json(res, 201, { id: planId });
+      return json(res, 201, { id: planId, href: cardHref(ticket, event.id) });
     },
   },
   {

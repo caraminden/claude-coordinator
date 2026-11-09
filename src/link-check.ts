@@ -3,12 +3,14 @@
 // own linkedPaths and resolveFile (src/artifacts.ts), against the folders the chat serves them from
 // (ticketRoots in routes/files.ts), and sends the reply back once if any link wouldn't open. The
 // same send-back carries the wording check's findings (src/wording.ts): a reserved word used in another sense,
-// and the cross-scheme link check's (src/scheme-refs.ts): a bare #N that likely means another scheme's minion.
+// the cross-scheme link check's (src/scheme-refs.ts): a bare #N that likely means another scheme's minion,
+// and the card link check's (src/card-links.ts): a card waiting on people mentioned without its link.
 //
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
+import { explainCards, unlinkedCards } from './card-links.ts';
 import { explainStrays, readRefs, strayRefs } from './scheme-refs.ts';
 import { CODE, explain, misusedWords } from './wording.ts';
 
@@ -56,7 +58,8 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const misused = misusedWords(input.last_assistant_message);
   const refs = readRefs(cfg.refs);
   const strays = refs ? strayRefs(input.last_assistant_message, refs) : [];
-  if (!broken.length && !misused.length && !strays.length) return null;
+  const cards = refs?.cards ? unlinkedCards(input.last_assistant_message, refs.cards, refs.self ?? null) : [];
+  if (!broken.length && !misused.length && !strays.length && !cards.length) return null;
   if (cfg.nudged) {
     try {
       writeFileSync(cfg.nudged, prompt);
@@ -78,7 +81,8 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
     : '';
   const wording = misused.length ? `${explain(misused)}\n` : '';
   const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';
-  return { decision: 'block', reason: `${SENT_BACK}\n${links}${wording}${scheme}Write the reply again in full.` };
+  const card = cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '';
+  return { decision: 'block', reason: `${SENT_BACK}\n${links}${wording}${scheme}${card}Write the reply again in full.` };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

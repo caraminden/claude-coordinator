@@ -15,6 +15,7 @@ import type { TripwireConfig } from './tripwire.ts';
 import type { TurnGithub } from './github-link.ts';
 import { SENT_BACK } from './link-check.ts';
 import { SCHEME_REFS_MATCHER, type SchemeRefs } from './scheme-refs.ts';
+import { cardHref, cardLabel, type CardLink } from './card-links.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import type { Ship } from './branch.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath } from './sessions.ts';
@@ -153,12 +154,15 @@ export function schemeRefsHooks(refs: string, sent: string, script = SCHEME_REFS
   return { matcher: SCHEME_REFS_MATCHER, hooks: [{ type: 'command', command, timeout: 10 }] };
 }
 
-/** The scheme-refs snapshot for a turn of `project`: its name, the other schemes' names and its minions. */
-export function schemeRefs(project: Project, projects: Project[], tickets: Ticket[]): SchemeRefs {
+/** The scheme-refs snapshot for a turn of `project`: its name, the other schemes' names and its minions, plus its cards waiting on people (card-links.ts). */
+export function schemeRefs(project: Project, projects: Project[], tickets: Ticket[], cards?: { self: number | null; cards: CardLink[] }): SchemeRefs {
   const minions: SchemeRefs['minions'] = {};
   for (const t of tickets) if (t.number != null) minions[t.number] = { title: t.title, closed: t.status === 'closed' };
-  return { scheme: project.name, others: projects.filter((p) => p.id !== project.id).map((p) => p.name), minions };
+  return { scheme: project.name, others: projects.filter((p) => p.id !== project.id).map((p) => p.name), minions, ...cards };
 }
+
+/** The chat event kinds that post or settle a card waiting on people. */
+const CARD_KINDS = new Set(['question', 'plan', 'approval', 'question_result', 'plan_result', 'approval_result']);
 
 /**
  * The parts of this server's environment a turn inherits. Anything else (MACHINES_URL, PORT, HOST,
@@ -690,6 +694,7 @@ function instructionLayers(project: Project, appText: string): string[] {
 const CHAT_FACTS = [
   'The chat keeps only a turn\'s last text whole: short remarks written before more tool calls collapse, and long ones show just their first lines. So make every tool call first, status and bookkeeping calls too, and write the answer last, with nothing after it.',
   'Write minions as #N and pull requests as PR #N, outside backticks: the chat links both to the minion (a PR to the one that owns it). Write another scheme\'s minion as "<scheme name> #N". Never paste GitHub URLs.',
+  'Every mention of a question, plan or approval card in your reply ("the card below", "#394\'s card", "a plan waiting in Delve #12") is a markdown link to that card, wherever it is, as in [the card below](#/p/2/t/394?e=123): it opens that chat at the card. ask_question and propose_plan return your card\'s link; read_ticket and list_tickets show the link beside each card waiting on people; for another scheme\'s card, ask for its link with the message that asks about it. A reply that mentions a waiting card without its link is sent back once.',
 ];
 
 /**
@@ -1135,6 +1140,8 @@ export class Runner {
       parked_for: this.heldFor(ticket.id),
       // When its oldest question or plan card still waiting on a person was posted.
       pending_card_at: ticket.status === 'closed' ? null : this.store.openCardAt(ticket.id),
+      // Its cards waiting on people with the links that open them, for read_ticket and list_tickets (#400).
+      open_cards: this.cardLinks(ticket),
       properties: this.store.props.forTarget('minion', ticket.id),
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
@@ -2011,7 +2018,7 @@ export class Runner {
     // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
     // A file, not an argument: a scheme's minion list outgrows a command line.
     const refsFile = join(dir, 'scheme-refs.json');
-    writeFileSync(refsFile, JSON.stringify(schemeRefs(project, this.store.listProjects(), this.store.listTickets(project.id))));
+    this.writeRefs(refsFile, ticket);
     const linkCheck = ticket.cwd ? linkCheckHooks([ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d), pinned(LINK_CHECK), join(dir, 'link-check-nudged'), refsFile) : {};
     // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
     // title, state and note. The token travels in the environment (which the MCP server
@@ -2741,6 +2748,43 @@ export class Runner {
   emit(ticketId: number, kind: string, data: unknown): EventRow {
     const row = this.store.addEvent(ticketId, kind, data);
     this.broadcast({ type: 'event', event: row });
+    if (CARD_KINDS.has(kind)) this.refreshRefs(ticketId);
     return row;
+  }
+
+  /** A minion's cards waiting on people, oldest first, each with the link that opens it (#400). */
+  cardLinks(ticket: Ticket): CardLink[] {
+    if (ticket.status === 'closed') return [];
+    const minion = ticket.kind === 'coordinator' ? null : ticket.number;
+    const link = (kind: CardLink['kind'], data: unknown, eventId: number): CardLink => ({ minion, kind, label: cardLabel(kind, data), href: cardHref(ticket, eventId) });
+    const asks = this.approvals.pending().filter((a) => a.ticketId === ticket.id).flatMap((a) => {
+      const eventId = this.store.cardEventId(ticket.id, 'approval', (a.card as { id: string }).id);
+      return eventId == null ? [] : [{ at: a.at, card: link('approval', a.card, eventId) }];
+    });
+    const stored = this.store.openCardsOf(ticket.id).map((e) => ({ at: e.created_at, card: link(e.kind as CardLink['kind'], JSON.parse(e.data), e.id) }));
+    return [...asks, ...stored].sort((a, b) => a.at - b.at).map((c) => c.card);
+  }
+
+  /** Write a turn's scheme-refs snapshot (scheme-refs.ts) for `ticket`, with its scheme's cards waiting on people. */
+  private writeRefs(file: string, ticket: Ticket) {
+    const project = this.store.getProject(ticket.project_id)!;
+    const tickets = this.store.listTickets(project.id);
+    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => this.cardLinks(t)) };
+    writeFileSync(file, JSON.stringify(schemeRefs(project, this.store.listProjects(), tickets, cards)));
+  }
+
+  /** A card was posted or settled in `ticketId`'s chat: the running turns of its scheme get it in their snapshot, so the link check knows it. */
+  private refreshRefs(ticketId: number) {
+    const projectId = this.store.getTicket(ticketId)?.project_id;
+    for (const [id, turn] of this.turns) {
+      const t = this.store.getTicket(id);
+      const file = join(turn.dir, 'scheme-refs.json');
+      if (t?.project_id !== projectId || !existsSync(file)) continue;
+      try {
+        this.writeRefs(file, t);
+      } catch {
+        // A stale snapshot only means a card goes unchecked.
+      }
+    }
   }
 }

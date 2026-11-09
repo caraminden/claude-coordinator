@@ -8,6 +8,7 @@
 // Run as a hook: node scheme-refs.ts '<config json>' < PreToolUse hook input; prints a "deny" decision or nothing.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import type { CardLink } from './card-links.ts';
 import { CODE } from './wording.ts';
 
 /** The turn-start snapshot the runner writes into the turn's folder (writeSchemeRefs in runner.ts). */
@@ -18,6 +19,10 @@ export interface SchemeRefs {
   others: string[];
   /** This scheme's minions by number. */
   minions: Record<string, { title: string; closed: boolean }>;
+  /** The turn's own minion number, null for the Taskmaster (card-links.ts). */
+  self?: number | null;
+  /** This scheme's cards waiting on people (card-links.ts), refreshed when a card is posted mid-turn. */
+  cards?: CardLink[];
 }
 
 export interface Stray {

@@ -719,10 +719,10 @@ export class Store {
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     // Setup commits once per block, not once per statement: each commit is an fsync, and a new database's
     // hundred of them took a boot past 15 s when the disk was busy (#426).
-    this.db.exec(`BEGIN; ${SCHEMA} COMMIT;`);
+    this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA} COMMIT;`);
     this.attachState();
     this.moveSharedViews();
-    this.db.exec('BEGIN');
+    this.db.exec('BEGIN IMMEDIATE'); // IMMEDIATE: a read-then-write transaction can't take a write lock once another connection has written
     for (const [table, column, ddl] of MIGRATIONS) {
       const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
       if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
@@ -753,7 +753,7 @@ export class Store {
     this.db.exec('PRAGMA state.auto_vacuum = INCREMENTAL; PRAGMA state.journal_mode = WAL;');
     // A WAL file keeps its biggest size unless capped: the move alone grew state.db's to its whole size.
     this.db.exec('PRAGMA main.journal_size_limit = 16777216; PRAGMA state.journal_size_limit = 16777216;');
-    this.db.exec(`BEGIN; ${STATE_SCHEMA} COMMIT;`);
+    this.db.exec(`BEGIN IMMEDIATE; ${STATE_SCHEMA} COMMIT;`);
     if (!this.db.prepare("SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'claude_state'").get()) return;
     const cols = 'path, project_id, ticket_id, size, mtime, data';
     // The newer copy of each file wins: an older release's after a rollback, state.db's after restoring an old backup.

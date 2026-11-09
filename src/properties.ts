@@ -153,7 +153,7 @@ export class Registry {
 
   constructor(db: DatabaseSync) {
     this.db = db;
-    db.exec(`BEGIN; ${PROPERTY_SCHEMA} COMMIT;`);
+    db.exec(`BEGIN IMMEDIATE; ${PROPERTY_SCHEMA} COMMIT;`);
   }
 
   // ── Seeding ────────────────────────────────────────────────────────────

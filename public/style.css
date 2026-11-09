@@ -516,7 +516,7 @@ a.file-chip:hover { border-color: var(--muted); }
 .shelf > summary .project-title .label { flex: 0 1 auto; background: none; border: 0; border-radius: 6px; padding: 0.2rem 0.35rem; margin-left: -0.35rem; color: inherit; font-weight: inherit; text-align: start; }
 .shelf[open] > summary .project-title .label:is(:hover, :focus-visible) { background: var(--panel); color: var(--accent); }
 /* The name's text lines up with the panel's edge, or sits just after the scheme's icon. */
-.shelf > summary .project-title .scheme-icon:not([hidden]) + .label { margin-left: -0.25rem; }
+.shelf[open] > summary .project-title .scheme-icon:not([hidden]) + .label { margin-left: -0.25rem; }
 .shelf:not([open]) > summary .project-title .label { padding: 0; margin: 0; }
 :is(.shelf, .sidebar) > summary .rename { flex: none; min-width: 32px; min-height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 6px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
 :is(.shelf, .sidebar) > summary .rename:is(:hover, :focus-visible) { color: var(--accent); background: var(--panel); }

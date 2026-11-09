@@ -1,16 +1,17 @@
 // The artifact bridge, page side (#168). The server inlines this function as the first script of every
 // HTML page it serves under a file token, called with what the page saved (`cfg.entries`) and the token
 // path it was served under (`cfg.page`). It gives the page:
-// - `citadel`: storage for this page, and `send(text)`, which fills the comment box for a person to send;
+// - `citadel`: storage for this page, and `send(text)`, which sends text to the minion that showed the page,
+//   as the person who clicked (#417);
 // - `window.claude.use('db')`, `window.storage` and a working `localStorage`, the claude.ai APIs Delve's
 //   pages were written for (the sandbox makes the real localStorage throw).
-// It talks only to the viewer that framed it (public/bridge-host.js); opened on its own, saved values still
-// show but nothing new is kept.
+// It talks only to the viewer that framed it, or the Citadel tab whose Open button opened it
+// (public/bridge-host.js); opened any other way, saved values still show but nothing new is kept or sent.
 (function (cfg) {
   'use strict';
   const TAG = 'citadel-bridge-1';
-  const NO_VIEWER = 'Saving needs Citadel\'s viewer: open this page from Citadel, not on its own';
-  const host = window.parent !== window ? window.parent : null;
+  const NO_VIEWER = 'This tab isn\'t connected to Citadel: open the page from Citadel (its viewer or its Open button)';
+  const host = window.parent !== window ? window.parent : window.opener;
   const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
   const data = new Map(cfg.entries.map((e) => [e.key, e.value]));
 
@@ -203,10 +204,19 @@
       list: async (prefix = '') => [...data.keys()].filter((k) => k.startsWith(prefix)),
       watch: (fn) => watch('', () => fn(), true),
     },
-    /** Put `text` in the comment box under the page, for a person to read and send. Nothing is sent by this. */
+    /**
+     * Send `text` to the minion that showed this page (a shared page: the one that linked it, else the
+     * Taskmaster), as the person, from a click or key press only. Resolves { sent: true, to: '#N' }.
+     */
     send: async (text) => {
       if (!(await ready)) throw new Error(NO_VIEWER);
-      return request('send', { text: String(text) });
+      const r = await request('send', { text: String(text) });
+      // Pages made before #417 (kit v1, hand-rolled ones) then say the text waits in the comment box; it was sent.
+      setTimeout(() => {
+        const walk = document.createTreeWalker(document.body ?? document.documentElement, NodeFilter.SHOW_TEXT);
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) if (n.nodeValue.trim().startsWith('In the comment box')) n.nodeValue = `Sent to ${r.to}.`;
+      });
+      return r;
     },
   };
 

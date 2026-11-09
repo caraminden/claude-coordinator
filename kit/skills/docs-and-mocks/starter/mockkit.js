@@ -1,8 +1,8 @@
-// Citadel mock kit (v1): boards of takes, pick bars, a Send dock and contents for documents and mocks.
-// Copy it beside the page with mockkit.css. No dependencies. In Citadel's viewer, picks save through the
-// artifact bridge (`window.claude.use('db')`, keys `db/<collection>/<id>`, read by agents with
-// artifact_data) and Send fills the comment box; opened anywhere else, the page still works, picks stay in
-// the tab, and Send becomes Copy.
+// Citadel mock kit (v2): boards of takes, pick bars, a Send dock and contents for documents and mocks.
+// Copy it beside the page with mockkit.css. No dependencies. In Citadel's viewer (or a tab its Open button
+// opened), picks save through the artifact bridge (`window.claude.use('db')`, keys `db/<collection>/<id>`,
+// read by agents with artifact_data) and Send posts them straight to the minion's chat as the person. Only
+// a tab with no way back to Citadel (opened from disk, or from a pasted link) falls back to Copy.
 //
 //   mock.boards('#takes', { boards, size, state, render, on, pick })   one board per take, each with its own state
 //   mock.picks({ collection, options, one })                          pick bars on every [data-pick] element
@@ -128,12 +128,44 @@
     return set;
   }
 
-  // The dock: counts and Send (Copy outside Citadel). One per page, under the content.
+  // A toast for a Send that failed, with Retry. One at a time.
+  let toastNode = null;
+  function toast(message, retry) {
+    toastNode?.remove();
+    const again = el('button', { type: 'button', class: 'mk-btn primary' }, 'Retry');
+    const close = el('button', { type: 'button', class: 'mk-btn', 'aria-label': 'Dismiss' }, '×');
+    toastNode = el('div', { class: 'mk-toast', role: 'alert' }, el('span', {}, message), again, close);
+    const node = toastNode;
+    again.addEventListener('click', () => { node.remove(); retry(); });
+    close.addEventListener('click', () => node.remove());
+    document.body.append(node);
+  }
+
+  // The dock: counts and Send (Copy only in a tab Citadel can't reach). One per page, under the content.
   const dock = (() => {
     let node = null;
     let text = null;
     let sent = null;
     let saving = false;
+    let inFlight = null; // the text being sent now: pressing Send again for the same picks doesn't post twice
+
+    // Shows Sent at once; a failure takes it back and says why, with Retry.
+    async function send(body) {
+      if (inFlight === body) return;
+      inFlight = body;
+      toastNode?.remove();
+      sent.textContent = 'Sent ✓';
+      try {
+        const r = await window.citadel.send(body);
+        sent.textContent = `Sent to ${r?.to ?? 'the minion'} ✓`;
+      } catch (e) {
+        sent.textContent = '';
+        toast(`Couldn't send your picks: ${e.message}`, () => send(body));
+      } finally {
+        if (inFlight === body) inFlight = null;
+      }
+    }
+
     return {
       mount(isSaving) {
         saving = isSaving;
@@ -147,9 +179,9 @@
           if (!body) return void (sent.textContent = 'Nothing picked yet');
           try {
             if (saving) {
-              await window.citadel.send(body);
-              sent.textContent = 'In the comment box below: press Comment to send.';
+              await send(body);
             } else {
+              // Last resort: this tab has no way back to Citadel, so it can't send as anyone.
               const ta = el('textarea', { style: 'position:fixed;opacity:0' });
               ta.value = body;
               document.body.append(ta);
@@ -170,7 +202,7 @@
         let picked = 0;
         let notes = 0;
         for (const s of sets) for (const d of s.docs.values()) { if (d.v) picked++; if (d.note) notes++; }
-        const where = saving ? 'saved for the minion to read' : 'not saved: this page is open outside Citadel';
+        const where = saving ? 'saved for the minion to read' : 'not saved or sent: open this page from Citadel to send';
         node.classList.toggle('stuck', picked + notes > 0);
         text.innerHTML = picked || notes
           ? `<b>${picked}</b> picked${notes ? `, <b>${notes}</b> with notes` : ''} · ${where}`

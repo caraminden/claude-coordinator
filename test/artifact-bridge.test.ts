@@ -52,7 +52,7 @@ let srv: Booted;
 before(async () => {
   srv = await bootServer({ root });
 });
-after(() => srv?.proc.kill());
+after(() => srv?.stop()); // Send starts turns (CLAUDE_BIN is /bin/false): stop ends them too
 
 /** The token path a person's viewer frames an artifact at, as the frame's page reports it. */
 async function pageOf(id: number) {
@@ -224,4 +224,51 @@ test('artifact_data is offered to minions and Taskmasters, and reads a page', as
   assert.equal(result.isError, undefined, result.content[0].text);
   assert.match(result.content[0].text, /picker\.html: \d+ keys?\./);
   assert.match(result.content[0].text, /^db\/picks\/rogue = \{"pick":1\} \(Taskmaster, \d{4}-\d\d-\d\dT\d\d:\d\dZ\)$/m);
+});
+
+// These start turns on M and the Taskmaster, which retires the nonce-less agent tokens the tests above use: keep them last.
+const sendPage = (body: object, headers: Record<string, string> = { Cookie: srv.cookie }) =>
+  fetch(`${srv.base}/api/artifact-send`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(async (r) => ({ status: r.status, data: await r.json() }));
+const lastMessage = (id: number) => store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data)).at(-1);
+async function sharedPage(path: string) {
+  const res = await fetch(`${srv.base}/api/projects/${A.id}/shared/file?path=${path}&raw=1`, { headers: { Cookie: srv.cookie }, redirect: 'manual' });
+  return new URL(res.headers.get('location')!, `${srv.base}/api/projects/${A.id}/shared/file`).pathname.replace('/api/files/', '');
+}
+
+test("a page's Send posts its text as the person to the minion that showed it (#417)", async () => {
+  const page = await pageOf(PICKER.id);
+  const r = await sendPage({ open: { artifact: PICKER.id }, page, text: 'Picks on "Picker":\n- B: Picked' });
+  assert.equal(r.status, 202, JSON.stringify(r.data));
+  assert.deepEqual(r.data.to, { id: M.id, kind: 'ticket', number: M.number, label: `#${M.number}` });
+  assert.deepEqual(lastMessage(M.id), { author: 'Cara', text: 'Picks on "Picker":\n- B: Picked', comment: { path: join(root, 'work', 'picker.html'), about: 'picker.html' } });
+  // Opened from the chat that linked it: that chat.
+  assert.equal((await sendPage({ open: { ticket: M.id, path: 'picker.html' }, page, text: 'again' })).data.to.id, M.id);
+});
+
+test('a shared page sends to the minion that last linked it, else the Taskmaster', async () => {
+  writeFileSync(join(shared, 'takes.html'), '<p>takes</p>');
+  const page = await sharedPage('takes.html');
+  const r = await sendPage({ open: { project: A.id, path: 'takes.html' }, page, text: 'A' });
+  assert.equal(r.status, 202, JSON.stringify(r.data));
+  assert.equal(r.data.to.label, 'the Taskmaster');
+  assert.equal(lastMessage(TA.id).text, 'A');
+  const linker = thread(A.id, 'ticket', 'work-linker');
+  store.syncArtifacts(linker, [{ path: join(shared, 'takes.html'), size: 1, mtime: 1 }]);
+  const again = await sendPage({ open: { project: A.id, path: 'takes.html' }, page, text: 'B' });
+  assert.equal(again.data.to.id, linker.id);
+  assert.deepEqual(lastMessage(linker.id), { author: 'Cara', text: 'B', comment: { path: join(shared, 'takes.html'), about: join(shared, 'takes.html') } });
+});
+
+test("a page's Send is refused for another page, an empty text, and anyone but a person", async () => {
+  const page = await pageOf(PICKER.id);
+  const before = store.listEvents(M.id).filter((e) => e.kind === 'user_message').length;
+  assert.equal((await sendPage({ open: { artifact: PICKER.id }, page: await pageOf(OTHER.id), text: 'x' })).status, 409);
+  assert.equal((await sendPage({ open: { artifact: THEIRS.id }, page, text: 'x' })).status, 409);
+  assert.equal((await sendPage({ open: { artifact: NOTES.id }, page, text: 'x' })).status, 404);
+  assert.equal((await sendPage({ open: { artifact: PICKER.id }, page, text: '  ' })).status, 400);
+  assert.equal((await sendPage({ open: { artifact: PICKER.id }, page, text: 'x'.repeat(10_001) })).status, 400);
+  assert.equal((await sendPage({ open: { artifact: PICKER.id }, page, text: 'x' }, { Authorization: `Bearer ${tokens.agentToken(MB.id)}` })).status, 403);
+  assert.equal((await sendPage({ open: { artifact: PICKER.id }, page, text: 'x' }, {})).status, 401);
+  assert.equal(store.listEvents(M.id).filter((e) => e.kind === 'user_message').length, before, 'nothing was sent');
 });

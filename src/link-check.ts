@@ -4,11 +4,12 @@
 // (ticketRoots in routes/files.ts), and sends the reply back once if any link wouldn't open. The
 // same send-back carries the wording check's findings (src/wording.ts): a reserved word used in another sense,
 // the cross-scheme link check's (src/scheme-refs.ts): a bare #N that likely means another scheme's minion,
-// and the card link check's (src/card-links.ts): a card waiting on people mentioned without its link, or
-// linked as "above" or "below" when it sits the other way.
+// the card link check's (src/card-links.ts): a card waiting on people mentioned without its link, or
+// linked as "above" or "below" when it sits the other way, and the page check: a linked HTML page with an
+// answer button of its own instead of the mock kit's Send dock (#417).
 //
 // Run as a hook: node link-check.ts '<config json>' < Stop hook input; prints a "block" decision or nothing.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { fileType, findByName, linkedPaths, resolveFile } from './artifacts.ts';
 import { explainCards, explainMisplaced, misplacedCards, unlinkedCards } from './card-links.ts';
@@ -41,6 +42,25 @@ export async function brokenLinks(text: string, cfg: LinkCheckConfig): Promise<s
   return broken;
 }
 
+// Clipboard use or a send of the page's own: the kit's dock (mockkit.js, a file beside the page) is the only answer button.
+const HAND_ROLLED = /navigator\.clipboard|execCommand\(\s*['"]copy['"]|citadel\.send\s*\(/;
+const MAX_PAGE_BYTES = 2 * 1024 * 1024;
+
+/** The HTML pages `text` links that hand-roll an answer or copy button, as absolute paths. */
+export async function handRolledPages(text: string, cfg: LinkCheckConfig): Promise<string[]> {
+  const pages: string[] = [];
+  for (const abs of linkedPaths([text.replace(CODE, '')], cfg.cwd)) {
+    if (fileType(abs)?.kind !== 'html') continue;
+    const found = await resolveFile(abs, cfg.cwd, cfg.roots);
+    try {
+      if (found && statSync(found.file).size <= MAX_PAGE_BYTES && HAND_ROLLED.test(readFileSync(found.file, 'utf8'))) pages.push(abs);
+    } catch {
+      // Unreadable: the broken-link check speaks for it.
+    }
+  }
+  return pages;
+}
+
 /** The prompt the marker says was nudged, or null if none was. */
 function readMarker(file: string): string | null {
   try {
@@ -63,7 +83,8 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const strays = refs ? strayRefs(input.last_assistant_message, refs) : [];
   const cards = refs?.cards ? unlinkedCards(input.last_assistant_message, refs.cards, refs.self ?? null) : [];
   const misplaced = refs?.cards ? misplacedCards(input.last_assistant_message, refs.cards, refs.self ?? null) : [];
-  if (!broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length) return null;
+  const rolled = await handRolledPages(input.last_assistant_message, cfg);
+  if (!broken.length && !misused.length && !strays.length && !cards.length && !misplaced.length && !rolled.length) return null;
   if (cfg.nudged) {
     try {
       writeFileSync(cfg.nudged, prompt);
@@ -83,10 +104,15 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
       + `Files must be inside ${cfg.roots.length > 1 ? `it or ${cfg.roots.slice(1).join(' or ')}` : 'it'}. `
       + 'Fix the paths (or drop links to files that are gone).\n'
     : '';
+  const pages = rolled.length
+    ? `These pages have an answer or copy button of their own (navigator.clipboard, execCommand('copy') or citadel.send):\n${rolled.map((p) => `- ${p}`).join('\n')}\n`
+      + 'People answer a page only through the mock kit\'s Send dock, which posts straight into your chat: ask with mock.picks instead '
+      + '(citadel:docs-and-mocks skill, mockkit.md), fix the pages, then rewrite the reply. A clipboard use that is no answer button can stay.\n'
+    : '';
   const wording = misused.length ? `${explain(misused)}\n` : '';
   const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';
   const card = (cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '') + (misplaced.length ? `${explainMisplaced(misplaced)}\n` : '');
-  return { decision: 'block', reason: `${SENT_BACK}\n${links}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
+  return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

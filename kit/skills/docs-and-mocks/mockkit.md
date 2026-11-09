@@ -12,10 +12,11 @@ The page links them in its head, then its theme:
 
 ## Where picks go
 
-In Citadel's viewer the kit saves through the artifact bridge: `window.claude.use('db')`, key
-`db/<collection>/<id>`, value `{ v, note, by, at }` (`v` the choice, `by` the person). Everyone's
-picks show live. Opened anywhere else (a new tab, from disk), the page still runs, picks stay in the
-tab, and the dock's Send becomes Copy. `mock.ready` resolves `{ saving, person }`.
+In Citadel's viewer, or a tab its Open button opened, the kit saves through the artifact bridge:
+`window.claude.use('db')`, key `db/<collection>/<id>`, value `{ v, note, by, at }` (`v` the choice,
+`by` the person). Everyone's picks show live. Opened with no way back to Citadel (from disk, a pasted
+link), the page still runs, picks stay in the tab, and the dock's Send becomes Copy, the only
+clipboard path. `mock.ready` resolves `{ saving, person }`.
 
 ## `mock.boards(target, opts)`
 
@@ -68,9 +69,16 @@ mock.picks({ collection: 'questions', options: ['yes', 'no'], root: document.get
 
 ## The dock
 
-Comes with the first picks set: counts picks and notes, and **Send picks to the minion** puts one
-line per pick in the comment box under the page for the person to send (`citadel.send`, which only
-works from a click). It sticks to the bottom once anything is picked.
+Comes with the first picks set: counts picks and notes, and **Send picks to the minion** posts one
+line per pick straight into your chat as the person who pressed it, which wakes you (`citadel.send`,
+only from a click). A shared-folder page's Send goes to the minion that last linked it, else the
+Taskmaster. The dock shows Sent at once; a failure takes it back with a toast and Retry. It sticks to
+the bottom once anything is picked.
+
+**The dock is the only answer button.** Never hand-roll one: no `navigator.clipboard`, no
+`execCommand('copy')`, no `citadel.send` of your own. Citadel's link check sends your reply back when
+a page you link has any of them. A question the pick bars can't ask is still a `mock.picks` set
+(options as strings, a note on each).
 
 ## `mock.toc()`
 

@@ -7,7 +7,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { cleanEntries, entriesView, injectBridge, LIMITS, storeId, writeStore } from '../artifact-data.ts';
-import { fileTitle, fileType, listable, resolveFile, resolveLink, siblingType } from '../artifacts.ts';
+import { commentMessage, fileTitle, fileType, listable, resolveFile, resolveLink, siblingType } from '../artifacts.ts';
 import type { Session } from '../auth.ts';
 import type { Artifact, Project, Ticket } from '../db.ts';
 import type { MessageFile } from '../runner.ts';
@@ -222,15 +222,17 @@ async function bridgedPage(app: App, page: unknown): Promise<string | null> {
 }
 
 /** The HTML file a person's viewer opened, as it says it did: an artifact, a file a minion linked, or a shared file. */
-async function openedPage(app: App, open: any): Promise<{ project: Project; file: string; name: string }> {
+async function openedPage(app: App, open: any): Promise<{ project: Project; file: string; abs: string; name: string; ticket: Ticket | null }> {
   let found: Awaited<ReturnType<typeof resolveFile>> = null;
   let projectId = 0;
+  // The chat the viewer opened it from: the artifact's minion, or the chat that linked the file.
+  let ticket: Ticket | null = null;
   if (Number.isInteger(open?.artifact)) {
     const a = app.store.getArtifact(open.artifact);
-    const ticket = a && app.store.getTicket(a.ticket_id);
-    if (ticket) [found, projectId] = [await resolveTicketFile(app, ticket, a.path), ticket.project_id];
+    ticket = (a && app.store.getTicket(a.ticket_id)) ?? null;
+    if (ticket) [found, projectId] = [await resolveTicketFile(app, ticket, a!.path), ticket.project_id];
   } else if (Number.isInteger(open?.ticket) && typeof open.path === 'string') {
-    const ticket = app.store.getTicket(open.ticket);
+    ticket = app.store.getTicket(open.ticket) ?? null;
     if (ticket) [found, projectId] = [await resolveTicketFile(app, ticket, open.path), ticket.project_id];
   } else if (Number.isInteger(open?.project) && typeof open.path === 'string' && !isAbsolute(open.path)) {
     const dir = projectSharedDir(app.dataDir, open.project);
@@ -238,7 +240,7 @@ async function openedPage(app: App, open: any): Promise<{ project: Project; file
   }
   const project = projectId ? app.store.getProject(projectId) : undefined;
   if (!found || !project || found.type.kind !== 'html') throw new HttpError(404, 'That page is no longer there');
-  return { project, file: found.file, name: basename(found.abs) };
+  return { project, file: found.file, abs: found.abs, name: basename(found.abs), ticket };
 }
 
 /**
@@ -482,6 +484,26 @@ export const fileRoutes: Route[] = [
         app.broadcast({ type: 'artifact-data', projectId: project.id, store: storeId(project.id, file) });
       } else if (body.op !== 'list') throw new HttpError(400, 'op is list or write');
       return json(res, 200, { store: storeId(project.id, file), entries: entriesView(app.store.artifactData(project.id, file)), person: session.name });
+    },
+  },
+  {
+    // A page's Send (#417): the person's viewer posts the page's answer as them, straight into the chat of
+    // the minion that showed the page, which wakes it. For a shared-folder page that's the minion that last
+    // linked it, else the Taskmaster.
+    method: 'POST', path: '/api/artifact-send', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const body = await readJson(req);
+      const { project, file, abs, ticket } = await openedPage(app, body.open);
+      if (!app.store.canSee(session, project.id)) throw new HttpError(404, 'That page is no longer there');
+      if (await bridgedPage(app, body.page) !== file) throw new HttpError(409, 'The frame shows a different page from the one this viewer opened; reopen it');
+      const linker = ticket ? null : app.store.latestArtifact(project.id, [abs, file]);
+      const to = ticket ?? (linker && app.store.getTicket(linker.ticket_id)) ?? app.store.getCoordinator(project.id);
+      if (!to) throw new HttpError(404, 'No minion or Taskmaster to send this to');
+      const { about, text } = commentMessage(to.cwd && abs.startsWith(to.cwd + sep) ? abs.slice(to.cwd.length + 1) : abs, str(body.text, 'Answer', 10_000));
+      app.runner.send(to.id, session.name, text, [], { comment: { path: abs, about } });
+      app.runner.personWrote(to.id);
+      app.runner.continueLoop(to.id, session.name);
+      return json(res, 202, { to: { id: to.id, kind: to.kind, number: to.number, label: to.kind === 'coordinator' ? 'the Taskmaster' : `#${to.number ?? to.id}` } });
     },
   },
   {

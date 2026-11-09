@@ -1,6 +1,7 @@
-// The artifact bridge, viewer side (#168): answers the pages in HTML frames this viewer made
-// (public/artifact-bridge.js is the page side). A page can read and write its own store and fill the
-// comment box; it never sends a message or acts as the person by itself.
+// The artifact bridge, viewer side (#168): answers the pages in HTML frames this viewer made, and in
+// tabs its Open button opened (public/artifact-bridge.js is the page side). A page can read and write its
+// own store, and on a person's click send its answer to the minion that showed it, as that person (#417).
+// It never sends by itself.
 
 export const TAG = 'citadel-bridge-1';
 const MAX_TEXT = 10_000;
@@ -9,8 +10,10 @@ const MAX_ENTRIES = 100;
 const BURST = 40;
 const PER_SECOND = 20;
 
-// The frames with a bridge, each with what the viewer opened in it (see attachBridge).
+// The frames and tabs with a bridge, each with what the viewer opened in it (see attachBridge).
 const frames = new Set();
+// A tab's sends, which can't show they came from a click (activation stays in the tab): one every few seconds.
+const TAB_SEND_GAP = 3000;
 
 /**
  * The frame a message came from and its request, or null when it isn't one to answer: not from the
@@ -19,8 +22,8 @@ const frames = new Set();
 export function readRequest(e, from = frames) {
   let frame = null;
   for (const f of from) {
-    if (!f.iframe.isConnected) from.delete(f);
-    else if (e.source && f.iframe.contentWindow === e.source) frame = f;
+    if (!alive(f)) from.delete(f);
+    else if (e.source && win(f) === e.source) frame = f;
   }
   const m = e.data;
   if (!frame || e.origin !== 'null' || !m || typeof m !== 'object' || m.bridge !== TAG) return null;
@@ -42,15 +45,26 @@ export function takeWrite(frame, now = Date.now()) {
 
 let call = null;
 
+const win = (f) => (f.iframe ? f.iframe.contentWindow : f.tab);
+const alive = (f) => (f.iframe ? f.iframe.isConnected : !f.tab.closed);
+
 /**
- * Answer the page in `iframe`. `open` says what the viewer opened ({ artifact } | { ticket, path } |
- * { project, path }), `name` and `owner` how people know the file and who made it, and `onSend(text)`
- * puts a page's text where a person can read and send it. `api` makes the person's own API calls.
+ * Answer the page in `iframe`, or in `tab`, a window the viewer opened. `open` says what the viewer opened
+ * ({ artifact } | { ticket, path } | { project, path }), `name` and `owner` how people know the file and
+ * who made it. `api` makes the person's own API calls.
  */
-export function attachBridge(iframe, { open, name, owner, onSend, api }) {
+export function attachBridge(iframe, { open, name, owner, api, tab = null }) {
   call ??= api;
   if (!frames.size) addEventListener('message', onMessage);
-  frames.add({ iframe, open, name, owner, onSend, store: null, page: null });
+  frames.add({ iframe: tab ? null : iframe, tab, open, name, owner, store: null, page: null });
+}
+
+/** Open `src` (an HTML page) in a new tab that keeps its bridge to this viewer; false if the browser refused. */
+export function openWithBridge(src, bridge, api) {
+  const tab = window.open(src, '_blank');
+  if (!tab) return false;
+  attachBridge(null, { ...bridge, api, tab });
+  return true;
 }
 
 async function onMessage(e) {
@@ -62,11 +76,13 @@ async function onMessage(e) {
   const reply = (body) => e.source.postMessage({ bridge: TAG, re: req.id, ...body }, '*');
   try {
     if (req.op === 'send') {
-      if (!frame.onSend) throw new Error('This view has no comment box to put that in');
-      // Only on a person's click or key: a page can't fill the box while someone types in it.
-      if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
-      await frame.onSend(req.text); // may leave full screen first; a failure reaches the page
-      return reply({ ok: true, result: { shown: true } });
+      // Only on a person's click or key: a page never sends as them by itself. A frame's click reaches
+      // this window; a tab's doesn't, so a tab only gets a gap between sends.
+      if (frame.iframe && navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
+      if (frame.tab && Date.now() - (frame.sentAt ?? 0) < TAB_SEND_GAP) throw new Error('Sent a moment ago; wait a few seconds before sending again');
+      const r = await call('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text } });
+      frame.sentAt = Date.now(); // after it went, so a retry after a failure isn't held back
+      return reply({ ok: true, result: { sent: true, to: r.to.label } });
     }
     if (req.op === 'write' && !takeWrite(frame)) throw new Error('Too many writes; slow down');
     const r = await storeCall(frame, req.page, req.op === 'write' ? { op: 'write', entries: req.entries } : { op: 'list' });
@@ -87,9 +103,9 @@ async function storeCall(frame, page, body) {
 /** Someone (a person or an agent) changed store `store`: send the frames showing it what it holds now. */
 export function onArtifactData(store) {
   for (const f of frames) {
-    if (!f.iframe.isConnected) frames.delete(f);
+    if (!alive(f)) frames.delete(f);
     else if (f.store === store && f.page) {
-      storeCall(f, f.page, { op: 'list' }).then((r) => f.iframe.contentWindow?.postMessage({ bridge: TAG, op: 'changed', entries: r.entries }, '*'), () => {});
+      storeCall(f, f.page, { op: 'list' }).then((r) => win(f)?.postMessage({ bridge: TAG, op: 'changed', entries: r.entries }, '*'), () => {});
     }
   }
 }

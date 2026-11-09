@@ -1314,6 +1314,13 @@ export class Store {
     return undefined;
   }
 
+  /** The newest artifact row of a scheme for any of the given paths: the minion that last linked that file. */
+  latestArtifact(projectId: number, paths: string[]): Artifact | undefined {
+    const q = this.db.prepare('SELECT * FROM artifacts WHERE project_id = ? AND path = ? ORDER BY created_at DESC, id DESC LIMIT 1');
+    const rows = paths.map((p) => q.get(projectId, p) as unknown as Artifact | undefined).filter((a) => a !== undefined);
+    return rows.sort((a, b) => b.created_at - a.created_at || b.id - a.id)[0];
+  }
+
     getArtifact(id: number): Artifact | undefined {
     return this.db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id) as unknown as Artifact | undefined;
   }

@@ -106,3 +106,19 @@ test('the hook script prints a block decision, or nothing', () => {
   assert.deepEqual([run('{bad').status, run('{bad').stdout], [0, '']);
   assert.deepEqual([run({ last_assistant_message: '![x](a.png)' }, '{bad').stdout], ['']);
 });
+
+test('a linked page with its own clipboard or send button is sent back; a kit page passes (#417)', async () => {
+  const kit = '<link rel="stylesheet" href="mockkit.css"><script src="mockkit.js"></script><script>mock.picks({ collection: "picks" });</script>';
+  writeFileSync(join(mine, 'kit.html'), kit);
+  assert.equal(await reply(`[takes](${mine}/kit.html)`), null);
+  for (const [name, js] of [['clip', 'navigator.clipboard.writeText(t)'], ['exec', "document.execCommand('copy')"], ['send', 'await window.citadel.send(picksText())']]) {
+    writeFileSync(join(mine, `${name}.html`), `<button id="send">Send</button><script>${js}</script>`);
+    const v = await reply(`[takes](${mine}/${name}.html) and [plan](docs/plan.md)`);
+    assert.equal(v?.decision, 'block', name);
+    assert.ok(v.reason.includes(`- ${join(mine, `${name}.html`)}`), v.reason);
+    assert.match(v.reason, /mock kit's Send dock/);
+    assert.doesNotMatch(v.reason, /won't open/, 'the other link is fine');
+  }
+  // A page named in code is no link.
+  assert.equal(await reply(`\`${mine}/clip.html\``), null);
+});

@@ -1,7 +1,7 @@
 // Artifacts and files: the shelf, the browser, and viewers for artifacts and linked or shared files.
 import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, followChat, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, loadPanelState, markdownDoc, me, reloadWhenIdle, routeSeq, savePanelState, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
 import { addBriefButtons } from './briefstart.js';
-import { attachBridge } from './bridge-host.js';
+import { attachBridge, openWithBridge } from './bridge-host.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { showProject } from './project.js';
 import { replaceHash } from './navstack.js';
@@ -237,6 +237,25 @@ export function renderArtifactResults() {
   }));
 }
 
+// What a page's bridge says the viewer opened: a file a chat linked, or a file in the scheme's shared folder.
+const viewerBridge = (ticket, file) => ({ open: { ticket: ticket.id, path: file.path }, owner: threadLabel(ticket) });
+const sharedBridge = (file) => ({ open: { project: view.projectId, path: file.path }, owner: null });
+
+/**
+ * The Open button. An HTML page opens in a tab that keeps its bridge to this one, so the page can still
+ * save and send (#417); a modified click, or a browser that blocks the tab, follows the plain link.
+ */
+function openButton(src, file, bridge) {
+  const link = h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open');
+  if (file.kind === 'html') {
+    link.addEventListener('click', (e) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (openWithBridge(src, { ...bridge, name: file.name }, api)) e.preventDefault();
+    });
+  }
+  return link;
+}
+
 /** Main panel: one artifact, shown inline according to its type. */
 export function artifactViewer(a) {
   const body = h('div', { class: 'artifact-body' });
@@ -245,7 +264,7 @@ export function artifactViewer(a) {
     body.append(h('p', { class: 'muted' }, 'This file is no longer in the minion\'s folder. Unpin it to remove it from the list.'));
   } else {
     const comment = commentBox(artifactThread(a), a.path, a.name, body);
-    const bridge = { open: { artifact: a.id }, owner: threadName(a), onSend: comment.fill };
+    const bridge = { open: { artifact: a.id }, owner: threadName(a) };
     renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id, brief: { projectId: a.project_id, path: a.abs ?? a.path, name: a.name }, bridge });
     section.append(comment);
   }
@@ -296,8 +315,8 @@ function openViewer(ticket, file, inPlace) {
   viewer.stage.replaceChildren();
   if (file.missing) viewer.stage.append(h('p', { class: 'muted' }, `${file.missing}.`));
   else {
-    // A page's send goes in the chat's own composer, beside it.
-    const bridge = { open: { ticket: ticket.id, path: file.path }, owner: threadLabel(ticket), onSend: (text) => fillComposer(viewer?.chat, text) };
+    // A page's Send goes to the chat beside it.
+    const bridge = viewerBridge(ticket, file);
     renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.abs ?? file.display_path, name: file.name }, bridge });
   }
   renderViewerBar();
@@ -338,7 +357,7 @@ function renderViewerBar() {
       h('span', { class: 'meta' }, file.missing ? 'not found' : `${formatSize(file.size)} · updated ${ago(file.mtime)}`)),
     a ? pinButton(a) : '',
     file.missing || file.kind !== 'html' ? '' : fullScreenButton(() => viewer?.stage),
-    file.missing ? '' : h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open'),
+    file.missing ? '' : openButton(src, file, viewerBridge(t, file)),
     file.missing ? '' : h('a', { class: 'button secondary wide-only', href: `${src}&download` }, 'Download'),
     h('button', { type: 'button', class: 'close-view', title: 'Back to the chat', 'aria-label': 'Back to the chat', onclick: leaveViewer }, icon('close')));
 }
@@ -421,45 +440,16 @@ function commentBox(t, path, name, body) {
       reloadWhenIdle();
     }
   });
-  // The artifact bridge's send: the page's text, for a person to read, change and send (or not).
-  form.fill = (text) => {
-    putPageText(textarea, text);
-    saveDraft(draftKey, textarea.value);
-    grow();
-    status.textContent = 'From the page, not sent yet';
-    textarea.focus();
-    form.scrollIntoView({ block: 'nearest' });
-  };
   return form;
-}
-
-/**
- * A page's text at the top of `textarea`, keeping what the person wrote below it. A later send from
- * the page replaces its earlier text rather than piling up.
- */
-function putPageText(textarea, text) {
-  const last = textarea.dataset.pageText;
-  const rest = last && textarea.value.startsWith(last) ? textarea.value.slice(last.length).replace(/^\n+/, '') : textarea.value;
-  textarea.value = rest.trim() ? `${text}\n\n${rest}` : text;
-  textarea.dataset.pageText = text;
-}
-
-/** Put a page's text in a chat's composer, ahead of any draft, for a person to send. */
-function fillComposer(chat, text) {
-  const textarea = chat?.querySelector('form.composer textarea');
-  if (!textarea) throw new Error('This view has no message box to put that in');
-  putPageText(textarea, text);
-  textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  textarea.focus();
 }
 
 /** Main panel: a file from the project's shared folder. */
 export function sharedViewer(file) {
   const body = h('div', { class: 'artifact-body' });
   if (file.missing) body.append(h('p', { class: 'muted' }, `${file.missing}.`));
-  // A shared page's send goes to the Taskmaster, in a comment box under it.
+  // Comments on a shared page go to the Taskmaster; the page's own Send goes to the minion that linked it, if one did (the server knows).
   const comment = !file.missing && file.kind === 'html' && view.coordinator ? commentBox(view.coordinator, file.abs, file.name, body) : null;
-  const bridge = { open: { project: view.projectId, path: file.path }, owner: view.coordinator ? threadLabel(view.coordinator) : null, onSend: comment?.fill };
+  const bridge = sharedBridge(file);
   if (!file.missing) renderFileBody(body, { ...file, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name }, bridge });
   return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body, comment ?? '');
 }
@@ -478,7 +468,7 @@ export function renderSharedHead() {
       h('span', { class: 'spacer' }),
       listed ? pinButton(listed) : '',
       file.missing || file.kind !== 'html' ? '' : fullScreenButton(() => el.closest('.artifacts-main')),
-      file.missing ? '' : h('a', { class: 'button secondary', href: src, target: '_blank', rel: 'noopener' }, 'Open'),
+      file.missing ? '' : openButton(src, file, sharedBridge(file)),
       file.missing ? '' : h('a', { class: 'button secondary', href: `${src}&download` }, 'Download')),
     h('div', { class: 'meta' },
       file.display_path, ' · in the folder every minion and the Taskmaster share',
@@ -519,13 +509,6 @@ function fillWindow(frame) {
   frame.leaveFill = leave;
 }
 
-const isFullScreen = (frame) => document.fullscreenElement === frame || !!frame.leaveFill;
-
-async function leaveFullScreen(frame) {
-  if (document.fullscreenElement === frame) await document.exitFullscreen().catch(() => {});
-  frame.leaveFill?.();
-}
-
 /**
  * Show a file in `body` by its kind. Markdown's relative image links load from next to it, its links
  * to files beside it open them (`hrefFor`), and its briefs get Start buttons (`brief` says where the
@@ -542,8 +525,7 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
     // Sandboxed (here and by the server's CSP) so a page a thread wrote can't act as the app.
     // Its page reaches the app only through the artifact bridge (bridge-host.js), as the person viewing it.
     const frame = h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals allow-downloads', allow: 'clipboard-write *; fullscreen *', allowfullscreen: true, title: name });
-    // A page's send fills a box outside the frame: leave full screen first so it's in view.
-    if (bridge) attachBridge(frame, { ...bridge, name, api, onSend: bridge.onSend && ((text) => (isFullScreen(frame) ? leaveFullScreen(frame).then(() => bridge.onSend(text)) : bridge.onSend(text))) });
+    if (bridge) attachBridge(frame, { ...bridge, name, api });
     body.append(frame);
   } else if (kind === 'pdf') {
     body.append(h('iframe', { class: 'artifact-frame', src, title: name }));
@@ -587,7 +569,7 @@ export function renderArtifactHead() {
       h('span', { class: 'spacer' }),
       pinButton(a),
       a.missing || a.kind !== 'html' ? '' : fullScreenButton(() => el.closest('.artifacts-main')),
-      a.missing ? '' : h('a', { class: 'button secondary', href: rawUrl(a), target: '_blank', rel: 'noopener' }, 'Open'),
+      a.missing ? '' : openButton(rawUrl(a), a, { open: { artifact: a.id }, owner: threadName(a) }),
       a.missing ? '' : h('a', { class: 'button secondary', href: `${rawUrl(a)}&download` }, 'Download')),
     h('div', { class: 'meta' },
       a.display_path ?? a.path, ' · from ',

@@ -2842,6 +2842,19 @@ export class Runner {
     this.onTurnError(ticketId, text, event.id);
   }
 
+  /**
+   * A minion's progress as a contraption may see it (#421): the readout's line ("Step 2 of 6: …") and step,
+   * built from its task list and tool calls. Never last_activity, which can be the first line of its reply.
+   */
+  progressOf(ticket: Ticket) {
+    const p = this.progressFor(ticket.id);
+    const { total, done, current, step } = stepInfo(p);
+    return {
+      line: progressLine(p, ticket.status === 'running') || null,
+      step: total ? { n: step, of: total, done, label: current ? current.activeForm || current.subject : null } : null,
+    };
+  }
+
   /** Task-list state for a ticket, rebuilt from its stored events the first time it is needed. */
   private progressFor(ticketId: number) {
     let p = this.progress.get(ticketId);

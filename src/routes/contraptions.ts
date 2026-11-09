@@ -2,6 +2,7 @@
 // rotate their keys, as does Citadel's Taskmaster on an admin's turn (#246); anyone signed in lists
 // the ones enabled for them, for the app rail; a contraption's own server sends its people's bug
 // reports, feature asks and data to its home scheme (src/contraption-asks.ts) and runs turns for its people through the turn API (src/contraption-turns.ts).
+import { createHash } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { APP_NAME } from '../appname.ts';
 import { adminAskRefusal } from '../access.ts';
@@ -13,14 +14,14 @@ import { ServiceError } from '../app-services.ts';
 import { contraptionRead } from '../contraption-read.ts';
 import { mandateItem, SCHEME_CALLER } from '../mandate-items.ts';
 import { relay } from '../relay.ts';
-import type { ContraptionRow } from '../db.ts';
+import type { ContraptionRow, Ticket } from '../db.ts';
 import { HttpError, json, oneOf, readJson, str, type App, type Ctx, type Route } from '../http.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { projectSharedDir } from '../workspace.ts';
 import { ensureCoordinator } from './projects.ts';
 
 // Names the turn API (section 4) and the rail take under /api/contraptions/.
-const RESERVED = new Set(['mine', 'turns', 'sessions', 'asks', 'relay']);
+const RESERVED = new Set(['mine', 'turns', 'sessions', 'asks', 'relay', 'home', 'minions']);
 
 /** A contraption as Settings → Contraptions shows it: never a key. */
 function view(app: App, c: ContraptionRow) {
@@ -186,6 +187,45 @@ function enabledPerson(app: App, c: ContraptionRow, url: URL): number {
   return person;
 }
 
+/** The app's home scheme and whether `person` is a member: in it, or an admin, as #211 counts one. */
+function homeOf(app: App, c: ContraptionRow, person: number) {
+  const scheme = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme);
+  if (!scheme) throw new HttpError(409, `${c.title} has no home scheme: an admin sets one in Settings → Contraptions`);
+  const user = app.store.getUser(person);
+  return { scheme, member: !!user && app.store.canSee({ uid: user.id, admin: !!user.admin }, scheme.id) };
+}
+
+/** The home scheme a minion read (#421) looks in, for a member only: minion state is the scheme's business. */
+function memberHome(app: App, c: ContraptionRow, url: URL) {
+  const person = enabledPerson(app, c, url);
+  const { scheme, member } = homeOf(app, c, person);
+  if (!member) throw new HttpError(403, `That person isn't a ${scheme.name} member, so can't see its minions`);
+  return scheme;
+}
+
+/** A minion as a contraption sees it (#421): what the minions list shows, never chat text. */
+function minionProgress(app: App, t: Ticket) {
+  const card = t.status === 'closed' ? null : app.store.openCardAt(t.id);
+  return {
+    number: t.number, title: t.title, status: t.status, state: t.state, note: t.note, ...app.runner.progressOf(t),
+    activity_at: t.updated_at, card_waiting: card !== null, card_since: card, link: `/c/#/p/${t.project_id}/t/${t.number}`,
+  };
+}
+
+/** Answer JSON with an ETag, or 304 when the caller's If-None-Match already has it, so polling costs next to nothing. */
+function jsonTagged(req: IncomingMessage, res: Ctx['res'], body: unknown) {
+  const text = JSON.stringify(body);
+  const tag = `"${createHash('sha1').update(text).digest('base64url')}"`;
+  if (req.headers['if-none-match'] === tag) {
+    res.writeHead(304, { ETag: tag, 'Cache-Control': 'no-cache' });
+    return res.end();
+  }
+  return json(res, 200, body, { ETag: tag, 'Cache-Control': 'no-cache' });
+}
+
+/** The most minions one list read names. */
+const MINIONS_MAX = 50;
+
 /** Server-sent events, one at a time, unbuffered. */
 function eventStream(req: IncomingMessage, res: Ctx['res']) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
@@ -202,6 +242,30 @@ export const contraptionRoutes: Route[] = [
   { method: ['PUT', 'DELETE'], path: '/api/mandate/items/:key', who: ['taskmaster', 'minion'], refuse: 'Only a minion or Taskmaster puts items for its scheme', handler: mandateItem },
   // contraption_read (#295): a minion or Taskmaster reads its asker's data in a contraption, through the app's read commands.
   { method: 'POST', path: '/api/contraption-read/:app', who: ['taskmaster', 'minion'], refuse: "Only a minion or Taskmaster reads a person's contraption data", handler: contraptionRead },
+  // #421: whether a person is a member of the app's home scheme, and its minions' progress for members.
+  fromContraption('GET', '/api/contraptions/home', ({ res, app, url }, c) => {
+    const { scheme, member } = homeOf(app, c, enabledPerson(app, c, url));
+    return json(res, 200, { id: scheme.id, name: scheme.name, member });
+  }),
+  fromContraption('GET', '/api/contraptions/minions', ({ req, res, app, url }, c) => {
+    const scheme = memberHome(app, c, url);
+    const raw = url.searchParams.get('n') ?? '';
+    const numbers = raw.split(',').map(Number);
+    if (!raw || numbers.length > MINIONS_MAX || numbers.some((n) => !Number.isInteger(n) || n < 1)) throw new HttpError(400, `n must be 1 to ${MINIONS_MAX} minion numbers, comma-separated`);
+    const minions = [...new Set(numbers)].flatMap((n) => {
+      const t = app.store.getTicketByNumber(scheme.id, n);
+      return t && t.kind !== 'coordinator' ? [minionProgress(app, t)] : [];
+    });
+    return jsonTagged(req, res, { minions });
+  }),
+  fromContraption('GET', '/api/contraptions/minions/:number', ({ req, res, app, url, params }, c) => {
+    const scheme = memberHome(app, c, url);
+    const n = Number(params.number);
+    if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Not a minion number');
+    const t = app.store.getTicketByNumber(scheme.id, n);
+    if (!t || t.kind === 'coordinator') throw new HttpError(404, `No minion #${n} in ${scheme.name}`);
+    return jsonTagged(req, res, minionProgress(app, t));
+  }),
   fromContraption('POST', '/api/contraptions/turns', async ({ req, res, app }, c) => {
     const body = await readJson(req, 4_000_000);
     const emit = eventStream(req, res);

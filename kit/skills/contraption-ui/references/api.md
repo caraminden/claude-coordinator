@@ -17,6 +17,7 @@ the test on purpose.
 - [Calling Citadel from your server](#calling-citadel-from-your-server)
 - [The turn API](#the-turn-api)
 - [Asks: bug reports, feature asks and data](#asks-bug-reports-feature-asks-and-data)
+- [Your home scheme and its minions](#your-home-scheme-and-its-minions)
 - [The relay: calling another contraption](#the-relay-calling-another-contraption)
 - [Sessions reading a person's data: `/app-api/read`](#sessions-reading-a-persons-data-app-apiread)
 - [What Citadel serves your pages](#what-citadel-serves-your-pages)
@@ -31,7 +32,8 @@ the test on purpose.
 - Each gated request carries `X-Citadel-Identity`, signed by Citadel; you verify it with your
   `identity.pub` and key the person's data on its `sub`.
 - Your server calls Citadel at `$CITADEL_URL` with `Authorization: Bearer <contraption.key>` to run
-  agent turns for a person, file asks with your home scheme, and call other contraptions.
+  agent turns for a person, file asks with your home scheme, follow its minions' progress, and call
+  other contraptions.
 - Citadel runs your server as a systemd user service it writes from your repo's
   `citadel-app.json`, and deploys it from GitHub.
 - Agent turns run on the person's own Claude (or Codex) sign-in, never anyone else's.
@@ -352,6 +354,58 @@ Body `{ "person": 3, "text": "…" }`, the turn's own person (tested).
   then 429. Held in memory, so a Citadel restart resets them.
 - `409` when your app has no home scheme.
 
+## Your home scheme and its minions
+
+Your server can ask whether a person is a member of your home scheme, and follow the progress of
+its minions, say the ones your asks started (tested). Both are `GET`s with your key, under the
+rules above, `person` in the query string.
+
+**`GET /api/contraptions/home?person=<sub>`** answers `200 { id, name, member }`: your home
+scheme's id and name, and whether the person is a member (in the scheme, or an admin). 403 when
+your app isn't enabled for them, 400 for a `person` that isn't a whole number, 409 when your app
+has no home scheme.
+
+**`GET /api/contraptions/minions/<n>?person=<sub>`** answers minion #n of your home scheme:
+
+```json
+{
+  "number": 12, "title": "Rune tooltips", "status": "running", "state": null, "note": null,
+  "line": "Step 2 of 6: Showing the rune cost…",
+  "step": { "n": 2, "of": 6, "done": 1, "label": "Showing the rune cost" },
+  "activity_at": 1762700000000, "card_waiting": false, "card_since": null,
+  "link": "/c/#/p/5/t/12"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `status` | `new` (no turn yet), `running` (a turn is under way), `idle`, `error` (its last turn failed) or `closed` (dismissed) |
+| `state` | Where its last turn left things, as the minions list shows it: `ready`, `try`, `parked`, `blocked`, `outside`, `pending-deploy`, `limited` (waiting out a usage limit) or `null`. Cleared when the next turn starts, except `pending-deploy` |
+| `note` | Its own one-line status (at most 60 characters), or `null` |
+| `line` | The minions list's progress line: `Step 2 of 6: …` while running, `Paused at step 2 of 6: …`, `Done · 6/6 steps`, `Working… Ran the tests`, `Finished · 14 actions`; `null` before any work |
+| `step` | Its task list: the step under way (`n`, or the count done when none is), the total (`of`), how many are `done`, and the step's `label` (`null` between steps); `null` with no task list |
+| `activity_at` | When its row last changed (a new progress line, a status or state), in milliseconds since 1970 |
+| `card_waiting`, `card_since` | Whether a question or plan card is waiting on a person, and when the oldest was posted (milliseconds), else `false` and `null` |
+| `link` | Where it opens in Citadel, below |
+
+No chat text: `line`, `step` and `note` are what the minions list shows every member.
+
+- **Members only:** a person who isn't a member of your home scheme gets 403, before anything about
+  the minion, as does one your app isn't enabled for. Minion state is the scheme's business, so
+  show it to whoever is looking only once Citadel says they may see it.
+- 404 when your home scheme has no minion #n (a number from another scheme counts as none), 400
+  for a number that isn't a whole number from 1, 409 with no home scheme.
+- **Several at once:** `GET /api/contraptions/minions?person=<sub>&n=12,14,15` answers
+  `200 { minions: [...] }`, each as above, in the order asked with repeats dropped; numbers your
+  home scheme hasn't are left out. 1 to 50 numbers, else 400.
+- **Polling:** both answer with an `ETag`. Send it back as `If-None-Match` and an unchanged answer
+  is `304` with no body. Every few seconds while a minion is running, and a minute or so when
+  it's idle, is plenty: the line changes as its steps do.
+- **The link:** `/c/#/p/<scheme id>/t/<n>`, `link` in the answer, opens minion #n's chat in
+  Citadel. Open it with `target="_top"`: your page runs inside Citadel's frame, and the link
+  should replace Citadel's window, not your frame. Only members can open it, so show it only to
+  them (`member` from `/home`).
+
 ## The relay: calling another contraption
 
 `GET | PUT | POST | DELETE /api/contraptions/relay/<to>/<path>` from your server, with your bearer
@@ -492,6 +546,7 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 | Ask files | 20 files, 16 MiB decoded |
 | Ask text, summary, item | 10,000, 200, 100 characters |
 | Asks per person per 10 minutes | 10 bug/feature, 60 data |
+| Minions in one list read | 50 |
 | Relay body, timeout | 64 KiB, 10 s |
 | `/app-api/read` timeout, answer | 15 s, 64 KB |
 | Open paths, relay paths | 20 each |
@@ -503,6 +558,9 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-09:** `GET /api/contraptions/home` says whether a person is a member of your home
+  scheme, and `GET /api/contraptions/minions/<n>` (or `?n=` for several) gives members a minion's
+  status, state, step and waiting card, with ETags for cheap polling.
 - **2026-11-09:** Every contraption ships a rail icon and a web manifest: the starter has both
   (stand-in icons to redraw), a deploy fills an empty registry icon from your manifest, and what's
   still missing is a To do for your home scheme's Taskmaster rather than a warning in the log.

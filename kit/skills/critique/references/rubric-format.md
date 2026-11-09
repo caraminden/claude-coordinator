@@ -32,7 +32,7 @@ because people's verdicts are written into it (the skill's step 9).
 | `effort` | no | `low` · `medium` · `high` | The critic's effort. Default `high` with opus, `medium` with sonnet. |
 | `scale` | no | `pass/fail` (default) · `<word> 1-5, pass at <n>` | A score beside the verdict, with its anchors under `## Scale`. Delve's art: `cool 1-5, pass at 4`. |
 | `max_rounds` | no | integer, default 3 | Critic rounds an item gets before it goes to the person with its open findings. |
-| `cross_family` | no | `off` (default) · `final` | `final`: Codex re-judges the pass verdicts once, read-only. Text artifacts only for now. |
+| `cross_family` | no | `off` (default) · `final` | `final`: Codex re-judges the pass verdicts once, read-only; images go to it as `--image` attachments. |
 | `gate` | no | `advisory` (default) · `blocks-ready` | Advisory: blockers are fixed or listed as "Not fixed: why", like reviewer findings. `blocks-ready`: the work isn't ready until the critic passes it or the person decides. |
 | `person` | no | a person's name | Whose taste the rubric holds; the `ask <person>` verdict and the learning step name them. Default: the person who asked for the work. |
 | `playbook` | no | a repo path | Fixes tried per kind of finding and how people judged them, for `citadel:professor`. |

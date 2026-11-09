@@ -15,10 +15,11 @@ import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
 import { personGithub } from '../github-link.ts';
 import { describeCron, type Schedule } from '../schedules.ts';
-import { KIT } from '../runner.ts';
+import { byteSize, KIT } from '../runner.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import type { Chain } from '../wake.ts';
-import { cloneProject, projectDir, removeProjectDir } from '../workspace.ts';
+import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
+import { relayFile } from '../taskmaster-files.ts';
 import { ICON_HEADERS, iconVersion, readIcon } from '../scheme-icon.ts';
 import { spokenText } from '../memory.ts';
 import { buildNumber, HttpError, json, oneOf, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
@@ -817,6 +818,8 @@ export const projectRoutes: Route[] = [
       const { store, runner } = app;
       const body = await readJson(req);
       const text = str(body.text, 'Message', 10_000);
+      // Held mail (#405): wake: false waits for the other Taskmaster's next turn instead of starting one.
+      const wake = body.wake !== false;
       const want = String(body.scheme ?? '').trim().toLowerCase();
       const own = store.getProject(from.project_id)!;
       // Only schemes the turn's person is in, and Citadel (src/access.ts): a scheme they aren't in gets
@@ -842,11 +845,14 @@ export const projectRoutes: Route[] = [
       const author = toCitadel
         ? `${AGENT_NAME} of ${name(own.name)}, for ${person ? name(person.name) : 'no one'}, ${store.canSee(who, project.id) ? 'a' : 'not a'} ${project.name} member`
         : `${AGENT_NAME} of ${own.name}`;
-      const { held, left } = runner.relayTaskmaster(from.id, to.id, author, text);
+      // A file (#405) is copied into the receiver's shared inbox/ before anything is sent, so a bad path sends nothing.
+      const file = body.file == null || body.file === '' ? null : relayFile(projectSharedDir(app.dataDir, own.id), projectSharedDir(app.dataDir, project.id), own.name, str(body.file, 'File', 1000));
+      const attached = file ? `\n${APP_NAME} copied a file it attached into your scheme's shared folder, where your minions can read it too: ${file.path} (${byteSize(file.size)})` : '';
+      const { held, left } = runner.relayTaskmaster(from.id, to.id, author, text, wake, attached);
       // Citadel may answer for a while once a message of theirs has reached it.
       if (toCitadel && !held) store.setSetting(askedCitadelKey(own.id), Date.now());
-      if (!held) runner.emit(from.id, 'note', { text: `Sent the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}` });
-      return json(res, 202, { scheme: project.name, held, left });
+      if (!held) runner.emit(from.id, 'note', { text: `${wake ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });
+      return json(res, 202, { scheme: project.name, held, left, ...(file ? { file: file.path } : {}) });
     },
   },
 ];

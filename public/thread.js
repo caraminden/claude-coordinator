@@ -800,6 +800,7 @@ export function appendEvent(event, scroll = true) {
       if (data.author === me && !data.comment) bubble.sent = { text: data.text ?? '', images: data.images ?? [], files: data.files ?? [] };
       stamped(bubble, event);
       if (data.steered) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: 'Sent into the turn that was running: Claude read it between steps' }, 'into the running turn'));
+      if (data.mail) bubble.querySelector('.who').append(h('span', { class: 'msg-tag', title: "Sent without waking: it is read on this Taskmaster's next turn, whoever starts it" }, 'held mail'));
       markQueued(bubble, view.ticket);
       nodes.push(bubble);
     }

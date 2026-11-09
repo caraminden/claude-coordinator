@@ -27,6 +27,8 @@ export interface LinkCheckConfig {
 
 /** How a send-back starts, which the runner looks for to swap the reply for its rewrite (Runner.replaceSentBack). */
 export const SENT_BACK = 'Your reply was sent back before people saw it.';
+/** The whole answer that keeps a sent-back reply as it was, so a false alarm costs a word, not a rewrite (#404). */
+export const KEEP = 'KEEP';
 
 /** The files `text` links that the chat would show as a card or preview but can't open, as absolute paths. */
 export async function brokenLinks(text: string, cfg: LinkCheckConfig): Promise<string[]> {
@@ -82,7 +84,7 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   const wording = misused.length ? `${explain(misused)}\n` : '';
   const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';
   const card = cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '';
-  return { decision: 'block', reason: `${SENT_BACK}\n${links}${wording}${scheme}${card}Write the reply again in full.` };
+  return { decision: 'block', reason: `${SENT_BACK}\n${links}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

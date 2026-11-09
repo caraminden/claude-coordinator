@@ -50,6 +50,16 @@ test('with no words after the send-back, or another hook\'s feedback, the first 
   ]);
 });
 
+test('a bare KEEP after the send-back keeps the first version and drops the KEEP (#404)', () => {
+  assert.deepEqual(turn([say('#390 told Delve.'), feedback(), say('KEEP'), result]), [['#390 told Delve.', false], ['KEEP', true]]);
+  const swap = broadcasts.map((b) => b.event).filter((e) => e?.kind === 'replaced').at(-1);
+  const { event, by } = typeof swap.data === 'string' ? JSON.parse(swap.data) : swap.data;
+  assert.ok(by < event, 'open chats drop the KEEP, not the reply');
+  assert.deepEqual(turn([say('#390 told Delve.'), feedback(), say('**Keep.**'), result]).map(([, r]) => r), [false, true]);
+  // Any other words are a rewrite, as before.
+  assert.deepEqual(turn([say('#390 told Delve.'), feedback(), say('Keep it short: #390 told Delve.'), result]).map(([, r]) => r), [true, false]);
+});
+
 test('only this turn counts: an earlier turn\'s send-back is left as it was', () => {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   for (const l of [say('A ![x](a.png)'), feedback(), result, say('Next turn.'), result]) (runner as any).handleLine(t.id, JSON.stringify(l), () => {});

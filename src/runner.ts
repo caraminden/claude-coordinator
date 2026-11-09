@@ -13,7 +13,7 @@ import { WS_SUFFIX, type MachineServer } from './machines.ts';
 import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, turnPluginDirs, type Go } from './approvals.ts';
 import type { TripwireConfig } from './tripwire.ts';
 import type { TurnGithub } from './github-link.ts';
-import { SENT_BACK } from './link-check.ts';
+import { KEEP, SENT_BACK } from './link-check.ts';
 import { SCHEME_REFS_MATCHER, type SchemeRefs } from './scheme-refs.ts';
 import { cardHref, cardLabel, type CardLink } from './card-links.ts';
 import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
@@ -2560,7 +2560,7 @@ export class Runner {
    * A reply the link check sent back gives way to its rewrite once the turn ends (#281, Cara's pick
    * "Replace in place"): it's marked `replaced` in the stored history, which the chat skips, and a
    * `replaced` event takes it out of open chats. The rewrite is the last words after the send-back,
-   * so narration on the way there doesn't count; with no words after it, the first version stays.
+   * so narration on the way there doesn't count; with no words after it, or just KEEP, the first version stays.
    */
   private sentBack = new Set<number>(); // tickets whose running turn had a reply sent back
 
@@ -2582,11 +2582,15 @@ export class Runner {
         if (open && open.original !== e) open.rewrite = e;
       }
     }
+    const text = (data: any) => data.message.content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('').trim();
     for (const { original, rewrite } of swaps) {
-      const data = JSON.parse(original.data);
-      if (!rewrite || data.replaced) continue;
-      this.store.setEventData(original.id, { ...data, replaced: rewrite.id });
-      this.emit(ticketId, 'replaced', { event: original.id, by: rewrite.id });
+      if (!rewrite) continue;
+      // A bare KEEP stands by the first version (#404): the KEEP is what gives way.
+      const [gone, by] = text(JSON.parse(rewrite.data)).replace(/[*_.!]/g, '').toUpperCase() === KEEP ? [rewrite, original] : [original, rewrite];
+      const data = JSON.parse(gone.data);
+      if (data.replaced) continue;
+      this.store.setEventData(gone.id, { ...data, replaced: by.id });
+      this.emit(ticketId, 'replaced', { event: gone.id, by: by.id });
     }
   }
 

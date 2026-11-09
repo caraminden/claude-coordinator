@@ -1,7 +1,6 @@
 // The cross-scheme link check (#327): in a scheme's chat a bare "#83" links to that scheme's own minion
 // #83 (public/threadrefs.js), so "#83" written about another scheme's minion opens the wrong one. When a
-// paragraph names another scheme and its bare #N here is closed, missing or about something else, the
-// reply (the Stop hook, link-check.ts) or the outgoing message (this file's PreToolUse hook,
+// bare #N sits right after another scheme's name (strayRefs), the reply (the Stop hook, link-check.ts) or the outgoing message (this file's PreToolUse hook,
 // schemeRefsHooks in runner.ts) is sent back once, naming what the link would open. A rewrite that
 // keeps the #N goes through. message_taskmaster is skipped: there a bare #N links to the receiving scheme.
 //
@@ -33,46 +32,51 @@ export interface Stray {
   opens: string;
 }
 
-// The chat's own patterns (public/threadrefs.js), kept in step by hand: a number they claim isn't a bare #N.
+// The chat's list separator (public/threadrefs.js), kept in step by hand.
 const LIST_SEP = String.raw`(?:\s*(?:,|\/|&)\s*|,?\s+(?:and|or)\s+)`;
-const PR_LIST = String.raw`\b(?:(?:PRs?|[Pp]ull [Rr]equests?|[Pp]ulls?):?\s\(?#\d{1,6}(?:${LIST_SEP}#\d{1,6})*|(?:PR|[Pp]ull [Rr]equest)\s\d{1,6})(?![\w#/-])`;
-const ISSUE_LIST = String.raw`\b[Ii]ssues?\s#\d{1,6}(?:${LIST_SEP}#\d{1,6})*`;
-const MINION_LIST = String.raw`(?:[Mm]inions\s+#\d{1,6}(?:${LIST_SEP}#\d{1,6})*|[Mm]inion\s+#\d{1,6})(?![\w#/-])`;
-const REF = String.raw`(?<![\w&/#.:?=+-])#(?<n>\d{1,6})(?![\w#/-])`;
-const POSSESSIVE = String.raw`(?:'|\u2019)s`;
-/** A name with any run of spaces where it has one; case as written, since a scheme's name is a proper noun. */
+/** A name with any run of spaces where it has one; case-blind, as the chat reads it. */
 const namePattern = (name: string) => name.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join(String.raw`\s+`);
-const nameRe = (names: string[], flags = '') => new RegExp(`(?<![\\p{L}\\p{N}_])(?:${names.map(namePattern).join('|')})(?![\\p{L}\\p{N}_])`, `u${flags}`);
+const key = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+/** "ToC" for "Theory of Crafting": a short form the chat doesn't know, so its numbers link here. */
+const initials = (name: string) => {
+  const words = name.trim().split(/\s+/);
+  return words.length > 1 ? words.map((w) => w[0]).join('').toLowerCase() : '';
+};
 
-/** Words too common to show a title and a paragraph are about the same thing. */
-const STOP = new Set('this that with from have will been were what when where which their there they them then than into onto over under about after before also just only some more most other others same such very your yours ours here does done make made like want need needs should would could still each every both once fix fixes fixed add adds added minion minions scheme schemes taskmaster grunt'.split(' '));
-const stems = (s: string) => new Set((s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 4 && !STOP.has(w)).map((w) => w.replace(/(?:es|s)$/, '')));
-
-/** The bare #N in `text` that likely mean another scheme's minion, one per number. */
+/**
+ * The bare #N in `text` the chat links here although they sit right after another scheme's name, one per number:
+ * the rest of a list ("Delve #3, #4 and #5": only #3 is Delve's), a possessive without its s ("Peek Auras' #81"),
+ * a short form ("ToC #60") or an aside ("Threadspace (the old Obsidian) #24"). A #N elsewhere in a paragraph that
+ * names another scheme is left alone: 99 of the first 109 send-backs were that, all this scheme's own minions (#404).
+ */
 export function strayRefs(text: string, refs: SchemeRefs): Stray[] {
-  const others = refs.others.filter((n) => n.trim() && n.trim() !== refs.scheme.trim());
+  const own = key(refs.scheme);
+  const others = refs.others.filter((n) => n.trim() && key(n) !== own);
   if (!others.length || !text.includes('#')) return [];
-  const all = [...others, refs.scheme].filter((n) => n.trim()).sort((a, b) => b.length - a.length);
-  const names = all.map(namePattern).join('|');
-  // As the chat reads it, but case-insensitive for names as the chat is: a name before the number scopes it.
-  const scoped = String.raw`(?<![\p{L}\p{N}_])(?:${names})(?:${POSSESSIVE})?\s+(?:${PR_LIST}|${MINION_LIST}|#\d{1,6}(?![\w#/-]))|${MINION_LIST}\s+in\s+(?:${names})(?![\p{L}\p{N}_])`;
-  const tokens = new RegExp(`${ISSUE_LIST}|${PR_LIST}|${scoped}|${REF}`, 'giu');
-  const max = Math.max(0, ...Object.keys(refs.minions).map(Number));
+  // What each name or short form the reply may use stands for, and whether the chat reads it as a scope.
+  const byKey = new Map<string, { other: string; full: boolean }>();
+  for (const n of others) {
+    const short = initials(n);
+    if (short && short !== initials(refs.scheme) && !byKey.has(short)) byKey.set(short, { other: n.trim(), full: false });
+  }
+  for (const n of others) byKey.set(key(n), { other: n.trim().replace(/\s+/g, ' '), full: true });
+  // Longest first, and this scheme's own name too, so "Delve Two #3" isn't read as "Delve" + "Two #3".
+  const names = [...byKey.keys(), own].sort((a, b) => b.length - a.length).map(namePattern).join('|');
+  const run = new RegExp(String.raw`(?<![\p{L}\p{N}_])(?<name>${names})(?<poss>'s|\u2019s|'|\u2019)?(?<aside>\s*\([^()\n]{1,60}\))?\s+(?<minion>[Mm]inions?\s+)?#(?<first>\d{1,6})(?<rest>(?:${LIST_SEP}#\d{1,6})*)(?![\w#/-])`, 'giu');
   const found: Stray[] = [];
-  for (const para of text.replace(CODE, ' ').split(/\n\s*\n/)) {
-    const other = nameRe(others).exec(para)?.[0];
-    if (!other) continue;
-    const words = stems(para);
-    for (const m of para.matchAll(tokens)) {
-      if (!m.groups?.n) continue;
-      const n = Number(m.groups.n);
+  for (const m of text.replace(CODE, ' ').matchAll(run)) {
+    const g = m.groups!;
+    const named = byKey.get(key(g.name));
+    if (!named) continue;
+    const { other } = named;
+    // As the chat reads it: the full name, "'s" or nothing, then "#3" or "minion(s) #3".
+    const scoped = named.full && !g.aside && (!g.poss || g.poss.endsWith('s'));
+    const nums = [...(scoped ? [] : [g.first]), ...(scoped && /^minions/i.test(g.minion ?? '') ? [] : g.rest.match(/\d+/g) ?? [])].map(Number);
+    for (const n of nums) {
       if (found.some((f) => f.n === n)) continue;
       const minion = refs.minions[n];
-      // Past the newest number it's likely one started during this turn, after the snapshot.
-      if (!minion && n > max) continue;
-      if (minion && !minion.closed && [...stems(minion.title)].some((w) => words.has(w))) continue;
       const opens = minion ? `${refs.scheme} #${n} "${minion.title}"${minion.closed ? ' (closed)' : ''}` : `nothing: ${refs.scheme} has no #${n}`;
-      found.push({ n, other: other.replace(/\s+/g, ' '), opens });
+      found.push({ n, other, opens });
     }
   }
   return found;

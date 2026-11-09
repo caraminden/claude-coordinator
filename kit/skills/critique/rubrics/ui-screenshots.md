@@ -77,7 +77,7 @@ ignored finding as a note, never a blocker.
    reading a word, you can see the app's accent, the cards that group its content and where each
    status sits (`citadel:contraption-ui`, "First look"). See it: in either mode, text sitting loose
    on the page background with no surface around it; one size and weight of type down the view;
-   states as plain words with no toned chip; the only colour Citadel's own orange; an empty view
+   states as plain words with no toned chip; no colour on the view but the accent; an empty view
    that is one grey sentence. A plain view is fine when there's nothing on it but a chat, whose
    parts carry their own look. Seen: Transdata's Review and Ingest tabs, a single muted line on
    an empty page (2026-11-09); Cara: "a big wall of white/black text is never going to be what we
@@ -86,6 +86,7 @@ ignored finding as a note, never a blocker.
 ## Watch-list
 
 - Meaning carried by colour alone: a red dot with no word (rule 17).
+- An app still in Citadel's orange accent rather than its own ("First look", 1).
 - An empty or failed state that is blank or says only "Error" (rule 19).
 - Text on the accent that isn't `--citadel-on-accent`, or grey text too faint to read on its panel.
 - A control's label off its baseline, so a row grows taller than its parts (Citadel #289: a switch
@@ -114,6 +115,9 @@ ignored finding as a note, never a blocker.
 | Peek's dialog before #175 | script only, not in the critic's trial | blocker 5: `close-scrolls` finds it on a rebuilt page and passes the pinned one |
 | Mandate #61 after, desktop | another round, then pass | a false alarm: it read the composer's own ring as a second line, so blocker 4 now says a ring outside a box's border is one line; re-run blind, it passed and still failed the before shot |
 | Citadel #212 after, #289 after, Peek's dialog after | pass | clean controls |
+| Transdata's Review tab and Database tab, 2026-11-09 | another round (hit, both) | blocker 8: one grey sentence on an empty page; rows loose on the background |
+| #419's Hearth sample from the old skill | another round, then pass | a false alarm: blocker 8 failed it for Citadel's orange alone though cards and toned chips carry it, so the accent moved to the watch-list; re-run, it passed with that note |
+| #419's Hearth sample from the First look checklist | pass | accent, cards, grouped rows, stat tiles, an empty state with shape |
 
 ## Known blind spots
 

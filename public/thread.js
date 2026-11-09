@@ -1,7 +1,7 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, takeJump, taskmasterLabel, taskmasterName, threadFullName, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
+import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, fileKind, fileUrl, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, USER_SCROLL, statusLabel, takeJump, taskmasterLabel, taskmasterName, threadFullName, threadLabel, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
 import { alertNote, composer, composerPlaceholder, loadDraft, renderModelPicker, saveDraft } from './composer.js';
-import { rowState, SHIP } from './sidebar.js';
+import { renderSidebar, rowState, SHIP } from './sidebar.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
 import { recapEvent, showRecap } from './recap.js';
@@ -9,6 +9,7 @@ import { noteStrike, struckSource } from './strike.js';
 import { narrationSorter } from './narration.js';
 import { gist, groupTitle, gruntName, gruntOf } from './grunts.js';
 import { stepMark } from './ui/chat.js';
+import { optimistic } from './ui/optimistic.js';
 import { threadNumberHref } from './threadrefs.js';
 import { replyChips } from './replies.js';
 import { askHeader } from './askcard.js';
@@ -384,10 +385,11 @@ export function renderTicketHead() {
   } else if (coord) {
     // The coordinator stays open for the life of the project.
   } else if (t.status === 'closed') {
-    actions.push(h('button', { class: 'secondary act-reopen', onclick: () => setStatus(t.id, 'idle') }, 'Reopen minion'));
+    actions.push(h('button', { class: 'secondary act-reopen', onclick: () => setStatus(t, 'idle') }, 'Reopen minion'));
   } else {
-    actions.push(h('button', { class: 'secondary act-dismiss', onclick: async () => {
-      if (await setStatus(t.id, 'closed')) location.hash = `#/p/${t.project_id}`;
+    actions.push(h('button', { class: 'secondary act-dismiss', onclick: () => {
+      setStatus(t, 'closed');
+      location.hash = `#/p/${t.project_id}`;
     }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
   }
   const state = (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '');
@@ -470,16 +472,25 @@ function editPersonNote(t) {
     noteEdit = null;
     renderTicketHead();
   };
-  const save = async () => {
-    try {
-      const { note } = await api(`api/tickets/${t.id}/person-note`, { method: 'PUT', body: { text: input.value } });
-      const notes = view.personNotes ?? {}; // none if the person left the scheme while it saved
-      if (note) notes[t.id] = note;
-      else delete notes[t.id];
-      done();
-    } catch (e) {
-      alertNote(e.message);
-    }
+  // Shown at once; the server's broadcast replaces it with its own copy, and a refusal puts the old note back.
+  const show = (note) => {
+    const notes = view.personNotes ?? {}; // none if the person left the scheme meanwhile
+    if (note) notes[t.id] = note;
+    else delete notes[t.id];
+    renderSidebar();
+    if (view.id === t.id) renderTicketHead();
+  };
+  const save = () => {
+    const was = view.personNotes?.[t.id];
+    const text = input.value.replace(/\s+/g, ' ').trim(); // as the server stores it
+    noteEdit = null;
+    optimistic({
+      key: `note:${t.id}`,
+      apply: () => show(text ? { text, by: me, at: Date.now() } : null),
+      send: () => api(`api/tickets/${t.id}/person-note`, { method: 'PUT', body: { text } }),
+      undo: () => show(was),
+      label: `save the note on ${threadLabel(t)}`,
+    });
   };
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); save(); }
@@ -499,14 +510,15 @@ function editPersonNote(t) {
 /** Pin or unpin the minion to the Pinned section atop your own list. */
 function pinButton(t) {
   const pinned = view.pins?.includes(t.id);
-  const toggle = async () => {
-    try {
-      await api(`api/tickets/${t.id}/pin`, { method: 'PUT', body: { pinned: !pinned } });
-      onTicketPin({ name: me, projectId: t.project_id, ticketId: t.id, pinned: !pinned }); // the stream says so too, maybe later
-    } catch (e) {
-      alertNote(e.message);
-    }
-  };
+  // The stream says so too, maybe later; a click after this one redraws first, so it unpins again.
+  const show = (on) => onTicketPin({ name: me, projectId: t.project_id, ticketId: t.id, pinned: on });
+  const toggle = () => optimistic({
+    key: `pin:${t.id}`,
+    apply: () => show(!pinned),
+    send: () => api(`api/tickets/${t.id}/pin`, { method: 'PUT', body: { pinned: !pinned } }),
+    undo: () => show(pinned),
+    label: `${pinned ? 'unpin' : 'pin'} ${threadLabel(t)}`,
+  });
   return h('button', { type: 'button', class: `note-btn pin-btn${pinned ? ' on' : ''}`, title: pinned ? 'Unpin from the top of your list' : 'Pin to the top of your list (only you see your pins)', 'aria-label': pinned ? 'Unpin' : 'Pin', 'aria-pressed': String(!!pinned), onclick: toggle },
     icon('pin'), h('span', { class: 'wide-only' }, pinned ? 'Pinned' : 'Pin'));
 }
@@ -519,14 +531,21 @@ function shipLine(t) {
     h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, stage.badge || 'on branch'));
 }
 
-async function setStatus(id, status) {
-  try {
-    await api(`api/tickets/${id}/status`, { method: 'POST', body: { status } });
-    return true;
-  } catch (e) {
-    alertNote(e.message);
-    return false;
-  }
+/** Dismiss (closed) or reopen (idle) a minion: shown at once in its head and the list, put back if the server says no. */
+function setStatus(t, status) {
+  const was = t.status;
+  const show = (s) => {
+    for (const x of new Set([t, view?.tickets?.get(t.id)])) if (x) x.status = s;
+    renderSidebar();
+    if (view?.id === t.id) renderTicketHead();
+  };
+  optimistic({
+    key: `status:${t.id}`,
+    apply: () => show(status),
+    send: () => api(`api/tickets/${t.id}/status`, { method: 'POST', body: { status } }),
+    undo: () => show(was),
+    label: `${status === 'closed' ? 'dismiss' : 'reopen'} ${threadLabel(t)}`,
+  });
 }
 
 // ---------- work progress (thread-bar readout) ----------
@@ -1144,18 +1163,25 @@ function approvalCard(ticketId, card) {
     h('div', { class: 'anote' }, `Approve runs this one call once. If the turn ends first, it expires and doesn't run.`),
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), deny, approve));
   let settled = false;
-  const decide = async (allow) => {
+  // Shown as decided at once; the server's outcome (settle) replaces it, and a refusal opens the card again.
+  const decide = (allow) => {
     if (settled) return;
-    approve.disabled = deny.disabled = true;
-    status.textContent = allow ? 'Approving…' : 'Denying…';
-    try {
-      await api(`api/tickets/${ticketId}/approve`, { method: 'POST', body: { approvalId: card.id, allow } });
-      if (view?.id === ticketId) catchUpEvents().catch(() => {});
-    } catch (ex) {
-      status.textContent = ex.message;
-      // An expired or already-settled card stays shut; anything else can be tried again.
-      if (!/expired|already/.test(ex.message)) approve.disabled = deny.disabled = false;
-    }
+    optimistic({
+      key: `card:${card.id}`,
+      apply: () => {
+        approve.hidden = deny.hidden = true;
+        status.textContent = allow ? 'Approved' : 'Denied';
+      },
+      send: () => api(`api/tickets/${ticketId}/approve`, { method: 'POST', body: { approvalId: card.id, allow } }),
+      undo: (ex) => {
+        if (settled) return;
+        // An expired or already-settled card stays shut; anything else can be tried again.
+        if (/expired|already/.test(ex?.message)) return void (status.textContent = ex.message);
+        approve.hidden = deny.hidden = false;
+        status.textContent = '';
+      },
+      label: allow ? 'approve that call' : 'deny that call',
+    }).then(() => view?.id === ticketId && catchUpEvents().catch(() => {}));
   };
   approve.addEventListener('click', () => decide(true));
   deny.addEventListener('click', () => decide(false));
@@ -1252,22 +1278,36 @@ function planCard(ticketId, card) {
     // Centre the box so its buttons clear the sticky message box at the bottom.
     notes.scrollIntoView({ block: 'center' });
   };
-  const decide = async (verdict) => {
-    if (rank) return;
-    approve.disabled = revise.disabled = sendNotes.disabled = cancel.disabled = true;
-    status.textContent = verdict === 'approve' ? 'Approving…' : 'Sending…';
-    try {
-      const ticket = await api(`api/tickets/${ticketId}/verdict`, { method: 'POST', body: { planId: card.id, verdict, notes: notes.value.trim() } });
-      if (view?.id === ticketId) {
-        view.ticket = ticket;
-        renderTicketHead();
-        catchUpEvents().catch(() => {});
-      }
-    } catch (ex) {
-      status.textContent = ex.message;
-      approve.disabled = revise.disabled = cancel.disabled = false;
-      sendNotes.disabled = !notes.value.trim();
-    }
+  // Shown as decided at once; the server's outcome (settle) replaces it, and a refusal opens the card again as it was.
+  let deciding = false;
+  const decide = (verdict) => {
+    if (rank || deciding) return;
+    const text = notes.value.trim();
+    optimistic({
+      key: `card:${card.id}`,
+      apply: () => {
+        deciding = true;
+        editing(false);
+        approve.hidden = revise.hidden = true;
+        el.classList.add('answered');
+        status.textContent = verdict === 'approve' ? 'Approved' : 'Revision sent';
+      },
+      send: () => api(`api/tickets/${ticketId}/verdict`, { method: 'POST', body: { planId: card.id, verdict, notes: text } }),
+      undo: () => {
+        deciding = false;
+        if (rank) return;
+        el.classList.remove('answered');
+        approve.hidden = revise.hidden = false;
+        status.textContent = '';
+        if (verdict === 'revise') editing(true);
+      },
+      label: verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
+    }).then((ticket) => {
+      if (view?.id !== ticketId) return;
+      view.ticket = ticket;
+      renderTicketHead();
+      catchUpEvents().catch(() => {});
+    });
   };
   approve.addEventListener('click', () => decide('approve'));
   revise.addEventListener('click', () => editing(true));
@@ -1298,16 +1338,19 @@ function planCard(ticketId, card) {
 function loopCard(data) {
   const status = h('span', { class: 'muted', role: 'status' });
   const go = h('button', { type: 'button', class: 'small' }, 'Continue');
-  go.addEventListener('click', async () => {
-    go.disabled = true;
-    status.textContent = 'Continuing…';
-    try {
-      await api(`api/tickets/${data.minion}/continue`, { method: 'POST' });
-    } catch (ex) {
-      status.textContent = ex.message;
-      go.disabled = false;
-    }
-  });
+  go.addEventListener('click', () => optimistic({
+    key: `continue:${data.minion}`,
+    apply: () => {
+      go.hidden = true;
+      status.textContent = 'Continued';
+    },
+    send: () => api(`api/tickets/${data.minion}/continue`, { method: 'POST' }),
+    undo: () => {
+      go.hidden = false;
+      status.textContent = '';
+    },
+    label: 'let that message through',
+  }));
   return h('div', { class: 'qcard lcard', 'data-minion': data.minion },
     h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Needs a person'), threadRefs(data.text)),
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), go));
@@ -1360,24 +1403,37 @@ function questionCard(ticketId, card) {
     }
     sendBtn.disabled = answered || !ready();
   };
-  const send = async () => {
+  // Shown as answered at once; the server's echo (markAnswered) confirms it, and a refusal opens the card again with the picks kept.
+  let confirmed = false; // answered or settled by the server, so a failed send leaves it shut
+  const lock = (on) => {
+    answered = on;
+    el.classList.toggle('answered', on);
+    for (const input of el.querySelectorAll('.opt, .other')) input.disabled = on;
+    sendBtn.hidden = on;
+  };
+  const send = () => {
     if (answered || !ready()) return;
-    el.classList.add('sending');
-    sendBtn.disabled = true;
-    status.textContent = 'Sending…';
-    try {
-      const answers = picks.map((p) => ({ selected: [...p.selected], other: p.other.trim() }));
-      const ticket = await api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id, answers } });
-      if (view?.id === ticketId) {
-        view.ticket = ticket;
-        renderTicketHead();
-        catchUpEvents().catch(() => {});
-      }
-    } catch (ex) {
-      status.textContent = ex.message;
-      el.classList.remove('sending');
-      refresh();
-    }
+    const answers = picks.map((p) => ({ selected: [...p.selected], other: p.other.trim() }));
+    optimistic({
+      key: `card:${card.id}`,
+      apply: () => {
+        lock(true);
+        status.textContent = `Answered by ${me}`;
+      },
+      send: () => api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id, answers } }),
+      undo: () => {
+        if (confirmed) return;
+        lock(false);
+        status.textContent = '';
+        refresh();
+      },
+      label: 'send your answer',
+    }).then((ticket) => {
+      if (view?.id !== ticketId) return;
+      view.ticket = ticket;
+      renderTicketHead();
+      catchUpEvents().catch(() => {});
+    });
   };
   sendBtn.addEventListener('click', send);
 
@@ -1427,8 +1483,7 @@ function questionCard(ticketId, card) {
   view.cards.set(card.id, {
     el,
     markAnswered(answers, author) {
-      answered = true;
-      el.classList.remove('sending');
+      answered = confirmed = true;
       el.classList.add('answered');
       answers.forEach((a, i) => {
         picks[i].selected = new Set(a.selected);
@@ -1444,8 +1499,7 @@ function questionCard(ticketId, card) {
     },
     // The minion took a typed reply as the answer (settle_question).
     markSettled() {
-      answered = true;
-      el.classList.remove('sending');
+      answered = confirmed = true;
       el.classList.add('answered');
       for (const input of el.querySelectorAll('.opt, .other')) input.disabled = true;
       for (const other of el.querySelectorAll('.other')) other.hidden = true;

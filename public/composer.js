@@ -4,6 +4,7 @@
 import { account, api, catchUpEvents, codex, formatSize, h, isCoordinator, me, reloadWhenIdle, scrollToBottom, sending, setSending, uploadUrl, view } from './core.js';
 import { base64Url, renderTicketHead, renderTyping, userBubble } from './thread.js';
 import { mountComposer } from './ui/composer.js';
+import { optimistic } from './ui/optimistic.js';
 
 // ---------- drafts ----------
 
@@ -391,22 +392,9 @@ function codexBlocked() {
 
 /** Model, effort and (minions only) the Workflow switch for this thread, beside Send; a change applies from its next turn. */
 function modelPicker(chatId) {
-  const save = (field) => async (e) => {
-    const sel = e.target;
-    sel.disabled = true;
-    try {
-      const value = field === 'workflow' ? sel.value === 'on' : sel.value || null;
-      const ticket = await api(`api/tickets/${chatId}`, { method: 'PATCH', body: { [field]: value } });
-      if (view?.kind === 'project' && view.id === chatId) {
-        view.ticket = ticket;
-        renderModelPicker();
-      }
-    } catch (err) {
-      alertNote(err.message);
-      renderModelPicker();
-    } finally {
-      sel.disabled = false;
-    }
+  const save = (field) => (e) => {
+    const value = field === 'workflow' ? e.target.value === 'on' : e.target.value || null;
+    setTicketField(chatId, field, value, value ?? 'the default');
   };
   const model = h('select', { class: 'picker', id: 'model-picker', title: 'Model for this minion', 'aria-label': 'Model for this minion', onchange: save('model') });
   const effort = h('select', { class: 'picker', id: 'effort-picker', title: 'Effort for this minion', 'aria-label': 'Effort for this minion', onchange: save('effort') });
@@ -488,20 +476,32 @@ function pluginPicker(chatId) {
       button.focus();
     }
   });
-  menu.addEventListener('change', async () => {
-    const boxes = [...menu.querySelectorAll('input')];
-    const picks = boxes.filter((b) => b.checked).map((b) => b.value);
-    for (const b of boxes) b.disabled = true;
-    try {
-      const ticket = await api(`api/tickets/${chatId}`, { method: 'PATCH', body: { plugin_dirs: picks } });
-      if (view?.kind === 'project' && view.id === chatId) view.ticket = ticket;
-    } catch (err) {
-      alertNote(err.message);
-    } finally {
-      renderModelPicker();
-    }
+  menu.addEventListener('change', () => {
+    const picks = [...menu.querySelectorAll('input')].filter((b) => b.checked).map((b) => b.value);
+    setTicketField(chatId, 'plugin_dirs', picks, picks.length ? picks.map(pluginName).join(', ') : 'no plugins');
   });
   return wrap;
+}
+
+/**
+ * Set one of the pickers' fields on the minion: shown at once, sent behind (one chat's changes in click order),
+ * and put back if the server refuses. plugin_dirs goes as a list and is kept, as the server gives it, one per line.
+ */
+function setTicketField(chatId, field, value, shown) {
+  const t = view.ticket;
+  if (view?.id !== chatId || !t) return;
+  const was = t[field];
+  const show = (v) => {
+    t[field] = v;
+    if (view?.ticket === t) renderModelPicker();
+  };
+  optimistic({
+    key: `pickers:${chatId}`,
+    apply: () => show(Array.isArray(value) ? value.join('\n') : value),
+    send: () => api(`api/tickets/${chatId}`, { method: 'PATCH', body: { [field]: value } }),
+    undo: () => show(was),
+    label: `set ${field === 'plugin_dirs' ? 'plugins' : field} to ${shown}`,
+  });
 }
 
 /**

@@ -3,6 +3,7 @@ import { api, h, icon, me, view } from './core.js';
 import { settingsTabs, tuneUpButton } from './settings.js';
 import { filterChoices, samePicks, valueCounts, viewPicks } from './propfilter.js';
 import { renderSidebar } from './sidebar.js';
+import { optimistic } from './ui/optimistic.js';
 
 // ---------- properties (the scheme's property registry) ----------
 
@@ -33,7 +34,7 @@ export function propertyChip(t) {
 
 /** Who the minion is assigned to: type a name or pick one people already go by; empty unassigns it. */
 function assignPicker(t) {
-  const current = t.properties?.assigned ?? '';
+  let current = t.properties?.assigned ?? '';
   const userKeys = propFilter.keys.filter((k) => k.value_kind === 'user').map((k) => k.key);
   // One spelling per person, the one already in use before the signed-in name, as the server matches them.
   const byLower = new Map();
@@ -42,19 +43,22 @@ function assignPicker(t) {
   const list = h('datalist', { id: `assign-names-${t.id}` }, names.map((n) => h('option', { value: n })));
   const note = h('span', { class: 'muted small', role: 'status' });
   const input = h('input', { type: 'text', class: 'assign-input', value: current, placeholder: 'Nobody', list: list.id, 'aria-label': 'Assigned to', maxlength: '60' });
-  input.addEventListener('change', async () => {
+  input.addEventListener('change', () => {
     const name = input.value.trim();
-    if (name === current) return;
-    input.disabled = true;
-    try {
-      // The minions list and this header redraw from the broadcast that follows.
-      await api(`api/tickets/${t.id}/properties`, { method: 'PUT', body: { properties: { assigned: name || null } } });
-      note.textContent = name ? 'Saved' : 'Unassigned';
-    } catch (err) {
-      note.textContent = err.message;
-    } finally {
-      input.disabled = false;
-    }
+    const was = current;
+    if (name === was) return;
+    // Shown as saved at once; the minions list and this header redraw from the broadcast that follows, and a refusal puts the old name back.
+    const show = (n, text) => {
+      current = input.value = n;
+      note.textContent = text;
+    };
+    optimistic({
+      key: `assign:${t.id}`,
+      apply: () => show(name, name ? 'Saved' : 'Unassigned'),
+      send: () => api(`api/tickets/${t.id}/properties`, { method: 'PUT', body: { properties: { assigned: name || null } } }),
+      undo: () => show(was, ''),
+      label: name ? `assign it to ${name}` : 'unassign it',
+    });
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
   return [input, list, note];

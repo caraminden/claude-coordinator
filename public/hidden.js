@@ -3,19 +3,25 @@
 import { api, h, me, schemeIcon, view } from './core.js';
 import { schemeCount } from './inbox.js';
 import { openNewScheme } from './sidebar.js';
+import { optimistic } from './ui/optimistic.js';
 
 let hiddenOpen = false; // whether the shelf's Hidden section is unfolded, kept across redraws
 
 export const isHidden = (projectId) => !!view?.projects?.find((p) => p.id === projectId)?.hidden;
 
-/** Hide or unhide a scheme for you, then redraw what shows it. */
-export async function setHidden(p, hidden) {
-  try {
-    await api(`api/projects/${p.id}/hidden`, { method: 'PUT', body: { hidden } });
-  } catch (err) {
-    return alert(err.message);
-  }
-  await refreshHidden();
+/** Hide or unhide a scheme for you: the shelf and its note show it at once, and everything showing it redraws once the server has it. */
+export function setHidden(p, hidden) {
+  const show = (on) => {
+    for (const x of new Set([p, view?.projects?.find((q) => q.id === p.id)])) if (x) x.hidden = on;
+    redrawHidden();
+  };
+  optimistic({
+    key: `hidden:${p.id}`,
+    apply: () => show(hidden),
+    send: () => api(`api/projects/${p.id}/hidden`, { method: 'PUT', body: { hidden } }),
+    undo: () => show(!hidden),
+    label: `${hidden ? 'hide' : 'unhide'} ${p.name}`,
+  }).then(() => refreshHidden());
 }
 
 /** A hide changed for someone (this tab or another of theirs): only theirs redraws. */
@@ -26,6 +32,11 @@ export function onHiddenChanged(name) {
 async function refreshHidden() {
   if (view?.kind !== 'project') return;
   view.projects = await api('api/projects').catch(() => view.projects);
+  redrawHidden();
+}
+
+function redrawHidden() {
+  if (view?.kind !== 'project') return;
   renderSchemesShelf();
   renderHiddenNote();
   document.getElementById('hide-scheme')?.replaceWith(hideButton(view.project));

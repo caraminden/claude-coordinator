@@ -2,6 +2,7 @@
 // by the clock in its header.
 import { ago, api, h, view } from './core.js';
 import { modelName } from './composer.js';
+import { optimistic } from './ui/optimistic.js';
 
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -15,23 +16,44 @@ function scheduleRow(s) {
     h('div', { class: 'muted small' }, h('span', { title: `cron: ${s.cron} (server time)` }, s.when), runsAs(s), ' · last run ', last),
     s.last_error ? h('p', { class: 'error small' }, "Last run didn't start: ", s.last_error) : '',
     h('div', { class: 'row schedule-actions' },
-      h('button', { type: 'button', class: 'secondary small', onclick: () => change(s, 'PATCH', { paused: !s.paused }) }, s.paused ? 'Resume' : 'Pause'),
-      h('button', { type: 'button', class: 'secondary small', onclick: () => confirm(`Delete the schedule "${s.name}"? Minions it already started stay.`) && change(s, 'DELETE') }, 'Delete')));
+      h('button', { type: 'button', class: 'secondary small', onclick: (e) => pause(s, e.currentTarget.closest('li')) }, s.paused ? 'Resume' : 'Pause'),
+      h('button', { type: 'button', class: 'secondary small', onclick: (e) => confirm(`Delete the schedule "${s.name}"? Minions it already started stay.`) && remove(s, e.currentTarget.closest('li')) }, 'Delete')));
+}
+
+// Both show at once and send behind; the server's broadcast then redraws the list, and a refusal puts the row back.
+function pause(s, row) {
+  const was = s.paused;
+  const show = (paused) => {
+    s.paused = paused;
+    const next = scheduleRow(s);
+    row.replaceWith(next);
+    row = next;
+  };
+  optimistic({
+    key: `schedule:${s.id}`,
+    apply: () => show(!was),
+    send: () => api(`api/schedules/${s.id}`, { method: 'PATCH', body: { paused: !was } }),
+    undo: () => show(was),
+    label: `${was ? 'resume' : 'pause'} the schedule "${s.name}"`,
+  });
+}
+
+function remove(s, row) {
+  const list = row.parentNode;
+  const after = row.nextSibling;
+  optimistic({
+    key: `schedule:${s.id}`,
+    apply: () => row.remove(),
+    send: () => api(`api/schedules/${s.id}`, { method: 'DELETE' }),
+    undo: () => list.isConnected && list.insertBefore(row, after?.parentNode === list ? after : null),
+    label: `delete the schedule "${s.name}"`,
+  });
 }
 
 /** The model and effort each run starts with, when the schedule sets them; nothing for the scheme's defaults. */
 function runsAs(s) {
   const set = [s.model && modelName(s.model), s.effort && `${s.effort} effort`].filter(Boolean);
   return set.length ? [' · ', h('span', { title: 'What each run starts with' }, set.join(', '))] : '';
-}
-
-async function change(s, method, body) {
-  try {
-    await api(`api/schedules/${s.id}`, { method, body });
-  } catch (ex) {
-    alert(ex.message);
-  }
-  // The server's broadcast redraws the list.
 }
 
 /** Someone added, changed or ran a schedule: redraw the list if it is open on that scheme. */

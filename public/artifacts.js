@@ -1,11 +1,12 @@
 // Artifacts and files: the shelf, the browser, and viewers for artifacts and linked or shared files.
-import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, followChat, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, loadPanelState, markdownDoc, reloadWhenIdle, routeSeq, savePanelState, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
+import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, followChat, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, loadPanelState, markdownDoc, me, reloadWhenIdle, routeSeq, savePanelState, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
 import { addBriefButtons } from './briefstart.js';
 import { attachBridge } from './bridge-host.js';
 import { loadDraft, saveDraft } from './composer.js';
 import { showProject } from './project.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
+import { optimistic } from './ui/optimistic.js';
 
 /** A file a thread linked in its reply, shown full screen over its chat, which stays beside it. */
 export async function showFile(ticketId, path) {
@@ -91,14 +92,22 @@ export function setArtifacts(artifacts, shared = view.shared) {
 }
 
 /** Pin or unpin an artifact, or a shared-folder file (which has no id, only its path). */
-async function setPinned(a, pinned) {
-  try {
-    if (a.id) await api(`api/artifacts/${a.id}/pin`, { method: 'POST', body: { pinned } });
-    else await api(`api/projects/${view.projectId}/shared/pin`, { method: 'POST', body: { path: a.path, pinned } });
-    await refreshArtifacts();
-  } catch (e) {
-    alert(`Could not ${pinned ? 'pin' : 'unpin'}: ${e.message}`);
-  }
+function setPinned(a, pinned) {
+  const was = { pinned_at: a.pinned_at, pinned_by: a.pinned_by };
+  const show = (pin) => {
+    Object.assign(a, pin);
+    setArtifacts(view.artifacts, view.shared);
+  };
+  const projectId = view.projectId;
+  optimistic({
+    key: `artifact-pin:${a.id ?? a.path}`,
+    apply: () => show(pinned ? { pinned_at: Date.now(), pinned_by: me } : { pinned_at: null, pinned_by: null }),
+    send: () => (a.id
+      ? api(`api/artifacts/${a.id}/pin`, { method: 'POST', body: { pinned } })
+      : api(`api/projects/${projectId}/shared/pin`, { method: 'POST', body: { path: a.path, pinned } })),
+    undo: () => show(was),
+    label: `${pinned ? 'pin' : 'unpin'} ${a.name}`,
+  }).then(() => refreshArtifacts());
 }
 
 function pinButton(a) {

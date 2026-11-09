@@ -49,6 +49,7 @@ so you have `manifest.webmanifest` and the icons, then:
 1. Replace `my-app` and `My app` in `manifest.webmanifest` (`id`, `start_url` and `scope` stay
    `/apps/<name>/`, `display` stays `standalone`).
 2. Redraw `icon.svg` and render the three PNGs from it ([references/installing.md](references/installing.md)).
+   Set the accent in `app.css` to match it ([First look](#first-look), 1).
 3. Serve the folder under your base path, so `/apps/<name>/manifest.webmanifest` and the icons load.
 4. Register `icon` as `/icon.svg`. Left empty, a deploy fills it from the manifest.
 5. Deploy and clear any **To do** lines it hands back.
@@ -83,6 +84,34 @@ tint a part, set the base colour (`--citadel-accent`) on its container rather th
 A chart, dashboard or stat tile follows the built-in `dataviz` skill's method (form, marks,
 interaction) but takes its colours from these tokens, never dataviz's placeholder palette.
 
+## First look
+
+Cara, 2026-11-09: "a big wall of white/black text is never going to be what we want out of our
+UIs". A new page or view meets all eight before its first screenshot. The code for each:
+[references/first-look.md](references/first-look.md).
+
+1. **Its own accent.** One `--citadel-accent` on `:root` in your CSS: a tone (`violet`, `info`) or
+   your own light and dark pair. Never `ok`, `warn` or `danger`, and not Citadel's orange: the app
+   should look like itself. Primary buttons, the current tab, links and what's selected wear it.
+2. **Cards group the content.** `bg` is the page; each list, form, pane or panel sits on a
+   `surface` card with the border and `radius`, and the top bar is `surface`. No text sits loose on `bg`.
+3. **At least three levels of type** on any view with content: an `h1` title, a heading per card,
+   body, and muted `size-meta` for times, counts and ids. A key number is a big stat with a label.
+4. **Every state is a toned chip** (`cui-chip data-tone`, with its word, rule 17), the same tone for
+   the same meaning on every view.
+5. **Rows have something to scan by:** a leading chip, glyph or tone bar, and long lists grouped
+   under headings with counts.
+6. **Empty means a card, not a sentence:** a mark, a heading, why, and the next step as a button
+   (rule 19). The same for a view not built yet.
+7. **Dark is its own look:** tokens and `color-mix()` only, so no fixed tints, `rgba` black, `opacity`
+   greys or pure white or black. Screenshot it separately.
+8. **Contrast holds:** body `text`, secondary `muted` and never fainter, `on-accent` on the accent;
+   your own accent passes 4.5:1 with `on-accent` and 3:1 with `surface`.
+
+The check: squint at the phone and desktop shots in both modes. You should see the accent, the
+cards and where each status sits before you can read a word. The critic's `ui-screenshots` rubric
+fails a view that's a wall of plain text (`citadel:critique`).
+
 ## The rules
 
 1. **Equal room above and below:** text or an icon in a box, bar, button, row or chip has equal,
@@ -100,7 +129,8 @@ interaction) but takes its colours from these tokens, never dataviz's placeholde
    web link.
 7. **No inline styles in what a component writes** (`style=""`, `<style>`): Citadel's CSP and maybe
    yours refuse them. Use classes, or a constructed stylesheet adopted once.
-8. **Use the variables, never copied hex.**
+8. **Use the variables, never copied hex.** Your own accent pair (First look, 1) is the one hex an
+   app owns.
 9. **Phone breakpoint is 800 px** (`NARROW` from `drawers.js` in script).
 10. **No full-screen loading covers.** Cara, 2026-11-03: "keep the screen visible and just have a spinner
     or grey out the changed thing". Mark the region that's changing busy (`cui-busy` with `aria-busy`),
@@ -172,6 +202,7 @@ finding (`citadel:self-review`, "UI findings").
 - Using a part from the table above: its file in the table's last column, before writing the code.
 - Adding or reviewing an animation or transition: [references/motion.md](references/motion.md).
 - A view that draws names, counts or lists, before its screenshots: [references/worst-case-data.md](references/worst-case-data.md).
+- A new page or view, before writing its CSS: [references/first-look.md](references/first-look.md).
 - A page or part of your own nearly done: [references/craft-floor.md](references/craft-floor.md).
 - A dialog (its focus and naming are yours), or a tooltip, live region, drawer or disclosure built by hand: [references/component-checks.md](references/component-checks.md).
 - A new page, view or flow, or a request to QA an app: [references/dogfood.md](references/dogfood.md).

@@ -1,4 +1,7 @@
 /* The page's own layout, on Citadel's tokens (theme.css). No hex values: use the --citadel-* variables. */
+/* Your app's accent (SKILL.md, "First look"): pick one that matches your icon, a tone or your own
+   light and dark pair. Violet is the starter's stand-in; don't ship it unchosen. */
+:root { --citadel-accent: var(--citadel-violet); }
 html { background: var(--citadel-bg); }
 body {
   margin: 0; display: flex; min-height: 100dvh;

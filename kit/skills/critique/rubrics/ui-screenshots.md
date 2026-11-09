@@ -73,6 +73,15 @@ ignored finding as a note, never a blocker.
    content, the composer or another control, and a status line keeps its own room. See it: in the 390
    shot, something drawn over text or over a control. Seen: Citadel #212, the Latest pill covered
    the chat on phones until it moved into the composer's row.
+8. **Colour and hierarchy carry meaning; no wall of plain text.** Squinting at the shot, before
+   reading a word, you can see the app's accent, the cards that group its content and where each
+   status sits (`citadel:contraption-ui`, "First look"). See it: in either mode, text sitting loose
+   on the page background with no surface around it; one size and weight of type down the view;
+   states as plain words with no toned chip; the only colour Citadel's own orange; an empty view
+   that is one grey sentence. A plain view is fine when there's nothing on it but a chat, whose
+   parts carry their own look. Seen: Transdata's Review and Ingest tabs, a single muted line on
+   an empty page (2026-11-09); Cara: "a big wall of white/black text is never going to be what we
+   want out of our UIs".
 
 ## Watch-list
 
@@ -88,6 +97,7 @@ ignored finding as a note, never a blocker.
 
 | Date | Minion | About | Words |
 |---|---|---|---|
+| 2026-11-09 | Citadel #419 | a first UI's look (blocker 8) | Cara: "a big wall of white/black text is never going to be what we want out of our UIs" |
 | 2026-11-08 | Citadel #388 | clicks (rule 23) | Cara: "assume things will work instantly, but recover later if there was an issue" |
 | 2026-11-08 | Citadel #383 | dialogs (rule 22) | Cara: "the X to close should stay at the top and clicking off the modal should close it" |
 | 2026-11-04 | Citadel #298 | status lines (rule 13) | Cara: "set up rules that make sure status changes like that dont move any UI elements" |

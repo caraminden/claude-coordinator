@@ -87,7 +87,8 @@ interaction) but takes its colours from these tokens, never dataviz's placeholde
 ## First look
 
 Cara, 2026-11-09: "a big wall of white/black text is never going to be what we want out of our
-UIs". A new page or view meets all eight before its first screenshot. The code for each:
+UIs". A new page or view meets all eight before its first screenshot; a view that is only a chat
+needs 1, 7 and 8, as the chat's parts carry their own look. The code for each:
 [references/first-look.md](references/first-look.md).
 
 1. **Its own accent.** One `--citadel-accent` on `:root` in your CSS: a tone (`violet`, `info`) or

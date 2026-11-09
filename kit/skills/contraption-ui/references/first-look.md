@@ -45,7 +45,7 @@ line (craft floor).
   border-radius: var(--citadel-radius); padding: var(--citadel-space-4);
 }
 .card > h2 { margin: 0 0 var(--citadel-space-3); font-size: var(--citadel-size-h3); }
-.cards { display: grid; gap: var(--citadel-space-4); grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
+.cards { display: grid; gap: var(--citadel-space-4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); }
 ```
 
 A table or list is a card too, its rows split by `border-top: 1px solid var(--citadel-border)`.

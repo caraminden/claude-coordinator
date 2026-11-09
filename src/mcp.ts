@@ -694,10 +694,10 @@ function readText(app: string, command: string | undefined, r: { status: number;
   return r.answer.map((c: any) => `- ${c?.name}: ${c?.description ?? ''}${c?.input_schema ? `\n  input: ${JSON.stringify(c.input_schema)}` : ''}`).join('\n') + cut;
 }
 
-/** A deploy as the tools show it. */
 /** What register_contraption says when it has no icon (#418). */
 const NO_ICON = 'To do: it has no icon, so the rail shows its first letter. Every contraption ships one with a web manifest (the citadel:contraption-ui starter has both): set icon with update_contraption, like /icon.svg, or deploy it and an empty icon is filled from its manifest.';
 
+/** A deploy as the tools show it. */
 function deployText(d: any): string {
   if (!d) return 'No deploy since the server started.';
   const head = `${d.name}: ${d.state}${d.state === 'running' ? '' : ` after ${Math.round(((d.finished_at ?? Date.now()) - d.started_at) / 1000)}s`} (${d.repo} ${d.branch}, asked by ${d.by}${d.from || d.to ? `; ${d.from?.slice(0, 9) ?? 'new'} → ${d.to?.slice(0, 9) ?? '?'}` : ''})`;

@@ -492,7 +492,7 @@ test('a deploy fills an empty rail icon from its manifest, and hands back what i
     todos.length = 0;
     services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks(true));
     d = await done(name);
-    assert.deepEqual([d.todo, todos, icons], [[], [], ['/icon-192.png']]);
+    assert.deepEqual([d.todo, todos, icons], [[], [[]], ['/icon-192.png']], 'checked and all done: an empty list');
     assert.ok(d.said.includes('Rail icon set to /icon-192.png, the first icon in its manifest.'), d.said.join('\n'));
     // Someone set one meanwhile (setIcon refuses): the row this deploy started from had none, so it says so.
     services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks(false));

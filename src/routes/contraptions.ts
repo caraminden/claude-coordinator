@@ -124,28 +124,31 @@ async function service<T>(work: () => Promise<T> | T): Promise<T> {
   }
 }
 
-/**
- * The contraption a deploy call names, if the caller may deploy it: an admin; Citadel's Taskmaster on a
- * turn an admin asked for; or a Taskmaster or minion of its home scheme. Anyone else learns nothing of it.
- */
-/** The to-do list each contraption's home Taskmaster was last sent, so a deploy that changes nothing wakes no one. */
+/** The to-do list each contraption's home Taskmaster was last sent (by contraption and scheme), so a deploy that changes nothing wakes no one. */
 const lastTodo = new Map<string, string>();
 
 /**
  * A deployed app's to-dos (#418: no rail icon, or a web manifest that won't install it) to its home scheme's
  * Taskmaster, as the person who deployed it. Not when that Taskmaster deployed it (its tool answer lists
- * them), nor when it was sent the same list already.
+ * them), nor when it was sent the same list already; an empty list (all done) forgets the last one sent.
  */
-function deployTodo(app: App, c: ContraptionRow, caller: Ctx['caller'], asker: number | null, todo: string[]) {
-  const key = todo.join('\n');
-  if (lastTodo.get(c.name) === key) return;
-  lastTodo.set(c.name, key);
+export async function deployTodo(app: Pick<App, 'store' | 'runner' | 'dataDir'>, c: ContraptionRow, caller: Ctx['caller'], asker: number | null, todo: string[]) {
   const scheme = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme);
-  if (!scheme || (caller?.kind === 'coordinator' && caller.project_id === scheme.id)) return;
+  if (!scheme) return;
+  const at = `${c.name}:${scheme.id}`;
+  const key = todo.join('\n');
+  if (!todo.length) return void lastTodo.delete(at);
+  if (lastTodo.get(at) === key || (caller?.kind === 'coordinator' && caller.project_id === scheme.id)) return;
   const text = `To do for ${c.title} (${c.name}): it deployed, but it still lacks what every contraption ships with, a rail icon and a web manifest that installs it as its own app:\n${todo.map((t) => `- ${t}`).join('\n')}\n\nIf no minion is on it yet, start one: the citadel:contraption-ui skill's references/installing.md and its starter's icon files say how. Then deploy again, which checks.`;
-  ensureCoordinator(app, scheme).then((taskmaster) => app.runner.send(taskmaster.id, APP_NAME, text, [], { asker })).catch(() => {});
+  const taskmaster = await ensureCoordinator(app as App, scheme);
+  app.runner.send(taskmaster.id, APP_NAME, text, [], { asker });
+  lastTodo.set(at, key);
 }
 
+/**
+ * The contraption a deploy call names, if the caller may deploy it: an admin; Citadel's Taskmaster on a
+ * turn an admin asked for; or a Taskmaster or minion of its home scheme. Anyone else learns nothing of it.
+ */
 function deployable(app: App, name: string, caller: Ctx['caller']): ContraptionRow {
   const c = app.store.getContraption(name);
   if (!caller) {
@@ -356,7 +359,7 @@ export const contraptionRoutes: Route[] = [
           app.store.updateContraption(c.name, { icon });
           return true;
         },
-        todo: (todo: string[]) => deployTodo(app, c, caller, person?.id ?? null, todo),
+        todo: (todo: string[]) => void deployTodo(app, c, caller, person?.id ?? null, todo).catch((err) => console.error(`Couldn't send ${c.name}'s deploy to-dos to its home Taskmaster:`, err)),
       };
       return service(async () => json(res, 202, app.services.deploy(c, by, app.store.listContraptions(), identity, hooks)));
     },

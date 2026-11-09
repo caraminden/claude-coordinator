@@ -58,12 +58,12 @@ const BUILD = {
 const MODEL = {
   type: ['string', 'null'],
   enum: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna', null],
-  description: "The model for the minion's turns, as in its composer. Leave it out (or null) for Claude Code's default, which suits most minions. The gpt-6 ones are Codex, only for a person who asked for it.",
+  description: "The model for the minion's turns, as in its composer. Leave it out (or null) for Claude Code's default, which suits most minions. By type: chore or read-only check claude-sonnet-5-5; everything else the default. The gpt-6 ones are Codex, only for a person who asked for it.",
 };
 const EFFORT = {
   type: ['string', 'null'],
   enum: ['low', 'medium', 'high', 'xhigh', 'max', null],
-  description: "The effort for the minion's turns, as in its composer. Leave it out (or null) for the scheme's default effort.",
+  description: "The effort for the minion's turns, as in its composer. Leave it out (or null) for the scheme's default effort. By type: chore medium, read-only check low, everything else the default.",
 };
 // What a schedule's runs start with (#387): Sonnet or medium suits a mechanical checkup.
 const SCHEDULE_MODEL = { ...MODEL, description: 'The model each run starts with; null (or left out) for the default. Sonnet suits a mechanical checkup.' };

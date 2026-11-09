@@ -17,9 +17,11 @@ so their `subagent_type` is `citadel:<name>` (`citadel:check-runner`, `citadel:f
   summarises (code, transcripts, usage data, docs lookups). Building and general-purpose workers
   inherit high. Never put `effort` on a skill: it would hold for the rest of a long turn, and a
   switch mid-session may restart the prompt cache.
-- Models: Agent calls set `model` too: `haiku` for bulk reads, `sonnet` for mechanical runs
-  (regeneration, reviewer passes), and the `citadel:check-runner` agent runs on `haiku` at `low` effort
-  (its answer is a verdict), the session's own model for judgment.
+- Models: Agent calls set `model` too. A general-purpose Grunt gets `sonnet` by default (reading,
+  research legwork, regeneration, reviewer passes); `haiku` for bulk reads; the
+  `citadel:check-runner` agent runs on `haiku` at `low` effort (its answer is a verdict). Only a
+  Grunt that judges (`citadel:critic`, `citadel:fresh-eyes`, `citadel:finding-checker`) inherits
+  the session's model: on Delve's art critic Opus caught about 9 of 13 of Cara's notes, Sonnet 5.
 - Turn count beats token price: the cheapest model took 2 to 3 times the turns on multi-step work
   in obra/superpowers' subagent-driven-development. Use `haiku` only when the brief holds
   everything the Grunt needs.

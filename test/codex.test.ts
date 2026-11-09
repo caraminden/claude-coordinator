@@ -375,7 +375,11 @@ test('a review reads Codex usage first: it skips (exit 4) when over pace, and ru
 
 // Host turns (#398): no hook on the host, so a review goes to the Codex container the runner named in the
 // turn's Codex config. A fake podman plays the container: FAKE_PODMAN picks what it does with the exec.
-const driver = join(import.meta.dirname, '..', 'src', 'codex-review.ts');
+// The driver pinned in a turn's folder, as the runner lays it out: <turn>/pin/codex-review.ts beside <turn>/codex-tripwire.json.
+const turnDir = join(root, 'turn-1');
+mkdirSync(join(turnDir, 'pin'), { recursive: true });
+const driver = join(turnDir, 'pin', 'codex-review.ts');
+writeFileSync(driver, readFileSync(join(import.meta.dirname, '..', 'src', 'codex-review.ts')));
 const podBin = join(root, 'podbin');
 const podLog = join(root, 'podman.jsonl');
 mkdirSync(podBin, { recursive: true });
@@ -414,7 +418,8 @@ process.exit(0);
 chmodSync(join(podBin, 'podman'), 0o755);
 const personTurns = join(root, 'run', 'turns', 'person-1');
 const container = { name: 'citadel-claude-test-1', turnsDir: personTurns, env: { HOME: '/home/u', PATH: '/usr/local/bin:/usr/bin' } };
-const hostTurn = configFile({ script: tripwire, config, container });
+const hostTurn = join(turnDir, 'codex-tripwire.json');
+writeFileSync(hostTurn, JSON.stringify({ script: tripwire, config, container }), { mode: 0o444 });
 const podCalls = () => {
   try {
     return readFileSync(podLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
@@ -460,7 +465,7 @@ test("a host turn's review is exit 3 with the reason when the container isn't si
 
   const gone = cli(['--check'], 'gone', hostTurn);
   assert.equal(gone.status, 3);
-  assert.match(gone.stdout, /Codex's container \(citadel-claude-test-1\) isn't running[\s\S]*no such container/);
+  assert.match(gone.stdout, /Couldn't run the review in Codex's container \(citadel-claude-test-1\): it isn't running[\s\S]*no such container/);
   const goneRun = cli([], 'gone', hostTurn, 'brief');
   assert.equal(goneRun.status, 3);
   assert.match(goneRun.stderr, /isn't running/);
@@ -478,4 +483,12 @@ test("a host turn's review is exit 3 with the reason when the container isn't si
   assert.equal(plain.status, 3);
   assert.match(plain.stdout, /managed tripwire hook isn't installed/);
   assert.equal(podCalls().length, 0);
+  // A config the turn points CITADEL_CODEX_TRIPWIRE at itself, naming some container: not the runner's, so ignored.
+  const forged = configFile({ script: tripwire, config, container: { ...container, name: 'citadel-claude-someone-else' } });
+  for (const args of [['--check'], ['--timeout', '60']]) {
+    const r = cli(args, 'ok', forged, 'brief');
+    assert.equal(r.status, 3);
+    assert.match(args[0] === '--check' ? r.stdout : r.stderr, /managed tripwire hook isn't installed/);
+  }
+  assert.equal(podCalls().length, 0, 'never execs into a container the runner didn\'t name');
 });

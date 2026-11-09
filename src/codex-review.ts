@@ -13,7 +13,7 @@
 // #398) has no hook, so when the runner names the login's Codex container (#341) in the turn's Codex
 // config, the review runs there instead (inContainer), and that copy checks the hook for itself.
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -195,6 +195,21 @@ export function turnConfig(env: Record<string, string | undefined> = process.env
   }
 }
 
+/**
+ * The Codex config the runner wrote for this turn, or null: only the file in the turn's own folder (this
+ * driver is pinned at <turn>/pin), never one CITADEL_CODEX_TRIPWIRE points elsewhere, since the turn sets
+ * its own environment and the config names the container a review runs in.
+ */
+export function runnerConfig(env: Record<string, string | undefined> = process.env, driver = fileURLToPath(import.meta.url)): CodexConfig | null {
+  try {
+    const own = join(dirname(dirname(realpathSync(driver))), 'codex-tripwire.json');
+    if (!env.CITADEL_CODEX_TRIPWIRE || realpathSync(env.CITADEL_CODEX_TRIPWIRE) !== own) return null;
+  } catch {
+    return null;
+  }
+  return turnConfig(env);
+}
+
 /** Copy a pinned file and the ./ files it imports into `to`, as src/runner.ts pins them. */
 function copyPinned(file: string, to: string) {
   const dest = join(to, basename(file));
@@ -258,7 +273,7 @@ export function inContainer(args: string[], cfg: CodexConfig & { container: Revi
     child.on('error', (err) => end(fail(check, `Couldn't run podman for Codex's container (${c.name}): ${err.message}`)));
     child.on('close', (code) => {
       if (code !== null && !PODMAN_FAILED.has(code)) return end(code);
-      end(fail(check, `Codex's container (${c.name}) isn't running or can't see this folder, so the review can't run there: it starts again with the next Codex turn or sign-in.${check ? tail(stderr) : ''}`));
+      end(fail(check, `Couldn't run the review in Codex's container (${c.name}): it isn't running (a host turn starts it again), can't see this folder, or has no node.${check ? tail(stderr) : ''}`));
     });
   });
 }
@@ -279,7 +294,7 @@ function tail(s: string): string {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   // A host turn (#398): no hook here, so the review goes to the Codex container the runner named, never runs here.
-  const cfg = hooked() ? null : turnConfig();
+  const cfg = hooked() ? null : runnerConfig();
   if (cfg?.container) process.exit(await inContainer(args, cfg as CodexConfig & { container: ReviewContainer }, process.cwd()));
   const why = notReady();
   if (args.includes('--check')) {

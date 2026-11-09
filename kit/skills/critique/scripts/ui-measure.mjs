@@ -61,6 +61,11 @@ function args(argv) {
   }
   if (!o.urls.length) throw new Error('give at least one url');
   if (o.widths.some((w) => !(w > 0))) throw new Error('--widths takes numbers, like 1440,390');
+  if (!(o.settle >= 0) || (o.minTap !== undefined && !(o.minTap > 0))) throw new Error('--settle and --min-tap take numbers');
+  for (const [k, sep] of [['cookies', '='], ['headers', ':'], ['ignore', ':']]) {
+    const bad = o[k].find((v) => !v.includes(sep));
+    if (bad) throw new Error(`--${k === 'cookies' ? 'cookie' : k === 'headers' ? 'header' : k} ${bad}: needs a "${sep}"`);
+  }
   return o;
 }
 

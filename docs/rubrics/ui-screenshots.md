@@ -3,7 +3,7 @@ name: ui-screenshots
 extends: citadel:critique/rubrics/ui-screenshots
 when: "diff: public/**, docs/design-system/**, kit/skills/contraption-ui/starter/**"
 person: Cara
-calibrated: "2026-11-08, sonnet, images only: 6/6 known misses hit, 0/4 clean pages failed (the starter's board)"
+calibrated: "2026-11-08, sonnet: 6/6 hits, 1/4 false alarms (the starter's board)"
 ---
 # UI screenshots: Citadel
 

@@ -11,7 +11,7 @@ max_rounds: 2
 cross_family: off
 gate: advisory
 person: Cara
-calibrated: "2026-11-08, sonnet, images only: 6/6 known misses hit, 0/4 clean pages failed (1/4 before blocker 4 named the focus-ring case)"
+calibrated: "2026-11-08, sonnet: 6/6 hits, 1/4 false alarms (images only; blocker 4 was then reworded and that control re-run, so 0/4 is tuned, not blind)"
 ---
 # UI screenshots
 
@@ -100,8 +100,8 @@ ignored finding as a note, never a blocker.
 | Mandate #61 before, desktop and phone, composer focused | another round (hit) | blocker 4: the field's own border inside the composer's ring; the script's `double-border` also finds it on a rebuilt page |
 | Citadel #212 before, phone | another round (hit) | blocker 7: the Latest pill over the chat |
 | Citadel #289 switch table before, and the old reset row | another round (hit, both) | blocker 3 and the watch-list's row height; it missed the stray scrollbar |
-| Citadel phone chat, 2026-11-08 | another round (hit) | blocker 2: the relay row's time out of its bubble, which the script measured at 48 px |
-| Peek's dialog before #175 | not shot; the script's `close-scrolls` finds it on a rebuilt page, and passes the pinned one | blocker 5 |
+| Citadel phone chat, 2026-11-08 | another round (hit) | blocker 2: the relay row's time out of its bubble; the script found it first, so not independent |
+| Peek's dialog before #175 | script only, not in the critic's trial | blocker 5: `close-scrolls` finds it on a rebuilt page and passes the pinned one |
 | Mandate #61 after, desktop | another round, then pass | a false alarm: it read the composer's own ring as a second line, so blocker 4 now says a ring outside a box's border is one line; re-run blind, it passed and still failed the before shot |
 | Citadel #212 after, #289 after, Peek's dialog after | pass | clean controls |
 

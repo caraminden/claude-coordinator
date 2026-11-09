@@ -40,15 +40,25 @@ export function membersPage() {
   const pick = h('select', { 'aria-label': 'Person to add' });
   const add = h('form', { class: 'row people-add' }, pick, h('button', { type: 'submit' }, 'Add'));
   let shown = [];
-  // Adding and removing show at once; the server's list replaces ours when it answers, and a refusal reloads
-  // it, since a GitHub refusal still took the person out of the scheme.
-  const change = (next, send, label, people) => optimistic({
-    key: `members:${p.id}`,
-    apply: () => render(next(shown), people),
-    send,
-    undo: () => api(`api/projects/${p.id}/members`).then((members) => render(members, people), () => {}),
-    label,
-  }).then((members) => render(members, people), () => {});
+  // Adding and removing show at once; the server's list replaces ours when it answers. A refusal puts the list
+  // back as it was, unless a later click changed it, then reloads it, since a GitHub refusal still took the
+  // person out of the scheme.
+  const change = (next, send, label, people) => {
+    let was, mine;
+    optimistic({
+      key: `members:${p.id}`,
+      apply: () => {
+        was = shown;
+        render(mine = next(shown), people);
+      },
+      send,
+      undo: () => {
+        if (shown === mine) render(was, people);
+        api(`api/projects/${p.id}/members`).then((members) => render(members, people), () => {});
+      },
+      label,
+    }).then((members) => render(members, people), () => {});
+  };
   const render = (members, people) => {
     shown = members;
     const inIt = new Set(members.map((m) => m.id));

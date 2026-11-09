@@ -15,7 +15,7 @@
 // cut off). steadyLabel() stacks every label a button can show in one grid cell and shows one, so the
 // button keeps the width of its widest label. Both work from plain markup too: this module only writes it,
 // and the *Html() builders write the same markup as strings, escaped, for views that draw HTML. toast()
-// says something in passing in the top layer, so it takes no room at all.
+// says something in passing in the top layer, so it takes no room at all, with a button (Retry) when it has one.
 
 const TONES = new Set(['ok', 'warn', 'danger', 'info', 'violet', 'neutral']);
 
@@ -108,23 +108,28 @@ export function steadyLabelHtml(labels, current) {
 let pop = null;
 let say = null;
 let timer = 0;
+let onHide = null;
 
 function hideToast() {
   clearTimeout(timer);
   if (pop?.matches(':popover-open')) pop.hidePopover();
   if (say) say.textContent = '';
+  const f = onHide;
+  onHide = null;
+  f?.();
 }
 
 /**
  * Say `text` in passing: a toast at the bottom centre, in the top layer, for `ms` (default 4 s) or until it's
- * tapped. One at a time: a new one replaces the last. A screen reader hears it from a live region.
+ * tapped. One at a time: a new one replaces the last. A screen reader hears it from a live region. `action`
+ * ({ label, run }) adds a button after the text that runs `run` and sends the toast away (Retry); `onHide` is
+ * called once when this toast goes, however it goes (its time, a tap, its action, a newer toast).
  */
 export function toast(text, opts = {}) {
   if (!pop?.isConnected) {
     pop = document.createElement('div');
     pop.className = 'cui-toast';
     pop.setAttribute('popover', 'manual');
-    pop.setAttribute('aria-hidden', 'true');
     pop.addEventListener('click', hideToast);
     say = document.createElement('div');
     say.className = 'cui-toast-say';
@@ -135,7 +140,21 @@ export function toast(text, opts = {}) {
   if (TONES.has(opts.tone)) pop.dataset.tone = opts.tone;
   else delete pop.dataset.tone;
   pop.textContent = text;
+  // The live region says the text; the toast itself is hidden from a screen reader unless it has a button to reach.
+  pop.toggleAttribute('aria-hidden', !opts.action);
+  if (opts.action) {
+    const line = document.createElement('span');
+    line.className = 'cui-toast-text';
+    line.textContent = text;
+    const act = document.createElement('button');
+    act.type = 'button';
+    act.className = 'cui-btn cui-small cui-toast-action';
+    act.textContent = opts.action.label;
+    act.addEventListener('click', () => opts.action.run());
+    pop.replaceChildren(line, act);
+  }
   pop.showPopover();
+  onHide = opts.onHide ?? null;
   // A frame later, so a live region made just now is in place before it changes and is heard.
   requestAnimationFrame(() => pop.matches(':popover-open') && (say.textContent = text));
   timer = setTimeout(hideToast, opts.ms ?? 4000);

@@ -24,7 +24,8 @@
              say; inside it <span class="cui-status-text"> (one line, cut off with …), after a cui-spin while working;
              data-tone="ok|warn|danger|info|violet|neutral" colours it, or one cui-status-text among others; in a
              row, cui-status-fill takes what's left without widening it. ui/status.js's statusSlot() writes it.
-   Toast:    ui/status.js's toast("Copied") shows div.cui-toast (a popover at the bottom centre) for a few seconds.
+   Toast:    ui/status.js's toast("Copied") shows div.cui-toast (a popover at the bottom centre) for a few seconds;
+             toast("Couldn't save", { action: { label: 'Retry', run } }) puts a button.cui-toast-action after the text.
    Steady:   <button class="cui-btn"><span class="cui-steady"><span>Save</span><span hidden>Saving…</span></span></button>:
              every label in one cell, one shown, so the button keeps its widest label's width (ui/status.js's steadyLabel()).
    Dialog:   <dialog class="cui-dialog" aria-labelledby="t"><form method="dialog" class="cui-dialog-head"><h2 id="t">…</h2>
@@ -244,14 +245,18 @@
 /* Toast (ui/status.js's toast()): a passing word that takes no room, in the top layer at the bottom centre, so
    it moves nothing (rule 13). One at a time; a tap or click sends it away. A bar in its tone, like a notice. */
 :where(.cui-toast) {
-  --cui-tone: var(--citadel-neutral);
   position: fixed; inset: auto 0 max(var(--citadel-space-4), env(safe-area-inset-bottom)); margin: 0 auto; box-sizing: border-box;
   width: max-content; max-width: min(420px, calc(100vw - 16px)); padding: var(--citadel-space-2) var(--citadel-space-3);
-  border: 1px solid var(--citadel-border); border-left: 3px solid var(--cui-tone); border-radius: var(--citadel-radius);
+  border: 1px solid var(--citadel-border); border-left: 3px solid var(--cui-tone, var(--citadel-neutral)); border-radius: var(--citadel-radius);
   background: var(--citadel-surface); color: var(--citadel-text); font: var(--citadel-size-body)/1.45 var(--citadel-font);
   box-shadow: 0 6px 18px rgb(0 0 0 / 0.16); overflow-wrap: anywhere; cursor: default;
 }
 :where(.cui-toast:popover-open) { opacity: 1; transition: opacity var(--citadel-motion); }
+/* With an action (toast(text, { action })): the text and its button in a row, centred, so the toast's padding
+   above and below them stays equal; the button keeps its size and the text wraps. */
+:where(.cui-toast:popover-open:has(> .cui-toast-action)) { display: flex; align-items: center; gap: var(--citadel-space-3); }
+:where(.cui-toast-text) { min-width: 0; }
+:where(.cui-toast-action) { flex: none; }
 @starting-style { :where(.cui-toast:popover-open) { opacity: 0; } }
 /* What the toast says, again, for a screen reader: a live region that's always there, so it's announced. */
 :where(.cui-toast-say) { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

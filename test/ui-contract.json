@@ -52,6 +52,9 @@
       "railItems",
       "showRail"
     ],
+    "optimistic.js": [
+      "optimistic"
+    ],
     "drawers.js": [
       "EDGE",
       "NARROW",
@@ -92,7 +95,9 @@
       "cui-tip-skel",
       "cui-tip-text",
       "cui-toast",
+      "cui-toast-action",
       "cui-toast-say",
+      "cui-toast-text",
       "cui-working"
     ],
     "chat.js": [

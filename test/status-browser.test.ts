@@ -192,6 +192,8 @@ for (const [label, opts] of [['desktop', { width: 900, height: 900 }], ['phone, 
     assert.deepEqual(await moved(page, [`toast('Copied the link')`, `toast('Couldn\\'t copy', { tone: 'danger' })`]), []);
     assert.equal(await page.eval('document.querySelector(".cui-toast").matches(":popover-open")'), true);
     assert.equal(await page.eval('document.querySelector(".cui-toast").dataset.tone'), 'danger');
+    // Its bar is in that tone: the toast's own rule once set a neutral tone after the tone rules, and won.
+    assert.equal(await page.eval('getComputedStyle(document.querySelector(".cui-toast")).borderLeftColor'), await page.eval('(() => { const p = document.createElement("p"); p.style.color = "var(--citadel-danger)"; document.body.append(p); return getComputedStyle(p).color; })()'));
     assert.equal(await page.eval('window.frame().then(() => document.querySelector(".cui-toast-say").textContent)'), 'Couldn\'t copy', 'heard from the live region');
     const box = await page.eval<{ bottom: number; left: number; right: number }>('document.querySelector(".cui-toast").getBoundingClientRect().toJSON()');
     assert.ok(box.bottom <= opts.height && box.left >= 0 && box.right <= opts.width, 'inside the window');

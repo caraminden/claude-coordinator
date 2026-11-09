@@ -47,5 +47,7 @@ export function statusWorkingHtml(text?: string): string;
 export function steadyLabelHtml(labels: Record<string, string>, current?: string): string;
 
 /** Say `text` in passing: a toast (div.cui-toast) at the bottom centre, in the top layer, so it moves nothing, for
- * `ms` (default 4000) or until tapped. One at a time; a screen reader hears it from a live region. */
-export function toast(text: string, opts?: { tone?: StatusTone; ms?: number }): void;
+ * `ms` (default 4000) or until tapped. One at a time; a screen reader hears it from a live region. `action` adds a
+ * button after the text (button.cui-toast-action) that calls `run` and sends the toast away: "Couldn't save" · Retry.
+ * `onHide` is called once when this toast goes: its time is up, a tap, its action, or a newer toast replacing it. */
+export function toast(text: string, opts?: { tone?: StatusTone; ms?: number; action?: { label: string; run: () => void }; onHide?: () => void }): void;

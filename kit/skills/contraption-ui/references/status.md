@@ -20,6 +20,8 @@ save.current;                                  // 'saving'
 
 toast('Copied the link');                      // in passing: the top layer, bottom centre, 4 s or a tap
 toast('Couldn\'t copy', { tone: 'danger', ms: 6000 });
+toast('Deleted 3 todos', { action: { label: 'Undo', run: restore } });  // a button after the text; it sends the toast away
+toast('Saved', { onHide: () => {} });          // called once when this toast goes, however it goes
 ```
 
 Views that draw HTML strings get the same markup from builders, with the text escaped (`inner` is yours):
@@ -60,6 +62,9 @@ tap opens a cut-off status's tip, as for anything a tap doesn't act on; inside a
   new one replaces the last), in the top layer at the bottom centre, so it moves nothing; a tap sends it
   away; a screen reader hears it from a live region. Not for an error someone has to act on: that stays
   in the page's own status line until it's dealt with.
+- **Something you can undo or retry** ("Deleted 3 todos" · Undo): `toast(text, { action: { label, run } })`.
+  The button sits after the text, centred, and its tap runs `run` and sends the toast away. A failed click
+  is `optimistic()`'s job (below), which makes this toast for you.
 - **Something that has to be big** (an error with a retry, a banner): overlay it (a `cui-tip`-style card in
   the top layer, `position: fixed`), never insert it into the flow.
 
@@ -77,3 +82,34 @@ const boxes = () => Object.fromEntries([...document.querySelectorAll('[id]')].ma
 // Then, from the test: await frame(); shifts = []; const first = boxes(); for each state: change it, await frame(),
 // and assert every box equals first's and shifts is empty.
 ```
+
+## Optimistic actions (`ui/optimistic.js`)
+
+Rule 23: a click shows its result at once and the request runs behind it. Nothing waits: every control
+stays usable, and ten quick clicks are ten actions.
+
+```js
+import { optimistic } from '/apps/_citadel/ui/optimistic.js';
+
+rejectButton.onclick = () => optimistic({
+  key: spec.id,                                     // same key: sends one after another, in click order
+  apply: () => card.classList.add('rejected'),      // the page changes now, synchronously
+  send: () => api(`/specs/${spec.id}/reject`, { method: 'POST' }),  // a promise; rejects on failure
+  undo: () => card.classList.remove('rejected'),    // this item alone, if send fails (gets the error)
+  label: 'reject speculation',                      // the toast: "Couldn't reject speculation" · Retry
+});
+```
+
+- **`key`:** actions on one thing (accept, then reject, on one speculation) share its id, so they
+  reach the server in the order they were clicked; different keys, or none, send at once, side by side.
+  A failure doesn't stop the next of its key: that one still sends.
+- **`send` must reject on failure.** `fetch` resolves on a 500, so check `res.ok` and throw.
+- **On failure:** `undo(err)`, then a danger toast (`Couldn't <label>`) with Retry, which runs `apply`
+  and `send` again. Failures while that toast is up join it ("Couldn't reject speculation (and 2 more)"),
+  and its one Retry runs them all.
+- **Returns `send`'s promise**, for a caller that wants the server's answer (an id it assigned). Its
+  rejection is already handled, so leaving it unchained logs nothing.
+- **`apply` and `undo` change only their own item,** never redraw the list from a snapshot taken at
+  click time: with three clicks in flight, a snapshot undo would wipe the other two.
+- **Not for a result you can't guess** (a calculation, an agent turn): show busy on its own region
+  (`cui-busy`, a `statusSlot` working line), never on the whole panel.

@@ -34,7 +34,8 @@ reaches you on Citadel's next deploy. Dev copies fetch them from the live Citade
 | `ui/chat.js` (+ `.d.ts`) | The chat log: your messages, replies, tool runs, Grunt rows, reply chips, the working line, messages sent mid-turn | ES module import, needs base.css; [references/chat.md](references/chat.md) |
 | `ui/tip.js` (+ `.d.ts`) | Tooltips: `data-tip` on anything, opened on hover, focus, a tap or a long press | ES module import, needs base.css; [references/tooltip.md](references/tooltip.md) |
 | `ui/dialog.js` (+ `.d.ts`) | The dialog: every modal. Its head and ✕ stay at the top while the body scrolls; a backdrop click and Escape close it | `cui-dialog` in base.css, `mountDialogs()` once; [references/base-parts.md](references/base-parts.md#dialog) |
-| `ui/status.js` (+ `.d.ts`) | A status line that's always there, a button label that keeps its width, a toast, and the headless check that nothing moved | ES module import, needs base.css; [references/status.md](references/status.md) |
+| `ui/status.js` (+ `.d.ts`) | A status line that's always there, a button label that keeps its width, a toast (with a Retry or Undo button), and the headless check that nothing moved | ES module import, needs base.css; [references/status.md](references/status.md) |
+| `ui/optimistic.js` (+ `.d.ts`) | `optimistic()`: a click shows its result at once and sends behind it; a failure rolls back that item with a Retry toast (rule 23) | ES module import, needs base.css; [references/status.md](references/status.md#optimistic-actions) |
 | Your `manifest.webmanifest` | Installing your app on its own, beside Citadel's | [references/installing.md](references/installing.md) |
 
 [starter/](starter/index.html) (`index.html`, `app.css`, `app.js`) wires theme.css, base.css, the
@@ -132,8 +133,8 @@ interaction) but takes its colours from these tokens, never dataviz's placeholde
 19. **Empty and failed say what next.** An empty list or search says why and offers the next step
     ("No todos yet. Add one below."); an error says what failed and the way out (Retry, what was
     kept), as the `cui-notice` example in [references/base-parts.md](references/base-parts.md) does.
-20. **Undo over "are you sure?".** A delete or bulk change acts at once and offers Undo in a bar
-    of your own (`toast` takes no button); ask first only when nothing could bring it back.
+20. **Undo over "are you sure?".** A delete or bulk change acts at once and offers Undo
+    (`toast(text, { action: { label: 'Undo', run } })`); ask first only when nothing could bring it back.
 21. **A view worth coming back to has its own URL.** A tab, item or filter someone would share,
     reload or go Back to updates the URL (`history.pushState`; `replaceState` for small steps), and
     that URL opens the same view.
@@ -141,6 +142,12 @@ interaction) but takes its colours from these tokens, never dataviz's placeholde
     clicking off the modal should close it". A `<dialog class="cui-dialog">` with a `cui-dialog-head`,
     opened with `showModal()`, and `mountDialogs()` from `ui/dialog.js` called once: the ✕ stays in
     view however long the body, a click on the backdrop closes it, Escape too.
+23. **Clicks never freeze the UI.** Cara, 2026-11-08: "assume things will work instantly, but recover
+    later if there was an issue". A click shows its result at once and the request runs behind it;
+    every other control stays usable and rapid clicks in a row all count. A failure rolls back that
+    one item, with a toast saying what failed and a Retry. Do it with `optimistic()` from
+    `ui/optimistic.js`, never a hand-rolled version. Only an action whose result can't be guessed
+    (a calculation, an agent turn) shows busy (rule 10), and only on its own region.
 
 A self-review counts a break of these rules, and anything hand-rolled that the library serves, as a
 finding (`citadel:self-review`, "UI findings").
@@ -154,6 +161,6 @@ finding (`citadel:self-review`, "UI findings").
 - A dialog (its focus and naming are yours), or a tooltip, live region, drawer or disclosure built by hand: [references/component-checks.md](references/component-checks.md).
 - A new page, view or flow, or a request to QA an app: [references/dogfood.md](references/dogfood.md).
 
-Each rule shown right and wrong (14 to 22 listed, no demo yet), with every part drawn live in both modes: Citadel's living
+Each rule shown right and wrong (14 to 23 listed, no demo yet), with every part drawn live in both modes: Citadel's living
 design-system home, `docs/design-system/index.html` in Citadel's repo (Citadel's minions keep it
 true; ask your Taskmaster for a copy if you need the page itself).

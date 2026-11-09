@@ -1,0 +1,162 @@
+// ui/optimistic.js and toast()'s action button in a real browser (headless Chromium, test/browser.ts): Cara's rule
+// (2026-11-08, "assume things will work instantly, but recover later if there was an issue"). Each send is a
+// promise the test settles by hand (window.reqs), so the order and overlap of sends is seen, not timed.
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
+import { after, before, test } from 'node:test';
+import { themeCss } from '../src/theme.ts';
+import { chromium, launch, type Browser, type Page } from './browser.ts';
+
+const bin = chromium();
+const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
+const pub = join(import.meta.dirname, '..', 'public');
+
+// act(id, key): an action on item `id` that marks it done at once, sends a request the test settles by hand
+// (ok(n) / no(n), n its place in window.reqs), and unmarks it on failure. window.log records what happened.
+const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/ui/base.css">
+<style>body{margin:0;padding:16px;font:15px var(--citadel-font);background:var(--citadel-bg);color:var(--citadel-text)}</style>
+<ul id="items"><li id="a">a</li><li id="b">b</li><li id="c">c</li></ul>
+<script type="module">
+  import { optimistic } from '/ui/optimistic.js';
+  import { toast } from '/ui/status.js';
+  window.log = [];
+  window.reqs = [];
+  window.unhandled = 0;
+  addEventListener('unhandledrejection', () => window.unhandled++);
+  window.act = (id, key, label = 'reject ' + id) => optimistic({
+    key, label,
+    apply: () => { document.getElementById(id).dataset.done = ''; log.push('apply ' + id); },
+    send: () => new Promise((ok, no) => { reqs.push({ id, ok, no }); log.push('send ' + id); }),
+    undo: (err) => { delete document.getElementById(id).dataset.done; log.push('undo ' + id + ' ' + err.message); },
+  });
+  window.ok = (n) => reqs[n].ok(n);
+  window.no = (n) => reqs[n].no(new Error('nope'));
+  window.settle = () => new Promise((r) => setTimeout(r, 0));
+  window.done = () => [...document.querySelectorAll('[data-done]')].map((el) => el.id).join('');
+  window.toastText = () => { const t = document.querySelector('.cui-toast'); return t?.matches(':popover-open') ? t.textContent : null; };
+  Object.assign(window, { optimistic, toast });
+  window.ready = true;
+</script>`;
+
+let server: Server;
+let browser: Browser;
+let base = '';
+
+before(async () => {
+  if (skip) return;
+  server = createServer((req, res) => {
+    const path = new URL(req.url ?? '/', 'http://x').pathname;
+    if (path === '/') return res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
+    if (path === '/theme.css') return res.writeHead(200, { 'content-type': 'text/css' }).end(themeCss(readFileSync(join(pub, 'style.css'), 'utf8')));
+    const m = /^\/ui\/([a-z-]+\.(js|css))$/.exec(path);
+    if (!m) return res.writeHead(404).end();
+    res.writeHead(200, { 'content-type': m[2] === 'js' ? 'text/javascript' : 'text/css' }).end(readFileSync(join(pub, 'ui', m[1])));
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+  browser = await launch(bin!);
+});
+
+after(async () => {
+  await browser?.close();
+  await new Promise((r) => (server ? server.close(r) : r(null)));
+});
+
+const open = (opts?: Parameters<Browser['page']>[1]) => browser.page(base, opts);
+
+/** A real mouse click at the centre of `selector`. */
+async function click(page: Page, selector: string) {
+  const { x, y } = await page.centre(selector);
+  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+}
+
+test('every click shows at once; one key sends in click order, other keys side by side', { skip }, async () => {
+  const page = await open();
+  await page.eval(`act('a', 'k'), act('b', 'k'), act('c', 'other'), null`);
+  // All three applied at once; the first of key k and the other key are sent, the second of k waits its turn.
+  assert.equal(await page.eval('done()'), 'abc');
+  assert.deepEqual(await page.eval('log'), ['apply a', 'send a', 'apply b', 'apply c', 'send c']);
+  await page.eval('ok(1), settle()'); // c (the other key) finishes first: nothing of k moves
+  assert.deepEqual(await page.eval('reqs.map((r) => r.id)'), ['a', 'c']);
+  await page.eval('ok(0), settle()');
+  assert.deepEqual(await page.eval('reqs.map((r) => r.id)'), ['a', 'c', 'b'], 'b sends once a has');
+  await page.eval('ok(2), settle()');
+  assert.equal(await page.eval('done()'), 'abc');
+  assert.equal(await page.eval('toastText()'), null, 'no toast when all went');
+});
+
+test('a failure rolls back that item alone, toasts with Retry, and the next of its key still sends', { skip }, async () => {
+  const page = await open();
+  const sent = page.eval(`act('a', 'k').then((v) => 'ok ' + v, (e) => 'failed ' + e.message)`); // a caller chaining
+  await page.eval(`act('b', 'k'), act('c'), null`);
+  await page.eval('no(0), settle()');
+  assert.equal(await sent, 'failed nope', 'the returned promise is send\'s, rejecting');
+  assert.equal(await page.eval('done()'), 'bc', 'a rolled back; b and c kept');
+  assert.ok((await page.eval<string[]>('log')).includes('undo a nope'), 'undo gets the error');
+  assert.equal(await page.eval('toastText()'), 'Couldn\'t reject aRetry');
+  assert.equal(await page.eval('document.querySelector(".cui-toast").dataset.tone'), 'danger');
+  assert.deepEqual(await page.eval('reqs.map((r) => r.id)'), ['a', 'c', 'b'], 'b sends after a failed');
+  await page.eval('ok(1), ok(2), settle()');
+});
+
+test('Retry runs apply and send again; failures while the toast is up join its one Retry', { skip }, async () => {
+  const page = await open();
+  await page.eval(`act('a'), act('b'), act('c'), null`);
+  await page.eval('no(0), settle()');
+  await page.eval('no(1), settle()');
+  assert.equal(await page.eval('toastText()'), 'Couldn\'t reject a (and 1 more)Retry');
+  assert.equal(await page.eval('done()'), 'c');
+  assert.equal(await page.eval('unhandled'), 0, 'an unchained failure logs no unhandled rejection');
+  await click(page, '.cui-toast-action');
+  await page.eval('settle()');
+  assert.equal(await page.eval('toastText()'), null, 'the toast goes on Retry');
+  assert.equal(await page.eval('done()'), 'abc', 'both applied again');
+  assert.deepEqual(await page.eval('reqs.map((r) => r.id)'), ['a', 'b', 'c', 'a', 'b'], 'both sent again');
+  await page.eval('ok(3), ok(4), ok(2), settle()');
+  assert.equal(await page.eval('done()'), 'abc');
+  // A failure after that toast went starts a toast of its own, not "and 2 more".
+  await page.eval(`act('a'), settle()`);
+  await page.eval('no(5), settle()');
+  assert.equal(await page.eval('toastText()'), 'Couldn\'t reject aRetry');
+});
+
+test('a send that throws, or no key, label or undo, still recovers', { skip }, async () => {
+  const page = await open();
+  const out = await page.eval(`optimistic({ send: () => { throw new Error('boom'); } }).catch((e) => e.message)`);
+  assert.equal(out, 'boom');
+  assert.equal(await page.eval('settle().then(() => toastText())'), 'Couldn\'t do thatRetry');
+});
+
+for (const [label, opts] of [['desktop', { width: 900, height: 600 }], ['phone, dark', { width: 390, height: 700, touch: true, dark: true }]] as const) {
+  test(`${label}: a toast's action sits beside its text with equal room above and below`, { skip }, async () => {
+    const page = await open(opts);
+    for (const text of ['Couldn\'t reject speculation', 'Couldn\'t reject the speculation about the Scion\'s ascendancy tree and 4 more things']) {
+      await page.eval(`toast(${JSON.stringify(text)}, { tone: 'danger', action: { label: 'Retry', run: () => {} } })`);
+      const [t, txt, btn] = await page.eval<DOMRect[]>('[".cui-toast", ".cui-toast-text", ".cui-toast-action"].map((s) => document.querySelector(s).getBoundingClientRect().toJSON())');
+      const top = Math.min(txt.top, btn.top) - t.top;
+      const bottom = t.bottom - Math.max(txt.bottom, btn.bottom);
+      assert.ok(top > 0 && Math.abs(top - bottom) <= 1, `equal room above and below (${top} / ${bottom})`);
+      assert.ok(Math.abs((btn.top + btn.bottom) / 2 - (t.top + t.bottom) / 2) <= 1, 'the button is centred');
+      assert.ok(btn.left >= txt.right && btn.right <= t.right, 'the button sits after the text, inside');
+      assert.ok(t.left >= 0 && t.right <= opts.width && t.bottom <= opts.height, 'inside the window');
+    }
+    assert.equal(await page.eval('document.querySelector(".cui-toast").hasAttribute("aria-hidden")'), false, 'its button is reachable');
+    await page.eval(`toast('Copied')`);
+    assert.equal(await page.eval('document.querySelector(".cui-toast").getAttribute("aria-hidden")'), '', 'a plain toast is still hidden from a screen reader');
+    assert.equal(await page.eval('document.querySelector(".cui-toast-action")'), null);
+  });
+}
+
+test('onHide runs once, however the toast goes', { skip }, async () => {
+  const page = await open();
+  await page.eval(`window.hid = []; toast('one', { onHide: () => hid.push('one') }); toast('two', { onHide: () => hid.push('two'), ms: 50 })`);
+  assert.deepEqual(await page.eval('hid'), ['one'], 'a newer toast sends the last away');
+  await page.eval('new Promise((r) => setTimeout(r, 120))');
+  assert.deepEqual(await page.eval('hid'), ['one', 'two'], 'its time ran out');
+  await page.eval(`toast('three')`);
+  assert.deepEqual(await page.eval('hid'), ['one', 'two'], 'not again');
+});

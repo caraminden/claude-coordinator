@@ -11,13 +11,15 @@
 // Nothing waits on it: every click counts and every control stays usable. Actions sharing a `key` send one
 // after another, in click order (accept then reject on one item reaches the server in that order); others
 // send at once, side by side. When a send fails, that action alone is rolled back (undo) and a toast says
-// what failed, with a Retry that runs apply and send again. Failures that land while that toast is up join
-// it, so its one Retry covers them all (ten quick rejects with the server down: one toast, one Retry).
+// what failed and why, with a Retry that runs apply and send again. Failures that land while that toast is up
+// join it, so its one Retry covers them all (ten quick rejects with the server down: one toast, one Retry).
+// The promise it returns settles once per action, Retries included: with the first send that goes through,
+// or with the last error once its failure toast goes without a Retry.
 
 import { toast } from './status.js';
 
 const tails = new Map(); // key → a promise that settles when the key's last queued send does
-let failed = null; // the actions the showing failure toast's Retry would run again
+let failed = null; // the attempts the showing failure toast's Retry would run again
 
 /** Call send() now, as a promise even if it throws or returns a plain value. */
 function start(send) {
@@ -39,33 +41,52 @@ function queue(key, send) {
   return sent;
 }
 
-function fail(action) {
-  const all = failed ? [...failed, action] : [action];
+const reason = (err) => (err instanceof Error ? err.message : err == null ? '' : String(err));
+
+function fail(attempt) {
+  const all = failed ? [...failed, attempt] : [attempt];
   failed = all;
-  const text = `Couldn't ${all[0].label ?? 'do that'}${all.length > 1 ? ` (and ${all.length - 1} more)` : ''}`;
+  const why = reason(all[0].err);
+  const text = `Couldn't ${all[0].action.label ?? 'do that'}${why ? `: ${why}` : ''}${all.length > 1 ? ` (and ${all.length - 1} more)` : ''}`;
+  let retried = false;
   toast(text, {
     tone: 'danger',
     ms: 8000,
-    action: { label: 'Retry', run: () => all.forEach(optimistic) },
-    onHide: () => failed === all && (failed = null),
+    action: {
+      label: 'Retry',
+      run: () => {
+        retried = true;
+        for (const a of all) run(a.action, a.settle);
+      },
+    },
+    onHide: () => {
+      if (failed === all) failed = null;
+      // Gone without a Retry, and not carried into a newer failure toast: these failures are final.
+      if (!retried) for (const a of all) if (!failed?.includes(a)) a.settle.no(a.err);
+    },
+  });
+}
+
+function run(action, settle) {
+  action.apply?.();
+  queue(action.key, action.send).then(settle.ok, (err) => {
+    try {
+      action.undo?.(err);
+    } finally {
+      fail({ action, settle, err });
+    }
   });
 }
 
 /**
  * Show an action's result now and send it behind: apply() at once, then send(); if send fails, undo() and a
- * toast "Couldn't <label>" with a Retry. Returns send's promise (rejecting if it fails, already handled here,
- * so an unchained call never logs an unhandled rejection).
+ * toast "Couldn't <label>: <error>" with a Retry. Returns a promise of send's value that settles once, Retries
+ * included (its rejection is handled here, so an unchained call never logs an unhandled rejection).
  */
 export function optimistic(action) {
-  const { key, apply, send, undo } = action;
-  apply?.();
-  const sent = queue(key, send);
-  sent.catch((err) => {
-    try {
-      undo?.(err);
-    } finally {
-      fail(action);
-    }
-  });
-  return sent;
+  let settle;
+  const result = new Promise((ok, no) => (settle = { ok, no }));
+  result.catch(() => {});
+  run(action, settle);
+  return result;
 }

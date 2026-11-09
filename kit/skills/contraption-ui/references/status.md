@@ -96,19 +96,24 @@ rejectButton.onclick = () => optimistic({
   apply: () => card.classList.add('rejected'),      // the page changes now, synchronously
   send: () => api(`/specs/${spec.id}/reject`, { method: 'POST' }),  // a promise; rejects on failure
   undo: () => card.classList.remove('rejected'),    // this item alone, if send fails (gets the error)
-  label: 'reject speculation',                      // the toast: "Couldn't reject speculation" · Retry
+  label: `reject "${spec.title}"`,                  // the toast: Couldn't reject "Ritual altars…": <error> · Retry
 });
 ```
 
 - **`key`:** actions on one thing (accept, then reject, on one speculation) share its id, so they
   reach the server in the order they were clicked; different keys, or none, send at once, side by side.
   A failure doesn't stop the next of its key: that one still sends.
+  When each response redraws a whole view (the server sends the whole list back), give every action in
+  that view one key (`workshop:${patch}`): with a key per item, two answers can land out of order and the
+  older one redraws over the newer.
 - **`send` must reject on failure.** `fetch` resolves on a 500, so check `res.ok` and throw.
-- **On failure:** `undo(err)`, then a danger toast (`Couldn't <label>`) with Retry, which runs `apply`
-  and `send` again. Failures while that toast is up join it ("Couldn't reject speculation (and 2 more)"),
-  and its one Retry runs them all.
-- **Returns `send`'s promise**, for a caller that wants the server's answer (an id it assigned). Its
-  rejection is already handled, so leaving it unchained logs nothing.
+- **On failure:** `undo(err)`, then a danger toast (`Couldn't <label>: <error message>`) with Retry, which
+  runs `apply` and `send` again. Name the item in the label, so the toast says which one failed. Failures
+  while that toast is up join it ("(and 2 more)"), and its one Retry runs them all.
+- **The promise settles once, Retries included:** with the value of the first `send` that goes through,
+  or with the last error once the failure toast goes without a Retry. So success handling chained on it
+  (`.then(({ id }) => …)`) runs after a Retry too. Its rejection is already handled, so leaving it
+  unchained logs nothing.
 - **`apply` and `undo` change only their own item,** never redraw the list from a snapshot taken at
   click time: with three clicks in flight, a snapshot undo would wipe the other two.
 - **Not for a result you can't guess** (a calculation, an agent turn): show busy on its own region

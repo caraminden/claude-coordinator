@@ -89,26 +89,28 @@ test('every click shows at once; one key sends in click order, other keys side b
   assert.equal(await page.eval('toastText()'), null, 'no toast when all went');
 });
 
-test('a failure rolls back that item alone, toasts with Retry, and the next of its key still sends', { skip }, async () => {
+test('a failure rolls back that item alone, toasts what failed and why with Retry, and the next of its key still sends', { skip }, async () => {
   const page = await open();
-  const sent = page.eval(`act('a', 'k').then((v) => 'ok ' + v, (e) => 'failed ' + e.message)`); // a caller chaining
-  await page.eval(`act('b', 'k'), act('c'), null`);
+  await page.eval(`window.out = {}; act('a', 'k').then((v) => (out.a = 'ok ' + v), (e) => (out.a = 'failed ' + e.message)); act('b', 'k'), act('c'), null`);
   await page.eval('no(0), settle()');
-  assert.equal(await sent, 'failed nope', 'the returned promise is send\'s, rejecting');
   assert.equal(await page.eval('done()'), 'bc', 'a rolled back; b and c kept');
   assert.ok((await page.eval<string[]>('log')).includes('undo a nope'), 'undo gets the error');
-  assert.equal(await page.eval('toastText()'), 'Couldn\'t reject aRetry');
+  assert.equal(await page.eval('toastText()'), 'Couldn\'t reject a: nopeRetry');
   assert.equal(await page.eval('document.querySelector(".cui-toast").dataset.tone'), 'danger');
   assert.deepEqual(await page.eval('reqs.map((r) => r.id)'), ['a', 'c', 'b'], 'b sends after a failed');
+  assert.deepEqual(await page.eval('out'), {}, 'while Retry is on offer, the promise waits');
+  await click(page, '.cui-toast-text'); // the toast sent away without a Retry: that failure is final
+  assert.deepEqual(await page.eval('settle().then(() => out)'), { a: 'failed nope' });
   await page.eval('ok(1), ok(2), settle()');
 });
 
-test('Retry runs apply and send again; failures while the toast is up join its one Retry', { skip }, async () => {
+test('Retry runs apply and send again and settles the first promise; failures while the toast is up join its one Retry', { skip }, async () => {
   const page = await open();
-  await page.eval(`act('a'), act('b'), act('c'), null`);
+  await page.eval(`window.out = {}; for (const id of 'abc') act(id).then((v) => (out[id] = 'ok ' + v), (e) => (out[id] = 'failed ' + e.message)); null`);
   await page.eval('no(0), settle()');
   await page.eval('no(1), settle()');
-  assert.equal(await page.eval('toastText()'), 'Couldn\'t reject a (and 1 more)Retry');
+  assert.equal(await page.eval('toastText()'), 'Couldn\'t reject a: nope (and 1 more)Retry');
+  assert.deepEqual(await page.eval('out'), {}, 'a, carried into the newer toast, still waits');
   assert.equal(await page.eval('done()'), 'c');
   assert.equal(await page.eval('unhandled'), 0, 'an unchained failure logs no unhandled rejection');
   await click(page, '.cui-toast-action');
@@ -118,17 +120,20 @@ test('Retry runs apply and send again; failures while the toast is up join its o
   assert.deepEqual(await page.eval('reqs.map((r) => r.id)'), ['a', 'b', 'c', 'a', 'b'], 'both sent again');
   await page.eval('ok(3), ok(4), ok(2), settle()');
   assert.equal(await page.eval('done()'), 'abc');
+  assert.deepEqual(await page.eval('out'), { a: 'ok 3', b: 'ok 4', c: 'ok 2' }, 'each first promise settles with its Retry\'s value');
   // A failure after that toast went starts a toast of its own, not "and 2 more".
   await page.eval(`act('a'), settle()`);
   await page.eval('no(5), settle()');
-  assert.equal(await page.eval('toastText()'), 'Couldn\'t reject aRetry');
+  assert.equal(await page.eval('toastText()'), 'Couldn\'t reject a: nopeRetry');
 });
 
-test('a send that throws, or no key, label or undo, still recovers', { skip }, async () => {
+test('a send that throws, or no key, label or undo, still recovers; another toast makes a failure final', { skip }, async () => {
   const page = await open();
-  const out = await page.eval(`optimistic({ send: () => { throw new Error('boom'); } }).catch((e) => e.message)`);
-  assert.equal(out, 'boom');
-  assert.equal(await page.eval('settle().then(() => toastText())'), 'Couldn\'t do thatRetry');
+  await page.eval(`window.thrown = optimistic({ send: () => { throw new Error('boom'); } }).catch((e) => e.message); null`);
+  assert.equal(await page.eval('settle().then(() => toastText())'), 'Couldn\'t do that: boomRetry');
+  assert.equal(await page.eval(`toast('Copied'), thrown`), 'boom');
+  await page.eval(`optimistic({ label: 'save', send: () => Promise.reject() }); null`);
+  assert.equal(await page.eval('settle().then(() => toastText())'), 'Couldn\'t saveRetry', 'no error, no colon');
 });
 
 for (const [label, opts] of [['desktop', { width: 900, height: 600 }], ['phone, dark', { width: 390, height: 700, touch: true, dark: true }]] as const) {

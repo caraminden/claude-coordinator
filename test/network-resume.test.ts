@@ -179,6 +179,14 @@ test('other failures never wait on the network', async () => {
 
 test("a turn that ends well clears the failure note a failed turn left, and only that note (#428)", async () => {
   const id = minion();
+  // Back to back, a turn waits for the last one's save: wait until it has run, not just until nothing runs.
+  const turn = async (id: number, result: string, text = 'go') => {
+    const before = turnsRun();
+    writeFileSync(release, result);
+    runner.send(id, 'Cara', text);
+    await until(() => turnsRun() > before && !runner.isRunning(id), 'the turn to run');
+    return store.getTicket(id)!;
+  };
   assert.equal((await turn(id, 'ok')).note, 'before', "a note the agent set stays through a turn that doesn't touch it");
   assert.equal((await turn(id, 'API Error: 529 Overloaded')).note, 'API Error: 529 Overloaded');
   assert.equal((await turn(id, 'ok', 'again')).note, null, 'the next good turn clears it');
@@ -250,7 +258,10 @@ test('a stop or a dismissal ends the wait', async () => {
   up = true;
   await sleep(200);
   assert.equal(turnsRun(), before, 'neither resumed');
-  assert.equal((await turn(a, 'ok', 'carry on')).note, null, "the stop's note goes with the next good turn");
+  writeFileSync(release, 'ok');
+  runner.send(a, 'Cara', 'carry on');
+  await until(() => turnsRun() > before && !runner.isRunning(a), 'the turn after the stop');
+  assert.equal(store.getTicket(a)!.note, null, "the stop's note goes with the next good turn");
 });
 
 test('the wait and its held messages outlive a restart while the network is still down', async () => {

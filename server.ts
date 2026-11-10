@@ -148,7 +148,9 @@ const services = new AppServices(serviceOptions(process.env, DATA_DIR === DEFAUL
   citadelUrl: () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`,
   logDir: join(DATA_DIR, 'contraption-deploys'),
 }));
-const githubLink = new GithubLink(store, credentials, process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '');
+const githubLink = new GithubLink(store, credentials, process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '', undefined, {
+  clientId: process.env.GITHUB_APP_CLIENT_ID ?? '', clientSecret: process.env.GITHUB_APP_CLIENT_SECRET ?? '', slug: process.env.GITHUB_APP_SLUG ?? '',
+});
 // A boot check or preview runs on a copy of the data: it leaves GitHub alone.
 const repoAccess = new RepoAccess(store, githubLink, !BOOT_CHECK);
 const runnerTokens = new RunnerTokens(store, githubLink, !BOOT_CHECK);
@@ -158,6 +160,7 @@ const claudeLink = new ClaudeLink(store, credentials, DATA_DIR, process.env.CLAU
 delete process.env.COORDINATOR_PASSWORD;
 delete process.env.SESSION_SECRET;
 delete process.env.GITHUB_CLIENT_SECRET;
+delete process.env.GITHUB_APP_CLIENT_SECRET;
 
 const MAX_CLIENT_BACKLOG = 4 * 1024 * 1024;
 const clients = new Map<ServerResponse, Session>();

@@ -258,3 +258,16 @@ test('a collaborator Citadel added stays Citadel\'s when a transfer carries them
   await w.access.remove(w.scheme.id, w.josh.id);
   assert.ok(!w.gh.collaborators.get('caraminden/peek-auras-2')!.has('KatzMeIfYouCan'), 'leaving takes off the access Citadel gave');
 });
+
+test('an owner\'s limited link that can\'t reach the repo says the App isn\'t installed there (#464)', async () => {
+  const w = world();
+  // Cara's link is the limited kind, and GitHub answers as if the repo weren't hers: the App isn't on it.
+  w.creds.put(w.cara.id, 'github', 'gho_cara', { login: 'caraminden', id: 1, name: null, app: true });
+  w.gh.owners.delete('caraminden/peek-auras');
+  w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
+  w.store.addMember(w.scheme.id, w.josh.id);
+  await w.access.sync(w.scheme.id, w.josh.id);
+  const v = w.access.view(w.scheme.id, w.josh.id)!;
+  assert.equal(v.state, 'failed');
+  assert.match(v.error!, /limited kind, which reaches caraminden\/peek-auras only once its owner has installed Citadel's GitHub App/);
+});

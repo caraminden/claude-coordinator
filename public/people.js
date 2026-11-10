@@ -356,38 +356,55 @@ function codexCard() {
 /** Your GitHub link: turns you start push and open pull requests as you (src/github-link.ts). */
 function githubCard() {
   const card = h('div', { class: 'account-card' }, h('p', { class: 'muted' }, 'Loading GitHub…'));
-  const render = ({ configured, error, link }) => {
+  const render = ({ configured, full, limited, install_url, error, link }) => {
     const title = (chip, cls = '') => h('h3', {}, 'GitHub', h('span', { class: `link-chip ${cls}` }, chip));
     const errLine = error ? h('p', { class: 'error', role: 'status' }, error) : '';
-    const linkBtn = (label) => h('a', { class: 'button small', href: `api/github/link?project=${view.projectId}` }, label);
+    // Two ways to link (#464): the OAuth App's full access, and the GitHub App's limited one. Linking again replaces the link.
+    const linkBtn = (label, kind, cls = '') => h('a', { class: `button small ${cls}`, href: `api/github/link?project=${view.projectId}${kind === 'limited' ? '&kind=limited' : ''}` }, label);
+    const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
+    const install = install_url ? ext(install_url, 'installs Citadel\'s GitHub App') : 'installs Citadel\'s GitHub App';
+    const kinds = h('ul', { class: 'muted small link-kinds' },
+      full ? h('li', {}, h('b', {}, 'Full access'), ': Citadel can act on every repo your GitHub account can reach.') : '',
+      limited ? h('li', {}, h('b', {}, 'Limited'), ': Citadel can act only on repos where the repo\'s owner ', install, ' and you already have access. Nothing else in your account.') : '');
+    const linkRow = (again = '') => h('div', { class: 'row' },
+      full ? linkBtn(`Link GitHub${again}${limited ? ' (full access)' : ''}`, 'full') : '',
+      limited ? linkBtn(`Link GitHub${again}${full ? ' (limited)' : ''}`, 'limited', full ? 'secondary' : '') : '');
     const unlink = h('button', {
       type: 'button', class: 'secondary small',
       onclick: async () => {
         if (!confirm('Unlink your GitHub? Citadel forgets the token and revokes it on GitHub; your turns stop pushing until you link again.')) return;
-        render(await api('api/me/github', { method: 'DELETE' }).catch(fail) ?? { configured, error: null, link });
+        render(await api('api/me/github', { method: 'DELETE' }).catch(fail) ?? { configured, full, limited, install_url, error: null, link });
       },
     }, 'Unlink');
-    const note = h('p', { class: 'muted small' }, 'The link lets Citadel act on every repo your GitHub account can reach, and lasts until you unlink it here or revoke "Citadel" on GitHub under Settings → Applications. ',
+    const note = h('p', { class: 'muted small' }, 'The link lasts until you unlink it here or revoke "Citadel" on GitHub under ', ext('https://github.com/settings/applications', 'Settings → Applications'), '. ',
       'Links are kept encrypted with the server\'s session secret: if an admin changes that secret, everyone links again.');
     if (!configured) {
-      return card.replaceChildren(title('Not set up', 'off'), errLine, h('p', { class: 'muted' }, 'An admin hasn\'t set up Citadel\'s GitHub OAuth App yet (see the README), so turns push with the server\'s own GitHub login.'));
+      return card.replaceChildren(title('Not set up', 'off'), errLine, h('p', { class: 'muted' }, 'An admin hasn\'t set up Citadel\'s GitHub linking yet (see the README), so turns push with the server\'s own GitHub login.'));
     }
     if (!link) {
       return card.replaceChildren(title('Not linked', 'off'), errLine,
         h('p', {}, 'Link your GitHub so turns you start push branches and open pull requests as you. Until then they run and commit, but can\'t push.'),
-        h('div', { class: 'row' }, linkBtn('Link GitHub')), note);
+        kinds, linkRow(), note);
     }
     if (link.failed) {
       return card.replaceChildren(title('Needs linking again', 'warn'), errLine,
         h('p', {}, `GitHub stopped accepting Citadel's link for @${link.login} (revoked on GitHub, or the server's secret changed). Your turns can't push until you link again.`),
-        h('div', { class: 'row' }, linkBtn('Link GitHub again'), unlink));
+        kinds, h('div', { class: 'row' }, ...linkRow(' again').childNodes, unlink));
     }
-    return card.replaceChildren(title('Linked', 'ok'), errLine,
+    const repoLinks = (link.reach ?? []).flatMap((slug, i) => [i ? ', ' : '', ext(`https://github.com/${slug}`, slug)]);
+    const reach = !link.limited ? 'Every repo your GitHub account can reach'
+      : !link.reach ? ['Only repos where the owner ', install, ' (GitHub didn\'t say which just now)']
+      : link.reach.length ? repoLinks
+      : ['No repos yet: a repo\'s owner ', install, ' on it first'];
+    const other = link.limited ? (full ? linkBtn('Switch to full access', 'full', 'secondary') : '') : (limited ? linkBtn('Switch to limited', 'limited', 'secondary') : '');
+    return card.replaceChildren(title(link.limited ? 'Linked, limited' : 'Linked', 'ok'), errLine,
       h('dl', { class: 'kv' },
-        h('dt', {}, 'Pushes and PRs as'), h('dd', {}, `@${link.login}`),
+        h('dt', {}, 'Pushes and PRs as'), h('dd', {}, ext(`https://github.com/${link.login}`, `@${link.login}`)),
         h('dt', {}, 'Commits as'), h('dd', {}, `${link.name || link.login} <${link.email}>`),
+        h('dt', {}, 'Can reach'), h('dd', {}, reach),
         h('dt', {}, 'Linked'), h('dd', {}, new Date(link.linked_at).toLocaleDateString(undefined, { dateStyle: 'medium' }))),
-      h('div', { class: 'row' }, unlink), note);
+      link.limited && link.reach?.length ? h('p', { class: 'muted small' }, 'A scheme\'s repo missing from that list? Its owner ', install, ' on it.') : '',
+      h('div', { class: 'row' }, other, unlink), note);
   };
   api('api/me/github').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));
   return card;

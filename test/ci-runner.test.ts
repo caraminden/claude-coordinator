@@ -133,3 +133,10 @@ test('a boot check or preview never asks GitHub', async () => {
   await assert.rejects(w.tokens.issue(w.machine('cara-pc', w.cara.id), 'Peek Auras'), { status: 403 });
   assert.equal(w.gh.calls.length, 0);
 });
+
+test('an owner\'s limited link that can\'t reach the repo says the App isn\'t installed there (#464)', async () => {
+  const w = world();
+  w.creds.put(w.cara.id, 'github', 'gho_cara', { login: 'caraminden', id: 1, name: null, app: true });
+  const other = w.store.createProject('Elsewhere', 'https://github.com/someone/else.git', w.cara.id);
+  await assert.rejects(w.tokens.issue(w.machine('cara-pc', w.cara.id), other.id), { status: 502, message: /limited kind, which reaches someone\/else only once its owner has installed Citadel's GitHub App/ });
+});

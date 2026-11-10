@@ -25,7 +25,7 @@ function uidOf(session: { uid?: number }): number {
   return session.uid;
 }
 
-/** Where GitHub sends people back: the address they reached Citadel at, which must be the OAuth App's callback URL. */
+/** Where GitHub sends people back: the address they reached Citadel at, which must be a callback URL of the OAuth App and of the GitHub App. */
 function callbackUrl(req: IncomingMessage): string {
   const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? 'localhost');
   return `${isSecure(req) ? 'https' : 'http'}://${host}/api/github/callback`;
@@ -124,10 +124,12 @@ export const peopleRoutes: Route[] = [
   {
     method: 'GET', path: '/api/github/link', who: ['person'],
     handler({ req, res, app, url, session }) {
-      if (!app.github.configured) throw new HttpError(503, 'GitHub linking isn\'t set up on this server yet: an admin adds the OAuth App (see the README).');
+      // kind=limited links through Citadel's GitHub App (#464); anything else is the OAuth App's full access.
+      const limited = url.searchParams.get('kind') === 'limited';
+      if (!(limited ? app.github.limited : app.github.full)) throw new HttpError(503, `${limited ? 'Limited GitHub linking' : 'GitHub linking'} isn't set up on this server yet: an admin adds the ${limited ? 'GitHub App' : 'OAuth App'} (see the README).`);
       const project = Number(url.searchParams.get('project'));
       if (!Number.isSafeInteger(project) || !app.store.getProject(project) || !app.store.canSee(session, project)) throw new HttpError(400, 'Which scheme\'s Settings to come back to?');
-      res.writeHead(302, { Location: app.github.authorizeUrl(uidOf(session), project, callbackUrl(req)), 'Cache-Control': 'no-store' }).end();
+      res.writeHead(302, { Location: app.github.authorizeUrl(uidOf(session), project, callbackUrl(req), limited), 'Cache-Control': 'no-store' }).end();
     },
   },
   {

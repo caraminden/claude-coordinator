@@ -193,6 +193,7 @@ Configuration comes from the environment:
 | `SESSION_SECRET` | (required, 32+ chars) | Signs session cookies, and encrypts people's linked accounts: changing it unlinks everyone's GitHub |
 | `CITADEL_CONTRAPTIONS_DIR` | `~/.config/citadel/contraptions` (another `DATA_DIR`: its `contraptions/`) | Where each contraption's key folder goes (`<name>/identity.pub`, `<name>/contraption.key`), which its own service reads |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | (unset: turns use the box's gh login) | The OAuth App people link their own GitHub through (below) |
+| `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` / `GITHUB_APP_SLUG` | (unset: no limited links) | The GitHub App behind the limited way to link GitHub, and its URL name for the install link (below) |
 | `CITADEL_EMBED_URL` / `CITADEL_EMBED_MODEL` | `http://127.0.0.1:21434` / `Qwen3-Embedding-0.6B-Q8_0` | Semantic memory's embedding service, and the model name stored with each vector: a new name embeds everything again |
 | `CITADEL_MEMORY_SCHEMES` | (unset: the scheme whose code the server runs) | Comma-separated scheme ids whose chats get indexed for search by meaning |
 | `HOST` / `PORT` | `127.0.0.1` / `8573` | Listen address |
@@ -364,6 +365,38 @@ own `gh` login as before. To set it up, once:
    as `GITHUB_CLIENT_ID=…` and `GITHUB_CLIENT_SECRET=…`, then restart.
 3. Link your own GitHub too: from then on an unlinked person's turns, the
    admin's included, can't push.
+
+**A limited GitHub link (#464).** Beside the OAuth App's full access, a person can link through a
+GitHub App instead. That token reaches a repo only when the repo's owner installed the App on it and
+the person already has access to it
+([GitHub's docs](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)),
+so nothing else in their account. Settings → Your account then offers both ways and lists what a
+limited link reaches. To set it up, once:
+
+1. [Register a new GitHub App](https://github.com/settings/apps/new). Homepage
+   `https://cara.apps.webplatformisbestplatform.net`, callback URL
+   `https://cara.apps.webplatformisbestplatform.net/api/github/callback` (add one per hostname people
+   reach Citadel at, up to 10). Leave "Request user authorization (OAuth) during installation" and
+   "Enable Device Flow" off. Untick **Expire user authorization tokens**: GitHub's refresh kills the old
+   token at once, which would cut off a person's other running turns
+   ([refreshing user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)).
+   Untick Webhook → Active.
+2. Repository permissions: **Read and write** for Actions, Administration, Contents, Issues, Pull
+   requests and Workflows; **Read-only** for Checks, Commit statuses and Metadata. Administration is what
+   collaborator invites, CI runner tokens and making a repo use; it only works for a person who is
+   already an admin of that repo. No account or organization permissions.
+3. "Where can this GitHub App be installed?": **Any account**, since other people's and organizations'
+   repos need it too.
+4. Create it, then on the App's page press **Generate a new client secret**. Add three lines to
+   `~/.config/claude-coordinator/env`: `GITHUB_APP_CLIENT_ID=…` (the Client ID, not the App ID),
+   `GITHUB_APP_CLIENT_SECRET=…`, and `GITHUB_APP_SLUG=…` (the name in the App's public URL,
+   `github.com/apps/<this>`). No private key is needed. Then restart.
+5. Install the App (its page → Install App) on each account that owns a scheme's repo, choosing the
+   scheme repos or all. Only a repo's owner can do this for their own repos; Settings → Your account
+   links to the install page.
+
+A scheme owner on a limited link needs the App on the scheme's repo for invites and CI runner tokens
+to work, and a repo moved to another account needs the App installed by its new owner.
 
 Tokens are kept encrypted with a key from `SESSION_SECRET`; changing that secret
 leaves every link needing linking again. Deploys still push `main` with the box's

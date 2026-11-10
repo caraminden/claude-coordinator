@@ -71,6 +71,7 @@ export class RepoAccess {
     if (!ownerToken) {
       return put('failed', { login, error: `${owner?.name ?? 'The scheme\'s owner'} hasn't linked a working GitHub in Settings → Your account, so Citadel can't invite @${login} to ${slug}.` });
     }
+    const hint = this.link.installHint(ownerToken.limited, slug);
     const repoOwner = slug.split('/')[0];
     if (login.toLowerCase() === repoOwner || login.toLowerCase() === ownerToken.login.toLowerCase()) return put('existing', { login });
     // Set once GitHub has made the invite, so a failure after it still remembers the invite as Citadel's.
@@ -81,10 +82,10 @@ export class RepoAccess {
       // one Citadel added to the scheme's previous repo, which a GitHub transfer carries over (#456).
       const ours = prev?.slug === slug ? prev.state === 'invited' : prev?.state === 'added' || prev?.state === 'invited';
       if (check.status === 204) return put(ours ? 'added' : 'existing', { login });
-      if (check.status !== 404) return put('failed', { login, error: await explain(check, ownerToken.login, login, slug) });
+      if (check.status !== 404) return put('failed', { login, error: await explain(check, ownerToken.login, login, slug, hint) });
       const invite = await this.api('PUT', `/repos/${slug}/collaborators/${login}`, ownerToken.secret, { permission: 'push' });
       if (invite.status === 204) return put('added', { login });
-      if (invite.status !== 201) return put('failed', { login, error: await explain(invite, ownerToken.login, login, slug) });
+      if (invite.status !== 201) return put('failed', { login, error: await explain(invite, ownerToken.login, login, slug, hint) });
       const id = invited = Number(((await invite.json().catch(() => ({}))) as { id?: number }).id) || null;
       const memberToken = this.link.token(member);
       if (!id || !memberToken || memberToken.login.toLowerCase() !== login.toLowerCase()) return put('invited', { login, invitation_id: id });
@@ -130,10 +131,10 @@ export class RepoAccess {
       // A pending invite and an accepted one are separate things on GitHub; 404 on either means it's gone already.
       if (r.invitation_id) {
         const inv = await this.api('DELETE', `/repos/${r.slug}/invitations/${r.invitation_id}`, ownerToken.secret);
-        if (inv.status !== 204 && inv.status !== 404) return fail(`Couldn't withdraw @${r.login}'s invite to ${r.slug}: ${await explain(inv, ownerToken.login, r.login!, r.slug)}`);
+        if (inv.status !== 204 && inv.status !== 404) return fail(`Couldn't withdraw @${r.login}'s invite to ${r.slug}: ${await explain(inv, ownerToken.login, r.login!, r.slug, this.link.installHint(ownerToken.limited, r.slug))}`);
       }
       const del = await this.api('DELETE', `/repos/${r.slug}/collaborators/${r.login}`, ownerToken.secret);
-      if (del.status !== 204 && del.status !== 404) return fail(`Couldn't take @${r.login} off ${r.slug}: ${await explain(del, ownerToken.login, r.login!, r.slug)}`);
+      if (del.status !== 204 && del.status !== 404) return fail(`Couldn't take @${r.login} off ${r.slug}: ${await explain(del, ownerToken.login, r.login!, r.slug, this.link.installHint(ownerToken.limited, r.slug))}`);
     } catch (err: any) {
       return fail(`Couldn't reach GitHub to take @${r.login} off ${r.slug} (${err?.message ?? err}); Citadel tries again at its next restart.`);
     }
@@ -183,8 +184,10 @@ async function githubSays(r: Response): Promise<string> {
 }
 
 /** Why the owner's token couldn't invite or remove: a dead link, a missing scope, a repo that isn't theirs, an org rule. */
-async function explain(r: Response, ownerLogin: string, login: string, slug: string): Promise<string> {
+async function explain(r: Response, ownerLogin: string, login: string, slug: string, hint = ''): Promise<string> {
   const said = await githubSays(r);
+  // A limited link (#464) is refused like a missing repo where the App isn't installed: say so before guessing further.
+  if (hint && (r.status === 403 || r.status === 404)) return `@${ownerLogin} can't manage collaborators on ${slug}.${hint} (${said})`;
   if (r.status === 401) return `@${ownerLogin}'s GitHub link stopped working; they link it again in Settings → Your account. (${said})`;
   const scopes = r.headers.get('x-oauth-scopes');
   if (scopes !== null && !scopes.split(/[ ,]+/).includes('repo')) return `@${ownerLogin}'s GitHub link lacks the repo permission, which inviting collaborators needs; they link it again in Settings → Your account. (${said})`;

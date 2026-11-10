@@ -82,10 +82,10 @@ export class RunnerTokens {
     const project = findScheme(this.store, schemeRef);
     // A scheme this machine can't act for looks the same as one that doesn't exist.
     if (!project || !mayFetch(this.store, machine, project)) throw new HttpError(404, `No scheme "${String(schemeRef ?? '')}" that machine ${machine.name} may fetch a runner token for`);
-    const { slug, owner, ownerToken, label } = this.repoOf(project);
+    const { slug, owner, ownerToken, label, hint } = this.repoOf(project);
     if (!mint) return { scheme: project.name, repo: slug, label, token: null, expires_at: null };
     const r = await this.github(ownerToken, 'POST', `/repos/${slug}/actions/runners/${kind === 'remove' ? 'remove-token' : 'registration-token'}`);
-    if (r.status !== 201) throw new HttpError(502, await refused(r, owner.name, slug));
+    if (r.status !== 201) throw new HttpError(502, await refused(r, owner.name, slug, hint));
     const body = (await r.json().catch(() => ({}))) as { token?: unknown; expires_at?: unknown };
     if (typeof body.token !== 'string' || !body.token) throw new HttpError(502, `GitHub answered ${r.status} without a token`);
     const expires = typeof body.expires_at === 'string' ? body.expires_at : '';
@@ -95,9 +95,9 @@ export class RunnerTokens {
 
   /** The runners GitHub lists for a scheme's repo with its label (#328), asked with the owner's login. */
   async listed(project: Project): Promise<{ name: string; status: string; busy: boolean }[]> {
-    const { slug, owner, ownerToken, label } = this.repoOf(project);
+    const { slug, owner, ownerToken, label, hint } = this.repoOf(project);
     const r = await this.github(ownerToken, 'GET', `/repos/${slug}/actions/runners?per_page=100`);
-    if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug));
+    if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
     const body = (await r.json().catch(() => ({}))) as { runners?: any[] };
     return (Array.isArray(body.runners) ? body.runners : [])
       .filter((x) => Array.isArray(x?.labels) && x.labels.some((l: any) => l?.name === label))
@@ -110,7 +110,7 @@ export class RunnerTokens {
     const slug = repoSlug(project.repo_url);
     if (!slug) throw new HttpError(409, `${project.name} has no GitHub repo, so it has nothing to register a runner with; set its repo in the scheme's settings first.`);
     const owner = this.store.getUser(project.owner_id ?? -1);
-    if (!this.link.configured) throw new HttpError(409, 'Citadel has no GitHub OAuth App set up, so it holds no one\'s GitHub login to ask with.');
+    if (!this.link.configured) throw new HttpError(409, 'Citadel has no GitHub linking set up, so it holds no one\'s GitHub login to ask with.');
     const ownerToken = owner ? this.link.token(owner) : null;
     if (!owner || !ownerToken) throw new HttpError(409, `${owner?.name ?? 'The scheme\'s owner'} (who owns ${project.name}) hasn't linked a working GitHub in Settings → Your account, so Citadel can't ask GitHub for a runner token for ${slug}.`);
     const label = runnerLabel(project.name);
@@ -118,7 +118,7 @@ export class RunnerTokens {
     // Two schemes with one label would share runs-on, and one's jobs could run on the other's runner.
     const twin = this.store.listProjects().find((p) => p.id !== project.id && runnerLabel(p.name) === label);
     if (twin) throw new HttpError(409, `${project.name} and ${twin.name} would share the runner label ${label}; rename one first.`);
-    return { slug, owner, ownerToken: ownerToken.secret, label };
+    return { slug, owner, ownerToken: ownerToken.secret, label, hint: this.link.installHint(ownerToken.limited, slug) };
   }
 
   private async github(token: string, method: string, path: string): Promise<Response> {
@@ -134,12 +134,14 @@ export class RunnerTokens {
 }
 
 /** Why GitHub wouldn't mint the token: a dead link, a missing scope, or a login that isn't the repo's admin. */
-async function refused(r: Response, ownerName: string, slug: string): Promise<string> {
+async function refused(r: Response, ownerName: string, slug: string, hint = ''): Promise<string> {
   const body = (await r.json().catch(() => null)) as { message?: string } | null;
   const said = body?.message ? `GitHub said "${body.message}" (${r.status})` : `GitHub answered ${r.status}`;
   if (r.status === 401) return `${ownerName}'s GitHub link stopped working; they link it again in Settings → Your account. (${said})`;
   const scopes = r.headers.get('x-oauth-scopes');
   if (scopes !== null && !scopes.split(/[ ,]+/).includes('repo')) return `${ownerName}'s GitHub link lacks the repo permission, which runner tokens need; they link it again in Settings → Your account. (${said})`;
+  // A limited link (#464) is refused like a missing repo where the App isn't installed.
+  if (hint && (r.status === 403 || r.status === 404)) return `${ownerName}'s GitHub login can't manage runners on ${slug}: registering one needs admin on the repo.${hint} (${said})`;
   // GitHub answers 404 (or 403) when the login isn't an admin of the repo: registering runners needs admin.
   if (r.status === 403 || r.status === 404) return `${ownerName}'s GitHub login isn't an admin of ${slug} (or the repo is gone or renamed), and registering a runner needs admin on the repo. (${said})`;
   return said;

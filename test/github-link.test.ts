@@ -86,6 +86,83 @@ test('linking: the state must be the person\'s own and fresh; a token without re
   assert.equal(creds.get(rachel.id, 'github'), null);
 });
 
+// #464: the limited link, through Citadel's GitHub App, beside the OAuth App's full access.
+const APP = { clientId: 'appid', clientSecret: 'appsecret', slug: 'citadel-app' };
+
+/** GitHub with the App installed on `repos` for whoever asks; the exchange gives a ghu_ token with no scope. */
+function fakeApp(repos: string[] | null) {
+  const gh = fakeGithub({ ghu_new: { login: 'alexdev', id: 11, name: 'Alex' }, gho_old: { login: 'alexdev', id: 11, name: 'Alex' } }, 'ghu_new', '');
+  const fetch = (async (url: string, init?: RequestInit) => {
+    if (url.includes('/user/installations/5/repositories')) return gh.calls.push({ url, init }), Response.json({ repositories: repos!.map((full_name) => ({ full_name })) });
+    if (url.includes('/user/installations')) return gh.calls.push({ url, init }), repos ? Response.json({ installations: [{ id: 5 }] }) : new Response('', { status: 500 });
+    return gh.fetch(url, init);
+  }) as typeof globalThis.fetch;
+  return { fetch, calls: gh.calls };
+}
+
+test('a limited link goes through the GitHub App with no scope, is kept as limited, and lists the repos it reaches', async () => {
+  const gh = fakeApp(['caraminden/zeta', 'caraminden/alpha']);
+  const link = new GithubLink(store, creds, 'cid', 'csecret', gh.fetch, APP);
+  const url = new URL(link.authorizeUrl(rachel.id, project.id, 'https://x/cb', true));
+  assert.equal(url.searchParams.get('client_id'), 'appid');
+  assert.equal(url.searchParams.has('scope'), false, 'a GitHub App takes no scope');
+  assert.equal(await link.finish(rachel.id, new URLSearchParams({ state: url.searchParams.get('state')!, code: 'c' }), 'https://x/cb'), project.id);
+  const exchange = gh.calls.find((c) => c.url.endsWith('/login/oauth/access_token'))!;
+  assert.deepEqual(JSON.parse(String(exchange.init!.body)), { client_id: 'appid', client_secret: 'appsecret', code: 'c', redirect_uri: 'https://x/cb' });
+  const s = await link.status(rachel.id);
+  assert.equal(s.error, null, 'no repo scope is asked of a limited link');
+  assert.deepEqual({ full: s.full, limited: s.limited, install_url: s.install_url }, { full: true, limited: true, install_url: 'https://github.com/apps/citadel-app/installations/new' });
+  assert.deepEqual({ limited: s.link!.limited, reach: s.link!.reach }, { limited: true, reach: ['caraminden/alpha', 'caraminden/zeta'] });
+  assert.equal(link.token(rachel)!.limited, true);
+  // The turn is told what a refusal means, with where the App is installed.
+  const turn = link.forTurn(rachel, mkdtempSync(join(root, 'limited-')))!;
+  assert.equal(turn.env.GH_TOKEN, 'ghu_new');
+  assert.match(turn.line, /limited kind.*github\.com\/apps\/citadel-app\/installations\/new/);
+  // Unlinking revokes with the App's client, not the OAuth App's.
+  await link.unlink(rachel.id);
+  const revoke = gh.calls.find((c) => c.url.includes('/applications/'))!;
+  assert.ok(revoke.url.endsWith('/applications/appid/grant'));
+  assert.equal((revoke.init!.headers as any).Authorization, `Basic ${Buffer.from('appid:appsecret').toString('base64')}`);
+  assert.equal(creds.get(rachel.id, 'github'), null);
+});
+
+test('a full link is unchanged beside the App, and switching kind replaces the link and revokes the old one', async () => {
+  creds.put(rachel.id, 'github', 'gho_old', { login: 'alexdev', id: 11, name: 'Alex' });
+  const gh = fakeApp(null);
+  const link = new GithubLink(store, creds, 'cid', 'csecret', gh.fetch, APP);
+  const before = await link.status(rachel.id);
+  assert.deepEqual({ limited: before.link!.limited, reach: before.link!.reach }, { limited: false, reach: null });
+  assert.equal(link.token(rachel)!.limited, false);
+  assert.doesNotMatch(link.forTurn(rachel, mkdtempSync(join(root, 'full-')))!.line, /limited/);
+  assert.equal(new URL(link.authorizeUrl(rachel.id, project.id, 'cb')).searchParams.get('client_id'), 'cid');
+
+  const state = new URL(link.authorizeUrl(rachel.id, project.id, 'cb', true)).searchParams.get('state')!;
+  await link.finish(rachel.id, new URLSearchParams({ state, code: 'c' }), 'cb');
+  assert.equal(creds.get(rachel.id, 'github')!.secret, 'ghu_new');
+  const revokes = gh.calls.filter((c) => c.url.includes('/applications/'));
+  assert.deepEqual(revokes.map((c) => [c.url.split('/applications/')[1], JSON.parse(String(c.init!.body)).access_token]), [['cid/grant', 'gho_old']], 'the full link is revoked with the OAuth App');
+  // GitHub not saying which repos: the link still shows, with no list.
+  assert.equal((await link.status(rachel.id)).link!.reach, null);
+  // Linking limited again keeps the grant the new token shares.
+  const again = new URL(link.authorizeUrl(rachel.id, project.id, 'cb', true)).searchParams.get('state')!;
+  await link.finish(rachel.id, new URLSearchParams({ state: again, code: 'c' }), 'cb');
+  assert.equal(gh.calls.filter((c) => c.url.includes('/applications/')).length, 1);
+  creds.remove(rachel.id, 'github');
+});
+
+test('each way of linking shows only when it is set up; a limited state is refused once the App is gone', async () => {
+  const none = { clientId: '', clientSecret: '', slug: '' };
+  const only = new GithubLink(store, creds, '', '', fakeApp([]).fetch, APP);
+  assert.deepEqual([only.configured, only.full, only.limited], [true, false, true]);
+  assert.notEqual(only.forTurn(josh, mkdtempSync(join(root, 'only-'))), null, 'with only the App set up, turns still never use the box\'s login');
+  const oauth = new GithubLink(store, creds, 'cid', 'csecret', fakeApp([]).fetch, none);
+  assert.deepEqual([oauth.configured, oauth.full, oauth.limited, oauth.installUrl], [true, true, false, null]);
+  const state = new URL(oauth.authorizeUrl(rachel.id, project.id, 'cb', true)).searchParams.get('state')!;
+  await oauth.finish(rachel.id, new URLSearchParams({ state, code: 'c' }), 'cb');
+  assert.match((await oauth.status(rachel.id)).error!, /isn't set up/);
+  assert.equal(creds.get(rachel.id, 'github'), null);
+});
+
 test('a token GitHub refuses (401) shows as needing linking again; unlink revokes it on GitHub', async () => {
   creds.put(rachel.id, 'github', 'gho_revoked', { login: 'rach', id: 3, name: null });
   const gh = fakeGithub({});
@@ -290,6 +367,9 @@ test('through the server: Link GitHub goes to GitHub for a scheme you can see; a
     assert.equal(to.searchParams.get('redirect_uri'), `${s.base}/api/github/callback`);
     assert.equal(to.searchParams.get('client_id'), 'cid');
     assert.equal((await get('/api/github/link?project=99999')).status, 400);
+    // No GitHub App on this server: the limited way isn't offered (#464).
+    assert.equal((await get(`/api/github/link?project=${scheme.id}&kind=limited`)).status, 503);
+    assert.equal((await s.call('/api/me/github')).data.limited, false);
     const back = await get('/api/github/callback?state=forged&code=c');
     assert.equal(back.status, 302);
     assert.equal(back.headers.get('location'), '../../c/');

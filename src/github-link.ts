@@ -3,6 +3,11 @@
 // token reaches only that turn's environment, as GH_TOKEN: gh, and git through gh's credential helper,
 // use it. With no OAuth App set up (GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET), turns use the box's
 // own gh login as before.
+//
+// Two ways to link, side by side (#464; Josh, 2026-11-10: "Lets do both?... I want alex to be able to do what
+// he is comfortable with"): the OAuth App's full-access link, and a limited one through Citadel's GitHub App
+// (GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, GITHUB_APP_SLUG), whose token reaches only repos where the
+// repo's owner installed the App and the person has access. A person has one link; linking again replaces it.
 import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,6 +26,20 @@ export interface GithubMeta {
   login: string;
   id: number;
   name: string | null;
+  /** True for a limited link, made through the GitHub App; absent for the OAuth App's full access. */
+  app?: boolean;
+}
+
+/** Citadel's GitHub App, for limited links: its client id and secret, and its URL name (for the install page). */
+export interface GithubApp {
+  clientId: string;
+  clientSecret: string;
+  slug: string;
+}
+
+interface Client {
+  id: string;
+  secret: string;
 }
 
 /** What a turn gets: its env additions and one line for its prompt. */
@@ -33,7 +52,7 @@ export interface TurnGithub {
 type Fetch = typeof fetch;
 
 export class GithubLink {
-  private states = new Map<string, { uid: number; projectId: number; expires: number }>();
+  private states = new Map<string, { uid: number; projectId: number; expires: number; limited: boolean }>();
   private checked = new Map<number, number>();
   /** A link that failed, said once on the account page. */
   private errors = new Map<number, string>();
@@ -43,26 +62,57 @@ export class GithubLink {
   private clientId: string;
   private clientSecret: string;
   private fetch: Fetch;
+  private app: GithubApp;
 
-  constructor(store: Store, creds: Credentials, clientId: string, clientSecret: string, fetch: Fetch = globalThis.fetch) {
+  constructor(store: Store, creds: Credentials, clientId: string, clientSecret: string, fetch: Fetch = globalThis.fetch, app: GithubApp = { clientId: '', clientSecret: '', slug: '' }) {
     this.store = store;
     this.creds = creds;
     this.clientId = clientId;
     this.clientSecret = clientSecret;
     this.fetch = fetch;
+    this.app = app;
   }
 
+  /** Whether people link their own GitHub here at all, either way. */
   get configured(): boolean {
+    return this.full || this.limited;
+  }
+
+  /** The OAuth App is set up: full-access links. */
+  get full(): boolean {
     return !!(this.clientId && this.clientSecret);
   }
 
+  /** The GitHub App is set up: limited links. */
+  get limited(): boolean {
+    return !!(this.app.clientId && this.app.clientSecret);
+  }
+
+  /** Where a repo's owner installs Citadel's GitHub App, or null when its URL name isn't set. */
+  get installUrl(): string | null {
+    return this.app.slug ? `https://github.com/apps/${encodeURIComponent(this.app.slug)}/installations/new` : null;
+  }
+
+  /** The client a link of this kind was made with, or null when that kind isn't set up (any more). */
+  private client(limited: boolean): Client | null {
+    if (limited) return this.limited ? { id: this.app.clientId, secret: this.app.clientSecret } : null;
+    return this.full ? { id: this.clientId, secret: this.clientSecret } : null;
+  }
+
+  /** For an error about `slug` from a limited link: that the App may not be installed there, and where to install it. */
+  installHint(limited: boolean | undefined, slug: string): string {
+    if (!limited) return '';
+    return ` Their GitHub link is the limited kind, which reaches ${slug} only once its owner has installed Citadel's GitHub App on it${this.installUrl ? `: ${this.installUrl}` : ''}.`;
+  }
+
   /** GitHub's authorize page for this person; `projectId` is the scheme whose Settings they come back to. */
-  authorizeUrl(uid: number, projectId: number, redirectUri: string): string {
+  authorizeUrl(uid: number, projectId: number, redirectUri: string, limited = false): string {
     const now = Date.now();
     for (const [k, v] of this.states) if (v.expires < now) this.states.delete(k);
     const state = randomBytes(24).toString('base64url');
-    this.states.set(state, { uid, projectId, expires: now + STATE_MS });
-    const q = new URLSearchParams({ client_id: this.clientId, redirect_uri: redirectUri, scope: SCOPES, state, allow_signup: 'false' });
+    this.states.set(state, { uid, projectId, expires: now + STATE_MS, limited });
+    // A GitHub App takes no scope: what its token can do is the App's own permissions, where it is installed.
+    const q = new URLSearchParams({ client_id: this.client(limited)?.id ?? '', redirect_uri: redirectUri, ...(limited ? {} : { scope: SCOPES }), state, allow_signup: 'false' });
     return `https://github.com/login/oauth/authorize?${q}`;
   }
 
@@ -80,18 +130,23 @@ export class GithubLink {
     this.states.delete(state);
     try {
       if (params.get('error')) throw new Error(params.get('error') === 'access_denied' ? 'You cancelled on GitHub.' : `GitHub said: ${params.get('error_description') ?? params.get('error')}`);
+      const client = this.client(s.limited);
+      if (!client) throw new Error('That way of linking GitHub isn\'t set up on this server.');
       const r = await this.fetch('https://github.com/login/oauth/access_token', {
         method: 'POST', signal: AbortSignal.timeout(GITHUB_WAIT_MS),
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_id: this.clientId, client_secret: this.clientSecret, code: params.get('code') ?? '', redirect_uri: redirectUri }),
+        body: JSON.stringify({ client_id: client.id, client_secret: client.secret, code: params.get('code') ?? '', redirect_uri: redirectUri }),
       });
       const body = (await r.json()) as { access_token?: string; scope?: string; error_description?: string };
       if (!body.access_token) throw new Error(`GitHub didn't give a token: ${body.error_description ?? r.status}`);
       const granted = (body.scope ?? '').split(/[ ,]+/);
-      if (!granted.includes('repo')) throw new Error('GitHub gave a token without the repo permission, so it couldn\'t push.');
+      if (!s.limited && !granted.includes('repo')) throw new Error('GitHub gave a token without the repo permission, so it couldn\'t push.');
       const me = await this.user(body.access_token);
       if (!me) throw new Error('GitHub didn\'t accept the new token.');
-      this.creds.put(uid, 'github', body.access_token, me);
+      // A link of the other kind is replaced: revoke it on GitHub. Never one of the same kind, whose grant the new token shares.
+      const old = this.creds.get<GithubMeta>(uid, 'github');
+      if (old?.secret && !!old.meta.app !== s.limited) await this.revoke(old.secret, !!old.meta.app);
+      this.creds.put(uid, 'github', body.access_token, s.limited ? { ...me, app: true } : me);
       this.checked.set(uid, Date.now());
       this.errors.delete(uid);
     } catch (err: any) {
@@ -126,28 +181,62 @@ export class GithubLink {
     return {
       configured: this.configured,
       error,
-      link: now ? { login: now.meta.login, name: now.meta.name, email: noreplyEmail(now.meta), failed: now.failed, linked_at: now.updated_at } : null,
+      full: this.full,
+      limited: this.limited,
+      install_url: this.installUrl,
+      link: now ? {
+        login: now.meta.login, name: now.meta.name, email: noreplyEmail(now.meta), failed: now.failed, linked_at: now.updated_at,
+        limited: !!now.meta.app,
+        reach: now.meta.app && now.secret && !now.failed ? await this.reach(now.secret) : null,
+      } : null,
     };
+  }
+
+  /**
+   * The repos a limited link can reach, as GitHub says now: where the App is installed and the person has
+   * access. Null when GitHub can't say.
+   */
+  private async reach(token: string): Promise<string[] | null> {
+    const get = async (path: string) => {
+      const r = await this.fetch(`https://api.github.com${path}`, { signal: AbortSignal.timeout(GITHUB_WAIT_MS), headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' } });
+      if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
+      return (await r.json()) as { installations?: { id: number }[]; repositories?: { full_name: string }[] };
+    };
+    try {
+      const repos: string[] = [];
+      // shortcut: the first 100 installs and 100 repos of each, page through them if a list ever looks cut short.
+      for (const i of (await get('/user/installations?per_page=100')).installations ?? []) {
+        for (const r of (await get(`/user/installations/${Number(i.id)}/repositories?per_page=100`)).repositories ?? []) repos.push(String(r.full_name));
+      }
+      return repos.sort();
+    } catch {
+      return null;
+    }
+  }
+
+  /** Revoke a token's grant on GitHub with the client that made it; best effort, it may be gone already. */
+  private async revoke(token: string, limited: boolean) {
+    const client = this.client(limited);
+    if (!client) return;
+    await this.fetch(`https://api.github.com/applications/${client.id}/grant`, {
+      method: 'DELETE', signal: AbortSignal.timeout(GITHUB_WAIT_MS),
+      headers: { Authorization: `Basic ${Buffer.from(`${client.id}:${client.secret}`).toString('base64')}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' },
+      body: JSON.stringify({ access_token: token }),
+    }).catch(() => {});
   }
 
   /** Revoke the grant on GitHub (best effort: it may be gone already) and forget the token. */
   async unlink(uid: number) {
     const c = this.creds.get<GithubMeta>(uid, 'github');
-    if (c?.secret && this.configured) {
-      await this.fetch(`https://api.github.com/applications/${this.clientId}/grant`, {
-        method: 'DELETE', signal: AbortSignal.timeout(GITHUB_WAIT_MS),
-        headers: { Authorization: `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' },
-        body: JSON.stringify({ access_token: c.secret }),
-      }).catch(() => {});
-    }
+    if (c?.secret) await this.revoke(c.secret, !!c.meta.app);
     this.creds.remove(uid, 'github');
   }
 
   /** A person's working token and its account, or null: not linked, the link failed, they're disabled, or no OAuth App. */
-  token(person: User): { secret: string; login: string } | null {
+  token(person: User): { secret: string; login: string; limited: boolean } | null {
     if (!this.configured || person.disabled_at) return null;
     const c = this.creds.get<GithubMeta>(person.id, 'github');
-    return c?.secret && !c.failed ? { secret: c.secret, login: c.meta.login } : null;
+    return c?.secret && !c.failed ? { secret: c.secret, login: c.meta.login, limited: !!c.meta.app } : null;
   }
 
   /** A person's GitHub login as People shows it, without decrypting anything. */
@@ -170,7 +259,9 @@ export class GithubLink {
     if (c?.secret && !c.failed) {
       const name = c.meta.name || c.meta.login;
       Object.assign(env, { GH_TOKEN: c.secret, ...gitIdentity(name, noreplyEmail(c.meta)) });
-      return { env, login: c.meta.login, line: `GitHub: this turn runs for ${who}, so its pushes and pull requests go out as @${c.meta.login} and its commits are theirs.` };
+      // A limited link's refusals look like a missing repo, so the turn is told what they mean.
+      const limited = c.meta.app ? ` Their link is the limited kind: it reaches a repo only once the repo's owner has installed Citadel's GitHub App on it${this.installUrl ? ` (${this.installUrl})` : ''}. If GitHub refuses a push or says a repo they can see doesn't exist, tell them that; never try another login.` : '';
+      return { env, login: c.meta.login, line: `GitHub: this turn runs for ${who}, so its pushes and pull requests go out as @${c.meta.login} and its commits are theirs.${limited}` };
     }
     Object.assign(env, gitIdentity(who, `${person?.login ?? 'nobody'}@citadel.invalid`));
     const why = c ? `${who}'s GitHub link stopped working` : `${who} hasn't linked GitHub`;

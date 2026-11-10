@@ -696,11 +696,47 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
 ];
 
 /**
- * The database's shape, kept in the `schema_version` setting. Bump it with any change to SCHEMA or
+ * The database's shape, kept in the `schema_version` setting. Add a line to SCHEMA_HISTORY below (the next number, what changed) with any change to SCHEMA or
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 35; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths; 23: contraptions.repo, branch, folder; 24: tickets.parent; 25: machines.scoped (#303); 26: machines.owner_id (#306); 27: machines.mcp_kind, mcp_command (#308); 28: repo_collaborators (#310); 29: memory_chunks (#331); 30: tickets.workflow (#359); 31: projects.optional_plugin_dirs, tickets.plugin_dirs (#361); 32: schedules.model, effort (#387); 33: machines.always_on, last_check (#437); 34: one lending list per machine, projects.machine_tools and machines.scoped unread (#438); 35: machines.lend (#439)
+export const SCHEMA_HISTORY = [
+  [2, 'claude_state moved to state.db'],
+  [3, 'brief_starts'],
+  [4, 'saved_views'],
+  [5, 'person_notes'],
+  [6, 'projects.machine_tools'],
+  [7, 'app_instruction_history'],
+  [8, 'shared_pins'],
+  [9, 'artifact_data'],
+  [10, 'projects.onboarding'],
+  [11, 'projects.github_error'],
+  [12, 'ticket_pins'],
+  [13, 'users, project_members, projects.owner_id'],
+  [14, 'credentials, tickets.person_id'],
+  [15, 'person_views replaces saved_views'],
+  [16, 'push_subscriptions.only_pinned'],
+  [17, 'server_login only for its owner (#213)'],
+  [18, 'project_hides'],
+  [19, 'contraptions, contraption_users'],
+  [20, 'contraption_sessions, contraption_turns'],
+  [21, 'projects.list_groups, type: other backfill'],
+  [22, 'contraptions.relay_paths'],
+  [23, 'contraptions.repo, branch, folder'],
+  [24, 'tickets.parent'],
+  [25, 'machines.scoped (#303)'],
+  [26, 'machines.owner_id (#306)'],
+  [27, 'machines.mcp_kind, mcp_command (#308)'],
+  [28, 'repo_collaborators (#310)'],
+  [29, 'memory_chunks (#331)'],
+  [30, 'tickets.workflow (#359)'],
+  [31, 'projects.optional_plugin_dirs, tickets.plugin_dirs (#361)'],
+  [32, 'schedules.model, effort (#387)'],
+  [33, 'machines.always_on, last_check (#437)'],
+  [34, 'one lending list per machine, projects.machine_tools unread, machines.scoped read only for a CI runner host (#438)'],
+  [35, 'machines.lend (#439)'],
+] as const;
+export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".

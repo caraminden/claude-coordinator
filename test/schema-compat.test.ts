@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { SCHEMA_VERSION, Store } from '../src/db.ts';
+import { SCHEMA_HISTORY, SCHEMA_VERSION, Store } from '../src/db.ts';
 
 // A deploy that fails rolls back to the last release, which then opens a database the new code has
 // already migrated. That release's Store must still read and write it. The last release is the live
@@ -102,4 +102,10 @@ test('a Store never lowers schema_version, so an older release left behind by a 
     console.warn = warn;
   }
   assert.match(warned.join('\n'), /newer than this code's .*pre-deploy/);
+});
+
+test('SCHEMA_HISTORY numbers rise by one with no gaps or repeats, and SCHEMA_VERSION is the last', () => {
+  SCHEMA_HISTORY.forEach(([n], i) => assert.equal(n, SCHEMA_HISTORY[0][0] + i));
+  assert.equal(SCHEMA_VERSION, SCHEMA_HISTORY.at(-1)![0]);
+  assert.equal(SCHEMA_VERSION, 35);
 });

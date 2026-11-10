@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createHmac } from 'node:crypto';
 import { Auth, looksLikeUrl, type Nonces } from '../src/auth.ts';
 
 test('a site address is not a name', () => {
@@ -76,13 +77,20 @@ test('a session over 7 days old is renewed on use; a newer one, a disabled perso
     return { headers: { cookie } } as any;
   };
   const renewed = auth.renewal(auth.session(aged(auth, 1, 8)), true);
-  assert.match(renewed ?? '', /^cc_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=2592000; Secure$/);
+  assert.match(renewed ?? '', /^cc_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=15552000; Secure$/);
   const fresh = auth.session({ headers: { cookie: renewed!.split(';')[0] } } as any)!;
   assert.equal(fresh.uid, 1);
-  assert.ok(fresh.exp > now + 29 * DAY, 'the new cookie runs a full 30 days from now');
+  assert.ok(fresh.exp > now + 179 * DAY, 'the new cookie runs a full 180 days from now');
   assert.equal(auth.renewal(fresh, true), null, 'and is not renewed again on the next request');
 
   assert.equal(auth.renewal(auth.session(aged(auth, 1, 1)), false), null, 'a day-old session is left alone');
+  assert.equal(auth.session(aged(auth, 1, 179))?.uid, 1, 'a session unused for 179 days still signs in');
+  assert.equal(auth.session(aged(auth, 1, 181)), null, 'and one unused for 181 days does not');
+  // A cookie issued under the old 30-day rule, 2 days ago: renewed on its next request.
+  const payload = Buffer.from(JSON.stringify({ name: 'Cara', uid: 1, exp: now + 28 * DAY })).toString('base64url');
+  const legacy = { headers: { cookie: `cc_session=${payload}.${createHmac('sha256', 'x'.repeat(32)).update(payload).digest('base64url')}` } } as any;
+  assert.equal(auth.session(legacy)?.uid, 1);
+  assert.match(auth.renewal(auth.session(legacy), false) ?? '', /Max-Age=15552000$/, 'a 30-day cookie moves to 180 days on its next request');
   assert.equal(auth.session(aged(auth, 2, 8)), null, 'a disabled person is signed out');
   assert.equal(auth.renewal(auth.session(aged(auth, 2, 8)), false), null, 'and gets no fresh cookie');
   assert.equal(auth.renewal({ name: 'Taskmaster', exp: Infinity, agent: 7 }, false), null);

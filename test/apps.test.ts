@@ -257,7 +257,7 @@ test('using an app or the API with a session over 7 days old renews it; logout s
   assert.equal(page.status, 200);
   const [renewed, ...more] = sessionCookies(page);
   assert.equal(more.length, 0);
-  assert.match(renewed ?? '', /^cc_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=2592000$/);
+  assert.match(renewed ?? '', /^cc_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=15552000$/);
   assert.ok(page.headers.getSetCookie().includes('stub=1; Path=/apps/stub/'), 'the contraption\'s own cookies still go through');
   assert.equal(lastSeen().headers.cookie, undefined, 'the contraption never sees the session, old or new');
   const me = await get('/api/me', { Cookie: renewed.split(';')[0] });

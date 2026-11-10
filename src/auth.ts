@@ -11,8 +11,8 @@ const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, len: number)
 const INVITE_DAYS = 7;
 
 export const COOKIE = 'cc_session';
-const SESSION_DAYS = 30;
-/** A session older than this gets a fresh cookie on its next request, so only 30 days unused signs someone out. */
+const SESSION_DAYS = 180;
+/** A session older than this gets a fresh cookie on its next request, so only SESSION_DAYS unused signs someone out. */
 const RENEW_DAYS = 7;
 const MAX_FAILURES = 10;
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;

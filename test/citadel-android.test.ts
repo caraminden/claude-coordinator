@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -188,7 +188,25 @@ test('sms goes through serve to the console with the host token, and serve refus
     assert.match(readFileSync(join(locks, 'android.out.forged'), 'utf8'), /^KO: .*control character/);
     writeFileSync(join(locks, 'android.req.other'), 'kill\n\n\n');
     for (let i = 0; i < 200 && !existsSync(join(locks, 'android.out.other')); i++) await new Promise((r) => setTimeout(r, 25));
-    assert.equal(readFileSync(join(locks, 'android.out.other'), 'utf8'), 'KO: unknown step kill\n');
+    assert.equal(readFileSync(join(locks, 'android.out.other'), 'utf8'), 'KO: unknown step\n');
+
+    // serve can read what turns can't: a request that links to the token (or a hard link to it) is refused
+    // without repeating it, and a link planted where the answer goes is replaced, not written through.
+    const answer = async (id: string) => {
+      for (let i = 0; i < 200 && !existsSync(join(locks, `android.out.${id}`)); i++) await new Promise((r) => setTimeout(r, 25));
+      return readFileSync(join(locks, `android.out.${id}`), 'utf8');
+    };
+    symlinkSync(join(home, '.emulator_console_auth_token'), join(locks, 'android.req.link'));
+    linkSync(join(home, '.emulator_console_auth_token'), join(locks, 'android.req.hard'));
+    const victim = join(root, 'victim');
+    writeFileSync(victim, 'keep me\n');
+    symlinkSync(victim, join(locks, 'android.out.planted'));
+    writeFileSync(join(locks, 'android.req.planted'), 'kill\n\n\n');
+    assert.equal(await answer('link'), 'KO: refused: a request must be a plain file\n');
+    assert.equal(await answer('hard'), 'KO: refused: a request must be a plain file\n');
+    assert.equal(await answer('planted'), 'KO: unknown step\n');
+    assert.equal(readFileSync(victim, 'utf8'), 'keep me\n');
+    assert.equal(readFileSync(join(home, '.emulator_console_auth_token'), 'utf8'), 'sekrit\n');
     assert.deepEqual(got, []);
   } finally {
     s.kill('SIGTERM');

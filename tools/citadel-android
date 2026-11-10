@@ -61,19 +61,20 @@ keep_screen() { printf '%s\t%s\n' "$(($(date +%s) + LEASE))" "$who" >"$holder"; 
 
 # A console step's arguments, checked on both sides: nothing but these words ever reaches the console, and
 # a line break or other control character in the text would start a console command of its own.
+# Fixed messages only: serve answers with them, and what it read must never go back to a turn.
 check_sms() {
   local LC_ALL=C.UTF-8
-  [[ $1 =~ ^\+?[0-9]{1,20}$ ]] || { echo "the sender is digits with an optional leading +, at most 20: $1"; return 1; }
+  [[ $1 =~ ^\+?[0-9]{1,20}$ ]] || { echo "the sender must be digits with an optional leading +, at most 20"; return 1; }
   [ -n "$2" ] || { echo "the text is empty"; return 1; }
-  [ "${#2}" -le $SMS_MAX ] || { echo "the text is ${#2} characters; at most $SMS_MAX"; return 1; }
+  [ "${#2}" -le $SMS_MAX ] || { echo "the text is over $SMS_MAX characters"; return 1; }
   [[ $2 != *[[:cntrl:]]* ]] || { echo "the text has a line break or another control character"; return 1; }
 }
 
 # Turn side: hand a console step to serve and print its answer. Arguments: the step's words.
 console_step() {
-  local id="$$.$RANDOM$RANDOM" t0=$SECONDS reply
+  local id="$$.$RANDOM$RANDOM" t0=$SECONDS reply tmp
   local req="$dir/android.req.$id" out="$dir/android.out.$id"
-  printf '%s\n' "$@" >"$dir/android.tmp.$id" && mv "$dir/android.tmp.$id" "$req" || { say "can't write to $dir"; return 1; }
+  tmp=$(mktemp "$dir/android.tmp.XXXXXX") && printf '%s\n' "$@" >"$tmp" && mv -f "$tmp" "$req" || { say "can't write to $dir"; return 1; }
   until [ -e "$out" ]; do
     if [ $((SECONDS - t0)) -ge 20 ]; then
       rm -f "$req"
@@ -106,23 +107,34 @@ console() {
 }
 
 # Host side (serve): answer the turns' request files. Only known steps, checked again here, since anything
-# running as this account can write a request.
+# running as this account can write a request. serve reads files turns can't, so a request that is a link
+# (to the console token, say) or a hard link is refused, judged by what was opened rather than by the name,
+# and answers are fixed words that never repeat what was read.
 relay() {
-  local f verb from text n=0
+  local f id verb from text reply ans real n=0
+  real=$(readlink -f "$dir")
   for f in "$dir"/android.req.*; do
-    [ -f "$f" ] || continue
-    { IFS= read -r verb; IFS= read -r from; IFS= read -r text; } <"$f"
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    id=${f##*/android.req.} reply="KO: refused: a request must be a plain file"
+    # <> doesn't block on a FIFO swapped in after the -f check.
+    if [ -f "$f" ] && [ ! -L "$f" ] && { exec 5<>"$f"; } 2>/dev/null; then
+      if [ "$(readlink /proc/self/fd/5)" = "$real/android.req.$id" ] && [ "$(stat -L -c %F:%h /proc/self/fd/5)" = 'regular file:1' ]; then
+        { IFS= read -r verb; IFS= read -r from; IFS= read -r text; } <&5
+        case $verb in
+          sms) reply=$(check_sms "$from" "$text" && console "sms send $from $text") ;;
+          *) reply="KO: unknown step" ;;
+        esac
+        [ "${reply:0:2}" = OK ] || [ "${reply:0:2}" = KO ] || reply="KO: ${reply:-no answer}"
+      fi
+      exec 5>&-
+    fi
     rm -f "$f"
-    case $verb in
-      sms) reply=$(check_sms "$from" "$text" && console "sms send $from $text") || reply=${reply:-KO} ;;
-      *) reply="KO: unknown step $verb" ;;
-    esac
-    [ "${reply:0:2}" = OK ] || [ "${reply:0:2}" = KO ] || reply="KO: $reply"
-    printf '%s\n' "$reply" >"$dir/android.ans.${f##*.req.}" && mv "$dir/android.ans.${f##*.req.}" "$dir/android.out.${f##*.req.}"
+    # mktemp makes a new file, and mv replaces a planted link rather than writing through it.
+    ans=$(mktemp "$dir/android.ans.XXXXXX") && printf '%s\n' "$reply" >"$ans" && mv -f "$ans" "$dir/android.out.$id"
     n=1
   done
   # Answers nobody collected (a caller that gave up) go after a few minutes.
-  [ $n = 0 ] || find "$dir" -maxdepth 1 -name 'android.out.*' -mmin +5 -delete 2>/dev/null
+  [ $n = 0 ] || find "$dir" -maxdepth 1 \( -name 'android.out.*' -o -name 'android.ans.*' -o -name 'android.tmp.*' \) -mmin +5 -delete 2>/dev/null
   return 0
 }
 

@@ -88,7 +88,9 @@ test('a page\'s bare URLs and web addresses become new-tab links; its scripts, s
   const untouched = '<!doctype html><head><title>x.com</title><style>a::after{content:"https://s.io"}</style></head>'
     + '<!-- see https://c.io --><script>const u = "https://j.io"; if (a < b) go("x.com");</script>'
     + '<a href="https://a.io">https://a.io</a><code>y.com</code><pre>https://p.io</pre><textarea>https://t.io</textarea>'
-    + '<button>z.com</button><svg><text>https://v.io</text></svg><img alt="https://i.io">';
+    + '<button>z.com</button><svg><text>https://v.io</text></svg><img alt="https://i.io">'
+    // A comment inside code or a link doesn't split it.
+    + '<pre>https://a.io<!-- note -->https://b.io</pre><a href="https://c.io">x<!-- n -->https://c.io</a>';
   assert.equal(linkPageText(untouched), untouched);
   // Prose between the skipped parts still links, and the bridge goes in ahead of it all.
   assert.equal(linkPageText('<script>1</script>see x.com<style>p{}</style>'), `<script>1</script>see ${ext('https://x.com', 'x.com')}<style>p{}</style>`);

@@ -54,16 +54,17 @@ const defaultLink = (href, html) => (/^(https?:\/\/|mailto:)/i.test(href)
  * A bare http(s) URL, DOI ("10.1234/x", "doi:10.1234/x") or web address with no scheme
  * ("console.firebase.google.com/x", #440) in escaped text. Each ends at a space, a tag, a quote or a
  * held-out marker; a DOI needs no "doi:" but can't sit inside a path or a number. A web address
- * counts only when it ends in one of WEB_TLDS, in lower case, and doesn't sit in an email address, a
- * path or a word, so file names ("land.sh", "README.md", "Node.js"), "ASP.NET" and package names
+ * counts only when its whole host ends in one of WEB_TLDS ("x.com.au" stays text rather than
+ * linking x.com), in lower case, and doesn't sit in an email address, a path or a word, so file names ("land.sh", "README.md", "Node.js"), "ASP.NET" and package names
  * ("com.example.app") stay text.
  */
 const WEB_TLDS = 'com|org|net|io|dev|app|ai|gov|edu|uk';
-const WEB_TLD = new RegExp(`^(?:${WEB_TLDS})$`, 'i');
+/** How a package name starts ("com.example.app"); no web address does, unlike "app." or "dev.". */
+const PACKAGE_ROOT = /^(?:com|org|net|edu)$/i;
 const URL_TAIL = `(?:(?!&quot;|&#39;|&lt;|&gt;)[^\\s<>"'\\u0000\\u0001])`;
 const BARE = new RegExp(`(?<![A-Za-z0-9/])(https?:\\/\\/${URL_TAIL}+)`
   + `|(?<![A-Za-z0-9/.:-])(doi:\\s?)?(10\\.\\d{4,9}\\/${URL_TAIL}+)`
-  + `|(?<![A-Za-z0-9/.:@\\\\-])(?<![A-Za-z0-9]_)((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+(${WEB_TLDS})(?![A-Za-z0-9-]|_[A-Za-z0-9])(?::\\d{2,5})?(?:[/?#]${URL_TAIL}*)?)`, 'gi');
+  + `|(?<![A-Za-z0-9/.:@\\\\-])(?<![A-Za-z0-9]_)((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+(${WEB_TLDS})(?![A-Za-z0-9-]|[._][A-Za-z0-9])(?::\\d{2,5})?(?:[/?#]${URL_TAIL}*)?)`, 'gi');
 
 /**
  * A bare link's end without the marks that end the sentence around it, and in markdown (`md`) the
@@ -87,7 +88,7 @@ function linkBare(s, link, held = null) {
   return s.replace(BARE, (m, url, doiPrefix, doi, web, tld) => {
     // "ASP.NET", "Foo.IO": a web address's ending is written in lower case.
     // "org.apache.commons.io" is a package name, read backwards from its domain.
-    if (web && (tld !== tld.toLowerCase() || WEB_TLD.test(web.split('.')[0]))) return m;
+    if (web && (tld !== tld.toLowerCase() || PACKAGE_ROOT.test(web.split('.')[0]))) return m;
     const kept = trimBare(m, !!held);
     // What's left must still point somewhere: not "https://" or "10.1234/" alone.
     if (url ? /^https?:\/\/$/i.test(kept) : doi && !/\/[^/]/.test(kept)) return m;

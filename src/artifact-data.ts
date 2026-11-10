@@ -72,9 +72,10 @@ function bridgeSource(): string {
 /** JSON that can sit inside a <script> element: nothing in it can close the element or open a comment. */
 const scriptJson = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
-// What isn't the page's prose: comments, the head, scripts, styles, form fields, buttons, SVG and
-// MathML (an HTML <a> inside them would break them or do nothing). linkifyHtml skips <a>, <code>, <pre>.
-const NOT_PROSE = /<!--[\s\S]*?-->|<(head|script|style|textarea|title|select|button|svg|math|noscript|iframe|object|template)\b[\s\S]*?<\/\1\s*>/gi;
+// What isn't the page's prose: comments, links and code already, the head, scripts, styles, form
+// fields, buttons, SVG and MathML (an HTML <a> inside them would break them or do nothing). Whichever
+// starts first wins, so a comment inside a <pre> or an <a> can't split it.
+const NOT_PROSE = /<!--[\s\S]*?-->|<(a|code|pre|head|script|style|textarea|title|select|button|svg|math|noscript|iframe|object|template)\b[\s\S]*?<\/\1\s*>/gi;
 
 /**
  * A page's bare URLs, DOIs and web addresses as new-tab links, the way Citadel's markdown links them

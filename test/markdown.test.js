@@ -247,6 +247,10 @@ test('linkify: a web address with no scheme links to https://, file and package 
     `Open ${ext('https://console.firebase.google.com', 'console.firebase.google.com')}, then ${ext('https://github.com/a/b_c', 'github.com/a/b_c')}.`);
   assert.equal(linkify('(web.dev/learn) x.co.uk/p example.com:8080/x?y=1'),
     `(${ext('https://web.dev/learn', 'web.dev/learn')}) ${ext('https://x.co.uk/p', 'x.co.uk/p')} ${ext('https://example.com:8080/x?y=1', 'example.com:8080/x?y=1')}`);
+  // Hosts starting "app." or "dev." are addresses; a host ending in an unlisted country stays text whole.
+  assert.equal(linkify('app.firebase.google.com dev.azure.com/x'),
+    `${ext('https://app.firebase.google.com', 'app.firebase.google.com')} ${ext('https://dev.azure.com/x', 'dev.azure.com/x')}`);
+  assert.equal(linkify('example.com.au/x and google.com.'), `example.com.au/x and ${ext('https://google.com', 'google.com')}.`);
   // Not an address: a file, an email, a path, a word with an underscore, a capitalised ending, a package name.
   const prose = 'land.sh README.md Node.js me@x.com a/b.com C:\\x.com foo_bar.com google.com_x ASP.NET Foo.IO org.apache.commons.io com.example.app localhost:3000';
   assert.equal(linkify(prose), prose.replace('&', '&amp;'));

@@ -524,8 +524,15 @@ export class MachineRelay {
   private async runCheck(machineId: number, timeoutMs: number, only?: MachineServer[]): Promise<CheckResult[]> {
     const servers = (this.online().find((m) => m.id === machineId)?.servers ?? []).filter((s) => !only || only.includes(s));
     const agent = this.agents.get(machineId);
-    const results: CheckResult[] = [];
+    const ticked = () => storedLend(this.store.getMachine(machineId) ?? ({} as Machine))?.server ?? null;
+    const was = ticked();
+    let results: CheckResult[] = [];
     for (const server of servers) results.push(await this.checkServer(machineId, { check: machineId }, server, "Citadel's check", timeoutMs));
+    // Another MCP server was ticked meanwhile (#439): this result is the old one's, so the new one is checked next.
+    if (ticked() !== was) {
+      results = results.filter((r) => r.server !== 'mcp');
+      setImmediate(() => this.checkIfDue(machineId));
+    }
     // A reconnect mid-check is a new agent, and an offline one wasn't tested: keep the last real check.
     if (agent && this.agents.get(machineId) === agent && results.length) {
       const last = only && this.lastCheck(machineId);

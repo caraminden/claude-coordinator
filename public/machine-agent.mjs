@@ -444,6 +444,11 @@ export class WorkspaceHost {
   }
 
   /** The workspaces minions get: every tool reads these, so one that isn't lent is not there for them. */
+  /** A job in a folder that was unticked since it started is out of reach, like the folder (#439). */
+  lentJob(job) {
+    if (this.lent && !this.lent.has(job.workspace)) throw new ToolError(`Job ${job.id} ran in workspace ${job.workspace}, which this machine no longer lends.`);
+  }
+
   get workspaces() {
     return this.lent ? new Map([...this.all].filter(([name]) => this.lent.has(name))) : this.all;
   }
@@ -515,11 +520,13 @@ export class WorkspaceHost {
       case 'job': {
         const job = this.jobs.get(String(args.id ?? ''));
         if (!job) throw new ToolError(`No job ${args.id} here. Jobs are forgotten when the agent restarts; their logs stay in ${this.jobsDir}.`);
+        this.lentJob(job);
         return this.report(job, waitFor(args.wait), Number(args.lines) || 60);
       }
       case 'stop_job': {
         const job = this.jobs.get(String(args.id ?? ''));
         if (!job) throw new ToolError(`No job ${args.id} here. Jobs are forgotten when the agent restarts.`);
+        this.lentJob(job);
         if (!job.ended) await job.stop(`Stopped by ${who}`);
         return this.report(job, 0, 60);
       }

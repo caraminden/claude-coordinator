@@ -210,7 +210,14 @@ test('a machine lends what is ticked of what its agent found, and nothing else (
 
   // A server its owner adds to the file shows up to tick without restarting anything.
   writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] }, second: { run: [process.execPath, mcpServer] } } }));
-  await until('the new server to show', async () => (await find()).found.some((f: any) => f.name === 'second'), 20_000);
+  writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] }, stuck: { run: [process.execPath, '-e', 'setInterval(() => {}, 1000)'] } }, workspaces: { w: { path: join(dir, 'w'), tasks: { wait: { run: [process.execPath, '-e', 'setTimeout(() => {}, 60000)'] } } }, x: { path: join(dir, 'x') } } }));
+  await until('the new server to show', async () => (await find()).found.some((f: any) => f.name === 'stuck'), 20_000);
+  // Another server ticked while the first is still being checked: the check that counts is the new one's.
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'stuck', workspaces: [] } } });
+  await until('the check of the stuck server to start', async () => (await find()).checking);
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'own', workspaces: [] } } });
+  const swapped = await until('the check of the server ticked instead', async () => { const m = await find(); return !m.checking && m.checked?.results.some((r: any) => r.server === 'mcp') && m; });
+  assert.deepEqual([swapped.status, swapped.checked.results.filter((r: any) => r.server === 'mcp').map((r: any) => r.ok)], ['ready', [true]]);
   await call(`/api/machines/${machine.id}`, { method: 'DELETE' });
 });
 

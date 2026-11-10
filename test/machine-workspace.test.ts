@@ -146,6 +146,12 @@ test('only configured tasks run, with hints, one at a time, and long ones become
   assert.match(finished.text, /slow in delve succeeded[\s\S]*done/);
   assert.match((await call('run_task', { workspace: 'delve', task: 'ok' })).text, /succeeded/);
   await refused(call('job', { id: 'nope' }), /No job nope/);
+  // Its folder unticked on the Machines page (#439): the job goes out of reach with it.
+  host.lent = new Set(['vault']);
+  await refused(call('job', { id }), /no longer lends/);
+  await refused(call('stop_job', { id }), /no longer lends/);
+  host.lent = null;
+  assert.match((await call('job', { id })).text, /./);
 });
 
 test('the MCP side lists the tools and answers calls and unknown methods', async () => {

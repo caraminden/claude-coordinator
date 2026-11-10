@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { test } from 'node:test';
-import { systemPrompt } from '../src/runner.ts';
+import { systemPrompt } from '../src/prompts.ts';
 import { TRIPWIRE_BLOCKS } from '../src/tripwire-blocks.ts';
 
 // How the app behaves (the chat, links, the tripwire) is the same in every scheme, so the built-in

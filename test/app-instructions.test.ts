@@ -8,7 +8,7 @@ import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { systemPrompt } from '../src/runner.ts';
+import { systemPrompt } from '../src/prompts.ts';
 import { bootServer, PASSWORD, REPO, SECRET, type Booted } from './helpers.ts';
 
 // The Citadel-wide instructions (#148): one app-wide text with history, in every prompt right before

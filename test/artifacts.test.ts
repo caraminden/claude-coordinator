@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { commentMessage, findByName, linkedPaths, optionImageProblem, resolveLink } from '../src/artifacts.ts';
-import { promptMessage } from '../src/runner.ts';
+import { promptMessage } from '../src/prompts.ts';
 
 const cwd = '/work/t1';
 const linked = (...texts: string[]) => [...linkedPaths(texts, cwd)].sort();

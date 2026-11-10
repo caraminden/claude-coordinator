@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { systemPrompt } from '../src/runner.ts';
+import { systemPrompt } from '../src/prompts.ts';
 
 // The starting prompt's size budget (#415): every API call re-reads it, so it only grows by decision.
 // Budgets are characters (about 4 per token), today's size plus 10% on 2026-11-08. Raising one is a

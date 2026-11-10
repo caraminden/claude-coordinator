@@ -5,7 +5,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { promptMessage } from '../src/runner.ts';
+import { promptMessage } from '../src/prompts.ts';
 import { isUploadName, safeFileName, saveUpload, UploadTooLarge } from '../src/uploads.ts';
 import { agentToken, bootServer, stopProcs } from './helpers.ts';
 

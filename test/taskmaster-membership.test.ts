@@ -7,7 +7,8 @@ import { askedCitadelKey, CITADEL_REPLY_MS, taskmasterTargets } from '../src/acc
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { Runner, systemPrompt } from '../src/runner.ts';
+import { Runner } from '../src/runner.ts';
+import { systemPrompt } from '../src/prompts.ts';
 import { bootServer, PASSWORD, SECRET, type Booted, stopTurns } from './helpers.ts';
 
 // message_taskmaster by membership (#211): a Taskmaster turn reaches the schemes its person is in as

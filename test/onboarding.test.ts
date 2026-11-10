@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { catalogue, frontmatter } from '../src/catalogue.ts';
 import { ONBOARDING, ONBOARDING_MODES, Store, type Project } from '../src/db.ts';
-import { onboardingPrompt } from '../src/runner.ts';
+import { onboardingPrompt } from '../src/prompts.ts';
 import { projectSharedDir, surveyReports } from '../src/workspace.ts';
 import { bootServer, jsonLines, REPO, until, stopProcs, stopTurns } from './helpers.ts';
 

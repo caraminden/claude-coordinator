@@ -111,7 +111,8 @@ Nothing to do.
 
   ```powershell
   $kit = "$env:TEMP\citadel-kit"   # the kit from step 0: refreshed if it's still there, fetched if not
-  if (Test-Path $kit) { git -C $kit pull } else { git clone --depth 1 https://github.com/caraminden/claude-coordinator $kit }
+  if (-not (Test-Path $kit)) { git clone --depth 1 https://github.com/caraminden/claude-coordinator $kit }
+  git -C $kit fetch --depth 1 origin main; git -C $kit checkout --detach FETCH_HEAD   # an old kit may sit on another branch
   powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit\tools\win-test-box\fix-autologon.ps1"
   ```
 

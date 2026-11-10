@@ -1172,15 +1172,14 @@ a.thread-ref:hover { text-decoration: underline; }
   html:not(.has-citadel-rail) body:not(:has(#app .panels)) .citadel-drawer-handle.left { display: none; }
 }
 
-/* Machines: live status in the overview panel, and the page that adds and connects them */
+/* Machines: the Settings tab that adds, connects and lists them */
 .dot.online { background: #16a34a; box-shadow: 0 0 0 2px color-mix(in srgb, #16a34a 25%, transparent); }
-.machine-item, .machine-row > .row { display: flex; gap: 0.5rem; align-items: center; min-width: 0; text-decoration: none; }
-.machine-item, .machine-row { padding: 0.3rem 0.4rem; border-radius: 6px; }
-.machine-item:hover { background: var(--panel); }
-.machine-item .dot, .machine-row .dot { flex: none; }
-.machine-item .text, .machine-row .text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.machine-item .name, .machine-row .name { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.machine-item .meta, .machine-row .meta { color: var(--muted); font-size: 0.78em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-row > .row { display: flex; gap: 0.5rem; align-items: center; min-width: 0; text-decoration: none; }
+.machine-row { padding: 0.3rem 0.4rem; border-radius: 6px; }
+.machine-row .dot { flex: none; }
+.machine-row .text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.machine-row .name { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-row .meta { color: var(--muted); font-size: 0.78em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .machine-add { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin: 0.9rem 0; }
 .machine-add label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85em; margin-bottom: 0; }
 .machine-add label.wide { flex: 1 1 18rem; }

@@ -78,8 +78,8 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   A file upload or a paste works too. The Taskmaster can read and change them
   with its `get_project_instructions` and `set_project_instructions` tools.
 - **Machines** lend minions MCP servers that run on people's own computers, such as a
-  Godot editor that runs builds on a laptop. Add one in the overview panel's Machines
-  section; the app shows a one-time token and a command to run there, which downloads
+  Godot editor that runs builds on a laptop. Add one in Settings, on the Machines tab;
+  the app shows a one-time token and a command to run there, which downloads
   `public/machine-agent.mjs` (Node 18+, no installs) and starts it with the MCP server's
   command. The agent dials out to the app and holds an event stream open, so the computer
   needs no open ports and can be anywhere. Every minion turn (not the Taskmaster) gets each

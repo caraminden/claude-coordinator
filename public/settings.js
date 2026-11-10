@@ -265,7 +265,7 @@ const settingText = (p, key) => (key === 'list_groups' ? listGroupsOf(p).join('\
 export function settingsTabs() {
   return h('nav', { class: 'settings-tabs' },
     [['instructions', 'Instructions'], account?.admin && ['app-instructions', 'Citadel-wide'], ['approvals', 'Needs approval'], ['properties', 'Properties'],
-      ['members', 'Members'], account?.admin && ['people', 'People'], account?.admin && ['contraptions', 'Contraptions'], ['account', 'Your account']].filter(Boolean).map(([kind, label]) =>
+      ['members', 'Members'], account?.admin && ['people', 'People'], account?.admin && ['contraptions', 'Contraptions'], ['machines', 'Machines'], ['account', 'Your account']].filter(Boolean).map(([kind, label]) =>
       h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, label,
         // The same waiting-review count as the Settings button (renderSettingsCount fills both).
         kind === 'properties' ? h('span', { class: 'count props-count', hidden: true }) : '')));
@@ -663,7 +663,6 @@ export function instructionsEditor() {
 export function onMachinesUpdate(machines) {
   if (view?.kind !== 'project') return;
   view.machines = machines;
-  renderMachinesShelf();
   renderMachineList();
 }
 
@@ -673,22 +672,7 @@ function machineStatus(m) {
   return m.last_seen_at ? `offline · seen ${ago(m.last_seen_at)}` : 'not connected yet';
 }
 
-/** Overview panel: people's computers lending threads their MCP tools, with live status. */
-export function renderMachinesShelf() {
-  const el = document.getElementById('machines-shelf');
-  if (!el) return;
-  const href = `#/p/${view.projectId}/machines`;
-  el.replaceChildren(h('section', { class: 'column' },
-    h('h3', {}, 'Machines', h('span', { class: 'spacer' }),
-      h('a', { class: `browse${view.main === 'machines' ? ' active' : ''}`, href }, view.machines.length ? 'Manage' : 'Add')),
-    view.machines.length
-      ? view.machines.map((m) => h('a', { class: `machine-item${m.online ? ' online' : ''}`, href, title: m.command ? `Runs ${m.command}` : '' },
-        h('span', { class: `dot${m.online ? ' online' : ''}` }),
-        h('span', { class: 'text' }, h('span', { class: 'name' }, m.name), h('span', { class: 'meta' }, machineStatus(m)))))
-      : h('p', { class: 'muted small' }, 'Lend minions MCP tools from your own computers, like a Godot editor that runs builds.')));
-}
-
-/** Main panel: add machines, show how to connect them, and remove them or replace their token. */
+/** Settings' Machines tab: add machines, show how to connect them, and remove them or replace their token. */
 export function machinesPage() {
   view.machineToken = null; // { id, name, token } just made, shown until you leave the page
   const name = h('input', { name: 'name', placeholder: 'godot-laptop', required: true, maxlength: 30, autocomplete: 'off', pattern: '[a-z0-9][a-z0-9\\-]*' });
@@ -731,8 +715,9 @@ export function machinesPage() {
   };
   const section = h('section', { class: 'artifacts-main machines-main' },
     h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, 'Machines'), h('span', { class: 'spacer' }),
+      h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+      settingsTabs(),
       h('div', { class: 'meta' }, account?.admin
         ? 'Computers that lend their MCP tools to minions while they are connected: in every scheme an admin owns, or only in the schemes picked under Lend to. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.'
         : 'Your computers, lending their MCP tools while they are connected to the minion turns you ask for, in any scheme you are in. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.')),

@@ -1,6 +1,6 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { account, api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, schemeIcon, setView, threadHref, usageMeter, view } from './core.js';
-import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachinesShelf } from './settings.js';
+import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip } from './settings.js';
 import { LAST_SCHEME, newTicketForm, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
 import { chatSection, chatView, mountChat } from './thread.js';
@@ -37,7 +37,7 @@ function renderCrumbs(main) {
       : main.kind === 'people' ? [projectLink, ' / ', settingsLink, ' / ', 'People']
       : main.kind === 'contraptions' ? [projectLink, ' / ', settingsLink, ' / ', 'Contraptions']
       : main.kind === 'account' ? [projectLink, ' / ', settingsLink, ' / ', 'Your account']
-      : main.kind === 'machines' ? [projectLink, ' / ', 'Machines']
+      : main.kind === 'machines' ? [projectLink, ' / ', settingsLink, ' / ', 'Machines']
       : main.kind === 'artifact' ? [projectLink, ' / ', artifactsLink, ' / ', main.artifact.name]
       : main.kind === 'sharedList' ? [projectLink, ' / ', 'Shared files']
       : main.kind === 'shared' ? [projectLink, ' / ', h('a', { href: `#/p/${project.id}/shared` }, 'Shared files'), ' / ', main.file.name]
@@ -96,13 +96,12 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     h('summary', { title: 'Show or hide the overview' }, projectTitle(project)),
     h('section', { class: 'account' },
       h('div', { class: 'row' }, h('strong', {}, me), h('span', { class: 'spacer' }),
-        h('a', { class: 'button secondary settings-link', href: `#/p/${projectId}/settings`, title: 'Instructions, approvals and properties for this scheme' },
+        h('a', { class: 'button secondary settings-link', href: `#/p/${projectId}/settings`, title: 'Instructions, approvals, properties and machines for this scheme' },
           'Settings', h('span', { id: 'settings-count', class: 'count', hidden: true })),
         h('button', { class: 'secondary small', onclick: logout }, 'Sign out')),
       usageMeter(),
       pushControls(project)),
     h('section', { class: 'column', id: 'schemes-shelf' }),
-    h('div', { id: 'machines-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
     h('summary', { title: 'Show or hide minions' }, h('span', { class: 'label' }, 'Minions'), schedulesButton()),
@@ -151,7 +150,6 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderUsage();
   renderCost();
   renderSettingsCount();
-  renderMachinesShelf();
   renderShelf();
   renderSidebar();
   renderGithubStrip();

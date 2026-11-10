@@ -2,7 +2,7 @@
 // Importing it here is itself the check that it needs no document at load.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ago, costText, fileExt, fileKind, formatSize, isLocalPath, joinPath, listGroupsOf, setView, shortPath, statusLabel, threadFullName, threadHref, threadTitleParts } from '../public/base.js';
+import { account, ago, baseName, costText, fileExt, fileHref, fileKind, fileUrl, formatSize, isLocalPath, isSeen, joinPath, listGroupsOf, me, setAccount, setView, sharedHref, sharedUrl, shortPath, statusLabel, taskmasterName, threadFullName, threadHref, threadLabel, threadTitleParts, uploadUrl } from '../public/base.js';
 
 test('joinPath resolves a relative link against its folder', () => {
   const rows = [
@@ -33,6 +33,27 @@ test('fileKind goes by extension, whatever its case, ignoring a query or fragmen
   assert.equal(fileKind('Makefile'), null);
   assert.equal(fileExt('a/b/shot.png'), 'PNG');
   assert.equal(fileExt('Makefile'), 'FILE');
+});
+
+test('baseName is the last part of a path, a folder\'s trailing slash ignored', () => {
+  const rows = [
+    ['docs/specs/plan.md', 'plan.md'],
+    ['plan.md', 'plan.md'],
+    ['/abs/shot.png', 'shot.png'],
+    ['docs/specs/', 'specs'],
+    ['', ''],
+  ];
+  for (const [path, want] of rows) assert.equal(baseName(path), want, path);
+});
+
+test('file addresses carry the path as one encoded part, so a caller can append &v= and the router gets it back whole', () => {
+  const odd = 'docs/50% off & more #2?.md';
+  const enc = 'docs%2F50%25%20off%20%26%20more%20%232%3F.md';
+  assert.equal(fileUrl(7, odd), `api/tickets/7/file?path=${enc}`);
+  assert.equal(fileHref(7, odd), `#/f/7/${enc}`);
+  assert.equal(sharedUrl(2, odd), `api/projects/2/shared/file?path=${enc}`);
+  assert.equal(sharedHref(2, odd), `#/s/2/${enc}`);
+  assert.equal(uploadUrl(7, 'shot 1#.png'), 'api/tickets/7/uploads/shot%201%23.png');
 });
 
 test('isLocalPath tells a path from a URL, a fragment or a mail address', () => {
@@ -114,4 +135,50 @@ test('minion names: the full name, its phone-friendly parts, the address and the
   assert.equal(statusLabel(tm), 'Ready');
   assert.equal(statusLabel({ ...minion, status: 'new' }), 'Starting');
   assert.equal(statusLabel(minion), 'Waiting for you');
+});
+
+test('isSeen: a thread opened at or after its last change, and not one never opened', (t) => {
+  t.after(() => setView(null));
+  setView({ kind: 'project', projectId: 2, seen: { 5: 1000 } });
+  assert.equal(isSeen({ id: 5, updated_at: 1000 }), true, 'opened at the moment it last changed');
+  assert.equal(isSeen({ id: 5, updated_at: 999 }), true);
+  assert.equal(isSeen({ id: 5, updated_at: 1001 }), false, 'changed since');
+  assert.equal(isSeen({ id: 6, updated_at: 1 }), false, 'never opened');
+  setView({ kind: 'project', projectId: 2 });
+  assert.equal(isSeen({ id: 5, updated_at: 1 }), false, 'nothing opened yet');
+});
+
+test('the Taskmaster goes by the name of the scheme asked for, from the list or the scheme on screen', (t) => {
+  t.after(() => setView(null));
+  setView({ kind: 'project', projectId: 2, projects: [{ id: 1, name: 'Delve' }, { id: 2, name: 'Citadel' }] });
+  assert.equal(taskmasterName(), 'Citadel Taskmaster', 'the scheme on screen by default');
+  assert.equal(taskmasterName(1), 'Delve Taskmaster');
+  assert.equal(taskmasterName(9), 'Taskmaster', 'a scheme not in the list');
+  // A page with only its own scheme loaded (no list) names that one, and no other.
+  setView({ kind: 'thread', projectId: 3, project: { id: 3, name: 'Mandate' } });
+  assert.equal(taskmasterName(), 'Mandate Taskmaster');
+  assert.equal(taskmasterName(1), 'Taskmaster');
+  setView({ kind: 'project', projectId: 4, projects: [{ id: 4, name: '' }] });
+  assert.equal(taskmasterName(), 'Taskmaster', 'a scheme with no name');
+  setView(null);
+  assert.equal(taskmasterName(2), 'Taskmaster', 'before anything loads');
+});
+
+test('threadLabel: "#number title" for a minion, falling back to the id, and the scheme\'s Taskmaster name for a Taskmaster', (t) => {
+  t.after(() => setView(null));
+  setView({ kind: 'project', projectId: 2, projects: [{ id: 1, name: 'Delve' }, { id: 2, name: 'Citadel' }] });
+  assert.equal(threadLabel({ id: 900, kind: 'ticket', number: 12, project_id: 2, title: 'Usage bar' }), '#12 Usage bar');
+  assert.equal(threadLabel({ id: 900, kind: 'ticket', project_id: 2, title: 'Odd job' }), '#900 Odd job', 'a server from before per-scheme numbers');
+  assert.equal(threadLabel({ id: 50, kind: 'ticket', number: 3, project_id: 1, title: 'Cave art' }), '#3 Cave art', 'another scheme\'s minion');
+  assert.equal(threadLabel({ id: 1, kind: 'coordinator', project_id: 1, title: 'ignored' }), 'Delve Taskmaster', 'its own scheme, not the one on screen');
+});
+
+test('setAccount: who is signed in, as every module reads it, and nobody after signing out', (t) => {
+  t.after(() => setAccount(null));
+  setAccount({ name: 'Cara', login: 'cara', admin: true });
+  assert.equal(me, 'Cara');
+  assert.equal(account.login, 'cara');
+  setAccount(null);
+  assert.equal(me, null);
+  assert.equal(account, null);
 });

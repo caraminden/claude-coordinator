@@ -6,7 +6,7 @@ import { after, test } from 'node:test';
 import { appServerLimits } from '../src/codex-link.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { codexHigh, codexTop, codexWindows } from '../public/codexusage.js';
+import { codexHigh, codexLevel, codexTop, codexWindows, windowName } from '../public/codexusage.js';
 import { testPins } from './helpers.ts';
 testPins();
 
@@ -31,6 +31,19 @@ test('the windows come shortest first, clamped, with no usage as null rather tha
   assert.equal(codexTop({ primary: null, secondary: null, updatedAt: now }, now), null);
   const ws = codexWindows({ primary: win(120, 10080), secondary: win(33.4, 300) }, now);
   assert.deepEqual(ws.map((w) => [w.windowDurationMins, w.pct]), [[300, 33], [10080, 100]]);
+});
+
+test("the bar's colour matches Claude's: plain under 75%, warn from 75%, error from 90%", () => {
+  const rows: [number, string][] = [[0, ''], [74.9, ''], [75, 'warn'], [89, 'warn'], [90, 'error'], [100, 'error']];
+  for (const [pct, want] of rows) assert.equal(codexLevel(pct), want, `${pct}%`);
+});
+
+test('a window is named by its length: the two Codex has by name, others in whole hours or days', () => {
+  const rows: [number | null | undefined, string][] = [
+    [300, '5-hour window'], [10080, 'Weekly'], [60, '1-hour window'], [720, '12-hour window'],
+    [1440, '1-day window'], [4320, '3-day window'], [null, 'Window'], [undefined, 'Window'],
+  ];
+  for (const [mins, want] of rows) assert.equal(windowName(mins), want, String(mins));
 });
 
 test("each person's Codex usage is their own, the server login's included", () => {

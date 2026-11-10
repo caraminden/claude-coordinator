@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jumpParts, linkThreadRefs, linkUrls, prNumberRoute, prOwnerRoute, prUrlParts } from '../public/threadrefs.js';
+import { jumpParts, linkThreadRefs, linkUrls, prLinkOpen, prNumberRoute, prOwnerRoute, prUrlParts, threadNumberHref } from '../public/threadrefs.js';
+import { threadHref } from '../public/base.js';
 
 const link = (html, titleOf) => linkThreadRefs(html, 2, titleOf);
 const a = (n, text = `#${n}`) => `<a class="thread-ref" href="#/p/2/t/${n}">${text}</a>`;
@@ -154,6 +155,18 @@ test('a PR link routes to the minion that owns it, even the one on screen (#272)
 const delveRepos = new Map([['o/r', { projectId: 1, scheme: 'Delve', repo: 'o/r', prs: { 186: { id: 162, number: 68, title: 'Laptop "scripts"' } } }]]);
 const toOwner = (text) => `<a class="thread-ref" href="#/p/1/t/68" title="Delve #68 Laptop &quot;scripts&quot; (owns PR #186)">${text}</a>`;
 const pending = (n, text = `#${n}`, p = 1) => `<span class="pr-ref" data-project="${p}" data-pr="${n}">${text}</span>`;
+
+test('threadNumberHref is the address the app itself gives a numbered minion', () => {
+  // A "#12" link and the minion's own address must be the same page.
+  assert.equal(threadNumberHref(2, 12), threadHref({ id: 900, kind: 'ticket', number: 12, project_id: 2 }));
+});
+
+test('prLinkOpen: a link to the owner, keeping the already-escaped PR address as it is; none without an owner', () => {
+  const url = 'https://github.com/o/r/pull/5?w=1&amp;x=2';
+  assert.equal(prLinkOpen(url, { hash: '#/p/1/t/68', title: 'Delve #68 "Fix" <b> & co\'s (owns PR #5)' }),
+    `<a href="#/p/1/t/68" title="Delve #68 &quot;Fix&quot; &lt;b&gt; &amp; co&#39;s (owns PR #5)" data-pr-url="${url}">`);
+  assert.equal(prLinkOpen(url, null), null);
+});
 
 test('prNumberRoute finds a PR by its scheme\'s repo', () => {
   assert.deepEqual(prNumberRoute(delveRepos, 1, 186), { hash: '#/p/1/t/68', title: 'Delve #68 Laptop "scripts" (owns PR #186)' });

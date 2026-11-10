@@ -1,0 +1,2636 @@
+{
+ "a minion on the host, as a plain child": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<ROOT>/bin/claude",
+   "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/1-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "host",
+    "--permission-prompt-tool",
+    "mcp__thread__approve",
+    "--settings",
+    "<ROOT>/run/turns/1-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/1/shared/project",
+    "<ROOT>/projects/1/tmp/1",
+    "--plugin-dir",
+    "<ROOT>/run/turns/1-<TIME>/pin/kit",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/1-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-1",
+   "env": {
+    "PATH": "<ROOT>/run/turns/1-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/home",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "LC_TIME": "en_GB.UTF-8",
+    "ANTHROPIC_API_KEY": "server-key",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/1/tmp/1",
+    "TMP": "<ROOT>/projects/1/tmp/1",
+    "TEMP": "<ROOT>/projects/1/tmp/1",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/1/tmp/1",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-1",
+    "COORDINATOR_PROJECT": "1",
+    "COORDINATOR_ROLE": "thread",
+    "COORDINATOR_TICKET": "1",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P1 #1 (cara)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/1/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/1-<TIME>/codex-tripwire.json",
+    "COORDINATOR_APPROVALS": "1",
+    "MCP_TOOL_TIMEOUT": "604800000"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-1\",\"roots\":[\"<ROOT>/ticket-1\",\"<ROOT>/projects/1/shared/project\"],\"nudged\":\"<ROOT>/run/turns/1-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":1,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/1/shared/project\"],\"sent\":\"<ROOT>/run/turns/1-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/1-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/1-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 250000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "ask": [
+     "mcp__*__merge_pull_request",
+     "mcp__*__enable_pr_auto_merge"
+    ],
+    "allow": [
+     "mcp__thread"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "thread": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/1-<TIME>/pin/mcp.ts"
+     ],
+     "timeout": 604800000
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/1-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 1,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false
+   }
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "child",
+    "wrapper": [
+     "<NODE>",
+     "<ROOT>/run/turns/1-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/1-<TIME>"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "a minion on the host in a unit, with files and shared folders, lent machines, approval rules, a model, an effort, Workflow, GitHub, deploys and memory": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<ROOT>/bin/claude",
+   "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/2-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "host",
+    "--permission-prompt-tool",
+    "mcp__thread__approve",
+    "--settings",
+    "<ROOT>/run/turns/2-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/2/shared/2",
+    "<ROOT>/projects/2/shared/project",
+    "<ROOT>/projects/2/tmp/2",
+    "--plugin-dir",
+    "<ROOT>/run/turns/2-<TIME>/pin/kit",
+    "--model",
+    "claude-sonnet-5-5",
+    "--effort",
+    "low",
+    "--mcp-config",
+    "<ROOT>/run/turns/2-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-2",
+   "env": {
+    "PATH": "<ROOT>/run/turns/2-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/home",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "LC_TIME": "en_GB.UTF-8",
+    "ANTHROPIC_API_KEY": "server-key",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/2/tmp/2",
+    "TMP": "<ROOT>/projects/2/tmp/2",
+    "TEMP": "<ROOT>/projects/2/tmp/2",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/2/tmp/2",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-2",
+    "COORDINATOR_PROJECT": "2",
+    "COORDINATOR_ROLE": "thread",
+    "COORDINATOR_TICKET": "2",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P2 #1 (cara)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/2/shared/project",
+    "COORDINATOR_FILES_DIR": "<ROOT>/projects/2/shared/2",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/2-<TIME>/codex-tripwire.json",
+    "COORDINATOR_APPROVALS": "1",
+    "MCP_TOOL_TIMEOUT": "604800000",
+    "COORDINATOR_MEMORY": "1",
+    "GH_TOKEN": "gh-1",
+    "GIT_AUTHOR_NAME": "Cara"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-2\",\"roots\":[\"<ROOT>/ticket-2\",\"<ROOT>/projects/2/shared/2\",\"<ROOT>/projects/2/shared/project\"],\"nudged\":\"<ROOT>/run/turns/2-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/2/shared/2\",\"<ROOT>/projects/2/shared/project\"],\"sent\":\"<ROOT>/run/turns/2-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/2-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/2-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 250000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "ask": [
+     "mcp__*__merge_pull_request",
+     "mcp__*__enable_pr_auto_merge",
+     "Bash(git push:*)",
+     "mcp__github__create_issue"
+    ],
+    "allow": [
+     "mcp__thread",
+     "mcp__perigee-godot",
+     "mcp__caras-laptop",
+     "mcp__caras-laptop-ws"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "thread": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/2-<TIME>/pin/mcp.ts"
+     ],
+     "timeout": 604800000
+    },
+    "perigee-godot": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/2-<TIME>/pin/machine-mcp.ts",
+      "7",
+      "perigee-godot",
+      "mcp"
+     ]
+    },
+    "caras-laptop": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/2-<TIME>/pin/machine-mcp.ts",
+      "8",
+      "caras-laptop",
+      "mcp"
+     ]
+    },
+    "caras-laptop-ws": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/2-<TIME>/pin/machine-mcp.ts",
+      "8",
+      "caras-laptop-ws",
+      "ws"
+     ]
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/2-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 2,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false
+   }
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [],
+  "unit": [
+   [
+    "--user",
+    "--collect",
+    "--quiet",
+    "--unit=citadel-turn-<TAG>-2-<TIME>",
+    "--slice=citadel-turns.slice",
+    "-p",
+    "TimeoutStopSec=15",
+    "-p",
+    "UMask=0077",
+    "<NODE>",
+    "<ROOT>/run/turns/2-<TIME>/pin/turn-wrapper.ts",
+    "<ROOT>/run/turns/2-<TIME>"
+   ]
+  ]
+ },
+ "a Taskmaster on the host, with a repo and two minion folders": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<ROOT>/bin/claude",
+   "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/3-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "none",
+    "--settings",
+    "<ROOT>/run/turns/3-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/3/shared/project",
+    "<ROOT>/projects/3/tmp/3",
+    "<ROOT>/repo",
+    "<ROOT>/projects/3/tickets",
+    "<ROOT>/host-claude/projects/<ROOT-AS-SLUG>-repo/memory",
+    "--plugin-dir",
+    "<ROOT>/run/turns/3-<TIME>/pin/kit",
+    "--model",
+    "opus",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/3-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-3",
+   "env": {
+    "PATH": "<ROOT>/run/turns/3-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/home",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "LC_TIME": "en_GB.UTF-8",
+    "ANTHROPIC_API_KEY": "server-key",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/3/tmp/3",
+    "TMP": "<ROOT>/projects/3/tmp/3",
+    "TEMP": "<ROOT>/projects/3/tmp/3",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/3/tmp/3",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-3",
+    "COORDINATOR_PROJECT": "3",
+    "COORDINATOR_ROLE": "coordinator",
+    "COORDINATOR_TICKET": "3",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P3 #null (cara)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/3/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/3-<TIME>/codex-tripwire.json"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-3\",\"roots\":[\"<ROOT>/ticket-3\",\"<ROOT>/projects/3/shared/project\"],\"nudged\":\"<ROOT>/run/turns/3-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":3,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/3/shared/project\"],\"sent\":\"<ROOT>/run/turns/3-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/3-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/3-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 180000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Edit(/<ROOT>/repo/**)",
+     "Edit(/<ROOT>/projects/3/tickets/**)",
+     "Bash(git * --output*)",
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "allow": [
+     "WebSearch",
+     "WebFetch",
+     "Bash(git -C <ROOT>/repo log:*)",
+     "Bash(git -C <ROOT>/repo show:*)",
+     "Bash(git -C <ROOT>/repo status:*)",
+     "Bash(git -C <ROOT>/repo diff:*)",
+     "Bash(git -C <ROOT>/repo blame:*)",
+     "Bash(git -C <ROOT>/repo ls-files:*)",
+     "Bash(git -C <ROOT>/repo rev-parse:*)",
+     "Bash(git -C <ROOT>/repo shortlog:*)",
+     "Bash(git -C <ROOT>/repo worktree list:*)",
+     "Bash(git -C <ROOT>/repo branch)",
+     "Bash(git -C <ROOT>/repo branch -a)",
+     "Bash(git -C <ROOT>/repo branch -r)",
+     "Bash(git -C <ROOT>/repo branch -v)",
+     "Bash(git -C <ROOT>/repo branch -vv)",
+     "Bash(git -C <ROOT>/repo branch -av)",
+     "Bash(git -C <ROOT>/repo branch --list)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 log:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 show:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 status:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 diff:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 blame:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 ls-files:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 rev-parse:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 shortlog:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 worktree list:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 branch)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 branch -a)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 branch -r)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 branch -v)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 branch -vv)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 branch -av)",
+     "Bash(git -C <ROOT>/projects/3/tickets/1 branch --list)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 log:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 show:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 status:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 diff:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 blame:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 ls-files:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 rev-parse:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 shortlog:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 worktree list:*)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 branch)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 branch -a)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 branch -r)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 branch -v)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 branch -vv)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 branch -av)",
+     "Bash(git -C <ROOT>/projects/3/tickets/2 branch --list)",
+     "mcp__coordinator"
+    ]
+   },
+   "autoMemoryDirectory": "<ROOT>/host-claude/projects/<ROOT-AS-SLUG>-repo/memory"
+  },
+  "mcp": {
+   "mcpServers": {
+    "coordinator": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/3-<TIME>/pin/mcp.ts"
+     ]
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/3-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 3,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false
+   }
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "child",
+    "wrapper": [
+     "<NODE>",
+     "<ROOT>/run/turns/3-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/3-<TIME>"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "the Citadel scheme's Taskmaster": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<ROOT>/bin/claude",
+   "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/4-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "none",
+    "--settings",
+    "<ROOT>/run/turns/4-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/2/shared/project",
+    "<ROOT>/projects/2/tmp/4",
+    "<ROOT>/projects/2/tickets",
+    "<CHECKOUT>",
+    "--plugin-dir",
+    "<ROOT>/run/turns/4-<TIME>/pin/kit",
+    "--model",
+    "opus",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/4-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-4",
+   "env": {
+    "PATH": "<ROOT>/run/turns/4-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/home",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "LC_TIME": "en_GB.UTF-8",
+    "ANTHROPIC_API_KEY": "server-key",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/2/tmp/4",
+    "TMP": "<ROOT>/projects/2/tmp/4",
+    "TEMP": "<ROOT>/projects/2/tmp/4",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/2/tmp/4",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-4",
+    "COORDINATOR_PROJECT": "2",
+    "COORDINATOR_ROLE": "coordinator",
+    "COORDINATOR_TICKET": "4",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P2 #null (cara)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/2/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/4-<TIME>/codex-tripwire.json",
+    "COORDINATOR_MEMORY": "1",
+    "COORDINATOR_APP_INSTRUCTIONS": "1"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-4\",\"roots\":[\"<ROOT>/ticket-4\",\"<ROOT>/projects/2/shared/project\"],\"nudged\":\"<ROOT>/run/turns/4-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":2,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":false}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/2/shared/project\"],\"sent\":\"<ROOT>/run/turns/4-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/4-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/4-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 180000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Edit(/<ROOT>/projects/2/tickets/**)",
+     "Edit(/<CHECKOUT>/**)",
+     "Bash(git * --output*)",
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "allow": [
+     "WebSearch",
+     "WebFetch",
+     "Bash(git -C <CHECKOUT> log:*)",
+     "Bash(git -C <CHECKOUT> show:*)",
+     "Bash(git -C <CHECKOUT> status:*)",
+     "Bash(git -C <CHECKOUT> diff:*)",
+     "Bash(git -C <CHECKOUT> blame:*)",
+     "Bash(git -C <CHECKOUT> ls-files:*)",
+     "Bash(git -C <CHECKOUT> rev-parse:*)",
+     "Bash(git -C <CHECKOUT> shortlog:*)",
+     "Bash(git -C <CHECKOUT> worktree list:*)",
+     "Bash(git -C <CHECKOUT> branch)",
+     "Bash(git -C <CHECKOUT> branch -a)",
+     "Bash(git -C <CHECKOUT> branch -r)",
+     "Bash(git -C <CHECKOUT> branch -v)",
+     "Bash(git -C <CHECKOUT> branch -vv)",
+     "Bash(git -C <CHECKOUT> branch -av)",
+     "Bash(git -C <CHECKOUT> branch --list)",
+     "mcp__coordinator"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "coordinator": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/4-<TIME>/pin/mcp.ts"
+     ]
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/4-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 2,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false
+   }
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "child",
+    "wrapper": [
+     "<NODE>",
+     "<ROOT>/run/turns/4-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/4-<TIME>"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "a minion in a person's container": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<ROOT>/bin/claude",
+   "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/person-2/5-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "host",
+    "--permission-prompt-tool",
+    "mcp__thread__approve",
+    "--settings",
+    "<ROOT>/run/turns/person-2/5-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/4/shared/project",
+    "<ROOT>/projects/4/tmp/5",
+    "--plugin-dir",
+    "<ROOT>/run/turns/person-2/5-<TIME>/pin/kit",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/person-2/5-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-5",
+   "env": {
+    "PATH": "<ROOT>/run/turns/person-2/5-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/josh-volume",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/josh-volume/.claude",
+    "XDG_RUNTIME_DIR": "<ROOT>/projects/4/tmp/5",
+    "LC_TIME": "en_GB.UTF-8",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/4/tmp/5",
+    "TMP": "<ROOT>/projects/4/tmp/5",
+    "TEMP": "<ROOT>/projects/4/tmp/5",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/4/tmp/5",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-5",
+    "COORDINATOR_PROJECT": "4",
+    "COORDINATOR_ROLE": "thread",
+    "COORDINATOR_TICKET": "5",
+    "COORDINATOR_CONTAINER": "1",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P4 #1 (josh)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/4/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/5-<TIME>/codex-tripwire.json",
+    "COORDINATOR_APPROVALS": "1",
+    "MCP_TOOL_TIMEOUT": "604800000"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-5\",\"roots\":[\"<ROOT>/ticket-5\",\"<ROOT>/projects/4/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/5-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":4,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/4/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/5-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/5-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/5-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 250000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "ask": [
+     "mcp__*__merge_pull_request",
+     "mcp__*__enable_pr_auto_merge"
+    ],
+    "allow": [
+     "mcp__thread"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "thread": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/person-2/5-<TIME>/pin/mcp.ts"
+     ],
+     "timeout": 604800000
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/person-2/5-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 4,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false
+   }
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "container citadel-claude-test-2",
+    "wrapper": [
+     "<ROOT>/run/turns/person-2/5-<TIME>/pin/turn-wrapper.ts"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "a minion in a person's container, with units": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<ROOT>/bin/claude",
+   "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/person-2/6-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "host",
+    "--permission-prompt-tool",
+    "mcp__thread__approve",
+    "--settings",
+    "<ROOT>/run/turns/person-2/6-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/5/shared/project",
+    "<ROOT>/projects/5/tmp/6",
+    "--plugin-dir",
+    "<ROOT>/run/turns/person-2/6-<TIME>/pin/kit",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/person-2/6-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-6",
+   "env": {
+    "PATH": "<ROOT>/run/turns/person-2/6-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/josh-volume",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/josh-volume/.claude",
+    "XDG_RUNTIME_DIR": "<ROOT>/projects/5/tmp/6",
+    "LC_TIME": "en_GB.UTF-8",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/5/tmp/6",
+    "TMP": "<ROOT>/projects/5/tmp/6",
+    "TEMP": "<ROOT>/projects/5/tmp/6",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/5/tmp/6",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-6",
+    "COORDINATOR_PROJECT": "5",
+    "COORDINATOR_ROLE": "thread",
+    "COORDINATOR_TICKET": "6",
+    "COORDINATOR_CONTAINER": "1",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P5 #1 (josh)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/5/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/6-<TIME>/codex-tripwire.json",
+    "COORDINATOR_APPROVALS": "1",
+    "MCP_TOOL_TIMEOUT": "604800000"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-6\",\"roots\":[\"<ROOT>/ticket-6\",\"<ROOT>/projects/5/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/6-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":5,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/5/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/6-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/6-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/6-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 250000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "ask": [
+     "mcp__*__merge_pull_request",
+     "mcp__*__enable_pr_auto_merge"
+    ],
+    "allow": [
+     "mcp__thread"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "thread": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/person-2/6-<TIME>/pin/mcp.ts"
+     ],
+     "timeout": 604800000
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/person-2/6-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 5,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false
+   }
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "container citadel-claude-test-2",
+    "wrapper": [
+     "<ROOT>/run/turns/person-2/6-<TIME>/pin/turn-wrapper.ts"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "a minion on Codex, a new thread": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<NODE>",
+   "args": [
+    "<ROOT>/run/turns/person-2/7-<TIME>/pin/codex-turn.ts",
+    "--codex-mode",
+    "turn",
+    "--codex-log",
+    "<ROOT>/run/turns/person-2/7-<TIME>/codex-log.jsonl",
+    "--codex-handover",
+    "<ROOT>/run/turns/person-2/7-<TIME>/handover.md",
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/person-2/7-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "host",
+    "--permission-prompt-tool",
+    "mcp__thread__approve",
+    "--settings",
+    "<ROOT>/run/turns/person-2/7-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/6/shared/project",
+    "<ROOT>/projects/6/tmp/7",
+    "--plugin-dir",
+    "<ROOT>/run/turns/person-2/7-<TIME>/pin/kit",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/person-2/7-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-7",
+   "env": {
+    "PATH": "<ROOT>/run/turns/person-2/7-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/josh-volume",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/josh-volume/.claude",
+    "XDG_RUNTIME_DIR": "<ROOT>/projects/6/tmp/7",
+    "LC_TIME": "en_GB.UTF-8",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/6/tmp/7",
+    "TMP": "<ROOT>/projects/6/tmp/7",
+    "TEMP": "<ROOT>/projects/6/tmp/7",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/6/tmp/7",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-7",
+    "COORDINATOR_PROJECT": "6",
+    "COORDINATOR_ROLE": "thread",
+    "COORDINATOR_TICKET": "7",
+    "COORDINATOR_CONTAINER": "1",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P6 #1 (josh)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/6/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/7-<TIME>/codex-tripwire.json",
+    "COORDINATOR_APPROVALS": "1",
+    "MCP_TOOL_TIMEOUT": "604800000"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-7\",\"roots\":[\"<ROOT>/ticket-7\",\"<ROOT>/projects/6/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/7-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":6,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/6/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/7-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/7-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/7-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 250000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "ask": [
+     "mcp__*__merge_pull_request",
+     "mcp__*__enable_pr_auto_merge"
+    ],
+    "allow": [
+     "mcp__thread"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "thread": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/person-2/7-<TIME>/pin/mcp.ts"
+     ],
+     "timeout": 604800000
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/person-2/7-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 6,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false,
+    "turnDir": "<ROOT>/run/turns/person-2/7-<TIME>"
+   },
+   "mode": "turn",
+   "mcp": [
+    "thread"
+   ],
+   "rules": [
+    "mcp__*__merge_pull_request",
+    "mcp__*__enable_pr_auto_merge"
+   ]
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "handover.md 644",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "container citadel-claude-test-2",
+    "wrapper": [
+     "<ROOT>/run/turns/person-2/7-<TIME>/pin/turn-wrapper.ts"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "a minion on Codex, resuming its thread, with approval rules and a lent machine": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<NODE>",
+   "args": [
+    "<ROOT>/run/turns/person-2/8-<TIME>/pin/codex-turn.ts",
+    "--codex-mode",
+    "turn",
+    "--codex-log",
+    "<ROOT>/run/turns/person-2/8-<TIME>/codex-log.jsonl",
+    "--codex-handover",
+    "<ROOT>/run/turns/person-2/8-<TIME>/handover.md",
+    "--codex-thread",
+    "th-9",
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/person-2/8-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "host",
+    "--permission-prompt-tool",
+    "mcp__thread__approve",
+    "--settings",
+    "<ROOT>/run/turns/person-2/8-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/7/shared/project",
+    "<ROOT>/projects/7/tmp/8",
+    "--plugin-dir",
+    "<ROOT>/run/turns/person-2/8-<TIME>/pin/kit",
+    "--model",
+    "gpt-5.5-codex",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/person-2/8-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-8",
+   "env": {
+    "PATH": "<ROOT>/run/turns/person-2/8-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/josh-volume",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/josh-volume/.claude",
+    "XDG_RUNTIME_DIR": "<ROOT>/projects/7/tmp/8",
+    "LC_TIME": "en_GB.UTF-8",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/7/tmp/8",
+    "TMP": "<ROOT>/projects/7/tmp/8",
+    "TEMP": "<ROOT>/projects/7/tmp/8",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/7/tmp/8",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-8",
+    "COORDINATOR_PROJECT": "7",
+    "COORDINATOR_ROLE": "thread",
+    "COORDINATOR_TICKET": "8",
+    "COORDINATOR_CONTAINER": "1",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P7 #1 (josh)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/7/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/8-<TIME>/codex-tripwire.json",
+    "COORDINATOR_APPROVALS": "1",
+    "MCP_TOOL_TIMEOUT": "604800000"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-8\",\"roots\":[\"<ROOT>/ticket-8\",\"<ROOT>/projects/7/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/8-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":7,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/7/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/8-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/8-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/8-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 250000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "ask": [
+     "mcp__*__merge_pull_request",
+     "mcp__*__enable_pr_auto_merge",
+     "Bash(git push:*)"
+    ],
+    "allow": [
+     "mcp__thread",
+     "mcp__perigee-godot"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "thread": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/person-2/8-<TIME>/pin/mcp.ts"
+     ],
+     "timeout": 604800000
+    },
+    "perigee-godot": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/person-2/8-<TIME>/pin/machine-mcp.ts",
+      "7",
+      "perigee-godot",
+      "mcp"
+     ]
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/person-2/8-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 7,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false,
+    "turnDir": "<ROOT>/run/turns/person-2/8-<TIME>"
+   },
+   "mode": "turn",
+   "mcp": [
+    "thread",
+    "perigee-godot"
+   ],
+   "rules": [
+    "mcp__*__merge_pull_request",
+    "mcp__*__enable_pr_auto_merge",
+    "Bash(git push:*)"
+   ]
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "handover.md 644",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "container citadel-claude-test-2",
+    "wrapper": [
+     "<ROOT>/run/turns/person-2/8-<TIME>/pin/turn-wrapper.ts"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "a Claude turn after Codex turns, back in the person's container": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<ROOT>/bin/claude",
+   "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/person-2/9-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "host",
+    "--permission-prompt-tool",
+    "mcp__thread__approve",
+    "--settings",
+    "<ROOT>/run/turns/person-2/9-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/8/shared/project",
+    "<ROOT>/projects/8/tmp/9",
+    "--plugin-dir",
+    "<ROOT>/run/turns/person-2/9-<TIME>/pin/kit",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/person-2/9-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-9",
+   "env": {
+    "PATH": "<ROOT>/run/turns/person-2/9-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/josh-volume",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/josh-volume/.claude",
+    "XDG_RUNTIME_DIR": "<ROOT>/projects/8/tmp/9",
+    "LC_TIME": "en_GB.UTF-8",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/8/tmp/9",
+    "TMP": "<ROOT>/projects/8/tmp/9",
+    "TEMP": "<ROOT>/projects/8/tmp/9",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/8/tmp/9",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-9",
+    "COORDINATOR_PROJECT": "8",
+    "COORDINATOR_ROLE": "thread",
+    "COORDINATOR_TICKET": "9",
+    "COORDINATOR_CONTAINER": "1",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P8 #1 (josh)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/8/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-2/9-<TIME>/codex-tripwire.json",
+    "COORDINATOR_APPROVALS": "1",
+    "MCP_TOOL_TIMEOUT": "604800000"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-9\",\"roots\":[\"<ROOT>/ticket-9\",\"<ROOT>/projects/8/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-2/9-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":8,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/8/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-2/9-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-2/9-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-2/9-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 250000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "ask": [
+     "mcp__*__merge_pull_request",
+     "mcp__*__enable_pr_auto_merge"
+    ],
+    "allow": [
+     "mcp__thread"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "thread": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/person-2/9-<TIME>/pin/mcp.ts"
+     ],
+     "timeout": 604800000
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/person-2/9-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 8,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false
+   }
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "container citadel-claude-test-2",
+    "wrapper": [
+     "<ROOT>/run/turns/person-2/9-<TIME>/pin/turn-wrapper.ts"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "the server login's Codex turn, in its Codex container": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<NODE>",
+   "args": [
+    "<ROOT>/run/turns/person-1/10-<TIME>/pin/codex-turn.ts",
+    "--codex-mode",
+    "turn",
+    "--codex-log",
+    "<ROOT>/run/turns/person-1/10-<TIME>/codex-log.jsonl",
+    "--codex-handover",
+    "<ROOT>/run/turns/person-1/10-<TIME>/handover.md",
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/person-1/10-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "host",
+    "--permission-prompt-tool",
+    "mcp__thread__approve",
+    "--settings",
+    "<ROOT>/run/turns/person-1/10-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/9/shared/project",
+    "<ROOT>/projects/9/tmp/10",
+    "--plugin-dir",
+    "<ROOT>/run/turns/person-1/10-<TIME>/pin/kit",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/person-1/10-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-10",
+   "env": {
+    "PATH": "<ROOT>/run/turns/person-1/10-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/cara-volume",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/cara-volume/.claude",
+    "XDG_RUNTIME_DIR": "<ROOT>/projects/9/tmp/10",
+    "LC_TIME": "en_GB.UTF-8",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/9/tmp/10",
+    "TMP": "<ROOT>/projects/9/tmp/10",
+    "TEMP": "<ROOT>/projects/9/tmp/10",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/9/tmp/10",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-10",
+    "COORDINATOR_PROJECT": "9",
+    "COORDINATOR_ROLE": "thread",
+    "COORDINATOR_TICKET": "10",
+    "COORDINATOR_CONTAINER": "1",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P9 #1 (cara)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/9/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/person-1/10-<TIME>/codex-tripwire.json",
+    "COORDINATOR_APPROVALS": "1",
+    "MCP_TOOL_TIMEOUT": "604800000"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-10\",\"roots\":[\"<ROOT>/ticket-10\",\"<ROOT>/projects/9/shared/project\"],\"nudged\":\"<ROOT>/run/turns/person-1/10-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":9,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/9/shared/project\"],\"sent\":\"<ROOT>/run/turns/person-1/10-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/person-1/10-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/person-1/10-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 250000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "ask": [
+     "mcp__*__merge_pull_request",
+     "mcp__*__enable_pr_auto_merge"
+    ],
+    "allow": [
+     "mcp__thread"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "thread": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/person-1/10-<TIME>/pin/mcp.ts"
+     ],
+     "timeout": 604800000
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/person-1/10-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 9,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false,
+    "turnDir": "<ROOT>/run/turns/person-1/10-<TIME>"
+   },
+   "mode": "turn",
+   "mcp": [
+    "thread"
+   ],
+   "rules": [
+    "mcp__*__merge_pull_request",
+    "mcp__*__enable_pr_auto_merge"
+   ]
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "handover.md 644",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "container citadel-claude-test-cara",
+    "wrapper": [
+     "<ROOT>/run/turns/person-1/10-<TIME>/pin/turn-wrapper.ts"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "the server login's Claude turn on the host, naming its Codex container for reviews": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<ROOT>/bin/claude",
+   "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/11-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "host",
+    "--permission-prompt-tool",
+    "mcp__thread__approve",
+    "--settings",
+    "<ROOT>/run/turns/11-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/10/shared/project",
+    "<ROOT>/projects/10/tmp/11",
+    "--plugin-dir",
+    "<ROOT>/run/turns/11-<TIME>/pin/kit",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/11-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-11",
+   "env": {
+    "PATH": "<ROOT>/run/turns/11-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/home",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "LC_TIME": "en_GB.UTF-8",
+    "ANTHROPIC_API_KEY": "server-key",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/10/tmp/11",
+    "TMP": "<ROOT>/projects/10/tmp/11",
+    "TEMP": "<ROOT>/projects/10/tmp/11",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/10/tmp/11",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-11",
+    "COORDINATOR_PROJECT": "10",
+    "COORDINATOR_ROLE": "thread",
+    "COORDINATOR_TICKET": "11",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P10 #1 (cara)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/10/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/11-<TIME>/codex-tripwire.json",
+    "COORDINATOR_APPROVALS": "1",
+    "MCP_TOOL_TIMEOUT": "604800000"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-11\",\"roots\":[\"<ROOT>/ticket-11\",\"<ROOT>/projects/10/shared/project\"],\"nudged\":\"<ROOT>/run/turns/11-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":10,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/10/shared/project\"],\"sent\":\"<ROOT>/run/turns/11-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/11-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/11-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 250000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "ask": [
+     "mcp__*__merge_pull_request",
+     "mcp__*__enable_pr_auto_merge"
+    ],
+    "allow": [
+     "mcp__thread"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "thread": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/11-<TIME>/pin/mcp.ts"
+     ],
+     "timeout": 604800000
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/11-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 10,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false
+   },
+   "container": {
+    "name": "citadel-claude-test-cara",
+    "turnsDir": "<ROOT>/run/turns/person-1",
+    "env": {
+     "HOME": "<ROOT>/cara-volume",
+     "CLAUDE_CONFIG_DIR": "<ROOT>/cara-volume/.claude"
+    }
+   }
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "child",
+    "wrapper": [
+     "<NODE>",
+     "<ROOT>/run/turns/11-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/11-<TIME>"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "a resumed session whose transcript is on this login": {
+  "launched": true,
+  "notes": [],
+  "spec": {
+   "command": "<ROOT>/bin/claude",
+   "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/12-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "host",
+    "--permission-prompt-tool",
+    "mcp__thread__approve",
+    "--settings",
+    "<ROOT>/run/turns/12-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/11/shared/project",
+    "<ROOT>/projects/11/tmp/12",
+    "--plugin-dir",
+    "<ROOT>/run/turns/12-<TIME>/pin/kit",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/12-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger",
+    "--resume",
+    "sess-7"
+   ],
+   "cwd": "<ROOT>/ticket-12",
+   "env": {
+    "PATH": "<ROOT>/run/turns/12-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/home",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "LC_TIME": "en_GB.UTF-8",
+    "ANTHROPIC_API_KEY": "server-key",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/11/tmp/12",
+    "TMP": "<ROOT>/projects/11/tmp/12",
+    "TEMP": "<ROOT>/projects/11/tmp/12",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/11/tmp/12",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-12",
+    "COORDINATOR_PROJECT": "11",
+    "COORDINATOR_ROLE": "thread",
+    "COORDINATOR_TICKET": "12",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P11 #1 (cara)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/11/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/12-<TIME>/codex-tripwire.json",
+    "COORDINATOR_APPROVALS": "1",
+    "MCP_TOOL_TIMEOUT": "604800000"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-12\",\"roots\":[\"<ROOT>/ticket-12\",\"<ROOT>/projects/11/shared/project\"],\"nudged\":\"<ROOT>/run/turns/12-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":11,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/11/shared/project\"],\"sent\":\"<ROOT>/run/turns/12-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/12-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/12-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 250000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "ask": [
+     "mcp__*__merge_pull_request",
+     "mcp__*__enable_pr_auto_merge"
+    ],
+    "allow": [
+     "mcp__thread"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "thread": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/12-<TIME>/pin/mcp.ts"
+     ],
+     "timeout": 604800000
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/12-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 11,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false
+   }
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "child",
+    "wrapper": [
+     "<NODE>",
+     "<ROOT>/run/turns/12-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/12-<TIME>"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "a session whose transcript is nowhere starts fresh": {
+  "launched": true,
+  "notes": [
+   "This minion's conversation (session sess-gone) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here, but Claude doesn't remember the earlier turns."
+  ],
+  "spec": {
+   "command": "<ROOT>/bin/claude",
+   "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<ROOT>/run/turns/13-<TIME>/system-prompt.md",
+    "--permission-prompts",
+    "host",
+    "--permission-prompt-tool",
+    "mcp__thread__approve",
+    "--settings",
+    "<ROOT>/run/turns/13-<TIME>/settings.json",
+    "--add-dir",
+    "<ROOT>/projects/12/shared/project",
+    "<ROOT>/projects/12/tmp/13",
+    "--plugin-dir",
+    "<ROOT>/run/turns/13-<TIME>/pin/kit",
+    "--effort",
+    "high",
+    "--mcp-config",
+    "<ROOT>/run/turns/13-<TIME>/mcp.json",
+    "--disallowedTools",
+    "AskUserQuestion",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger"
+   ],
+   "cwd": "<ROOT>/ticket-13",
+   "env": {
+    "PATH": "<ROOT>/run/turns/13-<TIME>/pin/bin:<ROOT>/bin:<PATH>",
+    "HOME": "<ROOT>/home",
+    "CLAUDE_CONFIG_DIR": "<ROOT>/host-claude",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "LC_TIME": "en_GB.UTF-8",
+    "ANTHROPIC_API_KEY": "server-key",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "TMPDIR": "<ROOT>/projects/12/tmp/13",
+    "TMP": "<ROOT>/projects/12/tmp/13",
+    "TEMP": "<ROOT>/projects/12/tmp/13",
+    "CLAUDE_CODE_TMPDIR": "<ROOT>/projects/12/tmp/13",
+    "COORDINATOR_API": "http://127.0.0.1:8573",
+    "COORDINATOR_TOKEN": "token-13",
+    "COORDINATOR_PROJECT": "12",
+    "COORDINATOR_ROLE": "thread",
+    "COORDINATOR_TICKET": "13",
+    "CARGO_BUILD_JOBS": "4",
+    "CITADEL_HEAVY_DIR": "<ROOT>/projects/.heavy",
+    "CITADEL_HEAVY_WHO": "P12 #1 (cara)",
+    "COORDINATOR_SHARED_DIR": "<ROOT>/projects/12/shared/project",
+    "CITADEL_CODEX_TRIPWIRE": "<ROOT>/run/turns/13-<TIME>/codex-tripwire.json",
+    "COORDINATOR_APPROVALS": "1",
+    "MCP_TOOL_TIMEOUT": "604800000"
+   }
+  },
+  "settings": {
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/link-check.ts' '{\"cwd\":\"<ROOT>/ticket-13\",\"roots\":[\"<ROOT>/ticket-13\",\"<ROOT>/projects/12/shared/project\"],\"nudged\":\"<ROOT>/run/turns/13-<TIME>/link-check-nudged\",\"refs\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs.json\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ],
+    "PreToolUse": [
+     {
+      "matcher": "^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/tripwire.ts' '{\"home\":\"<ROOT>/home\",\"data\":\"<ROOT>\",\"checkout\":\"<CHECKOUT>\",\"project\":12,\"claudeConfig\":\"<ROOT>/host-claude\",\"ask\":true}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^(mcp__(thread|coordinator)__(message_coordinator|message_taskmaster|message_ticket|ask_question|propose_plan|update_ticket)|Write|Edit|MultiEdit)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/wording.ts' '{\"shared\":[\"<ROOT>/projects/12/shared/project\"],\"sent\":\"<ROOT>/run/turns/13-<TIME>/wording-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     },
+     {
+      "matcher": "^mcp__(thread|coordinator)__(message_coordinator|message_ticket|ask_question|propose_plan)$",
+      "hooks": [
+       {
+        "type": "command",
+        "command": "'<NODE>' '<ROOT>/run/turns/13-<TIME>/pin/scheme-refs.ts' '{\"refs\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs.json\",\"sent\":\"<ROOT>/run/turns/13-<TIME>/scheme-refs-sent\"}'",
+        "timeout": 10
+       }
+      ]
+     }
+    ]
+   },
+   "syncClaudeAiSkills": false,
+   "disableClaudeAiConnectors": true,
+   "autoCompactWindow": 250000,
+   "bashOutputMaxChars": 12000,
+   "permissions": {
+    "deny": [
+     "Read(/<ROOT>/home/.claude/.credentials.json)",
+     "Read(/<ROOT>/host-claude/.credentials.json)",
+     "Read(/<ROOT>/home/.ssh/**)",
+     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
+     "Read(/<ROOT>/home/.config/gh/hosts.yml)",
+     "Read(/<ROOT>/home/.config/citadel-claude/**)",
+     "Read(/<ROOT>/state.db*)",
+     "Read(/<ROOT>/backups/state-*)",
+     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
+     "Read(//run/user/1000/podman/**)",
+     "Read(//run/user/1000/containers/**)"
+    ],
+    "ask": [
+     "mcp__*__merge_pull_request",
+     "mcp__*__enable_pr_auto_merge"
+    ],
+    "allow": [
+     "mcp__thread"
+    ]
+   }
+  },
+  "mcp": {
+   "mcpServers": {
+    "thread": {
+     "type": "stdio",
+     "command": "<NODE>",
+     "args": [
+      "<ROOT>/run/turns/13-<TIME>/pin/mcp.ts"
+     ],
+     "timeout": 604800000
+    }
+   }
+  },
+  "codexTripwire": {
+   "script": "<ROOT>/run/turns/13-<TIME>/pin/tripwire.ts",
+   "config": {
+    "home": "<ROOT>/home",
+    "data": "<ROOT>",
+    "checkout": "<CHECKOUT>",
+    "project": 12,
+    "claudeConfig": "<ROOT>/host-claude",
+    "ask": false
+   }
+  },
+  "files": [
+   "codex-tripwire.json 444",
+   "mcp.json 644",
+   "prompt.jsonl 644",
+   "scheme-refs.json 644",
+   "settings.json 644",
+   "spec.json 600",
+   "stderr.log 644",
+   "steer.jsonl 644",
+   "stream.jsonl 644",
+   "system-prompt.md 644"
+  ],
+  "pinned": true,
+  "spawned": [
+   {
+    "how": "child",
+    "wrapper": [
+     "<NODE>",
+     "<ROOT>/run/turns/13-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/13-<TIME>"
+    ]
+   }
+  ],
+  "unit": null
+ },
+ "a preview launches nothing": {
+  "launched": false,
+  "notes": [
+   "This is a preview: it shows the app on a copy of the data, but it never runs turns."
+  ]
+ }
+}

@@ -106,6 +106,7 @@ test('a workspace turn works end to end with the agent on the machines URL: its 
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: true } });
 
   const project = await call('/api/projects', { method: 'POST', body: { name: 'Vault' } });
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [project.id] } }); // a new machine is lent to no scheme (#438)
   const before = turns().length;
   const ticket = await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'vault' } });
   const turn = (await until('a turn', () => turns().length > before && turns())).at(-1);

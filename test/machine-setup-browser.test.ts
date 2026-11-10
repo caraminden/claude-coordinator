@@ -137,3 +137,28 @@ test('the CI runner agent tab shows the install line with this app\'s address an
   assert.ok(line.startsWith(`$u = '${srv.base}';`), line);
   assert.match(line, /-MachineToken 'ccm_\d+_[\w-]+'$/);
 });
+
+test('Who gets it is one list of scheme chips: + scheme adds one at once, × takes it away (#438)', { skip }, async () => {
+  const other = (await srv.call('/api/projects', { name: 'Other scheme' })).data;
+  const { machine } = (await srv.call('/api/machines', { name: 'chip-box' })).data;
+  await openMachines();
+  await wait('the machine list', '!!document.querySelector(".machine-row")');
+  const row = `[...document.querySelectorAll('.machine-row')].find((r) => r.querySelector('.name').textContent === 'chip-box')`;
+  await page.eval(`${row}.querySelector('.machine-open').click()`);
+  const chips = () => page.eval<string[]>(`[...${row}.querySelectorAll('.scheme-chip > span')].map((c) => c.textContent)`);
+  const saved = async () => (await srv.call('/api/machines')).data.find((m: any) => m.id === machine.id).projects;
+  assert.deepEqual(await chips(), []);
+  assert.match(await page.eval<string>(`${row}.querySelector('.machine-lending').textContent`), /No scheme gets it yet/);
+  assert.equal(await page.eval(`!!${row}.querySelector('input[type=radio]')`), false, 'no "every scheme an admin owns" radio');
+  const add = (id: number) => page.eval(`(() => { const s = ${row}.querySelector('select.add-scheme'); s.value = '${id}'; s.dispatchEvent(new Event('change')); })()`);
+  // Two picks in a row both count, before either answer is back.
+  await add(projectId);
+  await add(other.id);
+  assert.deepEqual(await chips(), ['P', 'Other scheme']);
+  await wait('both to be saved', `fetch('api/machines').then((r) => r.json()).then((l) => l.find((m) => m.id === ${machine.id}).projects.length === 2)`);
+  assert.equal(await page.eval(`${row}.querySelector('select.add-scheme').hidden`), true, 'no scheme left to add');
+  await page.eval(`${row}.querySelector('.scheme-chip button[aria-label="Remove P"]').click()`);
+  assert.deepEqual(await chips(), ['Other scheme']);
+  await wait('the removal to be saved', `fetch('api/machines').then((r) => r.json()).then((l) => l.find((m) => m.id === ${machine.id}).projects.length === 1)`);
+  assert.deepEqual(await saved(), [other.id]);
+});

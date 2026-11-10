@@ -945,7 +945,7 @@ function machineBody(m) {
   return h('div', { class: 'machine-body' },
     h('div', { class: 'machine-kv' },
       m.runners ? kv('Does', 'Adds, lists and removes CI runners for schemes, when Citadel asks') : kv('Lends', machineLends(m)),
-      kv(m.runners ? 'Schemes' : 'Who gets it',
+      m.runners ? [] : kv('Who gets it',
         m.owner_id === null ? '' : h('div', { class: 'small muted' }, `Only turns ${m.created_by} asks for (and their contraptions), in:`),
         machineLending(m)),
       kv('Computer',
@@ -1049,7 +1049,7 @@ function machineLending(m) {
     h('option', { value: '' }, '+ scheme'), rest.map((p) => h('option', { value: p.id }, p.name)));
   add.onchange = () => add.value && save([...now(), Number(add.value)]);
   return h('div', { class: 'machine-lending', 'data-id': m.id }, chips,
-    chips.length ? '' : h('span', { class: 'muted small' }, m.runners ? 'No scheme can have runners on it yet.' : 'No scheme gets it yet.'), add);
+    chips.length ? '' : h('span', { class: 'muted small' }, 'No scheme gets it yet.'), add);
 }
 
 /** The import picker: this app's Claude Code instruction and memory files, to tick and add. */

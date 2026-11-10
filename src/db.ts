@@ -810,8 +810,8 @@ export class Store {
    * Lending becomes one list of schemes per machine (#438): each machine's machine_projects rows become exactly
    * the schemes whose minions got it under the old rules, so no scheme gains or loses one. The old rules: a scheme
    * needed projects.machine_tools on; a shared machine went to every scheme an admin owns, or (scoped) to its rows;
-   * a person's own to the schemes its owner is in. A CI runner host keeps every scheme an admin owns, since fetching
-   * a runner token never asked for machine tools. Once, from schema 34; a shared machine an older release left
+   * a person's own to the schemes its owner is in. (A CI runner host's runners follow ci-runner.ts mayFetch, not
+   * this list.) Once, from schema 34; a shared machine an older release left
    * unscoped (a rollback) is converted whenever one is found. Says what it did, for the deploy's notes.
    */
   private lendingLists() {
@@ -825,21 +825,17 @@ export class Store {
       for (const m of machines) {
         const rows = this.machineProjects(m.id);
         const owner = m.owner_id === null ? undefined : this.getUser(m.owner_id);
-        let runners = false;
-        try {
-          runners = !!JSON.parse(m.last_check ?? 'null')?.runners;
-        } catch { /* an unreadable check: not a runner host */ }
         const ids = m.owner_id !== null
           ? schemes.filter((p) => p.machine_tools && owner && this.canSee({ uid: owner.id, admin: !!owner.admin }, p.id)).map((p) => p.id)
           : m.scoped
             ? rows.filter((id) => schemes.find((p) => p.id === id)?.machine_tools)
-            : schemes.filter((p) => (runners || p.machine_tools) && this.getUser(p.owner_id ?? -1)?.admin).map((p) => p.id);
+            : schemes.filter((p) => p.machine_tools && this.getUser(p.owner_id ?? -1)?.admin).map((p) => p.id);
         this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(m.id);
         const add = this.db.prepare('INSERT INTO machine_projects (machine_id, project_id) VALUES (?, ?)');
         for (const id of ids) add.run(m.id, id);
         this.db.prepare('UPDATE machines SET scoped = 1 WHERE id = ?').run(m.id);
         const was = m.owner_id !== null ? `${owner?.name ?? 'its owner'}'s turns in the schemes they are in` : m.scoped ? `only ${names(rows)}` : 'every scheme an admin owns';
-        console.log(`Lending lists (#438): ${m.name}: was ${was}${runners ? ' (CI runner host)' : ', where machine tools are on'}; its list is now ${names(ids)}.`);
+        console.log(`Lending lists (#438): ${m.name}: was ${was}, where machine tools are on; its list is now ${names(ids)}.`);
       }
       this.db.exec('COMMIT');
     } catch (err) {

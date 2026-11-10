@@ -113,7 +113,7 @@ export function machineStatus(f: StatusFacts): MachineStatus {
   return s('ready', `Ready · ${tools} tool${tools === 1 ? '' : 's'}`, null, checked);
 }
 
-function storedCheck(m: Machine): StoredCheck | null {
+export function storedCheck(m: Pick<Machine, 'last_check'>): StoredCheck | null {
   try {
     return m.last_check ? JSON.parse(m.last_check) : null;
   } catch {

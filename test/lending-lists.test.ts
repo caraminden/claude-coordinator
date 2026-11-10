@@ -64,16 +64,14 @@ test('opening an older database gives every machine a list that lends it exactly
     assert.equal(m.scoped, 1, `${m.name} reads the same to an older release`);
     for (const p of old.schemes) {
       const project = store.getProject(p.id)!;
-      // A CI runner host is the one machine whose list is wider than its old lending: its agent offers turns no
-      // server (MachineRelay.online leaves it out), so the list only says which schemes may have runners on it.
-      const runnerHost = !!was.last_check?.includes('"runners":true');
-      for (const askers of runnerHost ? [] : [[], [cara.id], [josh.id], [cara.id, josh.id]]) {
+      for (const askers of [[], [cara.id], [josh.id], [cara.id, josh.id]]) {
         const now = lendsMachine(store, m, project, askers);
         assert.equal(now, lentBefore(was, p, askers), `${m.name} in ${p.name} for askers ${askers}`);
         lent += Number(now);
       }
-      // A CI runner host's token fetch never asked for the scheme's switch, and still reaches the same schemes.
-      if (runnerHost || was.owner_id !== null) assert.equal(mayFetch(store, m, project), fetchedBefore(was, p), `${m.name} fetching for ${p.name}`);
+      // A CI runner host's token fetch never asked for the scheme's switch or a list, and a person's own follows
+      // its owner: both still reach the same schemes.
+      if (was.last_check?.includes('"runners":true') || was.owner_id !== null) assert.equal(mayFetch(store, m, project), fetchedBefore(was, p), `${m.name} fetching for ${p.name}`);
     }
   }
   assert.ok(lent > 10, 'the table has lent cases, not only refusals');
@@ -82,7 +80,7 @@ test('opening an older database gives every machine a list that lends it exactly
   assert.deepEqual(list('everywhere-stale-row'), ['Admin on', 'Member on'], 'old unread rows are replaced');
   assert.deepEqual(list('chosen'), ['Admin on', 'Josh on'], 'rows for schemes with the switch off got nothing, and go');
   assert.deepEqual(list('chosen-none'), []);
-  assert.deepEqual(list('ci-host'), ['Admin on', 'Admin off', 'Member on']);
+  assert.deepEqual(list('ci-host'), ['Admin on', 'Member on']);
   assert.deepEqual(list('joshs'), ['Josh on', 'Member on'], 'the schemes he is in with the switch on');
   assert.deepEqual(list('caras'), ['Admin on', 'Josh on', 'Member on'], 'an admin is in every scheme');
   store.db.close();

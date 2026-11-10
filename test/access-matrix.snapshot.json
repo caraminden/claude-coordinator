@@ -2017,6 +2017,7 @@
   "person": "404",
   "member": "404",
   "outsider": "404",
+  "tmA": "404",
   "tmB": "403",
   "m1": "403",
   "m2": "403"
@@ -2173,8 +2174,8 @@
  },
  "POST /api/tickets/:taskmasterA/start": {
   "anon": "401 Not logged in",
-  "person": "409 #null isn't parked waiting on another minion's work",
-  "member": "409 #null isn't parked waiting on another minion's work",
+  "person": "400 The Taskmaster never waits on another minion's work",
+  "member": "400 The Taskmaster never waits on another minion's work",
   "outsider": "404 No such minion",
   "tmA": "403 The Taskmaster cannot act on itself",
   "tmB": "403 Outside this Taskmaster's scheme",

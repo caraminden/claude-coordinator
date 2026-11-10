@@ -341,11 +341,11 @@ function checkRole(route: Route, caller: Ticket | null, params: Record<string, s
   if (!who.includes('minion') || !own) throw new HttpError(403, 'A minion may only update itself');
 }
 
-/** Once its rows are loaded: a Taskmaster stays in its own scheme, and only reads itself (its 'self' routes aside). */
+/** Once its rows are loaded: a Taskmaster stays in its own scheme, and only reads itself, GET or HEAD (its 'self' routes aside). */
 function checkScope(route: Route, caller: Ticket, method: string, project: number | undefined, ticket: number | undefined) {
   if (caller.kind !== 'coordinator' || (ticket === caller.id && (route.who as readonly Who[]).includes('self'))) return;
   if (project !== undefined && project !== caller.project_id) throw new HttpError(403, 'Outside this Taskmaster\'s scheme');
-  if (ticket === caller.id && method !== 'GET') throw new HttpError(403, 'The Taskmaster cannot act on itself');
+  if (ticket === caller.id && method !== 'GET' && method !== 'HEAD') throw new HttpError(403, 'The Taskmaster cannot act on itself');
 }
 
 /**

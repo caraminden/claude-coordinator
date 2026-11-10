@@ -92,8 +92,6 @@ const PEOPLE = ['person', 'member', 'outsider'];
 // Answers that look wrong, so they are probed but kept out of the snapshot until a person decides
 // (#452, handoffs/handoff-access-matrix-findings.md). Fixed or accepted: drop the line and pin the answer.
 const UNDECIDED = new Set([
-  // HEAD counts as a write in checkScope, so a Taskmaster may GET its own file but not HEAD it.
-  'HEAD /api/tickets/:taskmasterA/file as tmA',
   // Any member may start a tune-up, though changing the scheme's settings is its owner's.
   'POST /api/projects/:p/tune-up as member',
 ]);

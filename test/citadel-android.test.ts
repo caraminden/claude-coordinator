@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -193,7 +193,9 @@ test('sms goes through serve to the console with the host token, and serve refus
     // serve can read what turns can't: a request that links to the token (or a hard link to it) is refused
     // without repeating it, and a link planted where the answer goes is replaced, not written through.
     const answer = async (id: string) => {
-      for (let i = 0; i < 200 && !existsSync(join(locks, `android.out.${id}`)); i++) await new Promise((r) => setTimeout(r, 25));
+      // A planted link already "exists": wait for the plain file serve leaves in its place.
+      const isAnswer = () => { try { return lstatSync(join(locks, `android.out.${id}`)).isFile(); } catch { return false; } };
+      for (let i = 0; i < 200 && !isAnswer(); i++) await new Promise((r) => setTimeout(r, 25));
       return readFileSync(join(locks, `android.out.${id}`), 'utf8');
     };
     symlinkSync(join(home, '.emulator_console_auth_token'), join(locks, 'android.req.link'));

@@ -26,7 +26,7 @@ import { clearTmpDir, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { CHECKOUT, COMPACT_COMMAND, freshStartText, handoffPrompt, machineServers, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
-import { alive, CODEX_TURN, coordinatorAccess, credentialDenies, disallowedTools, KIT, LEAN_CONTEXT, LINK_CHECK, linkCheckHooks, MACHINE_MCP_SERVER, MCP_DIR, MCP_SERVER, MERGE_ASKS, SCHEME_REFS, schemeRefsHooks, TASKMASTER_COMPACT_WINDOW, TRIPWIRE, tripwireConfig, tripwireHooks, TURN_BUILD_JOBS, TURN_SETTINGS, TURN_SLICE, TURN_WRAPPER, turnEnv, turnSettings, USAGE_LIMIT, WORDING, wordingHooks } from './turn-launch.ts';
+import { alive, coordinatorAccess, credentialDenies, disallowedTools, LEAN_CONTEXT, linkCheckHooks, MERGE_ASKS, schemeRefsHooks, TASKMASTER_COMPACT_WINDOW, tripwireConfig, tripwireHooks, TURN_BUILD_JOBS, TURN_SETTINGS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wordingHooks } from './turn-launch.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -1654,7 +1654,8 @@ export class Runner {
     const dir = join(place.host ? this.turnsDir : place.turnsDir, `${ticket.id}-${Date.now()}`);
     const pin = join(dir, 'pin');
     mkdirSync(dir, { recursive: true });
-    cpSync(MCP_DIR, pin, { recursive: true });
+    const pins = turnPins();
+    cpSync(pins.MCP_DIR, pin, { recursive: true });
     const pinned = (file: string) => join(pin, basename(file));
     // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
     const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
@@ -1688,19 +1689,19 @@ export class Runner {
     // A file, not an argument: a scheme's minion list outgrows a command line.
     const refsFile = join(dir, 'scheme-refs.json');
     this.writeRefs(refsFile, ticket);
-    const linkCheck = ticket.cwd ? linkCheckHooks([ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d), pinned(LINK_CHECK), join(dir, 'link-check-nudged'), refsFile) : {};
+    const linkCheck = ticket.cwd ? linkCheckHooks([ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d), pinned(pins.LINK_CHECK), join(dir, 'link-check-nudged'), refsFile) : {};
     // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
     // title, state and note. The token travels in the environment (which the MCP server
     // inherits), never on the command line.
     const role = ticket.kind === 'coordinator' ? 'coordinator' : 'thread';
     // A card can wait for days: past MCP_TOOL_TIMEOUT, Claude Code also drops a tool silent for 30 minutes unless its server sets a timeout.
-    const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [pinned(MCP_SERVER)], ...(role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) } };
+    const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [pinned(pins.MCP_SERVER)], ...(role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) } };
     for (const m of machines) {
-      for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: process.execPath, args: [pinned(MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
+      for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: process.execPath, args: [pinned(pins.MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
     }
     // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
-    const tripwire = tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(TRIPWIRE));
+    const tripwire = tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(pins.TRIPWIRE));
     // Codex's managed hook (deploy/claude-container/codex) reads the turn's tripwire from this file: its command can't carry it.
     // A Codex turn's own run is checked in turn mode: its patches and MCP calls too, with no cards, and never its own folder.
     // A host turn has no hook, so the server login's Codex reviews run in its Codex container (#398): named here, where
@@ -1710,9 +1711,9 @@ export class Runner {
     if (reviewAt) this.wakeCodex?.(person!);
     const container = reviewAt ? { container: { name: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } } : {};
     const codexTripwire = join(dir, 'codex-tripwire.json');
-    writeFileSync(codexTripwire, JSON.stringify({ script: pinned(TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(process.env), false), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), { mode: 0o444 });
+    writeFileSync(codexTripwire, JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(process.env), false), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), { mode: 0o444 });
     const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
-      hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
+      hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(pins.WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(pins.SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
     };
     if (rules.length) settings.permissions.ask = rules;
     if (ticket.kind === 'coordinator') {
@@ -1728,7 +1729,7 @@ export class Runner {
     writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings));
     args.push('--settings', join(dir, 'settings.json'));
     if (addDirs.length) args.push('--add-dir', ...addDirs);
-    if (existsSync(pinned(KIT))) args.push('--plugin-dir', pinned(KIT));
+    if (existsSync(pinned(pins.KIT))) args.push('--plugin-dir', pinned(pins.KIT));
     args.push(...pluginDirArgs(turnPluginDirs(project, ticket), ticket.cwd));
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
@@ -1854,7 +1855,7 @@ export class Runner {
       const same = codexThread?.person === person && codexThread.thread;
       if (!same) this.store.setSetting(codexThreadKey(ticket.id), { thread: null, person: person!, log: codexThread?.log ?? '' });
       command = process.execPath;
-      args.unshift(pinned(CODEX_TURN), '--codex-mode', 'turn', '--codex-log', join(dir, 'codex-log.jsonl'), '--codex-handover', join(dir, 'handover.md'), ...(same ? ['--codex-thread', same] : []));
+      args.unshift(pinned(pins.CODEX_TURN), '--codex-mode', 'turn', '--codex-log', join(dir, 'codex-log.jsonl'), '--codex-handover', join(dir, 'handover.md'), ...(same ? ['--codex-thread', same] : []));
     }
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command, args, cwd: ticket.cwd, env }), { mode: 0o600 });
     const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
@@ -1866,10 +1867,10 @@ export class Runner {
     this.setStatus(ticket.id, 'running');
     // Its step on the lane lasts until it has ended and its session is saved (finish).
     if (!place.host) {
-      this.spawnInContainer(place, dir, pinned(TURN_WRAPPER));
+      this.spawnInContainer(place, dir, pinned(pins.TURN_WRAPPER));
       return live.ended;
     }
-    const wrapper = [process.execPath, pinned(TURN_WRAPPER), dir];
+    const wrapper = [process.execPath, pinned(pins.TURN_WRAPPER), dir];
     if (!unit) {
       this.spawnWrapper(wrapper, dir);
       return live.ended;

@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // Turns run in a process of their own (src/turn-wrapper.ts) and write to a turn folder, so a server
 // that dies mid-turn leaves the turn running, and the next server re-attaches and catches up. Here the

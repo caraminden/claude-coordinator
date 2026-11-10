@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { isNetworkFailure, MAX_NET_RESUMES, Runner } from '../src/runner.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // A turn that died because the network or the API was unreachable waits for one server-wide probe to
 // see the API again, then resumes by itself (with the messages queued behind it), at most

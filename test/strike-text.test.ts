@@ -6,7 +6,8 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { noteStrike, struckSource } from '../public/strike.js';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // strike_text: a thread proven wrong strikes its own words, in its replies or in the messages it
 // sent another thread. A stand-in `claude -p` ends every turn at once.

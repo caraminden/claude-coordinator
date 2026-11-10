@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { check, SENT_BACK } from '../src/link-check.ts';
-import { WORDING, WORDING_MATCHER, wordingHooks } from '../src/turn-launch.ts';
+import { WORDING_MATCHER, wordingHooks } from '../src/turn-launch.ts';
+import { testPins } from './helpers.ts';
+
+const { WORDING } = testPins();
 import { checkCall, misusedWords } from '../src/wording.ts';
 
 const flagged = (text: string) => misusedWords(text).map((f) => f.word);

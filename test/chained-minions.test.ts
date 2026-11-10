@@ -7,7 +7,8 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { type Chain, githubPrs, LiveWaiters, mergedPr, mergedPrOf, type PrMerge } from '../src/wake.ts';
-import { bootServer, stopTurns, stopProcs } from './helpers.ts';
+import { bootServer, stopTurns, stopProcs, testPins } from './helpers.ts';
+testPins();
 
 // Chained minions: one created parked, whose brief is held until the minion it follows (its leader)
 // has its work live, or merged. A temp repo stands in for both the live checkout and the scheme's repo,

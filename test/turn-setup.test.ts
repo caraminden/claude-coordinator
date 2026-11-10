@@ -9,9 +9,9 @@ import { after, test } from 'node:test';
 import { APPROVAL_TIMEOUT_MS } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
 
-// The runner pins its MCP servers under $DATA_DIR/run when it loads, sweeping copies of dead servers.
+// The server pins its MCP servers under its data dir when it starts (pinTurnFiles), sweeping copies of dead servers.
 const root = mkdtempSync(join(tmpdir(), 'turn-setup-'));
 after(async () => {
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
@@ -30,7 +30,8 @@ process.env.COORDINATOR_API = 'http://service.invalid';
 process.env.COORDINATOR_TOKEN = 'service-token';
 process.env.COORDINATOR_TICKET = '999';
 const { Runner } = await import('../src/runner.ts');
-const { KIT, MCP_DIR, MCP_SERVER, turnEnv } = await import('../src/turn-launch.ts');
+const { turnEnv } = await import('../src/turn-launch.ts');
+const { KIT, MCP_DIR, MCP_SERVER } = testPins(process.env.DATA_DIR);
 const { CHECKOUT, HEAVY_LINE } = await import('../src/prompts.ts');
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));

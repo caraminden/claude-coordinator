@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { check } from '../src/link-check.ts';
-import { LINK_CHECK, linkCheckHooks } from '../src/turn-launch.ts';
+import { linkCheckHooks } from '../src/turn-launch.ts';
+import { testPins } from './helpers.ts';
+
+const { LINK_CHECK } = testPins();
 
 // A scheme's folders as the runner lays them out: a minion's worktree, its shared folder and the scheme's.
 const root = mkdtempSync(join(tmpdir(), 'link-check-'));

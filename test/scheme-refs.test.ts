@@ -10,7 +10,10 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { check, SENT_BACK } from '../src/link-check.ts';
 import { schemeRefs } from '../src/runner.ts';
-import { SCHEME_REFS, schemeRefsHooks } from '../src/turn-launch.ts';
+import { schemeRefsHooks } from '../src/turn-launch.ts';
+import { testPins } from './helpers.ts';
+
+const { SCHEME_REFS } = testPins();
 import { checkCall, SCHEME_REFS_MATCHER, strayRefs, type SchemeRefs } from '../src/scheme-refs.ts';
 import type { Project, Ticket } from '../src/db.ts';
 

@@ -22,7 +22,7 @@ import { Store, type Artifact, type Project, type Ticket } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
-import { turnEnv } from './src/turn-launch.ts';
+import { pinTurnFiles, turnEnv } from './src/turn-launch.ts';
 import { Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
@@ -174,6 +174,8 @@ function broadcast(msg: object) {
   }
 }
 
+// The copies of the server files turns run (src/turn-launch.ts), made before any turn starts or is picked up again.
+pinTurnFiles(DATA_DIR);
 const runner = new Runner(
   store,
   broadcast,

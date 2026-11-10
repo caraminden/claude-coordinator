@@ -11,9 +11,8 @@ import type { TurnPlace } from '../src/claude-link.ts';
 import { codexSwitchKey } from '../src/codex.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
-import { bootServer, until, stopTurns } from './helpers.ts';
+import { bootServer, until, stopTurns, testPins } from './helpers.ts';
 
-// The runner (which the turn module borrows from) pins files under $DATA_DIR/run when it loads.
 const root = mkdtempSync(join(tmpdir(), 'contraption-turns-'));
 after(async () => {
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
@@ -21,6 +20,7 @@ after(async () => {
 });
 const data = join(root, 'data');
 process.env.DATA_DIR = data;
+testPins(data);
 const { ContraptionTurns, parseTurn, TurnError } = await import('../src/contraption-turns.ts');
 
 // A stand-in for claude: logs what it was started with (argv, cwd, env, and the settings and MCP config

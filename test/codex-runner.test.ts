@@ -6,7 +6,8 @@ import { after, test } from 'node:test';
 import { codexSwitchKey, codexThreadKey, codexUsageKey, type CodexThread } from '../src/codex.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // Codex fallback (#337) through the runner: a Codex pick or the person's switch runs the turn on the shim
 // (src/codex-turn.ts) in their container, with the Claude conversation handed over verbatim; the first

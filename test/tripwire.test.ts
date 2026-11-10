@@ -6,7 +6,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
 import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
-import { TRIPWIRE, tripwireHooks } from '../src/turn-launch.ts';
+import { tripwireHooks } from '../src/turn-launch.ts';
+import { testPins } from './helpers.ts';
+
+const { TRIPWIRE } = testPins();
 
 const home = '/home/u';
 const data = `${home}/.local/share/claude-coordinator`;

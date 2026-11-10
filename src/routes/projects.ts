@@ -15,7 +15,7 @@ import { GLOBAL_OWNER, type Actor } from '../properties.ts';
 import { checkFolder, citadelOwner, cloneFolder, errorText, GITHUB_OWNER, githubRepoExists, githubUrl, initRepo, pushToGithub, repoName, SOURCES, validOwner, type GithubEnv, type Source } from '../scheme-repo.ts';
 import { personGithub } from '../github-link.ts';
 import { describeCron, type Schedule } from '../schedules.ts';
-import { KIT } from '../turn-launch.ts';
+import { turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import type { Chain } from '../wake.ts';
@@ -270,7 +270,7 @@ export const projectRoutes: Route[] = [
       // A Taskmaster sees what its scheme's owner sees.
       const owner = caller ? app.store.getUser(app.store.getProject(caller.project_id)?.owner_id ?? -1) : null;
       const who = caller ? { uid: owner?.id, admin: !!owner?.admin } : session;
-      return json(res, 200, { items: catalogue(visibleSchemes(app.store, who), KIT) });
+      return json(res, 200, { items: catalogue(visibleSchemes(app.store, who), turnPins().KIT) });
     },
   },
   {

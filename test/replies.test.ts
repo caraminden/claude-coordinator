@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { bootServer, until, stopTurns } from './helpers.ts';
+import { bootServer, until, stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // One-tap replies (#105): set with set_thread_status, gone once anyone writes or the next turn starts.
 const root = mkdtempSync(join(tmpdir(), 'replies-'));

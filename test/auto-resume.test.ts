@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MAX_RESUMES, Runner } from '../src/runner.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // A stand-in for `claude -p` that logs each prompt it gets and runs until a release file appears.
 const root = mkdtempSync(join(tmpdir(), 'auto-resume-'));

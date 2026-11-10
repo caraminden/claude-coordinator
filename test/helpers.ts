@@ -6,6 +6,17 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
 import { freePort, listeningPort } from '../src/ports.ts';
+import { pinTurnFiles, type TurnPins } from '../src/turn-launch.ts';
+
+/**
+ * The pinned turn files (src/turn-launch.ts) for a test that starts turns or builds their hooks: server.ts
+ * makes them at start. Without `dataDir` they go in a scratch folder removed when the process exits.
+ */
+export function testPins(dataDir?: string): TurnPins {
+  const dir = dataDir ?? mkdtempSync(join(tmpdir(), 'test-pins-'));
+  if (!dataDir) process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
+  return pinTurnFiles(dir);
+}
 
 /**
  * Stop servers a test started and wait until they have exited: a server still finishing its requests

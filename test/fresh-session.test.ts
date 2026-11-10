@@ -8,7 +8,8 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { FRESH_CONTEXT_TOKENS, FRESH_IDLE_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'fresh-session-'));
 after(async () => {

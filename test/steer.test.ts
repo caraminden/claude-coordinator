@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, unsentSteers } from '../src/runner.ts';
-import { lines, stopTurns } from './helpers.ts';
+import { lines, stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // Mid-turn messages steer: the runner appends them to the turn's steer.jsonl and the wrapper
 // (src/turn-wrapper.ts) passes them to claude's stdin until the turn's result is out. The fake reads

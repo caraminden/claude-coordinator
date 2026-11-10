@@ -8,7 +8,8 @@ import { APP_NAME } from '../src/appname.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { LiveWaiters, type PrMerge } from '../src/wake.ts';
-import { bootServer, REPO, stopTurns } from './helpers.ts';
+import { bootServer, REPO, stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // wake_when_live: a waiter is messaged once the server runs a commit containing its commit (or, with
 // none, once the server runs anything new), then dropped. A stand-in live checkout in a temp repo.

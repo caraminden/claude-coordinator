@@ -7,6 +7,8 @@ import { appServerLimits } from '../src/codex-link.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { codexHigh, codexTop, codexWindows } from '../public/codexusage.js';
+import { testPins } from './helpers.ts';
+testPins();
 
 // Codex's usage bar (#342): each person's own windows, a bar under Claude's above 75%, and a read for Settings.
 const root = mkdtempSync(join(tmpdir(), 'codex-usage-'));

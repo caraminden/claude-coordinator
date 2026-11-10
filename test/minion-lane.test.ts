@@ -8,7 +8,8 @@ import { Store } from '../src/db.ts';
 import { Lanes } from '../src/lanes.ts';
 import { Runner } from '../src/runner.ts';
 import { projectSlug, saveSession } from '../src/sessions.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // #259: every step of a minion's turn lifecycle runs on one serial lane per minion, and cleanups
 // delete only what they can show is stale. Each test holds one step open and starts the next, as #250

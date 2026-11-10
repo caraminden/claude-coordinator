@@ -8,7 +8,8 @@ import { Auth } from '../src/auth.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { Runner } from '../src/runner.ts';
-import { bootServer, PASSWORD, SECRET, stopTurns } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // Admin-only tools and routes look at who asked for a Taskmaster's turn, not whom it runs as (#255).
 // A non-member's relay to Citadel runs as Citadel's owner (#211), an admin, but the non-member asked

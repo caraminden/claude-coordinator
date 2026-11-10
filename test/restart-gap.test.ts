@@ -7,8 +7,9 @@ import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { MCP_SERVER } from '../src/turn-launch.ts';
-import { bootServer, freePort } from './helpers.ts';
+import { bootServer, freePort, testPins } from './helpers.ts';
+
+const { MCP_SERVER } = testPins();
 
 // While the server restarts, a turn keeps running: its MCP calls wait for the next server, and the
 // old one finishes what it can within a few seconds instead of dropping requests.

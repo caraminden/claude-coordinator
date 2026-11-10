@@ -12,9 +12,6 @@ import { CHECKOUT } from './prompts.ts';
 // Turns run a copy of the MCP server taken when this server started, not the file on disk: a deploy
 // pulls new code before the restart, and a newer MCP server would offer tools this process rejects.
 // The copies live in the app's data dir, one folder per server process, swept once that process is gone.
-const DATA_DIR = process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator');
-const RUN_DIR = join(DATA_DIR, 'run');
-export const MCP_DIR = join(RUN_DIR, `mcp-${process.pid}`);
 export function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -23,52 +20,88 @@ export function alive(pid: number): boolean {
     return err.code === 'EPERM';
   }
 }
-mkdirSync(RUN_DIR, { recursive: true });
-for (const name of readdirSync(RUN_DIR)) {
-  const pid = Number(/^mcp-(\d+)$/.exec(name)?.[1]);
-  if (pid && pid !== process.pid && !alive(pid)) rmSync(join(RUN_DIR, name), { recursive: true, force: true });
+
+/** The pinned copies this server process made (pinTurnFiles), and the data dir they live in. */
+export interface TurnPins {
+  dataDir: string;
+  MCP_DIR: string;
+  MCP_SERVER: string;
+  /** Stands in for a connected machine's MCP server; see src/machines.ts. */
+  MACHINE_MCP_SERVER: string;
+  /** Pinned too, so a deploy can't change the rules under a running turn. */
+  TRIPWIRE: string;
+  LINK_CHECK: string;
+  WORDING: string;
+  SCHEME_REFS: string;
+  TURN_WRAPPER: string;
+  /**
+   * The Citadel kit (kit/), the plugin every turn of every scheme loads; pinned like the tripwire, so a
+   * deploy only reaches turns that start after the restart, and a branch's kit never reaches other schemes.
+   */
+  KIT: string;
+  /** citadel-heavy (tools/), the host-wide slots for heavy builds and test suites (#325), first on every turn's PATH from its pinned bin folder. */
+  HEAVY: string;
+  /** citadel-codex-review (#330): a read-only Codex review on the person's own login, pinned with its driver like citadel-heavy. */
+  CODEX_REVIEW: string;
+  /** Codex turns (#337): the shim a turn runs in place of claude when it runs on Codex. */
+  CODEX_TURN: string;
 }
-rmSync(MCP_DIR, { recursive: true, force: true });
-mkdirSync(MCP_DIR);
-process.on('exit', () => rmSync(MCP_DIR, { recursive: true, force: true }));
-/** Copy a server file and, first, every local file it imports, so the copy starts on its own. */
-function pinnedCopy(file: string): string {
-  const copy = join(MCP_DIR, file);
-  if (existsSync(copy)) return copy;
-  const source = readFileSync(join(import.meta.dirname, file), 'utf8');
-  for (const [, dep] of source.matchAll(/from '\.\/([^']+)'/g)) pinnedCopy(dep);
-  writeFileSync(copy, source);
-  return copy;
-}
-export const MCP_SERVER = pinnedCopy('mcp.ts');
-// Stands in for a connected machine's MCP server; see src/machines.ts.
-export const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
-// Pinned too, so a deploy can't change the rules under a running turn.
-export const TRIPWIRE = pinnedCopy('tripwire.ts');
-export const LINK_CHECK = pinnedCopy('link-check.ts');
-export const WORDING = pinnedCopy('wording.ts');
-export const SCHEME_REFS = pinnedCopy('scheme-refs.ts');
-export const TURN_WRAPPER = pinnedCopy('turn-wrapper.ts');
+let pins: TurnPins | null = null;
+
 /**
- * The Citadel kit (kit/), the plugin every turn of every scheme loads; pinned like the tripwire, so a
- * deploy only reaches turns that start after the restart, and a branch's kit never reaches other schemes.
+ * Make this server process's pinned copies under `dataDir`/run/mcp-<pid>, sweeping the folders of
+ * processes that are gone. server.ts calls it once at start, before the Runner is built; importing
+ * this module writes nothing.
  */
-export const KIT = join(MCP_DIR, 'kit');
-const KIT_SOURCE = join(import.meta.dirname, '..', 'kit');
-if (existsSync(KIT_SOURCE)) cpSync(KIT_SOURCE, KIT, { recursive: true });
-/** citadel-heavy (tools/), the host-wide slots for heavy builds and test suites (#325), first on every turn's PATH from its pinned bin folder. */
-export const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
-const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
-if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
-/** citadel-android (tools/), the shared headless emulator (#381), on every turn's PATH the same way. */
-const ANDROID_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-android');
-if (existsSync(ANDROID_SOURCE)) cpSync(ANDROID_SOURCE, join(MCP_DIR, 'bin', 'citadel-android'));
-/** citadel-codex-review (#330): a read-only Codex review on the person's own login, pinned with its driver like citadel-heavy. */
-export const CODEX_REVIEW = pinnedCopy('codex-review.ts');
-/** Codex turns (#337): the shim a turn runs in place of claude when it runs on Codex. */
-export const CODEX_TURN = pinnedCopy('codex-turn.ts');
-const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
-if (existsSync(CODEX_REVIEW_BIN)) cpSync(CODEX_REVIEW_BIN, join(MCP_DIR, 'bin', 'citadel-codex-review'));
+export function pinTurnFiles(dataDir: string): TurnPins {
+  const RUN_DIR = join(dataDir, 'run');
+  const MCP_DIR = join(RUN_DIR, `mcp-${process.pid}`);
+  mkdirSync(RUN_DIR, { recursive: true });
+  for (const name of readdirSync(RUN_DIR)) {
+    const pid = Number(/^mcp-(\d+)$/.exec(name)?.[1]);
+    if (pid && pid !== process.pid && !alive(pid)) rmSync(join(RUN_DIR, name), { recursive: true, force: true });
+  }
+  rmSync(MCP_DIR, { recursive: true, force: true });
+  mkdirSync(MCP_DIR);
+  process.on('exit', () => rmSync(MCP_DIR, { recursive: true, force: true }));
+  /** Copy a server file and, first, every local file it imports, so the copy starts on its own. */
+  function pinnedCopy(file: string): string {
+    const copy = join(MCP_DIR, file);
+    if (existsSync(copy)) return copy;
+    const source = readFileSync(join(import.meta.dirname, file), 'utf8');
+    for (const [, dep] of source.matchAll(/from '\.\/([^']+)'/g)) pinnedCopy(dep);
+    writeFileSync(copy, source);
+    return copy;
+  }
+  const MCP_SERVER = pinnedCopy('mcp.ts');
+  const MACHINE_MCP_SERVER = pinnedCopy('machine-mcp.ts');
+  const TRIPWIRE = pinnedCopy('tripwire.ts');
+  const LINK_CHECK = pinnedCopy('link-check.ts');
+  const WORDING = pinnedCopy('wording.ts');
+  const SCHEME_REFS = pinnedCopy('scheme-refs.ts');
+  const TURN_WRAPPER = pinnedCopy('turn-wrapper.ts');
+  const KIT = join(MCP_DIR, 'kit');
+  const KIT_SOURCE = join(import.meta.dirname, '..', 'kit');
+  if (existsSync(KIT_SOURCE)) cpSync(KIT_SOURCE, KIT, { recursive: true });
+  const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
+  const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
+  if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);
+  /** citadel-android (tools/), the shared headless emulator (#381), on every turn's PATH the same way. */
+  const ANDROID_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-android');
+  if (existsSync(ANDROID_SOURCE)) cpSync(ANDROID_SOURCE, join(MCP_DIR, 'bin', 'citadel-android'));
+  const CODEX_REVIEW = pinnedCopy('codex-review.ts');
+  const CODEX_TURN = pinnedCopy('codex-turn.ts');
+  const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
+  if (existsSync(CODEX_REVIEW_BIN)) cpSync(CODEX_REVIEW_BIN, join(MCP_DIR, 'bin', 'citadel-codex-review'));
+  return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, LINK_CHECK, WORDING, SCHEME_REFS, TURN_WRAPPER, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN });
+}
+
+/** The pinned copies pinTurnFiles made; throws if it was never called, since a turn launched without them would run with no tripwire. */
+export function turnPins(): TurnPins {
+  if (!pins) throw new Error('The pinned turn files were never made: call pinTurnFiles(dataDir) once at start, before any turn (src/turn-launch.ts)');
+  return pins;
+}
+
 /** A build's default parallelism in turns, so the few heavy jobs at once (citadel-heavy's 2 slots) leave cores for the rest. */
 export const TURN_BUILD_JOBS = '4';
 /** The slice turn units run in; its name puts it under citadel.slice, which deploy/citadel.slice caps. */
@@ -76,7 +109,7 @@ export const TURN_SLICE = 'citadel-turns.slice';
 
 /** The tripwire's view of this server, for a turn in this project; `ask` when the turn can show approval cards. */
 export function tripwireConfig(projectId: number, claudeConfig: string, ask: boolean): TripwireConfig {
-  return { home: homedir(), data: DATA_DIR, checkout: CHECKOUT, project: projectId, claudeConfig, ask };
+  return { home: homedir(), data: turnPins().dataDir, checkout: CHECKOUT, project: projectId, claudeConfig, ask };
 }
 
 /**
@@ -84,7 +117,7 @@ export function tripwireConfig(projectId: number, claudeConfig: string, ask: boo
  * this server's data and checkout, and in a minion's turn sends the ones a person may allow to a card.
  * Its config travels as one JSON argument; no quoting needed, as these paths and JSON carry no single quotes.
  */
-export function tripwireHooks(projectId: number, claudeConfig: string, ask = false, script = TRIPWIRE) {
+export function tripwireHooks(projectId: number, claudeConfig: string, ask = false, script = turnPins().TRIPWIRE) {
   const config = tripwireConfig(projectId, claudeConfig, ask);
   const command = [process.execPath, script, JSON.stringify(config)].map((s) => `'${s}'`).join(' ');
   return { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$', hooks: [{ type: 'command', command, timeout: 10 }] }] };
@@ -96,7 +129,7 @@ export function tripwireHooks(projectId: number, claudeConfig: string, ask = fal
  * (ticketRoots in routes/files.ts), its working directory first. `nudged` is a file in the turn's
  * folder the check leaves once it has sent the reply back. `refs` is the scheme-refs snapshot (writeSchemeRefs).
  */
-export function linkCheckHooks(roots: string[], script = LINK_CHECK, nudged?: string, refs?: string) {
+export function linkCheckHooks(roots: string[], script = turnPins().LINK_CHECK, nudged?: string, refs?: string) {
   const command = [process.execPath, script, JSON.stringify({ cwd: roots[0], roots, ...(nudged ? { nudged } : {}), ...(refs ? { refs } : {}) })].map((s) => `'${s}'`).join(' ');
   return { Stop: [{ hooks: [{ type: 'command', command, timeout: 10 }] }] };
 }
@@ -109,7 +142,7 @@ export const WORDING_MATCHER = '^(mcp__(thread|coordinator)__(message_coordinato
  * .md or .html file written into `shared` that uses a reserved word ("fold") in another sense. `shared`
  * is the scheme's shared folder and the minion's own, since people read the files in both. `sent` is a file in the turn's folder listing the sentences already refused.
  */
-export function wordingHooks(shared: string[], sent: string, script = WORDING) {
+export function wordingHooks(shared: string[], sent: string, script = turnPins().WORDING) {
   const command = [process.execPath, script, JSON.stringify({ shared, sent })].map((s) => `'${s}'`).join(' ');
   return { matcher: WORDING_MATCHER, hooks: [{ type: 'command', command, timeout: 10 }] };
 }
@@ -119,7 +152,7 @@ export function wordingHooks(shared: string[], sent: string, script = WORDING) {
  * this scheme whose bare #N likely means another scheme's minion. `refs` is the snapshot (writeSchemeRefs),
  * `sent` a file in the turn's folder listing the numbers already refused.
  */
-export function schemeRefsHooks(refs: string, sent: string, script = SCHEME_REFS) {
+export function schemeRefsHooks(refs: string, sent: string, script = turnPins().SCHEME_REFS) {
   const command = [process.execPath, script, JSON.stringify({ refs, sent })].map((s) => `'${s}'`).join(' ');
   return { matcher: SCHEME_REFS_MATCHER, hooks: [{ type: 'command', command, timeout: 10 }] };
 }

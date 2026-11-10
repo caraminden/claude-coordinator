@@ -9,7 +9,8 @@ import { Runner } from '../src/runner.ts';
 import { TASKMASTER_LOOP_LIMIT } from '../src/prompts.ts';
 import { RELAY_FILE_MAX } from '../src/taskmaster-files.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { agentToken, bootServer, stopProcs, stopTurns, until } from './helpers.ts';
+import { agentToken, bootServer, stopProcs, stopTurns, until, testPins } from './helpers.ts';
+testPins();
 
 // Taskmaster mail and relay files (#405): message_taskmaster's wake: false leaves held mail for the other
 // Taskmaster's next turn instead of starting one, and its file is copied by the server into the receiving

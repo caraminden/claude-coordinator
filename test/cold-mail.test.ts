@@ -9,7 +9,8 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { COLD_HOLD_MAX_MS, COLD_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { stopTurns, until } from './helpers.ts';
+import { stopTurns, until, testPins } from './helpers.ts';
+testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'cold-mail-'));
 after(async () => {

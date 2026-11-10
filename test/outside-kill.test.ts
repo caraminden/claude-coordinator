@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, wrapperAlive } from '../src/runner.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // Delve #14's claude was SIGTERMed by its own `pkill`, and the chat showed only a stderr warning and
 // "(claude exited with code 143)". A signal Citadel didn't send must be named as such.

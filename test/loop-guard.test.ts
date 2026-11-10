@@ -7,7 +7,8 @@ import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { LOOP_LIMIT, LOOP_WINDOW_MS, Runner } from '../src/runner.ts';
 import { TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS } from '../src/prompts.ts';
-import { agentToken, bootServer, until, stopProcs, stopTurns } from './helpers.ts';
+import { agentToken, bootServer, until, stopProcs, stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // The loop guard: Taskmaster↔minion messages past LOOP_LIMIT per LOOP_WINDOW_MS (ten minutes) wait for a person. A stand-in
 // `claude -p` ends every turn at once.

@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MAX_LIMIT_RESUMES, parseResetTime, Runner } from '../src/runner.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // A failed turn says why. A usage limit is a wait: the minion is `limited`, resumes by itself after the
 // reset (spaced from the others, capped, held messages included, across a restart), and nobody gets

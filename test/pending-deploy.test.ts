@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // pending-deploy: the state outlasts a new turn, and a deploy that went live dismisses the minion,
 // unless something is still open for a person. Same fake `claude -p` as close-self.test.ts.

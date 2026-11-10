@@ -7,7 +7,8 @@ import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { gzipSync } from 'node:zlib';
 import { projectSlug } from '../src/sessions.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // #250: a minion whose turns move from one Claude login to another between turns (Josh's container,
 // then the host's login for Cara) must still resume its conversation there. The fake claude keeps

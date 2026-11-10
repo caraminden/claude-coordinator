@@ -12,7 +12,8 @@ import { messagePerson } from '../src/access.ts';
 import { verifyIdentity } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { bootServer, freePort, jsonLines, stopProcs, until, type Booted, stopTurns } from './helpers.ts';
+import { bootServer, freePort, jsonLines, stopProcs, until, type Booted, stopTurns, testPins } from './helpers.ts';
+testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'mandate-items-'));
 const procs: ChildProcess[] = [];

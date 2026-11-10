@@ -8,6 +8,8 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { SENT_BACK } from '../src/link-check.ts';
 import { Runner } from '../src/runner.ts';
+import { testPins } from './helpers.ts';
+testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'sent-back-'));
 after(() => rmSync(root, { recursive: true, force: true }));

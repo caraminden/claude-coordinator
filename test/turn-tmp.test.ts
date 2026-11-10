@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { clearTmpDir, makeTmpDir, sweepTmpDirs, tmpDirFor } from '../src/turn-tmp.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'turn-tmp-'));
 after(async () => {
@@ -14,6 +14,7 @@ after(async () => {
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const { Runner } = await import('../src/runner.ts');
+testPins();
 
 test('a temp folder is only ever a ticket id directly under an absolute root', () => {
   assert.equal(tmpDirFor('/data/tmp', 7), '/data/tmp/7');

@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // A stand-in for `claude -p`: waits until a release file appears, then ends the turn the way
 // FAKE_OUTCOME says (ok, error), so the test can act while the turn is running.

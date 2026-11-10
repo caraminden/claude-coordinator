@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { clearBuildOutput, findBuildOutput, ticketWorktree } from '../src/build-output.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'build-output-')));
 after(async () => {
@@ -15,6 +15,7 @@ after(async () => {
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const { Runner } = await import('../src/runner.ts');
+testPins();
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...args], { cwd, stdio: 'pipe' });
 const put = (file: string, text = 'x') => {

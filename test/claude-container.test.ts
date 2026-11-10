@@ -10,7 +10,8 @@ import { CodexLink } from '../src/codex-link.ts';
 import { Store } from '../src/db.ts';
 import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
 import { TURN_SLICE } from '../src/turn-launch.ts';
-import { stopTurns } from './helpers.ts';
+import { stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // Turns in a person's own Claude container (#213). A fake `podman` on PATH runs `exec` on the host,
 // so the whole path runs: placeFor, the detached wrapper, its heartbeat, the stream and the finish.

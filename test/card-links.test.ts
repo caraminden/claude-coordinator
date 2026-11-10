@@ -11,6 +11,8 @@ import { Store } from '../src/db.ts';
 import { check, SENT_BACK } from '../src/link-check.ts';
 import { Runner } from '../src/runner.ts';
 import type { SchemeRefs } from '../src/scheme-refs.ts';
+import { testPins } from './helpers.ts';
+testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'card-links-'));
 after(() => rmSync(root, { recursive: true, force: true }));

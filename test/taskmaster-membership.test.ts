@@ -9,7 +9,8 @@ import { Store } from '../src/db.ts';
 import { GLOBAL_OWNER } from '../src/properties.ts';
 import { Runner } from '../src/runner.ts';
 import { systemPrompt } from '../src/prompts.ts';
-import { bootServer, PASSWORD, SECRET, type Booted, stopTurns } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, type Booted, stopTurns, testPins } from './helpers.ts';
+testPins();
 
 // message_taskmaster by membership (#211): a Taskmaster turn reaches the schemes its person is in as
 // well as its own (an admin is in all), Citadel always, and Citadel's Taskmaster answers a scheme for

@@ -11,7 +11,8 @@ import { messagePerson } from '../src/access.ts';
 import { APP_NAME } from '../src/appname.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { jsonLines, stopTurns, until } from './helpers.ts';
+import { jsonLines, stopTurns, until, testPins } from './helpers.ts';
+testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'turn-person-env-'));
 after(async () => {

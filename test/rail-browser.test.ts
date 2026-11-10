@@ -8,7 +8,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { chromium, launch, type Browser, type Page } from './browser.ts';
+import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
@@ -78,12 +78,6 @@ async function until(page: Page, want: string) {
   let got = '';
   for (const end = Date.now() + 10_000; (got = await toc(page)) !== want && Date.now() < end; await wait(25));
   return got;
-}
-/** Wait until `expression` is truthy in the page; throws naming `what` after 10 s. */
-async function waitFor(page: Page, what: string, expression: string) {
-  for (const end = Date.now() + 10_000; !(await page.eval(expression)); await wait(25)) {
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-  }
 }
 const mark = (page: Page) => page.eval('document.querySelector(".citadel-rail").dataset.first = "1"');
 const sameRail = (page: Page) => page.eval<boolean>('document.querySelector(".citadel-rail")?.dataset.first === "1"');

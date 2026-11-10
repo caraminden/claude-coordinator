@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +18,7 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const { mcpServer, fakeClaude, turns } = machineFakes(root);
+const { fakeClaude, turns, startMachineAgent } = machineFakes(root, procs);
 
 let base = '';
 let agentBase = '';
@@ -35,16 +35,6 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
   return data;
 }
 
-function startAgent(url: string, token: string) {
-  const agent = spawn(process.execPath, [join(repo, 'public/machine-agent.mjs'), url, token, '--', process.execPath, mcpServer], { stdio: ['ignore', 'pipe', 'pipe'] });
-  procs.push(agent);
-  let output = '';
-  agent.stdout!.on('data', (d) => (output += d));
-  agent.stderr!.on('data', (d) => (output += d));
-  const exited = new Promise<number | null>((r) => agent.on('exit', r));
-  return { output: () => output, exited };
-}
-
 before(async () => {
   agentBase = `http://127.0.0.1:${await freePort()}`;
   const srv = await bootServer({ root, env: { MACHINES_URL: agentBase, CLAUDE_BIN: fakeClaude }, stdout: true });
@@ -59,11 +49,11 @@ test('agents connect only at the machines URL, which the setup is given', async 
   assert.equal(agent_url, agentBase);
 
   // The app's own address refuses agents, even with a good token, and says where to go.
-  const refused = startAgent(base, token);
+  const refused = startMachineAgent({ base, token });
   assert.equal(await refused.exited, 1);
   assert.match(refused.output(), new RegExp(`connect at ${agentBase}`));
 
-  startAgent(agentBase, token);
+  startMachineAgent({ base: agentBase, token });
   await until('laptop to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'laptop' && m.online));
 });
 
@@ -98,8 +88,7 @@ test('a workspace turn works end to end with the agent on the machines URL: its 
   const configFile = join(root, 'studio.json');
   writeFileSync(configFile, JSON.stringify({ workspaces: { w: { path: folder, tasks: { hi: { run: [process.execPath, '-e', 'console.log("task ran")'] } } } } }));
   const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'studio' } });
-  const agent = spawn(process.execPath, [join(repo, 'public/machine-agent.mjs'), agentBase, token, '--config', configFile], { stdio: 'ignore' });
-  procs.push(agent);
+  startMachineAgent({ base: agentBase, token, run: ['--config', configFile] });
   // The workspaces arrive through /api/machines/info.
   const online = await until('studio to report its workspace', async () => (await call('/api/machines')).find((m: any) => m.name === 'studio' && m.workspaces.length));
   assert.deepEqual(online.servers, ['ws']);

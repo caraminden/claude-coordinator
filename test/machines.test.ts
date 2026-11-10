@@ -22,7 +22,7 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const { mcpServer, fakeClaude, turns } = machineFakes(root);
+const { mcpServer, fakeClaude, turns, startMachineAgent } = machineFakes(root, procs);
 
 let base = '';
 let cookie = '';
@@ -41,14 +41,7 @@ async function call(path: string, opts: { method?: string; body?: unknown } = {}
 /** Put these schemes on a machine's list (#438): a new machine is lent to none. */
 const lend = (machineId: number, ...projects: { id: number }[]) => call(`/api/machines/${machineId}`, { method: 'PATCH', body: { projects: projects.map((p) => p.id) } });
 
-function startAgent(token: string, run = ['--', process.execPath, mcpServer], env: NodeJS.ProcessEnv = {}) {
-  const agent = spawn(process.execPath, [join(repo, 'public/machine-agent.mjs'), base, token, ...run], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MACHINES_URL: undefined, ...env } });
-  procs.push(agent);
-  let output = '';
-  agent.stdout!.on('data', (d) => (output += d));
-  agent.stderr!.on('data', (d) => (output += d));
-  return { agent, output: () => output };
-}
+const startAgent = (token: string, run?: string[], env?: NodeJS.ProcessEnv) => startMachineAgent({ base, token, run, env });
 
 before(async () => {
   // bootServer clears MACHINES_URL: a thread's turn inherits the live service's, and this server must take agents itself.
@@ -461,7 +454,7 @@ test('a person\'s own machine goes only to turns they ask for, in schemes they\'
 
   // An admin's own: only Cara's turns, in the schemes on its list.
   const mineMade = await call('/api/machines', { method: 'POST', body: { name: 'cara-own', mine: true } });
-  assert.equal(mineMade.machine.owner_id !== null, true);
+  assert.equal(mineMade.machine.owner_id, (await call('/api/me')).id, "an admin's own machine is owned by Cara");
   await lend(mineMade.machine.id, notTheirs, shared);
   assert.equal((await call('/api/machines', { method: 'POST', body: { name: 'shared-box' } })).machine.owner_id, null);
   startAgent(mineMade.token);

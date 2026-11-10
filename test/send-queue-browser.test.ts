@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { sendIdOf, sendOnce } from '../src/send-ids.ts';
 import { bootServer, until, type Booted } from './helpers.ts';
-import { chromium, launch, type Browser, type Page } from './browser.ts';
+import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
 
 test('a sendId is sent once per chat; a repeat shares the first one\'s outcome; a failed one is forgotten', async () => {
   assert.equal(sendIdOf(''), undefined);
@@ -89,15 +89,9 @@ async function open(width: number, t: { id: number; number: number }) {
   const [name, value] = srv.cookie.split('=');
   await page.send('Network.setCookie', { name, value, url: srv.base });
   await page.send('Page.navigate', { url: `${srv.base}/#/p/${projectId}/t/${t.number}` });
-  await wait(page, 'the chat', '!!document.querySelector(".composer textarea") && !!document.querySelector("#log .msg.user")');
+  await waitFor(page, 'the chat', '!!document.querySelector(".composer textarea") && !!document.querySelector("#log .msg.user")');
   await page.eval(HOLD);
   return page;
-}
-
-async function wait(page: Page, what: string, expression: string) {
-  for (const end = Date.now() + 10_000; !(await page.eval(expression).catch(() => false)); await new Promise((r) => setTimeout(r, 50))) {
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-  }
 }
 
 const type = (page: Page, text: string) => page.eval(`(() => {
@@ -122,39 +116,39 @@ for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
     const page = await open(width, t);
     // Send stays live through all three, and only the first is on its way: the rest wait their turn.
     for (const text of ['one', 'two', 'three']) assert.equal(await type(page, text), false, `Send is live after "${text}"`);
-    await wait(page, 'the first send', 'held.length === 1');
+    await waitFor(page, 'the first send', 'held.length === 1');
     assert.equal(await page.eval('held.length'), 1, 'one at a time');
     assert.equal(await page.eval('document.querySelectorAll("#log .msg.user.pending").length'), 3, 'all three show at once');
     await shoot(page, `${label}-sending.png`);
 
     await page.eval('held[0].go()');
-    await wait(page, 'the second send', 'held.length === 2');
+    await waitFor(page, 'the second send', 'held.length === 2');
     await page.eval('held[1].fail()');
     // The failed one stays in the chat, not sent, its text kept; the third still goes.
-    await wait(page, '"two" marked not sent', `${bubble('two')}?.classList.contains('not-sent')`);
-    await wait(page, 'the third send', 'held.length === 3');
+    await waitFor(page, '"two" marked not sent', `${bubble('two')}?.classList.contains('not-sent')`);
+    await waitFor(page, 'the third send', 'held.length === 3');
     await page.eval('held[2].go()');
     await until('the server to have one and three', async () => (await texts(t.id)).length === 3);
     assert.deepEqual(await texts(t.id), ['hi', 'one', 'three']);
-    await wait(page, 'the server\'s copies swapped in', 'document.querySelectorAll("#log .msg.user.pending").length === 0');
+    await waitFor(page, 'the server\'s copies swapped in', 'document.querySelectorAll("#log .msg.user.pending").length === 0');
     assert.equal(await page.eval('document.querySelectorAll("#log .msg.user.not-sent").length'), 1);
     assert.equal(await page.eval(`${bubble('three')}.compareDocumentPosition(${bubble('two')}) === Node.DOCUMENT_POSITION_FOLLOWING`), true, 'the unsent one stays below what the server has');
     await shoot(page, `${label}-not-sent.png`);
 
     // Retry sends it again with the same sendId, so a reply lost on the way can't make it twice.
     await page.eval(`${bubble('two')}.querySelector('[aria-label="Send it again"]').click()`);
-    await wait(page, 'the retry', 'held.length === 4');
+    await waitFor(page, 'the retry', 'held.length === 4');
     assert.equal(await page.eval('held[3].body.sendId === held[1].body.sendId && held[3].body.text'), 'two');
     await page.eval('held[3].go()');
     await until('the retry to land', async () => (await texts(t.id)).length === 4);
     assert.deepEqual(await texts(t.id), ['hi', 'one', 'three', 'two']);
-    await wait(page, 'no message left pending or unsent', 'document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length === 0');
+    await waitFor(page, 'no message left pending or unsent', 'document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length === 0');
 
     // ✎ on a failed one takes it back into the box, ahead of anything typed since.
     await type(page, 'four');
-    await wait(page, 'the fourth send', 'held.length === 5');
+    await waitFor(page, 'the fourth send', 'held.length === 5');
     await page.eval('held[4].fail()');
-    await wait(page, '"four" marked not sent', `${bubble('four')}?.classList.contains('not-sent')`);
+    await waitFor(page, '"four" marked not sent', `${bubble('four')}?.classList.contains('not-sent')`);
     await page.eval(`(() => { const b = document.querySelector('.composer textarea'); b.value = 'draft'; b.dispatchEvent(new Event('input')); })()`);
     await page.eval(`${bubble('four')}.querySelector('[aria-label="Take back to edit"]').click()`);
     assert.equal(await page.eval('document.querySelector(".composer textarea").value'), 'four\ndraft');
@@ -169,17 +163,17 @@ test('a chat whose history holds your own sent message opens after a reload', { 
   await srv.call(`/api/tickets/${t.id}/messages`, { text: 'mine', sendId: 'reload-1' });
   await until('the turn to end', async () => (await srv.call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
   const page = await open(1280, t);
-  await wait(page, 'its message', `!!${bubble('mine')}`);
+  await waitFor(page, 'its message', `!!${bubble('mine')}`);
 });
 
 test('a message the server took after its send failed is marked sent, and a Retry then adds no copy', { skip }, async () => {
   const t = await minion('Lost reply');
   const page = await open(1280, t);
   await type(page, 'lost');
-  await wait(page, 'the send', 'held.length === 1');
+  await waitFor(page, 'the send', 'held.length === 1');
   await page.eval('held[0].lose()');
   await until('the server to have it', async () => (await texts(t.id)).length === 2);
-  await wait(page, 'the server\'s copy swapped in', 'document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length === 0');
+  await waitFor(page, 'the server\'s copy swapped in', 'document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length === 0');
   const sending = `import(new URL('core.js', location.href)).then((m) => m.sending)`;
   assert.equal(await page.eval(sending), 0, 'nothing left sending, so the page can reload when idle');
   // The failure toast's Retry is still up: it has nothing to send again.

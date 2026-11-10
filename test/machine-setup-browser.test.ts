@@ -2,14 +2,14 @@
 // agent (#439): adding a machine asks a name and gives one install line, and what it lends is ticked in its row
 // from what its agent found there.
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, REPO, stopProcs, type Booted } from './helpers.ts';
+import { bootServer, stopProcs, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
-import { chromium, launch, type Browser, type Page } from './browser.ts';
+import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
@@ -20,7 +20,7 @@ let page: Page;
 let projectId = 0;
 const procs: ChildProcess[] = [];
 const dir = mkdtempSync(join(tmpdir(), 'machine-browser-'));
-const { mcpServer } = machineFakes(dir);
+const { mcpServer, startMachineAgent } = machineFakes(dir, procs);
 
 before(async () => {
   if (skip) return;
@@ -39,11 +39,7 @@ after(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const wait = async (what: string, expression: string) => {
-  for (const end = Date.now() + 10_000; !(await page.eval(expression).catch(() => false)); await new Promise((r) => setTimeout(r, 50))) {
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-  }
-};
+const wait = (what: string, expression: string) => waitFor(page, what, expression);
 const shown = () => page.eval<string[]>('[...document.querySelectorAll("#machine-setup .machine-setup-way:not([hidden]) pre")].map((p) => p.textContent)');
 const pressed = () => page.eval<string>('document.querySelector("#machine-setup [aria-pressed=true]")?.textContent ?? ""');
 const row = (name: string) => `[...document.querySelectorAll('.machine-row')].find((r) => r.querySelector('.name').textContent === ${JSON.stringify(name)})`;
@@ -101,7 +97,7 @@ test('a machine lends what is ticked in its row from what its agent found, with 
   mkdirSync(join(dir, 'vault'));
   writeFileSync(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { 'godot-ai': { command: process.execPath, args: [mcpServer], env: { KEY: 'sk-secret-123' } } } }));
   writeFileSync(join(dir, 'machine-agent.json'), JSON.stringify({ workspaces: { vault: { path: join(dir, 'vault') } } }));
-  procs.push(spawn(process.execPath, [join(REPO, 'public/machine-agent.mjs'), srv.base, token, '--config', join(dir, 'machine-agent.json')], { stdio: 'ignore', env: { ...process.env, MACHINES_URL: undefined, CLAUDE_CONFIG_DIR: dir } }));
+  startMachineAgent({ base: srv.base, token, run: ['--config', join(dir, 'machine-agent.json')], env: { CLAUDE_CONFIG_DIR: dir } });
   for (const end = Date.now() + 20_000; !(await machine('tick-box')).found?.length;) {
     if (Date.now() > end) throw new Error('the agent never reported');
     await new Promise((r) => setTimeout(r, 100));
@@ -128,7 +124,7 @@ test('a machine lends what is ticked in its row from what its agent found, with 
 
 test('a machine set up before ticks shows what it lends as set on that computer, with a way to reinstall', { skip }, async () => {
   const { machine: old, token } = (await srv.call('/api/machines', { name: 'old-box' })).data;
-  procs.push(spawn(process.execPath, [join(REPO, 'public/machine-agent.mjs'), srv.base, token, '--', process.execPath, mcpServer], { stdio: 'ignore', env: { ...process.env, MACHINES_URL: undefined } }));
+  startMachineAgent({ base: srv.base, token });
   for (const end = Date.now() + 20_000; !(await machine('old-box')).online;) {
     if (Date.now() > end) throw new Error('the old agent never connected');
     await new Promise((r) => setTimeout(r, 100));
@@ -145,7 +141,7 @@ test('a machine set up before ticks shows what it lends as set on that computer,
   assert.match(asked, /servers/);
   await wait('old-box\'s install line', `document.querySelector('#machine-setup strong')?.textContent === 'Connect old-box'`);
   assert.match((await shown())[0], /--config machine-agent\.json --install old-box$/);
-  assert.equal(old.id > 0, true);
+  assert.equal((await machine('old-box')).id, old.id, 'reinstalling kept the same machine');
 });
 
 test('a CI runner host is added from its own button and gets its own install line', { skip }, async () => {

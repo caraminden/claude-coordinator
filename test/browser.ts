@@ -114,3 +114,10 @@ export async function launch(bin: string): Promise<Browser> {
     },
   };
 }
+
+/** Wait until `expression` is truthy in the page (an error counts as not yet); throws naming `what` after 10 s. */
+export async function waitFor(page: Page, what: string, expression: string) {
+  for (const end = Date.now() + 10_000; !(await page.eval(expression).catch(() => false)); await new Promise((r) => setTimeout(r, 25))) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+  }
+}

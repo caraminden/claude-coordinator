@@ -1,14 +1,17 @@
+import { spawn, type ChildProcess } from 'node:child_process';
 import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { jsonLines } from './helpers.ts';
+import { jsonLines, REPO } from './helpers.ts';
 
 /**
  * Stand-ins for a machine test, written into root: a tiny MCP server, and a `claude -p` that acts
  * as the MCP client, starting each machine server from its --mcp-config just as claude would.
  * On a machine's workspace server (`<name>-ws`) it lists the workspaces, fetches `report.zip` and
- * runs task `hi` from workspace `w`. turns() reads what each turn saw.
+ * runs task `hi` from workspace `w`. turns() reads what each turn saw. startMachineAgent runs the real
+ * public/machine-agent.mjs against a server (by default lending the stand-in MCP server) and pushes it
+ * onto `procs`, for the caller's cleanup.
  */
-export function machineFakes(root: string) {
+export function machineFakes(root: string, procs: ChildProcess[] = []) {
   // A tiny MCP server with one tool that says which process answered.
   const mcpServer = join(root, 'fake-mcp.mjs');
   writeFileSync(mcpServer, `
@@ -67,5 +70,16 @@ process.stdin.resume();
 `);
   chmodSync(fakeClaude, 0o755);
 
-  return { mcpServer, fakeClaude, turns: () => jsonLines(join(root, 'turns.jsonl')) };
+  /** `run` is the agent's command line after the token (default: the stand-in MCP server); `env` is added to the process environment. */
+  function startMachineAgent({ base, token, run = ['--', process.execPath, mcpServer], env = {} }: { base: string; token: string; run?: string[]; env?: NodeJS.ProcessEnv }) {
+    const agent = spawn(process.execPath, [join(REPO, 'public/machine-agent.mjs'), base, token, ...run], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MACHINES_URL: undefined, ...env } });
+    procs.push(agent);
+    let out = '';
+    agent.stdout!.on('data', (d) => (out += d));
+    agent.stderr!.on('data', (d) => (out += d));
+    const exited = new Promise<number | null>((r) => agent.on('exit', r));
+    return { agent, output: () => out, exited };
+  }
+
+  return { mcpServer, fakeClaude, turns: () => jsonLines(join(root, 'turns.jsonl')), startMachineAgent };
 }

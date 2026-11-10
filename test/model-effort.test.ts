@@ -195,10 +195,31 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
 
 test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and the composer, beside 5.1', async () => {
   const { MODELS } = await import('../src/db.ts');
-  const { readFileSync } = await import('node:fs');
-  for (const id of ['claude-fable-5-1', 'claude-fable-5-2']) {
-    assert.ok((MODELS as readonly string[]).includes(id), `MODELS has ${id}`);
-    assert.ok(readFileSync(join(repo, 'src/mcp.ts'), 'utf8').includes(`'${id}'`), `the MCP enum has ${id}`);
+  for (const id of ['claude-fable-5-1', 'claude-fable-5-2']) assert.ok((MODELS as readonly string[]).includes(id), `MODELS has ${id}`);
+
+  // The MCP server's own list, as a client sees it: every tool that takes a model offers exactly MODELS and null.
+  const mcp = spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
+    env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:1', COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1' },
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
+  try {
+    const listed = new Promise<any>((resolve) => createInterface({ input: mcp.stdout! }).on('line', (l) => {
+      const r = JSON.parse(l);
+      if (r.id === 2) resolve(r.result);
+    }));
+    mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } } }) + '\n');
+    mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
+    const withModel = (await listed).tools.filter((t: any) => t.inputSchema.properties?.model);
+    assert.ok(withModel.some((t: any) => t.name === 'create_ticket') && withModel.some((t: any) => t.name === 'update_ticket'), 'create_ticket and update_ticket take a model');
+    for (const t of withModel) assert.deepEqual(t.inputSchema.properties.model.enum, [...MODELS, null], `${t.name}'s model enum`);
+  } finally {
+    mcp.kill();
   }
-  assert.ok(readFileSync(join(repo, 'public/composer.js'), 'utf8').includes("['claude-fable-5-2', 'Fable 5.2']"), 'the composer lists it');
+
+  // The composer can't be imported without a browser (it needs the page's DOM), so read its two lists
+  // out of the source as data: its Claude and Codex picks together are exactly MODELS, in order.
+  const { readFileSync } = await import('node:fs');
+  const composer = readFileSync(join(repo, 'public/composer.js'), 'utf8');
+  const listIds = (name: string) => [...composer.match(new RegExp(`const ${name} = \\[([^;]*?)\\n\\];`))![1].matchAll(/\['([^']+)', '[^']+'\]/g)].map((m) => m[1]);
+  assert.deepEqual([...listIds('MODELS'), ...listIds('CODEX_MODELS')], [...MODELS], 'the composer offers exactly the server list');
 });

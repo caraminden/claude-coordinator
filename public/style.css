@@ -1195,6 +1195,37 @@ a.thread-ref:hover { text-decoration: underline; }
 .machine-list { display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 1rem; }
 .machine-row { border: 1px solid var(--line); }
 .machine-row button { padding: 0.2rem 0.6rem; font-size: 0.82em; }
+/* The quiet list (#437): one line per machine, its status as a dot; asleep and checking get a hollow one. */
+.dot.ready { background: var(--done); }
+.dot.fix { background: var(--waiting-tint); }
+.dot.down { background: var(--error); }
+.dot.asleep, .dot.checking { background: none; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.machines-bar { display: flex; align-items: center; gap: 0.5rem; margin: 0.9rem 0 0.4rem; }
+.machines-bar h3 { margin: 0; font-size: 1em; }
+.machines-main .machine-add[hidden] { display: none; }
+h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.machine-line { padding: 0; background: var(--panel); border-radius: var(--radius); }
+.machine-line .machine-head { display: flex; gap: 0.6rem; align-items: center; min-width: 0; padding: 0.55rem 0.75rem; cursor: pointer; border-radius: var(--radius); }
+.machine-line .machine-head:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.machine-line .name { font-size: 0.95em; font-weight: 600; }
+.machine-line .meta { font-size: 0.82em; white-space: normal; }
+.machine-line .machine-head > button { flex: none; }
+.machine-body { border-top: 1px solid var(--line); padding: 0.6rem 0.75rem; display: grid; gap: 0.6rem; font-size: 0.88em; }
+.machine-kv { display: grid; grid-template-columns: 7rem 1fr; gap: 0.45rem 0.8rem; align-items: baseline; min-width: 0; }
+.machine-kv > div { min-width: 0; overflow-wrap: anywhere; }
+.machine-kv .machine-lending, .machine-kv .machine-workspaces, .machine-kv .machine-notes { margin: 0; font-size: 1em; }
+.machine-kv .row.small { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.2rem; }
+.machine-kv label.always-on { display: flex; gap: 0.4rem; align-items: center; margin: 0.2rem 0 0; cursor: pointer; }
+.machine-kv label.always-on input { width: auto; margin: 0; }
+.machine-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.machine-warning { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; padding: 0.4rem 0.6rem; border-radius: var(--radius-sm); background: var(--notice-bg); border-left: 3px solid var(--notice-bar); font-size: 0.85em; }
+.machine-warning[hidden] { display: none; }
+.machine-warning .dot { flex: none; }
+.machine-warning a { color: inherit; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 600px) {
+  .machine-kv { grid-template-columns: 1fr; gap: 0.15rem; }
+  .machine-kv > span.muted { margin-top: 0.35rem; }
+}
 .machines-main > p.small { font-size: 0.85em; }
 .machine-add label .row { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 0.4rem; }
 .machine-add label .row select { width: auto; flex: none; }

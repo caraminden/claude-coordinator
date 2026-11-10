@@ -1,6 +1,6 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { account, api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, schemeIcon, setView, threadHref, usageMeter, view } from './core.js';
-import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip } from './settings.js';
+import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachineWarning } from './settings.js';
 import { LAST_SCHEME, newTicketForm, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
 import { chatSection, chatView, mountChat } from './thread.js';
@@ -100,7 +100,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
           'Settings', h('span', { id: 'settings-count', class: 'count', hidden: true })),
         h('button', { class: 'secondary small', onclick: logout }, 'Sign out')),
       usageMeter(),
-      pushControls(project)),
+      pushControls(project),
+      // Only while a machine this scheme's minions get needs a fix or is down (#437).
+      h('div', { id: 'machine-warning', class: 'machine-warning', hidden: true })),
     h('section', { class: 'column', id: 'schemes-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },
@@ -154,6 +156,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderSidebar();
   renderGithubStrip();
   renderSchemesShelf();
+  renderMachineWarning();
   renderHiddenNote();
   refreshInbox();
   prefetchTopRows();
@@ -175,9 +178,9 @@ async function switchChat(main, seq) {
   if (!chatId) return false;
   const [{ ticket }, page] = await Promise.all([api(`api/tickets/${chatId}`), loadEvents(chatId)]);
   if (seq !== routeSeq) return true; // overtaken by another click while loading
-  const { kind, projectId, project, coordinator, tickets, seen, personNotes, pins, artifacts, shared, showClosed } = view;
+  const { kind, projectId, project, coordinator, tickets, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
   setView({
-    kind, main: 'chat', projectId, project, coordinator, tickets, seen, personNotes, pins, artifacts, shared, showClosed,
+    kind, main: 'chat', projectId, project, coordinator, tickets, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects,
     artifactId: null, file: null,
     ...chatView(chatId, ticket),
   });

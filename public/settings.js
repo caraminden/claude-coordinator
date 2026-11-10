@@ -4,6 +4,7 @@ import { agentLog, DEFAULT_CLAUDE_MCP, machineSetup, machineSetupBackground, mac
 import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
+import { toast } from './ui/status.js';
 import { instructionCost } from './prompt-cost.js';
 
 // ---------- push notifications ----------
@@ -670,12 +671,29 @@ export function onMachinesUpdate(machines) {
   if (view?.kind !== 'project') return;
   view.machines = machines;
   renderMachineList();
+  renderMachineWarning();
 }
 
-/** "online on cara-laptop · 2 threads using it" or "offline · seen 3h ago". */
-function machineStatus(m) {
-  if (m.online) return [`online${m.host ? ` on ${m.host}` : ''}`, m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ');
-  return m.last_seen_at ? `offline · seen ${ago(m.last_seen_at)}` : 'not connected yet';
+/** A machine's status line as the server words it (#437): "Asleep · seen 3h ago". */
+function machineStatusText(m) {
+  if (!m.when) return m.reason;
+  return `${m.reason} · ${m.when.label} ${m.when.label === 'added' ? new Date(m.when.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ago(m.when.at)}`;
+}
+
+/** The machines this scheme's minions get that need a fix or are down (#437). */
+const troubled = () => (view.machines ?? []).filter((m) => m.gets?.includes(view.projectId) && (m.status === 'fix' || m.status === 'down'));
+
+/** The overview's one warning line, only while a machine this scheme's minions get is yellow or red (#437). */
+export function renderMachineWarning() {
+  const el = document.getElementById('machine-warning');
+  if (!el) return;
+  const bad = troubled();
+  el.hidden = !bad.length;
+  el.replaceChildren(...(bad.length ? [
+    h('span', { class: `dot ${bad.some((m) => m.status === 'down') ? 'down' : 'fix'}` }),
+    h('a', { href: `#/p/${view.projectId}/machines`, title: bad.map((m) => `${m.name}: ${m.reason}`).join('\n') },
+      bad.length === 1 ? `${bad[0].name} ${bad[0].status === 'down' ? 'is down' : 'needs a fix'}` : `${bad.length} machines minions here use need a look`),
+  ] : []));
 }
 
 /** Settings' Machines tab: add machines, show how to connect them, and remove them or replace their token. */
@@ -719,14 +737,23 @@ export function machinesPage() {
       status.textContent = err.message;
     }
   };
+  // The add form waits behind its button (#437, take A), open while there are no machines yet.
+  form.hidden = !!view.machines?.length;
+  const add = h('button', { type: 'button', class: 'machine-add-toggle', 'aria-expanded': String(!form.hidden) }, 'Add a machine');
+  add.onclick = () => {
+    form.hidden = !form.hidden;
+    add.setAttribute('aria-expanded', String(!form.hidden));
+    if (!form.hidden) name.focus();
+  };
   const section = h('section', { class: 'artifacts-main machines-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, account?.admin
-        ? 'Computers that lend their MCP tools to minions while they are connected: in every scheme an admin owns, or only in the schemes picked under Lend to. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them.'
+        ? 'Computers that lend their MCP tools to minions while they are connected: in every scheme an admin owns, or only in the schemes picked under Who gets it. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Citadel checks each one as it connects and hourly.'
         : 'Your computers, lending their MCP tools while they are connected to the minion turns you ask for, in any scheme you are in. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.')),
+    h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), add),
     form,
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
@@ -741,7 +768,7 @@ export function machinesPage() {
   setTimeout(() => {
     renderMachineSetup();
     renderMachineList();
-    name.focus();
+    if (!form.hidden) name.focus();
   });
   return section;
 }
@@ -809,62 +836,161 @@ function guessOs() {
 function renderMachineList() {
   const el = document.getElementById('machine-list');
   if (!el) return;
-  el.replaceChildren(...view.machines.map((m) => {
-    const newToken = h('button', { type: 'button', class: 'secondary small', title: 'Make a new token; the old one stops working and the machine disconnects' }, 'New token');
-    newToken.onclick = async () => {
-      if (!confirm(`Make a new token for ${m.name}? Its current connection stops and it has to be set up again.`)) return;
-      const { machine, token, agent_url } = await api(`api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
-      if (!token) return;
-      view.machineToken = setupFor(machine, token, agent_url);
+  view.machineOpen ??= new Set();
+  const scheme = view.project?.name ?? 'This scheme';
+  const runners = view.machines.filter((m) => m.runners);
+  const ours = view.machines.filter((m) => !m.runners && m.gets?.includes(view.projectId));
+  const others = view.machines.filter((m) => !m.runners && !ours.includes(m));
+  const group = (title, list) => (list.length ? [h('h4', { class: 'machine-group' }, title), ...list.map(machineLine)] : []);
+  el.replaceChildren(
+    ...group(`${scheme}'s minions get`, ours),
+    ...group(ours.length ? 'Other machines' : 'Machines', others),
+    ...group('CI runners', runners),
+    view.machines.length ? '' : h('p', { class: 'muted small' }, 'No machines yet.'));
+}
+
+/** Make a new token for a machine and show its setup lines. */
+async function newMachineToken(m) {
+  if (!confirm(`Make a new token for ${m.name}? Its current connection stops and it has to be set up again.`)) return;
+  const { machine, token, agent_url } = await api(`api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
+  if (!token) return;
+  view.machineToken = setupFor(machine, token, agent_url);
+  renderMachineSetup();
+  document.getElementById('machine-setup')?.scrollIntoView({ block: 'nearest' });
+}
+
+function removeMachine(m) {
+  if (!confirm(`Remove ${m.name}? Minions lose its tools and its token stops working.`)) return;
+  const at = view.machines.findIndex((x) => x.id === m.id);
+  optimistic({
+    key: `machine:${m.id}`,
+    apply: () => {
+      if (view.machineToken?.id === m.id) view.machineToken = null;
+      onMachinesUpdate(view.machines.filter((x) => x.id !== m.id));
       renderMachineSetup();
-    };
-    const remove = h('button', { type: 'button', class: 'secondary small' }, 'Remove');
-    remove.onclick = () => {
-      if (!confirm(`Remove ${m.name}? Minions lose its tools and its token stops working.`)) return;
-      const at = view.machines.findIndex((x) => x.id === m.id);
-      optimistic({
-        key: `machine:${m.id}`,
-        apply: () => {
-          if (view.machineToken?.id === m.id) view.machineToken = null;
-          onMachinesUpdate(view.machines.filter((x) => x.id !== m.id));
-          renderMachineSetup();
-        },
-        send: () => api(`api/machines/${m.id}`, { method: 'DELETE' }),
-        undo: () => view.machines.some((x) => x.id === m.id) || onMachinesUpdate(view.machines.toSpliced(at, 0, m)),
-        label: `remove ${m.name}`,
-      });
-    };
-    const notes = h('textarea', { rows: 4, maxlength: 2000, placeholder: 'What minions should know: never restart it, where the repo is cloned, what to check first…' });
-    notes.value = m.notes ?? '';
-    const saved = h('span', { class: 'muted small', role: 'status' });
-    const summary = h('summary', {});
-    const summarize = (text) => { summary.textContent = text ? `Notes: ${text.split('\n')[0]}` : 'Add notes for minions'; };
-    summarize(m.notes);
-    const save = h('button', { type: 'button', class: 'small' }, 'Save notes');
-    // The field keeps what was typed either way; a refusal only says it isn't saved.
-    save.onclick = () => patchMachine(m, { notes: notes.value }, `save the notes on ${m.name}`, (ok, x) => {
-      summarize(x.notes);
-      saved.textContent = ok ? 'Saved; minions get them from their next turn.' : 'Not saved.';
-    });
-    notes.addEventListener('input', () => { saved.textContent = ''; });
-    // Keep an open notes editor open (and its draft) when the list re-renders for a status change.
-    const old = document.querySelector(`.machine-notes[data-id="${m.id}"]`);
-    const editing = old?.open;
-    if (editing) notes.value = old.querySelector('textarea').value;
-    return h('div', { class: `machine-row${m.online ? ' online' : ''}` },
-      h('div', { class: 'row' },
-        h('span', { class: `dot${m.online ? ' online' : ''}` }),
-        h('span', { class: 'text' },
-          h('span', { class: 'name' }, m.name),
-          h('span', { class: 'meta' }, [machineStatus(m), m.command, `added by ${m.created_by}`].filter(Boolean).join(' · '))),
-        newToken, remove),
-      machineWorkspaces(m),
-      // A person's own machine goes to the turns they ask for (#306): nothing to lend.
-      m.owner_id === null ? machineLending(m) : h('div', { class: 'machine-lending' },
-        h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Used by'), h('span', {}, `turns ${m.created_by} asks for, in schemes they are in, and their contraptions`))),
-      h('details', { class: 'machine-notes', 'data-id': m.id, open: editing },
-        summary, notes, h('div', { class: 'row' }, save, saved)));
-  }));
+    },
+    send: () => api(`api/machines/${m.id}`, { method: 'DELETE' }),
+    undo: () => view.machines.some((x) => x.id === m.id) || onMachinesUpdate(view.machines.toSpliced(at, 0, m)),
+    label: `remove ${m.name}`,
+  });
+}
+
+/** Check now (#437): its result can't be guessed, so only its own button shows it is busy. */
+function checkMachine(m, button) {
+  button.disabled = true;
+  button.textContent = 'Checking…';
+  api(`api/machines/${m.id}/check`, { method: 'POST' })
+    .catch((err) => toast(`Couldn't check ${m.name}: ${err.message}`, { tone: 'error' }))
+    // The broadcast has redrawn the row by now; this is for one that didn't.
+    .finally(() => { if (button.isConnected) { button.disabled = false; button.textContent = 'Check now'; } });
+}
+
+/** Switch machine tools on in a scheme (until lending becomes one list per machine, handoff 3). */
+function machineToolsOn(m, project) {
+  optimistic({
+    key: `machine-tools:${project.id}`,
+    apply: () => { m.fix = null; renderMachineList(); },
+    send: () => api(`api/projects/${project.id}`, { method: 'PATCH', body: { machine_tools: true } }),
+    undo: () => { m.fix = 'machine_tools'; renderMachineList(); },
+    label: `switch machine tools on in ${project.name}`,
+  });
+}
+
+const schemeName = (id) => (view.projects ?? []).find((p) => p.id === id)?.name ?? `scheme ${id}`;
+
+/** The button on a machine's line that fixes what its status says, if one does (#437). */
+function fixButton(m, open) {
+  const b = (label, onclick, title) => h('button', { type: 'button', class: 'secondary small', title, onclick: (e) => { e.stopPropagation(); onclick(e.currentTarget); } }, label);
+  switch (m.fix) {
+    case 'check': return m.checking ? b('Checking…', () => {}) : b('Check now', (btn) => checkMachine(m, btn), 'Start its tools again and list them');
+    case 'workspace_tools': return b('Turn on', () => patchMachine(m, { workspace_tools: true }, `switch workspace tools on for ${m.name}`, renderMachineList), 'Switch its workspace tools on, so minions get its folders');
+    case 'lend': return b('Lend it', open, 'Pick the schemes whose minions get it');
+    case 'machine_tools': {
+      const [only] = m.lent_to;
+      return m.lent_to.length === 1
+        ? b(`Turn on in ${schemeName(only)}`, () => machineToolsOn(m, { id: only, name: schemeName(only) }), `Switch machine tools on in ${schemeName(only)}: its minions get every machine lent to it`)
+        : b('Show schemes', open);
+    }
+    case 'token': return b('New token', () => newMachineToken(m), 'Set it up again, with an MCP server or a folder');
+    case 'remove': return b('Remove', () => removeMachine(m));
+    case 'always_on': return b('Not always on', () => patchMachine(m, { always_on: false }, `mark ${m.name} as not always on`, renderMachineList), 'A laptop that comes and goes: offline shows as Asleep, not Down');
+    default: return '';
+  }
+}
+
+/** What a machine lends, from its last check: "MCP server (godot-ai), 47 tools · workspace tools, 8 tools". */
+function machineLends(m) {
+  const results = m.checked?.results ?? [];
+  if (!results.length) return m.online ? 'Nothing it offers has been checked yet' : 'Shows once it connects and is checked';
+  return results.map((r) => `${r.server === 'ws' ? 'workspace tools' : `MCP server${m.mcp_command ? ` (${m.mcp_command})` : ''}`}${r.ok ? `, ${r.tools.length} tool${r.tools.length === 1 ? '' : 's'}` : ': didn\'t start'}`).join(' · ');
+}
+
+/** One line of the quiet list (#437, take A): dot, name, reason, fix button; click it for the rest. */
+function machineLine(m) {
+  const isOpen = view.machineOpen.has(m.id);
+  const toggle = () => {
+    view.machineOpen[isOpen ? 'delete' : 'add'](m.id);
+    renderMachineList();
+  };
+  const open = () => {
+    view.machineOpen.add(m.id);
+    renderMachineList();
+  };
+  const head = h('div', { class: 'machine-head', role: 'button', tabindex: 0, 'aria-expanded': String(isOpen), onclick: toggle, onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } } },
+    h('span', { class: `dot ${m.status}`, title: { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status] }),
+    h('span', { class: 'text' },
+      h('span', { class: 'name' }, m.name),
+      h('span', { class: 'meta' }, machineStatusText(m))),
+    fixButton(m, open));
+  return h('div', { class: `machine-row machine-line ${m.status}${isOpen ? ' open' : ''}` }, head, isOpen ? machineBody(m) : '');
+}
+
+/** A machine's line opened: what it lends, who gets it, its computer, notes and its buttons. */
+function machineBody(m) {
+  const check = h('button', { type: 'button', class: 'secondary small', disabled: !m.online || m.checking, title: m.online ? 'Start its tools and list them, as a minion\'s turn would' : 'It is offline' }, m.checking ? 'Checking…' : 'Check now');
+  check.onclick = () => checkMachine(m, check);
+  const newToken = h('button', { type: 'button', class: 'secondary small', title: 'Make a new token; the old one stops working and the machine disconnects', onclick: () => newMachineToken(m) }, 'New token');
+  const remove = h('button', { type: 'button', class: 'secondary small', onclick: () => removeMachine(m) }, 'Remove');
+  const alwaysOn = h('input', { type: 'checkbox', checked: m.always_on });
+  alwaysOn.onchange = () => patchMachine(m, { always_on: alwaysOn.checked }, `mark ${m.name} as ${alwaysOn.checked ? '' : 'not '}always on`, renderMachineList);
+  const kv = (label, ...value) => [h('span', { class: 'muted' }, label), h('div', {}, ...value)];
+  const off = m.lent_to?.filter((id) => !m.gets.includes(id)) ?? [];
+  return h('div', { class: 'machine-body' },
+    h('div', { class: 'machine-kv' },
+      m.runners ? kv('Does', 'Adds, lists and removes CI runners for schemes, when Citadel asks') : kv('Lends', machineLends(m)),
+      m.runners ? [] : kv('Who gets it',
+        m.owner_id === null ? machineLending(m) : `Turns ${m.created_by} asks for, in schemes they are in, and their contraptions`,
+        ...off.map((id) => h('div', { class: 'row small' }, `${schemeName(id)} has machine tools off, so its minions don't get it. `,
+          h('button', { type: 'button', class: 'secondary small', onclick: () => machineToolsOn(m, { id, name: schemeName(id) }) }, 'Turn on')))),
+      kv('Computer',
+        h('span', {}, [m.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
+        h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on'))),
+      m.runners ? [] : kv('Workspaces', machineWorkspaces(m)),
+      kv('Notes', machineNotes(m))),
+    h('div', { class: 'row machine-buttons' }, m.runners ? '' : check, newToken, remove));
+}
+
+/** A machine's notes for minions: a collapsed editor that keeps an open draft through re-renders. */
+function machineNotes(m) {
+  const notes = h('textarea', { rows: 4, maxlength: 2000, placeholder: 'What minions should know: never restart it, where the repo is cloned, what to check first…' });
+  notes.value = m.notes ?? '';
+  const saved = h('span', { class: 'muted small', role: 'status' });
+  const summary = h('summary', {});
+  const summarize = (text) => { summary.textContent = text ? text.split('\n')[0] : 'Add notes for minions'; };
+  summarize(m.notes);
+  const save = h('button', { type: 'button', class: 'small' }, 'Save notes');
+  // The field keeps what was typed either way; a refusal only says it isn't saved.
+  save.onclick = () => patchMachine(m, { notes: notes.value }, `save the notes on ${m.name}`, (ok, x) => {
+    summarize(x.notes);
+    saved.textContent = ok ? 'Saved; minions get them from their next turn.' : 'Not saved.';
+  });
+  notes.addEventListener('input', () => { saved.textContent = ''; });
+  // Keep an open notes editor open (and its draft) when the list re-renders for a status change.
+  const old = document.querySelector(`.machine-notes[data-id="${m.id}"]`);
+  const editing = old?.open;
+  if (editing) notes.value = old.querySelector('textarea').value;
+  return h('details', { class: 'machine-notes', 'data-id': m.id, open: editing },
+    summary, notes, h('div', { class: 'row' }, save, saved));
 }
 
 // What a machine-agent.json looks like, for the Machines page; the owner writes it beside the agent.
@@ -942,7 +1068,6 @@ function machineLending(m) {
     return h('label', { class: 'row small' }, box, h('span', {}, p.name));
   });
   return h('div', { class: 'machine-lending', 'data-id': m.id },
-    h('div', { class: 'row small' }, h('span', { class: 'muted' }, 'Lend to')),
     choice(false, 'Every scheme an admin owns', 'Minions in every scheme an admin owns get it, as for every machine before'),
     choice(true, 'Only these schemes', 'Only the ticked schemes\' minions get it, whoever owns the scheme; Taskmasters never do'),
     m.projects === null ? '' : h('div', { class: 'schemes' }, ...schemes,

@@ -118,6 +118,52 @@ test('a conflict aborts the rebase and lands nothing', () => {
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
 });
 
+test('a conflict is logged to the retro-log with its files, and the refusal names them', () => {
+  const r = setup();
+  r.commit(r.wt, 'a.txt', 'mine\n');
+  r.commit(r.source, 'a.txt', 'theirs\n');
+  const main = git(r.source, 'rev-parse', 'main');
+  const shared = join(r.dir, 'shared');
+  const res = r.run({ COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /rebase onto main failed.*conflicted files: a\.txt\./);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  const day = new Date().toISOString().slice(0, 10);
+  const log = readFileSync(join(shared, 'retro-log', day, 'land.md'), 'utf8');
+  assert.match(log, new RegExp(`^- \\d\\d:\\d\\d:\\d\\dZ · land conflict · ticket/1-x onto ${main.slice(0, 7)}: a\\.txt$`, 'm'));
+});
+
+test('a rebase that cannot start logs no conflicted files', () => {
+  const r = setup();
+  r.commit(r.wt, 'x.txt', 'mine\n');
+  writeFileSync(join(r.source, 'c.txt'), 'x\n');
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'c');
+  // main adds c.txt; an untracked c.txt in the worktree is in the way of the rebase.
+  writeFileSync(join(r.wt, 'c.txt'), 'untracked\n');
+  const shared = join(r.dir, 'shared');
+  const res = r.run({ COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1);
+  const log = readFileSync(join(shared, 'retro-log', new Date().toISOString().slice(0, 10), 'land.md'), 'utf8');
+  assert.match(log, /land conflict · ticket\/1-x: no conflicted files \(rebase did not start\)$/m);
+});
+
+test('a conflict still refuses the same when there is no shared dir or it cannot be written', () => {
+  const r = setup();
+  r.commit(r.wt, 'a.txt', 'mine\n');
+  r.commit(r.source, 'a.txt', 'theirs\n');
+  const main = git(r.source, 'rev-parse', 'main');
+  const blocker = join(r.dir, 'blocker');
+  writeFileSync(blocker, 'a file, not a folder\n');
+  for (const shared of ['', blocker]) {
+    const res = r.run({ COORDINATOR_SHARED_DIR: shared });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /rebase onto main failed/);
+    assert.equal(git(r.source, 'rev-parse', 'main'), main);
+    assert.equal(git(r.wt, 'status', '--porcelain'), '');
+  }
+});
+
 test('a deploy that fails before going live puts main back', () => {
   const r = setup();
   r.commit(r.wt, 'b.txt', 'mine\n');

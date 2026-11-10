@@ -38,8 +38,20 @@ flock -w 900 9 || refuse "another deploy or landing has held the lock for 15 min
 old=$(git -C "$SOURCE" rev-parse main)
 say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
 if ! git rebase -q main; then
+  # Which files collide is worth a retro-log line (the architecture check counts them). Best effort: land.sh has no
+  # session id, so the line goes in the day's land.md; any failure here is swallowed and the abort and refusal go on as before.
+  conflicted=$(git diff --name-only --diff-filter=U 2>/dev/null | paste -sd' ' - | sed 's/ /, /g' || true)
+  (
+    set +e
+    [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
+    dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
+    mkdir -p "$dir" || exit 0
+    [ -e "$dir/land.md" ] || printf '# Retro log: land.sh\n\nWritten by tools/land.sh (no session id, so one file per day). One line per rebase conflict.\n\n' >>"$dir/land.md"
+    if [ -n "$conflicted" ]; then what=" onto $(git log -1 --format=%h main): $conflicted"; else what=": no conflicted files (rebase did not start)"; fi
+    printf -- '- %sZ · land conflict · %s%s\n' "$(date -u +%T)" "$branch" "$what" >>"$dir/land.md"
+  ) >/dev/null 2>&1 || true
   git rebase --abort 2>/dev/null || true # nothing to abort if it never started (an untracked file in the way)
-  refuse "the rebase onto main failed (see git's output above), so nothing landed. On conflicts: run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again"
+  refuse "the rebase onto main failed (see git's output above), so nothing landed${conflicted:+; conflicted files: $conflicted}. On conflicts: run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again"
 fi
 
 say "running the tests (in a citadel-heavy slot, shared host-wide)"

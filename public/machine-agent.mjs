@@ -191,11 +191,12 @@ const TOOLS = [
 function run(command, args, opts) {
   return new Promise((done) => {
     let out = '';
+    let stdout = '';
     const p = spawn(command, args, { ...opts, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    p.stdout.on('data', (d) => (out += d));
+    p.stdout.on('data', (d) => ((out += d), (stdout += d)));
     p.stderr.on('data', (d) => (out += d));
-    p.on('error', (err) => done({ code: -1, out: err.message }));
-    p.on('close', (code) => done({ code, out: out.trim() }));
+    p.on('error', (err) => done({ code: -1, out: err.message, stdout: '' }));
+    p.on('close', (code) => done({ code, out: out.trim(), stdout: stdout.trim() }));
   });
 }
 
@@ -285,7 +286,9 @@ function screenHolder(file) {
 
 // Reads the screen the way desktop tests do (GDI BitBlt with CAPTUREBLT, as Peek Auras'
 // screen-check.ps1), per-monitor DPI aware so 125% gives real pixels. C# 5: Windows PowerShell's compiler.
+// Progress off: Add-Type's "Preparing modules for first use" otherwise reaches stderr as CLIXML.
 const SCREENSHOT_PS = String.raw`$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 try {
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
@@ -383,7 +386,7 @@ async function captureScreen(file, window) {
     env: { ...process.env, CITADEL_SHOT_FILE: file, CITADEL_SHOT_WINDOW: window },
   });
   if (r.code) throw new ToolError(`The screenshot failed: ${r.out}`);
-  return r.out;
+  return r.stdout;
 }
 
 /** The workspaces this computer offers, shared by every thread session: one lock and one job list. */

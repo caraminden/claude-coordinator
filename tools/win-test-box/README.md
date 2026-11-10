@@ -4,7 +4,7 @@ A Hyper-V VM on Cara's gaming PC (DESKTOP-G248IJ8) for native-app schemes (#369)
 - **Its screen is always there.** It signs itself in at every start and can never lock, sleep or blank its screen, so screen reads and capture work with Cara's own PC locked, after a reboot, and with nobody at it.
 - **It looks like her PC where tests care:** 125% scaling and Windows 11's rounded corners. The corners are forced on, because Hyper-V's display adapter draws square ones otherwise.
 - **It renders on the CPU (WARP), not her RTX 5080.** That was Cara's pick on 2026-11-07, over GPU-P, which GeForce cards don't support.
-- **It runs Windows 11 Home, unactivated** (Cara's pick, 2026-11-07). An "Activate Windows" watermark shows in its bottom-right corner, in every screenshot.
+- **It runs Windows 11 Home, unactivated** (Cara's pick, 2026-11-07). Windows may add an "Activate Windows" watermark in its bottom-right corner; the first screenshots (2026-11-10) had none.
 - **Two kinds of user share one screen** through one lock, `C:\citadel-box\screen.lock`:
   - **CI:** each scheme's GitHub **desktop runner** (the `<slug>-desktop` label) runs its desktop jobs here.
   - **Minions:** Citadel's **machine agent** lends them the box's tools, so they can sync a branch, run a command, launch the app, take a screenshot and stop it (the `citadel:run-on-windows` skill).

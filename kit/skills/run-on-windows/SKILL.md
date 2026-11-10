@@ -46,9 +46,13 @@ Citadel's `tools/win-test-box/README.md`.
   - "busy … for #N" means another minion has it.
 
   Do the `build` side meanwhile, or try again in a few minutes. Never stop someone else's job.
-- **Pixel tests:** the "Activate Windows" watermark sits in the bottom-right corner of every
-  screenshot (the box is unactivated on purpose). A test that reads pixels there sees it.
+- **Pixel tests:** the box is unactivated on purpose, so an "Activate Windows" watermark may
+  appear in the bottom-right corner. The first screenshots (2026-11-10) had none, but Windows can
+  add it later, so keep pixel checks out of that corner.
 - **What a pass proves:** a pass here proves Windows behaviour on a GPU-less 125% screen. It does
   not prove her GPU, HDR or a game running beside it. Say which one you proved.
+- **What the box can't do** (WARP, a Hyper-V screen): exclusive fullscreen fails, and capturing
+  a maximised window can give a black frame (Peek Auras, 2026-11-10). Skip such a test on the box
+  rather than chase it, and say so.
 - **The record:** CI still gives the verdict on a PR. The box is for proving a fix before you
   push the round trip, and for looking.

@@ -865,7 +865,7 @@ export function appendEvent(event, scroll = true) {
   } else if (event.kind === 'loop_paused') {
     nodes.push(loopCard(data));
   } else if (event.kind === 'loop_continued') {
-    for (const card of log.querySelectorAll(`.lcard[data-minion="${data.minion}"]:not(.answered)`)) {
+    for (const card of log.querySelectorAll(`.lcard[data-minion="${data.minion}"]:has(button)`)) {
       card.classList.add('answered');
       card.querySelector('button').remove();
       card.querySelector('[role=status]').textContent = `Continued by ${data.by}`;
@@ -958,7 +958,8 @@ function openCardsOutOfView() {
   if (!log) return [];
   const top = document.getElementById('ticket-head')?.getBoundingClientRect().bottom ?? 0;
   const bottom = log.parentElement.querySelector('.composer')?.getBoundingClientRect().top ?? innerHeight;
-  return [...log.querySelectorAll('.qcard:not(.answered)')].filter((el) => {
+  // An ultra review's card waits on its review, not on a person.
+  return [...log.querySelectorAll('.qcard:not(.answered, .ur-card)')].filter((el) => {
     const r = el.getBoundingClientRect();
     return r.bottom <= top || r.top >= bottom;
   });
@@ -1376,11 +1377,13 @@ function loopCard(data) {
   go.addEventListener('click', () => optimistic({
     key: `continue:${data.minion}`,
     apply: () => {
+      go.closest('.qcard').classList.add('answered');
       go.hidden = true;
       status.textContent = 'Continued';
     },
     send: () => api(`api/tickets/${data.minion}/continue`, { method: 'POST' }),
     undo: () => {
+      go.closest('.qcard').classList.remove('answered');
       go.hidden = false;
       status.textContent = '';
     },

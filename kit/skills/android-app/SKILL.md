@@ -28,6 +28,7 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
 
 - Keep `compileSdk` at 36. Don't bump compileSdk, the Android Gradle Plugin or `buildToolsVersion`
   to a version that isn't installed.
+- Moving a project to AGP 9 (once the packages above are installed): read `references/agp-9.md`.
 - **"The SDK directory is not writable"** means the build wants a package that isn't installed.
   Gradle can't install it inside a container. Don't work around it with a private SDK copy:
   1. Add the package to `PACKAGES` in Citadel's `tools/android/install-sdk.sh`.
@@ -84,6 +85,15 @@ citadel-android down               # when you're done
   If it says the service didn't answer, the service still runs older code: `down`, then try again. Run your app with
   `adb -s emulator-5554 shell monkey -p <applicationId> 1`; plain `adb -s emulator-5554 ...` works
   for anything else (logcat, input), from containers too.
+- **Other console and shell traps.** `adb emu` exits 0 even when it prints `KO: ...`, and a refused
+  `cmd notification` can print usage and exit 0: read the reply, not the exit code. `sms` is
+  accepted before it reaches the inbox, so poll. There is no MMS or RCS, and the sender isn't
+  validated. `adb shell cmd notification post` posts as `com.android.shell` on channel `shell_cmd`,
+  so a listener filtering by your package won't match; read back with `cmd notification list`.
+  `cmd notification allow_listener <pkg>/<service>` grants listener access. To tap without
+  coordinates: `adb -s emulator-5554 exec-out uiautomator dump /dev/tty`, then tap the centre of the
+  node's `bounds` (`exec-out` avoids a shared temp file). One app's log:
+  `adb -s emulator-5554 logcat -d --pid=$(adb -s emulator-5554 shell pidof <pkg>)`.
 - **One screen.** Each call takes the screen lock, and you keep the screen for 2 minutes after each
   call, so your install, open and shot run back to back. Anyone else waits, and it says whose turn
   holds it. Don't work around a wait: it ends when the holder's lease runs out or it runs `down`.

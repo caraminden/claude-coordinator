@@ -154,8 +154,10 @@ test('Who gets it is one list of scheme chips: + scheme adds one at once, × tak
   // Two picks in a row both count, before either answer is back.
   await add(projectId);
   await add(other.id);
-  assert.deepEqual(await chips(), ['P', 'Other scheme']);
   await wait('both to be saved', `fetch('api/machines').then((r) => r.json()).then((l) => l.find((m) => m.id === ${machine.id}).projects.length === 2)`);
+  // The first answer's broadcast can show the list without the second pick for a moment; it comes back with its own.
+  await wait('both chips', `${row}.querySelectorAll('.scheme-chip').length === 2`);
+  assert.deepEqual(await chips(), ['P', 'Other scheme']);
   assert.equal(await page.eval(`${row}.querySelector('select.add-scheme').hidden`), true, 'no scheme left to add');
   await page.eval(`${row}.querySelector('.scheme-chip button[aria-label="Remove P"]').click()`);
   assert.deepEqual(await chips(), ['Other scheme']);

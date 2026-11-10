@@ -3,14 +3,21 @@
 // coordinator's threads. It dials out to the app and keeps that connection open, so the app never
 // needs to reach this computer; each thread session gets its own copy of the MCP server.
 //
+//   node machine-agent.mjs <app url> <token> --config <file>
 //   node machine-agent.mjs <app url> <token> --claude-mcp <name> [--config <file>]
 //   node machine-agent.mjs <app url> <token> [--config <file>] -- <mcp server command> [args...]
-//   node machine-agent.mjs <app url> <token> --config <file>
 //
-// --claude-mcp runs a server already set up for Claude Code on this computer (in ~/.claude.json),
+// The first form is what the Machines page installs (#439): the agent tells the app what it found here,
+// the names of the MCP servers set up for Claude Code on this computer (in ~/.claude.json; names only,
+// never their commands, env or paths), the servers its owner lists in the config file, and that file's
+// workspaces. A person ticks what to lend on the Machines page, and the agent serves only what is
+// ticked and what it found itself: the app sends names, never a command.
+// The other two are how agents were set up before: the MCP server is fixed on this computer's command
+// line, and the Machines page shows it as "set on that computer".
+// --claude-mcp runs a server already set up for Claude Code on this computer,
 // such as godot-ai, whose entry holds a path only this computer knows. It is read afresh for each
 // session, so an updated entry applies without restarting the agent.
-// --config names a workspaces file (machine-agent.json). When it lists any, the agent also serves
+// --config names the config file (machine-agent.json). When it lists workspaces, the agent also serves
 // its own workspace tools (mcp__<name>-ws__…): git sync and the tasks listed there, in the folders
 // listed there, nothing else. Only this computer's owner edits that file; minions can't write to it.
 // It is re-read when it changes. A missing file just means no workspace tools.
@@ -32,6 +39,8 @@ import { fileURLToPath } from 'node:url';
 class ToolError extends Error {}
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
+// An MCP server's name as the app takes it (src/machines.ts SERVER_NAME).
+const SERVER_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}$/;
 // A branch name as git allows it, minus anything that could read as an option or a range.
 const REF = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*@\{)[A-Za-z0-9._/-]{1,200}(?<![./])$/;
 const SHA = /^[0-9a-f]{7,40}$/;
@@ -41,6 +50,7 @@ const TAIL_LINES = 400;
 const READ_MAX = 5_000_000;
 const FETCH_MAX = 20_000_000;
 const KEEP_LOGS = 100;
+const FOUND_EVERY_MS = 30_000;
 
 /** %NAME% from the environment, as Windows writes it; an unset one is an error, not an empty string. */
 export function expand(text, env = process.env) {
@@ -70,15 +80,18 @@ function within(root, target) {
 }
 
 /**
- * Reads machine-agent.json: { screen_lock?: <file>, screenshots?: true, workspaces: { <name>: { path, read?: [folders], git_sync?: false,
+ * Reads machine-agent.json: { screen_lock?: <file>, screenshots?: true, servers?: { <name>: { run: [argv] } },
+ * workspaces: { <name>: { path, read?: [folders], git_sync?: false,
  * tasks: { <name>: { run: [argv], about?, hints?, args?: true, screen?: false } } } } }.
+ * servers are MCP servers this computer's owner offers besides Claude Code's (#439): a program and its arguments, no shell.
  * A bad workspace or task is left out with a problem saying why, so one typo doesn't take the rest down.
  * screen_lock and screenshots are for a test box (tools/win-test-box/): one lock file its CI desktop jobs take too.
  */
 export function loadConfig(file, env = process.env) {
   const workspaces = new Map();
+  const servers = new Map();
   const problems = [];
-  const none = { workspaces, problems, screenLock: null, screenshots: false };
+  const none = { workspaces, servers, problems, screenLock: null, screenshots: false };
   if (!existsSync(file)) return none;
   let raw;
   try {
@@ -97,6 +110,11 @@ export function loadConfig(file, env = process.env) {
   }
   const screenshots = raw?.screenshots === true;
   if (raw?.screenshots !== undefined && typeof raw.screenshots !== 'boolean') problems.push('"screenshots" must be true or false, so it is off');
+  for (const [name, v] of Object.entries(raw?.servers ?? {})) {
+    if (!SERVER_NAME.test(name)) problems.push(`server "${name}": names use letters, digits, -, _ and .`);
+    else if (!Array.isArray(v?.run) || !v.run.length || !v.run.every((a) => typeof a === 'string' && a)) problems.push(`server ${name}: "run" must be a list of the program and its arguments`);
+    else servers.set(name, { run: v.run });
+  }
   for (const [name, w] of Object.entries(raw?.workspaces ?? {})) {
     if (!NAME.test(name)) {
       problems.push(`workspace "${name}": names use letters, digits, - and _`);
@@ -141,7 +159,25 @@ export function loadConfig(file, env = process.env) {
     }
     workspaces.set(name, { name, path, read, gitSync, tasks });
   }
-  return { workspaces, problems, screenLock, screenshots };
+  return { workspaces, servers, problems, screenLock, screenshots };
+}
+
+const claudeConfigFile = (env) => join(env.CLAUDE_CONFIG_DIR ?? homedir(), '.claude.json');
+
+/**
+ * The names of the stdio MCP servers set up for Claude Code on this computer (#439): user scope and every
+ * project's. Names only: an entry's command, env and paths can hold secrets, and never leave this computer.
+ */
+export function claudeServerNames(env = process.env) {
+  let config;
+  try {
+    config = JSON.parse(readFileSync(claudeConfigFile(env), 'utf8'));
+  } catch {
+    return [];
+  }
+  const scopes = [config?.mcpServers, ...Object.values(config?.projects ?? {}).map((p) => p?.mcpServers)];
+  const names = scopes.flatMap((s) => Object.entries(s ?? {}).filter(([name, e]) => SERVER_NAME.test(name) && typeof e?.command === 'string' && e.command).map(([name]) => name));
+  return [...new Set(names)].sort();
 }
 
 const TOOLS = [
@@ -398,17 +434,24 @@ export class WorkspaceHost {
     this.capture = capture;
     this.busy = new Map(); // workspace name -> { what, who, since, job? }
     this.jobs = new Map();
+    // The workspace names minions get (#439), as ticked on the Machines page; null lends them all (an agent set up the old way).
+    this.lent = null;
     this.reload();
   }
 
   reload() {
-    ({ workspaces: this.workspaces, problems: this.problems, screenLock: this.screenLock, screenshots: this.screenshots } = loadConfig(this.configFile, this.env));
+    ({ workspaces: this.all, servers: this.servers, problems: this.problems, screenLock: this.screenLock, screenshots: this.screenshots } = loadConfig(this.configFile, this.env));
+  }
+
+  /** The workspaces minions get: every tool reads these, so one that isn't lent is not there for them. */
+  get workspaces() {
+    return this.lent ? new Map([...this.all].filter(([name]) => this.lent.has(name))) : this.all;
   }
 
   /** What the app shows on the Machines page. */
   summary() {
     return {
-      workspaces: [...this.workspaces.values()].map((w) => ({ name: w.name, path: w.path, read: w.read, git_sync: w.gitSync, tasks: [...w.tasks].map(([name, t]) => ({ name, run: t.run, about: t.about, args: t.args })) })),
+      workspaces: [...this.all.values()].map((w) => ({ name: w.name, path: w.path, read: w.read, git_sync: w.gitSync, tasks: [...w.tasks].map(([name, t]) => ({ name, run: t.run, about: t.about, args: t.args })) })),
       problems: this.problems,
     };
   }
@@ -845,8 +888,8 @@ async function installService(name, argv) {
     if (run.status !== 0) {
       throw new Error(`${cmd} ${args.join(' ')} failed${run.error ? `: ${run.error.message}` : `:\n${run.stderr.trim()}`}\n` +
         (cmd === 'systemctl'
-          ? 'This computer has no systemd user session: use the "Just try it" lines from the Machines page in a terminal you leave open instead.'
-          : 'launchd needs this Mac\'s own login (not SSH): run this in Terminal on the Mac, or use the "Just try it" lines from the Machines page.'));
+          ? 'This computer has no systemd user session: run the same line without --install and the name, in a terminal you leave open, instead.'
+          : 'launchd needs this Mac\'s own login (not SSH): run this in Terminal on the Mac, or run the same line without --install and the name in a terminal you leave open.'));
     }
   }
   console.log(`Installed ${s.file}. Waiting for the agent to connect…`);
@@ -888,18 +931,22 @@ async function main() {
   const [appUrl, argToken] = opts;
   const token = argToken ?? process.env.CC_MACHINE_TOKEN;
   if (!appUrl || !token || (!command.length && !claudeMcp && !configArg)) {
-    console.error('Usage: node machine-agent.mjs <app url> <token> --claude-mcp <name> [--config machine-agent.json]');
+    console.error('Usage: node machine-agent.mjs <app url> <token> --config machine-agent.json');
+    console.error('   or: node machine-agent.mjs <app url> <token> --claude-mcp <name> [--config machine-agent.json]');
     console.error('   or: node machine-agent.mjs <app url> <token> [--config machine-agent.json] -- <mcp server command> [args...]');
-    console.error('   or: node machine-agent.mjs <app url> <token> --config machine-agent.json');
     console.error('Add --log <file> to copy its output to a file, or --install <machine name> to run it in the background (macOS, Linux).');
-    console.error('Example: node machine-agent.mjs https://example.net ccm_1_… --claude-mcp godot-ai');
+    console.error('Example: node machine-agent.mjs https://example.net ccm_1_… --config machine-agent.json');
     process.exit(2);
   }
+  // Set up the old way, its MCP server is fixed on this command line; otherwise the Machines page's ticks decide (#439).
   const lends = !!(command.length || claudeMcp);
+  const managed = !lends;
+  /** What the app says is ticked: one MCP server's name, or null. The ticked workspaces are host.lent. */
+  let lentServer = null;
 
   /** A stdio server from Claude Code's config: user scope first, then any project's. */
   function claudeServer(name) {
-    const file = join(process.env.CLAUDE_CONFIG_DIR ?? homedir(), '.claude.json');
+    const file = claudeConfigFile(process.env);
     let config;
     try {
       config = JSON.parse(readFileSync(file, 'utf8'));
@@ -913,15 +960,21 @@ async function main() {
 
   /** What a session runs: the program, its arguments, extra environment, and whether it needs a shell. */
   function serverCommand() {
-    if (claudeMcp) {
-      const s = claudeServer(claudeMcp);
+    if (managed) {
+      // Only a name this agent found itself, looked up afresh: the app never names a command.
+      if (!lentServer || !found().some((f) => f.name === lentServer)) throw new Error('no MCP server found on this computer is ticked for this machine on the Machines page');
+      const own = host.servers.get(lentServer);
+      if (own) return { command: own.run[0], args: own.run.slice(1), env: {}, shell: process.platform === 'win32' };
+    }
+    if (claudeMcp || managed) {
+      const s = claudeServer(claudeMcp ?? lentServer);
       // An absolute path may hold spaces, which a shell would split; only batch files need one.
       return { ...s, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(s.command) };
     }
     // npx and friends are .cmd files on Windows, which only start through a shell.
     return { command: command[0], args: command.slice(1), env: {}, shell: process.platform === 'win32' };
   }
-  const describe = claudeMcp ? `${claudeMcp} (from Claude Code's config)` : command.length ? command.join(' ') : 'workspace tools only';
+  const describe = claudeMcp ? `${claudeMcp} (from Claude Code's config)` : command.length ? command.join(' ') : 'what is ticked on the Machines page';
   if (lends) {
     try {
       serverCommand();
@@ -944,11 +997,19 @@ async function main() {
 
   const configFile = configArg && resolve(configArg);
   const host = configFile && new WorkspaceHost({ configFile, jobsDir: join(dirname(configFile), 'citadel-jobs') });
+  // Nothing is lent until the app says what is ticked.
+  if (managed) host.lent = new Set();
   const offered = () => [...(lends ? ['mcp'] : []), ...(host?.workspaces.size ? ['ws'] : [])];
+  /** The MCP servers found here, by name: the config file's own first, then Claude Code's. */
+  function found() {
+    const own = [...host.servers.keys()];
+    return [...own.map((name) => ({ name, from: 'file' })), ...claudeServerNames().filter((n) => !own.includes(n)).map((name) => ({ name, from: 'claude' }))];
+  }
   const describeWorkspaces = () => {
     if (!host) return;
     for (const p of host.problems) log(`Config problem: ${p}`);
-    log(host.workspaces.size ? `Workspaces from ${configFile}: ${[...host.workspaces.keys()].join(', ')}` : `No workspaces in ${configFile}${existsSync(configFile) ? '' : ' (no such file yet)'}`);
+    log(host.all.size ? `Workspaces from ${configFile}: ${[...host.all.keys()].join(', ')}` : `No workspaces in ${configFile}${existsSync(configFile) ? '' : ' (no such file yet)'}`);
+    if (managed) log(`MCP servers found here: ${found().map((f) => f.name).join(', ') || 'none'}`);
   };
   describeWorkspaces();
 
@@ -957,7 +1018,8 @@ async function main() {
     await fetch(new URL('/api/machines/info', appUrl), {
       method: 'POST',
       headers: { ...auth, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ servers: offered(), ...(host ? host.summary() : {}) }),
+      // v says which agent this is: the app shows one without it as set up the old way.
+      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}) }),
     }).then(async (res) => {
       // fetch doesn't throw on a refusal; a silent one hid #301's 404.
       if (!res.ok) log(`The app refused this computer's workspaces: ${res.status} ${(await res.json().catch(() => ({}))).error ?? ''}`);
@@ -970,6 +1032,20 @@ async function main() {
       describeWorkspaces();
       sendInfo();
     });
+  }
+  // Claude Code rewrites its config all the time, so look now and then and say so only when the names changed.
+  let reported = [];
+  if (managed) setInterval(() => JSON.stringify(found()) !== JSON.stringify(reported) && sendInfo(), FOUND_EVERY_MS).unref();
+
+  /** The app says what is ticked for this machine: on connect, and whenever a person changes a tick. */
+  function setLend(lend) {
+    if (!managed) return;
+    const server = typeof lend?.server === 'string' ? lend.server : null;
+    host.lent = new Set((Array.isArray(lend?.workspaces) ? lend.workspaces : []).filter((w) => typeof w === 'string'));
+    // Sessions on a server that is no longer the ticked one stop; the app ends them on its side too.
+    if (server !== lentServer) for (const [id, s] of sessions) if (s.proc) stopServer(id);
+    lentServer = server;
+    log(`Lent from the Machines page: ${[server ? `MCP server ${server}` : '', host.lent.size ? `workspaces ${[...host.lent].join(', ')}` : ''].filter(Boolean).join(' and ') || 'nothing yet'}`);
   }
 
   /** session id -> its running MCP server (or workspace session), and the chain that sends its output in order */
@@ -986,7 +1062,7 @@ async function main() {
     const proc = spawn(spec.command, spec.args, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...spec.env }, shell: spec.shell });
     const s = { proc, chain: Promise.resolve() };
     sessions.set(id, s);
-    log(`Session ${id.slice(0, 6)} started ${describe}`);
+    log(`Session ${id.slice(0, 6)} started ${managed ? lentServer : describe}`);
     createInterface({ input: proc.stdout }).on('line', (line) => {
       let message;
       try {
@@ -1079,6 +1155,8 @@ async function main() {
     const url = new URL('/api/machines/connect', appUrl);
     url.searchParams.set('host', hostname());
     url.searchParams.set('command', describe);
+    // It lends nothing until it has said what it found and heard what is ticked.
+    if (managed) url.searchParams.set('v', '2');
     const res = await fetch(url, { headers: { ...auth, Accept: 'text/event-stream' } });
     if (res.status === 401) {
       console.error('The app rejected this token. Make a new one in the Machines panel.');
@@ -1092,16 +1170,18 @@ async function main() {
     if (!res.ok) throw new Error(`the app answered ${res.status}`);
     for await (const msg of events(res.body)) {
       if (msg.hello) {
-        log(`Connected to ${new URL(appUrl).host} as "${msg.hello}". Minions can use ${describe}${host?.workspaces.size ? ` and workspaces ${[...host.workspaces.keys()].join(', ')}` : ''} while this runs.`);
+        log(`Connected to ${new URL(appUrl).host} as "${msg.hello}". Minions can use ${describe}${!managed && host?.workspaces.size ? ` and workspaces ${[...host.workspaces.keys()].join(', ')}` : ''} while this runs.`);
         retry = 0;
         sendInfo();
+      } else if (msg.lend) {
+        setLend(msg.lend);
       } else if (msg.close) {
         stopServer(msg.session);
       } else if (msg.session && msg.server === 'ws') {
         if (!host) continue;
         const s = sessions.get(msg.session) ?? startWorkspace(msg.session, String(msg.who ?? 'a minion'));
         onWorkspaceMessage(msg.session, s, msg.message);
-      } else if (msg.session && lends) {
+      } else if (msg.session && (lends || managed)) {
         const s = sessions.get(msg.session) ?? startServer(msg.session);
         s.proc.stdin.write(`${JSON.stringify(msg.message)}\n`);
       }

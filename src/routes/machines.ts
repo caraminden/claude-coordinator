@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { runnerAsk } from '../ci-runner.ts';
-import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, hashToken, newToken } from '../machines.ts';
+import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, hashToken, newToken } from '../machines.ts';
 import type { Machine } from '../db.ts';
 import { HttpError, json, readJson, type Ctx, type Route } from '../http.ts';
 
@@ -12,19 +12,6 @@ import { HttpError, json, readJson, type Ctx, type Route } from '../http.ts';
 const MAX_MACHINE_UPLOAD = 20_000_000;
 // Notes go into every thread's system prompt while the machine is online, so keep them short.
 const MAX_MACHINE_NOTES = 2000;
-const MCP_KINDS = ['claude', 'command', 'none'];
-
-/** What the add form says the machine runs (#308), kept so its setup lines say the same after a new token. */
-function machineMcp(body: { kind?: unknown; command?: unknown }) {
-  if (body.kind === undefined) return {};
-  if (!MCP_KINDS.includes(body.kind as string)) throw new HttpError(400, `kind must be one of ${MCP_KINDS.join(', ')}`);
-  const command = body.kind === 'none' ? '' : body.command ?? '';
-  // It goes on one line of a shell or PowerShell command the person pastes.
-  if (typeof command !== 'string' || command.length > 500 || /[\x00-\x1f]/.test(command)) throw new HttpError(400, 'command must be one line of text, up to 500 characters');
-  if (body.kind === 'command' && !command.trim()) throw new HttpError(400, 'Type the command the machine should run');
-  // An empty Claude Code server name stays '': the setup lines put in DEFAULT_CLAUDE_MCP, as the form suggests.
-  return { mcp_kind: body.kind as Machine['mcp_kind'], mcp_command: command.trim() };
-}
 
 function machineName(v: unknown): string {
   const name = typeof v === 'string' ? v.trim().toLowerCase() : '';
@@ -77,7 +64,7 @@ const agent = (method: string, path: string, handler: (ctx: Ctx, machine: Machin
 export const agentRoutes: Route[] = [
   agent('GET', '/api/machines/connect', ({ url, res, app }, machine) => {
     const info = (k: string) => (url.searchParams.get(k) ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200);
-    return app.machines.connectAgent(machine, res, { host: info('host'), command: info('command'), runners: url.searchParams.get('kind') === 'runners' });
+    return app.machines.connectAgent(machine, res, { host: info('host'), command: info('command'), runners: url.searchParams.get('kind') === 'runners', managed: url.searchParams.get('v') === '2' });
   }),
   agent('POST', '/api/machines/send', async ({ req, res, app }, machine) => {
     // Room for screenshots, which MCP servers send as base64 images.
@@ -183,9 +170,8 @@ export const machineRoutes: Route[] = [
       // Someone signed in with the old shared password has no id to own it by.
       if (mine && session.uid === undefined) throw new HttpError(403, 'Sign in with your own login to add a machine');
       const name = machineName(body.name);
-      // On from the start for a machine added with a folder for minions (#305); off otherwise.
-      if (body.workspace_tools !== undefined && typeof body.workspace_tools !== 'boolean') throw new HttpError(400, 'workspace_tools must be true or false');
-      const mcp = machineMcp(body);
+      // Adding is a name (#439): what it lends is ticked once its agent reports what it found. runners: a CI runner host.
+      for (const k of ['always_on', 'runners'] as const) if (body[k] !== undefined && typeof body[k] !== 'boolean') throw new HttpError(400, `${k} must be true or false`);
       let machine;
       try {
         // The real hash goes in once the id (part of the token) is known.
@@ -194,7 +180,8 @@ export const machineRoutes: Route[] = [
         throw new HttpError(409, 'A machine with that name already exists');
       }
       const token = newToken(machine.id);
-      app.store.updateMachine(machine.id, { token_hash: hashToken(token), ...mcp, ...(body.workspace_tools ? { workspace_tools: 1 } : {}) });
+      // A runner host is one from the start, before its agent first connects: its line and its install line say so.
+      app.store.updateMachine(machine.id, { token_hash: hashToken(token), ...(body.always_on === false ? { always_on: 0 } : {}), ...(body.runners ? { last_check: JSON.stringify({ at: machine.created_at, results: [], runners: true }) } : {}) });
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       // The only time the token is shown; the app keeps just its hash.
       return json(res, 201, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? null });
@@ -213,8 +200,10 @@ export const machineRoutes: Route[] = [
   {
     method: 'PATCH', path: '/api/machines/:machine', ...people,
     handler: managed(async ({ req, res, app, machine, session }) => {
-      // Any of name, notes, workspace_tools, always_on and projects (the schemes it is lent to: the whole list).
+      // Any of name, notes, lend (what is ticked), workspace_tools, always_on and projects (the schemes it is lent to: the whole list).
       const body = await readJson(req);
+      const lend = body.lend === undefined ? undefined : cleanLend(body.lend);
+      if (lend === null) throw new HttpError(400, 'lend must be { server: a found MCP server\'s name or null, workspaces: [names] }');
       let projects: number[] | undefined;
       if (body.projects !== undefined) {
         // A scheme the person can't see isn't theirs to add; one already on the list (an admin's doing) may stay.
@@ -242,6 +231,7 @@ export const machineRoutes: Route[] = [
         throw new HttpError(409, 'A machine with that name already exists');
       }
       if (projects !== undefined) app.store.setMachineProjects(machine.id, projects);
+      if (lend) app.machines.setLend(machine.id, lend);
       // Switched off or taken from a scheme: minions mid-turn lose the tools now, not at their next turn.
       if (fields.workspace_tools === 0) app.machines.endServer(machine.id, 'ws');
       // Switched on: its workspace tools get their first check now.

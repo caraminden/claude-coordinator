@@ -1182,7 +1182,6 @@ a.thread-ref:hover { text-decoration: underline; }
 .machine-row .meta { color: var(--muted); font-size: 0.78em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .machine-add { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin: 0.9rem 0; }
 .machine-add label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85em; margin-bottom: 0; }
-.machine-add label.wide { flex: 1 1 18rem; }
 .machine-add label.check { flex-direction: row; align-items: center; gap: 0.4rem; align-self: end; min-height: 2.5rem; cursor: pointer; }
 .machine-add label.check input { width: auto; margin: 0; }
 .machine-setup { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 1rem; }
@@ -1215,7 +1214,7 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .machine-body { border-top: 1px solid var(--line); padding: 0.6rem 0.75rem; display: grid; gap: 0.6rem; font-size: 0.88em; }
 .machine-kv { display: grid; grid-template-columns: 7rem 1fr; gap: 0.45rem 0.8rem; align-items: baseline; min-width: 0; }
 .machine-kv > div { min-width: 0; overflow-wrap: anywhere; }
-.machine-kv .machine-lending, .machine-kv .machine-workspaces, .machine-kv .machine-notes { margin: 0; font-size: 1em; }
+.machine-kv .machine-lending, .machine-kv .machine-notes { margin: 0; font-size: 1em; }
 .machine-kv .row.small { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.2rem; }
 .machine-kv label.always-on { display: flex; gap: 0.4rem; align-items: center; margin: 0.2rem 0 0; cursor: pointer; }
 .machine-kv label.always-on input { width: auto; margin: 0; }
@@ -1229,16 +1228,22 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
   .machine-kv > span.muted { margin-top: 0.35rem; }
 }
 .machines-main > p.small { font-size: 0.85em; }
-.machine-add label .row { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 0.4rem; }
-.machine-add label .row select { width: auto; flex: none; }
-.machine-add label .row input { flex: 1; min-width: 0; width: auto; }
+.machines-bar.runners-bar { margin-top: 0; flex-wrap: wrap; }
+.machines-bar.runners-bar button { flex: none; }
 .machine-notes { margin: 0.3rem 0 0.1rem 1.1rem; font-size: 0.85em; }
 .machine-notes summary { cursor: pointer; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .machine-notes textarea { width: 100%; margin: 0.4rem 0; font-size: 0.95em; }
 .machine-notes .row { display: flex; gap: 0.5rem; align-items: center; }
-.machine-workspaces { margin: 0.3rem 0 0.1rem 1.1rem; font-size: 0.85em; }
-.machine-workspaces > label.row { display: flex; gap: 0.4rem; align-items: center; padding: 0.15rem 0; cursor: pointer; }
-.machine-workspaces > label.row input { width: auto; margin: 0; }
+/* What a machine lends (#439): a tick per MCP server and folder its agent found. */
+.machine-lends { display: grid; gap: 0.5rem; min-width: 0; }
+.machine-lends p { margin: 0; }
+.machine-lends label.row { display: flex; flex-wrap: nowrap; gap: 0.4rem; align-items: center; padding: 0.15rem 0; margin: 0; cursor: pointer; }
+.machine-lends label.row input { width: auto; margin: 0; flex: none; }
+.machine-lends .machine-workspace { margin: 0 0 0.3rem 1.4rem; color: var(--muted); }
+.machine-lends button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.machine-lends summary { cursor: pointer; color: var(--muted); }
+.machine-lends details p { margin: 0.4rem 0; }
+.machine-lends pre { overflow-x: auto; font-size: 0.9em; margin: 0.3rem 0; padding: 0.5rem 0.6rem; background: var(--code-bg); border-radius: 6px; }
 .machine-workspace { margin: 0.3rem 0; overflow-wrap: anywhere; }
 .machine-workspace ul { margin: 0.2rem 0 0; padding-left: 1.2rem; }
 .machine-lending { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
@@ -1253,8 +1258,6 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
   .machine-lending select.add-scheme { min-height: var(--citadel-control-h); }
 }
 .machine-lending select.add-scheme { width: auto; margin: 0; padding: 0.33rem 0.5rem; border-radius: 999px; font-size: 0.85em; line-height: 1.3; color: var(--muted); cursor: pointer; }
-.machine-workspaces summary { cursor: pointer; color: var(--muted); }
-.machine-workspaces pre { overflow-x: auto; font-size: 0.9em; }
 
 /* Properties: the "🏷 N" chip in a minion's header, its popover, and the scheme's Properties page. */
 .prop-chip { position: relative; flex: none; }

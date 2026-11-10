@@ -8,7 +8,7 @@ const min = 60_000;
 const ok = (server: 'mcp' | 'ws', tools = 2) => ({ server, ok: true, tools: Array.from({ length: tools }, (_, i) => `t${i}`), error: null, ms: 5 });
 const base: StatusFacts = {
   now, startedAt: now - 24 * 60 * min, online: true, runners: false, alwaysOn: true, createdAt: now - 48 * 60 * min, lastSeenAt: now - 30 * min,
-  offers: ['mcp'], wsOff: false, check: { at: now - 3 * min, results: [ok('mcp', 47)] }, lent: 1,
+  offers: ['mcp'], wsOff: false, managed: false, finds: false, check: { at: now - 3 * min, results: [ok('mcp', 47)] }, lent: 1,
 };
 
 const rows: [string, Partial<StatusFacts>, string, string, string | null][] = [
@@ -20,6 +20,8 @@ const rows: [string, Partial<StatusFacts>, string, string, string | null][] = [
   ['its tools didn\'t start', { check: { at: now, results: [{ server: 'mcp', ok: false, tools: [], error: 'no answer in 30s', ms: 30_000 }] } }, 'fix', 'Its tools didn\'t start: no answer in 30s', 'check'],
   ['its workspace tools didn\'t start', { offers: ['mcp', 'ws'], check: { at: now, results: [ok('mcp'), { server: 'ws', ok: false, tools: [], error: 'boom', ms: 1 }] } }, 'fix', 'Its workspace tools didn\'t start: boom', 'check'],
   ['folder, workspace tools off', { offers: [], wsOff: true, check: null }, 'fix', 'Lends nothing: workspace tools are off', 'workspace_tools'],
+  ['found a server and a folder, nothing ticked (#439)', { offers: [], managed: true, finds: true, check: null }, 'fix', 'Lends nothing: nothing is ticked', 'tick'],
+  ['found nothing on that computer (#439)', { offers: [], managed: true, check: null }, 'fix', 'Found nothing to lend on that computer', 'tick'],
   ['no server and no folder', { offers: [], check: null }, 'fix', 'Lends nothing: no MCP server or folder on that computer', 'token'],
   ['lent to no scheme', { lent: 0 }, 'fix', 'Lent to no scheme', 'lend'],
   ['lent to three schemes', { lent: 3 }, 'ready', 'Ready · 47 tools', null],

@@ -1,6 +1,6 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
 import { account, ago, api, h, icon, listGroupsOf, me, openHash, schemeIcon, view } from './core.js';
-import { agentLog, DEFAULT_CLAUDE_MCP, machineSetup, machineSetupBackground, machineSetupRunnerAgent, machineSetupWindows, workspaceName } from './machine-setup.js';
+import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupWindows } from './machine-setup.js';
 import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
@@ -699,55 +699,51 @@ export function renderMachineWarning() {
   ] : []));
 }
 
-/** Settings' Machines tab: add machines, show how to connect them, and remove them or replace their token. */
-export function machinesPage() {
-  view.machineToken = null; // { id, name, token } just made, shown until you leave the page
-  const name = h('input', { name: 'name', placeholder: 'godot-laptop', required: true, maxlength: 30, autocomplete: 'off', pattern: '[a-z0-9][a-z0-9\\-]*' });
-  const kind = h('select', { name: 'kind' },
-    h('option', { value: 'claude' }, 'Claude Code MCP server named'),
-    h('option', { value: 'command' }, 'Command'),
-    h('option', { value: 'none' }, 'None'));
-  const command = h('input', { name: 'command', value: DEFAULT_CLAUDE_MCP, autocomplete: 'off', spellcheck: 'false' });
-  kind.onchange = () => {
-    command.value = kind.value === 'claude' ? DEFAULT_CLAUDE_MCP : '';
-    command.placeholder = kind.value === 'claude' ? DEFAULT_CLAUDE_MCP : 'npx -y some-mcp-server';
-    command.hidden = kind.value === 'none';
-    renderMachineSetup();
-  };
-  command.addEventListener('input', renderMachineSetup);
-  const folder = h('input', { name: 'folder', placeholder: 'C:\\Users\\you\\Documents\\Vault', autocomplete: 'off', spellcheck: 'false' });
-  folder.addEventListener('input', renderMachineSetup);
-  const status = h('span', { class: 'muted', role: 'status' });
+/** The add form (#439): a name, and nothing about what it lends, which is ticked once its agent reports. runners: a CI runner host. */
+function machineAddForm(runners, label) {
+  const name = h('input', { name: 'name', placeholder: runners ? 'desktop-ci-runners' : 'godot-laptop', required: true, maxlength: 30, autocomplete: 'off', pattern: '[a-z0-9][a-z0-9\\-]*' });
+  const alwaysOn = runners ? null : h('input', { type: 'checkbox', name: 'always_on', checked: true });
   // Everyone else's machine is their own (#306); an admin's is shared unless they tick this.
-  const mine = account?.admin ? h('input', { type: 'checkbox', name: 'mine' }) : null;
-  const form = h('form', { class: 'machine-add' },
+  const mine = !runners && account?.admin ? h('input', { type: 'checkbox', name: 'mine' }) : null;
+  const status = h('span', { class: 'muted', role: 'status' });
+  const form = h('form', { class: `machine-add${runners ? ' runners' : ''}` },
     h('label', {}, 'Name', name),
-    h('label', { class: 'wide' }, 'MCP server to run there', h('span', { class: 'row' }, kind, command)),
-    h('label', { class: 'wide' }, 'Folder minions can use (optional)', folder),
-    mine ? h('label', { class: 'check', title: 'Off: a shared machine, lent to schemes under Lend to. On: only turns you ask for get it, in schemes you are in, and your contraptions\' turns.' }, mine, h('span', {}, 'Mine: only my turns use it')) : '',
-    h('button', { type: 'submit' }, 'Add machine'),
+    alwaysOn ? h('label', { class: 'check', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on (untick for a laptop)')) : '',
+    mine ? h('label', { class: 'check', title: 'Off: a shared machine, lent to schemes under Who gets it. On: only turns you ask for get it, in schemes you are in, and your contraptions\' turns.' }, mine, h('span', {}, 'Mine: only my turns use it')) : '',
+    h('button', { type: 'submit' }, label),
     status);
+  const toggle = h('button', { type: 'button', class: runners ? 'secondary small' : 'machine-add-toggle', 'aria-expanded': 'false' }, runners ? 'Add a CI runner host' : 'Add a machine');
+  const show = (on) => {
+    form.hidden = !on;
+    toggle.setAttribute('aria-expanded', String(on));
+    if (on) name.focus();
+  };
+  toggle.onclick = () => show(form.hidden);
+  form.hidden = true;
   form.onsubmit = async (e) => {
     e.preventDefault();
     status.textContent = 'Adding…';
     try {
-      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), kind: kind.value, command: command.value, ...(folder.value.trim() ? { workspace_tools: true } : {}), ...(mine?.checked ? { mine: true } : {}) } });
+      const { machine, token, agent_url } = await api('api/machines', { method: 'POST', body: { name: name.value.trim().toLowerCase(), ...(alwaysOn && !alwaysOn.checked ? { always_on: false } : {}), ...(mine?.checked ? { mine: true } : {}), ...(runners ? { runners: true } : {}) } });
       view.machineToken = setupFor(machine, token, agent_url);
       name.value = '';
       status.textContent = '';
+      show(false);
       renderMachineSetup();
+      document.getElementById('machine-setup')?.scrollIntoView({ block: 'nearest' });
     } catch (err) {
       status.textContent = err.message;
     }
   };
-  // The add form waits behind its button (#437, take A), open while there are no machines yet.
-  form.hidden = !!view.machines?.length;
-  const add = h('button', { type: 'button', class: 'machine-add-toggle', 'aria-expanded': String(!form.hidden) }, 'Add a machine');
-  add.onclick = () => {
-    form.hidden = !form.hidden;
-    add.setAttribute('aria-expanded', String(!form.hidden));
-    if (!form.hidden) name.focus();
-  };
+  return { form, toggle, show };
+}
+
+/** Settings' Machines tab: add machines, show the line that connects one, tick what each lends, and remove them or replace their token. */
+export function machinesPage() {
+  view.machineToken = null; // { id, name, token } just made, shown until you leave the page
+  const add = machineAddForm(false, 'Add machine');
+  // A CI runner host is a different program with a different job, so it has its own add and install line (#439).
+  const runners = account?.admin ? machineAddForm(true, 'Add CI runner host') : null;
   const section = h('section', { class: 'artifacts-main machines-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }),
@@ -756,29 +752,30 @@ export function machinesPage() {
       h('div', { class: 'meta' }, account?.admin
         ? 'Computers that lend their MCP tools to minions while they are connected, in the schemes listed under Who gets it. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Citadel checks each one as it connects and hourly.'
         : 'Your computers, lending their MCP tools while they are connected to the minion turns you ask for, in the schemes you list under Who gets it. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.')),
-    h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), add),
-    form,
+    h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), add.toggle),
+    add.form,
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
+    runners ? h('div', { class: 'row machines-bar runners-bar' }, h('span', { class: 'muted small' }, 'A CI runner host adds and removes schemes\' CI runners on its PC (tools/ci-runner/README.md).'), h('span', { class: 'spacer' }), runners.toggle) : '',
+    runners ? runners.form : '',
     h('p', { class: 'muted small' },
-      'Each machine runs one MCP server, or none; add another machine for a second one. It needs Node 18 or newer. ',
-      'A folder typed when adding a machine goes into machine-agent.json by the setup lines, and the machine starts with workspace tools on. ',
-      'With workspace tools switched on, minions also get mcp__<name>-ws__…: git sync and the tasks its owner lists in machine-agent.json on that computer, nothing else. ',
-      '"Claude Code MCP server" runs one already set up for Claude Code on that computer, like godot-ai after its dock\'s Configure. ',
+      'Adding a machine is a name and one line to paste on that computer (it needs Node 18 or newer). Once connected it reports the MCP servers set up for Claude Code there, by name, and the servers and folders its owner lists in machine-agent.json beside the agent; open its line and tick what to lend. ',
+      'One MCP server per machine: add another machine for a second one. Its tools reach minions as mcp__<name>__…, and its ticked folders as mcp__<name>-ws__…: git sync and the tasks its owner lists in that file, nothing else. ',
+      'Nothing typed here can run a command there: commands and tasks live only in that file, on that computer. ',
       'A person\'s own machine goes only to turns they ask for: their minions\' turns in schemes they are in, and their contraptions\' turns. ',
-      'A minion gets the tools of every machine online and lent to its scheme when its turn starts, named mcp__<name>__…, plus the machine\'s notes, and the tools act on that computer, ',
-      'so only add servers you trust minions to run.'));
+      'A minion gets the tools of every machine online and lent to its scheme when its turn starts, plus the machine\'s notes, and the tools act on that computer, ',
+      'so only tick servers you trust minions to run.'));
   setTimeout(() => {
     renderMachineSetup();
     renderMachineList();
-    if (!form.hidden) name.focus();
+    if (!view.machines?.length) add.show(true);
   });
   return section;
 }
 
-/** A machine just added or given a new token, with the MCP server it was added with (#308), not whatever the form shows later. */
+/** A machine just added or given a new token: what its install line needs. */
 function setupFor(machine, token, url) {
-  return { id: machine.id, name: machine.name, token, url: url ?? location.origin, kind: machine.mcp_kind, command: machine.mcp_command };
+  return { id: machine.id, name: machine.name, token, url: url ?? location.origin, runners: machine.runners };
 }
 
 function renderMachineSetup() {
@@ -786,48 +783,40 @@ function renderMachineSetup() {
   if (!el) return;
   const t = view.machineToken;
   if (!t) return el.replaceChildren();
-  // A machine added before its server was kept (kind null) follows the add form, live.
-  const kind = t.kind ?? document.querySelector('.machine-add select[name=kind]')?.value;
-  const command = t.kind ? t.command : document.querySelector('.machine-add input[name=command]')?.value.trim();
-  const folder = document.querySelector('.machine-add input[name=folder]')?.value.trim();
-  const ways = [
-    { os: 'windows', tab: 'Windows', label: 'Windows PowerShell: runs in the background, also after you close the window, and starts at every logon. No reboot.',
-      text: machineSetupWindows(t.url, t.name, t.token, kind, command, folder), log: agentLog('windows', t.name) },
-    { os: 'posix', tab: 'macOS or Linux', label: 'Terminal on macOS or Linux: runs in the background, also after you close the window, and starts at every login. No sudo.',
-      text: machineSetupBackground(t.url, t.name, t.token, kind, command, folder), log: agentLog('posix', t.name) },
-    { os: 'window', tab: 'Just try it', label: 'Try it in a terminal window (stops when you close it)',
-      text: machineSetup(t.url, t.token, kind, command, folder) },
-    { os: 'runner', tab: 'CI runner agent', label: 'Administrator PowerShell on the Windows PC that hosts the CI runners (tools/ci-runner/README.md): installs the runner agent as a background task, instead of the MCP agent above. Use it on a machine added with no MCP server and no folder.',
+  const ways = t.runners ? [
+    { os: 'runner', label: 'Administrator PowerShell on the Windows PC that hosts the CI runners (tools/ci-runner/README.md): installs the runner agent as a background task.',
       text: machineSetupRunnerAgent(t.url, t.token),
       note: 'It checks Node 18+ and Git for Windows, registers the task Citadel runner agent (SYSTEM, at startup), starts it and waits until this machine shows online. No reboot, and no runner is touched.' },
+  ] : [
+    { os: 'windows', tab: 'Windows', label: 'Windows PowerShell: runs in the background, also after you close the window, and starts at every logon. No reboot.',
+      text: machineSetupWindows(t.url, t.name, t.token), log: agentLog('windows', t.name) },
+    { os: 'posix', tab: 'macOS or Linux', label: 'Terminal on macOS or Linux: runs in the background, also after you close the window, and starts at every login. No sudo.',
+      text: machineSetupPosix(t.url, t.name, t.token), log: agentLog('posix', t.name) },
   ];
+  // Picked from this browser; the chips are for adding a computer from another one.
   view.machineSetupOs ??= guessOs();
+  const os = t.runners ? 'runner' : view.machineSetupOs;
   const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
   copy.onclick = async () => {
-    copy.textContent = await copyText(ways.find((w) => w.os === view.machineSetupOs).text) ? 'Copied' : 'Couldn\'t copy';
+    copy.textContent = await copyText(ways.find((w) => w.os === os).text) ? 'Copied' : 'Couldn\'t copy';
   };
-  const pick = (os) => {
-    view.machineSetupOs = os;
+  const pick = (to) => {
+    view.machineSetupOs = to;
     renderMachineSetup();
   };
   el.replaceChildren(h('div', { class: 'machine-setup' },
     h('strong', {}, `Connect ${t.name}`),
-    h('p', { class: 'small' }, 'The token is shown only now; if you lose it, make a new one. Run these on that computer:'),
-    t.kind ? false : h('p', { class: 'small' }, h('strong', {}, `Citadel doesn't know what ${t.name} runs`),
-      ` (it hasn't connected since Citadel started keeping that), so these lines run what the form above says: ${kind === 'none' ? 'no MCP server' : command || DEFAULT_CLAUDE_MCP}. Pick the right one there before copying.`),
-    folder ? h('p', { class: 'small' }, `It adds ${folder} to machine-agent.json there as workspace ${workspaceName(folder)}, keeping what the file already lists. `,
-      'If the folder is a git repo it also gets a pull task (git pull --ff-only) with git sync off; pull uses the git sign-in saved on that computer, so check git pull works there first.',
-      view.machines.find((m) => m.id === t.id)?.workspace_tools === false ? ' Workspace tools are off for this machine: switch them on below so minions get the folder.' : '') : false,
+    h('p', { class: 'small' }, 'The token is shown only now; if you lose it, make a new one. Paste this on that computer:'),
     h('div', { class: 'row machine-setup-ways' },
-      h('div', { class: 'row', role: 'group', 'aria-label': 'Which computer' },
-        ways.map((w) => h('button', { type: 'button', class: `chip${w.os === view.machineSetupOs ? ' on' : ''}`, 'aria-pressed': String(w.os === view.machineSetupOs), onclick: () => pick(w.os) }, w.tab))),
+      t.runners ? '' : h('div', { class: 'row', role: 'group', 'aria-label': 'Which computer' },
+        ways.map((w) => h('button', { type: 'button', class: `chip${w.os === os ? ' on' : ''}`, 'aria-pressed': String(w.os === os), onclick: () => pick(w.os) }, w.tab))),
       h('span', { class: 'spacer' }), copy),
-    ways.map((w) => h('div', { class: 'machine-setup-way', 'data-os': w.os, hidden: w.os !== view.machineSetupOs },
-        h('p', { class: 'small' }, w.label),
-        h('pre', {}, w.text),
-        w.note ? h('p', { class: 'small muted' }, w.note) : w.log
-          ? h('p', { class: 'small muted' }, 'It writes what it prints to ', h('code', {}, w.log), ', and ends by printing how to watch that log, stop it and remove it.')
-          : h('p', { class: 'small muted' }, 'Good for a first try: you see what it prints. Closing the window, logging out or restarting stops it, and the machine goes offline.')))));
+    ways.map((w) => h('div', { class: 'machine-setup-way', 'data-os': w.os, hidden: w.os !== os },
+      h('p', { class: 'small' }, w.label),
+      h('pre', {}, w.text),
+      w.note ? h('p', { class: 'small muted' }, w.note)
+        : h('p', { class: 'small muted' }, 'It writes what it prints to ', h('code', {}, w.log), ', and ends by printing how to watch that log, stop it and remove it.'))),
+    t.runners ? '' : h('p', { class: 'small' }, `Once it connects, ${t.name}'s line below shows the MCP servers and folders it found there: open it and tick what to lend.`)));
 }
 
 /** The setup to show first: the viewer's own kind of computer, as the browser says it (a phone gets Windows). */
@@ -852,9 +841,12 @@ function renderMachineList() {
     view.machines.length ? '' : h('p', { class: 'muted small' }, 'No machines yet.'));
 }
 
-/** Make a new token for a machine and show its setup lines. */
+/** Make a new token for a machine and show its install line. */
 async function newMachineToken(m) {
-  if (!confirm(`Make a new token for ${m.name}? Its current connection stops and it has to be set up again.`)) return;
+  // One set up before #439 runs what its own command line says; the new line makes it report what it finds instead.
+  const old = !m.runners && m.managed !== true && !m.lend;
+  if (!confirm(`Make a new token for ${m.name}? Its current connection stops and it has to be installed again with the new line.${old
+    ? '\n\nAfter that, what it lends is ticked here, from the MCP servers in that computer\'s Claude Code config and its machine-agent.json. If it runs a server from a command of its own, put that under "servers" in machine-agent.json there first.' : ''}`)) return;
   const { machine, token, agent_url } = await api(`api/machines/${m.id}/token`, { method: 'POST' }).catch((err) => alert(err.message) ?? {});
   if (!token) return;
   view.machineToken = setupFor(machine, token, agent_url);
@@ -895,20 +887,118 @@ function fixButton(m, open) {
   const b = (label, onclick, title) => h('button', { type: 'button', class: 'secondary small', title, onclick: (e) => onclick(e.currentTarget) }, label);
   switch (m.fix) {
     case 'check': return m.checking ? h('button', { type: 'button', class: 'secondary small', disabled: true }, 'Checking…') : b('Check now', (btn) => checkMachine(m, btn), 'Start its tools again and list them');
+    case 'tick': return b(m.reason.startsWith('Found nothing') ? 'How to add' : 'Tick what it lends', open, 'Open its line: what it found on that computer, and how to add more there');
     case 'workspace_tools': return b('Turn on', () => patchMachine(m, { workspace_tools: true }, `switch workspace tools on for ${m.name}`, renderMachineList), 'Switch its workspace tools on, so minions get its folders');
     case 'lend': return b('Lend it', open, 'Pick the schemes whose minions get it');
-    case 'token': return b('New token', () => newMachineToken(m), 'Set it up again, with an MCP server or a folder');
+    case 'token': return b('New token', () => newMachineToken(m), 'Install it again with the new line: it then reports what it finds there');
     case 'remove': return b('Remove', () => removeMachine(m));
     case 'always_on': return b('Not always on', () => patchMachine(m, { always_on: false }, `mark ${m.name} as not always on`, renderMachineList), 'A laptop that comes and goes: offline shows as Asleep, not Down');
     default: return '';
   }
 }
 
-/** What a machine lends, from its last check: "MCP server (godot-ai), 47 tools · workspace tools, 8 tools". */
-function machineLends(m) {
+/** What a machine's last check found: "MCP server (godot-ai), 47 tools · workspace tools, 8 tools". */
+function machineChecked(m) {
   const results = m.checked?.results ?? [];
-  if (!results.length) return m.online ? 'Nothing it offers has been checked yet' : 'Shows once it connects and is checked';
-  return results.map((r) => `${r.server === 'ws' ? 'workspace tools' : `MCP server${m.mcp_command ? ` (${m.mcp_command})` : ''}`}${r.ok ? `, ${r.tools.length} tool${r.tools.length === 1 ? '' : 's'}` : ': didn\'t start'}`).join(' · ');
+  const server = m.lend?.server ?? m.mcp_command;
+  if (!results.length) return m.online ? 'Nothing it lends has been checked yet' : 'Shows once it connects and is checked';
+  return results.map((r) => `${r.server === 'ws' ? 'workspace tools' : `MCP server${server ? ` (${server})` : ''}`}${r.ok ? `, ${r.tools.length} tool${r.tools.length === 1 ? '' : 's'}` : ': didn\'t start'}`).join(' · ');
+}
+
+// What machine-agent.json takes, for the Machines page; the owner writes it beside the agent on that computer.
+const CONFIG_EXAMPLE = `{
+  "servers": { "godot": { "run": ["uvx", "godot-ai", "attach"] } },
+  "workspaces": { "delve": { "path": "C:\\\\Users\\\\you\\\\Projects\\\\delve" } }
+}`;
+const WORKSPACE_EXAMPLE = `{
+  "workspaces": {
+    "delve": {
+      "path": "C:\\\\Users\\\\you\\\\Projects\\\\delve",
+      "read": ["%APPDATA%\\\\Godot\\\\app_userdata\\\\Delve"],
+      "tasks": {
+        "build": {
+          "run": ["dotnet", "build", "Delve.sln"],
+          "hints": [{ "match": "MSB3027|used by another process", "say": "Close the game and the editor, then retry." }]
+        },
+        "import": { "run": ["cmd.exe", "/c", "tools\\\\prepare.cmd"], "about": "imports new art" }
+      }
+    },
+    "vault": {
+      "path": "%USERPROFILE%\\\\Documents\\\\Vault",
+      "git_sync": false,
+      "tasks": { "pull": { "run": ["git", "pull", "--ff-only"], "about": "Bring the minion's push into the vault now" } }
+    }
+  }
+}`;
+
+/** How a new server or folder gets onto a machine: in the file on that computer, never from here. */
+function machineConfigHelp(open) {
+  return h('details', { class: 'small machine-config-help', open },
+    h('summary', {}, 'Add a server or a folder: in machine-agent.json on that computer'),
+    h('p', { class: 'muted' }, 'The file sits beside the agent, in the coordinator-agent folder of that computer\'s home folder. The agent picks up changes by itself, and what it finds shows here to tick. A server is a program and its arguments (no shell); a folder is a path:'),
+    h('pre', {}, CONFIG_EXAMPLE),
+    h('details', {}, h('summary', {}, 'Folders with tasks, read folders and a vault that pulls'),
+      h('p', { class: 'muted' }, 'In a ticked folder minions can check out pushed branches and run only the tasks listed, with no shell. "git_sync": false keeps them from checking anything out in a folder you keep on a branch yourself (an Obsidian vault with Obsidian Git, say); give that one a pull task instead.'),
+      h('pre', {}, WORKSPACE_EXAMPLE)));
+}
+
+/** A folder as its agent reports it: its path, what else is readable and its tasks. */
+function workspaceDetail(w) {
+  return h('div', { class: 'machine-workspace small' },
+    h('div', {}, h('code', {}, w.path), w.git_sync === false ? h('span', { class: 'muted' }, ' · git_sync off') : ''),
+    w.read.length ? h('div', { class: 'muted' }, 'Also readable: ', w.read.join(', ')) : '',
+    w.tasks.length ? h('ul', {}, w.tasks.map((t) => h('li', {}, h('code', {}, t.name), ': ', t.run.join(' '), t.args ? ' …' : '', t.about ? h('span', { class: 'muted' }, ` (${t.about})`) : ''))) : '');
+}
+
+/**
+ * What a machine lends (#439). One whose agent reports what it found gets a tick per MCP server (one at a time)
+ * and per folder; a tick saves at once and reaches the agent, with no new token. One set up before that lends
+ * what its own command line says, shown as it is.
+ */
+function machineLends(m) {
+  const problems = (m.problems ?? []).map((p) => h('p', { class: 'error small' }, p));
+  const checked = h('p', { class: 'muted small' }, `Last check: ${machineChecked(m)}`);
+  const workspaces = m.workspaces ?? [];
+  if (m.managed === false) {
+    // An agent from before #439: its MCP server is fixed on that computer, and its folders go together behind one switch.
+    const all = h('input', { type: 'checkbox', checked: m.workspace_tools });
+    all.onchange = () => patchMachine(m, { workspace_tools: all.checked }, `switch workspace tools ${all.checked ? 'on' : 'off'} for ${m.name}`, renderMachineList);
+    return h('div', { class: 'machine-lends' },
+      m.servers.includes('mcp') ? h('div', { class: 'small' }, 'MCP server: ', h('code', {}, m.command || '?'), h('span', { class: 'muted' }, ' · set on that computer')) : '',
+      m.servers.includes('ws') ? h('label', { class: 'row small', title: 'Lets minions check out pushed branches and run the listed tasks in every folder below' }, all, h('span', {}, 'All its folders')) : '',
+      ...workspaces.map((w) => h('div', { class: 'machine-found' }, h('strong', { class: 'small' }, w.name), workspaceDetail(w))),
+      m.servers.length ? '' : h('p', { class: 'muted small' }, 'Nothing: it runs no MCP server and lists no folder.'),
+      h('p', { class: 'muted small' }, 'Set up before ticks: it lends what its own command line says. ',
+        h('button', { type: 'button', class: 'link', onclick: () => newMachineToken(m) }, 'Reinstall to manage from here'), '.'),
+      ...problems, checked);
+  }
+  const lend = m.lend ?? { server: null, workspaces: [] };
+  const save = (next) => patchMachine(m, { lend: next }, `change what ${m.name} lends`, renderMachineList);
+  const tick = (on, change, ...label) => {
+    const box = h('input', { type: 'checkbox', checked: on });
+    box.onchange = () => change(box.checked);
+    return h('label', { class: 'row small' }, box, h('span', {}, ...label));
+  };
+  const online = m.managed === true;
+  const found = m.found ?? [];
+  // Ticked but not there now (removed from that computer, or it is offline): still shown, so it can be unticked.
+  const servers = [...found, ...(lend.server && !found.some((f) => f.name === lend.server) ? [{ name: lend.server, gone: true }] : [])];
+  const folders = [...workspaces, ...lend.workspaces.filter((n) => !workspaces.some((w) => w.name === n)).map((name) => ({ name, gone: true }))];
+  const gone = online ? 'not found there now' : 'ticked';
+  return h('div', { class: 'machine-lends' },
+    servers.length ? h('div', { class: 'machine-found' }, h('div', { class: 'muted small' }, 'MCP server (one at a time)'),
+      ...servers.map((f) => tick(lend.server === f.name, (on) => save({ ...lend, server: on ? f.name : null }),
+        h('code', {}, f.name), h('span', { class: 'muted' }, f.gone ? ` · ${gone}` : f.from === 'file' ? ' · from machine-agent.json' : ' · from Claude Code\'s config')))) : '',
+    folders.length ? h('div', { class: 'machine-found' }, h('div', { class: 'muted small' }, 'Folders'),
+      ...folders.map((w) => h('div', {},
+        tick(lend.workspaces.includes(w.name), (on) => save({ ...lend, workspaces: on ? [...lend.workspaces, w.name] : lend.workspaces.filter((n) => n !== w.name) }),
+          h('strong', {}, w.name), w.gone ? h('span', { class: 'muted' }, ` · ${gone}`) : ''),
+        w.gone ? '' : workspaceDetail(w)))) : '',
+    online
+      ? (servers.length || folders.length ? '' : h('p', { class: 'muted small' }, 'It found no MCP server in Claude Code\'s config there and no machine-agent.json entries.'))
+      : h('p', { class: 'muted small' }, m.last_seen_at ? 'Offline: what it finds there shows once it connects.' : 'Once it connects, what it finds on that computer shows here to tick.'),
+    online ? machineConfigHelp(!servers.length && !folders.length) : '',
+    ...problems, m.checked?.results.length ? checked : '');
 }
 
 /** One line of the quiet list (#437, take A): dot, name, reason, fix button; click it for the rest. */
@@ -951,7 +1041,6 @@ function machineBody(m) {
       kv('Computer',
         h('span', {}, [m.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
         h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on'))),
-      m.runners ? [] : kv('Workspaces', machineWorkspaces(m)),
       kv('Notes', machineNotes(m))),
     h('div', { class: 'row machine-buttons' }, m.runners ? '' : check, newToken, remove));
 }
@@ -977,48 +1066,6 @@ function machineNotes(m) {
   if (editing) notes.value = old.querySelector('textarea').value;
   return h('details', { class: 'machine-notes', 'data-id': m.id, open: editing },
     summary, notes, h('div', { class: 'row' }, save, saved));
-}
-
-// What a machine-agent.json looks like, for the Machines page; the owner writes it beside the agent.
-const WORKSPACE_EXAMPLE = `{
-  "workspaces": {
-    "delve": {
-      "path": "C:\\\\Users\\\\you\\\\Projects\\\\delve",
-      "read": ["%APPDATA%\\\\Godot\\\\app_userdata\\\\Delve"],
-      "tasks": {
-        "build": {
-          "run": ["dotnet", "build", "Delve.sln"],
-          "hints": [{ "match": "MSB3027|used by another process", "say": "Close the game and the editor, then retry." }]
-        },
-        "import": { "run": ["cmd.exe", "/c", "tools\\\\prepare.cmd"], "about": "imports new art" }
-      }
-    },
-    "vault": { "path": "%USERPROFILE%\\\\Documents\\\\Vault", "git_sync": false }
-  }
-}`;
-
-/** A machine's workspace tools: the switch, and the workspaces and tasks its agent reports. */
-function machineWorkspaces(m) {
-  const toggle = h('input', { type: 'checkbox', checked: m.workspace_tools });
-  toggle.onchange = () => patchMachine(m, { workspace_tools: toggle.checked }, `switch workspace tools ${toggle.checked ? 'on' : 'off'} for ${m.name}`,
-    (ok, x) => { toggle.checked = !!x.workspace_tools; });
-  const workspaces = m.workspaces ?? [];
-  const reported = !m.online
-    ? h('p', { class: 'muted small' }, 'Shows the workspaces its agent offers once it connects.')
-    : workspaces.length
-      ? workspaces.map((w) => h('div', { class: 'machine-workspace small' },
-        h('div', {}, h('strong', {}, w.name), ' ', h('code', {}, w.path), w.git_sync === false ? h('span', { class: 'muted' }, ' · git_sync off') : ''),
-        w.read.length ? h('div', { class: 'muted' }, 'Also readable: ', w.read.join(', ')) : '',
-        h('ul', {}, w.tasks.map((t) => h('li', {}, h('code', {}, t.name), ': ', t.run.join(' '), t.args ? ' …' : '', t.about ? h('span', { class: 'muted' }, ` (${t.about})`) : '')))))
-      : h('details', { class: 'small' },
-        h('summary', {}, 'No workspaces. Its owner lists them in machine-agent.json beside the agent'),
-        h('p', { class: 'muted' }, 'Minions can check out pushed branches there and run only the tasks listed, with no shell. "git_sync": false keeps them from checking anything out in a workspace you keep on a branch yourself (an Obsidian vault with Obsidian Git, say). The agent picks up changes to the file by itself (agents set up before workspaces need setting up again with a new token).'),
-        h('pre', {}, WORKSPACE_EXAMPLE));
-  return h('div', { class: 'machine-workspaces' },
-    h('label', { class: 'row small', title: 'Lets minions in every scheme check out pushed branches and run the listed tasks on this computer' },
-      toggle, h('span', {}, 'Workspace tools for minions')),
-    reported,
-    ...(m.problems ?? []).map((p) => h('p', { class: 'error small' }, p)));
 }
 
 /**

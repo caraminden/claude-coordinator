@@ -212,6 +212,8 @@ export interface Machine {
   always_on: number;
   /** Its last check as JSON (src/machines.ts StoredCheck), kept through restarts (#437); null before its first. */
   last_check: string | null;
+  /** What a person ticked for it to lend, as JSON (src/machines.ts Lend) (#439); null until its agent first reports what it found. */
+  lend: string | null;
 }
 
 /** One browser of one signed-in person that wants Web Push notifications (src/push.ts). */
@@ -422,7 +424,8 @@ CREATE TABLE IF NOT EXISTS machines (
   mcp_kind TEXT,
   mcp_command TEXT NOT NULL DEFAULT '',
   always_on INTEGER NOT NULL DEFAULT 1,
-  last_check TEXT
+  last_check TEXT,
+  lend TEXT
 );
 -- The schemes a machine is lent to (#303; every machine's one list since #438). Before #438 read only where machines.scoped = 1: rows left from #62
 -- (Oct 27, unused since #89) stay put, and choosing "only these" for a machine replaces its rows.
@@ -684,6 +687,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'mcp_command', "ALTER TABLE machines ADD COLUMN mcp_command TEXT NOT NULL DEFAULT ''"],
   ['machines', 'always_on', 'ALTER TABLE machines ADD COLUMN always_on INTEGER NOT NULL DEFAULT 1'],
   ['machines', 'last_check', 'ALTER TABLE machines ADD COLUMN last_check TEXT'],
+  ['machines', 'lend', 'ALTER TABLE machines ADD COLUMN lend TEXT'],
   ['contraptions', 'relay_paths', "ALTER TABLE contraptions ADD COLUMN relay_paths TEXT NOT NULL DEFAULT '[]'"],
   ['contraptions', 'repo', 'ALTER TABLE contraptions ADD COLUMN repo TEXT'],
   ['contraptions', 'branch', 'ALTER TABLE contraptions ADD COLUMN branch TEXT'],
@@ -696,7 +700,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 34; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths; 23: contraptions.repo, branch, folder; 24: tickets.parent; 25: machines.scoped (#303); 26: machines.owner_id (#306); 27: machines.mcp_kind, mcp_command (#308); 28: repo_collaborators (#310); 29: memory_chunks (#331); 30: tickets.workflow (#359); 31: projects.optional_plugin_dirs, tickets.plugin_dirs (#361); 32: schedules.model, effort (#387); 33: machines.always_on, last_check (#437); 34: one lending list per machine, projects.machine_tools and machines.scoped unread (#438)
+export const SCHEMA_VERSION = 35; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths; 23: contraptions.repo, branch, folder; 24: tickets.parent; 25: machines.scoped (#303); 26: machines.owner_id (#306); 27: machines.mcp_kind, mcp_command (#308); 28: repo_collaborators (#310); 29: memory_chunks (#331); 30: tickets.workflow (#359); 31: projects.optional_plugin_dirs, tickets.plugin_dirs (#361); 32: schedules.model, effort (#387); 33: machines.always_on, last_check (#437); 34: one lending list per machine, projects.machine_tools and machines.scoped unread (#438); 35: machines.lend (#439)
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -1921,7 +1925,7 @@ export class Store {
     return this.getMachine(Number(lastInsertRowid))!;
   }
 
-  updateMachine(id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'last_seen_at' | 'notes' | 'workspace_tools' | 'mcp_kind' | 'mcp_command' | 'always_on' | 'last_check'>>) {
+  updateMachine(id: number, fields: Partial<Pick<Machine, 'name' | 'token_hash' | 'last_seen_at' | 'notes' | 'workspace_tools' | 'mcp_kind' | 'mcp_command' | 'always_on' | 'last_check' | 'lend'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     this.db.prepare(`UPDATE machines SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);

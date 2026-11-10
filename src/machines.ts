@@ -6,7 +6,11 @@
 // stream -> local MCP server, and back the same way. Each proxy is one session, and the agent
 // runs one copy of the MCP server per session, so concurrent threads never share one.
 // An agent with a workspaces config also serves its own workspace tools (server "ws"), which threads
-// see as mcp__<name>-ws__…, only while a person has the machine's workspace tools switched on.
+// see as mcp__<name>-ws__….
+// What a machine lends is ticked on the Machines page (#439): its agent reports the MCP servers and
+// workspaces it found on that computer, by name, and serves only the ticked ones. An agent set up
+// before that (it posts no version) lends the MCP server on its own command line, and its workspace
+// tools while a person has the machine's workspace tools switched on.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -30,6 +34,33 @@ export function mcpFromAgent(describe: string): Pick<Machine, 'mcp_kind' | 'mcp_
   if (describe === 'workspace tools only') return { mcp_kind: 'none', mcp_command: '' };
   const claude = describe.match(/^(.+) \(from Claude Code's config\)$/);
   return claude ? { mcp_kind: 'claude', mcp_command: claude[1] } : null;
+}
+
+/** An MCP server's name as an agent reports it (machine-agent.mjs SERVER_NAME), and a workspace's. */
+const SERVER_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}$/;
+const WORKSPACE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
+/** What the setup lines ran for a machine added as a Claude Code server with no name typed (#308). */
+const DEFAULT_CLAUDE_MCP = 'godot-ai';
+
+/** What a person ticked for a machine to lend (#439): one of the MCP servers its agent found, and its workspaces, by name. */
+export type Lend = { server: string | null; workspaces: string[] };
+/** An MCP server an agent found on its computer: in Claude Code's config, or in its own machine-agent.json. */
+export type FoundServer = { name: string; from: 'claude' | 'file' };
+
+/** A lend as a person's PATCH or machines.lend gives it, or null when it isn't one. */
+export function cleanLend(v: any): Lend | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
+  if (v.server !== null && !(typeof v.server === 'string' && SERVER_NAME.test(v.server))) return null;
+  if (!Array.isArray(v.workspaces) || v.workspaces.length > 50 || !v.workspaces.every((w: unknown) => typeof w === 'string' && WORKSPACE_NAME.test(w))) return null;
+  return { server: v.server, workspaces: [...new Set<string>(v.workspaces)] };
+}
+
+function storedLend(m: Machine): Lend | null {
+  try {
+    return m.lend ? cleanLend(JSON.parse(m.lend)) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The servers an agent can offer: the MCP server it lends, and its built-in workspace tools. */
@@ -64,7 +95,7 @@ export type MachineStatus = {
   /** One line saying why, without a time: `when` carries that. */
   reason: string;
   /** The button that fixes it, if one does. */
-  fix: 'check' | 'workspace_tools' | 'lend' | 'token' | 'remove' | 'always_on' | null;
+  fix: 'check' | 'workspace_tools' | 'tick' | 'lend' | 'token' | 'remove' | 'always_on' | null;
   when: { label: 'checked' | 'seen' | 'added'; at: number } | null;
 };
 
@@ -82,6 +113,9 @@ export type StatusFacts = {
   offers: MachineServer[];
   /** Its agent offers workspace tools, but its switch is off. */
   wsOff: boolean;
+  /** Its agent takes ticks from the Machines page (#439), and whether it found anything there to tick. */
+  managed: boolean;
+  finds: boolean;
   check: StoredCheck | null;
   /** How many schemes are on its list (#438). */
   lent: number;
@@ -99,6 +133,9 @@ export function machineStatus(f: StatusFacts): MachineStatus {
     return s('asleep', f.alwaysOn ? 'Offline' : 'Asleep', null, seen);
   }
   if (f.runners) return s('ready', 'CI runner host, connected');
+  if (!f.offers.length && f.managed) {
+    return f.finds ? s('fix', 'Lends nothing: nothing is ticked', 'tick') : s('fix', 'Found nothing to lend on that computer', 'tick');
+  }
   if (!f.offers.length) {
     return f.wsOff ? s('fix', 'Lends nothing: workspace tools are off', 'workspace_tools')
       : s('fix', 'Lends nothing: no MCP server or folder on that computer', 'token');
@@ -140,7 +177,10 @@ interface Agent {
   sessions: Set<string>;
   // What the agent says it offers; an agent from before workspaces never says, and lends its MCP server.
   servers: MachineServer[];
-  workspaces: unknown[];
+  /** It posts v 2 (#439): it reports what it found and serves what is ticked. Otherwise it lends what its own command line says. */
+  managed: boolean;
+  found: FoundServer[];
+  workspaces: { name: string }[];
   problems: string[];
   /** Its hourly check, and the connect check for an agent that never posts its info (#437). */
   timers: NodeJS.Timeout[];
@@ -173,7 +213,7 @@ interface Session {
 }
 
 /** The workspaces an agent reports, cut down to what the Machines page shows. */
-function cleanWorkspaces(v: unknown): unknown[] {
+function cleanWorkspaces(v: unknown): { name: string }[] {
   const text = (x: unknown, max = 500) => (typeof x === 'string' ? x.slice(0, max) : '');
   const list = (x: unknown) => (Array.isArray(x) ? x.slice(0, 50) : []);
   return list(v).map((w: any) => ({
@@ -183,6 +223,27 @@ function cleanWorkspaces(v: unknown): unknown[] {
     git_sync: w?.git_sync !== false,
     tasks: list(w?.tasks).map((t: any) => ({ name: text(t?.name, 40), run: list(t?.run).map((a) => text(a)), about: text(t?.about), args: t?.args === true })),
   }));
+}
+
+/** The MCP servers an agent says it found, cut down to valid names, each once. */
+function cleanFound(v: unknown): FoundServer[] {
+  const seen = new Set<string>();
+  return (Array.isArray(v) ? v.slice(0, 50) : []).flatMap((f: any) => {
+    if (typeof f?.name !== 'string' || !SERVER_NAME.test(f.name) || seen.has(f.name)) return [];
+    seen.add(f.name);
+    return [{ name: f.name, from: f.from === 'file' ? 'file' : 'claude' } as FoundServer];
+  });
+}
+
+/** The servers a turn gets from a connected machine: what is ticked and found (#439), or as an old agent says with its switch. */
+function lentServers(m: Machine, agent: Agent): MachineServer[] {
+  if (!agent.managed) return agent.servers.filter((s) => s === 'mcp' || m.workspace_tools);
+  const lend = storedLend(m);
+  if (!lend) return [];
+  return [
+    ...(lend.server && agent.found.some((f) => f.name === lend.server) ? ['mcp' as const] : []),
+    ...(agent.workspaces.some((w) => lend.workspaces.includes(w.name)) ? ['ws' as const] : []),
+  ];
 }
 
 const holderKey = (h: SessionHolder) => ('ticketId' in h ? `t${h.ticketId}` : 'contraptionTurn' in h ? `c${h.contraptionTurn}` : `k${h.check}`);
@@ -237,6 +298,7 @@ export class MachineRelay {
       now: Date.now(), startedAt: this.startedAt, online: !!agent, runners: agent ? agent.runners : !!check?.runners,
       alwaysOn: !!machine.always_on, createdAt: machine.created_at, lastSeenAt: machine.last_seen_at,
       offers, wsOff: !machine.workspace_tools && !!agent?.servers.includes('ws'), check,
+      managed: !!agent?.managed, finds: !!(agent?.found.length || agent?.workspaces.length),
       lent: projects.length,
     });
     return {
@@ -266,6 +328,11 @@ export class MachineRelay {
       /** False only for a CI runner host from before #438 with no list: it serves every scheme an admin owns. */
       scoped: !!machine.scoped,
       servers: agent?.servers ?? [],
+      /** Whether its agent takes ticks (#439); null while offline, when nobody knows which agent will connect. */
+      managed: agent ? agent.managed : null,
+      /** The MCP servers its agent found there, and what is ticked; lend is null until a managed agent first reports. */
+      found: agent?.found ?? [],
+      lend: storedLend(machine),
       runners: agent ? agent.runners : !!check?.runners,
       workspaces: agent?.workspaces ?? [],
       problems: agent?.problems ?? [],
@@ -280,7 +347,7 @@ export class MachineRelay {
   online(): OnlineMachine[] {
     return this.store.listMachines().flatMap((m) => {
       const agent = this.agents.get(m.id);
-      const servers = agent?.servers.filter((s) => s === 'mcp' || m.workspace_tools) ?? [];
+      const servers = agent ? lentServers(m, agent) : [];
       return servers.length ? [{ ...m, servers }] : [];
     });
   }
@@ -290,7 +357,7 @@ export class MachineRelay {
   }
 
   /** A machine's agent connected: hold the stream open and send it its sessions' messages. */
-  connectAgent(machine: Machine, res: ServerResponse, info: { host: string; command: string; runners?: boolean }) {
+  connectAgent(machine: Machine, res: ServerResponse, info: { host: string; command: string; runners?: boolean; managed?: boolean }) {
     // A newer connection wins: the old one is a laptop that dropped off without the server noticing.
     const old = this.agents.get(machine.id);
     if (old) this.dropAgent(machine.id, old);
@@ -298,7 +365,7 @@ export class MachineRelay {
     res.write(`data: ${JSON.stringify({ hello: machine.name })}\n\n`);
     const mcp = !info.runners && machine.mcp_kind === null && mcpFromAgent(info.command);
     if (mcp) this.store.updateMachine(machine.id, mcp);
-    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: info.runners ? [] : ['mcp'], workspaces: [], problems: [], timers: [], runners: !!info.runners };
+    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: info.runners || info.managed ? [] : ['mcp'], managed: !info.runners && !!info.managed, found: [], workspaces: [], problems: [], timers: [], runners: !!info.runners };
     this.agents.set(machine.id, agent);
     // A runner host's check is its agent connecting: an hourly runner list could collide with a person's add, which the agent would refuse as busy.
     this.store.updateMachine(machine.id, { last_seen_at: agent.since, ...(info.runners ? { last_check: JSON.stringify({ at: agent.since, results: [], runners: true }) } : {}) });
@@ -332,19 +399,55 @@ export class MachineRelay {
   }
 
   /** The agent says what it offers: its servers, and the workspaces in its config. False if it isn't connected. */
-  setInfo(machine: Machine, body: { servers?: unknown; workspaces?: unknown; problems?: unknown }): boolean {
+  setInfo(machine: Machine, body: { v?: unknown; found?: unknown; servers?: unknown; workspaces?: unknown; problems?: unknown }): boolean {
     const agent = this.agents.get(machine.id);
     if (!agent) return false;
     // A runner agent offers no MCP server or workspaces, whatever it says.
     if (agent.runners) return true;
-    agent.servers = (['mcp', 'ws'] as const).filter((s) => Array.isArray(body.servers) && body.servers.includes(s));
+    agent.managed = body.v === 2;
+    agent.found = agent.managed ? cleanFound(body.found) : [];
     agent.workspaces = cleanWorkspaces(body.workspaces);
+    agent.servers = agent.managed ? [...(agent.found.length ? ['mcp' as const] : []), ...(agent.workspaces.length ? ['ws' as const] : [])]
+      : (['mcp', 'ws'] as const).filter((s) => Array.isArray(body.servers) && body.servers.includes(s));
     agent.problems = (Array.isArray(body.problems) ? body.problems : []).slice(0, 50).map((p) => String(p).slice(0, 500));
+    if (agent.managed) {
+      // Its first report as a managed agent: the ticks start from what it lent before, so a reinstall changes nothing a minion gets.
+      if (!storedLend(machine)) {
+        const was = machine.mcp_kind === 'claude' ? machine.mcp_command || DEFAULT_CLAUDE_MCP : null;
+        const lend: Lend = { server: was && agent.found.some((f) => f.name === was) ? was : null, workspaces: machine.workspace_tools ? agent.workspaces.map((w) => w.name).filter((n) => WORKSPACE_NAME.test(n)) : [] };
+        this.store.updateMachine(machine.id, { lend: JSON.stringify(lend) });
+      }
+      this.sendLend(machine.id);
+    }
     // A server it no longer offers is gone for the sessions using it.
-    for (const id of agent.sessions) if (!agent.servers.includes(this.sessions.get(id)!.server)) this.endSession(id, true);
+    const offers = lentServers(this.store.getMachine(machine.id)!, agent);
+    for (const id of agent.sessions) if (!offers.includes(this.sessions.get(id)!.server)) this.endSession(id, true);
     this.onChange();
     this.checkIfDue(machine.id);
     return true;
+  }
+
+  /** Tell a managed agent what is ticked; it serves nothing else. */
+  private sendLend(machineId: number) {
+    const agent = this.agents.get(machineId);
+    const machine = this.store.getMachine(machineId);
+    if (agent?.managed && machine) agent.res.write(`data: ${JSON.stringify({ lend: storedLend(machine) ?? { server: null, workspaces: [] } })}\n\n`);
+  }
+
+  /**
+   * A person changed a machine's ticks (#439): keep them, tell its agent, end the sessions on what is no longer
+   * lent, and check what is new. Another MCP server ticked is a new server to check.
+   */
+  setLend(machineId: number, lend: Lend) {
+    const machine = this.store.getMachine(machineId);
+    if (!machine) return;
+    const swapped = storedLend(machine)?.server !== lend.server;
+    const check = swapped && storedCheck(machine);
+    this.store.updateMachine(machineId, { lend: JSON.stringify(lend), ...(check ? { last_check: JSON.stringify({ ...check, results: check.results.filter((r) => r.server !== 'mcp') }) } : {}) });
+    this.sendLend(machineId);
+    const offers = this.online().find((m) => m.id === machineId)?.servers ?? [];
+    for (const server of ['mcp', 'ws'] as const) if ((server === 'mcp' && swapped) || !offers.includes(server)) this.endServer(machineId, server);
+    this.checkIfDue(machineId);
   }
 
   /**

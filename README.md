@@ -78,10 +78,15 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   A file upload or a paste works too. The Taskmaster can read and change them
   with its `get_project_instructions` and `set_project_instructions` tools.
 - **Machines** lend minions MCP servers that run on people's own computers, such as a
-  Godot editor that runs builds on a laptop. Add one in Settings, on the Machines tab;
-  the app shows a one-time token and a command to run there, which downloads
-  `public/machine-agent.mjs` (Node 18+, no installs) and starts it with the MCP server's
-  command. The agent dials out to the app and holds an event stream open, so the computer
+  Godot editor that runs builds on a laptop. Add one in Settings, on the Machines tab,
+  by name (#439); the app shows a one-time token and one install line for that computer
+  (Windows, or macOS and Linux), which downloads `public/machine-agent.mjs` (Node 18+, no
+  installs) and runs it in the background from then on. The agent reports what it found there:
+  the names (never the commands or env) of the MCP servers in that computer's Claude Code
+  config, servers its owner wrote under `"servers"` in `machine-agent.json` beside it, and
+  that file's workspaces. A person ticks, in the machine's line, the one server and the folders
+  it lends; the agent serves only what is ticked and what it found itself, so the app can
+  name a server and never a command, and a tick needs no new token. The agent dials out to the app and holds an event stream open, so the computer
   needs no open ports and can be anywhere. Every minion turn (not the Taskmaster) gets each
   machine that is online when it starts as an MCP server named after the machine
   (`mcp__<name>__…`): a small stdio proxy (`src/machine-mcp.ts`) relays through the app
@@ -89,15 +94,16 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   Tokens are stored hashed; a new token or removing the machine disconnects it. With
   `MACHINES_URL` set (perigee uses its tailnet name), agents connect only there, on a second
   listener that serves nothing else, and the public address refuses them.
-  `--claude-mcp <name>` runs a server already set up for Claude Code on that computer
-  (from its `~/.claude.json`, e.g. Delve's `godot-ai`), and each machine's notes ("never
-  restart it", where the clone is) go into minion prompts while it is online. For Windows
-  the page also gives a PowerShell snippet that registers a Task Scheduler task to start the
-  agent now and at every logon, in the person's own session, with no reboot.
-  **Workspace tools** (#90): an agent started with `--config machine-agent.json` (both
-  snippets pass it) reads workspaces from that file, which only the computer's owner edits:
+  An agent installed before ticks (started with `--claude-mcp <name>` or `-- <command>`)
+  keeps lending what its command line says, shown as "set on that computer" until it is
+  reinstalled with a new token. Each machine's notes ("never
+  restart it", where the clone is) go into minion prompts while it is online. On Windows
+  the install line registers a Task Scheduler task that starts the agent now and at every
+  logon, in the person's own session, with no reboot; on macOS and Linux the agent installs
+  itself as a launchd agent or a systemd user unit.
+  **Workspace tools** (#90): the agent reads workspaces from that file, which only the computer's owner edits:
   a folder, extra read-only folders, and named tasks with a fixed argv (no shell; a minion's
-  arguments are appended only to a task that says `"args": true`). With the machine's "Workspace tools" switch on (off by default),
+  arguments are appended only to a task that says `"args": true`). With a folder ticked (an older agent: its "All its folders" switch on),
   turns also get `mcp__<name>-ws__…`: `workspaces`, `git_sync` (fetch origin, detached
   checkout; stops rather than overwrite local changes), `run_task`/`job` (one job per
   workspace, long ones return a job id), `read_file`, `list_files`, and `fetch_file`, which
@@ -109,10 +115,9 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   A workspace its owner keeps on a branch (an Obsidian vault with Obsidian Git) sets
   `"git_sync": false`: `git_sync` refuses there, `workspaces` and the Machines page say it's off,
   and an agent whose workspaces all have it off doesn't offer the tool.
-  A folder typed in the add form ("Folder minions can use", #305) makes both snippets add it to
-  that file as a workspace named after the folder, keeping what's there, with a
-  `git pull --ff-only` task and `git_sync` off when it's a git repo; such a machine starts with
-  the switch on. The MCP server choice can be None, for a machine that lends only a folder.
+  A new folder is added on that computer, in that file; the page shows the lines to write.
+  A CI runner host (`tools/ci-runner/`) is added from its own button under the list, with
+  its own install line.
   The agent re-reads the file when it changes. Builds still run whatever the repo's project
   files say, so this limits what minions can ask for; it is not a sandbox.
   The Taskmaster sees them too (#307): `list_machines` gives each machine its scheme can see

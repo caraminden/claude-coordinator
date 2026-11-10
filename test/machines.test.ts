@@ -133,29 +133,114 @@ test('threads skip offline machines, and only people manage machines', async () 
   await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'sleepy' } }), /409/);
 });
 
-test('a machine added with workspace_tools: true starts with the switch on', async () => {
-  await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'vault-pc', workspace_tools: 'yes' } }), /400/);
-  assert.ok(!(await call('/api/machines')).some((m: any) => m.name === 'vault-pc'), 'a refused add leaves no machine behind');
-  const { machine } = await call('/api/machines', { method: 'POST', body: { name: 'vault-pc', workspace_tools: true } });
-  assert.equal(machine.workspace_tools, true);
-  const { machine: plain } = await call('/api/machines', { method: 'POST', body: { name: 'plain-pc', workspace_tools: false } });
-  assert.equal(plain.workspace_tools, false);
+test('adding a machine takes a name, always on and nothing about what it lends (#439)', async () => {
+  await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'named-pc', always_on: 'yes' } }), /400 always_on must be true or false/);
+  await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'named-pc', runners: 1 } }), /400 runners must be true or false/);
+  assert.ok(!(await call('/api/machines')).some((m: any) => m.name === 'named-pc'), 'a refused add leaves no machine behind');
+  // What an older page sent about an MCP server or a folder is not kept: the agent reports what is there.
+  const { machine } = await call('/api/machines', { method: 'POST', body: { name: 'named-pc', kind: 'command', command: 'rm -rf /', workspace_tools: true } });
+  assert.deepEqual([machine.mcp_kind, machine.mcp_command, machine.workspace_tools, machine.lend, machine.always_on, machine.runners], [null, '', false, null, true, false]);
+  const { machine: laptop } = await call('/api/machines', { method: 'POST', body: { name: 'lap-pc', always_on: false } });
+  assert.equal(laptop.always_on, false);
+  // A CI runner host is one from the start, so its own install line shows before its agent ever connects.
+  const { machine: host } = await call('/api/machines', { method: 'POST', body: { name: 'ci-pc', runners: true } });
+  assert.deepEqual([host.runners, host.status, host.reason], [true, 'asleep', 'Not connected yet']);
+  assert.equal((await call(`/api/machines/${host.id}/token`, { method: 'POST' })).machine.runners, true);
+  for (const m of [machine, laptop, host]) await call(`/api/machines/${m.id}`, { method: 'DELETE' });
 });
 
-test('a machine keeps the MCP server it was added with, through a new token (#308)', async () => {
-  await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'mcp-pc', kind: 'godot' } }), /400/);
-  await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'mcp-pc', kind: 'command', command: ' ' } }), /400/);
-  await assert.rejects(call('/api/machines', { method: 'POST', body: { name: 'mcp-pc', kind: 'command', command: 'a\nb' } }), /400/);
-  assert.ok(!(await call('/api/machines')).some((m: any) => m.name === 'mcp-pc'), 'a refused add leaves no machine behind');
-  const { machine } = await call('/api/machines', { method: 'POST', body: { name: 'mcp-pc', kind: 'none', command: 'godot-ai' } });
-  assert.deepEqual([machine.mcp_kind, machine.mcp_command], ['none', '']);
-  const renewed = await call(`/api/machines/${machine.id}/token`, { method: 'POST' });
-  assert.deepEqual([renewed.machine.mcp_kind, renewed.machine.mcp_command], ['none', '']);
-  const { machine: cmd } = await call('/api/machines', { method: 'POST', body: { name: 'cmd-pc', kind: 'command', command: ' npx -y x ' } });
-  assert.deepEqual([cmd.mcp_kind, cmd.mcp_command], ['command', 'npx -y x']);
-  const { machine: old } = await call('/api/machines', { method: 'POST', body: { name: 'old-pc' } });
-  assert.equal(old.mcp_kind, null, 'an add without kind (an older page) leaves it unknown');
-  for (const m of [machine, cmd, old]) await call(`/api/machines/${m.id}`, { method: 'DELETE' });
+test('a machine lends what is ticked of what its agent found, and nothing else (#439)', async () => {
+  const { mkdirSync } = await import('node:fs');
+  const dir = join(root, 'ticks');
+  const home = join(dir, 'home');
+  mkdirSync(join(dir, 'w'), { recursive: true });
+  mkdirSync(join(dir, 'x'), { recursive: true });
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(dir, 'w', 'report.zip'), Buffer.from([1, 2, 3]));
+  // The entry's env holds a secret, as real ones do: only its name may leave that computer.
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'godot-ai': { command: process.execPath, args: [mcpServer], env: { API_KEY: 'sk-secret-123' } } } }));
+  const config = join(dir, 'machine-agent.json');
+  const task = { hi: { run: [process.execPath, '-e', 'console.log("task ran")'] } };
+  writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] } }, workspaces: { w: { path: join(dir, 'w'), tasks: task }, x: { path: join(dir, 'x') } } }));
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'ticks' } });
+  const find = async () => (await call('/api/machines')).find((m: any) => m.name === 'ticks');
+  const { output } = startAgent(token, ['--config', config], { CLAUDE_CONFIG_DIR: home });
+  const found = await until('ticks to report what it found', async () => { const m = await find(); return m.managed && m.found.length && m; });
+  assert.deepEqual(found.found, [{ name: 'own', from: 'file' }, { name: 'godot-ai', from: 'claude' }]);
+  assert.deepEqual(found.workspaces.map((w: any) => w.name), ['w', 'x']);
+  assert.doesNotMatch(JSON.stringify(found), /sk-secret-123|API_KEY/);
+  assert.deepEqual(found.lend, { server: null, workspaces: [] }, 'a new machine starts with nothing ticked');
+  assert.deepEqual([found.status, found.reason, found.fix], ['fix', 'Lends nothing: nothing is ticked', 'tick']);
+  const [project] = await call('/api/projects');
+  const turnNow = async (message: string) => {
+    const before = turns().length;
+    await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message } });
+    return (await until('a turn', () => turns().length > before && turns())).at(-1);
+  };
+  assert.deepEqual(Object.keys((await turnNow('nothing ticked')).results).filter((n) => n.startsWith('ticks')), []);
+
+  for (const lend of [{ server: 'a b', workspaces: [] }, { server: null, workspaces: 'w' }, { server: null }, { server: null, workspaces: ['../x'] }, 'all']) {
+    await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend } }), /400 lend must be/);
+  }
+  // A tick needs no new token: the same agent serves it at once.
+  const ticked = await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'godot-ai', workspaces: ['w'] } } });
+  assert.deepEqual(ticked.lend, { server: 'godot-ai', workspaces: ['w'] });
+  const ready = await until('its check', async () => { const m = await find(); return m.status === 'ready' && !m.checking && m; });
+  assert.deepEqual(ready.checked.results.map((r: any) => [r.server, r.ok]).sort(), [['mcp', true], ['ws', true]]);
+  let turn = await turnNow('ticked');
+  assert.equal(turn.error, undefined);
+  assert.deepEqual(turn.results.ticks.tools, ['whoami']);
+  assert.match(turn.results['ticks-ws'].text, /## w\n/);
+  assert.doesNotMatch(turn.results['ticks-ws'].text, /## x\n/, 'a folder that isn\'t ticked is not there for minions');
+  assert.match(turn.results['ticks-ws'].ran, /task ran/);
+  assert.match(output(), /Lent from the Machines page: MCP server godot-ai and workspaces w/);
+
+  // The other server ticked instead: the machine's own, from its file. Its tools keep the machine's name.
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'own', workspaces: [] } } });
+  turn = await turnNow('the other one');
+  assert.deepEqual(Object.keys(turn.results).filter((n) => n.startsWith('ticks')), ['ticks']);
+  assert.match(output(), /started own/);
+
+  // A name the agent didn't find lends nothing: Citadel can name a server, never a command.
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'not-there', workspaces: ['nor-this'] } } });
+  assert.deepEqual((await find()).reason, 'Lends nothing: nothing is ticked');
+  assert.deepEqual(Object.keys((await turnNow('made up')).results).filter((n) => n.startsWith('ticks')), []);
+  const opened = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${(await turnNow('by hand')).token}` } });
+  assert.equal(opened.status, 503);
+
+  // A server its owner adds to the file shows up to tick without restarting anything.
+  writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] }, second: { run: [process.execPath, mcpServer] } } }));
+  await until('the new server to show', async () => (await find()).found.some((f: any) => f.name === 'second'), 20_000);
+  await call(`/api/machines/${machine.id}`, { method: 'DELETE' });
+});
+
+test('a machine set up before ticks starts from what it lent when its agent first reports (#439)', async () => {
+  const { mkdirSync } = await import('node:fs');
+  const dir = join(root, 'carried');
+  mkdirSync(join(dir, 'w'), { recursive: true });
+  writeFileSync(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { 'godot-ai': { command: process.execPath, args: [mcpServer] } } }));
+  const config = join(dir, 'machine-agent.json');
+  writeFileSync(config, JSON.stringify({ workspaces: { w: { path: join(dir, 'w') } } }));
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'carried' } });
+  const find = async () => (await call('/api/machines')).find((m: any) => m.name === 'carried');
+  // As caras-laptop is today: --claude-mcp godot-ai, its workspace tools switched on.
+  const old = startAgent(token, ['--config', config, '--claude-mcp', 'godot-ai'], { CLAUDE_CONFIG_DIR: dir });
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: true } });
+  const before = await until('the old agent\'s check', async () => { const m = await find(); return m.status === 'ready' && m.checked.results.length === 2 && !m.checking && m; });
+  assert.deepEqual([before.managed, before.lend, before.mcp_kind, before.mcp_command], [false, null, 'claude', 'godot-ai'], 'an agent set up the old way lends what its command line says');
+  old.agent.kill();
+  await until('it to go offline', async () => !(await find()).online);
+  // Reinstalled with the new line: the same server and folders are ticked, so minions get what they got.
+  startAgent(token, ['--config', config], { CLAUDE_CONFIG_DIR: dir });
+  const after = await until('the new agent\'s report', async () => { const m = await find(); return m.managed && m.lend && m; });
+  assert.deepEqual(after.lend, { server: 'godot-ai', workspaces: ['w'] });
+  assert.equal((await until('it to be Ready', async () => { const m = await find(); return m.status === 'ready' && !m.checking && m; })).reason, before.reason);
+  // A folder added later starts unticked.
+  mkdirSync(join(dir, 'later'), { recursive: true });
+  writeFileSync(config, JSON.stringify({ workspaces: { w: { path: join(dir, 'w') }, later: { path: join(dir, 'later') } } }));
+  const more = await until('the new folder to show', async () => { const m = await find(); return m.workspaces.length === 2 && m; }, 20_000);
+  assert.deepEqual(more.lend.workspaces, ['w']);
+  await call(`/api/machines/${machine.id}`, { method: 'DELETE' });
 });
 
 test('an agent can run a server from Claude Code\'s config, and threads get the machine\'s notes', async () => {
@@ -514,7 +599,8 @@ test('an older machine learns what it runs from its agent, and a known one keeps
   assert.equal(mcpFromAgent('npx -y some-mcp'), null, 'a command comes joined with spaces, its quoting lost');
   assert.equal(mcpFromAgent(''), null);
   assert.equal(mcpFromAgent('x'.repeat(200)), null, 'cut at the route\'s 200 characters');
-  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'kept-box', kind: 'none' } });
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'kept-box' } });
+  new Store(join(root, 'data', 'coordinator.db')).updateMachine(machine.id, { mcp_kind: 'none' });
   startAgent(token, ['--', process.execPath, mcpServer]);
   const online = await until('kept-box to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'kept-box' && m.online));
   assert.deepEqual([online.mcp_kind, online.mcp_command], ['none', ''], 'what it was added with wins');

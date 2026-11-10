@@ -103,7 +103,8 @@ test('a workspace turn works end to end with the agent on the machines URL: its 
   // The workspaces arrive through /api/machines/info.
   const online = await until('studio to report its workspace', async () => (await call('/api/machines')).find((m: any) => m.name === 'studio' && m.workspaces.length));
   assert.deepEqual(online.servers, ['ws']);
-  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: true } });
+  assert.equal(online.reason, 'Lends nothing: nothing is ticked', 'a folder is lent once it is ticked (#439)');
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: null, workspaces: ['w'] } } });
 
   const project = await call('/api/projects', { method: 'POST', body: { name: 'Vault' } });
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [project.id] } }); // a new machine is lent to no scheme (#438)

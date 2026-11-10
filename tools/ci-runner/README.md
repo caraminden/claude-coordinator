@@ -55,10 +55,10 @@ who runs `add-runner.ps1`, and the agent runs as SYSTEM. The agent's `list` show
 
 ## Install the runner agent (Cara, once)
 
-1. On Citadel's Machines page, add a machine named `cara-desktop-runners` that runs nothing
-   and has no folder. Copy its token (`ccm_…`) and the address its setup lines connect to.
+1. On Citadel's Machines page, press **Add a CI runner host** under the list (admins see
+   it) and name it `cara-desktop-runners`. Copy its token (`ccm_…`) and the address its setup lines connect to.
    Being Cara's, it may act for every scheme.
-2. Easiest: the page shows the whole line, address and token filled in, on its **CI runner agent** tab right after you add the machine (or make a new token). Copy that and skip to the end of this step. By hand: open PowerShell **as administrator** and paste this. Put that address in
+2. Easiest: the page shows the whole line, address and token filled in, right after you add the host (or make a new token for it). Copy that and skip to the end of this step. By hand: open PowerShell **as administrator** and paste this. Put that address in
    `$u` and the token in place of `ccm_…`:
 
    ```powershell

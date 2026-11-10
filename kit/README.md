@@ -1,7 +1,7 @@
 # The Citadel kit
 
 A Claude Code plugin that every turn of every scheme loads: minions and Taskmasters alike
-(`src/runner.ts`, `KIT`). The runner copies this folder when the server starts and each turn loads
+(`src/turn-launch.ts`, `KIT`). The server copies this folder when the server starts and each turn loads
 its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh` and
 `tools/deploy.sh`, and a branch's edits never reach other schemes' turns.
 

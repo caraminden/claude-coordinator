@@ -29,7 +29,8 @@ process.env.LC_TIME = 'en_GB.UTF-8';
 process.env.COORDINATOR_API = 'http://service.invalid';
 process.env.COORDINATOR_TOKEN = 'service-token';
 process.env.COORDINATOR_TICKET = '999';
-const { KIT, MCP_DIR, MCP_SERVER, Runner, turnEnv } = await import('../src/runner.ts');
+const { Runner } = await import('../src/runner.ts');
+const { KIT, MCP_DIR, MCP_SERVER, turnEnv } = await import('../src/turn-launch.ts');
 const { CHECKOUT, HEAVY_LINE } = await import('../src/prompts.ts');
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));

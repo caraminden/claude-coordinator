@@ -8,7 +8,8 @@ import { Containers, runArgs, specHash, type RunCmd } from '../src/containers.ts
 import { Credentials } from '../src/credentials.ts';
 import { CodexLink } from '../src/codex-link.ts';
 import { Store } from '../src/db.ts';
-import { Runner, TURN_SLICE, usageKey, wrapperAlive } from '../src/runner.ts';
+import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
+import { TURN_SLICE } from '../src/turn-launch.ts';
 import { stopTurns } from './helpers.ts';
 
 // Turns in a person's own Claude container (#213). A fake `podman` on PATH runs `exec` on the host,

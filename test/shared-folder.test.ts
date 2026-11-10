@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { findArtifacts } from '../src/artifacts.ts';
-import { coordinatorAccess } from '../src/runner.ts';
+import { coordinatorAccess } from '../src/turn-launch.ts';
 import { systemPrompt } from '../src/prompts.ts';
 import { mergeMemory, projectSlug } from '../src/sessions.ts';
 import { projectSharedDir } from '../src/workspace.ts';

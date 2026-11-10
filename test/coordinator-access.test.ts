@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { coordinatorAccess } from '../src/runner.ts';
+import { coordinatorAccess } from '../src/turn-launch.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'coordinator-access-'));
 after(() => rmSync(root, { recursive: true, force: true }));

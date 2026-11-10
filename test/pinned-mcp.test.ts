@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createInterface } from 'node:readline';
 import { test } from 'node:test';
-import { MACHINE_MCP_SERVER, MCP_SERVER } from '../src/runner.ts';
+import { MACHINE_MCP_SERVER, MCP_SERVER } from '../src/turn-launch.ts';
 
 // Turns run copies of the MCP servers from the data dir; a local import that isn't copied
 // with them makes every session's MCP server die on start (CONNECTION_CLOSED).

@@ -50,7 +50,7 @@ skill step is skipped or uses its default.
   `src/mcp.ts`, besides the kit, `CLAUDE.md` and `.claude/`.
 - **Glossary:** none. The names people read (Scheme, Taskmaster, Minion, Grunt) are in the scheme
   instructions; code keeps the old identifiers.
-- **Decisions log (ADRs):** none yet; the first goes in `docs/adr/`.
+- **Decisions log (ADRs):** `docs/adr/`.
 - **Retros:** none yet; the first goes in `docs/retros/`.
 - **Bug classes of its own:** none beyond the bug-fixing skill's.
 - **Rubrics:** docs/rubrics/

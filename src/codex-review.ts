@@ -247,7 +247,7 @@ export function runnerConfig(env: Record<string, string | undefined> = process.e
   return turnConfig(env);
 }
 
-/** Copy a pinned file and the ./ files it imports into `to`, as src/runner.ts pins them. */
+/** Copy a pinned file and the ./ files it imports into `to`, as src/turn-launch.ts pins them. */
 function copyPinned(file: string, to: string) {
   const dest = join(to, basename(file));
   if (existsSync(dest)) return;

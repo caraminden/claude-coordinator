@@ -20,7 +20,7 @@ import { AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claud
 import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
 import { claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
-import { USAGE_LIMIT, turnEnv, tripwireConfig } from './runner.ts';
+import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
 import { claudeConfigDir, projectSlug } from './sessions.ts';
 
 /** Read once at load, like the runner's pinned files: a deploy doesn't change the hook under a running server. */

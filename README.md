@@ -153,6 +153,7 @@ uses the built-in `node:sqlite`.
 | --- | --- |
 | `server.ts` | HTTP server, JSON API, SSE stream, static files |
 | `src/runner.ts` | Spawns `claude` turns, parses stream-json, queues messages |
+| `src/turn-launch.ts` | What a turn is launched with: pinned copies of the server files, hooks, settings, env and tool lists |
 | `src/prompts.ts` | The agent instructions: the minion and Taskmaster prompts, onboarding, and the messages a turn is sent |
 | `src/mcp.ts` | MCP server giving the Taskmaster its minion-management tools |
 | `src/approvals.ts` | Approval rules, plugin folders, and the Approve / Deny cards |

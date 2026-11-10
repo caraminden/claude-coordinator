@@ -12,7 +12,7 @@ import { historyPage } from '../history.ts';
 import { parseMerge, prInfo } from '../merge-card.ts';
 import { previewPath } from '../previews.ts';
 import { NOTIFY_STATES } from '../push.ts';
-import { tripwireConfig } from '../runner.ts';
+import { tripwireConfig } from '../turn-launch.ts';
 import { runsRepo } from '../wake.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';

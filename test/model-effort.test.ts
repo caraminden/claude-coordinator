@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { turnSettings } from '../src/runner.ts';
+import { turnSettings } from '../src/turn-launch.ts';
 import { bootServer, stopProcs } from './helpers.ts';
 
 const repo = join(import.meta.dirname, '..');

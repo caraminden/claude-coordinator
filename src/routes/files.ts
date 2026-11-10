@@ -33,8 +33,9 @@ export function artifactView(app: App, a: Artifact & { ticket_title?: string; ti
 /** Content-Security-Policy for an artifact opened directly or framed by the app. */
 function artifactCsp(kind: string): string {
   // Tickets write these files, so never let them run as the app: sandboxed pages get an opaque
-  // origin with no cookies or API access. HTML may still run its own scripts (canvases, demos).
-  if (kind === 'html') return "sandbox allow-scripts allow-popups allow-forms allow-modals allow-downloads; frame-ancestors 'self'";
+  // origin with no cookies or API access. HTML may still run its own scripts (canvases, demos). A
+  // link it opens in a new tab leaves the sandbox, or a site like a cloud console couldn't sign in (#440).
+  if (kind === 'html') return "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads; frame-ancestors 'self'";
   // Chrome's PDF viewer refuses to load in a sandbox; PDFs can't script the page anyway.
   if (kind === 'pdf') return "frame-ancestors 'self'";
   return "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'self'";

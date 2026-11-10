@@ -5,6 +5,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { linkifyHtml } from '../public/ui/markdown.js';
 import type { ArtifactDatum, Store } from './db.ts';
 import { HttpError } from './http.ts';
 
@@ -71,13 +72,31 @@ function bridgeSource(): string {
 /** JSON that can sit inside a <script> element: nothing in it can close the element or open a comment. */
 const scriptJson = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
+// What isn't the page's prose: comments, the head, scripts, styles, form fields, buttons, SVG and
+// MathML (an HTML <a> inside them would break them or do nothing). linkifyHtml skips <a>, <code>, <pre>.
+const NOT_PROSE = /<!--[\s\S]*?-->|<(head|script|style|textarea|title|select|button|svg|math|noscript|iframe|object|template)\b[\s\S]*?<\/\1\s*>/gi;
+
 /**
- * `html` with the bridge script as its first script: after a doctype (so the page keeps its mode) and
+ * A page's bare URLs, DOIs and web addresses as new-tab links, the way Citadel's markdown links them
+ * (#440): any URL a page shows is clickable, whether its author wrote the <a> or not.
+ */
+export function linkPageText(html: string): string {
+  let out = '';
+  let at = 0;
+  for (const m of html.matchAll(NOT_PROSE)) {
+    out += linkifyHtml(html.slice(at, m.index)) + m[0];
+    at = m.index + m[0].length;
+  }
+  return out + linkifyHtml(html.slice(at));
+}
+
+/**
+ * `html` with the bridge script as its first script, and its text's URLs linked (linkPageText): after a doctype (so the page keeps its mode) and
  * any comments or whitespace before it, else at the very start. `page` is the token path the page was
  * served under, which the viewer passes on so the server can check the frame still shows the file it opened.
  */
 export function injectBridge(html: Buffer, cfg: { page: string; entries: ReturnType<typeof entriesView> }): Buffer {
-  const text = html.toString('utf8');
+  const text = linkPageText(html.toString('utf8'));
   const lead = /^\uFEFF?(?:\s|<!--[\s\S]*?-->)*(?:<!doctype[^>]*>)?/i.exec(text)![0];
   const script = `<script>${bridgeSource()}(${scriptJson(cfg)});</script>`;
   return Buffer.from(lead + script + text.slice(lead.length));

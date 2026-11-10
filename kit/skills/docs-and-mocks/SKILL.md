@@ -59,6 +59,9 @@ when look variants belong in the real app instead, in [`prototypes.md`](prototyp
    (`size` on boards). A grey box stands in only for something that does not exist yet, labelled so.
    A chart, dashboard or stat tile follows the built-in `dataviz` skill's method (form, marks,
    interaction) but takes its colours from the scheme's tokens, never dataviz's placeholder palette.
+   Every URL, console page or outside doc is a link, `[Firebase console](https://console.firebase.google.com)`
+   in markdown or an `<a>` in a page: never a URL in backticks, a bare domain, or "open X → Y" with
+   no link to X (Josh, 2026-11-10: "links are links, the same should be true of documents").
 4. **Make live what the feel decides** (hover details, collapsed sections, filters, toggles, a
    state switch), and always a pick bar where a choice is asked. Art stays images; long motion is a
    clip beside the page. The kit's API is in [`mockkit.md`](mockkit.md).

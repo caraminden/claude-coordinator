@@ -51,10 +51,19 @@ const defaultLink = (href, html) => (/^(https?:\/\/|mailto:)/i.test(href)
   : `<span class="cui-link" title="${escapeHtml(href)}">${html}</span>`);
 
 /**
- * A bare http(s) URL or DOI ("10.1234/x", "doi:10.1234/x") in escaped text. Each ends at a space, a
- * tag, a quote or a held-out marker; a DOI needs no "doi:" but can't sit inside a path or a number.
+ * A bare http(s) URL, DOI ("10.1234/x", "doi:10.1234/x") or web address with no scheme
+ * ("console.firebase.google.com/x", #440) in escaped text. Each ends at a space, a tag, a quote or a
+ * held-out marker; a DOI needs no "doi:" but can't sit inside a path or a number. A web address
+ * counts only when it ends in one of WEB_TLDS, in lower case, and doesn't sit in an email address, a
+ * path or a word, so file names ("land.sh", "README.md", "Node.js"), "ASP.NET" and package names
+ * ("com.example.app") stay text.
  */
-const BARE = /(?<![A-Za-z0-9/])(https?:\/\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>"'\u0000\u0001])+)|(?<![A-Za-z0-9/.:-])(doi:\s?)?(10\.\d{4,9}\/(?:(?!&quot;|&#39;|&lt;|&gt;)[^\s<>"'\u0000\u0001])+)/gi;
+const WEB_TLDS = 'com|org|net|io|dev|app|ai|gov|edu|uk';
+const WEB_TLD = new RegExp(`^(?:${WEB_TLDS})$`, 'i');
+const URL_TAIL = `(?:(?!&quot;|&#39;|&lt;|&gt;)[^\\s<>"'\\u0000\\u0001])`;
+const BARE = new RegExp(`(?<![A-Za-z0-9/])(https?:\\/\\/${URL_TAIL}+)`
+  + `|(?<![A-Za-z0-9/.:-])(doi:\\s?)?(10\\.\\d{4,9}\\/${URL_TAIL}+)`
+  + `|(?<![A-Za-z0-9/.:@\\\\-])(?<![A-Za-z0-9]_)((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+(${WEB_TLDS})(?![A-Za-z0-9-]|_[A-Za-z0-9])(?::\\d{2,5})?(?:[/?#]${URL_TAIL}*)?)`, 'gi');
 
 /**
  * A bare link's end without the marks that end the sentence around it, and in markdown (`md`) the
@@ -73,20 +82,25 @@ function trimBare(s, md) {
   }
 }
 
-/** Escaped text with its bare URLs and DOIs as `link(href, html)`; in markdown, `held` holds each link's HTML out (see inline()). */
+/** Escaped text with its bare URLs, DOIs and web addresses as `link(href, html)`; in markdown, `held` holds each link's HTML out (see inline()). */
 function linkBare(s, link, held = null) {
-  return s.replace(BARE, (m, url, doiPrefix) => {
+  return s.replace(BARE, (m, url, doiPrefix, doi, web, tld) => {
+    // "ASP.NET", "Foo.IO": a web address's ending is written in lower case.
+    // "org.apache.commons.io" is a package name, read backwards from its domain.
+    if (web && (tld !== tld.toLowerCase() || WEB_TLD.test(web.split('.')[0]))) return m;
     const kept = trimBare(m, !!held);
     // What's left must still point somewhere: not "https://" or "10.1234/" alone.
-    if (url ? /^https?:\/\/$/i.test(kept) : !/\/[^/]/.test(kept)) return m;
-    const href = url ? unescapeHtml(kept) : `https://doi.org/${unescapeHtml(kept.slice(doiPrefix?.length ?? 0)).split('/').map(encodeURIComponent).join('/')}`;
+    if (url ? /^https?:\/\/$/i.test(kept) : doi && !/\/[^/]/.test(kept)) return m;
+    const href = url ? unescapeHtml(kept)
+      : web ? `https://${unescapeHtml(kept)}`
+      : `https://doi.org/${unescapeHtml(kept.slice(doiPrefix?.length ?? 0)).split('/').map(encodeURIComponent).join('/')}`;
     return (held ?? String)(link(href, kept)) + m.slice(kept.length);
   });
 }
 
 /**
- * Plain text (a record's field, a note) as HTML: everything escaped, its bare http(s) URLs and DOIs
- * linked, opening a new tab. DOIs go to https://doi.org/.
+ * Plain text (a record's field, a note) as HTML: everything escaped, its bare http(s) URLs, DOIs and
+ * web addresses linked, opening a new tab. DOIs go to https://doi.org/, a web address to https://.
  */
 export function linkify(text) {
   return linkBare(escapeHtml(String(text ?? '')), defaultLink);

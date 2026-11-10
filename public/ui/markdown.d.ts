@@ -9,21 +9,21 @@ export interface MarkdownOptions {
   streaming?: boolean;
   /** The level a `#` is drawn as (default 3, so a reply's headings sit under the page's own; a document passes 1). */
   headingBase?: number;
-  /** A link's HTML, given its target unescaped and its text as HTML: for `[text](href)`, `<https://…>`, and bare URLs and DOIs (a DOI's target is its https://doi.org/ address). Default: http(s) and mailto open a new tab (`rel="noopener noreferrer"`, never `_top`); anything else is an inert span.cui-link. */
+  /** A link's HTML, given its target unescaped and its text as HTML: for `[text](href)`, `<https://…>`, and bare URLs, DOIs and web addresses (a DOI's target is its https://doi.org/ address; "example.com/x" goes to https://example.com/x). Default: http(s) and mailto open a new tab (`rel="noopener noreferrer"`, never `_top`); anything else is an inert span.cui-link. */
   link?: (href: string, html: string) => string;
   /** An image's HTML, given its target unescaped and its alt text escaped. Default: the alt text. */
   image?: (href: string, alt: string, title: string | null) => string;
-  /** Runs over the inline HTML outside code and links (bare URLs and DOIs are already links), e.g. to link bare words. Default: as is. */
+  /** Runs over the inline HTML outside code and links (bare URLs, DOIs and web addresses are already links), e.g. to link bare words. Default: as is. */
   text?: (html: string) => string;
 }
 
 /** `src` as HTML. Everything from the text is escaped first; the only tags are the ones it makes (and `<br>`). */
 export function renderMarkdown(src: string, opts?: MarkdownOptions): string;
 
-/** Plain text (a record's field, a note) as HTML: everything escaped, bare http(s) URLs and DOIs ("10.1234/x", "doi:10.1234/x", to https://doi.org/) as links opening a new tab. Sentence punctuation after one stays outside it. */
+/** Plain text (a record's field, a note) as HTML: everything escaped, bare http(s) URLs, DOIs ("10.1234/x", "doi:10.1234/x", to https://doi.org/) and web addresses with no scheme ending in .com, .org, .net, .io, .dev, .app, .ai, .gov, .edu or .uk ("console.firebase.google.com/x", to https://) as links opening a new tab. Sentence punctuation after one stays outside it. */
 export function linkify(text: string | null | undefined): string;
 
-/** HTML you made (already escaped) with the bare URLs and DOIs in its text linked as `linkify` does; tags, `<a>`, `<code>` and `<pre>` are left alone. */
+/** HTML you made (already escaped) with the bare URLs, DOIs and web addresses in its text linked as `linkify` does; tags, `<a>`, `<code>` and `<pre>` are left alone. */
 export function linkifyHtml(html: string): string;
 
 /** GitHub's id for a heading's HTML: lower case, punctuation dropped, spaces to hyphens. Headings carry it as `data-slug`. */

@@ -6,6 +6,7 @@ import { loadDraft, saveDraft } from './composer.js';
 import { showProject } from './project.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
+import { linkify } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 
 /** A file a thread linked in its reply, shown full screen over its chat, which stays beside it. */
@@ -524,7 +525,7 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
   } else if (kind === 'html') {
     // Sandboxed (here and by the server's CSP) so a page a thread wrote can't act as the app.
     // Its page reaches the app only through the artifact bridge (bridge-host.js), as the person viewing it.
-    const frame = h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-forms allow-modals allow-downloads', allow: 'clipboard-write *; fullscreen *', allowfullscreen: true, title: name });
+    const frame = h('iframe', { class: 'artifact-frame', src, sandbox: 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads', allow: 'clipboard-write *; fullscreen *', allowfullscreen: true, title: name });
     if (bridge) attachBridge(frame, { ...bridge, name, api });
     body.append(frame);
   } else if (kind === 'pdf') {
@@ -548,7 +549,10 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
       const linkHref = (href) => hrefFor(joinPath(dir, href));
       const doc = kind === 'markdown' && markdownDoc(text, { imageUrl, linkHref });
       if (doc && brief) addBriefButtons(doc, text, brief);
-      body.replaceChildren(doc ? h('div', { class: 'msg doc' }, doc) : h('pre', { class: 'artifact-text' }, shown));
+      // Plain text keeps its URLs clickable too (#440): linkify escapes everything else.
+      const pre = h('pre', { class: 'artifact-text' });
+      if (!doc) pre.innerHTML = linkify(shown);
+      body.replaceChildren(doc ? h('div', { class: 'msg doc' }, doc) : pre);
     }).catch((err) => body.replaceChildren(h('p', { class: 'error' }, `Could not load: ${err.message}`)));
   }
 }

@@ -19,8 +19,10 @@ reply sits under your page's headings; a document passes 1), and hooks `link(hre
 `image(href, alt, title)`, `text(html)` returning HTML.
 
 - Output is escaped first; the only tags are the renderer's own, so `innerHTML` with it is safe.
-- Bare URLs, `<https://…>` and DOIs (`10.1234/x`, `doi:10.1234/x`, to https://doi.org/) become
-  links through the `link` hook, as `[text](href)` does; code spans stay text.
+- Bare URLs, `<https://…>`, DOIs (`10.1234/x`, `doi:10.1234/x`, to https://doi.org/) and web
+  addresses with no scheme (`console.firebase.google.com/x`, to https://; only .com, .org, .net, .io,
+  .dev, .app, .ai, .gov, .edu and .uk, so file names stay text) become links through the `link` hook,
+  as `[text](href)` does; code spans stay text.
 - Default links: http(s) and mailto open a new tab (`_blank`, `rel="noopener noreferrer"`); anything
   else is an inert `span.cui-link`. A `link` hook for your own paths should still never use `target="_top"`:
   inside Citadel's frame that takes the person out of Citadel.
@@ -31,5 +33,5 @@ reply sits under your page's headings; a document passes 1), and hooks `link(hre
   for tests and servers. Preact: `updateMarkdown(ref.current, text, opts)` in a `useEffect`, with
   nothing rendered into that element.
 - `linkify(text)` is for text that isn't markdown (a field, a note, a log line): it escapes it and
-  links the same URLs and DOIs. `linkifyHtml(html)` does that to HTML you built, leaving its tags,
+  links the same URLs, DOIs and web addresses. `linkifyHtml(html)` does that to HTML you built, leaving its tags,
   links and code alone.

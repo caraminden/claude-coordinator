@@ -242,6 +242,16 @@ test('linkify: bare URLs and DOIs in plain text become new-tab links, everything
   assert.equal(linkify(null), '');
 });
 
+test('linkify: a web address with no scheme links to https://, file and package names stay text (#440)', () => {
+  assert.equal(linkify('Open console.firebase.google.com, then github.com/a/b_c.'),
+    `Open ${ext('https://console.firebase.google.com', 'console.firebase.google.com')}, then ${ext('https://github.com/a/b_c', 'github.com/a/b_c')}.`);
+  assert.equal(linkify('(web.dev/learn) x.co.uk/p example.com:8080/x?y=1'),
+    `(${ext('https://web.dev/learn', 'web.dev/learn')}) ${ext('https://x.co.uk/p', 'x.co.uk/p')} ${ext('https://example.com:8080/x?y=1', 'example.com:8080/x?y=1')}`);
+  // Not an address: a file, an email, a path, a word with an underscore, a capitalised ending, a package name.
+  const prose = 'land.sh README.md Node.js me@x.com a/b.com C:\\x.com foo_bar.com google.com_x ASP.NET Foo.IO org.apache.commons.io com.example.app localhost:3000';
+  assert.equal(linkify(prose), prose.replace('&', '&amp;'));
+});
+
 test('linkifyHtml: links bare URLs in text, leaves tags, existing links and code alone', () => {
   assert.equal(linkifyHtml('<a href="https://x.y">https://x.y</a> <code>https://c.d</code> <pre>10.1234/p</pre> <em>https://e.f</em>'),
     `<a href="https://x.y">https://x.y</a> <code>https://c.d</code> <pre>10.1234/p</pre> <em>${ext('https://e.f')}</em>`);
@@ -257,6 +267,9 @@ test('markdown autolinks bare URLs and DOIs through the link hook, not inside li
   const seen = [];
   md('at https://x.io and 10.1234/q', { link: (href, html) => (seen.push([href, html]), html) });
   assert.deepEqual(seen, [['https://x.io', 'https://x.io'], ['https://doi.org/10.1234/q', '10.1234/q']]);
+  // A web address with no scheme links, bold or in emphasis; in code it stays code (#440).
+  assert.equal(md('Open **console.firebase.google.com** → _web.dev_ `x.com`'),
+    `<p>Open <strong>${ext('https://console.firebase.google.com', 'console.firebase.google.com')}</strong> → <em>${ext('https://web.dev', 'web.dev')}</em> <code>x.com</code></p>`);
   // An image's alt is text, so a URL in it isn't a link.
   assert.equal(md('![see https://x.y](p.png)'), '<p><span class="cui-alt">[image: see https://x.y]</span></p>');
 });

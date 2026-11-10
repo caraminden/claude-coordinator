@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
-import { cleanEntries, injectBridge, LIMITS, writeStore } from '../src/artifact-data.ts';
+import { cleanEntries, injectBridge, linkPageText, LIMITS, writeStore } from '../src/artifact-data.ts';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
@@ -79,6 +79,21 @@ test('the bridge goes in after the doctype, or first, and what it inlines cannot
   const out = html('<p>x</p>');
   assert.equal(out.split('</script>').length, 2);
   assert.ok(!out.includes('\u2028') && out.includes('\\u003c/script>') && out.includes('\\u2028'));
+});
+
+test('a page\'s bare URLs and web addresses become new-tab links; its scripts, styles, links, code and fields stay as written (#440)', () => {
+  const ext = (href: string, text = href) => `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+  assert.equal(linkPageText('<p>Open <b>console.firebase.google.com</b>, then https://x.io/a.</p>'),
+    `<p>Open <b>${ext('https://console.firebase.google.com', 'console.firebase.google.com')}</b>, then ${ext('https://x.io/a')}.</p>`);
+  const untouched = '<!doctype html><head><title>x.com</title><style>a::after{content:"https://s.io"}</style></head>'
+    + '<!-- see https://c.io --><script>const u = "https://j.io"; if (a < b) go("x.com");</script>'
+    + '<a href="https://a.io">https://a.io</a><code>y.com</code><pre>https://p.io</pre><textarea>https://t.io</textarea>'
+    + '<button>z.com</button><svg><text>https://v.io</text></svg><img alt="https://i.io">';
+  assert.equal(linkPageText(untouched), untouched);
+  // Prose between the skipped parts still links, and the bridge goes in ahead of it all.
+  assert.equal(linkPageText('<script>1</script>see x.com<style>p{}</style>'), `<script>1</script>see ${ext('https://x.com', 'x.com')}<style>p{}</style>`);
+  const served = injectBridge(Buffer.from('<!doctype html><p>web.dev</p>'), { page: 't1-0.x.y/p.html', entries: [] }).toString();
+  assert.ok(served.startsWith('<!doctype html><script>(function (cfg)') && served.endsWith(`<p>${ext('https://web.dev', 'web.dev')}</p>`));
 });
 
 test('writes are checked: key length, value size, entries per write, keys and bytes per page', () => {

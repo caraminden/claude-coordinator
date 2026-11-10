@@ -58,8 +58,10 @@ async function add(name: string, kind: string, command?: string) {
 async function newToken(name: string) {
   await page.eval(`(() => {
     window.confirm = () => true;
-    const row = [...document.querySelectorAll('.machine-row')].find((r) => r.querySelector('.name').textContent === ${JSON.stringify(name)});
-    [...row.querySelectorAll('button')].find((b) => b.textContent === 'New token').click();
+    const row = () => [...document.querySelectorAll('.machine-row')].find((r) => r.querySelector('.name').textContent === ${JSON.stringify(name)});
+    // Its buttons are on its opened line (#437); opening it redraws the list.
+    if (!row().classList.contains('open')) row().querySelector('.machine-head').click();
+    [...row().querySelectorAll('button')].find((b) => b.textContent === 'New token').click();
   })()`);
   await wait(`${name}'s new setup lines`, `document.querySelector('#machine-setup strong')?.textContent === 'Connect ${name}'`);
 }

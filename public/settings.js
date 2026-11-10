@@ -902,7 +902,7 @@ const schemeName = (id) => (view.projects ?? []).find((p) => p.id === id)?.name 
 function fixButton(m, open) {
   const b = (label, onclick, title) => h('button', { type: 'button', class: 'secondary small', title, onclick: (e) => { e.stopPropagation(); onclick(e.currentTarget); } }, label);
   switch (m.fix) {
-    case 'check': return m.checking ? b('Checking…', () => {}) : b('Check now', (btn) => checkMachine(m, btn), 'Start its tools again and list them');
+    case 'check': return m.checking ? h('button', { type: 'button', class: 'secondary small', disabled: true }, 'Checking…') : b('Check now', (btn) => checkMachine(m, btn), 'Start its tools again and list them');
     case 'workspace_tools': return b('Turn on', () => patchMachine(m, { workspace_tools: true }, `switch workspace tools on for ${m.name}`, renderMachineList), 'Switch its workspace tools on, so minions get its folders');
     case 'lend': return b('Lend it', open, 'Pick the schemes whose minions get it');
     case 'machine_tools': {

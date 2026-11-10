@@ -1207,10 +1207,11 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .machine-line { padding: 0; background: var(--panel); border-radius: var(--radius); }
 .machine-line .machine-head { display: flex; gap: 0.6rem; align-items: center; min-width: 0; padding: 0 0.75rem 0 0; }
 .machine-line .machine-open { flex: 1; display: flex; gap: 0.6rem; align-items: center; min-width: 0; padding: 0.55rem 0 0.55rem 0.75rem; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius); min-height: 0; }
+.machine-line .machine-open .text { flex: 1; min-width: 0; display: flex; flex-direction: column; white-space: normal; overflow-wrap: anywhere; }
 .machine-line .machine-open:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 .machine-line .name { font-size: 0.95em; font-weight: 600; }
 .machine-line .meta { font-size: 0.82em; white-space: normal; }
-.machine-line .machine-head > button { flex: none; }
+.machine-line .machine-head > button:not(.machine-open) { flex: none; }
 .machine-body { border-top: 1px solid var(--line); padding: 0.6rem 0.75rem; display: grid; gap: 0.6rem; font-size: 0.88em; }
 .machine-kv { display: grid; grid-template-columns: 7rem 1fr; gap: 0.45rem 0.8rem; align-items: baseline; min-width: 0; }
 .machine-kv > div { min-width: 0; overflow-wrap: anywhere; }

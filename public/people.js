@@ -396,7 +396,7 @@ function githubCard() {
     const reach = !link.limited ? 'Every repo your GitHub account can reach'
       : !link.reach ? ['Only repos where the owner ', install, ' (GitHub didn\'t say which just now)']
       : link.reach.length ? repoLinks
-      : ['No repos yet: a repo\'s owner ', install, ' on it first'];
+      : 'No repos yet';
     const other = link.limited ? (full ? linkBtn('Switch to full access', 'full', 'secondary') : '') : (limited ? linkBtn('Switch to limited', 'limited', 'secondary') : '');
     return card.replaceChildren(title(link.limited ? 'Linked, limited' : limited ? 'Linked, full access' : 'Linked', 'ok'), errLine,
       h('dl', { class: 'kv' },
@@ -404,7 +404,7 @@ function githubCard() {
         h('dt', {}, 'Commits as'), h('dd', {}, `${link.name || link.login} <${link.email}>`),
         h('dt', {}, 'Can reach'), h('dd', {}, reach),
         h('dt', {}, 'Linked'), h('dd', {}, new Date(link.linked_at).toLocaleDateString(undefined, { dateStyle: 'medium' }))),
-      link.limited && link.reach?.length ? h('p', { class: 'muted small' }, 'A scheme\'s repo missing from that list? Its owner ', install, ' on it.') : '',
+      link.limited ? h('p', { class: 'muted small' }, 'A repo of your own: ', install_url ? ext(install_url, 'pick which of your repos Citadel may reach') : 'install Citadel\'s GitHub App on your account and pick the repos', '. Someone else\'s repo missing from the list: its owner ', install, ' on it.') : '',
       h('div', { class: 'row' }, other, unlink), note);
   };
   api('api/me/github').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));

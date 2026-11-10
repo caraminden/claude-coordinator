@@ -233,7 +233,10 @@ case "$cmd" in
   up) take_screen; up; keep_screen ;;
   install)
     [ $# -eq 1 ] && [ -f "$1" ] || { say "usage: citadel-android install <file.apk>"; exit 2; }
-    take_screen; up; need_server; adb install -r -t "$1"; s=$?; keep_screen; exit $s ;;
+    take_screen; up; need_server
+    out=$(adb install -r -t "$1" 2>&1); s=$?; printf '%s\n' "$out"
+    case "$out" in *INSTALL_FAILED_UPDATE_INCOMPATIBLE*) say "the installed copy was signed with another key. Debug builds should sign with the app's committed debug keystore. Uninstall it only if it is yours: someone else's build and its data go with it." ;; esac
+    keep_screen; exit $s ;;
   open)
     [ $# -eq 1 ] || { say "usage: citadel-android open <url>"; exit 2; }
     take_screen; up; need_server; adb shell am start -W -a android.intent.action.VIEW --es com.android.browser.application_id citadel -d "'${1//\'/}'" >/dev/null; s=$?; keep_screen; exit $s ;;

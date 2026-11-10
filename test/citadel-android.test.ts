@@ -21,6 +21,7 @@ case "$*" in
   # A real stop saves the quick-boot snapshot first, which takes seconds.
   'emu kill') touch '${sdk}/killed'; [ -e '${sdk}/emu.pid' ] && { sleep 1; kill "$(cat '${sdk}/emu.pid')"; } ;;
   'exec-out screencap -p') printf PNG ;;
+  'install -r -t '*bad.apk) echo 'Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]'; exit 1 ;;
 esac
 `;
 mkdirSync(join(sdk, 'platform-tools'), { recursive: true });
@@ -47,6 +48,15 @@ test('usage errors exit 2 without touching the emulator', () => {
   assert.equal(run('a', 'offline', 'maybe').status, 2);
   assert.equal(run('a', 'install', join(root, 'missing.apk')).status, 2);
   assert.ok(!existsSync(calls));
+});
+
+test('install says what a signature mismatch means and still fails', () => {
+  const apk = join(root, 'bad.apk');
+  writeFileSync(apk, 'x');
+  const r = run('Peek #1 (josh)', 'install', apk);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /INSTALL_FAILED_UPDATE_INCOMPATIBLE/);
+  assert.match(r.stderr, /signed with another key.*only if it is yours/);
 });
 
 test('shot saves the screen and the caller keeps the screen for its next step', () => {

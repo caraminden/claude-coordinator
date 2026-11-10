@@ -19,6 +19,10 @@ is **read-only**.
 - The Gradle daemon is off (`~/.gradle/gradle.properties`, copied into container homes). Don't pass
   `--daemon` or override it in the project's `gradle.properties`. After the build,
   `pgrep -u "$USER" -f '[G]radleDaemon'` should print nothing.
+- **Debug builds sign with one committed debug keystore** (public, `android`/`androiddebugkey`, in the
+  app's repo), not the home's `~/.android/debug.keystore`. Every home has its own, so builds from
+  different homes can't update each other on the shared emulator. With the shared key they upgrade
+  over each other. Never `adb uninstall` another build to get past a signature error.
 - The first build in a home downloads Gradle and its dependencies, about 1 GB in `~/.gradle`.
 
 ## Pinned versions
@@ -76,6 +80,10 @@ citadel-android sms +15551234567 'Your code is 1234'                      # an i
 citadel-android down               # when you're done
 ```
 
+- **Install and launch only through `citadel-android`, never raw `adb install`.** Its screen lease
+  covers only `citadel-android`'s own calls, so a raw install can land mid-way through someone
+  else's test. `install` is `-r -t`, an upgrade in place. On `INSTALL_FAILED_UPDATE_INCOMPATIBLE` it
+  prints a hint: uninstall only a build that is yours.
 - `install`, `open`, `offline` and `sms` boot it first if needed.
 - **Fake texts with `sms`, never `adb emu sms send`.** The console wants a token turns can't read, so
   plain `adb emu` answers "KO: unknown command". `sms` hands the text to the emulator's service on the

@@ -368,6 +368,8 @@ const CSS = `
 :where(.cui-md .cui-table) { overflow-x: auto; margin: 0.75rem 0; }
 :where(.cui-md table) { border-collapse: collapse; font-size: 0.9em; }
 :where(.cui-md :is(th, td)) { border: 1px solid var(--citadel-border); padding: 0.3rem 0.55rem; text-align: left; vertical-align: top; overflow-wrap: normal; }
+/* Words stay whole in a cell, but one long code token or URL may break, or it would widen the table and squeeze the other columns to a word per line (#462). */
+:where(.cui-md :is(th, td) :is(code, a)) { overflow-wrap: anywhere; }
 :where(.cui-md th) { background: var(--citadel-code-bg); }
 :where(.cui-md :is(th, td).cui-al-r) { text-align: right; }
 :where(.cui-md :is(th, td).cui-al-c) { text-align: center; }

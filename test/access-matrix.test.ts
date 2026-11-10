@@ -153,21 +153,25 @@ test('every route answers each kind of caller as recorded', { timeout: 120_000 }
     } catch {}
     return `${res.status}${error ? ` ${error}` : ''}`;
   };
-  const got: Record<string, string> = {};
+  // One block per route, holding each caller's answer: a new route is one block in one place.
+  const got: Record<string, Record<string, string>> = {};
   for (const who of Object.keys(callers)) {
     for (const [target, t] of [['minion1', M1.id], ['taskmasterA', TA.id]] as const) {
-      for (const p of TICKET_ROUTES) got[`${who} ${p.method} ${p.path.replace(':t', `:${target}`)}`] = await probe(who, p, t);
+      for (const p of TICKET_ROUTES) (got[`${p.method} ${p.path.replace(':t', `:${target}`)}`] ??= {})[who] = await probe(who, p, t);
     }
-    for (const p of OTHER_ROUTES) got[`${who} ${p.method} ${p.path}`] = await probe(who, p, M1.id);
+    for (const p of OTHER_ROUTES) (got[`${p.method} ${p.path}`] ??= {})[who] = await probe(who, p, M1.id);
   }
-  const sorted = Object.fromEntries(Object.entries(got).sort(([a], [b]) => a.localeCompare(b)));
+  // By path, then method, so one thing's routes sit together.
+  const byPath = (k: string) => k.replace(/^(\S+) (.*)$/, '$2 $1');
+  const sorted = Object.fromEntries(Object.entries(got).sort(([a], [b]) => byPath(a).localeCompare(byPath(b))));
   if (process.env.UPDATE_ACCESS_MATRIX === '1' || !existsSync(SNAPSHOT)) {
     writeFileSync(SNAPSHOT, JSON.stringify(sorted, null, 1) + '\n');
     return;
   }
-  const want: Record<string, string> = JSON.parse(readFileSync(SNAPSHOT, 'utf8'));
+  const want: Record<string, Record<string, string>> = JSON.parse(readFileSync(SNAPSHOT, 'utf8'));
   const diffs = [...new Set([...Object.keys(want), ...Object.keys(sorted)])]
-    .filter((k) => want[k] !== sorted[k])
-    .map((k) => `${k}: was ${want[k] ?? '(none)'}, now ${sorted[k] ?? '(none)'}`);
+    .flatMap((k) => Object.keys(callers).map((who) => [k, who, want[k]?.[who], sorted[k]?.[who]] as const))
+    .filter(([, , was, now]) => was !== now)
+    .map(([k, who, was, now]) => `${k} as ${who}: was ${was ?? '(none)'}, now ${now ?? '(none)'}`);
   assert.deepEqual(diffs, []);
 });

@@ -1,7 +1,8 @@
 # Sets the test box's Windows up from inside it (#369). new-test-box.ps1 copies it to C:\citadel-box and
 # Windows runs it once at the first sign-in (the unattend file's FirstLogonCommands). Run it again by
 # hand, as administrator in the box, after a failure: every step is safe to repeat.
-#   - signs in as `citadel` at every start, for good, and can never lock, sleep or blank the screen;
+#   - signs in as `citadel` at every start, for good (stay-signed-in.ps1), and can never lock, sleep or
+#     blank the screen;
 #   - 125% display scaling, and Windows 11's rounded corners forced on (the Hyper-V display adapter
 #     draws square ones otherwise);
 #   - no notifications over tests, and Windows Update never restarts it while signed in;
@@ -25,18 +26,12 @@ function Set-Reg([string]$Key, [string]$Name, $Value, [string]$Type = 'DWord') {
   New-ItemProperty -Path $Key -Name $Name -Value $Value -PropertyType $Type -Force | Out-Null
 }
 
-Log 'Signing in by itself at every start'
-$winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-if (Test-Path "$box\autologon.txt") {
-  # shortcut: the password sits in the registry as Windows' own autologon keeps it; it's a local
-  # account in a VM nobody else reaches. Sysinternals Autologon would hide it, if that ever matters.
-  Set-Reg $winlogon DefaultPassword (Get-Content "$box\autologon.txt" -Raw).Trim() String
-  Remove-Item "$box\autologon.txt"
-}
-Set-Reg $winlogon AutoAdminLogon '1' String
-Set-Reg $winlogon DefaultUserName 'citadel' String
-Set-Reg $winlogon DefaultDomainName $env:COMPUTERNAME String
-Remove-ItemProperty -Path $winlogon -Name AutoLogonCount -ErrorAction SilentlyContinue
+Log 'Signing in by itself at every start, and no update restarts while signed in'
+# Run again by hand, autologon.txt is gone, so the stored password stays as it was: if the box no
+# longer signs itself in, fix-autologon.ps1 on the host puts the password back.
+$password = if (Test-Path "$box\autologon.txt") { (Get-Content "$box\autologon.txt" -Raw).Trim() } else { '' }
+& "$box\stay-signed-in.ps1" -Password $password | ForEach-Object { Log $_ }
+Remove-Item "$box\autologon.txt" -ErrorAction SilentlyContinue
 Remove-Item C:\Windows\Panther\unattend.xml -ErrorAction SilentlyContinue
 
 Log 'Never locking, sleeping or blanking the screen'
@@ -56,11 +51,8 @@ Set-Reg 'HKCU:\Control Panel\Desktop' LogPixels 120
 Set-Reg 'HKCU:\Control Panel\Desktop' Win8DpiScaling 1
 Set-Reg 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm' ForceEffectMode 2
 
-Log 'No notifications, and no update restarts while signed in'
+Log 'No notifications over tests'
 Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications' ToastEnabled 0
-Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' NoAutoRebootWithLoggedOnUsers 1
-Set-Reg 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' ActiveHoursStart 6
-Set-Reg 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' ActiveHoursEnd 23
 
 Log 'Waiting for winget (the Store brings it in a few minutes after the first sign-in)'
 $deadline = (Get-Date).AddMinutes(15)

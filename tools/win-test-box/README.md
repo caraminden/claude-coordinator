@@ -100,12 +100,24 @@ Everything is on her PC. Nothing here restarts it except step 1's restart, which
 ## Day to day
 
 Nothing to do.
-- **Restarts look after themselves.** When her PC restarts, the box starts 2 minutes later, signs itself in, and its runners and agent come back. Windows Update in the box never restarts it while it's signed in; its active hours are 06:00–23:00.
+- **Restarts look after themselves.** When her PC restarts, the box starts 2 minutes later, signs itself in, and its runners and agent come back. Windows Update in the box is told not to restart it while it's signed in (installs at 03:00, active hours 06:00–23:00), but Windows 11 Home isn't promised to honour that: an update may still restart it at night, and it signs itself in again.
+- **Restart the box gracefully, only ever from inside it:** `Restart-Computer` in the box, or from her PC `Invoke-Command -VMName citadel-test-box -Credential $cred { Restart-Computer -Force }` (there `-Force` only closes apps without asking). **Never `Restart-VM -Force` or a plain `Restart-VM`:** that is a hard reset, like pulling the plug. On 2026-11-10 one put the box into Automatic Repair and lost the settings written just before it.
 - **Adding a scheme** is step 7 again.
 
 ## If something goes wrong
 
-- **A desktop job fails with `BitBlt: Access is denied`, or a minion's screenshot does.** The box's screen is gone: someone signed out, or Windows Update restarted it before it signed in again. Connect (step 4) and look. A sign-in screen means the autologon broke: sign in as `citadel`, then run `C:\citadel-box\guest-setup.ps1` as administrator.
+- **A desktop job fails with `BitBlt: Access is denied`, or a minion's screenshot does.** The box's screen is gone: someone signed out, or it restarted and didn't sign in again. Connect (step 4) and look.
+- **The box sits at the sign-in screen** (its runner and machine show offline). The autologon broke. On her PC, in PowerShell as administrator:
+
+  ```powershell
+  git clone --depth 1 https://github.com/caraminden/claude-coordinator "$env:TEMP\citadel-kit"   # skip if it's still there; `git -C "$env:TEMP\citadel-kit" pull` to refresh
+  powershell -ExecutionPolicy Bypass -File "$env:TEMP\citadel-kit\tools\win-test-box\fix-autologon.ps1"
+  ```
+
+  - It asks for the box's password (user `citadel`, from her password manager), prints why the box isn't signing in, stores the password again, restarts the box gracefully after asking, and says PASS or FAIL. It writes what it found to `citadel-box-autologon.txt` on the desktop, with no password in it.
+  - Running `guest-setup.ps1` again does not fix this: it deleted its copy of the password on its first run.
+  - What happened on 2026-11-10 (#461): an update's restart at 02:15 left `AutoAdminLogon` 0 and no stored password, and the box was offline for 8 hours. `stay-signed-in.ps1` now turns off Windows' own sign-in after updates, which clears those values, and keeps the password from expiring after 42 days.
+- **The box shows "Your device ran into a problem and couldn't be repaired"** (Automatic Repair, after a hard reset or a bad update). In its window: **Advanced options → Troubleshoot → Advanced options → Uninstall Updates → Uninstall latest quality update**. Once it starts, run `fix-autologon.ps1` as above.
 - **A CI job waits on "Waiting for the screen".** A minion's run has it, for 30 minutes at most. After 40 minutes the job takes it anyway.
 - **A minion says "The screen is busy".** A CI desktop job or another minion has it. It tries again later.
 - **The machine shows offline on Citadel.** In the box: `Get-Content -Tail 20 $env:USERPROFILE\coordinator-agent\machine-agent-citadel-test-box.log`. Usually it's Tailscale signed out.
@@ -117,6 +129,8 @@ Nothing to do.
 |---|---|
 | `new-test-box.ps1` | her PC, as administrator: checks, Windows onto a new disk, the VM, waits for the guest |
 | `guest-setup.ps1` | the box, once at first sign-in (again by hand after a failure) |
+| `stay-signed-in.ps1` | the box: autologon, a password that never expires, no update restarts. Called by `guest-setup.ps1`, and sent in by `fix-autologon.ps1` |
+| `fix-autologon.ps1` | her PC, as administrator, when the box sits at the sign-in screen |
 | `add-scheme.ps1` | the box, as administrator, once per scheme |
 | `screen-lock.ps1` | the box: `-Install` adds the job hooks to every `C:\actions-runner-*-desktop\.env`; `-Take`/`-Release` are those hooks |
 | `remove-test-box.ps1` | her PC, as administrator |

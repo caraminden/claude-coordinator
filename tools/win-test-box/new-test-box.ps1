@@ -72,7 +72,7 @@ if (-not $existing -and -not $CheckOnly -and -not $IsoPath) { Stop-With 'pass -I
 if (-not $existing -and $IsoPath -and -not (Test-Path $IsoPath)) { Stop-With "no ISO at $IsoPath. Download the Windows 11 disk image (ISO) from Microsoft's Windows 11 download page." }
 $cpusHere = (Get-CimInstance Win32_Processor | Measure-Object NumberOfLogicalProcessors -Sum).Sum
 Write-Host "  Processors: $cpusHere logical; the box gets $Cpus, capped at 75% of them, at a low weight"
-$guestFiles = 'guest-setup.ps1', 'add-scheme.ps1', 'screen-lock.ps1' | ForEach-Object { Join-Path $PSScriptRoot $_ }
+$guestFiles = 'guest-setup.ps1', 'stay-signed-in.ps1', 'add-scheme.ps1', 'screen-lock.ps1' | ForEach-Object { Join-Path $PSScriptRoot $_ }
 foreach ($f in $guestFiles) { if (-not (Test-Path $f)) { Stop-With "$f is missing: run this from the kit's folder (tools\win-test-box)." } }
 if ($CheckOnly) {
   Say 'Checks passed. Without -CheckOnly it would:'
@@ -247,4 +247,5 @@ Next (README.md, steps 5-8), in the box's window (Hyper-V Manager, Connect):
   6. On Citadel's Machines page, add the machine '$Name', paste its Windows lines into PowerShell in the box.
   7. For each scheme: PowerShell as administrator in the box, C:\citadel-box\add-scheme.ps1 -Repo <owner/repo>
   8. Close the window. Never sign out of the box or lock it.
+Restart the box only from inside it (Restart-Computer). Never Restart-VM -Force or a plain Restart-VM: that is a hard reset.
 "@

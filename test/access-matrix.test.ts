@@ -38,6 +38,7 @@ const schedule = () => store.schedules.create({ project_id: A.id, name: 'S', cro
 const S = schedule();
 const machine = (name: string) => store.createMachine(name, 'x', 'Cara');
 const MX = machine('mx');
+store.setMachineProjects(MX.id, [A.id]); // lent to scheme A only (#438): its minions may open it, B's may not
 // A pinned artifact stays listed (as missing) whatever the startup scan finds.
 store.syncArtifacts(M1, [{ path: 'report.md', size: 1, mtime: 1 }]);
 const ART = store.listArtifacts(A.id)[0];

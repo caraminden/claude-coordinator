@@ -7,7 +7,7 @@ import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { AGENT_NAME } from '../auth.ts';
 import { askerKey, EFFORTS, MAX_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
-import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, lendsMachines, taskmasterTargets } from '../access.ts';
+import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { inboxCount, inboxItems } from '../inbox.ts';
 import { isWorking } from '../../public/schemecounts.js';
 import { instructionSources, lineDiff } from '../instructions.ts';
@@ -416,12 +416,12 @@ export const projectRoutes: Route[] = [
     method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER, access: 'owner',
     async handler({ req, res, app, session, caller, project }) {
       const { store, runner } = app;
-      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, machine_tools, onboarding, onboarding_mode and list_groups; what is left out stays.
+      // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode and list_groups; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'machine_tools', 'onboarding', 'onboarding_mode', 'list_groups'];
+      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups'];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'machine_tools' | 'onboarding' | 'onboarding_mode' | 'list_groups'>> = {};
+      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups'>> = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -431,10 +431,6 @@ export const projectRoutes: Route[] = [
       if (body.onboarding_mode !== undefined) settings.onboarding_mode = required(body.onboarding_mode, ONBOARDING_MODES, 'onboarding_mode') as Project['onboarding_mode'];
       // null or "" leaves effort to Claude Code's default.
       if (body.default_effort !== undefined) settings.default_effort = oneOf(body.default_effort || null, EFFORTS, 'Default effort') ?? '';
-      if (body.machine_tools !== undefined) {
-        if (typeof body.machine_tools !== 'boolean') throw new HttpError(400, 'machine_tools must be true or false');
-        settings.machine_tools = body.machine_tools ? 1 : 0;
-      }
       try {
         if (body.approval_rules !== undefined) settings.approval_rules = cleanRules(body.approval_rules);
         if (body.plugin_dirs !== undefined) settings.plugin_dirs = cleanPluginDirs(body.plugin_dirs);
@@ -447,7 +443,7 @@ export const projectRoutes: Route[] = [
       // The optional ones too (#361): a minion picks from them without an admin, so registering one is the gate.
       const pluginsChanged = (['plugin_dirs', 'optional_plugin_dirs'] as const).some((k) => settings[k] !== undefined && settings[k] !== (project[k] ?? ''));
       if (pluginsChanged && !session.admin) {
-        if (!caller || !lendsMachines(store, project)) throw new HttpError(403, 'Only an admin can change plugin folders');
+        if (!caller || !adminOwned(store, project)) throw new HttpError(403, 'Only an admin can change plugin folders');
         const refused = adminAskRefusal(store, caller.id);
         if (refused) throw new HttpError(403, refused);
       }
@@ -484,11 +480,6 @@ export const projectRoutes: Route[] = [
         if (coordinator && settings.default_effort !== undefined) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} set the scheme's default effort to ${settings.default_effort || "Claude Code's default"}. It applies from each minion's next turn.` });
         }
-        if (coordinator && settings.machine_tools !== undefined) {
-          runner.emit(coordinator.id, 'note', { text: `${session.name} ${settings.machine_tools ? 'gave' : 'took'} the connected machines' tools ${settings.machine_tools ? 'to' : 'from'} this scheme's minions. It applies from each minion's next turn.` });
-        }
-        // Which machines this scheme's minions get decides their status (#437).
-        if (settings.machine_tools !== undefined) app.broadcast({ type: 'machines', machines: app.machines.list() });
         if (coordinator && settings.onboarding === 'skipped') {
           runner.emit(coordinator.id, 'note', { text: `${session.name} skipped the scheme's setup. Tell the ${AGENT_NAME} to pick it up again any time.` });
         }

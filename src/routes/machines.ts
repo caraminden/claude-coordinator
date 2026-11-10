@@ -133,9 +133,9 @@ function taskmasterMachines({ app, caller, project }: Ctx) {
     return {
       ...view,
       owner_name: m.owner_id === null ? null : app.store.getUser(m.owner_id)?.name ?? null,
-      project_names: view.projects?.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`) ?? null,
+      project_names: view.projects.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`),
       // Whether a minion turn its asker starts here gets it (src/runner.ts): an admin sees more than that.
-      minions_get_it: !!project.machine_tools && lendsMachine(app.store, m, project, asker === null ? [] : [asker]),
+      minions_get_it: lendsMachine(app.store, m, project, asker === null ? [] : [asker]),
     };
   });
 }
@@ -189,8 +189,7 @@ export const machineRoutes: Route[] = [
       let machine;
       try {
         // The real hash goes in once the id (part of the token) is known.
-        // An owned one is scoped to no scheme too: if its owner is ever removed, it reaches no one's turns.
-        machine = app.store.createMachine(name, '', session.name, mine ? session.uid! : null, mine);
+        machine = app.store.createMachine(name, '', session.name, mine ? session.uid! : null);
       } catch {
         throw new HttpError(409, 'A machine with that name already exists');
       }
@@ -214,13 +213,14 @@ export const machineRoutes: Route[] = [
   {
     method: 'PATCH', path: '/api/machines/:machine', ...people,
     handler: managed(async ({ req, res, app, machine, session }) => {
-      // Any of name, notes, workspace_tools, always_on and projects (the schemes it is lent to, or null for every scheme).
+      // Any of name, notes, workspace_tools, always_on and projects (the schemes it is lent to: the whole list).
       const body = await readJson(req);
-      let projects: number[] | null | undefined;
+      let projects: number[] | undefined;
       if (body.projects !== undefined) {
-        if (machine.owner_id !== null) throw new HttpError(400, 'A person\'s own machine goes to the turns they ask for, not to schemes');
-        if (body.projects !== null && !(Array.isArray(body.projects) && body.projects.every((id: unknown) => Number.isInteger(id) && app.store.getProject(id as number)))) {
-          throw new HttpError(400, 'projects must be null or a list of scheme ids');
+        // A scheme the person can't see isn't theirs to add; one already on the list (an admin's doing) may stay.
+        const had = app.store.machineProjects(machine.id);
+        if (!(Array.isArray(body.projects) && body.projects.every((id: unknown) => Number.isInteger(id) && app.store.getProject(id as number) && (had.includes(id as number) || app.store.canSee(session, id as number))))) {
+          throw new HttpError(400, 'projects must be a list of scheme ids');
         }
         projects = body.projects;
       }
@@ -246,13 +246,7 @@ export const machineRoutes: Route[] = [
       if (fields.workspace_tools === 0) app.machines.endServer(machine.id, 'ws');
       // Switched on: its workspace tools get their first check now.
       if (fields.workspace_tools === 1) app.machines.checkIfDue(machine.id);
-      if (projects !== undefined) {
-        const now = app.store.getMachine(machine.id)!;
-        app.machines.endSessionsWhere(machine.id, (id) => {
-          const project = app.store.getProject(id);
-          return !project || !lendsMachine(app.store, now, project);
-        });
-      }
+      if (projects !== undefined) app.machines.endSessionsWhere(machine.id, (id) => !app.store.machineGranted(machine.id, id));
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       return json(res, 200, app.machines.view(app.store.getMachine(machine.id)!));
     }),
@@ -302,7 +296,7 @@ export const machineRoutes: Route[] = [
   // The Taskmaster's look at the machines (#307): list them with their live state, and test one.
   {
     method: 'GET', path: '/api/projects/:project/machines', ...taskmaster,
-    handler: (ctx) => json(ctx.res, 200, { machine_tools: !!ctx.project.machine_tools, machines: taskmasterMachines(ctx) }),
+    handler: (ctx) => json(ctx.res, 200, { machines: taskmasterMachines(ctx) }),
   },
   {
     method: 'POST', path: '/api/projects/:project/machines/:name/check', ...taskmaster,
@@ -330,9 +324,9 @@ export const machineRoutes: Route[] = [
       if (machine && machine.owner_id !== null && (!app.runner.ownedMachines(caller!.id).includes(machine.id) || machine.owner_id !== app.store.turnAsker(caller!.id))) {
         throw new HttpError(403, 'That machine is someone else\'s, or this turn started without it');
       }
-      // A machine lent to chosen schemes opens only for a minion that would have got it at its turn's start
-      // (src/runner.ts); any other still opens for a minion in any scheme, as before #303.
-      if (machine?.scoped && machine.owner_id === null && (!project || caller!.kind === 'coordinator' || !project.machine_tools || !lendsMachine(app.store, machine, project))) {
+      // A machine opens only for a minion in a scheme on its list (#438), as at its turn's start (src/runner.ts):
+      // a scheme taken off the list mid-turn can't open it again.
+      if (machine && (!project || caller!.kind === 'coordinator' || !app.store.machineGranted(machine.id, project.id))) {
         throw new HttpError(403, 'That machine isn\'t lent to this scheme');
       }
       const who = `#${caller!.number} in ${project?.name ?? 'a scheme'}`;

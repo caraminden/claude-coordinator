@@ -59,8 +59,8 @@ export function claudeRefusal(who: User, linked: ClaudeLinked, asOwner = false):
     : `Turns for ${who.name} start once they link their Claude account in Settings → Your account, so this message waits here and Claude hasn't seen it.`;
 }
 
-/** The connected machines (Cara's laptop, perigee's GPU) are an admin's: only their schemes' minions get them. */
-export function lendsMachines(store: Store, project: Project): boolean {
+/** Whether an admin owns this scheme: its Taskmaster may then register plugin folders for an admin's ask. */
+export function adminOwned(store: Store, project: Project): boolean {
   return !!store.getUser(project.owner_id ?? -1)?.admin;
 }
 
@@ -75,14 +75,14 @@ export function machinesFor<T extends Pick<Machine, 'owner_id'>>(who: Pick<Sessi
 }
 
 /**
- * Whether a turn in this scheme, asked for by `askers`, gets this machine. A person's own (#306, Josh: "any
- * scheme they are in ... can use their machine to do stuff on their behalf") goes only to a turn its owner
- * asked for, in a scheme they're in. An ownerless one lent to chosen schemes (#303, Josh's vault) goes to
- * those only, whoever owns them: the admin's grant is the consent. Any other follows lendsMachines.
+ * Whether a turn in this scheme, asked for by `askers`, gets this machine: only if the machine's list of schemes
+ * has this one (#438, Cara: "Yes, one list per machine"), whoever owns the scheme. A person's own (#306, Josh:
+ * "any scheme they are in ... can use their machine to do stuff on their behalf") also needs its owner to have
+ * asked for the turn and to be in the scheme.
  */
 export function lendsMachine(store: Store, machine: Machine, project: Project, askers: readonly number[] = []): boolean {
-  if (machine.owner_id !== null) return ownerAsked(store, machine.owner_id, askers, project.id);
-  return machine.scoped ? store.machineGranted(machine.id, project.id) : lendsMachines(store, project);
+  if (!store.machineGranted(machine.id, project.id)) return false;
+  return machine.owner_id === null || ownerAsked(store, machine.owner_id, askers, project.id);
 }
 
 /**

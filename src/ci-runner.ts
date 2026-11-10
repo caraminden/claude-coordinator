@@ -47,7 +47,8 @@ export function findScheme(store: Store, ref: unknown): Project | undefined {
 
 /**
  * Whether this machine's key may fetch a runner token for the scheme. A person's own machine: if its owner is
- * in the scheme (an admin is in all of them). An ownerless one: if it is lent to that scheme (lendsMachine).
+ * in the scheme (an admin is in all of them), whatever its own list of schemes says. An ownerless one: if it is
+ * lent to that scheme (lendsMachine).
  * The token lets a PC run the repo's CI jobs, which a member can already do by pushing a workflow.
  */
 export function mayFetch(store: Store, machine: Machine, project: Project): boolean {

@@ -8,8 +8,8 @@ description: Run a test, a command or the app on the shared Windows test box and
 The test box is a Windows 11 VM whose screen is always signed in and unlocked. It runs at 125%
 with rounded corners and renders on the CPU (WARP), with no GPU. Its machine is
 `citadel-test-box`, and its tools are `mcp__citadel-test-box-ws__…`. If your turn doesn't have
-them, the box is offline, isn't lent to your scheme, has Workspace tools off, or your scheme has
-machine tools off: say so (the Taskmaster's machines tool shows which) and use CI. Setup and costs:
+them, the box is offline, isn't lent to your scheme or has Workspace tools off: say so (the
+Taskmaster's machines tool shows which) and use CI. Setup and costs:
 Citadel's `tools/win-test-box/README.md`.
 
 ## The loop

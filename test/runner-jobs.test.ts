@@ -66,7 +66,7 @@ function world(idleMs = 10_000) {
   const notes: string[] = [];
   const details: string[] = [];
   jobs.onNote = (p, words, detail) => { notes.push(`${p.name}: ${words}`); details.push(detail); };
-  const pc = store.createMachine('cara-desktop-runners', 'x', 'Cara', cara.id, true);
+  const pc = store.createMachine('cara-desktop-runners', 'x', 'Cara', cara.id);
   const agent = stream();
   relay.connectAgent(pc, agent, { host: 'DESKTOP-G248IJ8', command: 'citadel runner agent', runners: true });
   /** Answer the last job the agent got. */
@@ -161,7 +161,7 @@ test('an agent only answers its own jobs, and a machine that may not act for the
   const w = world();
   await w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null });
   const job = w.agent.sent.find((m) => m.runners).runners;
-  const stranger = w.store.createMachine('olive-pc', 'y', 'Olive', w.olive.id, true);
+  const stranger = w.store.createMachine('olive-pc', 'y', 'Olive', w.olive.id);
   assert.equal(w.relay.runnerResult(stranger, { id: job.id, ok: true, output: 'forged' }), false);
   assert.equal(w.relay.runnerResult(w.pc, { id: 'nope', ok: true, output: '' }), false);
   w.answer(true, 'actions.runner.x Running');
@@ -170,7 +170,7 @@ test('an agent only answers its own jobs, and a machine that may not act for the
   // Olive's own runner agent can't act for Peek Auras, so with Cara's gone there is none to pick.
   const w2 = world();
   w2.relay.disconnect(w2.pc.id);
-  const olivePc = w2.store.createMachine('olive-pc', 'y', 'Olive', w2.olive.id, true);
+  const olivePc = w2.store.createMachine('olive-pc', 'y', 'Olive', w2.olive.id);
   w2.relay.connectAgent(olivePc, stream(), { host: 'h', command: 'c', runners: true });
   await assert.rejects(w2.jobs.start(w2.scheme, w2.josh.id, { op: 'list', count: null }), { status: 409, message: /No CI runner agent/ });
 });
@@ -192,7 +192,7 @@ test('a list notes nothing; a remove notes once, failed or not; a token its scri
   await w.jobs.start(w.scheme, w.josh.id, { op: 'remove', count: null });
   // The PC's remove script fetches a removal token with the agent's key while the job runs: no note of its own.
   assert.equal(w.jobs.absorb(w.scheme, w.pc, 'Machine cara-desktop-runners fetched a CI runner removal token'), true);
-  const stranger = w.store.createMachine('olive-pc', 'y', 'Olive', w.olive.id, true);
+  const stranger = w.store.createMachine('olive-pc', 'y', 'Olive', w.olive.id);
   assert.equal(w.jobs.absorb(w.scheme, stranger, 'other'), false, 'another machine\'s token is noted as before');
   assert.equal(w.jobs.absorb(w.other, w.pc, 'other'), false, 'so is one for a scheme with no job running');
   w.answer(true, 'Removed actions.runner.a\nRemoved actions.runner.b');

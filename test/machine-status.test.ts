@@ -8,13 +8,12 @@ const min = 60_000;
 const ok = (server: 'mcp' | 'ws', tools = 2) => ({ server, ok: true, tools: Array.from({ length: tools }, (_, i) => `t${i}`), error: null, ms: 5 });
 const base: StatusFacts = {
   now, startedAt: now - 24 * 60 * min, online: true, runners: false, alwaysOn: true, createdAt: now - 48 * 60 * min, lastSeenAt: now - 30 * min,
-  offers: ['mcp'], wsOff: false, check: { at: now - 3 * min, results: [ok('mcp', 47)] }, owned: false, lent: 1, lentOn: 1,
+  offers: ['mcp'], wsOff: false, check: { at: now - 3 * min, results: [ok('mcp', 47)] }, lent: 1,
 };
 
 const rows: [string, Partial<StatusFacts>, string, string, string | null][] = [
   // what it is, its facts, status, reason, fix button
   ['connected, checked, lent', {}, 'ready', 'Ready · 47 tools', null],
-  ['a person\'s own, lent to no scheme', { owned: true, lent: 0, lentOn: 0 }, 'ready', 'Ready · 47 tools', null],
   ['MCP server and workspace tools both passed', { offers: ['mcp', 'ws'], check: { at: now, results: [ok('mcp', 1), ok('ws', 3)] } }, 'ready', 'Ready · 4 tools', null],
   ['one tool', { check: { at: now, results: [ok('mcp', 1)] } }, 'ready', 'Ready · 1 tool', null],
   ['CI runner host, connected', { runners: true, offers: [], check: null }, 'ready', 'CI runner host, connected', null],
@@ -22,10 +21,8 @@ const rows: [string, Partial<StatusFacts>, string, string, string | null][] = [
   ['its workspace tools didn\'t start', { offers: ['mcp', 'ws'], check: { at: now, results: [ok('mcp'), { server: 'ws', ok: false, tools: [], error: 'boom', ms: 1 }] } }, 'fix', 'Its workspace tools didn\'t start: boom', 'check'],
   ['folder, workspace tools off', { offers: [], wsOff: true, check: null }, 'fix', 'Lends nothing: workspace tools are off', 'workspace_tools'],
   ['no server and no folder', { offers: [], check: null }, 'fix', 'Lends nothing: no MCP server or folder on that computer', 'token'],
-  ['lent to no scheme', { lent: 0, lentOn: 0 }, 'fix', 'Lent to no scheme', 'lend'],
-  ['its one scheme has machine tools off', { lent: 1, lentOn: 0 }, 'fix', 'Its scheme has machine tools off', 'machine_tools'],
-  ['every scheme has machine tools off', { lent: 3, lentOn: 0 }, 'fix', 'Every scheme it is lent to has machine tools off', 'machine_tools'],
-  ['some schemes have machine tools on', { lent: 3, lentOn: 1 }, 'ready', 'Ready · 47 tools', null],
+  ['lent to no scheme', { lent: 0 }, 'fix', 'Lent to no scheme', 'lend'],
+  ['lent to three schemes', { lent: 3 }, 'ready', 'Ready · 47 tools', null],
   ['a broken check beats lent to no scheme', { lent: 0, check: { at: now, results: [{ server: 'mcp', ok: false, tools: [], error: 'x', ms: 1 }] } }, 'fix', 'Its tools didn\'t start: x', 'check'],
   ['connected, not checked yet', { check: null }, 'checking', 'Checking its tools…', null],
   ['workspace tools just switched on, not checked yet', { offers: ['mcp', 'ws'] }, 'checking', 'Checking its tools…', null],

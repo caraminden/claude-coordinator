@@ -76,9 +76,8 @@ Everything is on her PC. Nothing here restarts it except step 1's restart, which
 
 6. **Lend it to Citadel** (2 min):
    - On Citadel's **Machines** page, add a machine named `citadel-test-box`, MCP server **None**, no folder.
-   - Lend it to the native-app schemes (Peek Auras) and switch its **Workspace tools** on.
+   - Open its line, add the native-app schemes (Peek Auras) under **Who gets it**, and switch its **Workspace tools** on. A new machine is lent to no scheme until you add one.
    - Copy its **Windows** lines, open PowerShell in the box (not as administrator), and paste them. They should end with "It runs in the background now".
-   - **Machine tools must be on for each of those schemes.** It's a scheme setting with no button: ask that scheme's Taskmaster to "switch machine tools on" (its scheme settings tool, `machine_tools`). Until then its minions get no machines at all; the Machines page shows whether a scheme's minions get it.
 
 7. **Add each scheme** (PowerShell **as administrator** in the box; 2 min of hands each, plus a toolchain download):
 

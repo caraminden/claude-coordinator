@@ -754,8 +754,8 @@ export function machinesPage() {
         h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, account?.admin
-        ? 'Computers that lend their MCP tools to minions while they are connected: in every scheme an admin owns, or only in the schemes picked under Who gets it. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Citadel checks each one as it connects and hourly.'
-        : 'Your computers, lending their MCP tools while they are connected to the minion turns you ask for, in any scheme you are in. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.')),
+        ? 'Computers that lend their MCP tools to minions while they are connected, in the schemes listed under Who gets it. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Citadel checks each one as it connects and hourly.'
+        : 'Your computers, lending their MCP tools while they are connected to the minion turns you ask for, in the schemes you list under Who gets it. They dial out to this app (over the tailnet, where one is set up), so it never has to reach them. Only you and the admins can change them.')),
     h('div', { class: 'row machines-bar' }, h('h3', {}, 'Machines'), h('span', { class: 'spacer' }), add),
     form,
     h('div', { id: 'machine-setup' }),
@@ -888,17 +888,6 @@ function checkMachine(m, button) {
     .finally(() => { if (button.isConnected) { button.disabled = false; button.textContent = 'Check now'; } });
 }
 
-/** Switch machine tools on in a scheme (until lending becomes one list per machine, handoff 3). */
-function machineToolsOn(m, project) {
-  optimistic({
-    key: `machine-tools:${project.id}`,
-    apply: () => { m.fix = null; renderMachineList(); },
-    send: () => api(`api/projects/${project.id}`, { method: 'PATCH', body: { machine_tools: true } }),
-    undo: () => { m.fix = 'machine_tools'; renderMachineList(); },
-    label: `switch machine tools on in ${project.name}`,
-  });
-}
-
 const schemeName = (id) => (view.projects ?? []).find((p) => p.id === id)?.name ?? `scheme ${id}`;
 
 /** The button on a machine's line that fixes what its status says, if one does (#437). */
@@ -908,12 +897,6 @@ function fixButton(m, open) {
     case 'check': return m.checking ? h('button', { type: 'button', class: 'secondary small', disabled: true }, 'Checking…') : b('Check now', (btn) => checkMachine(m, btn), 'Start its tools again and list them');
     case 'workspace_tools': return b('Turn on', () => patchMachine(m, { workspace_tools: true }, `switch workspace tools on for ${m.name}`, renderMachineList), 'Switch its workspace tools on, so minions get its folders');
     case 'lend': return b('Lend it', open, 'Pick the schemes whose minions get it');
-    case 'machine_tools': {
-      const [only] = m.lent_to;
-      return m.lent_to.length === 1
-        ? b(`Turn on in ${schemeName(only)}`, () => machineToolsOn(m, { id: only, name: schemeName(only) }), `Switch machine tools on in ${schemeName(only)}: its minions get every machine lent to it`)
-        : b('Show schemes', open);
-    }
     case 'token': return b('New token', () => newMachineToken(m), 'Set it up again, with an MCP server or a folder');
     case 'remove': return b('Remove', () => removeMachine(m));
     case 'always_on': return b('Not always on', () => patchMachine(m, { always_on: false }, `mark ${m.name} as not always on`, renderMachineList), 'A laptop that comes and goes: offline shows as Asleep, not Down');
@@ -959,14 +942,12 @@ function machineBody(m) {
   const alwaysOn = h('input', { type: 'checkbox', checked: m.always_on });
   alwaysOn.onchange = () => patchMachine(m, { always_on: alwaysOn.checked }, `mark ${m.name} as ${alwaysOn.checked ? '' : 'not '}always on`, renderMachineList);
   const kv = (label, ...value) => [h('span', { class: 'muted' }, label), h('div', {}, ...value)];
-  const off = m.lent_to?.filter((id) => !m.gets.includes(id)) ?? [];
   return h('div', { class: 'machine-body' },
     h('div', { class: 'machine-kv' },
       m.runners ? kv('Does', 'Adds, lists and removes CI runners for schemes, when Citadel asks') : kv('Lends', machineLends(m)),
-      m.runners ? [] : kv('Who gets it',
-        m.owner_id === null ? machineLending(m) : `Turns ${m.created_by} asks for, in schemes they are in, and their contraptions`,
-        ...off.map((id) => h('div', { class: 'row small' }, `${schemeName(id)} has machine tools off, so its minions don't get it. `,
-          h('button', { type: 'button', class: 'secondary small', onclick: () => machineToolsOn(m, { id, name: schemeName(id) }) }, 'Turn on')))),
+      kv(m.runners ? 'Schemes' : 'Who gets it',
+        m.owner_id === null ? '' : h('div', { class: 'small muted' }, `Only turns ${m.created_by} asks for (and their contraptions), in:`),
+        machineLending(m)),
       kv('Computer',
         h('span', {}, [m.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
         h('label', { class: 'row small always-on', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on'))),
@@ -1057,26 +1038,18 @@ function patchMachine(m, fields, label, shown) {
   });
 }
 
-/** Which schemes' minions get a shared machine: every admin-owned scheme (the default), or only the ones ticked (#303). */
+/** Which schemes' minions get a machine (#438): its one list, as chips with a remove button each, and "+ scheme". */
 function machineLending(m) {
+  const now = () => (view.machines?.find((x) => x.id === m.id) ?? m).projects ?? [];
   const save = (projects) => patchMachine(m, { projects }, `change which schemes get ${m.name}`, renderMachineList);
-  const choice = (scoped, label, title) => {
-    const radio = h('input', { type: 'radio', name: `lend-${m.id}`, checked: scoped === (m.projects !== null) });
-    // "Only these" starts with none ticked, so grants left from before never come back by themselves.
-    radio.onchange = () => save(scoped ? [] : null);
-    return h('label', { class: 'row small', title }, radio, h('span', {}, label));
-  };
-  const schemes = m.projects === null ? [] : (view.projects ?? []).map((p) => {
-    const box = h('input', { type: 'checkbox', checked: m.projects.includes(p.id) });
-    box.onchange = () => save([...document.querySelectorAll(`.machine-lending[data-id="${m.id}"] .schemes input:checked`)].map((b) => Number(b.value)));
-    box.value = p.id;
-    return h('label', { class: 'row small' }, box, h('span', {}, p.name));
-  });
-  return h('div', { class: 'machine-lending', 'data-id': m.id },
-    choice(false, 'Every scheme an admin owns', 'Minions in every scheme an admin owns get it, as for every machine before'),
-    choice(true, 'Only these schemes', 'Only the ticked schemes\' minions get it, whoever owns the scheme; Taskmasters never do'),
-    m.projects === null ? '' : h('div', { class: 'schemes' }, ...schemes,
-      m.projects.length ? '' : h('p', { class: 'muted small' }, 'No scheme gets it until you tick one.')));
+  const chips = now().map((id) => h('span', { class: 'chip scheme-chip' }, h('span', {}, schemeName(id)),
+    h('button', { type: 'button', title: `Take ${m.name} from ${schemeName(id)}: its minions lose it now, mid-turn too`, 'aria-label': `Remove ${schemeName(id)}`, onclick: () => save(now().filter((x) => x !== id)) }, '×')));
+  const rest = (view.projects ?? []).filter((p) => !now().includes(p.id));
+  const add = h('select', { class: 'add-scheme', 'aria-label': `Lend ${m.name} to a scheme`, hidden: !rest.length },
+    h('option', { value: '' }, '+ scheme'), rest.map((p) => h('option', { value: p.id }, p.name)));
+  add.onchange = () => add.value && save([...now(), Number(add.value)]);
+  return h('div', { class: 'machine-lending', 'data-id': m.id }, chips,
+    chips.length ? '' : h('span', { class: 'muted small' }, m.runners ? 'No scheme can have runners on it yet.' : 'No scheme gets it yet.'), add);
 }
 
 /** The import picker: this app's Claude Code instruction and memory files, to tick and add. */

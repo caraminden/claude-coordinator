@@ -29,8 +29,6 @@ export interface Project {
   optional_plugin_dirs: string;
   /** Effort for turns of minions (and a Taskmaster) with none of their own; '' leaves it to Claude Code. */
   default_effort: string;
-  /** 1 when its minions get the connected machines' tools (#138): Godot's ~1.1k tokens of names on every call. */
-  machine_tools: number;
   /** The minions list's promoted groups (#253): a JSON list of "key: value" of the scheme's own keys, shown above the types. */
   list_groups: string;
   /** Where its setup stands (#172): the Taskmaster gets its onboarding prompt section until it is done or skipped. */
@@ -203,7 +201,7 @@ export interface Machine {
   notes: string;
   /** 1 when minions get the workspace tools its agent offers (git sync, its owner's tasks); off until a person turns it on. */
   workspace_tools: number;
-  /** 1 when it is lent only to the schemes in machine_projects (#303); 0 lends it as access.ts lendsMachines says. */
+  /** Unread since #438: every machine is lent to the schemes in machine_projects. Kept at 1, which an older release (a rollback) reads the same way. */
   scoped: number;
   /** The person who added it and manages it (#306); null for one from before, which admins manage. */
   owner_id: number | null;
@@ -426,7 +424,7 @@ CREATE TABLE IF NOT EXISTS machines (
   always_on INTEGER NOT NULL DEFAULT 1,
   last_check TEXT
 );
--- The schemes a scoped machine is lent to (#303). Read only where machines.scoped = 1: rows left from #62
+-- The schemes a machine is lent to (#303; every machine's one list since #438). Before #438 read only where machines.scoped = 1: rows left from #62
 -- (Oct 27, unused since #89) stay put, and choosing "only these" for a machine replaces its rows.
 CREATE TABLE IF NOT EXISTS machine_projects (
   machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
@@ -698,7 +696,7 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
  * MIGRATIONS, or a one-off rewrite of data, so an older release that opens the database (a rollback)
  * knows a newer one has been at it. test/schema-compat.test.ts checks the last release still opens it.
  */
-export const SCHEMA_VERSION = 33; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths; 23: contraptions.repo, branch, folder; 24: tickets.parent; 25: machines.scoped (#303); 26: machines.owner_id (#306); 27: machines.mcp_kind, mcp_command (#308); 28: repo_collaborators (#310); 29: memory_chunks (#331); 30: tickets.workflow (#359); 31: projects.optional_plugin_dirs, tickets.plugin_dirs (#361); 32: schedules.model, effort (#387); 33: machines.always_on, last_check (#437)
+export const SCHEMA_VERSION = 34; // 2: claude_state moved to state.db; 3: brief_starts; 4: saved_views; 5: person_notes; 6: projects.machine_tools; 7: app_instruction_history; 8: shared_pins; 9: artifact_data; 10: projects.onboarding; 11: projects.github_error; 12: ticket_pins; 13: users, project_members, projects.owner_id; 14: credentials, tickets.person_id; 15: person_views replaces saved_views; 16: push_subscriptions.only_pinned; 17: server_login only for its owner (#213); 18: project_hides; 19: contraptions, contraption_users; 20: contraption_sessions, contraption_turns; 21: projects.list_groups, type: other backfill; 22: contraptions.relay_paths; 23: contraptions.repo, branch, folder; 24: tickets.parent; 25: machines.scoped (#303); 26: machines.owner_id (#306); 27: machines.mcp_kind, mcp_command (#308); 28: repo_collaborators (#310); 29: memory_chunks (#331); 30: tickets.workflow (#359); 31: projects.optional_plugin_dirs, tickets.plugin_dirs (#361); 32: schedules.model, effort (#387); 33: machines.always_on, last_check (#437); 34: one lending list per machine, projects.machine_tools and machines.scoped unread (#438)
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -746,6 +744,7 @@ export class Store {
     this.memory = new Memory(this);
     this.serverLoginOwnerOnly();
     this.groupByType();
+    this.lendingLists();
     this.noteSchemaVersion();
   }
 
@@ -805,6 +804,48 @@ export class Store {
   /** Whose subscription the server's own Claude login is: the first admin, the one Citadel made at its first start. */
   serverLoginOwner(): number | null {
     return (this.db.prepare('SELECT min(id) AS id FROM users WHERE admin = 1').get() as { id: number | null }).id;
+  }
+
+  /**
+   * Lending becomes one list of schemes per machine (#438): each machine's machine_projects rows become exactly
+   * the schemes whose minions got it under the old rules, so no scheme gains or loses one. The old rules: a scheme
+   * needed projects.machine_tools on; a shared machine went to every scheme an admin owns, or (scoped) to its rows;
+   * a person's own to the schemes its owner is in. A CI runner host keeps every scheme an admin owns, since fetching
+   * a runner token never asked for machine tools. Once, from schema 34; a shared machine an older release left
+   * unscoped (a rollback) is converted whenever one is found. Says what it did, for the deploy's notes.
+   */
+  private lendingLists() {
+    const first = (this.getSetting<number>('schema_version') ?? 0) < 34;
+    const machines = (this.db.prepare('SELECT * FROM machines ORDER BY id').all() as unknown as Machine[]).filter((m) => first || (!m.scoped && m.owner_id === null));
+    if (!machines.length) return;
+    const schemes = this.db.prepare('SELECT id, name, machine_tools, owner_id FROM projects ORDER BY id').all() as { id: number; name: string; machine_tools: number; owner_id: number | null }[];
+    const names = (ids: number[]) => ids.map((id) => schemes.find((p) => p.id === id)?.name ?? `scheme ${id}`).join(', ') || 'no scheme';
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const m of machines) {
+        const rows = this.machineProjects(m.id);
+        const owner = m.owner_id === null ? undefined : this.getUser(m.owner_id);
+        let runners = false;
+        try {
+          runners = !!JSON.parse(m.last_check ?? 'null')?.runners;
+        } catch { /* an unreadable check: not a runner host */ }
+        const ids = m.owner_id !== null
+          ? schemes.filter((p) => p.machine_tools && owner && this.canSee({ uid: owner.id, admin: !!owner.admin }, p.id)).map((p) => p.id)
+          : m.scoped
+            ? rows.filter((id) => schemes.find((p) => p.id === id)?.machine_tools)
+            : schemes.filter((p) => (runners || p.machine_tools) && this.getUser(p.owner_id ?? -1)?.admin).map((p) => p.id);
+        this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(m.id);
+        const add = this.db.prepare('INSERT INTO machine_projects (machine_id, project_id) VALUES (?, ?)');
+        for (const id of ids) add.run(m.id, id);
+        this.db.prepare('UPDATE machines SET scoped = 1 WHERE id = ?').run(m.id);
+        const was = m.owner_id !== null ? `${owner?.name ?? 'its owner'}'s turns in the schemes they are in` : m.scoped ? `only ${names(rows)}` : 'every scheme an admin owns';
+        console.log(`Lending lists (#438): ${m.name}: was ${was}${runners ? ' (CI runner host)' : ', where machine tools are on'}; its list is now ${names(ids)}.`);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   /** Records SCHEMA_VERSION, never lowering it: after a rollback, the newer number says what migrated it. */
@@ -954,7 +995,7 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'machine_tools' | 'onboarding' | 'onboarding_mode' | 'list_groups'>>) {
+  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups'>>) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).
@@ -1014,7 +1055,8 @@ export class Store {
     this.db.exec('BEGIN');
     try {
       this.db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id = ?').run(heir, id);
-      // Ownerless but still scoped to no scheme, so a gone person's computer reaches no one's turns; an admin removes it.
+      // Ownerless and lent to no scheme, so a gone person's computer reaches no one's turns; an admin removes it.
+      this.db.prepare('DELETE FROM machine_projects WHERE machine_id IN (SELECT id FROM machines WHERE owner_id = ?)').run(id);
       this.db.prepare('UPDATE machines SET owner_id = NULL, scoped = 1 WHERE owner_id = ?').run(id);
       this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
       this.db.exec('COMMIT');
@@ -1868,11 +1910,11 @@ export class Store {
     return this.db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as unknown as Machine | undefined;
   }
 
-  /** A machine `ownerId` manages (#306), or a shared one with none; `scoped` lends it to no scheme until some are ticked. */
-  createMachine(name: string, tokenHash: string, by: string, ownerId: number | null = null, scoped = false): Machine {
+  /** A machine `ownerId` manages (#306), or a shared one with none. It is lent to no scheme until some are added (#438). */
+  createMachine(name: string, tokenHash: string, by: string, ownerId: number | null = null): Machine {
     const { lastInsertRowid } = this.db
-      .prepare('INSERT INTO machines (name, token_hash, created_by, created_at, owner_id, scoped) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(name, tokenHash, by, Date.now(), ownerId, scoped ? 1 : 0);
+      .prepare('INSERT INTO machines (name, token_hash, created_by, created_at, owner_id, scoped) VALUES (?, ?, ?, ?, ?, 1)')
+      .run(name, tokenHash, by, Date.now(), ownerId);
     return this.getMachine(Number(lastInsertRowid))!;
   }
 
@@ -1882,7 +1924,7 @@ export class Store {
     this.db.prepare(`UPDATE machines SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
   }
 
-  /** The schemes a scoped machine is lent to. */
+  /** The schemes a machine is lent to. */
   machineProjects(machineId: number): number[] {
     return (this.db.prepare('SELECT project_id FROM machine_projects WHERE machine_id = ? ORDER BY project_id').all(machineId) as { project_id: number }[]).map((r) => r.project_id);
   }
@@ -1891,16 +1933,13 @@ export class Store {
     return !!this.db.prepare('SELECT 1 FROM machine_projects WHERE machine_id = ? AND project_id = ?').get(machineId, projectId);
   }
 
-  /** Lend a machine to these schemes only, or (null) as before: its old grant rows stay, unread, until it is scoped again. */
-  setMachineProjects(machineId: number, projectIds: number[] | null) {
+  /** Lend a machine to exactly these schemes. */
+  setMachineProjects(machineId: number, projectIds: number[]) {
     this.db.exec('BEGIN');
     try {
-      if (projectIds) {
-        this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(machineId);
-        const add = this.db.prepare('INSERT OR IGNORE INTO machine_projects (machine_id, project_id) VALUES (?, ?)');
-        for (const id of projectIds) add.run(machineId, id);
-      }
-      this.db.prepare('UPDATE machines SET scoped = ? WHERE id = ?').run(projectIds ? 1 : 0, machineId);
+      this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(machineId);
+      const add = this.db.prepare('INSERT OR IGNORE INTO machine_projects (machine_id, project_id) VALUES (?, ?)');
+      for (const id of projectIds) add.run(machineId, id);
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');

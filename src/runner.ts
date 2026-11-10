@@ -958,7 +958,7 @@ export function onboardingPrompt(project: Project, sharedDir: string | null, sur
     '- Does it run anywhere: nothing to run · on perigee as a service · its own CI/CD · someone\'s own machines. For perigee, a first minion writes a deploy script and a unit in `deploy/` for a person to install by hand.',
     '- How do we know it works: tests exist (show the command) · set up tests as a first minion · no tests.',
     '- Group work into numbered builds: no · yes.',
-    `Don't ask, but name in the plan so people can veto them: default effort high, machine tools on only for game and Godot schemes, memory starts empty; ports, tone, cards, run-backs and git habits come from the ${APP_NAME}-wide layer and are not repeated. Write the answers, in people's own words where they typed them and with the date, to ${record}; a later tune-up starts from it.`,
+    `Don't ask, but name in the plan so people can veto them: default effort high, memory starts empty; ports, tone, cards, run-backs and git habits come from the ${APP_NAME}-wide layer and are not repeated. Write the answers, in people's own words where they typed them and with the date, to ${record}; a later tune-up starts from it.`,
     '',
     '**2. One plan card.** Post the whole setup with `propose_plan` and write nothing before a person approves it: no instructions, settings, property keys or values, files or minions. Shape:',
     '- **From the kit (already loaded, nothing to copy):** the kit skills and agents that matter here; they read the Project facts below.',
@@ -966,7 +966,7 @@ export function onboardingPrompt(project: Project, sharedDir: string | null, sur
     '- **Write new:** each new skill, agent or rule, with a one-line job.',
     '- **Not pulled:** what you considered and left out, and why. Adapt and Write new carry at most two of each kind (skill, agent, rule): the ones that pay off first. The rest wait here for a tune-up.',
     '- **Instructions:** the full draft of the scheme instructions, scheme-specific only.',
-    '- **Settings:** default effort, machine tools, approval rules, plugin folders.',
+    '- **Settings:** default effort, approval rules, plugin folders.',
     '- **Properties:** new keys and values.',
     '- **Shipping:** the answer to how changes land. For auto-merge or straight to main, also who pushes main to GitHub: the recommended route is a scheme-local `tools/land.sh` the setup minion writes (rebase onto local main, run the check command, fast-forward main, push it to origin, never forced); without one named, main stays local.',
     '- **Repo:** CLAUDE.md with its **Project facts** section drafted (check commands, front end, high-risk files, how a change ships, UI rules, glossary, decisions log, retros, rubrics), `.claude/settings.json`, guard and pre-push hooks, rules to copy.',
@@ -2184,7 +2184,7 @@ export class Runner {
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now and lent
     // to the scheme, and the asker's own (#306): the one person this batch (or the turn it resumes) answers, so
     // a turn no one asked for gets none, and a ride-along message doesn't bring its sender's machines.
-    const machines = ticket.kind === 'coordinator' || !project.machine_tools ? [] : this.machines(project, askers.length ? [asker!] : []);
+    const machines = ticket.kind === 'coordinator' ? [] : this.machines(project, askers.length ? [asker!] : []);
     // Tool calls matching the merge asks or the project's approval rules wait for a person (threads only:
     // a Taskmaster can't show cards, so an ask would be a silent deny there).
     const rules = ticket.kind === 'coordinator' ? [] : [...new Set([...MERGE_ASKS, ...lines(project.approval_rules)])];

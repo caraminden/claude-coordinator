@@ -64,7 +64,7 @@ export type MachineStatus = {
   /** One line saying why, without a time: `when` carries that. */
   reason: string;
   /** The button that fixes it, if one does. */
-  fix: 'check' | 'workspace_tools' | 'lend' | 'machine_tools' | 'token' | 'remove' | 'always_on' | null;
+  fix: 'check' | 'workspace_tools' | 'lend' | 'token' | 'remove' | 'always_on' | null;
   when: { label: 'checked' | 'seen' | 'added'; at: number } | null;
 };
 
@@ -83,11 +83,8 @@ export type StatusFacts = {
   /** Its agent offers workspace tools, but its switch is off. */
   wsOff: boolean;
   check: StoredCheck | null;
-  /** A person's own machine: it goes to the turns they ask for, so it is lent to no scheme. */
-  owned: boolean;
-  /** The schemes it is lent to, and how many of those have machine tools on. */
+  /** How many schemes are on its list (#438). */
   lent: number;
-  lentOn: number;
 };
 
 /** The one place a machine's status is decided (#437); test/machine-status.test.ts holds its table. */
@@ -111,8 +108,7 @@ export function machineStatus(f: StatusFacts): MachineStatus {
   const checked = { label: 'checked', at: f.check!.at } as const;
   const failed = results.find((r) => !r!.ok);
   if (failed) return s('fix', `Its ${failed.server === 'ws' ? 'workspace ' : ''}tools didn't start: ${failed.error}`, 'check', checked);
-  if (!f.owned && !f.lent) return s('fix', 'Lent to no scheme', 'lend', checked);
-  if (!f.owned && !f.lentOn) return s('fix', f.lent === 1 ? 'Its scheme has machine tools off' : 'Every scheme it is lent to has machine tools off', 'machine_tools', checked);
+  if (!f.lent) return s('fix', 'Lent to no scheme', 'lend', checked);
   const tools = results.reduce((n, r) => n + r!.tools.length, 0);
   return s('ready', `Ready · ${tools} tool${tools === 1 ? '' : 's'}`, null, checked);
 }
@@ -168,7 +164,7 @@ interface Session {
   holder: string;
   /** The minion, for fetch_file; null for a contraption turn. */
   ticketId: number | null;
-  /** The minion's scheme, so taking a scheme off a scoped machine ends its sessions; null for a contraption turn. */
+  /** The minion's scheme, so taking a scheme off a machine's list ends its sessions; null for a contraption turn. */
   projectId: number | null;
   server: MachineServer;
   /** Which minion, for the agent's log and its workspace lock ("#90 in Citadel"). */
@@ -231,25 +227,24 @@ export class MachineRelay {
   view(machine: Machine) {
     const agent = this.agents.get(machine.id);
     const check = storedCheck(machine);
-    // Whom it is lent to, and which of those schemes' minions get it (machine tools on). A person's own is lent to
-    // no scheme: it goes to the turns its owner asks for, in the schemes they're in, which `gets` lists.
+    // Its list of schemes (#438), and which of those schemes' turns get it: all of them, or for a person's own,
+    // the ones its owner is in (and only the turns they ask for).
+    const projects = this.store.machineProjects(machine.id);
     const owner = machine.owner_id === null ? [] : [machine.owner_id];
-    const lent = owner.length ? [] : this.store.listProjects().filter((p) => lendsMachine(this.store, machine, p));
-    const gets = (owner.length ? this.store.listProjects().filter((p) => lendsMachine(this.store, machine, p, owner)) : lent).filter((p) => p.machine_tools).map((p) => p.id);
+    const gets = this.store.listProjects().filter((p) => lendsMachine(this.store, machine, p, owner)).map((p) => p.id);
     const offers = this.online().find((m) => m.id === machine.id)?.servers ?? [];
     const st = machineStatus({
       now: Date.now(), startedAt: this.startedAt, online: !!agent, runners: agent ? agent.runners : !!check?.runners,
       alwaysOn: !!machine.always_on, createdAt: machine.created_at, lastSeenAt: machine.last_seen_at,
       offers, wsOff: !machine.workspace_tools && !!agent?.servers.includes('ws'), check,
-      owned: machine.owner_id !== null, lent: lent.length, lentOn: gets.length,
+      lent: projects.length,
     });
     return {
       ...st,
       always_on: !!machine.always_on,
       checked: check,
       checking: this.checks.has(machine.id),
-      /** The schemes it is lent to, resolved, and those whose minions get it (a person's own: their turns there). */
-      lent_to: lent.map((p) => p.id),
+      /** The schemes whose minions get it (a person's own: its owner's turns there). */
       gets,
       id: machine.id,
       name: machine.name,
@@ -266,8 +261,8 @@ export class MachineRelay {
       workspace_tools: !!machine.workspace_tools,
       mcp_kind: machine.mcp_kind,
       mcp_command: machine.mcp_command,
-      /** The schemes it is lent to, or null for every scheme an admin owns. */
-      projects: machine.scoped ? this.store.machineProjects(machine.id) : null,
+      /** The schemes it is lent to: its list. */
+      projects,
       servers: agent?.servers ?? [],
       runners: agent ? agent.runners : !!check?.runners,
       workspaces: agent?.workspaces ?? [],

@@ -79,18 +79,16 @@ const errors: string[] = [];
 const runner = new Runner(store, () => {}, (t) => ({ COORDINATOR_API: 'http://127.0.0.1:8573', COORDINATOR_TOKEN: `token-${t.id}` }), fake);
 runner.onTurnError = (_id, text) => errors.push(text);
 
-async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; workflow?: number; machine_tools?: number } = {}, repoDir?: string, projectId?: number) {
+async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; workflow?: number } = {}, repoDir?: string, projectId?: number) {
   writeFileSync(join(root, 'mcp-status'), mcpStatus);
   // A scheme has one Taskmaster, so each turn gets a scheme of its own unless it names one.
   const project = projectId ? store.getProject(projectId)! : store.createProject(`P${Math.random()}`, null);
   if (repoDir) store.setProjectRepoDir(project.id, repoDir);
-  if (set.machine_tools !== undefined) store.setProjectSettings(project.id, { machine_tools: set.machine_tools });
   const t = (kind === 'coordinator' && projectId && store.getCoordinator(projectId)) || store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara', kind });
   const cwd = join(root, `ticket-${t.id}`);
   mkdirSync(cwd, { recursive: true });
   store.setTicketDir(t.id, cwd, null);
-  const { machine_tools: _, ...own } = set;
-  if (Object.keys(own).length) store.updateTicket(t.id, own as any);
+  if (Object.keys(set).length) store.updateTicket(t.id, set as any);
   errors.length = 0;
   runner.send(t.id, 'Cara', 'go');
   while (runner.isRunning(t.id)) await wait(20);
@@ -224,19 +222,23 @@ test("minion and Taskmaster turns both keep the Read tool out of the logins, key
   }
 });
 
-test("a scheme with machine tools off gives its minions no machine servers or notes", async () => {
+test("a minion gets the servers and notes of the machines lent to its scheme, whatever the retired scheme switch says (#438); a Taskmaster gets none", async () => {
   runner.machines = () => [{ id: 1, name: 'perigee-godot', token_hash: '', created_by: 'Cara', created_at: 0, last_seen_at: 0, notes: 'Never restart it.', workspace_tools: 0, scoped: 0 }];
   try {
     const servers = (t: any) => Object.keys(t.mcp.mcpServers);
     const on = await turn('ticket', 'connected');
-    assert.deepEqual(servers(on), ['thread', 'perigee-godot'], 'on by default');
+    assert.deepEqual(servers(on), ['thread', 'perigee-godot']);
     assert.ok(on.settings.permissions.allow.includes('mcp__perigee-godot'), "the machine's tools are allowed");
     // In claude's argv, the machine's name would let a turn's `pkill -f godot` hit claude itself.
     assert.ok(!on.args.some((a: string) => a.includes('godot')), 'no argument names the machine');
     assert.match(on.system, /Never restart it/);
-    const off = await turn('ticket', 'connected', { machine_tools: 0 });
-    assert.deepEqual(servers(off), ['thread']);
-    assert.doesNotMatch(off.system, /perigee-godot|Never restart it/);
+    // projects.machine_tools is still in the table, unread: off there changes nothing.
+    const old = store.createProject('Switch off', null);
+    store.db.prepare('UPDATE projects SET machine_tools = 0 WHERE id = ?').run(old.id);
+    assert.deepEqual(servers(await turn('ticket', 'connected', {}, undefined, old.id)), ['thread', 'perigee-godot']);
+    const taskmaster = await turn('coordinator', 'connected');
+    assert.ok(!servers(taskmaster).includes('perigee-godot'));
+    assert.doesNotMatch(taskmaster.system, /perigee-godot|Never restart it/);
   } finally {
     runner.machines = () => [];
   }

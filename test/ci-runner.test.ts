@@ -42,7 +42,7 @@ function world(live = true) {
   const tokens = new RunnerTokens(store, link, live, gh.fetch);
   const notes: string[] = [];
   tokens.onFetched = (p, words) => notes.push(`${p.name}: ${words}`);
-  const machine = (name: string, owner: number | null, scoped = false) => store.createMachine(name, 'x', 'Cara', owner, scoped);
+  const machine = (name: string, owner: number | null) => store.createMachine(name, 'x', 'Cara', owner);
   return { store, creds, cara, josh, olive, scheme, bare, gh, tokens, notes, machine };
 }
 
@@ -62,7 +62,7 @@ test('labels and scheme lookup follow the scheme name', () => {
 
 test('a member\'s machine gets the token, made with the owner\'s login, and the Taskmaster is told', async () => {
   const w = world();
-  const got = await w.tokens.issue(w.machine('josh-pc', w.josh.id, true), 'Peek Auras');
+  const got = await w.tokens.issue(w.machine('josh-pc', w.josh.id), 'Peek Auras');
   assert.deepEqual(got, { scheme: 'Peek Auras', repo: 'caraminden/peek-auras', label: 'peek-auras-ci', token: 'AREGTOKEN', expires_at: '2026-11-05T13:00:00Z' });
   assert.deepEqual(w.gh.calls, ['POST /repos/caraminden/peek-auras/actions/runners/registration-token']);
   assert.equal(w.notes.length, 1);
@@ -74,23 +74,23 @@ test('a member\'s machine gets the token, made with the owner\'s login, and the 
 test('only machines whose person is in the scheme, or lent to it, may fetch', async () => {
   const w = world();
   // Olive isn't in Peek Auras: her machine is told there's no such scheme, and GitHub is never asked.
-  await assert.rejects(w.tokens.issue(w.machine('olive-pc', w.olive.id, true), 'Peek Auras'), { status: 404 });
-  // An admin's own machine reaches every scheme.
-  assert.equal((await w.tokens.issue(w.machine('cara-pc', w.cara.id, true), w.scheme.id)).token, 'AREGTOKEN');
-  // An ownerless machine lent to chosen schemes reaches those only.
-  const vault = w.machine('vault', null, true);
+  await assert.rejects(w.tokens.issue(w.machine('olive-pc', w.olive.id), 'Peek Auras'), { status: 404 });
+  // An admin's own machine reaches every scheme, whatever its list of schemes says.
+  assert.equal((await w.tokens.issue(w.machine('cara-pc', w.cara.id), w.scheme.id)).token, 'AREGTOKEN');
+  // An ownerless machine reaches only the schemes on its list.
+  const vault = w.machine('vault', null);
   await assert.rejects(w.tokens.issue(vault, 'Peek Auras'), { status: 404 });
   w.store.setMachineProjects(vault.id, [w.scheme.id]);
   assert.equal((await w.tokens.issue(vault, 'Peek Auras')).token, 'AREGTOKEN');
   // A disabled person's machine reaches nothing.
   w.store.updateUser(w.josh.id, { disabled_at: Date.now() });
-  await assert.rejects(w.tokens.issue(w.machine('josh-pc', w.josh.id, true), 'Peek Auras'), { status: 404 });
+  await assert.rejects(w.tokens.issue(w.machine('josh-pc', w.josh.id), 'Peek Auras'), { status: 404 });
   assert.equal(w.gh.calls.length, 2);
 });
 
 test('clear errors: no repo, no owner login, no admin, a missing scope, a dead link, GitHub down', async () => {
   const w = world();
-  const pc = w.machine('cara-pc', w.cara.id, true);
+  const pc = w.machine('cara-pc', w.cara.id);
   await assert.rejects(w.tokens.issue(pc, 'No Repo'), { status: 409, message: /No Repo has no GitHub repo/ });
   w.store.setProjectUpstream(w.scheme.id, 'https://github.com/someone-else/peek-auras.git', null);
   await assert.rejects(w.tokens.issue(pc, 'Peek Auras'), { status: 502, message: /Cara's GitHub login isn't an admin of someone-else\/peek-auras.*needs admin/ });
@@ -110,9 +110,9 @@ test('clear errors: no repo, no owner login, no admin, a missing scope, a dead l
 
 test('mint: false gives the names after the same checks, without asking GitHub or noting anything', async () => {
   const w = world();
-  const pc = w.machine('cara-pc', w.cara.id, true);
+  const pc = w.machine('cara-pc', w.cara.id);
   assert.deepEqual(await w.tokens.issue(pc, 'Peek Auras', false), { scheme: 'Peek Auras', repo: 'caraminden/peek-auras', label: 'peek-auras-ci', token: null, expires_at: null });
-  await assert.rejects(w.tokens.issue(w.machine('olive-pc', w.olive.id, true), 'Peek Auras', false), { status: 404 });
+  await assert.rejects(w.tokens.issue(w.machine('olive-pc', w.olive.id), 'Peek Auras', false), { status: 404 });
   await assert.rejects(w.tokens.issue(pc, 'No Repo', false), { status: 409 });
   assert.equal(w.gh.calls.length, 0);
   assert.equal(w.notes.length, 0);
@@ -120,7 +120,7 @@ test('mint: false gives the names after the same checks, without asking GitHub o
 
 test('a scheme with no label, or one another scheme shares, gets no token', async () => {
   const w = world();
-  const pc = w.machine('cara-pc', w.cara.id, true);
+  const pc = w.machine('cara-pc', w.cara.id);
   const odd = w.store.createProject('日本', 'https://github.com/caraminden/nihon.git', w.cara.id);
   await assert.rejects(w.tokens.issue(pc, odd.id), { status: 409, message: /no letters/ });
   w.store.createProject('PEEK  auras!', null, w.cara.id);
@@ -130,6 +130,6 @@ test('a scheme with no label, or one another scheme shares, gets no token', asyn
 
 test('a boot check or preview never asks GitHub', async () => {
   const w = world(false);
-  await assert.rejects(w.tokens.issue(w.machine('cara-pc', w.cara.id, true), 'Peek Auras'), { status: 403 });
+  await assert.rejects(w.tokens.issue(w.machine('cara-pc', w.cara.id), 'Peek Auras'), { status: 403 });
   assert.equal(w.gh.calls.length, 0);
 });

@@ -421,6 +421,8 @@ test('a Taskmaster lists the machines its scheme can see and checks one through 
   // An agent whose MCP server dies at once: online, but the check fails.
   startAgent(machine('tm-broken', null), ['--', process.execPath, '-e', 'process.exit(1)']);
   await until('the machines to come online', async () => (await call('/api/machines')).filter((m: any) => m.name.startsWith('tm-') && m.online).length === 3);
+  // Citadel checks each one as it connects, unasked (#437), and keeps the result.
+  await until('their connect checks', async () => (await call('/api/machines')).filter((m: any) => m.name.startsWith('tm-') && m.checked && !m.checking).length === 3);
 
   // The Taskmaster's own MCP server, as its turn starts it, run for whoever asked for the turn.
   const tools = async (project: any, asker: number) => {
@@ -444,18 +446,18 @@ test('a Taskmaster lists the machines its scheme can see and checks one through 
   // Josh's ask in a scheme he's in: his own machine and the shared ones, with their live state.
   const asJosh = await tools(shared, josh.id);
   let list = await asJosh.use('list_machines');
-  assert.match(list, /^tm-josh: ONLINE, connected since \d{4}-\d\d-\d\d \d\d:\d\d UTC \((just now|1 min ago)\), host /m);
+  assert.match(list, /^tm-josh: READY: Ready · 1 tool · checked [^\n]+\n  ONLINE, connected since \d{4}-\d\d-\d\d \d\d:\d\d UTC \((just now|1 min ago)\), host /m);
   assert.match(list, /Josh's own: goes to the turns they ask for, in schemes they're in; this scheme's minions get it/);
-  assert.match(list, /^tm-box: ONLINE/m);
+  assert.match(list, /^tm-box: READY[^\n]*\n  ONLINE/m);
   assert.match(list, /lent to every scheme an admin owns/);
-  assert.match(list, /^sleepy: OFFLINE, last seen never/m);
-  assert.match(list, /tools: not checked since it connected/);
+  assert.match(list, /^sleepy: ASLEEP: Not connected yet · added [^\n]+\n  OFFLINE, last seen never/m);
+  assert.match(list, /^tm-broken: NEEDS A FIX: Its tools didn't start: the session ended[^\n]*\n  ONLINE[^]*?last check .*:\n  - MCP server: FAIL/m);
 
   const passed = await asJosh.use('check_machine', { name: 'tm-box' });
   assert.match(passed, /^tm-box: PASS\n- MCP server: PASS in \d+ ms, 1 tools: whoami$/);
   await until('the check\'s session to close', async () => (await call('/api/machines')).find((m: any) => m.name === 'tm-box').sessions === 0);
   list = await asJosh.use('list_machines');
-  assert.match(list, /tm-box: ONLINE[^]*?last check .*:\n  - MCP server: PASS in \d+ ms, 1 tools: whoami/);
+  assert.match(list, /tm-box: READY[^]*?last check .*:\n  - MCP server: PASS in \d+ ms, 1 tools: whoami/);
   assert.match(await asJosh.use('check_machine', { name: 'tm-broken' }), /^tm-broken: FAIL\n- MCP server: FAIL after \d+ ms: the session ended/);
   assert.match(await asJosh.use('check_machine', { name: 'sleepy' }), /^sleepy: FAIL, offline/);
   assert.match(await asJosh.use('check_machine', { name: 'nope' }), /^ERROR .*No machine called nope/);
@@ -465,13 +467,13 @@ test('a Taskmaster lists the machines its scheme can see and checks one through 
   const asDana = await tools(shared, dana.id);
   list = await asDana.use('list_machines');
   assert.doesNotMatch(list, /tm-josh/);
-  assert.match(list, /^tm-box: ONLINE/m);
+  assert.match(list, /^tm-box: READY/m);
   assert.match(await asDana.use('check_machine', { name: 'tm-josh' }), /^ERROR .*No machine called tm-josh/);
   asDana.done();
 
   // An admin's ask sees every machine, even one whose owner isn't in this scheme.
   const asCara = await tools(caras, cara.id);
-  assert.match(await asCara.use('list_machines'), /^tm-josh: ONLINE[^]*?this scheme's minions don't get it/m);
+  assert.match(await asCara.use('list_machines'), /^tm-josh: READY[^]*?this scheme's minions don't get it/m);
   assert.match(await asCara.use('check_machine', { name: 'tm-josh' }), /^tm-josh: PASS\n[^]*Note: this scheme's minions don't get tm-josh/);
   asCara.done();
 
@@ -494,4 +496,35 @@ test('an older machine learns what it runs from its agent, and a known one keeps
   const online = await until('kept-box to come online', async () => (await call('/api/machines')).find((m: any) => m.name === 'kept-box' && m.online));
   assert.deepEqual([online.mcp_kind, online.mcp_command], ['none', ''], 'what it was added with wins');
   await call(`/api/machines/${machine.id}`, { method: 'DELETE' });
+});
+
+test('Citadel checks a machine as it connects, keeps the result through a reconnect, and Check now runs one (#437)', async () => {
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'honest' } });
+  const find = async () => (await call('/api/machines')).find((m: any) => m.name === 'honest');
+  assert.equal((await find()).status, 'asleep', 'added a moment ago, not connected yet');
+  const first = startAgent(token);
+  const ready = await until('its connect check', async () => { const m = await find(); return m.checked && !m.checking && m.status === 'ready' && m; });
+  assert.equal(ready.reason, 'Ready · 1 tool');
+  assert.deepEqual(ready.checked.results.map((r: any) => [r.server, r.ok, r.tools]), [['mcp', true, ['whoami']]]);
+
+  // Offline under five minutes, always on: no colour yet. Not always on: asleep.
+  first.agent.kill();
+  assert.equal((await until('it to go offline', async () => { const m = await find(); return !m.online && m; })).reason, 'Offline');
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { always_on: false } });
+  assert.deepEqual([(await find()).always_on, (await find()).reason], [false, 'Asleep']);
+  await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { always_on: 'yes' } }), /400 always_on must be true or false/);
+  await assert.rejects(call(`/api/machines/${machine.id}/check`, { method: 'POST' }), /409 honest is offline/);
+
+  // Back within the hour: the kept check stands, and isn't run again unasked.
+  startAgent(token);
+  await until('it to come back', async () => (await find()).online);
+  await new Promise((r) => setTimeout(r, 1500));
+  const back = await find();
+  assert.equal(back.checked.at, ready.checked.at);
+  assert.equal(back.status, 'ready');
+
+  // Check now runs one anyway.
+  const { machine: after, results } = await call(`/api/machines/${machine.id}/check`, { method: 'POST' });
+  assert.deepEqual(results.map((r: any) => r.ok), [true]);
+  assert.ok(after.checked.at > ready.checked.at);
 });

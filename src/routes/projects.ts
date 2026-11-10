@@ -487,6 +487,8 @@ export const projectRoutes: Route[] = [
         if (coordinator && settings.machine_tools !== undefined) {
           runner.emit(coordinator.id, 'note', { text: `${session.name} ${settings.machine_tools ? 'gave' : 'took'} the connected machines' tools ${settings.machine_tools ? 'to' : 'from'} this scheme's minions. It applies from each minion's next turn.` });
         }
+        // Which machines this scheme's minions get decides their status (#437).
+        if (settings.machine_tools !== undefined) app.broadcast({ type: 'machines', machines: app.machines.list() });
         if (coordinator && settings.onboarding === 'skipped') {
           runner.emit(coordinator.id, 'note', { text: `${session.name} skipped the scheme's setup. Tell the ${AGENT_NAME} to pick it up again any time.` });
         }

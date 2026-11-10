@@ -134,7 +134,6 @@ function taskmasterMachines({ app, caller, project }: Ctx) {
       ...view,
       owner_name: m.owner_id === null ? null : app.store.getUser(m.owner_id)?.name ?? null,
       project_names: view.projects?.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`) ?? null,
-      checked: app.machines.lastCheck(m.id),
       // Whether a minion turn its asker starts here gets it (src/runner.ts): an admin sees more than that.
       minions_get_it: !!project.machine_tools && lendsMachine(app.store, m, project, asker === null ? [] : [asker]),
     };
@@ -215,7 +214,7 @@ export const machineRoutes: Route[] = [
   {
     method: 'PATCH', path: '/api/machines/:machine', ...people,
     handler: managed(async ({ req, res, app, machine, session }) => {
-      // Any of name, notes, workspace_tools and projects (the schemes it is lent to, or null for every scheme).
+      // Any of name, notes, workspace_tools, always_on and projects (the schemes it is lent to, or null for every scheme).
       const body = await readJson(req);
       let projects: number[] | null | undefined;
       if (body.projects !== undefined) {
@@ -225,10 +224,11 @@ export const machineRoutes: Route[] = [
         }
         projects = body.projects;
       }
-      const fields: { name?: string; notes?: string; workspace_tools?: number } = {};
-      if (body.workspace_tools !== undefined) {
-        if (typeof body.workspace_tools !== 'boolean') throw new HttpError(400, 'workspace_tools must be true or false');
-        fields.workspace_tools = body.workspace_tools ? 1 : 0;
+      const fields: { name?: string; notes?: string; workspace_tools?: number; always_on?: number } = {};
+      for (const k of ['workspace_tools', 'always_on'] as const) {
+        if (body[k] === undefined) continue;
+        if (typeof body[k] !== 'boolean') throw new HttpError(400, `${k} must be true or false`);
+        fields[k] = body[k] ? 1 : 0;
       }
       if (body.name !== undefined) fields.name = machineName(body.name);
       if (body.notes !== undefined) {
@@ -244,6 +244,8 @@ export const machineRoutes: Route[] = [
       if (projects !== undefined) app.store.setMachineProjects(machine.id, projects);
       // Switched off or taken from a scheme: minions mid-turn lose the tools now, not at their next turn.
       if (fields.workspace_tools === 0) app.machines.endServer(machine.id, 'ws');
+      // Switched on: its workspace tools get their first check now.
+      if (fields.workspace_tools === 1) app.machines.checkIfDue(machine.id);
       if (projects !== undefined) {
         const now = app.store.getMachine(machine.id)!;
         app.machines.endSessionsWhere(machine.id, (id) => {
@@ -253,6 +255,15 @@ export const machineRoutes: Route[] = [
       }
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       return json(res, 200, app.machines.view(app.store.getMachine(machine.id)!));
+    }),
+  },
+  {
+    // Check now (#437): what the hourly check does, asked for; it answers once the check ends.
+    method: 'POST', path: '/api/machines/:machine/check', ...people,
+    handler: managed(async ({ res, app, machine }) => {
+      if (!app.machines.isOnline(machine.id)) throw new HttpError(409, `${machine.name} is offline`);
+      const results = await app.machines.check(machine.id);
+      return json(res, 200, { machine: app.machines.view(app.store.getMachine(machine.id)!), results });
     }),
   },
   {
@@ -301,8 +312,8 @@ export const machineRoutes: Route[] = [
       const machine = taskmasterMachines(ctx).find((m) => m.name === name);
       if (!machine) throw new HttpError(404, `No machine called ${name} that this scheme can see`);
       if (!machine.online) return json(res, 200, { machine, results: [] });
-      const results = await app.machines.check(machine.id, { ticketId: caller!.id, projectId: project.id }, `the ${project.name} Taskmaster's check`);
-      return json(res, 200, { machine: { ...machine, checked: app.machines.lastCheck(machine.id) }, results });
+      const results = await app.machines.check(machine.id);
+      return json(res, 200, { machine: taskmasterMachines(ctx).find((m) => m.id === machine.id) ?? machine, results });
     },
   },
 

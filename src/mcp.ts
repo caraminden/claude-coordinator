@@ -417,7 +417,7 @@ const TOOLS = [
   {
     name: 'list_machines',
     description:
-      "List the connected machines (people's computers lending an MCP server, like a Godot editor, and workspace tools) this scheme can see: an admin's ask sees all of them, anyone else's those a minion turn of theirs here would get. For each: online or offline from the server's live connection, connected since and last seen, host, the MCP server its agent runs, the tools it offered at its last check_machine, workspace tools on or off and its workspaces, and whom it is lent to. Read-only.",
+      "List the connected machines (people's computers lending an MCP server, like a Godot editor, and workspace tools) this scheme can see: an admin's ask sees all of them, anyone else's those a minion turn of theirs here would get. For each: its status as the Machines tab shows it (Ready, Needs a fix, Down, Asleep) with the reason, online or offline from the server's live connection, connected since (this connection, which a Citadel restart also resets) and last seen, host, the MCP server its agent runs, the tools at its last check (Citadel checks each machine on connect and hourly), workspace tools on or off and its workspaces, and whom it is lent to. Read-only.",
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -755,17 +755,20 @@ function checkLines(results: any[]): string[] {
   return results.map((r) => `- ${r.server === 'ws' ? 'workspace tools' : 'MCP server'}: ${r.ok ? `PASS in ${r.ms} ms, ${r.tools.length} tools: ${r.tools.join(', ') || 'none'}` : `FAIL after ${r.ms} ms: ${r.error}`}`);
 }
 
-/** A machine as list_machines shows it (#307). */
+const STATUS_WORDS: Record<string, string> = { ready: 'READY', fix: 'NEEDS A FIX', down: 'DOWN', asleep: 'ASLEEP', checking: 'CHECKING' };
+
+/** A machine as list_machines shows it (#307), its status first as the Machines tab says it (#437). */
 function machineText(m: any): string {
   const lent = m.owner_id !== null ? `${m.owner_name ?? 'a removed person'}'s own: goes to the turns they ask for, in schemes they're in`
     : m.project_names ? `lent to ${m.project_names.length ? m.project_names.join(', ') : 'no scheme'}` : "lent to every scheme an admin owns";
   const ws = m.workspaces.map((w: any) => `${w.name} (${w.path})`).join(', ');
   return [
-    `${m.name}: ${m.online ? `ONLINE, connected since ${ago(m.connected_at)}, host ${m.host || '?'}, ${m.sessions} session${m.sessions === 1 ? '' : 's'} open` : `OFFLINE, last seen ${ago(m.last_seen_at)}`}`,
-    m.online ? `  agent runs: ${m.command || '?'}; offers ${m.servers.length ? m.servers.map((s: string) => (s === 'ws' ? 'workspace tools' : 'its MCP server')).join(' and ') : 'nothing'}` : '',
+    `${m.name}: ${STATUS_WORDS[m.status] ?? m.status}: ${m.when ? `${m.reason} · ${m.when.label} ${ago(m.when.at)}` : m.reason}`,
+    `  ${m.online ? `ONLINE, connected since ${ago(m.connected_at)}, host ${m.host || '?'}, ${m.sessions} session${m.sessions === 1 ? '' : 's'} open` : `OFFLINE, last seen ${ago(m.last_seen_at)}`}`,
+    m.online && !m.runners ? `  agent runs: ${m.command || '?'}; offers ${m.servers.length ? m.servers.map((s: string) => (s === 'ws' ? 'workspace tools' : 'its MCP server')).join(' and ') : 'nothing'}` : '',
     `  workspace tools: ${m.workspace_tools ? 'on' : 'off'}${m.online && ws ? `; workspaces: ${ws}` : ''}`,
     `  ${lent}; ${m.minions_get_it ? "this scheme's minions get it" : "this scheme's minions don't get it"}`,
-    m.checked ? [`  last check ${ago(m.checked.at)}:`, ...checkLines(m.checked.results).map((l) => `  ${l}`)].join('\n') : m.online ? '  tools: not checked since it connected (check_machine lists them)' : '',
+    m.checked?.results.length ? [`  last check ${ago(m.checked.at)}:`, ...checkLines(m.checked.results).map((l) => `  ${l}`)].join('\n') : m.online && !m.runners ? '  tools: not checked yet (Citadel checks it shortly after it connects; check_machine checks now)' : '',
     m.problems.length ? `  agent reports problems: ${m.problems.join('; ')}` : '',
     m.notes ? `  notes: ${m.notes.replace(/\n+/g, ' ')}` : '',
   ].filter(Boolean).join('\n');

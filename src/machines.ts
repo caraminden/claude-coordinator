@@ -10,6 +10,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { lendsMachine } from './access.ts';
 import type { Machine, Store } from './db.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
@@ -43,6 +44,86 @@ const CHECK_MS = 30_000;
 
 /** One server's check (#307): whether MCP initialize and tools/list came back, and what it lists. */
 export type CheckResult = { server: MachineServer; ok: boolean; tools: string[]; error: string | null; ms: number };
+/** A machine's last check as machines.last_check keeps it (#437); a CI runner host's says runners, with no results. */
+export type StoredCheck = { at: number; results: CheckResult[]; runners?: true };
+
+// Citadel checks a machine when its agent connects and hourly while connected (#437): a check starts a copy of its MCP server.
+const CHECK_EVERY_MS = 60 * 60_000;
+// An agent from before workspaces never posts its info, so its connect check starts this long after it connects.
+const CHECK_UNASKED_MS = 10_000;
+// An always-on machine is Down once offline this long; one never connected is Down this long after it was added.
+const DOWN_AFTER_MS = 5 * 60_000;
+const NEVER_CONNECTED_MS = 60 * 60_000;
+
+/**
+ * What a machine's line says (#437). ready, fix (yellow) and down (red) are the colours; asleep has none.
+ * checking (no colour either) is the few seconds between connecting and its first check.
+ */
+export type MachineStatus = {
+  status: 'ready' | 'fix' | 'down' | 'asleep' | 'checking';
+  /** One line saying why, without a time: `when` carries that. */
+  reason: string;
+  /** The button that fixes it, if one does. */
+  fix: 'check' | 'workspace_tools' | 'lend' | 'machine_tools' | 'token' | 'remove' | 'always_on' | null;
+  when: { label: 'checked' | 'seen' | 'added'; at: number } | null;
+};
+
+export type StatusFacts = {
+  now: number;
+  /** When this server started: an agent can't have been seen offline before then. */
+  startedAt: number;
+  online: boolean;
+  /** A CI runner host: its agent is the runner agent, or was at its last connection. */
+  runners: boolean;
+  alwaysOn: boolean;
+  createdAt: number;
+  lastSeenAt: number | null;
+  /** The servers a turn would get from it now (relay.online()). */
+  offers: MachineServer[];
+  /** Its agent offers workspace tools, but its switch is off. */
+  wsOff: boolean;
+  check: StoredCheck | null;
+  /** A person's own machine: it goes to the turns they ask for, so it is lent to no scheme. */
+  owned: boolean;
+  /** The schemes it is lent to, and how many of those have machine tools on. */
+  lent: number;
+  lentOn: number;
+};
+
+/** The one place a machine's status is decided (#437); test/machine-status.test.ts holds its table. */
+export function machineStatus(f: StatusFacts): MachineStatus {
+  const s = (status: MachineStatus['status'], reason: string, fix: MachineStatus['fix'] = null, when: MachineStatus['when'] = null): MachineStatus => ({ status, reason, fix, when });
+  if (!f.online) {
+    const added = { label: 'added', at: f.createdAt } as const;
+    if (f.lastSeenAt === null) return f.now - f.createdAt >= NEVER_CONNECTED_MS ? s('down', 'Never connected', 'remove', added) : s('asleep', 'Not connected yet', null, added);
+    const seen = { label: 'seen', at: f.lastSeenAt } as const;
+    // Offline since this server started at the earliest: a restart isn't the machine's fault.
+    if (f.alwaysOn && f.now - Math.max(f.lastSeenAt, f.startedAt) >= DOWN_AFTER_MS) return s('down', 'Offline', 'always_on', seen);
+    return s('asleep', f.alwaysOn ? 'Offline' : 'Asleep', null, seen);
+  }
+  if (f.runners) return s('ready', 'CI runner host, connected');
+  if (!f.offers.length) {
+    return f.wsOff ? s('fix', 'Lends nothing: workspace tools are off', 'workspace_tools')
+      : s('fix', 'Lends nothing: no MCP server or folder on that computer', 'token');
+  }
+  const results = f.offers.map((server) => f.check?.results.find((r) => r.server === server));
+  if (results.some((r) => !r)) return s('checking', 'Checking its tools…');
+  const checked = { label: 'checked', at: f.check!.at } as const;
+  const failed = results.find((r) => !r!.ok);
+  if (failed) return s('fix', `Its ${failed.server === 'ws' ? 'workspace ' : ''}tools didn't start: ${failed.error}`, 'check', checked);
+  if (!f.owned && !f.lent) return s('fix', 'Lent to no scheme', 'lend', checked);
+  if (!f.owned && !f.lentOn) return s('fix', f.lent === 1 ? 'Its scheme has machine tools off' : 'Every scheme it is lent to has machine tools off', 'machine_tools', checked);
+  const tools = results.reduce((n, r) => n + r!.tools.length, 0);
+  return s('ready', `Ready · ${tools} tool${tools === 1 ? '' : 's'}`, null, checked);
+}
+
+function storedCheck(m: Machine): StoredCheck | null {
+  try {
+    return m.last_check ? JSON.parse(m.last_check) : null;
+  } catch {
+    return null;
+  }
+}
 
 const SSE_HEADERS = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' };
 
@@ -65,8 +146,8 @@ interface Agent {
   servers: MachineServer[];
   workspaces: unknown[];
   problems: string[];
-  /** The last check's results (#307), for list_machines; a reconnect starts without one. */
-  checked: { at: number; results: CheckResult[] } | null;
+  /** Its hourly check, and the connect check for an agent that never posts its info (#437). */
+  timers: NodeJS.Timeout[];
   /** A CI runner agent (public/runner-agent.mjs, #328): it serves no MCP server, only runner jobs. */
   runners: boolean;
 }
@@ -78,8 +159,8 @@ export type RunnerJobResult = { ok: boolean; output: string };
 // Downloading the 100 MB runner and configuring four instances takes minutes; a stuck script ends at the agent's own limit first.
 const RUNNER_JOB_MS = 20 * 60_000;
 
-/** Whose turn a session serves: a minion's (its ticket and scheme), or a contraption turn's (#306). */
-export type SessionHolder = { ticketId: number; projectId: number } | { contraptionTurn: number };
+/** Whose turn a session serves: a minion's (its ticket and scheme), a contraption turn's (#306), or Citadel's own check of a machine (#437). */
+export type SessionHolder = { ticketId: number; projectId: number } | { contraptionTurn: number } | { check: number };
 
 interface Session {
   machineId: number;
@@ -108,19 +189,32 @@ function cleanWorkspaces(v: unknown): unknown[] {
   }));
 }
 
-const holderKey = (h: SessionHolder) => ('ticketId' in h ? `t${h.ticketId}` : `c${h.contraptionTurn}`);
+const holderKey = (h: SessionHolder) => ('ticketId' in h ? `t${h.ticketId}` : 'contraptionTurn' in h ? `c${h.contraptionTurn}` : `k${h.check}`);
 
 export class MachineRelay {
   private agents = new Map<number, Agent>();
   private sessions = new Map<string, Session>();
   /** Runner jobs sent to an agent and waiting on its answer, by job id. */
   private jobs = new Map<string, { machineId: number; done: (r: RunnerJobResult) => void }>();
+  /** Checks running now, by machine: one at a time each (#437). */
+  private checks = new Map<number, Promise<CheckResult[]>>();
   private store: Store;
   private onChange: () => void;
+  private startedAt = Date.now();
+  private shown = '';
 
   constructor(store: Store, onChange: () => void) {
     this.store = store;
     this.onChange = onChange;
+    // A status also changes with time alone (offline 5 minutes is Down): say so when one does.
+    setInterval(() => this.statuses(), 60_000).unref();
+  }
+
+  /** Every machine's status, telling the stream when one changed since last asked. */
+  private statuses() {
+    const now = JSON.stringify(this.list().map((m) => [m.id, m.status, m.reason, m.gets]));
+    if (this.shown && now !== this.shown) this.onChange();
+    this.shown = now;
   }
 
   /** The machine whose token the request carries, or null. */
@@ -136,7 +230,25 @@ export class MachineRelay {
 
   view(machine: Machine) {
     const agent = this.agents.get(machine.id);
+    const check = storedCheck(machine);
+    // Whom it is lent to, and which of those schemes' minions get it (machine tools on); a person's own goes to their asks instead.
+    const lent = machine.owner_id !== null ? [] : this.store.listProjects().filter((p) => lendsMachine(this.store, machine, p));
+    const gets = lent.filter((p) => p.machine_tools).map((p) => p.id);
+    const offers = this.online().find((m) => m.id === machine.id)?.servers ?? [];
+    const st = machineStatus({
+      now: Date.now(), startedAt: this.startedAt, online: !!agent, runners: agent ? agent.runners : !!check?.runners,
+      alwaysOn: !!machine.always_on, createdAt: machine.created_at, lastSeenAt: machine.last_seen_at,
+      offers, wsOff: !machine.workspace_tools && !!agent?.servers.includes('ws'), check,
+      owned: machine.owner_id !== null, lent: lent.length, lentOn: gets.length,
+    });
     return {
+      ...st,
+      always_on: !!machine.always_on,
+      checked: check,
+      checking: this.checks.has(machine.id),
+      /** The schemes it is lent to, resolved, and those whose minions get it. */
+      lent_to: lent.map((p) => p.id),
+      gets,
       id: machine.id,
       name: machine.name,
       created_by: machine.created_by,
@@ -155,7 +267,7 @@ export class MachineRelay {
       /** The schemes it is lent to, or null for every scheme an admin owns. */
       projects: machine.scoped ? this.store.machineProjects(machine.id) : null,
       servers: agent?.servers ?? [],
-      runners: !!agent?.runners,
+      runners: agent ? agent.runners : !!check?.runners,
       workspaces: agent?.workspaces ?? [],
       problems: agent?.problems ?? [],
     };
@@ -187,13 +299,19 @@ export class MachineRelay {
     res.write(`data: ${JSON.stringify({ hello: machine.name })}\n\n`);
     const mcp = !info.runners && machine.mcp_kind === null && mcpFromAgent(info.command);
     if (mcp) this.store.updateMachine(machine.id, mcp);
-    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: info.runners ? [] : ['mcp'], workspaces: [], problems: [], checked: null, runners: !!info.runners };
+    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: info.runners ? [] : ['mcp'], workspaces: [], problems: [], timers: [], runners: !!info.runners };
     this.agents.set(machine.id, agent);
-    this.store.updateMachine(machine.id, { last_seen_at: agent.since });
+    // A runner host's check is its agent connecting: an hourly runner list could collide with a person's add, which the agent would refuse as busy.
+    this.store.updateMachine(machine.id, { last_seen_at: agent.since, ...(info.runners ? { last_check: JSON.stringify({ at: agent.since, results: [], runners: true }) } : {}) });
     this.onChange();
+    if (!info.runners) {
+      agent.timers.push(setTimeout(() => this.checkIfDue(machine.id), CHECK_UNASKED_MS), setInterval(() => this.checkIfDue(machine.id), CHECK_EVERY_MS));
+      for (const t of agent.timers) t.unref();
+    }
     const ping = setInterval(() => res.write(': ping\n\n'), PING_MS);
     res.on('close', () => {
       clearInterval(ping);
+      for (const t of agent.timers) clearTimeout(t);
       if (this.agents.get(machine.id) === agent) this.dropAgent(machine.id, agent);
     });
   }
@@ -226,7 +344,22 @@ export class MachineRelay {
     // A server it no longer offers is gone for the sessions using it.
     for (const id of agent.sessions) if (!agent.servers.includes(this.sessions.get(id)!.server)) this.endSession(id, true);
     this.onChange();
+    this.checkIfDue(machine.id);
     return true;
+  }
+
+  /**
+   * Check a connected machine unless its last check is under an hour old and covers what it offers now (#437):
+   * on connect, hourly, and when what it offers changes. Never more often than that unasked.
+   */
+  checkIfDue(machineId: number) {
+    const machine = this.store.getMachine(machineId);
+    const agent = this.agents.get(machineId);
+    if (!machine || !agent || agent.runners || this.checks.has(machineId)) return;
+    const check = storedCheck(machine);
+    const offers = this.online().find((m) => m.id === machineId)?.servers ?? [];
+    const covered = offers.every((s) => check?.results.some((r) => r.server === s));
+    if (offers.length && (!check || !covered || Date.now() - check.at >= CHECK_EVERY_MS - 60_000)) this.check(machineId).catch(() => {});
   }
 
   /** Machines whose CI runner agent is connected now (#328). */
@@ -259,23 +392,37 @@ export class MachineRelay {
     return true;
   }
 
-  /** The last check of a connected machine (#307), or null. */
-  lastCheck(machineId: number) {
-    return this.agents.get(machineId)?.checked ?? null;
+  /** A machine's last check (#307), kept in the database (#437), or null. */
+  lastCheck(machineId: number): StoredCheck | null {
+    const machine = this.store.getMachine(machineId);
+    return machine ? storedCheck(machine) : null;
   }
 
   /**
    * Test a machine the way a turn uses it (#307): on each server a turn would get, open a session as a
    * turn's proxy does, send MCP initialize and tools/list, and close it. The agent starts a copy of its
    * server for the session, as for any turn, and no tool is called, so nothing on the machine changes.
+   * One at a time per machine: asking while one runs gets that one's results (#437).
    */
-  async check(machineId: number, holder: SessionHolder, who: string, timeoutMs = CHECK_MS): Promise<CheckResult[]> {
+  check(machineId: number, timeoutMs = CHECK_MS): Promise<CheckResult[]> {
+    const running = this.checks.get(machineId);
+    if (running) return running;
+    const run = this.runCheck(machineId, timeoutMs).finally(() => {
+      this.checks.delete(machineId);
+      this.onChange();
+    });
+    this.checks.set(machineId, run);
+    this.onChange();
+    return run;
+  }
+
+  private async runCheck(machineId: number, timeoutMs: number): Promise<CheckResult[]> {
     const servers = this.online().find((m) => m.id === machineId)?.servers ?? [];
     const agent = this.agents.get(machineId);
     const results: CheckResult[] = [];
-    for (const server of servers) results.push(await this.checkServer(machineId, holder, server, who, timeoutMs));
-    // A reconnect mid-check is a new agent: the old connection's results aren't its.
-    if (agent && this.agents.get(machineId) === agent) agent.checked = { at: Date.now(), results };
+    for (const server of servers) results.push(await this.checkServer(machineId, { check: machineId }, server, "Citadel's check", timeoutMs));
+    // A reconnect mid-check is a new agent, and an offline one wasn't tested: keep the last real check.
+    if (agent && this.agents.get(machineId) === agent && results.length) this.store.updateMachine(machineId, { last_check: JSON.stringify({ at: Date.now(), results }) });
     return results;
   }
 

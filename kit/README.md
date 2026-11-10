@@ -12,7 +12,7 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
   - `job-check.ts` (Stop, minions only): refuses to end the turn while the session's own
     background job runs, at most twice per prompt.
   - `retro-log.ts`: one line per tripwire or guard.sh refusal, red test (a test runner the command
-    runs, counted from that runner's own summary), failed push or refused stop in `$COORDINATOR_SHARED_DIR/retro-log/<date>/<session>.md`, for the retro skill.
+    runs, counted from that runner's own summary), failed push or refused stop in `$COORDINATOR_SHARED_DIR/retro-log/<date>/<session>.md`, for the retro skill. `tools/land.sh` adds `land conflict` lines (the rebase's conflicted files) to `<date>/land.md`.
   - `after-compact.sh` (SessionStart, compact): the branch, head and uncommitted files, and a
     reminder to re-read the record rather than the summary.
 - A plugin can't carry `.claude/rules`: per-repo rules stay in each repo.

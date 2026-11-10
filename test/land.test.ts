@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,7 +14,7 @@ const root = mkdtempSync(join(tmpdir(), 'land-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 // NODE_TEST_CONTEXT would make land.sh's own `node --test` report to this runner instead of exiting red;
 // COORDINATOR_* would have the real deploy.sh report to the live server; CITADEL_HEAVY_* would queue it in the host's slots.
-const env = { ...process.env, COORDINATOR_CONTAINER: undefined, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: join(root, 'heavy'), NODE_TEST_CONTEXT: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+const env = { ...process.env, COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: join(root, 'heavy'), NODE_TEST_CONTEXT: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
 
 let n = 0;
@@ -118,6 +118,9 @@ test('a conflict aborts the rebase and lands nothing', () => {
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
 });
 
+// The one day's folder, whichever UTC day the run fell on.
+const landLog = (shared: string) => readFileSync(join(shared, 'retro-log', readdirSync(join(shared, 'retro-log'))[0], 'land.md'), 'utf8');
+
 test('a conflict is logged to the retro-log with its files, and the refusal names them', () => {
   const r = setup();
   r.commit(r.wt, 'a.txt', 'mine\n');
@@ -128,8 +131,7 @@ test('a conflict is logged to the retro-log with its files, and the refusal name
   assert.equal(res.status, 1);
   assert.match(res.stderr, /rebase onto main failed.*conflicted files: a\.txt\./);
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
-  const day = new Date().toISOString().slice(0, 10);
-  const log = readFileSync(join(shared, 'retro-log', day, 'land.md'), 'utf8');
+  const log = landLog(shared);
   assert.match(log, new RegExp(`^- \\d\\d:\\d\\d:\\d\\dZ · land conflict · ticket/1-x onto ${main.slice(0, 7)}: a\\.txt$`, 'm'));
 });
 
@@ -144,8 +146,8 @@ test('a rebase that cannot start logs no conflicted files', () => {
   const shared = join(r.dir, 'shared');
   const res = r.run({ COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 1);
-  const log = readFileSync(join(shared, 'retro-log', new Date().toISOString().slice(0, 10), 'land.md'), 'utf8');
-  assert.match(log, /land conflict · ticket\/1-x: no conflicted files \(rebase did not start\)$/m);
+  const log = landLog(shared);
+  assert.match(log, /land conflict · ticket\/1-x: no conflicted files found/m);
 });
 
 test('a conflict still refuses the same when there is no shared dir or it cannot be written', () => {

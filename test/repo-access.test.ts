@@ -242,3 +242,19 @@ test('members of a scheme whose repo moved are invited to the new one at the swe
   assert.ok(w.gh.collaborators.get('caraminden/peek-auras-2')?.has('KatzMeIfYouCan'));
   assert.deepEqual(w.access.view(w.scheme.id, w.josh.id), { state: 'added', slug: 'caraminden/peek-auras-2', error: null });
 });
+
+test('a collaborator Citadel added stays Citadel\'s when a transfer carries them to the moved repo (#456)', async () => {
+  const w = world();
+  w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
+  w.store.addMember(w.scheme.id, w.josh.id);
+  await w.access.sync(w.scheme.id, w.josh.id);
+  // GitHub moved the repo with its collaborators.
+  w.gh.owners.set('caraminden/peek-auras-2', 'caraminden');
+  w.gh.collaborators.set('caraminden/peek-auras-2', new Set(['KatzMeIfYouCan']));
+  w.store.setProjectUpstream(w.scheme.id, 'https://github.com/caraminden/peek-auras-2.git', null);
+  await w.access.sweep();
+  assert.deepEqual(w.access.view(w.scheme.id, w.josh.id), { state: 'added', slug: 'caraminden/peek-auras-2', error: null });
+  w.store.removeMember(w.scheme.id, w.josh.id);
+  await w.access.remove(w.scheme.id, w.josh.id);
+  assert.ok(!w.gh.collaborators.get('caraminden/peek-auras-2')!.has('KatzMeIfYouCan'), 'leaving takes off the access Citadel gave');
+});

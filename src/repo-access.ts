@@ -77,8 +77,10 @@ export class RepoAccess {
     let invited: number | null = prev?.state === 'invited' ? prev.invitation_id : null;
     try {
       const check = await this.api('GET', `/repos/${slug}/collaborators/${login}`, ownerToken.secret);
-      // Already in: a collaborator Citadel invited earlier who has since accepted stays Citadel's.
-      if (check.status === 204) return put(prev?.state === 'invited' && prev.slug === slug ? 'added' : 'existing', { login });
+      // Already in: a collaborator Citadel invited earlier who has since accepted stays Citadel's, and so does
+      // one Citadel added to the scheme's previous repo, which a GitHub transfer carries over (#456).
+      const ours = prev?.slug === slug ? prev.state === 'invited' : prev?.state === 'added' || prev?.state === 'invited';
+      if (check.status === 204) return put(ours ? 'added' : 'existing', { login });
       if (check.status !== 404) return put('failed', { login, error: await explain(check, ownerToken.login, login, slug) });
       const invite = await this.api('PUT', `/repos/${slug}/collaborators/${login}`, ownerToken.secret, { permission: 'push' });
       if (invite.status === 204) return put('added', { login });

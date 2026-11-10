@@ -29,7 +29,7 @@ const PAGES: Record<string, string> = {
 </main><script>document.getElementById('d').show()</script>`,
   '/broken': `${STYLE}
 <span class="chip" id="lop" style="padding:2px 10px 10px">lopsided</span>
-<button class="btn" id="small" style="min-height:0;padding:2px 6px">x</button>
+<button class="btn" id="small" style="min-height:0;padding:2px 6px;line-height:14px">x</button>
 <div id="clip" style="width:80px;height:20px;overflow:hidden;white-space:nowrap">${'cut off text '.repeat(4)}</div>
 <div id="outer" style="border:1px solid #888;padding:2px;width:300px"><textarea id="ta" style="border:1px solid #888;width:100%;box-sizing:border-box;display:block"></textarea></div>
 <div id="wide" style="width:1600px;height:4px"></div>
@@ -81,7 +81,9 @@ test('each planted defect is found, with its numbers', { skip }, async () => {
   const phone = at(r, 390);
   const lop = desk.find((f: any) => f.check === 'padding' && f.selector === '#lop');
   assert.ok(lop && lop.bottom - lop.top >= 7, JSON.stringify(lop));
-  assert.ok(has(desk, 'tap', '#small') && has(phone, 'tap', '#small'));
+  // #small's line-height is pinned (20 px tall with its padding and border): left to the font, it came out
+  // 24 px under DejaVu Sans in a person's container, over the 22 px desktop cut, and under it on the host (#458).
+  assert.ok(has(desk, 'tap', '#small') && has(phone, 'tap', '#small'), JSON.stringify(desk.concat(phone).filter((f: any) => f.selector === '#small')));
   assert.equal(phone.find((f: any) => f.selector === '#small' && f.check === 'tap').min, 40);
   assert.ok(has(desk, 'clip', '#clip'));
   assert.ok(has(phone, 'overflow', '#wide'));

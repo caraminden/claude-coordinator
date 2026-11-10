@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 import { imageHash, type ClaudeLink } from '../src/claude-link.ts';
 import { CodexLink, deviceCode } from '../src/codex-link.ts';
 import { Containers } from '../src/containers.ts';
-import { images, notReady, overPace, review, usageLine } from '../src/codex-review.ts';
+import { images, notReady, overPace, REQUIREMENTS, review, usageLine } from '../src/codex-review.ts';
 // @ts-expect-error: a plain .mjs, shipped into the image as is.
 import { patchPaths } from '../deploy/claude-container/codex/citadel-hook.mjs';
 
@@ -409,7 +409,12 @@ test('a review reads Codex usage first: it skips (exit 4) when over pace, and ru
 const turnDir = join(root, 'turn-1');
 mkdirSync(join(turnDir, 'pin'), { recursive: true });
 const driver = join(turnDir, 'pin', 'codex-review.ts');
-writeFileSync(driver, readFileSync(join(import.meta.dirname, '..', 'src', 'codex-review.ts')));
+// It looks for the hook at a path of the test's own, where there is none: a person's container has the real
+// one at /etc/codex, and there the driver would skip the host path and run Codex on the person's own login (#458).
+const source = readFileSync(join(import.meta.dirname, '..', 'src', 'codex-review.ts'), 'utf8');
+const unhooked = source.replace(`export const REQUIREMENTS = '${REQUIREMENTS}';`, `export const REQUIREMENTS = ${JSON.stringify(join(root, 'no-hook', 'requirements.toml'))};`);
+assert.notEqual(unhooked, source, "the pinned driver's REQUIREMENTS line moved: update the test's rewrite");
+writeFileSync(driver, unhooked);
 mkdirSync(join(turnDir, 'pin', 'kit', 'agents'), { recursive: true });
 writeFileSync(join(turnDir, 'pin', 'kit', 'agents', 'reviewer.md'), 'the reviewer rules');
 const podBin = join(root, 'podbin');
@@ -462,10 +467,11 @@ const podCalls = () => {
 };
 function cli(args: string[], fake: string | null, cfg: string, input = '', extra: Record<string, string> = {}) {
   rmSync(podLog, { force: true });
-  return spawnSync(process.execPath, [driver, ...args], { cwd: root, input, encoding: 'utf8', env: { PATH: `${podBin}:${process.env.PATH}`, CITADEL_CODEX_TRIPWIRE: cfg, ...(fake ? { FAKE_PODMAN: fake } : {}), ...extra } });
+  // HOME too: never the real one, whose ~/.codex may hold a person's Codex login.
+  return spawnSync(process.execPath, [driver, ...args], { cwd: root, input, encoding: 'utf8', env: { PATH: `${podBin}:${process.env.PATH}`, HOME: join(root, 'home'), CITADEL_CODEX_TRIPWIRE: cfg, ...(fake ? { FAKE_PODMAN: fake } : {}), ...extra } });
 }
 
-test("a host turn's review runs in the Codex container the runner named, read-only, with the brief, exit code and usage line passed through (#398)", { skip: notReady({}) === null && 'this machine has the hook' }, () => {
+test("a host turn's review runs in the Codex container the runner named, read-only, with the brief, exit code and usage line passed through (#398)", () => {
   const check = cli(['--check'], 'ok', hostTurn);
   assert.equal(check.status, 0);
   assert.equal(check.stdout, 'ready\n');
@@ -494,7 +500,7 @@ test("a host turn's review runs in the Codex container the runner named, read-on
   assert.deepEqual(readdirSync(personTurns), [], 'the copy goes once the review ends');
 });
 
-test("a host turn's review is exit 3 with the reason when the container isn't signed in, isn't running, or has no hook; never Codex on the host (#398)", { skip: notReady({}) === null && 'this machine has the hook' }, () => {
+test("a host turn's review is exit 3 with the reason when the container isn't signed in, isn't running, or has no hook; never Codex on the host (#398)", () => {
   const out = cli(['--check'], 'signed-out', hostTurn);
   assert.equal(out.status, 3);
   assert.match(out.stdout, /hasn't signed in to Codex/);
@@ -529,7 +535,7 @@ test("a host turn's review is exit 3 with the reason when the container isn't si
   assert.equal(podCalls().length, 0, 'never execs into a container the runner didn\'t name');
 });
 
-test("a host turn's images go to the Codex container as --image, with the shared folders to check them against; a bad one stops before podman (#408)", { skip: notReady({}) === null && 'this machine has the hook' }, () => {
+test("a host turn's images go to the Codex container as --image, with the shared folders to check them against; a bad one stops before podman (#408)", () => {
   const shared = join(root, 'host-shared');
   mkdirSync(shared, { recursive: true });
   writeFileSync(join(root, 'shot.png'), 'x');

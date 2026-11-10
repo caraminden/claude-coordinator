@@ -99,6 +99,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "HEAD /api/artifacts/:a/raw": {
+  "anon": "401",
+  "person": "404",
+  "member": "404",
+  "outsider": "404",
+  "tmA": "403",
+  "tmB": "403",
+  "m1": "403",
+  "m2": "403"
+ },
  "GET /api/catalogue": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -108,6 +118,16 @@
   "tmB": "200",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
+ },
+ "POST /api/contraption-read/nope": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion or Taskmaster reads a person's contraption data",
+  "member": "403 Only a minion or Taskmaster reads a person's contraption data",
+  "outsider": "403 Only a minion or Taskmaster reads a person's contraption data",
+  "tmA": "403 Only a turn answering a person's own typed message may read their data in nope, and this one isn't (a GitHub or system message, a relay, a wake, or several people). Ask them to send the request in this chat.",
+  "tmB": "403 Only a turn answering a person's own typed message may read their data in nope, and this one isn't (a GitHub or system message, a relay, a wake, or several people). Ask them to send the request in this chat.",
+  "m1": "403 Only a turn answering a person's own typed message may read their data in nope, and this one isn't (a GitHub or system message, a relay, a wake, or several people). Ask them to send the request in this chat.",
+  "m2": "403 Only a turn answering a person's own typed message may read their data in nope, and this one isn't (a GitHub or system message, a relay, a wake, or several people). Ask them to send the request in this chat."
  },
  "GET /api/contraptions": {
   "anon": "401 Not logged in",
@@ -139,6 +159,16 @@
   "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
   "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
  },
+ "GET /api/contraptions/home": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
  "GET /api/contraptions/mine": {
   "anon": "401 Not logged in",
   "person": "200",
@@ -149,6 +179,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/contraptions/minions": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
+ "GET /api/contraptions/minions/1": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
  "PATCH /api/contraptions/nope": {
   "anon": "401 Not logged in",
   "person": "404 No such contraption",
@@ -158,6 +208,26 @@
   "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
+ },
+ "GET /api/contraptions/nope/deploy": {
+  "anon": "401 Not logged in",
+  "person": "404 No such contraption",
+  "member": "403 Only an admin can do that",
+  "outsider": "403 Only an admin can do that",
+  "tmA": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "m1": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption",
+  "m2": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption"
+ },
+ "POST /api/contraptions/nope/deploy": {
+  "anon": "401 Not logged in",
+  "person": "404 No such contraption",
+  "member": "403 Only an admin can do that",
+  "outsider": "403 Only an admin can do that",
+  "tmA": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "m1": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption",
+  "m2": "403 Only its home scheme's Taskmaster and minions, or an admin, deploy a contraption"
  },
  "POST /api/contraptions/nope/keys": {
   "anon": "401 Not logged in",
@@ -178,6 +248,76 @@
   "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
+ },
+ "GET /api/contraptions/nope/service": {
+  "anon": "401 Not logged in",
+  "person": "404 No such contraption",
+  "member": "403 Only an admin can do that",
+  "outsider": "403 Only an admin can do that",
+  "tmA": "403 Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/contraptions/nope/service": {
+  "anon": "401 Not logged in",
+  "person": "404 No such contraption",
+  "member": "403 Only an admin can do that",
+  "outsider": "403 Only an admin can do that",
+  "tmA": "403 Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/contraptions/nope/service/logs": {
+  "anon": "401 Not logged in",
+  "person": "404 No such contraption",
+  "member": "403 Only an admin can do that",
+  "outsider": "403 Only an admin can do that",
+  "tmA": "403 Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster",
+  "tmB": "403 Only a turn a Citadel admin asked for may do this, and this one is no one's ask. Ask a Citadel admin to send the request in this chat.",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "DELETE /api/contraptions/relay/nope/x": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
+ "GET /api/contraptions/relay/nope/x": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
+ "POST /api/contraptions/relay/nope/x": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
+ },
+ "PUT /api/contraptions/relay/nope/x": {
+  "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "person": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "member": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "outsider": "403 Only a contraption's own server may call this, on Citadel's machine, not through the web",
+  "tmA": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "tmB": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m1": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
+  "m2": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer"
  },
  "GET /api/contraptions/sessions?person=1": {
   "anon": "401 Unknown contraption key: send the one in its key folder (contraption.key) as Authorization: Bearer",
@@ -248,6 +388,16 @@
   "tmB": "403 This link has expired; open the file from Citadel again",
   "m1": "403 This link has expired; open the file from Citadel again",
   "m2": "403 This link has expired; open the file from Citadel again"
+ },
+ "HEAD /api/files/t1-0.zzzzzz.forged/report.md": {
+  "anon": "403",
+  "person": "404",
+  "member": "404",
+  "outsider": "404",
+  "tmA": "403",
+  "tmB": "403",
+  "m1": "403",
+  "m2": "403"
  },
  "GET /api/github/callback?state=x&code=y": {
   "anon": "401 Not logged in",
@@ -368,6 +518,16 @@
   "tmB": "405 Method not allowed",
   "m1": "405 Method not allowed",
   "m2": "405 Method not allowed"
+ },
+ "POST /api/machines/:m/check": {
+  "anon": "401 Not logged in",
+  "person": "409 mx is offline",
+  "member": "404 No such machine",
+  "outsider": "404 No such machine",
+  "tmA": "403 Only people manage machines",
+  "tmB": "403 Only people manage machines",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
  },
  "GET /api/machines/:m/contraption-session": {
   "anon": "401 Not a running contraption turn",
@@ -529,11 +689,55 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/me/claude": {
+  "anon": "401 Not logged in",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/me/claude/code": {
   "anon": "401 Not logged in",
   "person": "400 Paste the code Anthropic showed you.",
   "member": "400 Paste the code Anthropic showed you.",
   "outsider": "400 Paste the code Anthropic showed you.",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "DELETE /api/me/codex": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/me/codex": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "200",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/me/codex": {
+  "anon": "401 Not logged in",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/me/codex/switch": {
+  "anon": "401 Not logged in",
+  "person": "400 on must be true or false",
+  "member": "400 on must be true or false",
+  "outsider": "400 on must be true or false",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
@@ -989,6 +1193,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "HEAD /api/projects/:p/shared/file": {
+  "anon": "401",
+  "person": "404",
+  "member": "404",
+  "outsider": "404",
+  "tmA": "403",
+  "tmB": "403",
+  "m1": "403",
+  "m2": "403"
+ },
  "POST /api/projects/:p/shared/pin": {
   "anon": "401 Not logged in",
   "person": "400 path is required",
@@ -1028,6 +1242,15 @@
   "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "200",
   "m2": "200"
+ },
+ "POST /api/projects/:p/tune-up": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
  },
  "GET /api/projects/:p/views": {
   "anon": "401 Not logged in",
@@ -1339,6 +1562,26 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "HEAD /api/tickets/:minion1/file": {
+  "anon": "401",
+  "person": "404",
+  "member": "404",
+  "outsider": "404",
+  "tmA": "404",
+  "tmB": "403",
+  "m1": "403",
+  "m2": "403"
+ },
+ "POST /api/tickets/:minion1/fresh-session": {
+  "anon": "401 Not logged in",
+  "person": "409 Only a Taskmaster starts fresh sessions",
+  "member": "409 Only a Taskmaster starts fresh sessions",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "400 Summary is required",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/images/0123456789abcdef01234567.png": {
   "anon": "401 Not logged in",
   "person": "404 Not found",
@@ -1479,6 +1722,16 @@
   "m1": "200",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/start": {
+  "anon": "401 Not logged in",
+  "person": "409 #1 isn't parked waiting on another minion's work",
+  "member": "409 #1 isn't parked waiting on another minion's work",
+  "outsider": "404 No such minion",
+  "tmA": "409 #1 isn't parked waiting on another minion's work",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/status": {
   "anon": "401 Not logged in",
   "person": "400 Status must be closed or idle",
@@ -1507,6 +1760,26 @@
   "tmA": "403 Only a thread itself can strike its words",
   "tmB": "403 Only a thread itself can strike its words",
   "m1": "400 Text is required",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:minion1/ultrareview": {
+  "anon": "401 Not logged in",
+  "person": "400 This scheme has no repo to review",
+  "member": "400 This scheme has no repo to review",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:minion1/ultrareview": {
+  "anon": "401 Not logged in",
+  "person": "400 Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after",
+  "member": "400 Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
  "POST /api/tickets/:minion1/unqueue": {
@@ -1538,6 +1811,16 @@
   "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
+ },
+ "HEAD /api/tickets/:minion1/uploads/nothing.txt": {
+  "anon": "401",
+  "person": "404",
+  "member": "404",
+  "outsider": "404",
+  "tmA": "403",
+  "tmB": "403",
+  "m1": "403",
+  "m2": "403"
  },
  "POST /api/tickets/:minion1/verdict": {
   "anon": "401 Not logged in",
@@ -1729,6 +2012,25 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "HEAD /api/tickets/:taskmasterA/file": {
+  "anon": "401",
+  "person": "404",
+  "member": "404",
+  "outsider": "404",
+  "tmB": "403",
+  "m1": "403",
+  "m2": "403"
+ },
+ "POST /api/tickets/:taskmasterA/fresh-session": {
+  "anon": "401 Not logged in",
+  "person": "409 Its session is already fresh",
+  "member": "409 Its session is already fresh",
+  "outsider": "404 No such minion",
+  "tmA": "400 Summary is required",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:taskmasterA/images/0123456789abcdef01234567.png": {
   "anon": "401 Not logged in",
   "person": "404 Not found",
@@ -1869,6 +2171,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:taskmasterA/start": {
+  "anon": "401 Not logged in",
+  "person": "409 #null isn't parked waiting on another minion's work",
+  "member": "409 #null isn't parked waiting on another minion's work",
+  "outsider": "404 No such minion",
+  "tmA": "403 The Taskmaster cannot act on itself",
+  "tmB": "403 Outside this Taskmaster's scheme",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:taskmasterA/status": {
   "anon": "401 Not logged in",
   "person": "400 Status must be closed or idle",
@@ -1896,6 +2208,26 @@
   "outsider": "403 Only a thread itself can strike its words",
   "tmA": "400 Text is required",
   "tmB": "403 Only a thread itself can strike its words",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/ultrareview": {
+  "anon": "401 Not logged in",
+  "person": "400 This scheme has no repo to review",
+  "member": "400 This scheme has no repo to review",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/ultrareview": {
+  "anon": "401 Not logged in",
+  "person": "400 Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after",
+  "member": "400 Confirm first: an ultra review uses one of your free runs, or costs about $5-25 in usage credits after",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can start an ultra review: it is billed to their own Claude account",
+  "tmB": "403 Only a person can start an ultra review: it is billed to their own Claude account",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
@@ -1928,6 +2260,16 @@
   "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
+ },
+ "HEAD /api/tickets/:taskmasterA/uploads/nothing.txt": {
+  "anon": "401",
+  "person": "404",
+  "member": "404",
+  "outsider": "404",
+  "tmA": "403",
+  "tmB": "403",
+  "m1": "403",
+  "m2": "403"
  },
  "POST /api/tickets/:taskmasterA/verdict": {
   "anon": "401 Not logged in",

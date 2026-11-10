@@ -1,9 +1,10 @@
-// Who may call what: every API route, called as each kind of caller, against a recorded snapshot of
-// the status and error each got. The route table (src/http.ts) must give the same answers the old
-// hand-written checks did; a change here is a change in who may do what, so it gets looked at.
-// UPDATE_ACCESS_MATRIX=1 rewrites the snapshot.
+// Who may call what: every API route server.ts mounts, called as each kind of caller, against a recorded
+// snapshot of the status and error each got (one block per route). A change here is a change in who
+// may do what, so it gets looked at. A new route is probed without anyone listing it: run with
+// UPDATE_ACCESS_MATRIX=1 to add its block, and read the 8 answers before committing them. Never
+// rewrite the snapshot to turn a changed answer green without knowing why it changed.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +12,7 @@ import { after, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
 import { Contraptions } from '../src/contraptions.ts';
+import type { Route } from '../src/http.ts';
 import { bootServer, freePort, PASSWORD, SECRET } from './helpers.ts';
 
 const SNAPSHOT = join(import.meta.dirname, 'access-matrix.snapshot.json');
@@ -52,68 +54,89 @@ const CX = new Contraptions(store, SECRET, join(data, 'contraptions')).register(
 const tokens = new Auth(PASSWORD, SECRET);
 const bearer = (id: number) => ({ Authorization: `Bearer ${tokens.agentToken(id)}` });
 
-// Each route, with :t (a ticket), :p (scheme A), :s, :a, :m filled in below. `fresh` makes a new
-// schedule or machine per call, for routes that delete theirs.
-type Probe = { method: string; path: string; fresh?: 'schedule' | 'machine' };
-const P = (method: string, path: string, fresh?: Probe['fresh']): Probe => ({ method, path, fresh });
-const TICKET_ROUTES: Probe[] = [
-  P('GET', '/api/tickets/:t'), P('PATCH', '/api/tickets/:t'), P('PUT', '/api/tickets/:t/person-note'), P('PUT', '/api/tickets/:t/pin'), P('POST', '/api/tickets/:t/seen'),
-  P('GET', '/api/tickets/:t/branch'), P('GET', '/api/tickets/:t/file'), P('PUT', '/api/tickets/:t/uploads'),
-  P('GET', '/api/tickets/:t/events'), P('GET', '/api/tickets/:t/events?after=0'),
-  P('GET', '/api/tickets/:t/events?before=1000&limit=5&from=1'), P('POST', '/api/tickets/:t/messages'), P('POST', '/api/tickets/:t/unqueue'),
-  P('POST', '/api/tickets/:t/continue'), P('POST', '/api/tickets/:t/comments'), P('POST', '/api/tickets/:t/questions'),
-  P('POST', '/api/tickets/:t/settle'), P('POST', '/api/tickets/:t/strike'), P('POST', '/api/tickets/:t/answer'),
-  P('POST', '/api/tickets/:t/plans'), P('POST', '/api/tickets/:t/verdict'), P('POST', '/api/tickets/:t/approvals'),
-  P('GET', '/api/tickets/:t/approvals'), P('POST', '/api/tickets/:t/approve'), P('PUT', '/api/tickets/:t/properties'),
-  P('POST', '/api/tickets/:t/stop'), P('POST', '/api/tickets/:t/status'), P('POST', '/api/tickets/:t/coordinator'),
-  P('POST', '/api/tickets/:t/deploy'), P('POST', '/api/tickets/:t/land'), P('GET', '/api/tickets/:t/land'), P('POST', '/api/tickets/:t/preview'), P('POST', '/api/tickets/:t/wake'),
-  P('POST', '/api/tickets/:t/close'), P('GET', '/api/tickets/:t/images/0123456789abcdef01234567.png'),
-  P('GET', '/api/tickets/:t/uploads/nothing.txt'),
-  // Wrong methods and unknown actions.
-  P('PUT', '/api/tickets/:t'), P('GET', '/api/tickets/:t/messages'), P('POST', '/api/tickets/:t/nonsense'),
+// The probes come from the route table itself: every route server.ts mounts, in its order, so a new
+// route can't go unprobed. A probe's path is the route's with each parameter filled from FILL; the
+// loaded rows keep a short name (:t a ticket, :p scheme A, :s, :a, :m) that the call fills in.
+type Probe = { method: string; path: string; fresh?: 'schedule' | 'machine'; notAsPerson?: boolean };
+const FILL: Record<string, string> = {
+  ticket: ':t', project: ':p', schedule: ':s', artifact: ':a', machine: ':m', machineId: ':m',
+  person: '999', token: 'not-a-token', view: '0', name: 'nope', session: '0123456789abcdef01234567', turn: '1', key: 'k',
+  to: 'nope', rest: 'x', app: 'nope', number: '1',
+};
+// Routes probed at other paths than FILL gives: a query the route needs, or more than one case.
+const PATHS: Record<string, string[]> = {
+  'GET /api/github/link': ['/api/github/link?project=:p'],
+  'GET /api/github/callback': ['/api/github/callback?state=x&code=y'],
+  'GET /api/projects/:project/tickets': ['/api/projects/:p/tickets', '/api/projects/:p/tickets?include_closed=1'],
+  'GET /api/projects/:project/search': ['/api/projects/:p/search', '/api/projects/:p/search?q=one&ticket=:t'],
+  'GET /api/projects/:project/memory': ['/api/projects/:p/memory?q=one'],
+  'GET /api/tickets/:ticket/events': ['/api/tickets/:t/events', '/api/tickets/:t/events?after=0', '/api/tickets/:t/events?before=1000&limit=5&from=1'],
+  'GET /api/files/:token/*path': ['/api/files/t1-0.zzzzzz.forged/report.md'],
+  'HEAD /api/files/:token/*path': ['/api/files/t1-0.zzzzzz.forged/report.md'],
+  'GET /api/tickets/:ticket/images/:name': ['/api/tickets/:t/images/0123456789abcdef01234567.png'],
+  'GET /api/tickets/:ticket/uploads/:name': ['/api/tickets/:t/uploads/nothing.txt'],
+  'HEAD /api/tickets/:ticket/uploads/:name': ['/api/tickets/:t/uploads/nothing.txt'],
+  'GET /api/contraptions/sessions': ['/api/contraptions/sessions?person=1'],
+  'DELETE /api/contraptions/sessions/:session': ['/api/contraptions/sessions/acolyte?person=1'],
+};
+// Routes that delete their row get a new schedule or machine per call.
+const FRESH: Record<string, Probe['fresh']> = { 'DELETE /api/schedules/:schedule': 'schedule', 'DELETE /api/machines/:machine': 'machine' };
+// Routes whose success starts a real container: only their refusals are probed (test/claude-link.test.ts
+// and test/codex-link.test.ts cover the rest).
+const NOT_AS_PERSON = new Set(['POST /api/me/claude', 'POST /api/me/codex']);
+// Routes that leave something behind that changes other routes' answers go after all the rest, people
+// after threads: a failed GitHub sign-in is kept for the account page, and a tune-up starts a
+// Taskmaster turn, which retires tmA's token.
+const LAST = new Set(['GET /api/github/callback', 'POST /api/projects/:project/tune-up']);
+const PEOPLE = ['person', 'member', 'outsider'];
+// Answers that look wrong, so they are probed but kept out of the snapshot until a person decides
+// (#452, handoffs/handoff-access-matrix-findings.md). Fixed or accepted: drop the line and pin the answer.
+const UNDECIDED = new Set([
+  // HEAD counts as a write in checkScope, so a Taskmaster may GET its own file but not HEAD it.
+  'HEAD /api/tickets/:taskmasterA/file as tmA',
+  // Any member may start a tune-up, though changing the scheme's settings is its owner's.
+  'POST /api/projects/:p/tune-up as member',
+]);
+// What the table can't express: wrong methods, unknown paths, and a contraption's proxied paths.
+const EXTRA_TICKET: Probe[] = [
+  { method: 'PUT', path: '/api/tickets/:t' }, { method: 'GET', path: '/api/tickets/:t/messages' }, { method: 'POST', path: '/api/tickets/:t/nonsense' },
 ];
-const OTHER_ROUTES: Probe[] = [
-  P('POST', '/api/login'), P('POST', '/api/logout'), P('GET', '/api/health'), P('GET', '/api/me'),
-  P('GET', '/api/invite/not-a-token'), P('POST', '/api/invite/not-a-token'), P('PUT', '/api/me/password'), P('GET', '/api/me/github'), P('DELETE', '/api/me/github'), P('GET', '/api/github/link?project=:p'), P('GET', '/api/github/callback?state=x&code=y'),
-  // POST /api/me/claude starts a real container, so only its refusals are probed (test/claude-link.test.ts covers it).
-  P('GET', '/api/me/claude'), P('DELETE', '/api/me/claude'), P('POST', '/api/me/claude/code'),
-  P('GET', '/api/people'), P('POST', '/api/people'), P('POST', '/api/people/999/invite'), P('PATCH', '/api/people/999'),
-  P('DELETE', '/api/people/999'), P('GET', '/api/projects/:p/members'), P('POST', '/api/projects/:p/members'),
-  P('DELETE', '/api/projects/:p/members/999'), P('PUT', '/api/projects/:p/hidden'),
-  P('GET', '/api/machines/connect'), P('POST', '/api/machines/send'), P('POST', '/api/machines/info'), P('POST', '/api/machines/upload'), P('POST', '/api/machines/runner-token'), P('POST', '/api/machines/runner-result'),
-  P('GET', '/api/projects/:p/ci-runners'), P('POST', '/api/projects/:p/ci-runners'),
-  P('GET', '/api/stream'), P('GET', '/api/costs'), P('GET', '/api/prs'), P('POST', '/api/taskmaster'),
-  P('GET', '/api/projects'), P('POST', '/api/projects'), P('GET', '/api/catalogue'), P('GET', '/api/projects/:p'), P('PATCH', '/api/projects/:p'),
-  P('GET', '/api/projects/:p/instructions/history'), P('GET', '/api/projects/:p/instructions/sources'),
-  // Scheme B is id 2, so tmB stands in for the Citadel scheme's Taskmaster (GLOBAL_OWNER).
-  P('GET', '/api/app/instructions'), P('PUT', '/api/app/instructions'), P('GET', '/api/app/instructions/history'),
-  P('GET', '/api/app/settings'), P('PUT', '/api/app/settings'), P('POST', '/api/projects/:p/github'),
-  P('GET', '/api/projects/:p/tickets'), P('GET', '/api/projects/:p/tickets?include_closed=1'), P('POST', '/api/projects/:p/tickets'), P('GET', '/api/projects/:p/briefs'), P('GET', '/api/projects/:p/properties'), P('POST', '/api/projects/:p/properties/keys'),
-  P('POST', '/api/projects/:p/properties/values'), P('POST', '/api/projects/:p/properties/review'),
-  P('POST', '/api/projects/:p/properties/proposals'), P('GET', '/api/projects/:p/inbox'), P('GET', '/api/projects/:p/recap'),
-  P('GET', '/api/projects/:p/views'), P('POST', '/api/projects/:p/views'), P('DELETE', '/api/projects/:p/views/0'),
-  P('GET', '/api/projects/:p/schedules'), P('POST', '/api/projects/:p/schedules'), P('PATCH', '/api/schedules/:s'),
-  P('DELETE', '/api/schedules/:s', 'schedule'), P('GET', '/api/projects/:p/search'), P('GET', '/api/projects/:p/search?q=one&ticket=:t'), P('GET', '/api/projects/:p/memory?q=one'), P('GET', '/api/projects/:p/artifacts'),
-  P('GET', '/api/projects/:p/icon'), P('GET', '/api/projects/:p/shared'), P('GET', '/api/projects/:p/shared/file'), P('POST', '/api/projects/:p/shared/pin'), P('GET', '/api/artifacts/:a'),
-  P('GET', '/api/artifacts/:a/raw'), P('GET', '/api/files/t1-0.zzzzzz.forged/report.md'), P('POST', '/api/artifacts/:a/pin'), P('POST', '/api/projects/:p/artifacts/pin'),
-  P('POST', '/api/artifact-data'), P('POST', '/api/artifact-send'), P('POST', '/api/projects/:p/artifact-data'),
-  P('GET', '/api/push/key'), P('PUT', '/api/push/subscription'), P('POST', '/api/push/subscription'),
-  P('PATCH', '/api/push/subscription'), P('DELETE', '/api/push/subscription'),
-  P('GET', '/api/machines'), P('POST', '/api/machines'), P('POST', '/api/machines/:m/token'), P('PATCH', '/api/machines/:m'),
-  P('DELETE', '/api/machines/:m', 'machine'), P('GET', '/api/machines/:m/session'),
-  P('POST', '/api/machines/:m/session/0123456789abcdef01234567'), P('GET', '/api/machines/:m/contraption-session'),
-  P('POST', '/api/machines/:m/contraption-session/0123456789abcdef01234567'),
-  P('GET', '/api/projects/:p/machines'), P('POST', '/api/projects/:p/machines/nope/check'),
-  P('GET', '/api/contraptions/mine'), P('GET', '/api/contraptions'), P('POST', '/api/contraptions'), P('PATCH', '/api/contraptions/nope'),
-  P('PUT', '/api/contraptions/nope/people/999'), P('POST', '/api/contraptions/nope/keys'), P('POST', '/api/contraptions/asks'),
-  P('POST', '/api/contraptions/turns'), P('POST', '/api/contraptions/turns/1/cancel'), P('POST', '/api/contraptions/turns/1/messages'), P('GET', '/api/contraptions/sessions?person=1'),
-  P('DELETE', '/api/contraptions/sessions/acolyte?person=1'), P('PUT', '/api/mandate/items/k'), P('DELETE', '/api/mandate/items/k'),
-  // Wrong methods and unknown paths.
-  P('DELETE', '/api/projects/:p'), P('PUT', '/api/projects/:p/properties'), P('GET', '/api/push/subscription'),
-  P('POST', '/api/machines/:m'), P('GET', '/api/nonsense'),
-  // A contraption's proxied paths (src/apps.ts): cx is enabled for the admin only, /link is open.
-  P('GET', '/apps/cx/x'), P('POST', '/apps/cx/x'), P('GET', '/apps/cx/link'), P('GET', '/apps/nope/'),
+const EXTRA: Probe[] = [
+  { method: 'DELETE', path: '/api/projects/:p' }, { method: 'PUT', path: '/api/projects/:p/properties' }, { method: 'GET', path: '/api/push/subscription' },
+  { method: 'POST', path: '/api/machines/:m' }, { method: 'GET', path: '/api/nonsense' },
+  // src/apps.ts: cx is enabled for the admin only, /link is open.
+  { method: 'GET', path: '/apps/cx/x' }, { method: 'POST', path: '/apps/cx/x' }, { method: 'GET', path: '/apps/cx/link' }, { method: 'GET', path: '/apps/nope/' },
 ];
+
+/** Every route server.ts hands to router(), read from its source: importing it would boot the server. */
+async function mountedRoutes(): Promise<Route[]> {
+  const names = [...readFileSync(join(import.meta.dirname, '..', 'server.ts'), 'utf8').matchAll(/\brouter\(([^)]*)\)/g)].flatMap((m) => m[1].match(/\w+Routes\b/g) ?? []);
+  const exported: Record<string, Route[]> = {};
+  for (const f of readdirSync(join(import.meta.dirname, '..', 'src', 'routes'))) Object.assign(exported, await import(`../src/routes/${f}`));
+  assert.ok(names.length >= 9, `server.ts should hand its route arrays to router(); found ${names.join(', ') || 'none'}`);
+  // An array server.ts mounts that isn't one of src/routes' exports would go unprobed.
+  assert.deepEqual(names.filter((n) => !Array.isArray(exported[n])), [], 'route arrays server.ts mounts that src/routes/ does not export');
+  return names.flatMap((n) => exported[n]);
+}
+const TICKET_ROUTES: Probe[] = [];
+const OTHER_ROUTES: Probe[] = [];
+const LAST_ROUTES: Probe[] = [];
+const seen = new Set<string>();
+for (const route of await mountedRoutes()) {
+  for (const method of [route.method].flat()) {
+    const key = `${method} ${route.path}`;
+    // The agent routes are mounted twice: on the app's address and on the machines' own.
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const filled = () => route.path.replace(/[:*](\w+)/g, (_, name) => FILL[name] ?? assert.fail(`${key}: no FILL for :${name} in test/access-matrix.test.ts`));
+    for (const path of PATHS[key] ?? [filled()]) {
+      (LAST.has(key) ? LAST_ROUTES : route.path.includes(':ticket') ? TICKET_ROUTES : OTHER_ROUTES).push({ method, path, fresh: FRESH[key], notAsPerson: NOT_AS_PERSON.has(key) });
+    }
+  }
+}
+for (const key of [...Object.keys(PATHS), ...Object.keys(FRESH), ...NOT_AS_PERSON, ...LAST]) assert.ok(seen.has(key), `${key} is no route any more: drop its hint`);
+TICKET_ROUTES.push(...EXTRA_TICKET);
+OTHER_ROUTES.push(...EXTRA);
 
 test('every route answers each kind of caller as recorded', { timeout: 120_000 }, async () => {
   const srv = await bootServer({ root });
@@ -156,21 +179,27 @@ test('every route answers each kind of caller as recorded', { timeout: 120_000 }
   // One block per route, holding each caller's answer: a new route is one block in one place.
   const got: Record<string, Record<string, string>> = {};
   for (const who of Object.keys(callers)) {
+    const ask = (p: Probe) => !(p.notAsPerson && PEOPLE.includes(who));
     for (const [target, t] of [['minion1', M1.id], ['taskmasterA', TA.id]] as const) {
-      for (const p of TICKET_ROUTES) (got[`${p.method} ${p.path.replace(':t', `:${target}`)}`] ??= {})[who] = await probe(who, p, t);
+      for (const p of TICKET_ROUTES.filter(ask)) (got[`${p.method} ${p.path.replace(':t', `:${target}`)}`] ??= {})[who] = await probe(who, p, t);
     }
-    for (const p of OTHER_ROUTES) (got[`${p.method} ${p.path}`] ??= {})[who] = await probe(who, p, M1.id);
+    for (const p of OTHER_ROUTES.filter(ask)) (got[`${p.method} ${p.path}`] ??= {})[who] = await probe(who, p, M1.id);
+  }
+  for (const who of [...Object.keys(callers).filter((w) => !PEOPLE.includes(w)), ...PEOPLE]) {
+    for (const p of LAST_ROUTES) (got[`${p.method} ${p.path}`] ??= {})[who] = await probe(who, p, M1.id);
   }
   // By path, then method, so one thing's routes sit together.
   const byPath = (k: string) => k.replace(/^(\S+) (.*)$/, '$2 $1');
-  const sorted = Object.fromEntries(Object.entries(got).sort(([a], [b]) => byPath(a).localeCompare(byPath(b))));
+  const block = (k: string) => Object.fromEntries(Object.keys(callers).filter((who) => who in got[k] && !UNDECIDED.has(`${k} as ${who}`)).map((who) => [who, got[k][who]]));
+  for (const u of UNDECIDED) assert.ok(got[u.split(' as ')[0]]?.[u.split(' as ')[1]], `${u} is probed no more: drop it from UNDECIDED`);
+  const sorted = Object.fromEntries(Object.keys(got).sort((a, b) => byPath(a).localeCompare(byPath(b))).map((k) => [k, block(k)]));
   if (process.env.UPDATE_ACCESS_MATRIX === '1' || !existsSync(SNAPSHOT)) {
     writeFileSync(SNAPSHOT, JSON.stringify(sorted, null, 1) + '\n');
     return;
   }
   const want: Record<string, Record<string, string>> = JSON.parse(readFileSync(SNAPSHOT, 'utf8'));
   const diffs = [...new Set([...Object.keys(want), ...Object.keys(sorted)])]
-    .flatMap((k) => Object.keys(callers).map((who) => [k, who, want[k]?.[who], sorted[k]?.[who]] as const))
+    .flatMap((k) => Object.keys({ ...want[k], ...sorted[k] }).map((who) => [k, who, want[k]?.[who], sorted[k]?.[who]] as const))
     .filter(([, , was, now]) => was !== now)
     .map(([k, who, was, now]) => `${k} as ${who}: was ${was ?? '(none)'}, now ${now ?? '(none)'}`);
   assert.deepEqual(diffs, []);

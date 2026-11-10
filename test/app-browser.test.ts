@@ -1,7 +1,9 @@
-// The composer's Card button (thread.js renderCardJump) in a real browser (headless Chromium, test/browser.ts): it shows
-// only for a card still waiting on a person (#445). An ultra review's card waits on its review, not on you, running or
-// finished; a loop card waits until someone clicks Continue, and stops at the click, not when the server's event lands.
-// The page loads public/ as Citadel serves it, with fetch held so nothing reaches a server.
+// Citadel's own front end (public/) in a real browser (headless Chromium, test/browser.ts), loaded as Citadel serves it
+// with fetch held so nothing reaches a server (#445).
+// - The composer's Card button (thread.js renderCardJump) shows only for a card still waiting on a person. An ultra
+//   review's card waits on its review, not on you, running or finished; a loop card waits until someone clicks
+//   Continue, and stops at the click, not when the server's event lands.
+// - The Codex line under the Claude bar reads a window past its reset as 0%, as Codex's own bar and Settings do.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -16,10 +18,12 @@ const pub = join(import.meta.dirname, '..', 'public');
 
 // A chat log above a composer with its Card button; the spacer lets the cards scroll out of sight above.
 const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<body><div><div id="log"></div><div id="spacer" style="height:3000px"></div><div class="composer"><button class="to-card" hidden><span>↑</span> Card</button></div></div>
+<body><div class="meters"><div id="usage" class="usage" hidden><span class="label"></span><span class="track"><span class="fill"></span></span></div></div>
+<div><div id="log"></div><div id="spacer" style="height:3000px"></div><div class="composer"><button class="to-card" hidden><span>↑</span> Card</button></div></div>
 <script type="module">
   window.fetch = () => new Promise(() => {}); // every request stays on its way
-  const { setView } = await import('/core.js');
+  const { renderUsage, setCodex, setView } = await import('/core.js');
+  Object.assign(window, { renderUsage, setCodex });
   const { appendEvent, chatView, renderCardJump } = await import('/thread.js');
   setView({ ...chatView(1, { id: 1, title: 'T' }), kind: 'ticket' });
   let id = 0;
@@ -87,4 +91,18 @@ test('a loop card shows the Card button until Continue is clicked', { skip }, as
   await page.eval(`add('loop_continued', { minion: 5, by: 'Josh' })`);
   assert.equal(await page.eval(`document.querySelector('.lcard [role=status]').textContent`), 'Continued by Josh', 'the server\'s event still names who');
   assert.equal(await page.eval('showsCard()'), false);
+});
+
+test('the Codex line under the Claude bar reads a 5-hour window past its reset as 0%, not its last 99%', { skip }, async () => {
+  const page = await open();
+  const hourAgo = Math.floor(Date.now() / 1000) - 3600;
+  const inADay = Math.floor(Date.now() / 1000) + 86400;
+  await page.eval(`renderUsage({ weekly: { utilization: 0.95, resetsAt: Date.now() + 86400000 }, updatedAt: new Date().toISOString() })`);
+  await page.eval(`setCodex({ on: true, usage: { primary: { usedPercent: 99, windowDurationMins: 300, resetsAt: ${hourAgo} }, secondary: { usedPercent: 40, windowDurationMins: 10080, resetsAt: ${inADay} }, updatedAt: new Date().toISOString() } })`);
+  assert.equal(await page.eval(`document.querySelector('.usage.codex').hidden`), true, "Codex's own bar hides: nothing above 75%");
+  const line = await page.eval<{ text: string; level: string; title: string; hidden: boolean }>(`(({ textContent: text, dataset, title, hidden }) => ({ text, level: dataset.level, title, hidden }))(document.querySelector('.codex-usage'))`);
+  assert.equal(line.hidden, false);
+  assert.equal(line.text, 'Codex 40%');
+  assert.equal(line.level, '');
+  assert.match(line.title, /^5-hour window: 0%\nWeekly: 40%, resets /);
 });

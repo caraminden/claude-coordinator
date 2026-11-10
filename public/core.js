@@ -632,16 +632,14 @@ function renderCodexSwitch(bar) {
   sw.hidden = !codex || !(codex.on || claudeHigh());
   if (sw.hidden) return;
   sw.querySelector('.claude-back').hidden = !codex.on || claudeHigh();
-  const ws = [codex.usage?.primary, codex.usage?.secondary].filter(Boolean);
+  const top = codexTop(codex.usage);
   const cu = sw.querySelector('.codex-usage');
   // Codex's own bar above says it already.
-  cu.hidden = !codex.on || !ws.length || !bar.hidden;
+  cu.hidden = !codex.on || top == null || !bar.hidden;
   if (cu.hidden) return;
-  const top = Math.round(Math.max(...ws.map((w) => w.usedPercent)));
   cu.textContent = `Codex ${top}%`;
-  cu.dataset.level = top >= 90 ? 'error' : top >= 75 ? 'warn' : '';
-  const span = (m) => (m === 300 ? '5-hour window' : m === 10080 ? 'Weekly' : m ? `${Math.round(m / 60)}-hour window` : 'Window');
-  cu.title = [...ws.map((w) => `${span(w.windowDurationMins)}: ${Math.round(w.usedPercent)}%${w.resetsAt ? `, resets ${when(w.resetsAt * 1000)}` : ''}`), `As of the last Codex turn, ${ago(codex.usage.updatedAt)}`].join('\n');
+  cu.dataset.level = codexLevel(top);
+  cu.title = [...codexWindows(codex.usage).map(windowText), `As of the last Codex turn, ${ago(codex.usage.updatedAt)}`].join('\n');
 }
 
 async function flipCodex(box) {

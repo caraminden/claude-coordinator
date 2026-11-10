@@ -5,7 +5,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ClaudeLink } from './claude-link.ts';
+import { stripAnsi, type ClaudeLink } from './claude-link.ts';
 import { Containers } from './containers.ts';
 
 export type CodexState = 'no container' | 'not linked' | 'starting' | 'waiting' | 'linked';
@@ -196,10 +196,6 @@ export function deviceCode(out: string): { url: string; code: string } | null {
 function signInError(code: number | null, out: string): string {
   if (code === 127 || /executable file .*not found|codex: not found/i.test(out)) return 'Your container is from before Codex was added: it updates once no turns run in it. Try again then.';
   return `Codex's sign-in ended (${code === null ? 'stopped' : `exit ${code}`}) without signing in: ${lastLines(out.split('\n').filter((l) => !/https:\/\/|one-time code|^\s*[A-Z0-9]{3,}-[A-Z0-9-]{3,}\s*$/.test(l)).join('\n'))}`;
-}
-
-function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)|\r/g, '');
 }
 
 function lastLines(out: string): string {

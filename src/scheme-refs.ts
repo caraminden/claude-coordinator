@@ -6,8 +6,8 @@
 //
 // Run as a hook: node scheme-refs.ts '<config json>' < PreToolUse hook input; prints a "deny" decision or nothing.
 import { readFileSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import type { CardLink } from './card-links.ts';
+import { deny, readSent, runHook, saveSent, toolStrings } from './pre-tool-hook.ts';
 import { CODE } from './wording.ts';
 
 /** The turn-start snapshot the runner writes into the turn's folder (writeSchemeRefs in runner.ts). */
@@ -118,37 +118,12 @@ export const SCHEME_REFS_MATCHER = '^mcp__(thread|coordinator)__(message_coordin
 export function checkCall(input: { tool_name?: string; tool_input?: any }, cfg: SchemeRefsConfig) {
   const refs = readRefs(cfg.refs);
   if (!refs) return null;
-  const strings: string[] = [];
-  const walk = (v: any) => (typeof v === 'string' ? strings.push(v) : v && typeof v === 'object' && Object.values(v).forEach(walk));
-  walk(input.tool_input);
-  let sent: number[] = [];
-  try {
-    sent = JSON.parse(readFileSync(cfg.sent, 'utf8'));
-  } catch {
-    // None sent back yet.
-  }
-  const fresh = strayRefs(strings.join('\n\n'), refs).filter((f) => !sent.includes(f.n));
+  const sent = readSent<number>(cfg.sent);
+  const fresh = strayRefs(toolStrings(input.tool_input).join('\n\n'), refs).filter((f) => !sent.includes(f.n));
   if (!fresh.length) return null;
-  try {
-    writeFileSync(cfg.sent, JSON.stringify([...sent, ...fresh.map((f) => f.n)]));
-  } catch {
-    // No record to stop the next try, so let it through rather than loop.
-    return null;
-  }
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: `[links] This message wasn't sent: a #N in it would open the wrong minion.\n${explainStrays(fresh, refs.scheme)}\nRewrite it and send it again.`,
-    },
-  };
+  // No record to stop the next try, so let it through rather than loop.
+  if (!saveSent(cfg.sent, [...sent, ...fresh.map((f) => f.n)])) return null;
+  return deny(`[links] This message wasn't sent: a #N in it would open the wrong minion.\n${explainStrays(fresh, refs.scheme)}\nRewrite it and send it again.`);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  try {
-    const verdict = checkCall(JSON.parse(readFileSync(0, 'utf8')), JSON.parse(process.argv[2]));
-    if (verdict) process.stdout.write(JSON.stringify(verdict));
-  } catch {
-    // A check that can't run never holds up the call.
-  }
-}
+runHook(import.meta, checkCall);

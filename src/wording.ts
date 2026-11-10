@@ -5,9 +5,8 @@
 // the scheme's shared folders. Each sentence is sent back once; a rewrite that still trips it goes out.
 //
 // Run as a hook: node wording.ts '<config json>' < PreToolUse hook input; prints a "deny" decision or nothing.
-import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { deny, readSent, runHook, saveSent, toolStrings } from './pre-tool-hook.ts';
 
 export interface Reserved {
   /** The word as people know it, named in the send-back. */
@@ -129,10 +128,7 @@ export interface WordingConfig {
 /** The people-facing text a tool call carries, and whether it's HTML; null for a call the check skips. */
 function outgoing(tool: string, input: any, cfg: WordingConfig): { text: string; html: boolean } | null {
   if (/^mcp__/.test(tool)) {
-    const strings: string[] = [];
-    const walk = (v: any) => (typeof v === 'string' ? strings.push(v) : v && typeof v === 'object' && Object.values(v).forEach(walk));
-    walk(input);
-    return { text: strings.join('\n'), html: false };
+    return { text: toolStrings(input).join('\n'), html: false };
   }
   const path = typeof input?.file_path === 'string' ? resolve(input.file_path) : '';
   if (!/\.(md|html?)$/i.test(path) || !cfg.shared.some((d) => path.startsWith(resolve(d) + sep))) return null;
@@ -144,36 +140,14 @@ function outgoing(tool: string, input: any, cfg: WordingConfig): { text: string;
 export function checkCall(input: { tool_name?: string; tool_input?: any }, cfg: WordingConfig) {
   const out = outgoing(String(input.tool_name ?? ''), input.tool_input, cfg);
   if (!out) return null;
-  let sent: string[] = [];
-  try {
-    sent = JSON.parse(readFileSync(cfg.sent, 'utf8'));
-  } catch {
-    // None sent back yet.
-  }
+  const sent = readSent<string>(cfg.sent);
   const key = (f: Misuse) => `${f.term}\t${f.sentence}`;
   const fresh = misusedWords(out.text, out.html).filter((f) => !sent.includes(key(f)));
   if (!fresh.length) return null;
-  try {
-    writeFileSync(cfg.sent, JSON.stringify([...sent, ...fresh.map(key)].slice(-200)));
-  } catch {
-    // No record to stop the next try, so let it through rather than loop.
-    return null;
-  }
+  // No record to stop the next try, so let it through rather than loop.
+  if (!saveSent(cfg.sent, [...sent, ...fresh.map(key)])) return null;
   const what = /^mcp__/.test(String(input.tool_name)) ? 'This message' : 'This file';
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: `[wording] ${what} wasn't sent: people would read a reserved word in the wrong sense.\n${explain(fresh)}\nRewrite it and send it again.`,
-    },
-  };
+  return deny(`[wording] ${what} wasn't sent: people would read a reserved word in the wrong sense.\n${explain(fresh)}\nRewrite it and send it again.`);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  try {
-    const verdict = checkCall(JSON.parse(readFileSync(0, 'utf8')), JSON.parse(process.argv[2]));
-    if (verdict) process.stdout.write(JSON.stringify(verdict));
-  } catch {
-    // A check that can't run never holds up the call.
-  }
-}
+runHook(import.meta, checkCall);

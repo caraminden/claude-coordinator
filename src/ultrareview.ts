@@ -10,7 +10,7 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { resolveClaude, type TurnPlace } from './claude-link.ts';
+import { resolveClaude, stripAnsi, type TurnPlace } from './claude-link.ts';
 
 const run = promisify(execFile);
 
@@ -88,10 +88,6 @@ export async function prepare(spec: ReviewSpec, dir: string): Promise<string> {
   await git(dir, 'checkout', `origin/${spec.base}`, '--', ...spec.paths);
   await commit(`Ultra review area: ${spec.paths.join(' ')}`);
   return 'ultrareview-base';
-}
-
-export function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\r/g, '');
 }
 
 export interface ReviewEvent {

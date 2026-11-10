@@ -201,7 +201,7 @@ export interface Machine {
   notes: string;
   /** 1 when minions get the workspace tools its agent offers (git sync, its owner's tasks); off until a person turns it on. */
   workspace_tools: number;
-  /** Unread since #438: every machine is lent to the schemes in machine_projects. Kept at 1, which an older release (a rollback) reads the same way. */
+  /** Not read for lending since #438: every machine is lent to the schemes in machine_projects. Kept at 1 for an older release (a rollback); CI runner hosts from before #438 are still told apart by it (ci-runner.ts, public/settings.js). */
   scoped: number;
   /** The person who added it and manages it (#306); null for one from before, which admins manage. */
   owner_id: number | null;

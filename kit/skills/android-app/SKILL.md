@@ -71,10 +71,17 @@ citadel-android install app/build/outputs/apk/debug/app-debug.apk
 citadel-android open https://cara.apps.webplatformisbestplatform.net/c/   # in Chrome
 citadel-android shot "$TMPDIR/shot.png"                                    # then Read the PNG
 citadel-android offline on         # airplane mode; `offline off` to undo
+citadel-android sms +15551234567 'Your code is 1234'                      # an incoming text
 citadel-android down               # when you're done
 ```
 
-- `install`, `open` and `offline` boot it first if needed. Run your app with
+- `install`, `open`, `offline` and `sms` boot it first if needed.
+- **Fake texts with `sms`, never `adb emu sms send`.** The console wants a token turns can't read, so
+  plain `adb emu` answers "KO: unknown command". `sms` hands the text to the emulator's service on the
+  host, which sends it. The sender is digits with an optional leading `+` (up to 20); the text is one
+  line of up to 500 characters. To see it arrive: `adb -s emulator-5554 logcat -d | grep -i sms`, or
+  `adb -s emulator-5554 shell content query --uri content://sms/inbox --projection address,body`.
+  If it says the service didn't answer, the service still runs older code: `down`, then try again. Run your app with
   `adb -s emulator-5554 shell monkey -p <applicationId> 1`; plain `adb -s emulator-5554 ...` works
   for anything else (logcat, input), from containers too.
 - **One screen.** Each call takes the screen lock, and you keep the screen for 2 minutes after each

@@ -128,3 +128,72 @@ test('serve waits for a step that holds the screen before it stops the emulator'
     if (alive(pid)) process.kill(pid);
   }
 });
+
+// Console steps (#442): the turn's side checks its words, serve checks them again and talks to the console.
+test('sms refuses a bad sender or text without touching the emulator', () => {
+  rmSync(calls, { force: true });
+  for (const [from, text] of [['abc', 'hi'], ['+', 'hi'], ['12;reboot', 'hi'], ['1'.repeat(21), 'hi'], ['555', ''], ['555', 'hi\r\nkill'], ['555', 'tab\there'], ['555', 'x'.repeat(501)]]) {
+    const r = run('a', 'sms', from, text);
+    assert.equal(r.status, 2, `${from} ${JSON.stringify(text)}: ${r.stderr}`);
+  }
+  assert.equal(run('a', 'sms', '555').status, 2);
+  assert.ok(!existsSync(calls));
+});
+
+test('sms goes through serve to the console with the host token, and serve refuses a forged request', async () => {
+  const locks = join(root, 'serve-sms');
+  const home = join(root, 'home');
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, '.emulator_console_auth_token'), 'sekrit\n');
+  // A stub console: banner, then OK to each line, KO to a command before auth.
+  const got: string[] = [];
+  const consoleServer = createServer((s) => {
+    let authed = false;
+    let buf = '';
+    s.write('Android Console: Authentication required\r\nOK\r\n');
+    s.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\r\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        got.push(line);
+        if (line === 'quit') s.end();
+        else if (line === 'auth sekrit') { authed = true; s.write('OK\r\n'); }
+        else s.write(authed ? 'OK\r\n' : 'KO: unknown command\r\n');
+      }
+    });
+  });
+  await new Promise<void>((r) => consoleServer.listen(0, '127.0.0.1', r));
+  const port = String((consoleServer.address() as AddressInfo).port);
+  for (const f of [join(sdk, 'emu.pid'), join(sdk, 'killed'), calls]) rmSync(f, { force: true });
+  const s = spawn(helper, ['serve'], { env: { ...env, HOME: home, CITADEL_HEAVY_DIR: locks, CITADEL_ANDROID_IDLE: '60', CITADEL_ANDROID_CONSOLE_PORT: port }, stdio: 'ignore' });
+  const done = new Promise((r) => s.on('close', r));
+  const pid = await emulatorPid();
+  try {
+    // Not spawnSync: the stub console answers from this process.
+    const c = spawn(helper, ['sms', '+15551234567', 'Your code is 1234 \\ 50% off!'], { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: 'a' }, stdio: ['ignore', 'ignore', 'pipe'] });
+    const r = { stderr: '', status: null as number | null };
+    c.stderr!.on('data', (d) => (r.stderr += d));
+    r.status = await new Promise((res) => c.on('close', res));
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /sent a text from \+15551234567/);
+    assert.doesNotMatch(r.stderr, /sekrit/);
+    assert.deepEqual(got, ['auth sekrit', 'sms send +15551234567 Your code is 1234 \\ 50% off!', 'quit']);
+
+    // Anything running as this account can write a request; serve checks it again and the console never sees it.
+    got.length = 0;
+    writeFileSync(join(locks, 'android.req.forged'), 'sms\n555\nhi\rkill\n');
+    for (let i = 0; i < 200 && !existsSync(join(locks, 'android.out.forged')); i++) await new Promise((r) => setTimeout(r, 25));
+    assert.match(readFileSync(join(locks, 'android.out.forged'), 'utf8'), /^KO: .*control character/);
+    writeFileSync(join(locks, 'android.req.other'), 'kill\n\n\n');
+    for (let i = 0; i < 200 && !existsSync(join(locks, 'android.out.other')); i++) await new Promise((r) => setTimeout(r, 25));
+    assert.equal(readFileSync(join(locks, 'android.out.other'), 'utf8'), 'KO: unknown step kill\n');
+    assert.deepEqual(got, []);
+  } finally {
+    s.kill('SIGTERM');
+    await done;
+    if (alive(pid)) process.kill(pid);
+    consoleServer.close();
+  }
+});

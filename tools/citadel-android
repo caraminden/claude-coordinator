@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The shared headless Android emulator on perigee (#381), one AVD (`citadel`) for every scheme:
-#   citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | down
+#   citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | sms <from> <text> | down
 # The emulator runs in the user service citadel-android.service (deploy/), never always-on: perigee is
 # short of RAM, so `serve` (its main process) stops it after IDLE seconds with no citadel-android call.
 # Container turns share the host's network, so their adb reaches the host's adb server on 127.0.0.1:5037,
@@ -9,6 +9,9 @@
 # The screen is one lock in citadel-heavy's folder ($CITADEL_HEAVY_DIR): each step holds a flock, and its
 # holder keeps the screen for LEASE seconds after a step, so its next step (install, open, shot) comes
 # before anyone else's. Others wait and say for whom; nothing ever kills another holder's work.
+# Console steps (sms, #442) need the console's token in the host's ~/.emulator_console_auth_token, which
+# turns can't read. The step drops a request file in the lock folder (private to this account) and `serve`,
+# which runs on the host, checks it again, sends it to the console and leaves the answer beside it.
 set -uo pipefail
 
 say() { echo "citadel-android: $*" >&2; }
@@ -26,6 +29,8 @@ ADB_PORT=${ANDROID_ADB_SERVER_PORT:-5037} # adb's own variable
 dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
 who=${CITADEL_HEAVY_WHO:-$(id -un 2>/dev/null || echo someone)}
 lock="$dir/android.lock" holder="$dir/android.who" used="$dir/android.used"
+CONSOLE_PORT=${CITADEL_ANDROID_CONSOLE_PORT:-$CONSOLE} # tests only
+SMS_MAX=500
 
 adb() { "$ADB" -s "$SERIAL" "$@"; }
 port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
@@ -53,6 +58,73 @@ take_screen() {
 }
 # After a step: the lease runs from now, and the flock goes when the process exits.
 keep_screen() { printf '%s\t%s\n' "$(($(date +%s) + LEASE))" "$who" >"$holder"; touch "$used"; }
+
+# A console step's arguments, checked on both sides: nothing but these words ever reaches the console, and
+# a line break or other control character in the text would start a console command of its own.
+check_sms() {
+  local LC_ALL=C.UTF-8
+  [[ $1 =~ ^\+?[0-9]{1,20}$ ]] || { echo "the sender is digits with an optional leading +, at most 20: $1"; return 1; }
+  [ -n "$2" ] || { echo "the text is empty"; return 1; }
+  [ "${#2}" -le $SMS_MAX ] || { echo "the text is ${#2} characters; at most $SMS_MAX"; return 1; }
+  [[ $2 != *[[:cntrl:]]* ]] || { echo "the text has a line break or another control character"; return 1; }
+}
+
+# Turn side: hand a console step to serve and print its answer. Arguments: the step's words.
+console_step() {
+  local id="$$.$RANDOM$RANDOM" t0=$SECONDS reply
+  local req="$dir/android.req.$id" out="$dir/android.out.$id"
+  printf '%s\n' "$@" >"$dir/android.tmp.$id" && mv "$dir/android.tmp.$id" "$req" || { say "can't write to $dir"; return 1; }
+  until [ -e "$out" ]; do
+    if [ $((SECONDS - t0)) -ge 20 ]; then
+      rm -f "$req"
+      say "the emulator's service didn't answer in 20s; it may still run code from before $1 existed: citadel-android down, then try again"
+      return 1
+    fi
+    sleep 0.2
+  done
+  reply=$(cat "$out"); rm -f "$out"
+  [ "$reply" = OK ] || { say "$reply"; return 1; }
+}
+
+# Host side (serve): one console command after auth. Prints OK or the console's KO line; never the token.
+console() {
+  local token line
+  read_ok() {
+    while IFS= read -r -t 10 line <&4; do
+      line=${line%$'\r'}
+      case $line in OK) return 0 ;; KO*) echo "$line"; return 1 ;; esac
+    done
+    echo "KO: no answer from the emulator console"; return 1
+  }
+  token=$(cat "$HOME/.emulator_console_auth_token" 2>/dev/null)
+  exec 4<>"/dev/tcp/127.0.0.1/$CONSOLE_PORT" 2>/dev/null || { echo "KO: the emulator console isn't listening"; return 1; }
+  if read_ok && { [ -z "$token" ] || { printf 'auth %s\r\n' "$token" >&4 && read_ok; }; } && printf '%s\r\n' "$1" >&4 && read_ok; then
+    echo OK
+  fi
+  printf 'quit\r\n' >&4 2>/dev/null
+  exec 4>&-
+}
+
+# Host side (serve): answer the turns' request files. Only known steps, checked again here, since anything
+# running as this account can write a request.
+relay() {
+  local f verb from text n=0
+  for f in "$dir"/android.req.*; do
+    [ -f "$f" ] || continue
+    { IFS= read -r verb; IFS= read -r from; IFS= read -r text; } <"$f"
+    rm -f "$f"
+    case $verb in
+      sms) reply=$(check_sms "$from" "$text" && console "sms send $from $text") || reply=${reply:-KO} ;;
+      *) reply="KO: unknown step $verb" ;;
+    esac
+    [ "${reply:0:2}" = OK ] || [ "${reply:0:2}" = KO ] || reply="KO: $reply"
+    printf '%s\n' "$reply" >"$dir/android.ans.${f##*.req.}" && mv "$dir/android.ans.${f##*.req.}" "$dir/android.out.${f##*.req.}"
+    n=1
+  done
+  # Answers nobody collected (a caller that gave up) go after a few minutes.
+  [ $n = 0 ] || find "$dir" -maxdepth 1 -name 'android.out.*' -mmin +5 -delete 2>/dev/null
+  return 0
+}
 
 start_service() {
   local reply
@@ -114,9 +186,11 @@ serve() {
   idle() { echo $(($(date +%s) - $(stat -c %Y "$used" 2>/dev/null || echo 0))); }
   while kill -0 "$pid" 2>/dev/null; do
     # Wake on the emulator's exit too, so the service ends with it and a new `up` can start it again.
-    sleep $((IDLE < 30 ? IDLE : 30)) & nap=$!
+    # Once a second, so a console step's request gets its answer quickly.
+    sleep 1 & nap=$!
     wait -n "$pid" "$nap"
     kill "$nap" 2>/dev/null
+    relay
     [ "$(idle)" -ge "$IDLE" ] || continue
     # No step is running (a step holds the flock), and none starts until the stop and its snapshot save are
     # done: a caller arriving meanwhile waits on the lock, then its `up` starts the service again.
@@ -161,8 +235,14 @@ case "$cmd" in
   offline)
     case "${1:-}" in on) m=enable ;; off) m=disable ;; *) say "usage: citadel-android offline on|off"; exit 2 ;; esac
     take_screen; up; need_server; adb shell cmd connectivity airplane-mode "$m"; s=$?; keep_screen; exit $s ;;
+  sms)
+    [ $# -eq 2 ] || { say "usage: citadel-android sms <from> <text>   (an incoming text from <from>)"; exit 2; }
+    why=$(check_sms "$1" "$2") || { say "$why"; exit 2; }
+    take_screen; up; need_server; console_step sms "$1" "$2"; s=$?; keep_screen
+    [ $s = 0 ] && say "sent a text from $1 to the emulator"
+    exit $s ;;
   down) take_screen; down ;;
   *)
-    say "usage: citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | down"
+    say "usage: citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | sms <from> <text> | down"
     exit 2 ;;
 esac

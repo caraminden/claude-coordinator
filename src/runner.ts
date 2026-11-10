@@ -3037,10 +3037,11 @@ export class Runner {
     });
     const asks = this.approvals.pending().filter((a) => a.ticketId === ticket.id).flatMap((a) => {
       const eventId = this.store.cardEventId(ticket.id, 'approval', (a.card as { id: string }).id);
-      return eventId == null ? [] : [{ at: a.at, card: link('approval', a.card, eventId) }];
+      return eventId == null ? [] : [{ at: a.at, id: eventId, card: link('approval', a.card, eventId) }];
     });
-    const stored = this.store.openCardsOf(ticket.id).map((e) => ({ at: e.created_at, card: link(e.kind as CardLink['kind'], JSON.parse(e.data), e.id) }));
-    return [...asks, ...stored].sort((a, b) => a.at - b.at).map((c) => c.card);
+    const stored = this.store.openCardsOf(ticket.id).map((e) => ({ at: e.created_at, id: e.id, card: link(e.kind as CardLink['kind'], JSON.parse(e.data), e.id) }));
+    // Cards posted in the same millisecond keep the order they were posted in (their event ids).
+    return [...asks, ...stored].sort((a, b) => a.at - b.at || a.id - b.id).map((c) => c.card);
   }
 
   /** Write a turn's scheme-refs snapshot (scheme-refs.ts) for `ticket`, with its scheme's cards waiting on people. */

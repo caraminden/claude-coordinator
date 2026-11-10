@@ -1651,7 +1651,6 @@ export class Runner {
     mkdirSync(dir, { recursive: true });
     const pins = turnPins();
     cpSync(pins.MCP_DIR, pin, { recursive: true });
-    const pinned = (file: string) => join(pin, basename(file));
     // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
     const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
     // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
@@ -1686,19 +1685,9 @@ export class Runner {
     const handoff = !step && !ticket.session_id ? this.store.getSetting<string>(handoffKey(ticket.id)) : null;
     const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
       : promptMessage([...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...handBack, ...batch]);
-    if (asker !== null && asker !== person) this.store.setSetting(askerKey(ticket.id), asker);
-    else this.store.deleteSetting(askerKey(ticket.id));
-    if (person !== ticket.person_id) {
-      this.store.updateTicket(ticket.id, { person_id: person });
-      const name = person && this.store.getUser(person)?.name;
-      if (ticket.person_id && name) this.emit(ticket.id, 'note', { text: claudePlace.host ? `Turns now run for ${name}, on the server's Claude login.` : `Turns now run on ${name}'s Claude plan.` });
-    }
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     const typer = typedBy ? this.store.getUser(typedBy) : undefined;
-    const from = batch.find((m) => m.from || this.personOf?.(m.author))?.from;
-    if (from) this.turnFrom.set(ticket.id, from);
-    else this.turnFrom.delete(ticket.id);
     const homeOf = this.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => c.name);
     const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
@@ -1715,8 +1704,19 @@ export class Runner {
       homeContraptions: homeOf,
       claudeBin: this.claudeBin,
     });
+    // Written before anything of the minion's changes below, so a launch that can't be written leaves who it runs for as it was.
     for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
     const { command, args, env, configDir } = plan;
+    if (asker !== null && asker !== person) this.store.setSetting(askerKey(ticket.id), asker);
+    else this.store.deleteSetting(askerKey(ticket.id));
+    if (person !== ticket.person_id) {
+      this.store.updateTicket(ticket.id, { person_id: person });
+      const name = person && this.store.getUser(person)?.name;
+      if (ticket.person_id && name) this.emit(ticket.id, 'note', { text: claudePlace.host ? `Turns now run for ${name}, on the server's Claude login.` : `Turns now run on ${name}'s Claude plan.` });
+    }
+    const from = batch.find((m) => m.from || this.personOf?.(m.author))?.from;
+    if (from) this.turnFrom.set(ticket.id, from);
+    else this.turnFrom.delete(ticket.id);
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
     // outlasts a stray turn (a GitHub ping), so the deploy still dismisses the minion unless the turn
     // sets another state or a person wrote to it (personWrote).

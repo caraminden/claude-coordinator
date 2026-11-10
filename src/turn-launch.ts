@@ -331,7 +331,7 @@ export interface LaunchPlan {
   spawn: { how: 'container'; wrapper: string } | { how: 'unit'; systemdRun: string[]; wrapper: string[] } | { how: 'child'; wrapper: string[] };
 }
 
-/** What a turn is launched with, from its facts. Reads nothing but the turn's pin folder (is the kit there) and, for a Taskmaster, its scheme's minion folders (coordinatorAccess). */
+/** What a turn is launched with, from its facts. It writes nothing and reads no store. From disk it only looks: is the kit in the turn's pin folder, a Taskmaster's minion folders (coordinatorAccess), this machine's Android toolchain (androidEnv) and, for a container turn, where claude is (resolveClaude, which throws when it isn't on the server's PATH). */
 export function launchPlan(facts: TurnFacts): LaunchPlan {
   const { project, ticket, dir, pins, place, machines, model, effort, codex } = facts;
   const { files: filesDir, shared: sharedDir, memory: memoryDir, tmp } = facts.folders;

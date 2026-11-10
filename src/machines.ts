@@ -231,9 +231,11 @@ export class MachineRelay {
   view(machine: Machine) {
     const agent = this.agents.get(machine.id);
     const check = storedCheck(machine);
-    // Whom it is lent to, and which of those schemes' minions get it (machine tools on); a person's own goes to their asks instead.
-    const lent = machine.owner_id !== null ? [] : this.store.listProjects().filter((p) => lendsMachine(this.store, machine, p));
-    const gets = lent.filter((p) => p.machine_tools).map((p) => p.id);
+    // Whom it is lent to, and which of those schemes' minions get it (machine tools on). A person's own is lent to
+    // no scheme: it goes to the turns its owner asks for, in the schemes they're in, which `gets` lists.
+    const owner = machine.owner_id === null ? [] : [machine.owner_id];
+    const lent = owner.length ? [] : this.store.listProjects().filter((p) => lendsMachine(this.store, machine, p));
+    const gets = (owner.length ? this.store.listProjects().filter((p) => lendsMachine(this.store, machine, p, owner)) : lent).filter((p) => p.machine_tools).map((p) => p.id);
     const offers = this.online().find((m) => m.id === machine.id)?.servers ?? [];
     const st = machineStatus({
       now: Date.now(), startedAt: this.startedAt, online: !!agent, runners: agent ? agent.runners : !!check?.runners,
@@ -246,7 +248,7 @@ export class MachineRelay {
       always_on: !!machine.always_on,
       checked: check,
       checking: this.checks.has(machine.id),
-      /** The schemes it is lent to, resolved, and those whose minions get it. */
+      /** The schemes it is lent to, resolved, and those whose minions get it (a person's own: their turns there). */
       lent_to: lent.map((p) => p.id),
       gets,
       id: machine.id,
@@ -349,8 +351,9 @@ export class MachineRelay {
   }
 
   /**
-   * Check a connected machine unless its last check is under an hour old and covers what it offers now (#437):
-   * on connect, hourly, and when what it offers changes. Never more often than that unasked.
+   * Check a connected machine when its last check is an hour old, or failed before this connection (its owner
+   * may have fixed it and restarted the agent), and otherwise only what it offers that no check covers yet
+   * (#437): on connect, hourly, and when what it offers changes. No server is started more often unasked.
    */
   checkIfDue(machineId: number) {
     const machine = this.store.getMachine(machineId);
@@ -358,8 +361,9 @@ export class MachineRelay {
     if (!machine || !agent || agent.runners || this.checks.has(machineId)) return;
     const check = storedCheck(machine);
     const offers = this.online().find((m) => m.id === machineId)?.servers ?? [];
-    const covered = offers.every((s) => check?.results.some((r) => r.server === s));
-    if (offers.length && (!check || !covered || Date.now() - check.at >= CHECK_EVERY_MS - 60_000)) this.check(machineId).catch(() => {});
+    const stale = !check || Date.now() - check.at >= CHECK_EVERY_MS - 60_000 || (check.at < agent.since && check.results.some((r) => !r.ok));
+    const missing = offers.filter((s) => !check?.results.some((r) => r.server === s));
+    if (stale || missing.length) this.check(machineId, CHECK_MS, stale ? undefined : missing).catch(() => {});
   }
 
   /** Machines whose CI runner agent is connected now (#328). */
@@ -404,10 +408,10 @@ export class MachineRelay {
    * server for the session, as for any turn, and no tool is called, so nothing on the machine changes.
    * One at a time per machine: asking while one runs gets that one's results (#437).
    */
-  check(machineId: number, timeoutMs = CHECK_MS): Promise<CheckResult[]> {
+  check(machineId: number, timeoutMs = CHECK_MS, only?: MachineServer[]): Promise<CheckResult[]> {
     const running = this.checks.get(machineId);
     if (running) return running;
-    const run = this.runCheck(machineId, timeoutMs).finally(() => {
+    const run = this.runCheck(machineId, timeoutMs, only).finally(() => {
       this.checks.delete(machineId);
       this.onChange();
     });
@@ -416,13 +420,18 @@ export class MachineRelay {
     return run;
   }
 
-  private async runCheck(machineId: number, timeoutMs: number): Promise<CheckResult[]> {
-    const servers = this.online().find((m) => m.id === machineId)?.servers ?? [];
+  /** `only`: check just these servers, keeping the last check's results for the others and its time. */
+  private async runCheck(machineId: number, timeoutMs: number, only?: MachineServer[]): Promise<CheckResult[]> {
+    const servers = (this.online().find((m) => m.id === machineId)?.servers ?? []).filter((s) => !only || only.includes(s));
     const agent = this.agents.get(machineId);
     const results: CheckResult[] = [];
     for (const server of servers) results.push(await this.checkServer(machineId, { check: machineId }, server, "Citadel's check", timeoutMs));
     // A reconnect mid-check is a new agent, and an offline one wasn't tested: keep the last real check.
-    if (agent && this.agents.get(machineId) === agent && results.length) this.store.updateMachine(machineId, { last_check: JSON.stringify({ at: Date.now(), results }) });
+    if (agent && this.agents.get(machineId) === agent && results.length) {
+      const last = only && this.lastCheck(machineId);
+      const kept = last ? last.results.filter((r) => !servers.includes(r.server)) : [];
+      this.store.updateMachine(machineId, { last_check: JSON.stringify({ at: last ? last.at : Date.now(), results: [...kept, ...results] }) });
+    }
     return results;
   }
 

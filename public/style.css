@@ -1205,8 +1205,9 @@ a.thread-ref:hover { text-decoration: underline; }
 .machines-main .machine-add[hidden] { display: none; }
 h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .machine-line { padding: 0; background: var(--panel); border-radius: var(--radius); }
-.machine-line .machine-head { display: flex; gap: 0.6rem; align-items: center; min-width: 0; padding: 0.55rem 0.75rem; cursor: pointer; border-radius: var(--radius); }
-.machine-line .machine-head:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.machine-line .machine-head { display: flex; gap: 0.6rem; align-items: center; min-width: 0; padding: 0 0.75rem 0 0; }
+.machine-line .machine-open { flex: 1; display: flex; gap: 0.6rem; align-items: center; min-width: 0; padding: 0.55rem 0 0.55rem 0.75rem; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius); min-height: 0; }
+.machine-line .machine-open:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 .machine-line .name { font-size: 0.95em; font-weight: 600; }
 .machine-line .meta { font-size: 0.82em; white-space: normal; }
 .machine-line .machine-head > button { flex: none; }

@@ -528,3 +528,35 @@ test('Citadel checks a machine as it connects, keeps the result through a reconn
   assert.deepEqual(results.map((r: any) => r.ok), [true]);
   assert.ok(after.checked.at > ready.checked.at);
 });
+
+test('a check that failed is run again when its agent reconnects, and a new server is checked on its own (#437)', async () => {
+  const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'mended' } });
+  const find = async () => (await call('/api/machines')).find((m: any) => m.name === 'mended');
+  const broken = startAgent(token, ['--', process.execPath, '-e', 'process.exit(1)']);
+  await until('its failed check', async () => { const m = await find(); return m.status === 'fix' && m.fix === 'check' && !m.checking; });
+  // Its owner fixes the command and restarts the agent: Citadel checks again without being asked.
+  broken.agent.kill();
+  await until('it to go offline', async () => !(await find()).online);
+  const config = join(root, 'mended-agent', 'machine-agent.json');
+  const { mkdirSync } = await import('node:fs');
+  mkdirSync(join(root, 'mended-agent', 'w'), { recursive: true });
+  writeFileSync(config, JSON.stringify({ workspaces: { w: { path: join(root, 'mended-agent', 'w') } } }));
+  startAgent(token, ['--config', config, '--', process.execPath, mcpServer]);
+  const ready = await until('it to be Ready', async () => { const m = await find(); return m.status === 'ready' && !m.checking && m; });
+  assert.deepEqual(ready.checked.results.map((r: any) => r.server), ['mcp'], 'workspace tools are off, so only its MCP server');
+
+  // Workspace tools switched on: only they are checked, and the MCP server's check keeps its time.
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: true } });
+  const both = await until('its workspace tools check', async () => { const m = await find(); return m.checked.results.length === 2 && !m.checking && m; });
+  assert.deepEqual(both.checked.results.map((r: any) => [r.server, r.ok]), [['mcp', true], ['ws', true]]);
+  assert.equal(both.checked.at, ready.checked.at);
+  assert.equal(both.status, 'ready');
+});
+
+test('a person\'s own machine lists the schemes their turns get it in (#437)', async () => {
+  const { machine } = await call('/api/machines', { method: 'POST', body: { name: 'caras-own', mine: true } });
+  const schemes = (await call('/api/projects')).map((p: any) => p.id);
+  const mine = (await call('/api/machines')).find((m: any) => m.id === machine.id);
+  assert.deepEqual(mine.lent_to, []);
+  assert.ok(mine.gets.length && mine.gets.every((id: number) => schemes.includes(id)), 'Cara is in her schemes, so her turns there get it');
+});

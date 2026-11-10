@@ -680,8 +680,11 @@ function machineStatusText(m) {
   return `${m.reason} · ${m.when.label} ${m.when.label === 'added' ? new Date(m.when.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ago(m.when.at)}`;
 }
 
+/** Whether this scheme's minions get a machine for the viewer: a shared one lent here, or their own (their turns get it). */
+const oursHere = (m) => !m.runners && m.gets?.includes(view.projectId) && (m.owner_id === null || m.owner_id === account?.id);
+
 /** The machines this scheme's minions get that need a fix or are down (#437). */
-const troubled = () => (view.machines ?? []).filter((m) => m.gets?.includes(view.projectId) && (m.status === 'fix' || m.status === 'down'));
+const troubled = () => (view.machines ?? []).filter((m) => oursHere(m) && (m.status === 'fix' || m.status === 'down'));
 
 /** The overview's one warning line, only while a machine this scheme's minions get is yellow or red (#437). */
 export function renderMachineWarning() {
@@ -839,7 +842,7 @@ function renderMachineList() {
   view.machineOpen ??= new Set();
   const scheme = view.project?.name ?? 'This scheme';
   const runners = view.machines.filter((m) => m.runners);
-  const ours = view.machines.filter((m) => !m.runners && m.gets?.includes(view.projectId));
+  const ours = view.machines.filter(oursHere);
   const others = view.machines.filter((m) => !m.runners && !ours.includes(m));
   const group = (title, list) => (list.length ? [h('h4', { class: 'machine-group' }, title), ...list.map(machineLine)] : []);
   el.replaceChildren(
@@ -900,7 +903,7 @@ const schemeName = (id) => (view.projects ?? []).find((p) => p.id === id)?.name 
 
 /** The button on a machine's line that fixes what its status says, if one does (#437). */
 function fixButton(m, open) {
-  const b = (label, onclick, title) => h('button', { type: 'button', class: 'secondary small', title, onclick: (e) => { e.stopPropagation(); onclick(e.currentTarget); } }, label);
+  const b = (label, onclick, title) => h('button', { type: 'button', class: 'secondary small', title, onclick: (e) => onclick(e.currentTarget) }, label);
   switch (m.fix) {
     case 'check': return m.checking ? h('button', { type: 'button', class: 'secondary small', disabled: true }, 'Checking…') : b('Check now', (btn) => checkMachine(m, btn), 'Start its tools again and list them');
     case 'workspace_tools': return b('Turn on', () => patchMachine(m, { workspace_tools: true }, `switch workspace tools on for ${m.name}`, renderMachineList), 'Switch its workspace tools on, so minions get its folders');
@@ -936,11 +939,13 @@ function machineLine(m) {
     view.machineOpen.add(m.id);
     renderMachineList();
   };
-  const head = h('div', { class: 'machine-head', role: 'button', tabindex: 0, 'aria-expanded': String(isOpen), onclick: toggle, onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } } },
-    h('span', { class: `dot ${m.status}`, title: { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status] }),
-    h('span', { class: 'text' },
-      h('span', { class: 'name' }, m.name),
-      h('span', { class: 'meta' }, machineStatusText(m))),
+  const word = { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
+  const head = h('div', { class: 'machine-head' },
+    h('button', { type: 'button', class: 'machine-open', 'aria-expanded': String(isOpen), onclick: toggle },
+      h('span', { class: `dot ${m.status}`, title: word, role: 'img', 'aria-label': word }),
+      h('span', { class: 'text' },
+        h('span', { class: 'name' }, m.name),
+        h('span', { class: 'meta' }, machineStatusText(m)))),
     fixButton(m, open));
   return h('div', { class: `machine-row machine-line ${m.status}${isOpen ? ' open' : ''}` }, head, isOpen ? machineBody(m) : '');
 }

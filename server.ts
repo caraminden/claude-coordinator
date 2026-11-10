@@ -69,6 +69,9 @@ const THREAD_PERMISSION_MODE = 'bypassPermissions';
 const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 
 await mkdir(DATA_DIR, { recursive: true });
+// The copies of the server files turns run (src/turn-launch.ts): taken first, before a later deploy can move the
+// checkout under a server that is still starting, and before any turn starts or is picked up again.
+pinTurnFiles(DATA_DIR);
 // The front end as it was when this server started, or last reloaded on SIGHUP. Serving this copy,
 // not the files on disk, keeps pages in step with the running server: a deploy that changes the
 // server swaps both at the restart, so a tab never gets a new front end that calls API routes the old
@@ -174,8 +177,6 @@ function broadcast(msg: object) {
   }
 }
 
-// The copies of the server files turns run (src/turn-launch.ts), made before any turn starts or is picked up again.
-pinTurnFiles(DATA_DIR);
 const runner = new Runner(
   store,
   broadcast,

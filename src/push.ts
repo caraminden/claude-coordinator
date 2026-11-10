@@ -139,7 +139,7 @@ export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectNam
     body = clip(trigger.note || NOTIFY_STATES[trigger.state]);
   }
   const coordinator = ticket.kind === 'coordinator';
-  // The chat opens at what it's about: the card or error, or for a state the minion's latest reply (public/core.js jumpHref).
+  // The chat opens at what it's about: the card or error, or for a state the minion's latest reply (public/base.js jumpHref).
   const jump = trigger.kind === 'state' ? 'latest' : trigger.eventId;
   return {
     title: coordinator ? `${projectName ? `${projectName} ` : ''}Taskmaster` : `#${ticket.number ?? ticket.id} ${ticket.title}`,

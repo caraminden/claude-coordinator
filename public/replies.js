@@ -1,6 +1,6 @@
 // One-tap replies (#105): the short go-aheads a minion offers at the end of a turn (set_thread_status
 // replies), as buttons that send their text as your message. They go once anyone writes or a turn starts.
-import { h } from './core.js';
+import { h } from './base.js';
 
 /**
  * The minion's replies as a row of buttons, or '' when it offers none (or is running or dismissed).

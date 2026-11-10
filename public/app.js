@@ -1,6 +1,7 @@
 // Front end: hash-routed views over the JSON API, live via SSE. This entry starts the app;
-// each view lives in its own module (see core.js for what they share).
-import { api, app, h, reloadNow, renderInvite, renderUsage, start, usage, view } from './core.js';
+// each view lives in its own module (see base.js for what they share, core.js for the shell).
+import { api, h, view } from './base.js';
+import { app, reloadNow, renderInvite, renderUsage, start, usage } from './core.js';
 import { renderSidebar } from './sidebar.js';
 import { initDrawers } from './drawers.js';
 import { mountDialogs } from './ui/dialog.js';

@@ -1,5 +1,6 @@
 // The scheme's property registry: the Settings link's review count, the Properties tab and a minion's property chip.
-import { api, h, icon, me, threadRefs, view } from './core.js';
+import { api, h, icon, me, view } from './base.js';
+import { threadRefs } from './core.js';
 import { settingsTabs, tuneUpButton } from './settings.js';
 import { filterChoices, samePicks, valueCounts, viewPicks } from './propfilter.js';
 import { renderSidebar } from './sidebar.js';

@@ -1,7 +1,9 @@
 // A minion's chat: its head, history, readout, cards and the working line.
-import { ago, api, baseName, catchUpEvents, chatScroller, clearHighlights, fileHref, followChat, formatSize, h, highlight, icon, isCoordinator, loadEarlier, markdown, markSeen, me, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, statusLabel, takeJump, taskmasterName, threadFullName, threadLabel, threadRefs, threadTitleParts, uploadUrl, view } from './core.js';
+import { ago, api, baseName, clearHighlights, fileHref, formatSize, h, highlight, icon, isCoordinator, me, statusLabel, taskmasterName, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
+import { catchUpEvents, chatScroller, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
 import { alertNote, composer, composerPlaceholder, loadDraft, outbox, renderModelPicker, saveDraft } from './composer.js';
-import { renderSidebar, rowState, SHIP } from './sidebar.js';
+import { renderSidebar } from './sidebar.js';
+import { rowState, SHIP } from './threadstate.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
 import { recapEvent, showRecap } from './recap.js';
@@ -395,7 +397,7 @@ export function renderTicketHead() {
     }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
   }
   actions.unshift(ultraButton(t));
-  const state = (coord ? statusLabel(t) : rowState(t).label) + (t.queued ? ` · ${t.queued} queued` : '');
+  const state = (coord ? statusLabel(t) : rowState(t, usage).label) + (t.queued ? ` · ${t.queued} queued` : '');
   // Titled too, since a narrow line may cut it short. While Claude works,
   // a cut-short state shows dots that count up instead of "Cla…".
   const working = t.status === 'running';

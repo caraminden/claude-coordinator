@@ -1,7 +1,8 @@
 // The message box under a chat, on Citadel UI's composer (public/ui/composer.js: autogrow, Enter rules,
 // IME guard, list continuation, the text back on a failed send, the text draft). Citadel's own around it:
 // pasted and dropped files with their drafts, the model and effort pickers, and steer or queue mid-turn.
-import { account, api, codex, formatSize, h, isCoordinator, me, reloadWhenIdle, scrollToBottom, sending, setSending, uploadUrl, view } from './core.js';
+import { account, api, formatSize, h, isCoordinator, me, uploadUrl, view } from './base.js';
+import { codex, reloadWhenIdle, scrollToBottom, sending, setSending } from './core.js';
 import { adoptTicket, base64Url, renderTyping, userBubble } from './thread.js';
 import { mountComposer } from './ui/composer.js';
 import { optimistic } from './ui/optimistic.js';

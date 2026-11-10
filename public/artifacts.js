@@ -1,5 +1,6 @@
 // Artifacts and files: the shelf, the browser, and viewers for artifacts and linked or shared files.
-import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, followChat, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, loadPanelState, markdownDoc, me, reloadWhenIdle, routeSeq, savePanelState, scrollToBottom, sending, setSending, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './core.js';
+import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, loadPanelState, me, savePanelState, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './base.js';
+import { followChat, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending } from './core.js';
 import { addBriefButtons } from './briefstart.js';
 import { attachBridge, openWithBridge } from './bridge-host.js';
 import { loadDraft, saveDraft } from './composer.js';

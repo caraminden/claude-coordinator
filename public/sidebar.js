@@ -1,12 +1,14 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
 import { weekShare } from './cost.js';
-import { account, ago, api, app, costText, crumbs, h, isCoordinator, isSeen, listGroupsOf, schemeIcon, sending, setSending, setView, STATES, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, usage, view } from './core.js';
+import { account, ago, api, costText, h, isCoordinator, isSeen, listGroupsOf, schemeIcon, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { app, crumbs, sending, setSending, usage } from './core.js';
 import { fitHeight, loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
 import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
+import { byUrgency, rowState, SHIP } from './threadstate.js';
 import { refreshSchemeCounts, renderInbox, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
@@ -230,7 +232,7 @@ export function renderSidebar() {
   const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(view.project)).map((s) =>
     h('section', { class: `thread-group g-${s.build ? 'build' : s.group ? 'promoted' : s.key}` },
       h('h3', {}, s.build ? ['Build ', s.build, s.current ? h('span', { class: 'muted' }, ' current') : ''] : s.key === 'parked' ? 'Parked' : s.group ? groupHeading(s.group) : TYPES[s.type].section),
-      s.rows.sort(byUrgency).map((t) => threadRow(t))));
+      s.rows.sort((a, b) => byUrgency(a, b, usage)).map((t) => threadRow(t))));
   // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
   const byId = new Map(open.map((t) => [t.id, t]));
   const pinned = (view.pins ?? []).map((id) => byId.get(id)).filter(Boolean);
@@ -291,64 +293,11 @@ function renderThreadResults(el, tickets) {
         : h('p', { class: 'muted small' }, 'No minion has that in its title, number or properties.')));
 }
 
-/** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked. */
-function byUrgency(a, b) {
-  const sa = rowState(a), sb = rowState(b);
-  if (sa.rank !== sb.rank) return sa.rank - sb.rank;
-  return sa.rank === 0 ? (sa.since ?? a.updated_at) - (sb.since ?? b.updated_at) : b.updated_at - a.updated_at;
-}
-
-/**
- * A thread's state pill, coloured by family (one meaning each): you (amber, your move, with how
- * long it has waited), done (green), broken (red), work (blue, with steps done), wait (violet: the
- * usage reset, a deploy, CI), idle (grey: parked, dismissed).
- */
-export function rowState(t) {
-  const steps = t.steps ? ` ${t.steps.done}/${t.steps.total}` : '';
-  const waited = (word) => `${word} ${shortAgo(t.updated_at)}`;
-  if (t.approvals) return { rank: 0, fam: 'you', cell: waited('approve'), label: 'Waiting for your approval' };
-  // A minion parked on start_after is new (it hasn't run) but not working (#261).
-  if (t.status === 'running' || (t.status === 'new' && !t.parked_for)) return { rank: 1, fam: 'work', cell: [h('i', { class: 'pulse' }), steps.trim() || 'working'], counted: !!steps, label: 'Claude is working' };
-  if (t.status === 'error' && t.state === 'limited') return limitState(t, waited);
-  if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited('stuck'), label: 'Stuck: the last turn failed' };
-  if (t.status === 'closed') return { rank: 5, fam: 'idle', cell: 'dismissed', label: 'Dismissed' };
-  const state = STATES[t.state];
-  if (t.state === 'parked') return { rank: 4, fam: 'idle', cell: 'parked', label: state.label };
-  if (t.state === 'outside' || t.state === 'pending-deploy') return { rank: 2, fam: 'wait', cell: `${t.state === 'outside' ? 'waiting' : 'deploying'}${steps}`, counted: !!steps, label: state.label };
-  if (t.state === 'blocked') return { rank: 2, fam: 'broken', cell: 'blocked', label: state.label };
-  // An open question or plan card is the more specific ask than ready, try it or reply; timed from when it was posted.
-  if (t.pending_card_at) return { rank: 0, fam: 'you', cell: `? ${shortAgo(t.pending_card_at)}`, label: 'Waiting for you to answer a question or plan', since: t.pending_card_at };
-  if (t.state === 'ready') return { rank: 0, fam: 'done', cell: waited('ready'), label: state.label };
-  if (t.state === 'try') return { rank: 0, fam: 'you', cell: waited('try it'), label: state.label };
-  return { rank: 0, fam: 'you', cell: waited('reply'), label: 'Your move' };
-}
-
-/**
- * A minion that hit the usage limit: a countdown to its own resume when it has one, else a countdown while the account's limit is still hit, your move
- * once a later turn shows it has reset, and just "limit hit" when neither is known (the note says when).
- */
-function limitState(t, waited) {
-  if (t.limit_resume_at) return { rank: 2, fam: 'wait', cell: `resumes ${shortIn(t.limit_resume_at)}`, label: 'Usage limit: resumes by itself' };
-  const hit = [usage?.session, usage?.weekly].find((w) => w?.status === 'rejected' && w.resetsAt > Date.now());
-  if (hit) return { rank: 2, fam: 'wait', cell: `resets ${shortIn(hit.resetsAt)}`, label: STATES.limited.label };
-  if (usage?.updatedAt > t.updated_at) return { rank: 0, fam: 'you', cell: waited('resume'), label: 'The usage limit has reset: send a message to carry on' };
-  return { rank: 2, fam: 'wait', cell: 'limit hit', label: STATES.limited.label };
-}
-
-/** Where a minion's change is (t.ship, src/branch.ts): its colour family, and its badge in the list (none on its branch). */
-export const SHIP = {
-  branch: { fam: 'idle', badge: '' },
-  main: { fam: 'work', badge: 'on main' },
-  deploying: { fam: 'wait', badge: 'deploying' },
-  live: { fam: 'done', badge: 'live' },
-  failed: { fam: 'broken', badge: 'deploy failed' },
-};
-
 /** One compact row: number + short ask and the state on top, the thread's note (or what it is doing) below. */
 export function threadRow(t, href = threadHref(t)) {
   const coord = isCoordinator(t);
   // The coordinator is always there to talk to; only show when it is busy.
-  const st = coord && t.status !== 'running' ? { fam: '', cell: '', label: statusLabel(t) } : rowState(t);
+  const st = coord && t.status !== 'running' ? { fam: '', cell: '', label: statusLabel(t) } : rowState(t, usage);
   const quiet = st.fam === 'work' || st.fam === 'idle' || st.fam === 'wait';
   // The state cell already shows steps done, so the activity line drops its own count.
   const activity = st.counted && t.last_activity ? withoutCount(t.last_activity) : t.last_activity;
@@ -374,26 +323,8 @@ export function threadRow(t, href = threadHref(t)) {
   return h('a', { class: `thread-row s-${t.status} f-${st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${active ? ' active' : ''}`, href, title: details, 'data-id': t.id },
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
-    st.cell ? h('span', { class: 'state' }, st.cell) : '',
+    st.cell ? h('span', { class: 'state' }, st.pulse && h('i', { class: 'pulse' }), st.cell) : '',
     note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
     t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '');
-}
-
-/** "40m", "1h40", "14h", "2d": time left, for tight spaces. */
-function shortIn(ms) {
-  const m = Math.max(1, Math.ceil((ms - Date.now()) / 60_000));
-  if (m < 60) return `${m}m`;
-  if (m < 600) return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`;
-  if (m < 1440) return `${Math.floor(m / 60)}h`;
-  return `${Math.floor(m / 1440)}d`;
-}
-
-/** "now", "5m", "3h", "2d": ages for tight spaces. */
-function shortAgo(ms) {
-  const s = Math.round((Date.now() - ms) / 1000);
-  if (s < 60) return 'now';
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  return `${Math.floor(s / 86400)}d`;
 }

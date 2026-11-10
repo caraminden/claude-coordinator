@@ -1,8 +1,10 @@
 // The scheme recap: opening the Taskmaster chat 6+ hours after you last did anything
 // in the scheme puts a card at the bottom listing what changed since, built from the minions'
 // own states and notes. It is yours alone, never stored in the chat, and goes once you act.
-import { ago, api, h, me, view } from './core.js';
-import { rowState, threadRow } from './sidebar.js';
+import { ago, api, h, me, view } from './base.js';
+import { usage } from './core.js';
+import { threadRow } from './sidebar.js';
+import { rowState } from './threadstate.js';
 import { recapSections } from './threadgroups.js';
 
 const AWAY_MS = 6 * 60 * 60 * 1000; // Cara, 2026-10-28: "only ... if you havent taken an action for 6+ hours"
@@ -13,7 +15,7 @@ export async function showRecap() {
   const recap = await api(`api/projects/${projectId}/recap`).catch(() => null);
   if (!recap?.since || Date.now() - recap.since < AWAY_MS || view?.id !== id) return;
   const tickets = [...view.tickets.values()];
-  const sections = recapSections(tickets, recap.since, recap.turns, rowState);
+  const sections = recapSections(tickets, recap.since, recap.turns, (t) => rowState(t, usage));
   const log = document.getElementById('log');
   if (!sections.length || !log) return;
   const minions = sections.flatMap((s) => s.rows);

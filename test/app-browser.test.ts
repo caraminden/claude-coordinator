@@ -22,7 +22,8 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 <div><div id="log"></div><div id="spacer" style="height:3000px"></div><div class="composer"><button class="to-card" hidden><span>↑</span> Card</button></div></div>
 <script type="module">
   window.fetch = () => new Promise(() => {}); // every request stays on its way
-  const { renderUsage, setCodex, setView } = await import('/core.js');
+  const { renderUsage, setCodex } = await import('/core.js');
+  const { setView } = await import('/base.js');
   Object.assign(window, { renderUsage, setCodex });
   const { appendEvent, chatView, renderCardJump } = await import('/thread.js');
   setView({ ...chatView(1, { id: 1, title: 'T' }), kind: 'ticket' });

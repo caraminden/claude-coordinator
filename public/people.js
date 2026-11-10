@@ -1,5 +1,6 @@
 // Settings tabs for who is in Citadel: a scheme's members, everyone (admins only), and your own account.
-import { account, api, codexToggle, codexWindowsBlock, h, icon, setCodex, view } from './core.js';
+import { account, api, h, icon, view } from './base.js';
+import { codexToggle, codexWindowsBlock, setCodex } from './core.js';
 import { settingsTabs } from './settings.js';
 import { hideButton } from './hidden.js';
 import { copyText } from './ui/markdown.js';

@@ -1,6 +1,6 @@
 // The scheme's scheduled minions (src/schedules.ts), shown in the Minions panel in place of the list
 // by the clock in its header.
-import { ago, api, h, view } from './core.js';
+import { ago, api, h, view } from './base.js';
 import { modelName } from './composer.js';
 import { optimistic } from './ui/optimistic.js';
 

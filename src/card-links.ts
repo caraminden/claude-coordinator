@@ -1,5 +1,5 @@
 // Card links (#400): every mention of a question, plan or approval card in a reply links to that card,
-// at the chat address that opens it centred and ringed (#236's jump, public/core.js jumpHref). The
+// at the chat address that opens it centred and ringed (#236's jump, public/base.js jumpHref). The
 // tools hand the link out (ask_question, propose_plan, read_ticket), and the link check (link-check.ts)
 // sends back once a reply that mentions a card still waiting on people without linking it.
 import { CODE } from './wording.ts';
@@ -20,7 +20,7 @@ export interface CardLink {
   below?: boolean;
 }
 
-/** The chat address that opens `ticket`'s card posted as chat event `eventId` (public/core.js jumpHref). */
+/** The chat address that opens `ticket`'s card posted as chat event `eventId` (public/base.js jumpHref). */
 export function cardHref(ticket: { project_id: number; kind: string; number: number | null; id: number }, eventId: number): string {
   const chat = ticket.kind === 'coordinator' ? `#/p/${ticket.project_id}` : ticket.number == null ? `#/t/${ticket.id}` : `#/p/${ticket.project_id}/t/${ticket.number}`;
   return `${chat}?e=${eventId}`;

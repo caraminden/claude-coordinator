@@ -20,7 +20,7 @@ const card = (minion: number | null, event: number, kind: CardLink['kind'] = 'qu
 const cards = [card(394, 11), card(400, 22, 'plan'), card(null, 33)];
 const missing = (text: string, self: number | null = 400) => unlinkedCards(text, cards, self).map((g) => g.map((c) => c.href));
 
-test('cardHref opens a minion\'s or the Taskmaster\'s chat at the card (core.js jumpHref)', () => {
+test('cardHref opens a minion\'s or the Taskmaster\'s chat at the card (base.js jumpHref)', () => {
   assert.equal(cardHref({ project_id: 2, kind: 'ticket', number: 394, id: 9 }, 11), '#/p/2/t/394?e=11');
   assert.equal(cardHref({ project_id: 2, kind: 'coordinator', number: null, id: 1 }, 33), '#/p/2?e=33');
   assert.equal(cardLabel('plan', { summary: 'Build it this way' }), 'Build it this way');

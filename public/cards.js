@@ -1,6 +1,7 @@
 // The cards in a chat that wait on a person: approval (and merge), plan, loop and question cards.
 // appendEvent in thread.js builds them, and each registers itself in view.cards so later events settle it.
-import { api, catchUpEvents, fileHref, fileKind, fileUrl, h, isCoordinator, markdown, me, taskmasterLabel, taskmasterName, threadRefs, view } from './core.js';
+import { api, fileHref, fileKind, fileUrl, h, isCoordinator, me, taskmasterLabel, taskmasterName, view } from './base.js';
+import { catchUpEvents, markdown, threadRefs } from './core.js';
 import { optimistic } from './ui/optimistic.js';
 import { adoptTicket } from './thread.js';
 

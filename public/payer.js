@@ -1,6 +1,7 @@
 // Whose Claude plan a minion's turns run on (#219, take A): a chip in its head, and a line over the
 // composer only when your message would switch it, or the payer's limit is hit.
-import { account, h, usage } from './core.js';
+import { account, h } from './base.js';
+import { usage } from './core.js';
 
 /** What re-reading the minion's context costs a new payer, at $8 per million tokens (the handoff's rate). */
 const loadCost = (t) => (t.context_tokens ? `~$${((t.context_tokens * 8) / 1e6).toFixed(2)}` : null);

@@ -1,5 +1,5 @@
 // Today's use beside the weekly meter, as a share of an even day (a seventh of the week), opening to the last 7 days.
-import { account, api, costText, h, view } from './core.js';
+import { account, api, costText, h, view } from './base.js';
 import { closeOnClickAway } from './properties.js';
 import { renderSidebar } from './sidebar.js';
 

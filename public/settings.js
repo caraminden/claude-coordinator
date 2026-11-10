@@ -1,5 +1,6 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
-import { account, ago, api, h, icon, listGroupsOf, me, openHash, schemeIcon, view } from './core.js';
+import { account, ago, api, h, icon, listGroupsOf, me, schemeIcon, view } from './base.js';
+import { openHash } from './core.js';
 import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupWindows } from './machine-setup.js';
 import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
 import { copyText } from './ui/markdown.js';

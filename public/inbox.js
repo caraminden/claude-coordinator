@@ -1,6 +1,6 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
-import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './core.js';
+import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
 import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, turnMoved } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 

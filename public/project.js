@@ -1,5 +1,6 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
-import { account, api, app, crumbs, h, isCoordinator, loadEvents, loadPanelState, logout, me, prefetchTopRows, renderUsage, routeSeq, savePanelState, schemeIcon, setView, threadHref, usageMeter, view } from './core.js';
+import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
+import { app, crumbs, loadEvents, logout, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachineWarning } from './settings.js';
 import { LAST_SCHEME, newTicketForm, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';

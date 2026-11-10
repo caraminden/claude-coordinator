@@ -1,6 +1,6 @@
 // Settings → Contraptions, admins only: register personal apps, edit them, choose who each is
 // enabled for, and rotate their keys (src/routes/contraptions.ts).
-import { account, api, h, icon, view } from './core.js';
+import { account, api, h, icon, view } from './base.js';
 import { settingsTabs } from './settings.js';
 import { showRail } from './rail.js';
 import { optimistic } from './ui/optimistic.js';

@@ -1,7 +1,7 @@
 // The Start button on a brief in the file viewer (#129): a tap arms it, a second tap starts the minion
 // with the title and type guessed from the brief, and the button then reads "Started as #N" for everyone.
 // Options… opens a sheet for changing those or chaining the minion after another.
-import { api, h } from './core.js';
+import { api, h } from './base.js';
 import { briefMessage, findBriefs, matchType } from './briefs.js';
 import { steadyLabel } from './ui/status.js';
 

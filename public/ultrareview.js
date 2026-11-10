@@ -1,7 +1,7 @@
 // Ultra review (#432): a person runs `claude ultrareview` on their own Claude login, on this minion's
 // branch or on an area of the scheme's repo, and the findings land in this chat. It spends a free run or
 // usage credits, so the dialog says so and the server only takes it from a person who confirmed.
-import { api, h } from './core.js';
+import { api, h } from './base.js';
 
 const COST = 'It uses one of your 3 free ultra reviews, or about $5-25 in usage credits once those are gone. Citadel can\'t see how many free runs you have left, and a run counts as soon as it starts, even if it fails.';
 

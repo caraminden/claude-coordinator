@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { claudeLog, codexModelFor, fitLog } from '../src/codex.ts';
 import { codexInput, limitWords, mcpServers, parseArgs } from '../src/codex-turn.ts';
+import { jsonLines } from './helpers.ts';
 
 // Codex turns (#337): src/codex-turn.ts drives `codex app-server` and speaks Claude's stream-json both
 // ways, so the runner, steering, stop and the UI work unchanged. Here against a stand-in app-server.
@@ -164,7 +165,7 @@ function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: ob
   });
   for (const l of opts.lines ?? [{ type: 'user', message: { role: 'user', content: '[Josh]: go' } }]) child.stdin.write(JSON.stringify(l) + '\n');
   return new Promise((resolve) => child.on('exit', (code) => {
-    const calls = existsSync(fakeLog) ? readFileSync(fakeLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+    const calls = jsonLines(fakeLog); // the fake may still be logging its SIGTERM as the shim exits
     resolve({ code, events, calls });
   }));
 }

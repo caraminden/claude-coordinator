@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { codexSwitchKey, codexThreadKey, codexUsageKey, type CodexThread } from '../src/codex.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { jsonLines, stopTurns, testPins } from './helpers.ts';
 testPins();
 
 // Codex fallback (#337) through the runner: a Codex pick or the person's switch runs the turn on the shim
@@ -116,7 +116,7 @@ async function until(check: () => boolean) {
   for (let i = 0; i < 1000 && !check(); i++) await new Promise((r) => setTimeout(r, 20));
   assert.ok(check(), 'timed out');
 }
-const calls = () => (existsSync(seen) ? readFileSync(seen, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
+const calls = () => jsonLines(seen);
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 const turnStarts = () => calls().filter((c) => c.who === 'claude' || c.method === 'turn/start');
 function minion(n: number) {

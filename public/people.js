@@ -368,7 +368,8 @@ function githubCard() {
       limited ? h('li', {}, h('b', {}, 'Limited'), ': Citadel can act only on repos where the repo\'s owner ', install, ' and you already have access. Nothing else in your account.') : '');
     const linkRow = (again = '') => h('div', { class: 'row' },
       full ? linkBtn(`Link GitHub${again}${limited ? ' (full access)' : ''}`, 'full') : '',
-      limited ? linkBtn(`Link GitHub${again}${full ? ' (limited)' : ''}`, 'limited', full ? 'secondary' : '') : '');
+      // Both the same weight: neither grant is the one Citadel nudges people toward.
+      limited ? linkBtn(`Link GitHub${again}${full ? ' (limited)' : ''}`, 'limited') : '');
     const unlink = h('button', {
       type: 'button', class: 'secondary small',
       onclick: async () => {
@@ -397,7 +398,7 @@ function githubCard() {
       : link.reach.length ? repoLinks
       : ['No repos yet: a repo\'s owner ', install, ' on it first'];
     const other = link.limited ? (full ? linkBtn('Switch to full access', 'full', 'secondary') : '') : (limited ? linkBtn('Switch to limited', 'limited', 'secondary') : '');
-    return card.replaceChildren(title(link.limited ? 'Linked, limited' : 'Linked', 'ok'), errLine,
+    return card.replaceChildren(title(link.limited ? 'Linked, limited' : limited ? 'Linked, full access' : 'Linked', 'ok'), errLine,
       h('dl', { class: 'kv' },
         h('dt', {}, 'Pushes and PRs as'), h('dd', {}, ext(`https://github.com/${link.login}`, `@${link.login}`)),
         h('dt', {}, 'Commits as'), h('dd', {}, `${link.name || link.login} <${link.email}>`),

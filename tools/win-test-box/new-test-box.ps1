@@ -112,8 +112,21 @@ if (-not $existing) {
 
       Say "Applying $Edition (about 10 minutes)"
       Expand-WindowsImage -ImagePath $image -Index $index -ApplyPath "$w\" | Out-Null
-      & "$w\Windows\System32\bcdboot.exe" "$w\Windows" /s $s /f UEFI | Out-Null
-      if ($LASTEXITCODE) { throw "bcdboot failed ($LASTEXITCODE)" }
+      # The image's own bcdboot can fail from the host (0xC0E90002 on a 26200 host with a 26300 image);
+      # fall back to this PC's, and show bcdboot's own words if both fail.
+      # bcdboot writes warnings to stderr (e.g. "BFSVC Warning: FveOpenVolumeByHandle" on a BitLocker
+      # host); under 'Stop' PowerShell 5.1 turns those into a terminating error, so judge by exit code only.
+      $ErrorActionPreference = 'Continue'
+      $bcdOut = & "$w\Windows\System32\bcdboot.exe" "$w\Windows" /s $s /f UEFI /v 2>&1 | ForEach-Object { "$_" }
+      $bcdCode = $LASTEXITCODE
+      if ($bcdCode) {
+        Write-Host ("  the image's bcdboot failed (0x{0:X8}); trying this PC's" -f $bcdCode)
+        $bcdOut = & "$env:SystemRoot\System32\bcdboot.exe" "$w\Windows" /s $s /f UEFI /v 2>&1 | ForEach-Object { "$_" }
+        $bcdCode = $LASTEXITCODE
+      }
+      $ErrorActionPreference = 'Stop'
+      if ($bcdCode) { throw ("bcdboot failed (0x{0:X8}):`n{1}" -f $bcdCode, ($bcdOut | Out-String)) }
+      Write-Host "  boot files written"
 
       Say 'Writing the unattend file and the guest scripts'
       $bytes = New-Object byte[] 18

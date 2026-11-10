@@ -59,8 +59,18 @@ Everything is on her PC. Nothing here restarts it except step 1's restart, which
    - **Its password:** at the end it prints the box's sign-in, `citadel` and a password. Keep it in a password manager, then delete the `citadel-test-box.password.txt` it names.
    - **Options:** `-MemoryGB`, `-Cpus`, `-DiskGB`, `-Width`/`-Height` (default 1920x1080).
    - **If it stops:** run it again. Once the VM exists it picks up where it was. If it stopped before that, it says which half-made disk to delete first.
+   - **"I:\ is not accessible" popups** while it makes the disk are Explorer noticing a partition before it's formatted. Click OK; the script carries on.
 
 4. **Open the box's window:** Hyper-V Manager, `citadel-test-box`, **Connect**. If it offers a size or "enhanced session", close that dialog: it's a basic session, the only kind that never locks the box.
+
+   **Typing commands into the box:** a basic session has no shared clipboard, and its Clipboard → Type clipboard text refuses long lines and repeats keys. Use PowerShell Direct from her PC instead, in PowerShell as administrator; Ctrl+V works there because the window is her PC's:
+
+   ```powershell
+   $cred = Get-Credential citadel   # the box's password from step 3
+   Enter-PSSession -VMName citadel-test-box -Credential $cred
+   ```
+
+   The prompt becomes `[citadel-test-box]: PS ...>`, as administrator in the box; `exit` leaves. Enhanced session isn't an option: Windows 11 Home has no Remote Desktop host.
 
 5. **Sign Tailscale in**, in the box (3 min). The Tailscale icon by the clock in the box, then **Log in**, then sign in in the browser it opens. It's how the box reaches Citadel.
 
@@ -73,13 +83,15 @@ Everything is on her PC. Nothing here restarts it except step 1's restart, which
 7. **Add each scheme** (PowerShell **as administrator** in the box; 2 min of hands each, plus a toolchain download):
 
    ```powershell
-   C:\citadel-box\add-scheme.ps1 -Repo caraminden/peek-auras
+   powershell -ExecutionPolicy Bypass -File C:\citadel-box\add-scheme.ps1 -Repo caraminden/peek-auras
    ```
+
+   (The box keeps Windows' default execution policy, so calling the script directly is refused.)
 
    - **The deploy key:** it prints a read-only deploy key and the GitHub page to paste it on, then waits. Paste it there, then press Enter.
    - **The rest is automatic:** it clones the repo into `C:\work\peek-auras`, installs the repo's tools with mise and gives the machine agent a `peek-auras` workspace. That workspace has two tasks, `run` (on the screen) and `build` (off it).
    - **The scheme's desktop runner:** add it in the box with the scheme's own runner setup, as a session runner on the box's own desktop with no build runners. For Peek Auras, see its `docs/windows-ci.md`: `setup-runner.ps1 -Scheme "Peek Auras" -CitadelUrl <address> -Builders 0 -Visible -WithMsvc`. `-WithMsvc` puts in the C++ build tools that the Rust builds need too. Peek's script needs `-Builders 0` support first (asked of Peek Auras on 2026-11-07).
-   - **Hooks and restart:** run `add-scheme.ps1` again for the screen-lock hooks, then restart the box with `Restart-Computer` inside it. That restarts the box only, never her PC.
+   - **Hooks and restart:** run `add-scheme.ps1` again (the same `powershell -ExecutionPolicy Bypass -File` line) for the screen-lock hooks, then restart the box with `Restart-Computer` inside it. That restarts the box only, never her PC.
    - **Take her desktop off:** remove the scheme's old desktop runner on her own desktop (`-Visible`, the `<PC>-desktop` runner). Two runners with the same label would split the jobs between her screen and the box.
 
 8. **Close the box's window.** Don't sign out of the box or shut it down from inside it; closing the window leaves it running.

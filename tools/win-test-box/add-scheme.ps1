@@ -19,7 +19,9 @@ param(
   [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')][string]$Repo,
   [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$')][string]$Workspace = ($Repo -split '/')[1]
 )
-$ErrorActionPreference = 'Stop'
+# Not 'Stop': Windows PowerShell 5.1 turns git/ssh/mise stderr (progress, warnings) into terminating
+# errors under it, even with 2>$null. Every native step checks $LASTEXITCODE instead.
+$ErrorActionPreference = 'Continue'
 function Say([string]$Text) { Write-Host "`n== $Text" -ForegroundColor Cyan }
 $folder = "C:\work\$Workspace"
 $keys = 'C:\citadel-box\keys'

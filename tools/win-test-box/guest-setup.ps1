@@ -68,7 +68,7 @@ while (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
   if ((Get-Date) -gt $deadline) { throw 'winget never arrived. Update "App Installer" in the Microsoft Store, then run this again.' }
   Start-Sleep -Seconds 15
 }
-foreach ($id in 'Git.Git', 'OpenJS.NodeJS.LTS', 'jdx.mise', 'tailscale.tailscale') {
+foreach ($id in 'Git.Git', 'OpenJS.NodeJS.LTS', 'jdx.mise', 'Tailscale.Tailscale') {
   Log "Installing $id"
   winget install --id $id --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity | Out-Null
   # -1978335189: already installed and nothing newer.

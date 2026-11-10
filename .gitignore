@@ -3,3 +3,6 @@ node_modules/
 *.db-*
 .env
 env
+
+# new-test-box.ps1 writes the box's sign-in here; never commit it
+tools/win-test-box/*.password.txt

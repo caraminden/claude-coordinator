@@ -1,4 +1,4 @@
-// The link check: a Stop hook the runner adds to every turn (linkCheckHooks in runner.ts), for
+// The link check: a Stop hook the runner adds to every turn (linkCheckHooks in turn-launch.ts), for
 // Taskmasters and minions alike. Before a turn ends it reads the reply's file links with the server's
 // own linkedPaths and resolveFile (src/artifacts.ts), against the folders the chat serves them from
 // (ticketRoots in routes/files.ts), and sends the reply back once if any link wouldn't open. The

@@ -1,7 +1,7 @@
 // The wording check: words Citadel keeps for one meaning (Cara, 2026-11-04: "fold" is merging work and
 // nothing else), sent back before they reach people (#313). Three places use it: the Stop hook
 // (link-check.ts) checks a turn's final reply, and this file's PreToolUse hook (wordingHooks in
-// runner.ts) checks the messages and cards a session sends and the .md and .html files it writes into
+// turn-launch.ts) checks the messages and cards a session sends and the .md and .html files it writes into
 // the scheme's shared folders. Each sentence is sent back once; a rewrite that still trips it goes out.
 //
 // Run as a hook: node wording.ts '<config json>' < PreToolUse hook input; prints a "deny" decision or nothing.

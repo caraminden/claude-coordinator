@@ -118,7 +118,7 @@ interface Deps {
   emit: (ticketId: number, kind: 'ultrareview' | 'ultrareview_result', data: unknown) => void;
   getSetting: <T>(key: string) => T | undefined;
   setSetting: (key: string, value: unknown) => void;
-  /** The host's turn environment (runner.ts turnEnv), for the server login's owner. */
+  /** The host's turn environment (turn-launch.ts turnEnv), for the server login's owner. */
   hostEnv: Record<string, string>;
 }
 

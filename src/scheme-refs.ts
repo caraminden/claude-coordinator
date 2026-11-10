@@ -1,7 +1,7 @@
 // The cross-scheme link check (#327): in a scheme's chat a bare "#83" links to that scheme's own minion
 // #83 (public/threadrefs.js), so "#83" written about another scheme's minion opens the wrong one. When a
 // bare #N sits right after another scheme's name (strayRefs), the reply (the Stop hook, link-check.ts) or the outgoing message (this file's PreToolUse hook,
-// schemeRefsHooks in runner.ts) is sent back once, naming what the link would open. A rewrite that
+// schemeRefsHooks in turn-launch.ts) is sent back once, naming what the link would open. A rewrite that
 // keeps the #N goes through. message_taskmaster is skipped: there a bare #N links to the receiving scheme.
 //
 // Run as a hook: node scheme-refs.ts '<config json>' < PreToolUse hook input; prints a "deny" decision or nothing.

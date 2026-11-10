@@ -1,6 +1,6 @@
 /**
  * What the PreToolUse hooks that send a call back once (wording.ts, scheme-refs.ts) share. They run pinned inside
- * a minion's turn (runner.ts pinnedCopy follows the ./ imports), so this imports only node built-ins.
+ * a minion's turn (turn-launch.ts pinnedCopy follows the ./ imports), so this imports only node built-ins.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

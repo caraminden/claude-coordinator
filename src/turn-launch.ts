@@ -128,7 +128,7 @@ export function schemeRefsHooks(refs: string, sent: string, script = SCHEME_REFS
  * The parts of this server's environment a turn inherits. Anything else (MACHINES_URL, PORT, HOST,
  * COORDINATOR_PASSWORD, SESSION_SECRET, the D-Bus address) belongs to the live service, not to minions.
  * XDG_RUNTIME_DIR stays so tools/deploy.sh can reach the user bus (systemctl --user, systemd-run); the
- * COORDINATOR_* values it posts with are the runner's per-turn ones, set below.
+ * COORDINATOR_* values it posts with are the runner's per-turn ones (src/runner.ts).
  */
 const ENV_NAMES = new Set([
   'HOME', 'PATH', 'LANG', 'TERM', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TZ', 'SSH_AUTH_SOCK', 'XDG_RUNTIME_DIR',

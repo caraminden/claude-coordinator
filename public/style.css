@@ -1246,6 +1246,12 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .scheme-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.3rem 0.2rem 0.65rem; font-size: 0.85em; line-height: 1.3; }
 .scheme-chip button { flex: none; width: 1.3rem; height: 1.3rem; padding: 0; border-radius: 50%; line-height: 1; background: transparent; color: var(--muted); border: 0; }
 .scheme-chip button:hover { background: var(--line); color: var(--ink); }
+/* Phone: the × and the picker are tap targets, a control's height. */
+@media (max-width: 800px) {
+  .scheme-chip { padding: 0 0 0 0.75rem; }
+  .scheme-chip button { width: var(--citadel-control-h); height: var(--citadel-control-h); font-size: 1.15em; }
+  .machine-lending select.add-scheme { min-height: var(--citadel-control-h); }
+}
 .machine-lending select.add-scheme { width: auto; margin: 0; padding: 0.33rem 0.5rem; border-radius: 999px; font-size: 0.85em; line-height: 1.3; color: var(--muted); cursor: pointer; }
 .machine-workspaces summary { cursor: pointer; color: var(--muted); }
 .machine-workspaces pre { overflow-x: auto; font-size: 0.9em; }

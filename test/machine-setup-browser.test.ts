@@ -97,6 +97,7 @@ test('a machine lends what is ticked in its row from what its agent found, with 
   await openMachines();
   await add('tick-box');
   const token = (await shown())[0].match(/ccm_\d+_[\w-]+/)![0];
+  await srv.call(`/api/machines/${(await machine('tick-box')).id}`, { projects: [projectId] }, 'PATCH');
   mkdirSync(join(dir, 'vault'));
   writeFileSync(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { 'godot-ai': { command: process.execPath, args: [mcpServer], env: { KEY: 'sk-secret-123' } } } }));
   writeFileSync(join(dir, 'machine-agent.json'), JSON.stringify({ workspaces: { vault: { path: join(dir, 'vault') } } }));

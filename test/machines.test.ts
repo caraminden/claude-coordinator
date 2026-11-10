@@ -163,6 +163,8 @@ test('a machine lends what is ticked of what its agent found, and nothing else (
   const task = { hi: { run: [process.execPath, '-e', 'console.log("task ran")'] } };
   writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] } }, workspaces: { w: { path: join(dir, 'w'), tasks: task }, x: { path: join(dir, 'x') } } }));
   const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'ticks' } });
+  const [project] = await call('/api/projects');
+  await lend(machine.id, project);
   const find = async () => (await call('/api/machines')).find((m: any) => m.name === 'ticks');
   const { output } = startAgent(token, ['--config', config], { CLAUDE_CONFIG_DIR: home });
   const found = await until('ticks to report what it found', async () => { const m = await find(); return m.managed && m.found.length && m; });
@@ -171,7 +173,6 @@ test('a machine lends what is ticked of what its agent found, and nothing else (
   assert.doesNotMatch(JSON.stringify(found), /sk-secret-123|API_KEY/);
   assert.deepEqual(found.lend, { server: null, workspaces: [] }, 'a new machine starts with nothing ticked');
   assert.deepEqual([found.status, found.reason, found.fix], ['fix', 'Lends nothing: nothing is ticked', 'tick']);
-  const [project] = await call('/api/projects');
   const turnNow = async (message: string) => {
     const before = turns().length;
     await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message } });
@@ -229,6 +230,7 @@ test('a machine set up before ticks starts from what it lent when its agent firs
   const config = join(dir, 'machine-agent.json');
   writeFileSync(config, JSON.stringify({ workspaces: { w: { path: join(dir, 'w') } } }));
   const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'carried' } });
+  await lend(machine.id, (await call('/api/projects'))[0]);
   const find = async () => (await call('/api/machines')).find((m: any) => m.name === 'carried');
   // As caras-laptop is today: --claude-mcp godot-ai, its workspace tools switched on.
   const old = startAgent(token, ['--config', config, '--claude-mcp', 'godot-ai'], { CLAUDE_CONFIG_DIR: dir });

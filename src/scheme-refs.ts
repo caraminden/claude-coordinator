@@ -5,7 +5,7 @@
 // keeps the #N goes through. message_taskmaster is skipped: there a bare #N links to the receiving scheme.
 //
 // Run as a hook: node scheme-refs.ts '<config json>' < PreToolUse hook input; prints a "deny" decision or nothing.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import type { CardLink } from './card-links.ts';
 import { deny, readSent, runHook, saveSent, toolStrings } from './pre-tool-hook.ts';
 import { CODE } from './wording.ts';

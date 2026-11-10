@@ -24,7 +24,7 @@ const container = { host: false as const, container: 'box', configDir: '/vol/.cl
 const base: TurnFacts = {
   project, ticket: minion, dir, pins, place: { host: true }, machines: [], model: null, effort: null, codex: null, codexReview: null,
   folders: { files: null, shared: null, memory: null, tmp: null, tickets: join(root, 'tickets'), data: root },
-  env: { server: { PATH: '/usr/bin', HOME: '/home/server', ANTHROPIC_API_KEY: 'server-key', SECRET_OF_THE_SERVER: 'x' }, coordinator: { COORDINATOR_TOKEN: 'tok' }, heavy: {}, github: null },
+  env: { server: { PATH: '/usr/bin', HOME: '/home/server', CLAUDE_CONFIG_DIR: '/srv/claude', ANTHROPIC_API_KEY: 'server-key', SECRET_OF_THE_SERVER: 'x' }, coordinator: { COORDINATOR_TOKEN: 'tok' }, heavy: {}, github: null },
   deploys: false, memory: false, typer: null, homeContraptions: [], claudeBin: process.execPath, unit: null,
 };
 const plan = (over: Partial<TurnFacts> = {}) => launchPlan({ ...base, ...over });
@@ -49,7 +49,7 @@ test("the environment is the server's filtered one plus the turn's own, and noth
   assert.equal(p.env.COORDINATOR_TICKET, String(minion.id));
   // The turn's pinned tools come first on PATH (the Android toolchain may follow, when this machine has one).
   assert.ok(p.env.PATH.startsWith(`${join(dir, 'pin', 'bin')}:/usr/bin`), p.env.PATH);
-  assert.equal(p.configDir, '/home/server/.claude');
+  assert.equal(p.configDir, '/srv/claude');
 });
 
 // One fact each: the env names it adds to the plain minion's, and no others.

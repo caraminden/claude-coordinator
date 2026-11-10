@@ -129,7 +129,7 @@ const FILE_KINDS = {
   js: 'text', mjs: 'text', css: 'text', json: 'text',
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', avif: 'image', svg: 'image',
   mp4: 'video', webm: 'video', mov: 'video', mp3: 'audio', wav: 'audio', ogg: 'audio', m4a: 'audio',
-  zip: 'download', '7z': 'download', tar: 'download', gz: 'download', tgz: 'download',
+  zip: 'download', '7z': 'download', tar: 'download', gz: 'download', tgz: 'download', apk: 'download',
 };
 export const fileKind = (path) => FILE_KINDS[(path.split(/[?#]/)[0].split('.').pop() || '').toLowerCase()] ?? null;
 export const baseName = (path) => path.split('/').filter(Boolean).pop() ?? path;

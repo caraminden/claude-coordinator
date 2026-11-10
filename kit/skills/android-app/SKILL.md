@@ -63,6 +63,8 @@ Installed: `platforms;android-36`, `build-tools` 36.1.0 and 35.0.0 (the Android 
   "Update the app", which opens the APK URL in the system browser, and Android's installer takes
   it from there. A web-only change needs no new APK.
 - The first install needs "Install unknown apps" allowed for the friend's browser.
+- A plain Gradle app with no contraption: copy the signed `.apk` into the scheme's shared folder and
+  link it in chat (`[App 1.3](<path>.apk)`). The card downloads it, and a phone offers to install it.
 
 ## Emulator
 

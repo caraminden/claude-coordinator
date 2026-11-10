@@ -85,7 +85,7 @@ function showingFiles(ticket: Ticket, filesDir: string | null, sharedDir: string
     `You can show people files (documents, images, GIFs, videos, web pages, PDFs, and zip or other archives to download) by linking them in your reply with a path ${where}; the app turns those links into previews that open the file in place of the chat:`,
     '- Link files by absolute path, never `../`: a relative link resolves against your working directory and breaks at the wrong depth.',
     '- `![caption](path)` shows an inline preview: use it for images, GIFs and videos.',
-    '- `[title](path)` shows a card: use it for documents, web pages and PDFs. A card for a .zip, .7z, .tar or .gz file downloads it when clicked.',
+    '- `[title](path)` shows a card: use it for documents, web pages and PDFs. A card for a .zip, .7z, .tar, .gz or .apk file downloads it when clicked.',
     filesDir
       ? `Put files you fetch from elsewhere or make only to show people (not part of the work in your branch) in ${filesDir}, so they never end up in a commit. Files elsewhere on disk can't be shown; copy them there first.`
       : '',

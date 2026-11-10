@@ -139,3 +139,11 @@ test('a zip in the thread\'s folders is served as a download, never shown', asyn
   assert.equal(res.headers.get('content-type'), 'application/zip');
   assert.equal(res.headers.get('content-disposition'), "attachment; filename*=UTF-8''Game%20build.zip");
 });
+
+test('an apk in the thread\'s folders downloads with Android\'s type, so a phone offers to install it', async () => {
+  writeFileSync(join(shared, 'app-release.apk'), 'PK');
+  const res = await fetch(`${base}/api/tickets/${ticket.id}/file?path=${encodeURIComponent(join(shared, 'app-release.apk'))}`, { headers: { Cookie: cookie } });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/vnd.android.package-archive');
+  assert.equal(res.headers.get('content-disposition'), "attachment; filename*=UTF-8''app-release.apk");
+});

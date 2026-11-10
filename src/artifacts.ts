@@ -11,7 +11,7 @@ export type FileKind = 'markdown' | 'text' | 'canvas' | 'html' | 'pdf' | 'image'
 /**
  * File types the app will serve from a ticket's folder. Only documents, pages and downloads
  * (`artifact`) are listed as artifacts; images and media are served when a document embeds them.
- * Downloads (archives such as a game build) are never shown, only saved.
+ * Downloads (archives such as a game build, and Android apps) are never shown, only saved.
  * Other source code is left out on purpose; it lives in the branch. Scripts, styles and data show
  * as text, as a document may link them (old claude.ai page code), and an HTML page loads them.
  */
@@ -47,6 +47,8 @@ export const FILE_TYPES: Record<string, { kind: FileKind; mime: string; artifact
   '.tar': { kind: 'download', mime: 'application/octet-stream', artifact: true },
   '.gz': { kind: 'download', mime: 'application/octet-stream', artifact: true },
   '.tgz': { kind: 'download', mime: 'application/octet-stream', artifact: true },
+  // Android's own type, so a phone's browser offers to install the app once it has downloaded.
+  '.apk': { kind: 'download', mime: 'application/vnd.android.package-archive', artifact: true },
 };
 
 export function fileType(path: string) {

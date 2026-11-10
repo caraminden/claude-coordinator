@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 
+// The snapshot records each file's mode, and the server's umask (077 under its unit) isn't a shell's.
+process.umask(0o022);
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'turn-launch-')));
 after(() => rmSync(root, { recursive: true, force: true }));
 // A fixed environment, set before anything reads it: a turn inherits HOME, PATH, the locale and every

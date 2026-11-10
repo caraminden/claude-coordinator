@@ -141,12 +141,16 @@ function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: ob
   rmSync(fakeLog, { force: true });
   const home = join(root, `home-${Math.random().toString(36).slice(2)}`);
   mkdirSync(home);
+  // Another Codex turn of this person's (this test process) holds the lock until `lockedMs` after the shim
+  // says it waits: a timer from here would let go before a shim slow to start had looked (#470). The
+  // 30 s is for a shim that never says so: it then runs and the test fails on what it printed.
+  const lock = join(home, '.codex', 'citadel-turn.lock');
+  const letGo = (ms: number) => setTimeout(() => rmSync(lock, { recursive: true, force: true }), ms);
+  let giveUp: NodeJS.Timeout | undefined;
   if (opts.lockedMs) {
-    // Another Codex turn of this person's (this test process) holds the lock for a while.
-    const lock = join(home, '.codex', 'citadel-turn.lock');
     mkdirSync(lock, { recursive: true });
     writeFileSync(join(lock, 'pid'), String(process.pid));
-    setTimeout(() => rmSync(lock, { recursive: true, force: true }), opts.lockedMs);
+    giveUp = letGo(30_000);
   }
   const child = spawn(process.execPath, [SHIM, ...args], { cwd: root, env: { PATH: process.env.PATH, HOME: home, CODEX_HOME: join(home, '.codex'), CITADEL_CODEX_BIN: fake, FAKE: opts.fake ?? '', COORDINATOR_TOKEN: 'tok', ...opts.env }, stdio: ['pipe', 'pipe', 'inherit'] });
   const events: any[] = [];
@@ -158,13 +162,16 @@ function run(args: string[], opts: { fake?: string; lines?: object[]; steer?: ob
       const ev = JSON.parse(buf.slice(0, nl));
       buf = buf.slice(nl + 1);
       events.push(ev);
+      if (ev.type === 'codex_waiting' && opts.lockedMs) letGo(opts.lockedMs);
       if (ev.type === 'system' && opts.steer) setTimeout(() => child.stdin.write(JSON.stringify(opts.steer) + '\n'), 200);
       if (ev.type === 'system' && opts.sigterm) setTimeout(() => child.kill('SIGTERM'), 200);
       if (ev.type === 'result') child.stdin.end();
     }
   });
   for (const l of opts.lines ?? [{ type: 'user', message: { role: 'user', content: '[Josh]: go' } }]) child.stdin.write(JSON.stringify(l) + '\n');
-  return new Promise((resolve) => child.on('exit', (code) => {
+  // 'close', not 'exit': the shim's last lines can still be in its stdout pipe when it exits.
+  return new Promise((resolve) => child.on('close', (code) => {
+    clearTimeout(giveUp);
     const calls = jsonLines(fakeLog); // the fake may still be logging its SIGTERM as the shim exits
     resolve({ code, events, calls });
   }));

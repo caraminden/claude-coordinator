@@ -19,8 +19,9 @@ after(async () => {
 });
 
 // A turn's fake claude keeps its turn token, which the Taskmaster's calls need once a turn has started.
+// It writes the token under another name and renames it: the test would read a half-made file as an empty token (401).
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, '#!/bin/sh\nprintf %s "$COORDINATOR_TOKEN" > token\n');
+writeFileSync(fake, '#!/bin/sh\nprintf %s "$COORDINATOR_TOKEN" > token.tmp && mv token.tmp token\n');
 chmodSync(fake, 0o755);
 
 const store = new Store(join(data, 'coordinator.db'));

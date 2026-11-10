@@ -105,7 +105,9 @@ for (const [label, width, panel, touch] of [['a 372px side panel', 1366, 372, fa
     for (const id of ['wide', 'link']) {
       const l = await layout(page, id);
       assert.ok(l.table <= l.scroller + 0.5, `${id}: the table fits its scroller (${l.table} > ${l.scroller})`);
-      for (const w of l.cols) assert.ok(w >= 80, `${id}: no column squeezed to one word per line: ${l.cols.join('/')}`);
+      // The prose column ("What it does", "Notes") was squeezed to 14% of the table before (#462); a share, not pixels, so fonts don't matter.
+      const prose = l.cols[1];
+      assert.ok(prose >= l.table * 0.3, `${id}: the prose column keeps a readable share: ${l.cols.join('/')}`);
       for (const h of l.rows) assert.ok(h <= l.line * 6, `${id}: no tower rows: ${l.rows.join('/')} (one line is ${l.line})`);
     }
   });

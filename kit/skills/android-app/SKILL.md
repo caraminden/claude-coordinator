@@ -79,7 +79,7 @@ citadel-android down               # when you're done
 - **Fake texts with `sms`, never `adb emu sms send`.** The console wants a token turns can't read, so
   plain `adb emu` answers "KO: unknown command". `sms` hands the text to the emulator's service on the
   host, which sends it. The sender is digits with an optional leading `+` (up to 20); the text is one
-  line of up to 500 characters. To see it arrive: `adb -s emulator-5554 logcat -d | grep -i sms`, or
+  line of up to 500 characters. To see it arrive (logcat has no clear line for it):
   `adb -s emulator-5554 shell content query --uri content://sms/inbox --projection address,body`.
   If it says the service didn't answer, the service still runs older code: `down`, then try again. Run your app with
   `adb -s emulator-5554 shell monkey -p <applicationId> 1`; plain `adb -s emulator-5554 ...` works

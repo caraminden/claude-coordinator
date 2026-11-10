@@ -1,0 +1,356 @@
+/* The scheme view: schemes and their dialogs, the board, the panels' layout and drawers, the overview shelf, artifacts,
+   properties, the file viewer. */
+main:has(> .split) { max-width: 1560px; }
+/* New scheme: a modal box on desktop, a sheet along the bottom on phones; the scheme switcher's menu. */
+.card.new-scheme { max-width: 480px; margin: 10vh auto; }
+.card.new-scheme h2 { margin-bottom: 1rem; }
+/* The dialogs are the kit's cui-dialog (ui/base.css): head pinned, backdrop click closes (ui/dialog.js). */
+dialog.new-scheme { --cui-dialog-width: 440px; }
+dialog.new-scheme .close { min-width: var(--citadel-control-h); min-height: var(--citadel-control-h); padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; color: var(--muted); font-size: 1.3rem; line-height: 1; }
+dialog.new-scheme form > :last-child { margin-bottom: 0; }
+/* The code source: one radio a line, the picked one's URL or folder field under it. */
+.new-scheme fieldset.sources { border: 0; padding: 0; margin: 0 0 0.75rem; min-width: 0; }
+.new-scheme fieldset.sources legend { padding: 0; margin-bottom: 0.25rem; color: var(--muted); font-size: 0.9em; }
+.new-scheme label.source { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; margin-bottom: 0.3rem; color: var(--ink); font-size: 0.95em; }
+.new-scheme label.source input[type=radio] { width: auto; margin: 0; }
+.new-scheme label.source input:not([type=radio]) { flex-basis: 100%; margin: 0.1rem 0 0.2rem 1.5rem; width: calc(100% - 1.5rem); }
+.new-scheme label.source:has(input[type=radio]:disabled) { color: var(--muted); }
+.new-scheme label.source .source-note { flex-basis: 100%; margin: 0 0 0.2rem 1.5rem; font-size: 0.85em; }
+.new-scheme .create-buttons { justify-content: flex-end; gap: 0.5rem; }
+@media (max-width: 800px) {
+  dialog.new-scheme { width: 100%; max-width: none; margin: auto 0 0; border-radius: 12px 12px 0 0; border-bottom: 0; padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
+}
+/* A brief's Start button in the file viewer, and the sheet it opens (#129); the sheet is a new-scheme dialog. */
+.brief-start { margin: 0.4rem 0 0.9rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; }
+.brief-start > :is(button, a.button) { min-height: 44px; display: inline-flex; align-items: center; padding: 0 1rem; font-size: 0.95rem; font-weight: 600; line-height: 1.2; }
+.brief-start > button.secondary { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent); }
+.brief-start > button.secondary.armed { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.brief-start > button.options { background: none; border: 0; color: var(--muted); font-weight: normal; padding: 0 0.6rem; }
+.brief-start > button.options:hover { color: var(--ink); }
+dialog.start-brief { --cui-dialog-width: 560px; }
+dialog.start-brief .from { margin: 0 0 0.9rem; }
+.start-brief-form .label { margin-bottom: 0.75rem; color: var(--muted); font-size: 0.9em; }
+.start-brief-form .label .row { margin-top: 0.25rem; gap: 0.5rem; flex-wrap: nowrap; }
+.start-brief-form .label input { width: 6rem; flex: none; }
+.start-brief-form .label select { width: auto; }
+.start-brief-form :is(input, select, button) { min-height: 44px; }
+.start-brief-form details { margin-bottom: 0.75rem; }
+.start-brief-form summary { cursor: pointer; color: var(--muted); font-size: 0.9em; min-height: 44px; display: flex; align-items: center; }
+.start-brief-form details pre { max-height: 40vh; overflow: auto; margin: 0.25rem 0 0; font-size: 0.8rem; white-space: pre-wrap; }
+.start-brief-form .sheet-actions { gap: 0.5rem; }
+.scheme-menu { position: fixed; z-index: 40; min-width: 12rem; max-width: calc(100vw - 16px); max-height: 60vh; overflow-y: auto; padding: 0.3rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); box-shadow: 0 6px 20px rgb(0 0 0 / 0.15); }
+a.nav-item:has(> .scheme-count) { display: flex; align-items: center; gap: 0.5rem; }
+a.nav-item:has(> .scheme-count) > .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+/* A scheme's favicon (#222). */
+.scheme-icon { flex: none; width: 1.25em; height: 1.25em; border-radius: 4px; object-fit: contain; vertical-align: -0.25em; }
+.scheme-crumb { display: inline-flex; align-items: center; gap: 0.35em; vertical-align: bottom; max-width: 100%; }
+/* A scheme's pill: the spinner while a turn runs (#248), then the Needs-you count, side by side (#314). */
+.scheme-count { flex: none; display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85em; line-height: 1.3; font-weight: 600; }
+.scheme-count[hidden] { display: none; }
+.scheme-count > .need { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0.1rem 0.45rem; }
+/* A blue ring in a box as tall as the count's, so the row doesn't shift; a still dot without motion. */
+.scheme-count > .busy { display: inline-flex; align-items: center; padding: 0.1rem 0.2rem; }
+.scheme-count > .busy::before { content: '\2007'; width: 0; overflow: hidden; } /* a digit's height, as the count has */
+.scheme-count > .busy i { width: 1.05em; height: 1.05em; box-sizing: border-box; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--running) 30%, transparent); border-top-color: var(--running); animation: scheme-spin 0.9s linear infinite; }
+.scheme-count > .busy b { margin-left: 0.3em; color: var(--running); font-weight: 600; font-variant-numeric: tabular-nums; } /* how many minions are working (#278) */
+@keyframes scheme-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .scheme-count > .busy i { animation: none; border-color: transparent; background: var(--running) content-box; } }
+button.nav-item.add { width: 100%; text-align: left; background: none; border: 0; color: var(--accent); font-weight: normal; }
+/* The shelf's scheme rows with their Hide or Unhide (#226): shown on hover where there is one, always on touch. */
+.scheme-row { display: flex; align-items: center; gap: 0.25rem; }
+.scheme-row > a.nav-item { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.5rem; }
+.scheme-row > a.nav-item > .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.scheme-hide { flex: none; padding: 0.2rem 0.45rem; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 0.8em; font-weight: normal; line-height: 1.3; cursor: pointer; }
+.scheme-hide:hover, .scheme-hide:focus-visible { background: var(--panel); color: var(--ink); }
+@media (hover: hover) { #schemes-shelf > .scheme-row:not(:hover, :focus-within) > .scheme-hide { opacity: 0; } }
+.hidden-schemes { margin-top: 0.25rem; }
+.hidden-schemes > summary { cursor: pointer; padding: 0.3rem 0.5rem; color: var(--muted); font-size: 0.85em; }
+.hidden-schemes .nav-item { color: var(--muted); }
+.hidden-note { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; padding: 0.35rem 0.7rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); font-size: 0.85em; }
+.hidden-note[hidden] { display: none; }
+.hidden-note button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+
+/* Board */
+.board { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 1rem; align-items: start; }
+/* The closed section is a <details> whose summary looks like the other column headings. */
+.column h3, .column.closed > summary { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.5rem; display: flex; gap: 0.4rem; align-items: center; }
+.column.closed > summary { cursor: pointer; color: var(--muted); list-style: none; }
+.column.closed > summary::-webkit-details-marker { display: none; }
+.column.closed > summary::before { content: '▸'; }
+.column.closed[open] > summary::before { content: '▾'; }
+.column h3 .count, .column.closed > summary .count { color: var(--muted); font-weight: normal; }
+
+/* Project view: artifacts shelf and threads sidebar beside the main panel */
+.split { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+.panels { display: contents; }
+/* Both collapsed: one sticky column with the two tabs stacked, and the main panel takes the rest. */
+.split:not(:has(> .panels > details[open])) { grid-template-columns: auto minmax(0, 1fr); }
+.panels:not(:has(> details[open])) { display: flex; flex-direction: column; gap: 0.5rem; position: sticky; top: calc(var(--topbar-h, 3rem) + var(--banner-h, 0px) + 1rem); }
+.panels:not(:has(> details[open])) > details { position: static; }
+.shelf[open] { width: clamp(220px, 18vw, 270px); }
+.sidebar[open] { width: clamp(230px, 20vw, 300px); }
+/* Sticky can't move past the bottom of .split, which ends main's 3rem bottom padding above the
+   page end. Keep the side panels short enough (1rem top gap + 3rem) that the chat reaching the bottom
+   never drags them up, and keep wheel/touch scrolls inside them from chaining to the page. */
+.sidebar, .shelf { position: sticky; top: calc(var(--topbar-h, 3rem) + var(--banner-h, 0px) + 1rem); max-height: calc(100dvh - var(--topbar-h, 3rem) - var(--banner-h, 0px) - 4rem); overflow-y: auto; overscroll-behavior: contain; }
+/* Panel headers double as collapse toggles: a row with ‹ when open, a slim vertical tab with › when closed. */
+.sidebar > summary, .shelf > summary { cursor: pointer; font-weight: 650; margin-bottom: 0.5rem; list-style: none; display: flex; align-items: center; gap: 0.4rem; user-select: none; }
+.sidebar > summary::-webkit-details-marker, .shelf > summary::-webkit-details-marker { display: none; }
+.sidebar > summary .label, .shelf > summary .label { flex: 1; }
+.sidebar > summary::after, .shelf > summary::after { content: '‹'; color: var(--muted); font-size: 1.2em; line-height: 1; padding: 0 0.25rem; border-radius: 4px; }
+.sidebar > summary:hover::after, .shelf > summary:hover::after { color: var(--accent); }
+.sidebar:not([open]), .shelf:not([open]) { width: 2rem; padding-right: 0; border-right: 0; }
+.sidebar:not([open]) > summary, .shelf:not([open]) > summary {
+  writing-mode: vertical-rl;
+  flex-direction: row;
+  margin: 0;
+  padding: 0.6rem 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+}
+.sidebar:not([open]) > summary:hover, .shelf:not([open]) > summary:hover { border-color: var(--accent); color: var(--ink); }
+.sidebar:not([open]) > summary::after, .shelf:not([open]) > summary::after { content: '›'; writing-mode: horizontal-tb; order: -1; margin-bottom: 0.3rem; }
+.shelf { border-right: 1px solid var(--line); padding-right: 0.9rem; }
+.shelf .column { margin-top: 1rem; }
+.shelf .small { font-size: 0.82em; margin: 0; }
+.shelf > summary .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shelf:not([open]) > summary .label { max-height: 14rem; }
+/* Medium screens: stack the artifacts and threads in one column so the main panel keeps its width. */
+@media (min-width: 801px) and (max-width: 1150px) {
+  /* The main panel spans both rows; let the lower row take its extra height so the shelf stays snug. */
+  .split { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .shelf[open], .sidebar[open] { width: clamp(220px, 24vw, 280px); }
+  /* Stacked in one column: a closed panel beside an open one is just a header row. */
+  .panels:has(> details[open]) > details:not([open]) { width: auto; }
+  .panels:has(> details[open]) > details:not([open]) > summary { writing-mode: horizontal-tb; border: 0; background: none; padding: 0; margin-bottom: 0.5rem; }
+  .panels:has(> details[open]) > details:not([open]) > summary::after { content: '›'; order: 0; margin: 0; }
+  .panels > .shelf { grid-column: 1; grid-row: 1; position: static; max-height: none; border-right: 0; padding-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+  .panels > .sidebar { grid-column: 1; grid-row: 2; position: static; max-height: none; }
+  .split > section { grid-column: 2; grid-row: 1 / span 2; }
+  .panels:not(:has(> details[open])) > .shelf { border-bottom: 0; padding-bottom: 0; }
+}
+@media (max-width: 800px) {
+  .split { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .sidebar, .shelf { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+  .shelf { border-right: 0; padding-right: 0; }
+  .panels:not(:has(> details[open])) { position: static; gap: 0; }
+  .split:not(:has(> .panels > details[open])) { grid-template-columns: minmax(0, 1fr); }
+  .shelf[open], .sidebar[open], .sidebar:not([open]), .shelf:not([open]) { width: auto; }
+  .sidebar:not([open]) > summary, .shelf:not([open]) > summary { writing-mode: horizontal-tb; border: 0; background: none; padding: 0; }
+  .sidebar > summary::after, .shelf > summary::after { content: '▾'; }
+  .sidebar:not([open]) > summary::after, .shelf:not([open]) > summary::after { content: '▸'; order: 0; margin: 0; }
+}
+
+/* Phones: the overview and threads panels pulled out from the screen edge as drawers (drawers.js,
+   which brings the placement, backdrop, handles and motion; these are Citadel's look and which views have them). */
+@media (max-width: 800px) {
+  /* The drawers stand in for the panels, so their collapsed bars don't sit above the chat. */
+  .split > .panels:not(:has(> .citadel-drawer)) { display: none; }
+  .panels > details:not(.citadel-drawer) { display: none; }
+  .panels > details.citadel-drawer {
+    background: var(--bg); border: 0; border-right: 1px solid var(--line);
+    padding: calc(0.75rem + env(safe-area-inset-top, 0px)) 0.9rem calc(0.75rem + env(safe-area-inset-bottom, 0px)) calc(0.9rem + env(safe-area-inset-left, 0px));
+  }
+  .panels > details.citadel-drawer-right {
+    border-right: 0; border-left: 1px solid var(--line);
+    padding-left: 0.9rem; padding-right: calc(0.9rem + env(safe-area-inset-right, 0px));
+  }
+  /* No gap for the placeholder a pulled-out panel leaves in the grid. */
+  .split { gap: 0; }
+  /* In a drawer the panel's bar closes it. */
+  .panels > details.citadel-drawer > summary::after { content: '✕'; }
+  body .citadel-drawer-handle { z-index: 7; }
+  body .citadel-drawer-handle::before { background: var(--muted); }
+  /* Handles only where there's something to open: the panels, or on the left the app rail. */
+  body:not(:has(#app .panels)) .citadel-drawer-handle.right,
+  html:not(.has-citadel-rail) body:not(:has(#app .panels)) .citadel-drawer-handle.left { display: none; }
+}
+
+/* Account and usage, standing in for the top bar on project pages */
+.shelf .account { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 0.6rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.9em; }
+.shelf .account .usage .track { flex: 1; width: auto; }
+.shelf .account button { padding: 0.15rem 0.6rem; font-size: 0.85em; }
+/* Push notifications on this device, and a per-project mute once they are on */
+.shelf .account .push { display: flex; flex-direction: column; gap: 0.1rem; }
+.shelf .account .toggle { display: flex; align-items: center; gap: 0.45rem; margin: 0; padding: 0.15rem 0; color: var(--ink); font-size: 1em; cursor: pointer; }
+.shelf .account .toggle[hidden] { display: none; }
+.shelf .account .toggle input { width: auto; margin: 0; accent-color: var(--accent); flex: none; }
+.shelf .account .toggle:has(input:disabled) { color: var(--muted); cursor: default; }
+.shelf .account .push .hint { color: var(--muted); font-size: 0.9em; padding: 0.15rem 0; }
+.shelf .column h3 .more { font-size: 0.85em; text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--accent); text-decoration: none; }
+.nav-item { display: block; text-decoration: none; padding: 0.3rem 0.5rem; border-radius: 6px; font-size: 0.92em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-item:hover { background: var(--panel); }
+.nav-item.active { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); font-weight: 600; }
+.shelf > summary .project-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.25rem; }
+.shelf > summary .project-title .label { flex: 0 1 auto; background: none; border: 0; border-radius: 6px; padding: 0.2rem 0.35rem; margin-left: -0.35rem; color: inherit; font-weight: inherit; text-align: start; }
+.shelf[open] > summary .project-title .label:is(:hover, :focus-visible) { background: var(--panel); color: var(--accent); }
+/* The name's text lines up with the panel's edge, or sits just after the scheme's icon. */
+.shelf[open] > summary .project-title .scheme-icon:not([hidden]) + .label { margin-left: -0.25rem; }
+.shelf:not([open]) > summary .project-title .label { padding: 0; margin: 0; }
+:is(.shelf, .sidebar) > summary .rename { flex: none; min-width: 32px; min-height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 6px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
+:is(.shelf, .sidebar) > summary .rename:is(:hover, :focus-visible) { color: var(--accent); background: var(--panel); }
+.shelf > summary .rename-input { flex: 1; min-width: 0; font-weight: 650; padding: 0.25rem 0.4rem; user-select: text; -webkit-user-select: text; }
+:is(.shelf, .sidebar):not([open]) > summary .rename { display: none; }
+.shelf .column h3 .browse { font-size: 0.85em; text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--accent); text-decoration: none; }
+.shelf .column h3 .more:hover, .shelf .column h3 .browse:hover, .shelf .column h3 .browse.active { text-decoration: underline; }
+.shelf .sub { margin-top: 0.6rem; }
+.shelf .sub h4 { margin: 0 0 0.3rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); display: flex; gap: 0.4rem; align-items: center; }
+.shelf .sub h4 .count { font-weight: normal; }
+.shelf .sub.fold > summary { cursor: pointer; list-style: none; margin: 0 0 0.3rem; padding: 0.15rem 0; font-size: 0.8rem; font-weight: 600; color: var(--muted); display: flex; gap: 0.4rem; align-items: center; user-select: none; }
+.shelf .sub.fold > summary::-webkit-details-marker { display: none; }
+.shelf .sub.fold > summary::before { content: '▸'; }
+.shelf .sub.fold[open] > summary::before { content: '▾'; }
+.shelf .sub.fold > summary .count { font-weight: normal; }
+.view-all { display: flex; justify-content: space-between; text-decoration: none; color: var(--accent); font-size: 0.9em; padding: 0.3rem 0.5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.view-all:hover, .view-all.active { border-color: var(--accent); }
+.view-all .count, .chip .count { color: var(--muted); }
+.shelf .shared-link { display: inline-block; margin-top: 0.25rem; padding: 0.2rem 0.4rem; font-size: 0.85em; color: var(--accent); text-decoration: none; }
+.shelf .shared-link:hover, .shelf .shared-link.active { text-decoration: underline; }
+.shared-list { display: flex; flex-direction: column; gap: 0.15rem; max-width: 48rem; }
+.artifact-item { display: flex; gap: 0.5rem; align-items: center; text-decoration: none; padding: 0.3rem 0.4rem; border-radius: 6px; min-width: 0; }
+.artifact-item:hover { background: var(--panel); }
+.artifact-item.active { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.artifact-item.missing { opacity: 0.6; }
+.artifact-item .text { display: flex; flex-direction: column; min-width: 0; }
+.artifact-item .name { font-size: 0.88em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.artifact-item .meta { font-size: 0.75em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.badge { flex: none; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.03em; min-width: 2.6rem; text-align: center; padding: 0.15rem 0.25rem; border-radius: 4px; color: #fff; background: var(--closed); }
+.badge.k-markdown, .badge.k-text { background: #4b5563; }
+.badge.k-canvas { background: #7c3aed; }
+.badge.k-pdf { background: #b91c1c; }
+.badge.k-html { background: #c2410c; }
+.badge.k-download { background: #047857; }
+.badge.big { font-size: 1rem; padding: 0.4rem 0.6rem; }
+
+/* Artifacts in the main panel */
+.artifacts-main { min-width: 0; }
+.artifacts-main .ticket-head input[type=search] { margin-top: 0.6rem; }
+.artifacts-main .ticket-head .meta a { color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem; }
+.chip { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.65rem; font-size: 0.82em; }
+.chip.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.artifact-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.artifact-card { position: relative; display: block; text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.5rem 0.6rem 0.6rem; min-width: 0; }
+.artifact-card:hover { border-color: var(--accent); }
+.artifact-card.missing { opacity: 0.6; }
+.artifact-card .preview { height: 110px; display: flex; align-items: center; justify-content: center; background: var(--code-bg); border-radius: 6px; overflow: hidden; margin-bottom: 0.45rem; }
+.artifact-card .name { font-weight: 600; font-size: 0.92em; overflow-wrap: anywhere; }
+.artifact-card .meta { color: var(--muted); font-size: 0.78em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.artifact-card .pin { position: absolute; top: 0.8rem; right: 0.9rem; }
+.shared-list .artifact-item .pin { margin-left: auto; flex: none; }
+button.pin { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; width: 1.9rem; height: 1.9rem; padding: 0; line-height: 1; font-size: 1rem; }
+button.pin:hover { color: var(--accent); border-color: var(--accent); }
+button.pin.on { color: var(--accent); }
+.artifact-body { min-width: 0; }
+.artifact-frame { width: 100%; height: 75vh; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.artifact-text { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.artifact-media { display: block; max-width: 100%; max-height: 75vh; border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); }
+/* A comment on a file, kept in reach under it; it goes to the thread's chat. */
+.file-comment { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 0.75rem; border-top: 1px solid var(--line); }
+.file-comment textarea { display: block; resize: none; overflow-y: auto; min-height: 2.4rem; line-height: 1.4; }
+.file-comment .row { margin-top: 0.5rem; gap: 0.5rem; flex-wrap: nowrap; }
+.file-comment button.small { flex: none; padding: 0.2rem 0.65rem; font-size: 0.85em; }
+.file-comment .status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-comment .status a { color: var(--accent); }
+.file-comment .quote[hidden] { display: none; }
+.file-comment .quote { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; padding: 0.3rem 0.3rem 0.3rem 0.6rem; border-left: 3px solid var(--accent); border-radius: 4px; background: var(--code-bg); font-size: 0.88em; color: var(--muted); }
+.file-comment .quote .text { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: pre-wrap; }
+.file-comment .quote button { flex: none; width: 1.6rem; height: 1.6rem; padding: 0; line-height: 1; }
+
+/* Properties: the "🏷 N" chip in a minion's header, its popover, and the scheme's Properties page. */
+.prop-chip { position: relative; flex: none; }
+.prop-chip > summary { list-style: none; cursor: pointer; }
+.prop-chip > summary::-webkit-details-marker { display: none; }
+.tag-chip { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.25rem 0.55rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 0.78em; line-height: 1.3; }
+.prop-chip[open] > .tag-chip { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.prop-pop { position: absolute; z-index: 10; top: calc(100% + 6px); right: 0; width: min(270px, 80vw); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 0.45); padding: 0.6rem 0.7rem; font-size: 0.9em; }
+.prop-pop h4 { margin: 0 0 0.4rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.prop-pop dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.6rem; margin: 0; align-items: center; }
+.prop-pop dt { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85em; }
+.prop-pop dd { margin: 0; display: flex; flex-wrap: wrap; gap: 0.3rem; min-width: 0; }
+.prop-pop .pv-pick { color: var(--ink); cursor: pointer; }
+.prop-pop .pv-pick:hover, .prop-pop .pv-pick:focus-visible { border-color: var(--accent); }
+.prop-pop .assign-input { flex: 1 1 8rem; min-width: 0; width: auto; padding: 0.2rem 0.5rem; }
+.prop-pop .foot { margin-top: 0.5rem; padding-top: 0.45rem; border-top: 1px solid var(--line); display: flex; gap: 0.5rem; align-items: center; font-size: 0.85em; color: var(--muted); }
+.prop-pop .foot a { color: var(--accent); text-decoration: none; white-space: nowrap; }
+.prop-pop .foot .spacer { flex: 1; }
+.pv { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 999px; background: var(--code-bg); border: 1px solid var(--line); font-size: 0.92em; line-height: 1.3; }
+.props-body { overflow-y: auto; padding-bottom: 2rem; }
+.prop-key { border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.75rem; margin: 0.5rem 0; }
+.prop-key.proposed { border-style: dashed; }
+.prop-key > .row { gap: 0.5rem; flex-wrap: wrap; }
+.prop-key-name { font-weight: 600; }
+.prop-desc { margin: 0.35rem 0; white-space: pre-line; }
+.pv-list { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.4rem; }
+.pv-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 0.15rem 0; }
+.pv-row .pv-desc { flex: 1 1 12rem; }
+.pv-row button { padding: 0.15rem 0.5rem; font-size: 0.8em; }
+.pv-flag { font-size: 0.75em; padding: 0.15rem 0.45rem; border-radius: 999px; background: color-mix(in srgb, var(--accent) 15%, var(--panel)); color: var(--ink); line-height: 1.3; }
+.pv-row.proposed .pv { border-style: dashed; }
+.pv-add { gap: 0.4rem; flex-wrap: wrap; margin-top: 0.45rem; }
+.pv-add input[type=text] { flex: 1 1 9rem; min-width: 0; width: auto; }
+.pv-warn { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; color: var(--muted); font-size: 0.85em; }
+.pv-warn:empty { display: none; }
+.prop-new-key { margin-top: 1rem; }
+.props-main .ticket-head > .row > h2 { flex: 1 1 auto; }
+.props-main .ticket-head .meta { white-space: normal; overflow: visible; text-overflow: clip; }
+.props-main .small { font-size: 0.85em; }
+.props-main button.small { padding: 0.2rem 0.6rem; font-size: 0.85em; }
+.pv-add select { flex: none; width: auto; }
+.pv-add label { display: inline-flex; align-items: center; gap: 0.3rem; width: auto; margin: 0; color: var(--muted); }
+.pv-add input[type=checkbox] { width: auto; margin: 0; }
+/* The popover hangs from the start of the line under the title (.head-sub), so it stays on screen wherever the chip lands; on a phone it spans the line. */
+.ticket-head .head-sub > .prop-chip { position: static; }
+.ticket-head .head-sub .prop-pop { left: 0; right: auto; }
+@media (max-width: 800px) { .ticket-head .head-sub .prop-pop { right: 0; width: auto; } }
+
+/* Full-screen file viewer (#79): a file a chat linked, as big as it fits, with that chat in a
+   compact column beside it (below it on phones) and nothing else on screen. */
+dialog.viewer {
+  position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0;
+  background: var(--bg); color: var(--ink); display: grid; grid-template-columns: minmax(0, 1fr) clamp(20rem, 30vw, 28rem);
+  padding-top: env(safe-area-inset-top, 0px); box-sizing: border-box; overflow: hidden;
+}
+dialog.viewer:not([open]) { display: none; }
+body:has(dialog.viewer[open]) { overflow: hidden; }
+.viewer-file { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.viewer-bar { flex: none; display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--line); }
+.viewer-bar .name { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 0.6rem; }
+.viewer-bar h2 { margin: 0; font-size: 1rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.viewer-bar .meta { flex: none; color: var(--muted); font-size: 0.8em; white-space: nowrap; }
+.viewer-bar .close-view { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); }
+.viewer-bar .close-view:hover, .viewer-bar .close-view:focus-visible { background: var(--line); color: var(--ink); }
+/* The stage gives the file every pixel left; images and videos scale to fit it, up or down. */
+.viewer-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0.75rem; overflow: auto; overscroll-behavior: contain; }
+.viewer-stage > a { display: contents; }
+.viewer-stage .artifact-media { width: 100%; height: 100%; max-height: none; object-fit: contain; border: 0; border-radius: 0; background: none; }
+.viewer-stage .artifact-frame { width: 100%; height: 100%; }
+/* Full screen for HTML pages: sized like the Open link beside it. Where a frame can't go full screen
+   (iPhone), it fills the window with a close button over it. */
+button.full-screen { padding: 0.2rem 0.65rem; font-size: 0.85em; }
+.artifact-frame.frame-fill { position: fixed; inset: 0; z-index: 1000; width: 100%; height: 100dvh; border: 0; border-radius: 0; }
+.frame-fill-close { position: fixed; z-index: 1001; top: max(0.5rem, env(safe-area-inset-top, 0px)); right: max(0.5rem, env(safe-area-inset-right, 0px)); display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; padding: 0; border-radius: 999px; background: rgb(0 0 0 / 0.65); color: #fff; font-size: 1.3rem; }
+.viewer-stage.k-markdown, .viewer-stage.k-text, .viewer-stage.k-canvas { display: block; }
+.viewer-stage > .msg.doc, .viewer-stage > .artifact-text { max-width: 52rem; margin: 0 auto; }
+/* The chat, compact: smaller type, and no properties, find, dismiss or × in its bar. */
+dialog.viewer > .chat { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid var(--line); padding: 0 0.75rem; font-size: 0.88rem; }
+dialog.viewer .ticket-head { top: 0; margin: 0 0 0.75rem; }
+dialog.viewer .ticket-head > .row > h2 { font-size: 0.95rem; }
+dialog.viewer .ticket-head :is(.prop-chip, .find-box, .head-nav > :not(.refresh-btn), .close-view, button[title='Dismiss minion']) { display: none; }
+dialog.viewer .msg .file-preview img, dialog.viewer .msg .file-preview video { max-height: 10rem; }
+dialog.viewer .composer textarea { min-height: 2.6rem; height: 2.6rem; max-height: 10rem; }
+dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display: none; }
+@media (max-width: 800px) {
+  /* Phones: the file on top with most of the height, the chat below it. */
+  dialog.viewer { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); }
+  dialog.viewer > .chat { border-left: 0; border-top: 1px solid var(--line); }
+  .viewer-bar .meta, .viewer-bar a.wide-only { display: none; }
+  .viewer-stage { padding: 0.4rem; }
+  /* The chat gets little height here: the title takes one line, the state, where the change is, Stop and ↻ the next, and the readout waits for the full chat. */
+  dialog.viewer .ticket-head > .row > h2 { -webkit-line-clamp: 1; line-clamp: 1; }
+  dialog.viewer .ticket-head .head-sub::after, dialog.viewer .ticket-head .head-sub > .spacer { display: none; }
+  dialog.viewer .ticket-head .progress { display: none; }
+  dialog.viewer .ticket-head { margin-bottom: 0.5rem; }
+}

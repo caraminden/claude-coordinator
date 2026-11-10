@@ -1,0 +1,163 @@
+/* Settings: its tabs, the instructions editor, Machines, Members and People, accounts. */
+/* Settings: the link beside Sign out (with how many properties wait for review), and the page's tabs */
+.shelf .account .settings-link { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.6rem; }
+.shelf .account > .row:first-child { flex-wrap: nowrap; gap: 0.4rem; }
+.shelf .account > .row:first-child > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shelf .account > .row:first-child > :is(a, button) { flex: none; }
+.settings-link .count, .settings-tabs a .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 0.4rem; font-size: 0.85em; line-height: 1.4; }
+.settings-link .count[hidden], .settings-tabs a .count[hidden] { display: none; }
+.settings-tabs { display: flex; gap: 0.25rem; margin-top: 0.5rem; overflow-x: auto; }
+.settings-tabs a { padding: 0.3rem 0.7rem; border-radius: 6px; color: var(--muted); text-decoration: none; white-space: nowrap; font-size: 0.9em; }
+.settings-tabs a:hover { background: var(--panel); color: var(--ink); }
+.settings-tabs a .count { display: inline-block; margin-left: 0.35rem; font-weight: 600; }
+.settings-tabs a.active { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line); }
+.ticket-head button.tune-up { flex: none; padding: 0.3rem 0.7rem; font-size: 0.9em; white-space: nowrap; }
+/* Project instructions: the editor with its import picker */
+.instructions-tools { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.75rem 0; }
+.instructions-tools button { padding: 0.25rem 0.7rem; font-size: 0.9em; }
+.instructions-tools .small { font-size: 0.82em; }
+.instructions-text { width: 100%; min-height: 55vh; resize: vertical; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; line-height: 1.5; tab-size: 2; }
+.instructions-actions { margin-top: 0.6rem; }
+/* Approval rules and plugin folders: the editor's two lists */
+.instructions-text.settings-list { min-height: 7rem; }
+.settings-label { margin: 1rem 0 0.2rem; font-size: 1em; }
+.instructions-history details { margin: 0.3rem 0; }
+.instructions-history summary { cursor: pointer; padding: 0.2rem 0; }
+.instructions-diff { margin: 0.3rem 0 0.6rem; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.instructions-diff .add { color: var(--done); }
+.instructions-diff .del { color: var(--error); }
+.instructions-diff .gap { color: var(--muted); }
+.instructions-actions .counter.over { color: var(--error); font-weight: 600; }
+.import-picker { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 0.75rem; }
+.import-picker .sub + .sub { margin-top: 0.7rem; }
+.import-picker h4 { margin: 0 0 0.3rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.import-picker > .row { margin-top: 0.7rem; }
+.import-picker > .row button { padding: 0.25rem 0.7rem; font-size: 0.9em; }
+.import-source > summary { cursor: pointer; display: flex; flex-direction: column; padding: 0.25rem 0; list-style: none; }
+.import-source > summary::-webkit-details-marker { display: none; }
+.import-source label { display: inline-flex; gap: 0.45rem; align-items: center; margin: 0; font-size: 0.95em; color: var(--ink); cursor: pointer; }
+.import-source label input { margin: 0; width: auto; }
+.import-source .meta { color: var(--muted); font-size: 0.8em; padding-left: 1.6rem; overflow-wrap: anywhere; }
+.import-source .meta.hint { font-style: italic; }
+.import-source pre { max-height: 16rem; overflow: auto; background: var(--code-bg); border-radius: 6px; padding: 0.5rem 0.7rem; margin: 0.3rem 0 0.5rem 1.6rem; white-space: pre-wrap; }
+.import-picker .small { font-size: 0.82em; }
+
+/* Machines: the Settings tab that adds, connects and lists them */
+.dot.online { background: #16a34a; box-shadow: 0 0 0 2px color-mix(in srgb, #16a34a 25%, transparent); }
+.machine-row > .row { display: flex; gap: 0.5rem; align-items: center; min-width: 0; text-decoration: none; }
+.machine-row { padding: 0.3rem 0.4rem; border-radius: 6px; }
+.machine-row .dot { flex: none; }
+.machine-row .text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.machine-row .name { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-row .meta { color: var(--muted); font-size: 0.78em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-add { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin: 0.9rem 0; }
+.machine-add label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85em; margin-bottom: 0; }
+.machine-add label.check { flex-direction: row; align-items: center; gap: 0.4rem; align-self: end; min-height: 2.5rem; cursor: pointer; }
+.machine-add label.check input { width: auto; margin: 0; }
+.machine-setup { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 1rem; }
+.machine-setup pre { margin: 0.4rem 0 0; padding: 0.5rem 0.6rem; background: var(--code-bg); border-radius: 6px; overflow-x: auto; font-size: 0.82em; white-space: pre-wrap; word-break: break-all; user-select: all; }
+.machine-setup .small { margin: 0.3rem 0 0; font-size: 0.85em; }
+.machine-setup-ways { margin: 0.6rem 0 0.3rem; }
+.machine-setup-ways > .row { gap: 0.4rem; }
+.machine-setup-ways .chip { cursor: pointer; }
+.machine-setup code { word-break: break-all; }
+.machine-list { display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 1rem; }
+.machine-row { border: 1px solid var(--line); }
+.machine-row button { padding: 0.2rem 0.6rem; font-size: 0.82em; }
+/* The quiet list (#437): one line per machine, its status as a dot; asleep and checking get a hollow one. */
+.dot.ready { background: var(--done); }
+.dot.fix { background: var(--waiting-tint); }
+.dot.down { background: var(--error); }
+.dot.asleep, .dot.checking { background: none; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.machines-bar { display: flex; align-items: center; gap: 0.5rem; margin: 0.9rem 0 0.4rem; }
+.machines-bar h3 { margin: 0; font-size: 1em; }
+.machines-main .machine-add[hidden] { display: none; }
+h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.machine-line { padding: 0; background: var(--panel); border-radius: var(--radius); }
+.machine-line .machine-head { display: flex; gap: 0.6rem; align-items: center; min-width: 0; padding: 0 0.75rem 0 0; }
+.machine-line .machine-open { flex: 1; display: flex; gap: 0.6rem; align-items: center; min-width: 0; padding: 0.55rem 0 0.55rem 0.75rem; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius); min-height: 0; }
+.machine-line .machine-open .text { flex: 1; min-width: 0; display: flex; flex-direction: column; white-space: normal; overflow-wrap: anywhere; }
+.machine-line .machine-open:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.machine-line .name { font-size: 0.95em; font-weight: 600; }
+.machine-line .meta { font-size: 0.82em; white-space: normal; }
+.machine-line .machine-head > button:not(.machine-open) { flex: none; }
+.machine-body { border-top: 1px solid var(--line); padding: 0.6rem 0.75rem; display: grid; gap: 0.6rem; font-size: 0.88em; }
+.machine-kv { display: grid; grid-template-columns: 7rem 1fr; gap: 0.45rem 0.8rem; align-items: baseline; min-width: 0; }
+.machine-kv > div { min-width: 0; overflow-wrap: anywhere; }
+.machine-kv .machine-lending, .machine-kv .machine-notes { margin: 0; font-size: 1em; }
+.machine-kv .row.small { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.2rem; }
+.machine-kv label.always-on { display: flex; gap: 0.4rem; align-items: center; margin: 0.2rem 0 0; cursor: pointer; }
+.machine-kv label.always-on input { width: auto; margin: 0; }
+.machine-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.machine-warning { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; padding: 0.4rem 0.6rem; border-radius: var(--radius-sm); background: var(--notice-bg); border-left: 3px solid var(--notice-bar); font-size: 0.85em; }
+.machine-warning[hidden] { display: none; }
+.machine-warning .dot { flex: none; }
+.machine-warning a { color: inherit; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 600px) {
+  .machine-kv { grid-template-columns: 1fr; gap: 0.15rem; }
+  .machine-kv > span.muted { margin-top: 0.35rem; }
+}
+.machines-main > p.small { font-size: 0.85em; }
+.machines-bar.runners-bar { margin-top: 0; flex-wrap: wrap; }
+.machines-bar.runners-bar button { flex: none; }
+.machine-notes { margin: 0.3rem 0 0.1rem 1.1rem; font-size: 0.85em; }
+.machine-notes summary { cursor: pointer; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-notes textarea { width: 100%; margin: 0.4rem 0; font-size: 0.95em; }
+.machine-notes .row { display: flex; gap: 0.5rem; align-items: center; }
+/* What a machine lends (#439): a tick per MCP server and folder its agent found. */
+.machine-lends { display: grid; gap: 0.5rem; min-width: 0; }
+.machine-lends p { margin: 0; }
+.machine-lends label.row { display: flex; flex-wrap: nowrap; gap: 0.4rem; align-items: center; padding: 0.15rem 0; margin: 0; cursor: pointer; }
+.machine-lends label.row input { width: auto; margin: 0; flex: none; }
+.machine-lends .machine-workspace { margin: 0 0 0.3rem 1.4rem; color: var(--muted); }
+.machine-lends button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.machine-lends summary { cursor: pointer; color: var(--muted); }
+.machine-lends details p { margin: 0.4rem 0; }
+.machine-lends pre { overflow-x: auto; font-size: 0.9em; margin: 0.3rem 0; padding: 0.5rem 0.6rem; background: var(--code-bg); border-radius: 6px; }
+.machine-workspace { margin: 0.3rem 0; overflow-wrap: anywhere; }
+.machine-workspace ul { margin: 0.2rem 0 0; padding-left: 1.2rem; }
+.machine-lending { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+/* A scheme on a machine's list (#438): its name and a remove button, in one pill. */
+.scheme-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.3rem 0.2rem 0.65rem; font-size: 0.85em; line-height: 1.3; }
+.scheme-chip button { flex: none; width: 1.3rem; height: 1.3rem; padding: 0; border-radius: 50%; line-height: 1; background: transparent; color: var(--muted); border: 0; }
+.scheme-chip button:hover { background: var(--line); color: var(--ink); }
+/* Phone: the × and the picker are tap targets, a control's height. */
+@media (max-width: 800px) {
+  .scheme-chip { padding: 0 0 0 0.75rem; }
+  .scheme-chip button { width: var(--citadel-control-h); height: var(--citadel-control-h); font-size: 1.15em; }
+  .machine-lending select.add-scheme { min-height: var(--citadel-control-h); }
+}
+.machine-lending select.add-scheme { width: auto; margin: 0; padding: 0.33rem 0.5rem; border-radius: 999px; font-size: 0.85em; line-height: 1.3; color: var(--muted); cursor: pointer; }
+
+/* Settings → Members and People */
+.people-list { display: flex; flex-direction: column; gap: 0.25rem; margin: 1rem 0; }
+.person-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding: 0.4rem; border-radius: 6px; border: 1px solid var(--line); }
+.person-row .text { display: flex; flex-direction: column; min-width: 8rem; flex: 1; }
+.person-row .meta { color: var(--muted); font-size: 0.8em; }
+.person-row .turns-toggle { display: inline-flex; gap: 0.3rem; align-items: center; margin: 0; }
+.person-row .turns-toggle input { width: auto; margin: 0; }
+.person-row button { padding: 0.2rem 0.6rem; font-size: 0.82em; }
+.person-row .person-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.people-add { margin-top: 0.5rem; }
+.contraption-list { display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
+.contraption .row { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+.contraption-people { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; align-items: center; margin: 0.5rem 0; }
+.contraption-people .turns-toggle { display: inline-flex; gap: 0.3rem; align-items: center; margin: 0; }
+.contraption-people .turns-toggle input { width: auto; margin: 0; }
+.contraption details > summary { cursor: pointer; padding: 0.2rem 0; }
+.contraption-service { margin: 0.5rem 0; }
+.contraption-service .service-buttons { gap: 0.3rem; }
+.contraption-service pre { max-height: 20rem; overflow: auto; user-select: text; }
+.people-add[hidden] { display: none; }
+.people-add select { width: auto; flex: 1; max-width: 20rem; }
+.account-form { display: flex; flex-direction: column; gap: 0.5rem; max-width: 24rem; margin-top: 1rem; }
+.account-card { display: flex; flex-direction: column; gap: 0.5rem; max-width: 36rem; margin-top: 1.25rem; padding: 0.75rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.account-card h3 { margin: 0; font-size: 1rem; display: flex; gap: 0.5rem; align-items: center; }
+.account-card p { margin: 0; }
+.account-card .kv { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.75rem; margin: 0; font-size: 0.9em; }
+.account-card .kv dt { color: var(--muted); }
+.account-card .kv dd { margin: 0; overflow-wrap: anywhere; }
+.account-card a.button:not(.secondary) { background: var(--accent); color: var(--on-accent); padding: 0.45rem 0.9rem; font-size: 1em; }
+.link-chip { font-size: 0.75rem; font-weight: 500; line-height: 1.3; padding: 0.15rem 0.55rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.link-chip.ok { color: var(--done); border-color: var(--done); }
+.link-chip.warn { color: var(--waiting); border-color: var(--waiting); }

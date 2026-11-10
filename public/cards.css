@@ -1,0 +1,88 @@
+/* Cards in a chat: questions, approvals, merges, plans, galleries, ultra reviews, and the pointer back to an answer. */
+/* Ultra review (#432): its dialog, and its card in the chat (busy until the findings land). */
+dialog.ultra-review { --cui-dialog-width: 520px; }
+.ultra-review .ur-paths[hidden] { display: none; }
+.ultra-review .ur-modes { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.75rem; }
+.ultra-review label.ur-mode { display: flex; align-items: center; gap: 0.5rem; color: var(--ink); }
+.ultra-review label.ur-mode input { width: auto; margin: 0; }
+.ultra-review label.ur-mode:has(input:disabled) { color: var(--muted); }
+.ultra-review .ur-paths textarea { font-family: var(--mono); font-size: 0.9em; }
+.ultra-review .ur-size { min-height: 1.4em; overflow-wrap: anywhere; }
+.ultra-review .ur-over, .ur-card .ur-fail { color: var(--error); }
+.ultra-review .ur-cost { font-size: 0.9em; }
+.ur-card .qtitle code, .ultra-review code { overflow-wrap: anywhere; }
+.ur-card.failed { border-color: color-mix(in srgb, var(--error) 45%, var(--line)); }
+.ur-card .ur-findings { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; margin: 0.4rem 0 0; font-size: 0.85em; }
+.ur-card .ur-status summary { cursor: pointer; color: var(--ink); }
+
+/* Question cards: Claude's multiple-choice questions, answered with a click */
+.qcard { border: 1px solid color-mix(in srgb, var(--running) 45%, var(--line)); border-radius: 10px; background: var(--panel); padding: 0.6rem 0.85rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.qcard > .who { font-size: 0.8em; color: var(--running); font-weight: 600; margin-bottom: -0.35rem; }
+.qcard .qtitle { font-weight: 600; margin-bottom: 0.4rem; overflow-wrap: anywhere; }
+.qcard .chip { display: inline-block; font-size: 0.72em; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--running); border: 1px solid color-mix(in srgb, var(--running) 40%, var(--line)); border-radius: 999px; padding: 0 0.45rem; margin-right: 0.4rem; vertical-align: 0.1em; }
+.qcard .opts { display: flex; flex-direction: column; gap: 0.35rem; }
+.qcard .opt { display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; text-align: left; width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 0.45rem 0.7rem; font: inherit; cursor: pointer; }
+.qcard .opt:hover:not(:disabled) { border-color: var(--running); }
+.qcard .opt.picked { border-color: var(--running); background: color-mix(in srgb, var(--running) 12%, var(--panel)); }
+.qcard .opt .label { font-weight: 600; }
+.qcard .opt .rec { font-weight: 500; font-size: 0.85em; color: var(--running); }
+.qcard .opt .desc { font-size: 0.85em; color: var(--muted); }
+.qcard .other { margin-top: 0.35rem; font-size: 0.92em; }
+.qcard .row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85em; }
+.qcard .opt:disabled { opacity: 1; color: var(--ink); cursor: default; }
+.qcard.answered .opt:not(.picked) { opacity: 0.5; }
+/* Approval cards: the command (or tool input) people approve, shown as it will run */
+.acard { border-color: color-mix(in srgb, var(--waiting) 50%, var(--line)); }
+.acard > .who, .acard .chip { color: var(--waiting); }
+.acard .chip { border-color: color-mix(in srgb, var(--waiting) 45%, var(--line)); padding: 0.1rem 0.45rem; }
+.acard .desc { font-size: 0.88em; color: var(--muted); margin-top: -0.45rem; }
+.acard .acmd { margin: 0; padding: 0.45rem 0.6rem; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow: auto; }
+.acard .acmd.extra { font-size: 0.78em; color: var(--muted); }
+.acard .anote { font-size: 0.85em; color: var(--muted); }
+.acard.answered { border-color: var(--line); }
+/* A gh pr merge card (#200): the PR in place of the command, which sits behind Show command. */
+.mcard .qtitle { margin-bottom: 0; }
+.mcard .mnum { color: var(--muted); font-weight: 500; text-decoration: none; }
+.mcard a.mnum:hover { text-decoration: underline; }
+.mcard .mbranch { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-top: -0.4rem; font-size: 0.85em; color: var(--muted); }
+.mcard .mbranch code { padding: 0.1rem 0.35rem; background: var(--code-bg); border: 1px solid var(--line); border-radius: 4px; color: var(--ink); overflow-wrap: anywhere; }
+.mcard .mmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.8rem; font-size: 0.85em; color: var(--muted); }
+.mcard .mmethod { padding: 0.1rem 0.5rem; border: 1px solid color-mix(in srgb, var(--held) 40%, var(--line)); border-radius: 999px; color: var(--held); font-weight: 600; }
+.mcard .ok { color: var(--done); font-weight: 600; }
+.mcard .bad { color: var(--error); font-weight: 600; }
+.mcard .mwarn { margin-top: -0.4rem; font-size: 0.85em; color: var(--waiting); }
+.mcard .mtoggle { align-self: flex-start; margin: -0.4rem 0; padding: 0.2rem 0; background: none; border: 0; color: var(--muted); font-size: 0.82em; }
+.mcard .mtoggle:hover { color: var(--ink); }
+.mcard .mcall { display: flex; flex-direction: column; gap: 0.75rem; }
+.mcard .mcall .desc { margin-top: 0; }
+.mcard .mcall[hidden] { display: none; }
+.mcard button.go { background: var(--done); color: #fff; font-weight: 600; font-size: 0.85em; padding: 0.3rem 0.8rem; }
+.mcard.answered .anote { display: none; }
+@media (prefers-color-scheme: dark) { .mcard button.go { color: #0b1f12; } }
+.acard.answered > .who, .acard.answered .chip { color: var(--muted); border-color: var(--line); }
+/* Options with pictures: a gallery of tiles, each a thumbnail (opens full size) over its pick button. */
+.pcard .pbody { border-left: 3px solid color-mix(in srgb, var(--running) 35%, var(--line)); padding-left: 0.75rem; overflow-wrap: anywhere; }
+.pcard .pbody > div > :first-child { margin-top: 0; }
+.pcard .pbody > div > :last-child { margin-bottom: 0; }
+.pcard .pnotes { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; }
+.pcard.answered { border-color: var(--line); }
+.pcard.answered > .who, .pcard.answered .chip { color: var(--muted); border-color: var(--line); }
+.pcard.p-superseded .pbody { opacity: 0.55; }
+.qcard .opts.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 0.5rem; }
+.qcard .tile { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.qcard .tile:hover { border-color: var(--running); }
+.qcard .tile:has(.opt.picked) { border-color: var(--running); box-shadow: 0 0 0 1px var(--running); }
+.qcard .tile .thumb { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 4 / 3; background: var(--code-bg); border-bottom: 1px solid var(--line); }
+/* Out of the flow, so a tall picture can't stretch its tile past 4:3. */
+.qcard .tile .thumb img, .qcard .tile .thumb video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; }
+.qcard .tile .thumb.none { color: var(--muted); font-size: 0.85em; }
+.qcard .tile .opt { flex: 1; justify-content: center; border: 0; border-radius: 0; background: transparent; }
+.qcard .tile .opt.picked { background: color-mix(in srgb, var(--running) 12%, var(--panel)); }
+.qcard.answered .tile:not(:has(.opt.picked)) { opacity: 0.5; }
+.qcard.answered .tile .opt:not(.picked) { opacity: 1; }
+@media (max-width: 800px) { .qcard .opts.gallery { grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); } }
+
+/* "Cara picked Tabs ↑": an answer given in a card far above, pointing back to it */
+.answer-ref { display: flex; justify-content: flex-end; }
+.answer-ref button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: 0.85em; color: var(--muted); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 999px; padding: 0.25rem 0.75rem; cursor: pointer; }
+.answer-ref button:hover { color: var(--ink); }

@@ -1,0 +1,106 @@
+/* The composer under a chat: the message box, its button row and pickers, one-tap replies, attachments. */
+.composer { position: sticky; bottom: 0; background: var(--bg); padding: 0.75rem 0; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)); margin-top: 1rem; }
+/* It grows with its text (composer.js fitHeight), like the new-minion box, up to a cap that leaves the chat in view. */
+.composer textarea { min-height: 4.5rem; max-height: 40vh; resize: none; overflow-y: auto; }
+/* 16px on phones, so iOS Safari doesn't zoom in on focus (as ui/composer.js does for apps; Citadel's textarea font rule outweighs its :where()). */
+@media (max-width: 800px) { .composer textarea { font-size: 16px; } }
+.composer .composer-note { margin: 0 0 0.4rem; }
+.composer .row { margin-top: 0.5rem; }
+.composer button.small { padding: 0.2rem 0.65rem; font-size: 0.85em; }
+/* Latest stays in the composer's button row at every width, so it never covers chat words (#212, #231). */
+.composer :is(.to-latest, .to-card)[hidden] { display: none; }
+/* One-tap replies (public/replies.js): outlined pills that send their text, above the composer. */
+.replies { display: flex; flex-wrap: wrap; gap: 0.35rem; min-width: 0; }
+button.reply-chip { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line)); border-radius: 999px; padding: 0.25rem 0.75rem; font-size: 0.85em; font-weight: 600; line-height: 1.3; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.reply-chip:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, var(--panel)); }
+button.reply-chip.sent { background: var(--accent); color: var(--on-accent); opacity: 1; }
+#chat-payer[hidden] { display: none; }
+.payer-line { font-size: 0.85rem; line-height: 1.4; padding: 0.5rem 0.65rem; margin-bottom: 0.5rem; border-radius: 6px; background: var(--code-bg); }
+.payer-line.warn { background: color-mix(in srgb, var(--waiting-tint) 16%, transparent); }
+.payer-line.cold { color: var(--muted); }
+.payer-line .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.45rem; }
+.payer-chip, .payer-line button { white-space: nowrap; flex: none; }
+.replies-bar[hidden] { display: none; }
+.replies-bar { margin-bottom: 0.5rem; }
+.attachments[hidden] { display: none; }
+.attachments { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
+.attachments .thumb { position: relative; }
+.attachments img { display: block; height: 4.5rem; max-width: 9rem; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+.attachments .thumb button { position: absolute; top: -0.4rem; right: -0.4rem; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
+.attachments { align-items: center; }
+.attachments .file-chip { max-width: min(100%, 22rem); }
+.attachments .file-chip button { flex: none; width: 1.4rem; height: 1.4rem; padding: 0; border-radius: 50%; line-height: 1; background: var(--ink); color: var(--bg); }
+
+/* Model and effort pickers beside Send */
+.composer .pickers { display: inline-flex; gap: 0.35rem; }
+.composer select.picker { width: auto; padding: 0.2rem 0.4rem; font-size: 0.82em; color: var(--ink); background: var(--panel); border-radius: 6px; cursor: pointer; }
+/* No choice made: the default, in grey. */
+.composer select.picker.is-default { color: var(--muted); }
+.composer select.picker option { color: var(--ink); }
+.composer select.picker option[value=""] { color: var(--muted); }
+.composer select.picker:hover, .composer select.picker:focus { color: var(--ink); border-color: var(--accent); }
+/* Plugins (#361): a button styled as the pickers, with a checkbox menu over it. */
+.composer .plugin-picker { position: relative; display: inline-flex; }
+.composer .plugin-picker[hidden] { display: none; }
+.composer button.picker { width: auto; padding: 0.2rem 0.4rem; font-size: 0.82em; font-weight: normal; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: var(--control-h); }
+.composer button.picker.is-default { color: var(--muted); }
+/* The selects' ▾, so it reads as a picker too. */
+.composer button.picker::after { content: ' ▾'; color: var(--muted); }
+.composer button.picker:hover, .composer button.picker:focus-visible { color: var(--ink); border-color: var(--accent); }
+.composer .plugin-menu { position: absolute; right: 0; bottom: calc(100% + 0.35rem); z-index: 5; display: flex; flex-direction: column; gap: 0.15rem; width: max-content; max-width: min(20rem, calc(100vw - 2rem)); padding: 0.4rem 0.5rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.12); }
+.composer .plugin-menu[hidden] { display: none; }
+.composer .plugin-menu p { margin: 0 0 0.2rem; }
+.composer .plugin-menu input[type=checkbox] { width: auto; margin: 0; padding: 0; flex: none; }
+.composer .plugin-menu label { display: flex; align-items: center; gap: 0.35rem; margin: 0; padding: 0.3rem 0.25rem; color: var(--ink); font-size: 0.9em; border-radius: 4px; cursor: pointer; overflow-wrap: anywhere; }
+.composer .plugin-menu label:hover { background: var(--line); }
+/* Phones get one settings button for the pickers (#365); on desktop its box and the rows vanish from layout,
+   leaving the pickers inline exactly as before. */
+.composer .settings-picker, .composer .picker-row { display: contents; }
+.composer .picker-row[hidden] { display: none; }
+.composer .picker-label, .composer button.settings-button { display: none; }
+@media (max-width: 800px) {
+  /* Phones: Add image, the settings button and Send (with its ▾ mid-turn) share one line. */
+  .composer .row { position: relative; gap: 0.5rem; flex-wrap: nowrap; }
+  .composer .row > .add-image, .composer .row > .to-latest, .composer .row > .to-card, .composer .settings-picker, .composer .send-group { flex: none; }
+  .composer .settings-picker { display: inline-flex; }
+  .composer button.settings-button { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-h); padding: 0.2rem 0.6rem; }
+  .composer button.settings-button .gear { font-size: 1.15em; line-height: 1; }
+  /* Something's off its default (a model, an effort, Workflow on, a plugin): an accent dot on the gear. */
+  .composer button.settings-button .dot { position: absolute; top: 0.3rem; right: 0.3rem; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--accent); }
+  .composer button.settings-button.is-default .dot { display: none; }
+  .composer button.settings-button:not(.is-default) { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+  /* The menu hangs from the whole row, not the button, so a long folder name stays on screen. */
+  .composer .pickers { display: none; }
+  /* Open, it may reach up over the thread bar (z-index 4, earlier in the page), not under it; the top bar stays on top. */
+  .composer:has(.settings-picker.open) { z-index: 4; }
+  .composer .settings-picker.open .pickers { position: absolute; right: 0; bottom: calc(100% + 0.35rem); z-index: 5; display: flex; flex-direction: column; gap: 0.1rem; width: min(22rem, 100%); max-height: calc(100dvh - 9rem); overflow-y: auto; padding: 0.4rem 0.75rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.12); }
+  .composer .picker-row { display: flex; align-items: center; gap: 0.75rem; min-height: 2.75rem; }
+  .composer .picker-row[hidden] { display: none; }
+  .composer .picker-label { display: block; flex: none; width: 4.5rem; color: var(--muted); font-size: 0.9em; }
+  /* 16px so iOS doesn't zoom into a select on tap. */
+  .composer .picker-row select.picker { flex: 1; min-width: 0; font-size: 16px; }
+  /* Plugins: its checkboxes right in the row, no button and menu of their own. */
+  #plugin-row { align-items: flex-start; }
+  #plugin-row .picker-label { padding-top: 0.8rem; }
+  .composer .picker-row .plugin-picker { position: static; flex: 1; min-width: 0; }
+  .composer .picker-row .plugin-button { display: none; }
+  .composer .picker-row .plugin-menu, .composer .picker-row .plugin-menu[hidden] { position: static; display: flex; width: auto; max-width: none; padding: 0; background: none; border: 0; box-shadow: none; }
+  .composer .picker-row .plugin-menu p { display: none; }
+  .composer .picker-row .plugin-menu label { min-height: 2.75rem; padding: 0.5rem 0.25rem; font-size: 1rem; }
+  .composer textarea { min-height: 3rem; }
+}
+.composer .add-image { line-height: 1.4; }
+/* Attach, the pickers and Send (with its ▾) share one height, content centred; taller on phones to stay tappable. */
+.composer { --control-h: 2rem; }
+@media (max-width: 800px) { .composer { --control-h: 2.5rem; } }
+.composer button.add-image, .composer button.to-latest, .composer button.to-card, .composer select.picker, .composer .send-group > button { height: var(--control-h); padding-top: 0.2rem; padding-bottom: 0.2rem; }
+
+/* Send, and while a turn runs a ▾ beside it for "Send after this turn" (Send itself steers the turn). */
+.composer .send-group { position: relative; display: inline-flex; }
+.composer .send-group .more { display: none; padding-left: 0.5rem; padding-right: 0.5rem; border-left: 1px solid color-mix(in srgb, var(--on-accent) 35%, transparent); border-radius: 0 6px 6px 0; }
+.chat.turn-running .composer .send-group .more { display: inline-block; }
+.chat.turn-running .composer .send-group > button[type=submit] { border-radius: 6px 0 0 6px; }
+.composer .send-menu { position: absolute; right: 0; bottom: calc(100% + 0.35rem); z-index: 5; padding: 0.3rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.12); }
+.composer .send-menu[hidden] { display: none; }
+.composer .send-menu button { white-space: nowrap; border: 0; }
+.composer .send-menu button:hover, .composer .send-menu button:focus-visible { background: var(--line); }

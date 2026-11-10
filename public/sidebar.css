@@ -1,0 +1,141 @@
+/* The minions panel: the list's sections and rows, search, filters and saved views, the Needs-you strip, schedules. */
+.sidebar.show-schedules > :not(summary, .schedules-pane) { display: none; }
+:is(.shelf, .sidebar) > summary .schedules-btn[aria-pressed='true'] { color: var(--accent); }
+.schedule-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.schedule { border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.75rem; display: grid; gap: 0.2rem; }
+.schedule.paused > :not(.schedule-actions) { opacity: 0.65; }
+.schedule .row { gap: 0.5rem; }
+.schedule .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedule .error { margin: 0.2rem 0 0; }
+.schedule-actions { gap: 0.4rem; margin-top: 0.3rem; }
+.schedule-actions button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
+/* Compact rows in the threads sidebar */
+.s-running { border-left-color: var(--running); }
+.s-idle, .s-new { border-left-color: var(--waiting); }
+.s-error { border-left-color: var(--error); }
+.s-closed { border-left-color: var(--closed); opacity: 0.75; }
+.thread-row .ship-badge { display: inline-block; margin-right: 0.4rem; padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.85em; font-weight: 650; line-height: 1.3;
+  color: var(--c); background: color-mix(in srgb, var(--c) 13%, var(--panel)); }
+.sidebar .new-thread { margin: 0 0 0.6rem; }
+.new-thread textarea { resize: none; overflow-y: auto; max-height: 12rem; padding: 0.3rem 0.55rem; font-size: 0.9em; line-height: 1.4; border-color: var(--accent); }
+.new-thread .error { margin: 0.3rem 0 0; }
+.sidebar .column { margin-top: 0.75rem; }
+.sidebar .column h3, .sidebar .column.closed > summary { font-size: 0.75rem; margin-bottom: 0.3rem; }
+.sidebar .new-thread + #threads { margin-top: -0.25rem; }
+
+/* Threads list, after Delve's Custom view: sections by kind of work, one compact row per thread
+   (number + short ask, state, then a terse note), stripes restarting in each section. */
+.thread-group { margin-top: 0.8rem; }
+.thread-group > h3, .thread-group > summary { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.25rem; padding-left: 0.4rem; border-left: 3px solid currentColor; }
+.thread-group > summary { cursor: pointer; color: var(--muted); list-style: none; }
+.thread-group > summary::-webkit-details-marker { display: none; }
+.thread-group > summary::after { content: ' ▸'; }
+.thread-group[open] > summary::after { content: ' ▾'; }
+.g-build > h3 { color: hsl(205 65% 45%); }
+.g-build > h3 .muted { text-transform: none; font-weight: normal; }
+.g-feature > h3 { color: hsl(265 55% 55%); }
+.g-bug > h3 { color: hsl(0 60% 52%); }
+.g-design > h3 { color: hsl(330 55% 55%); }
+.g-art > h3 { color: hsl(15 65% 50%); }
+.g-research > h3 { color: hsl(220 30% 45%); }
+.g-chore > h3 { color: hsl(180 55% 36%); }
+.g-other > h3 { color: hsl(30 35% 48%); }
+.g-ideation > h3 { color: hsl(45 75% 42%); }
+.g-promoted > h3 { color: hsl(150 50% 34%); }
+.g-parked > h3 { color: var(--muted); }
+.g-pinned > h3 { color: var(--accent); }
+.thread-row { text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 0.4rem; align-items: baseline; padding: 0.25rem 0.45rem; border-radius: 6px; text-decoration: none; color: var(--ink); font-size: 0.9em; border: 1px solid transparent; }
+.thread-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }
+.thread-row:hover { border-color: var(--line); }
+.thread-row.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+/* State colour families, one meaning each (sidebar.js rowState): you act, done, broken, working, waiting on the clock or elsewhere, asleep. */
+.f-you { --c: var(--waiting); --t: var(--waiting-tint); }
+.f-done { --c: var(--done); --t: var(--done); }
+.f-broken { --c: var(--error); --t: var(--error); }
+.f-work { --c: var(--running); }
+.f-wait { --c: var(--held); }
+.f-idle { --c: var(--closed); }
+/* Your move: a tint of its colour over the zebra striping, stronger while unread, a bit stronger again when open. */
+.thread-row.yours, .thread-group .thread-row.yours { background: color-mix(in srgb, var(--t) 9%, var(--panel)); }
+.thread-row.yours.unread, .thread-group .thread-row.yours.unread { background: color-mix(in srgb, var(--t) 20%, var(--panel)); }
+.thread-row.yours.active, .thread-group .thread-row.yours.active { background: color-mix(in srgb, var(--t) 26%, var(--panel)); }
+.thread-row .name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 450; }
+.thread-row.unread .name { font-weight: 650; }
+.thread-row .unread-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
+.thread-row.unread .unread-dot { background: var(--c); }
+.thread-row .num { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+.thread-row.coordinator { margin-top: 0.1rem; }
+#coordinator-row .thread-row { margin-bottom: 0.5rem; }
+.thread-row.coordinator .name::before { content: "◆ "; color: var(--accent); }
+.thread-row .queued { font-size: 0.8em; color: var(--running); }
+.thread-row .state { align-self: center; font-weight: 650; white-space: nowrap; font-size: 0.78em; line-height: 1.35; padding: 0.1rem 0.45rem; border-radius: 999px; font-variant-numeric: tabular-nums;
+  color: var(--c); background: color-mix(in srgb, var(--t, var(--c)) 15%, var(--panel)); }
+.thread-row .state .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .thread-row .state .pulse { animation: none; } }
+.thread-row .note { text-align: left; color: var(--ink); grid-column: 1 / -1; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-left: 12px; }
+.thread-row .note.t { color: var(--muted); }
+.thread-row .pnote { grid-column: 1 / -1; font-size: 0.85em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-left: 12px; color: color-mix(in srgb, var(--waiting) 80%, var(--ink)); }
+.thread-row.s-closed .name { color: var(--muted); }
+/* The minion's cost so far shares the note's line, at its right end. */
+.thread-row .cost { grid-row: 2; grid-column: 2 / -1; text-align: right; font-size: 0.75em; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.thread-row:has(> .cost) .note { grid-column: 1 / 2; }
+
+/* Search: threads list and find-in-chat */
+.thread-search { margin: 0 0 0.5rem; padding: 0.3rem 0.55rem; font-size: 0.9em; }
+/* Property filter: one checklist dropdown per key, under the search */
+.prop-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin: 0 0 0.6rem; }
+.prop-filter:empty { display: none; }
+.prop-filter .tag-chip { font-family: ui-monospace, "SF Mono", Menlo, monospace; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; background: transparent; }
+.prop-filter .pf-toggle::after { content: " ▾"; }
+.prop-filter .pf-toggle[aria-expanded="true"]::after { content: " ▴"; }
+.prop-filter .tag-chip.on, .prop-filter .pf-pick { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.prop-filter .pf-clear { padding: 0.25rem 0.55rem; font-size: 0.78em; line-height: 1.3; border-radius: 999px; color: var(--muted); }
+/* The panel takes a line of its own under the button and chips, and pushes the list down. */
+.pf-panel { flex: 1 0 100%; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 0.3rem 0.6rem; }
+.pf-key + .pf-key { border-top: 1px solid var(--line); }
+.pf-key > summary { display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.1rem; cursor: pointer; color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
+.pf-key > summary .pf-n { margin-left: auto; color: var(--accent); }
+.pf-key[open] > summary { color: var(--ink); }
+.pf-key > summary::before { content: "▸"; width: 0.7rem; }
+.pf-key[open] > summary::before { content: "▾"; }
+.pf-key > summary::-webkit-details-marker { display: none; }
+.pf-opt { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.1rem 0.3rem 1.1rem; cursor: pointer; color: var(--ink); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
+.pf-opt:last-child { margin-bottom: 0.3rem; }
+.pf-opt input { margin: 0; flex: none; width: auto; }
+.pf-opt .pf-n { margin-left: auto; padding-left: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pf-opt.none { color: var(--muted); }
+.saved-views { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 0.45rem; }
+.saved-views:empty { display: none; }
+.saved-views .sv { padding: 0; gap: 0; color: var(--ink); }
+.saved-views .sv.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.saved-views .sv button { background: none; border: 0; color: inherit; font-weight: normal; border-radius: 999px; line-height: 1.3; }
+.saved-views .sv-name { padding: 0.25rem 0.55rem; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-views .sv.on .sv-name { padding-right: 0.2rem; }
+.saved-views .sv-del { padding: 0.25rem 0.5rem 0.25rem 0.2rem; color: var(--muted); filter: grayscale(1); opacity: 0.75; }
+.saved-views .sv-del:hover { opacity: 1; }
+.saved-views .sv-save { padding: 0.25rem 0.55rem; font-size: 0.78em; line-height: 1.3; border-radius: 999px; color: var(--accent); border-style: dashed; }
+
+/* Needs-you inbox (#74): a strip at the top of the minions list, minimized to a count until opened. */
+.inbox-strip { margin: 0 0 0.5rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.inbox-strip[hidden] { display: none; }
+.github-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; margin: 0 0 0.5rem; padding: 0.4rem 0.7rem; border: 1px solid var(--error); border-radius: 8px; background: var(--panel); font-size: 0.9em; }
+.github-strip[hidden] { display: none; }
+.github-strip .error { flex: 1 1 12rem; overflow-wrap: anywhere; }
+.github-strip button.small { padding: 0.2rem 0.65rem; font-size: 0.9em; }
+.github-owner .row { gap: 0.5rem; }
+.github-owner input { max-width: 16rem; }
+.inbox-toggle { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.35rem 0.7rem; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 0.9em; text-align: left; cursor: pointer; }
+.inbox-toggle:hover { color: var(--accent); }
+.inbox-toggle .label { font-weight: 600; }
+.inbox-toggle .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0.1rem 0.45rem; font-size: 0.85em; line-height: 1.3; font-weight: 600; }
+.inbox-toggle .chev { color: var(--muted); }
+.inbox-rows { display: flex; flex-direction: column; max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); padding: 0.25rem; }
+.inbox-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.6rem; padding: 0.35rem 0.5rem; border-radius: 6px; color: var(--ink); text-decoration: none; font-size: 0.9em; }
+.inbox-row:hover { background: var(--bg); }
+.inbox-row.active { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.inbox-row.seen { opacity: 0.55; }
+/* The panel is narrow: the title takes the first line, what it asks and when go below it. */
+.inbox-row .name { flex-basis: 100%; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.inbox-row .num { color: var(--muted); }
+.inbox-row .asks { display: flex; gap: 0.3rem; flex: none; }
+.inbox-row .when { flex: none; font-size: 0.9em; }

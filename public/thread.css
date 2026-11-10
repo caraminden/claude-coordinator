@@ -1,0 +1,383 @@
+/* A minion's chat: its header, the messages, the progress readout, the working line. Tokens and globals: style.css. */
+/* Ticket view */
+/* Thread bar: pinned under the top bar while the chat scrolls beneath it. */
+.ticket-head {
+  position: sticky;
+  /* Tuck 1px under the top bar so pixel rounding can never open a gap between them. */
+  top: max(0px, calc(var(--topbar-h, 3rem) + var(--banner-h, 0px) - 1px));
+  z-index: 4;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 0;
+  margin: -0.6rem 0 1rem;
+}
+/* Where the minion's change is: branch, on main, deploying, live (src/branch.ts) */
+.ticket-head .ship { flex: none; display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85em; color: var(--muted); white-space: nowrap; cursor: default; }
+.ticket-head .ship .ship-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.ticket-head .ship.f-done .text, .ticket-head .ship.f-broken .text { color: var(--c); font-weight: 600; }
+/* The line under the title (#158): the state, where the change is, then ✎ Note, the properties chip and the find box, wrapping when narrow. */
+.ticket-head .onboarding-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.35rem; margin-top: 0.35rem; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.85em; color: var(--ink); background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.ticket-head .onboarding-strip > span:first-child { font-weight: 600; color: var(--accent); }
+.ticket-head .onboarding-strip button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.ticket-head .head-sub { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; margin-top: 0.35rem; min-width: 0; }
+/* A state too long for its line gets the line to itself, the rest wrapping under it; only then is it cut short. */
+.ticket-head .head-sub > .head-state { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
+.ticket-head .head-sub > :is(button, .find-box) { flex: none; white-space: nowrap; }
+.ticket-head > .row > .find-box { flex: none; }
+/* People's own note (#146): a dashed amber strip, so it never reads as the minion's words. */
+.ticket-head .pnote { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.9em; line-height: 1.4;
+  background: color-mix(in srgb, var(--waiting-tint) 13%, var(--panel)); border: 1px dashed color-mix(in srgb, var(--waiting-tint) 60%, transparent); min-width: 0; }
+.ticket-head .pnote:not(.editing) { cursor: text; }
+.ticket-head .pnote .pen { flex: none; color: var(--waiting); }
+.ticket-head .pnote .text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ticket-head .pnote .who { flex: none; color: var(--muted); font-size: 0.85em; white-space: nowrap; }
+.ticket-head .pnote input { flex: 1; min-width: 0; font: inherit; padding: 0.2rem 0.45rem; }
+.ticket-head .pnote button { flex: none; }
+.ticket-head .note-btn { flex: none; display: inline-flex; align-items: center; gap: 0.3rem; height: var(--head-btn); padding: 0 0.45rem; border: 0; border-radius: 6px; background: none; color: var(--muted); }
+.ticket-head .note-btn:is(:hover, :focus-visible) { background: var(--line); color: var(--ink); }
+.ticket-head .pin-btn.on { color: var(--accent); }
+.ticket-head .pin-btn.on .icon { fill: currentColor; }
+.ticket-head .meta { color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ticket-head button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
+/* The minion header's Stop, Dismiss and Reopen, tinted by what they do so the minion's state reads at a glance (#166). */
+button.secondary:is(.act-stop, .act-dismiss, .act-reopen) { color: var(--act); border-color: color-mix(in srgb, var(--act) 55%, var(--line)); background: color-mix(in srgb, var(--act) 9%, transparent); font-weight: 600; }
+button.secondary.act-stop { --act: var(--error); }
+button.secondary.act-dismiss { --act: var(--waiting); }
+button.secondary.act-reopen { --act: var(--done); }
+/* Back, Forward and ×: one square size, the icon centred; tap-sized on phones. */
+.ticket-head { --head-btn: 1.9rem; }
+@media (max-width: 800px) { .ticket-head { --head-btn: 2.5rem; } }
+.ticket-head .head-nav { flex: none; display: inline-flex; gap: 0.15rem; }
+.ticket-head :is(.close-view, .nav-btn) { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--head-btn); height: var(--head-btn); padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); text-decoration: none; }
+.ticket-head :is(.close-view, .nav-btn:enabled):is(:hover, :focus-visible) { background: var(--line); color: var(--ink); }
+.find-box { display: inline-flex; align-items: center; gap: 0.25rem; }
+.find-box .chat-find { width: 9rem; padding: 0.2rem 0.5rem; font-size: 0.85em; transition: width 0.15s; }
+.find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 13rem; }
+.find-box .find-count { font-size: 0.8em; min-width: 2.2rem; text-align: right; }
+/* Count and steps appear with the box's focus widening, then hold their room: typing moves nothing (rule 13). */
+.find-box .chat-find:placeholder-shown:not(:focus) ~ :is(.find-count, .find-step) { display: none; }
+.find-box .find-count:empty { visibility: hidden; }
+.find-box .find-step { padding: 0.1rem 0.45rem; font-size: 0.85em; }
+@media (max-width: 800px) { .find-box .chat-find, .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 7rem; } }
+/* Squeezed while Claude works: "." → ".." → "..." instead of "Cla…" (thread.js, stateFit). The text stays for screen readers. */
+.ticket-head .head-state.squeezed > .state-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.ticket-head .head-state.squeezed > .state-dots { display: inline; }
+/* Phones: the title gets the first line; the buttons and ‹ › × share the second. */
+@media (max-width: 800px) {
+  .ticket-head > .row { gap: 0.4rem 0.45rem; }
+  .ticket-head > .row > h2 { flex: 1 0 calc(100% - 1.1rem); min-width: 0; }
+  .ticket-head > .row > .muted { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
+  .ticket-head > .row > .spacer { display: none; }
+  .ticket-head > .row > h2 { font-size: 1rem; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+  .ticket-head > .row > button { flex: none; white-space: nowrap; }
+  .find-box .chat-find { width: 4.8rem; }
+  .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 6.5rem; }
+  /* While a search is typed, its count and arrows need room too. */
+  .find-box { gap: 0.15rem; }
+  .find-box .chat-find:not(:placeholder-shown) { width: 5.5rem; }
+  .find-box .find-count { min-width: 0; }
+  .find-box .find-step { padding: 0.1rem 0.3rem; }
+}
+/* Keep the title's line on one line on wider screens: a long title gives way to the buttons. */
+@media (min-width: 801px) {
+  .ticket-head > .row { flex-wrap: nowrap; }
+  .ticket-head > .row > h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The line under it stays one line too: a long state gives way, cut short with … (its full text on hover). */
+  .ticket-head .head-sub { flex-wrap: nowrap; }
+  .ticket-head > .row > .muted { white-space: nowrap; }
+  .ticket-head > .row > button { flex: none; white-space: nowrap; }
+  .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 11rem; }
+}
+/* Refresh button at the top of the screen, phones only (desktop browsers have their own). */
+.refresh-btn { display: none; }
+@media (max-width: 800px) {
+  .topbar .refresh-btn, .ticket-head > .row > .refresh-btn, .ticket-head .head-nav > .refresh-btn {
+    display: inline-flex; flex: none; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; padding: 0;
+    border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 1.2rem; line-height: 1; cursor: pointer;
+  }
+  .refresh-btn:hover, .refresh-btn:focus-visible { background: var(--line); color: var(--ink); }
+  /* The title leaves room for it (and the status dot, when there is one) on its line. */
+  .ticket-head > .row > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 2.35rem); }
+  .ticket-head > .row:has(> .dot) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 3.45rem); }
+  /* Pages with a close × (Settings, Artifacts…) keep it on the title's line too. */
+  .ticket-head > .row:has(> .close-view) > h2:has(+ .refresh-btn) { flex-basis: calc(100% - 5.3rem); }
+  /* Settings' Tune up shares that line too: the short title gives way instead of wrapping the buttons under it. */
+  .ticket-head > .row:has(> .tune-up) > h2:has(+ .refresh-btn) { flex: 1 1 auto; }
+  /* A minion's state shares its line with where the change is (wrapping to two lines before it is cut short);
+     the tools, the buttons, Find and ↻ ‹ › × take the next, after a break (::after). */
+  .ticket-head .head-sub > .head-state { flex: 1 1 0; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; }
+  .ticket-head .head-sub:has(> .prop-chip)::after { content: ''; order: 1; flex-basis: 100%; height: 0; margin-top: -0.35rem; }
+  .ticket-head .head-sub:has(> .prop-chip) > :not(.head-state, .ship) { order: 2; }
+  /* A minion's ✎ for a new person note (#146): just the pen on phones. */
+  .ticket-head .note-btn { width: 1.9rem; height: 1.9rem; justify-content: center; padding: 0; }
+  /* To share that line, ↻ ‹ › × are narrower than tall, and Find is just its 🔍 until tapped. */
+  .ticket-head .head-sub .head-nav { margin-left: auto; }
+  .ticket-head .head-sub .head-nav > :is(.nav-btn, .close-view) { width: 2rem; }
+  .ticket-head .head-sub .head-nav > .refresh-btn { width: 1.7rem; height: var(--head-btn); }
+  .ticket-head .head-sub .chat-find:placeholder-shown:not(:focus) { width: 2.4rem; padding-right: 0; }
+}
+
+.log { display: flex; flex-direction: column; gap: 0.6rem; }
+.msg { border-radius: 10px; padding: 0.6rem 0.85rem; background: var(--panel); border: 1px solid var(--line); overflow-wrap: anywhere; }
+.msg.user { background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.msg.user.github { background: var(--panel); border-color: var(--line); border-left: 3px solid var(--muted); }
+.msg .who { font-size: 0.8em; color: var(--muted); margin-bottom: 0.2rem; }
+.msg.coord { padding: 0; }
+.msg.coord > summary { display: flex; align-items: baseline; gap: 0.5rem; padding: 0.45rem 0.85rem; cursor: pointer; list-style: none; font-size: 0.8em; color: var(--muted); }
+.msg.coord > summary::-webkit-details-marker { display: none; }
+.msg.coord > summary::before { content: '▸'; flex: none; }
+.msg.coord[open] > summary::before { content: '▾'; }
+.msg.coord > summary .who { flex: 0 1 auto; display: flex; align-items: baseline; min-width: 0; margin: 0; font-size: inherit; }
+/* A long sender ("Peek Auras Taskmaster, for Cara, a Citadel member") gives way, so its time and tags stay in the row. */
+.msg.coord > summary .who > .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.coord > summary .who > :not(.name) { flex: none; }
+.msg.coord > summary .preview { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.msg.coord[open] > summary .preview { display: none; }
+.msg.coord > .msg { border: 0; background: none; padding: 0 0.85rem 0.6rem; }
+/* A contraption's ask (askcard.js): header and summary showing, the full text behind the toggle. */
+.msg.ask { padding: 0; }
+.msg.ask > summary { display: block; padding: 0.6rem 0.85rem; cursor: pointer; list-style: none; }
+.msg.ask > summary::-webkit-details-marker { display: none; }
+.msg.ask > summary .who::before { content: '▸ '; }
+.msg.ask[open] > summary .who::before { content: '▾ '; }
+.msg.ask > .msg { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; padding: 0.6rem 0.85rem; }
+/* Grunt reports collapse to a line each (thread.js addGruntText); a fan-out's lines share one block. */
+.msg.grunt > summary .dur { flex: none; font-variant-numeric: tabular-nums; }
+.grunts > .grunt-list { padding: 0 0.6rem 0.5rem; }
+.grunts .grunt { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; }
+.grunts .grunt > summary { padding-left: 0.25rem; padding-right: 0.25rem; }
+.msg p { margin: 0.35rem 0; }
+/* Rendered Markdown (core.js markdownDoc), in messages, plan cards and narration alike: long words and
+   paths wrap, and code blocks and tables scroll in their own box, so nothing widens the page. */
+/* Its own look (code, tables, task lists) comes with ui/markdown.js as .cui-md; these are Citadel's extras. */
+.tool pre { background: var(--code-bg); padding: 0.6rem; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; margin: 0.4rem 0; }
+.msg del, .msg del a { color: var(--muted); }
+.tool { font-size: 0.9em; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.tool summary { cursor: pointer; padding: 0.35rem 0.7rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool summary b { color: var(--ink); font-weight: 600; }
+.tool .body { padding: 0 0.7rem 0.5rem; }
+.tool.err summary { color: var(--error); }
+.tool .st { display: inline-block; width: 0.8em; text-align: center; }
+.tool.pending .st { color: var(--running); }
+
+.msg h1, .msg h2, .msg h3, .msg h4, .msg h5, .msg h6 { font-size: 1.02rem; margin: 0.9rem 0 0.35rem; }
+.msg h1, .msg h2 { font-size: 1.1rem; }
+.msg ul, .msg ol { padding-left: 1.4rem; margin: 0.35rem 0; }
+.msg.doc { padding: 1rem 1.5rem 1.5rem; line-height: 1.6; max-width: 60rem; }
+.msg.doc h1 { font-size: 1.6rem; margin: 0.6rem 0 0.8rem; }
+.msg.doc h2 { font-size: 1.3rem; margin: 1.8rem 0 0.6rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--line); }
+.msg.doc h3 { font-size: 1.1rem; margin: 1.4rem 0 0.5rem; }
+.msg.doc h4, .msg.doc h5, .msg.doc h6 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
+.msg.doc p { margin: 0.6rem 0; }
+.msg.doc ul, .msg.doc ol { padding-left: 1.4rem; margin: 0.5rem 0; }
+.msg.doc li { margin: 0.2rem 0; }
+.msg.doc img { display: block; max-width: 100%; margin: 0.75rem 0; border-radius: 6px; border: 1px solid var(--line); background: var(--code-bg); }
+.msg blockquote { margin: 0.6rem 0; padding: 0.1rem 0.9rem; border-left: 3px solid var(--line); color: var(--muted); }
+.msg hr { border: 0; border-top: 1px solid var(--line); margin: 1.2rem 0; }
+.msg .link { text-decoration: underline dotted; }
+.msg.user.pending { opacity: 0.7; }
+/* A message that didn't reach the server (composer.js notSent): kept, with ↻ and ✎ in its who-line. */
+.msg.user.not-sent { border-color: var(--error); }
+.msg .who .unsent-tag { color: var(--error); }
+.msg .images { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.4rem 0 0.2rem; }
+.msg .images img { display: block; max-height: 14rem; max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
+.msg .files { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 0.2rem; }
+.file-chip { display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%; padding: 0.4rem 0.6rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font-size: 0.9em; line-height: 1.3; text-decoration: none; }
+a.file-chip:hover { border-color: var(--muted); }
+.file-chip .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-chip .size { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.msg .who .about { color: var(--accent); }
+.msg.user.answer .answer-lines { font-size: 0.95em; }
+/* When a message or card was posted, after its who-line */
+.who .stamp { margin-left: 0.4rem; color: var(--muted); font-weight: normal; font-variant-numeric: tabular-nums; }
+/* "into the running turn", "queued for the next turn" with its ✕, "taken back by …" */
+.msg .who .msg-tag { margin-left: 0.4rem; display: inline-flex; align-items: center; gap: 0.3rem; }
+.msg .who .msg-tag::before { content: '·'; margin-right: 0.1rem; }
+.msg .who .take-back { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; padding: 0; border-radius: 50%; background: transparent; color: var(--muted); border: 1px solid var(--line); font-size: 0.75rem; line-height: 1; }
+.msg .who .take-back:hover, .msg .who .take-back:focus-visible { color: var(--ink); border-color: var(--accent); }
+.msg.user.withdrawn { opacity: 0.55; }
+.msg.user.withdrawn > :not(.who), .msg.user.withdrawn > summary .preview { text-decoration: line-through; }
+
+/* Files a thread links in its reply: a card, or the image or video itself; both open the file view. */
+.md .file-card { display: inline-flex; align-items: center; gap: 0.6rem; max-width: 100%; margin: 0.25rem 0; padding: 0.45rem 0.7rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); text-decoration: none; vertical-align: middle; }
+.md .file-card:hover { border-color: var(--accent); }
+.md .file-card img { width: 2.6rem; height: 2.6rem; object-fit: cover; border-radius: 4px; flex: none; }
+.md .file-card .text { display: flex; flex-direction: column; min-width: 0; }
+.md .file-card .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md .file-card .meta { font-size: 0.78em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md .file-preview { display: inline-block; max-width: 100%; margin: 0.35rem 0; text-decoration: none; }
+.md .file-preview img, .md .file-preview video { display: block; max-width: 100%; max-height: 22rem; border-radius: 8px; border: 1px solid var(--line); background: var(--code-bg); }
+.md .file-preview:hover img, .md .file-preview:hover video { border-color: var(--accent); }
+.md .file-preview .caption { display: block; font-size: 0.82em; color: var(--muted); margin-top: 0.2rem; }
+/* Not clickable until the server has found the file (checkFileLinks in core.js). */
+/* The markdown Copy button (ui/markdown.js), as the Machines page's: the global button rule would make it an accent button. */
+.md .cui-copy { background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 0.15rem 0.5rem; font: 500 var(--citadel-size-small)/1.3 var(--citadel-font); }
+.md .checking { pointer-events: none; }
+.md .file-missing .mark { font-size: 0.82em; color: var(--muted); }
+
+/* "#12" in messages, notes and tool results: a link to that thread in this project. */
+a.thread-ref { color: var(--accent); font-weight: 600; text-decoration: none; white-space: nowrap; }
+a.thread-ref:hover { text-decoration: underline; }
+.phases .thread-refs { color: var(--muted); }
+mark.find { background: color-mix(in srgb, var(--waiting) 35%, transparent); color: inherit; border-radius: 2px; }
+mark.find.current { background: var(--waiting); color: #fff; }
+/* What a Needs-you row or a notification opened the chat at (#236): a brief ring so the eye finds it. */
+#log .jumped { animation: jumped 2.4s ease-out; border-radius: 10px; }
+@keyframes jumped { 0%, 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 3px transparent; } }
+
+/* Work progress readout in the thread bar */
+.progress { margin-top: 0.5rem; }
+.ticket-head .progress-line {
+  display: flex; align-items: center; gap: 0.6rem; width: 100%;
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+  padding: 0.35rem 0.7rem; text-align: left; font-size: 0.9em;
+}
+.progress-line:hover { border-color: var(--accent); }
+.progress-line .text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-line .count { font-variant-numeric: tabular-nums; font-weight: 600; }
+.progress-line .chev { color: var(--muted); }
+.progress .meter { display: block; appearance: none; width: calc(100% - 0.4rem); height: 3px; border: 0; border-radius: 2px; margin: 0.25rem 0.2rem 0; background: var(--line); overflow: hidden; }
+.progress .meter.blank { visibility: hidden; }
+.progress .meter::-webkit-progress-bar { background: var(--line); }
+.progress .meter::-webkit-progress-value { background: var(--running); }
+.progress .meter::-moz-progress-bar { background: var(--running); }
+.progress-detail { max-height: 55dvh; overscroll-behavior: contain; overflow-y: auto; margin-top: 0.5rem; padding-right: 0.2rem; }
+.progress-detail .empty { margin: 0.3rem 0.5rem; font-size: 0.85em; }
+.step { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 0.35rem; background: var(--panel); }
+.step > summary { cursor: pointer; padding: 0.35rem 0.7rem; display: flex; gap: 0.5rem; align-items: baseline; list-style: none; }
+.step > summary::-webkit-details-marker { display: none; }
+.step .subject { flex: 1; min-width: 0; }
+.step .n { font-size: 0.8em; white-space: nowrap; }
+.step .icon { width: 1em; text-align: center; color: var(--muted); }
+.step.completed .icon { color: #16a34a; }
+.step.completed .subject { color: var(--muted); }
+.step.in_progress { border-color: var(--running); }
+.step.in_progress .icon { color: var(--running); animation: pulse 1.4s infinite; }
+.step.in_progress .subject { font-weight: 600; }
+.step.paused { border-color: var(--waiting); }
+.step.paused .icon { color: var(--waiting); animation: none; }
+.step > summary { flex-wrap: wrap; }
+.progress-detail .request { margin: 0.1rem 0.3rem 0.6rem; font-size: 0.9em; }
+.progress-detail .request q { font-style: italic; }
+.plan-group h4 { margin: 0.6rem 0.3rem 0.3rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.plan-group:first-of-type h4 { margin-top: 0; }
+.step-desc { margin: 0 0.7rem 0.4rem 2.2em; font-size: 0.88em; }
+.phases { list-style: none; margin: 0 0.7rem 0.3rem 2.2em; padding: 0; font-size: 0.88em; }
+.phases li { padding: 0.1rem 0; }
+.phases .st, .phases li > .cui-mark { display: inline-block; width: 1.2em; text-align: left; }
+.phases li > .cui-spin { margin-right: 0.25em; vertical-align: -0.1em; }
+.cmds { margin: 0 0.7rem 0.5rem 2.2em; font-size: 0.82em; }
+.cmds > summary { cursor: pointer; color: var(--muted); }
+.cmds .actions { padding: 0.3rem 0 0 0.5rem; }
+.step .recap { flex-basis: 100%; padding-left: 1.5em; font-size: 0.85em; color: var(--muted); }
+.step-note { margin: 0 0.7rem 0.4rem 2.2em; padding-left: 0.6rem; border-left: 2px solid var(--line); font-size: 0.88em; color: var(--muted); font-style: italic; white-space: pre-line; }
+.actions { display: flex; flex-direction: column; padding: 0 0.7rem 0.5rem 2.2em; font-size: 0.88em; }
+.act > summary { cursor: pointer; list-style: none; padding: 0.1rem 0; display: flex; align-items: baseline; gap: 0.45rem; }
+.act > summary::-webkit-details-marker { display: none; }
+.act > summary:hover .what { text-decoration: underline; text-decoration-color: var(--line); }
+.act > summary > .cui-spin { align-self: center; }
+.act .why { color: var(--error); }
+.act .what { min-width: 0; overflow-wrap: anywhere; }
+.act .body pre, .note.detail > pre { background: var(--code-bg); padding: 0.5rem; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; margin: 0.25rem 0; max-height: 18rem; overflow-y: auto; font-size: 0.9em; }
+.act .body pre.err { color: var(--error); }
+.note { color: var(--muted); font-size: 0.85em; text-align: center; }
+.note.error { color: var(--error); white-space: pre-wrap; text-align: left; }
+/* A note with output under it (#339): the line stays centred, ▸ opens the output, which reads left to right. */
+.note.detail > summary { cursor: pointer; list-style: none; }
+.note.detail > summary::-webkit-details-marker { display: none; }
+.note.detail > summary::after { content: ' ▸'; }
+.note.detail[open] > summary::after { content: ' ▾'; }
+.note.detail > pre { text-align: left; }
+/* A Taskmaster's fresh session (#406): its handoff reads as a message, not as muted status. */
+.note.detail.fresh > :not(summary) { text-align: left; margin: 0.25rem 0; color: var(--ink); font-size: 1rem; }
+.turn-end { color: var(--muted); font-size: 0.8em; text-align: right; border-top: 1px dashed var(--line); padding-top: 0.2rem; }
+/* One line: the branch on the left gives way, the turn's ✓, time and actions stay whole on the right. */
+.turn-end > summary, div.turn-end { display: flex; align-items: baseline; gap: 0.5rem; }
+.turn-end > summary { list-style: none; }
+.turn-end > summary::-webkit-details-marker { display: none; }
+.turn-end > summary::after { content: '▸'; flex: none; }
+details.turn-end[open] > summary::after { content: '▾'; }
+.turn-end .bits { flex: none; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.turn-end .bits .ok { color: #16a34a; }
+.turn-end .bits .fail { color: var(--error); font-weight: 700; }
+details.turn-end summary { cursor: pointer; }
+details.turn-end .phases, details.turn-end .cmds { text-align: left; margin-left: 0.2rem; font-size: 1.1em; }
+details.turn-end .recap { text-align: left; margin: 0.4rem 0 0.2rem; font-size: 1.1em; }
+details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 1.1em; }
+
+/* The thread's PR or branch, on the left of the newest turn-end line */
+.turn-end .branch-status { display: inline-flex; gap: 0.4rem; align-items: baseline; min-width: 0; text-align: left; }
+.turn-end .branch-status .branch { min-width: 2.5em; }
+.turn-end .branch-status[hidden] { display: none; }
+.turn-end .branch-status a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.turn-end .branch-status .branch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.turn-end .branch-status .state { border-radius: 999px; padding: 0 0.45rem; border: 1px solid var(--line); white-space: nowrap; }
+.turn-end .branch-status .state.merged { color: #7c3aed; border-color: color-mix(in srgb, #7c3aed 40%, var(--line)); }
+.turn-end .branch-status .state.open { color: var(--running); border-color: color-mix(in srgb, var(--running) 40%, var(--line)); }
+.turn-end .branch-status .state.draft, .turn-end .branch-status .state.closed { color: var(--muted); }
+
+/* The working line under the chat while a turn runs, one line: who's working · what's running · time · queued */
+.typing { display: flex; align-items: center; gap: 0.4rem; margin: 0.25rem 0 0.75rem; color: var(--muted); font-size: 0.9em; white-space: nowrap; cursor: pointer; }
+.typing:hover .what, .typing:focus-visible .what { text-decoration: underline; }
+.typing .line { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.typing .lead { flex: none; }
+.typing .what { min-width: 3em; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+/* With no action beside it, a long lead ("Waiting for someone to approve or deny") truncates on a phone. */
+.typing .line:not(:has(.what)) .lead { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.typing .time, .typing .queued { flex: none; font-variant-numeric: tabular-nums; }
+.typing .sep { flex: none; opacity: 0.6; }
+/* No turn running: the line keeps its room, empty, so a turn starting or ending moves nothing (rule 13). */
+.typing { min-height: calc(0.9rem + 8px); } /* the dots pill: its padding, dots and border */
+.typing[hidden] { visibility: hidden; }
+/* A turn's in-between remarks, collapsed into a row per stretch between messages */
+.unread-divider { display: flex; align-items: center; gap: 0.5rem; margin: 0.75rem 0; color: var(--accent); font-size: 0.8em; font-weight: 600; }
+.unread-divider::before, .unread-divider::after { content: ''; flex: 1; border-top: 1px solid var(--accent); }
+.load-earlier { display: flex; justify-content: center; padding: 0.5rem 0; }
+.load-earlier > button { display: inline-flex; align-items: center; gap: 0.45em; }
+.load-earlier > button[aria-busy='true'] { opacity: 1; color: var(--muted); }
+.narration { margin: 0.25rem 0 0.5rem; color: var(--muted); font-size: 0.9em; }
+.narration > summary { cursor: pointer; padding: 0.3rem 0; list-style: none; }
+.narration > summary::-webkit-details-marker { display: none; }
+.narration > summary:hover { color: var(--ink); }
+.narration .notes { border-left: 2px solid var(--line); padding: 0 0 0 0.75rem; margin: 0.25rem 0 0.5rem 0.3rem; }
+.narration .note-text > :first-child { margin-top: 0; }
+.narration .note-text > :last-child { margin-bottom: 0.4rem; }
+/* A long message from the middle of a turn: its first lines, fading out above "Show all" */
+.msg.clamped > .md { max-height: 16em; overflow: hidden; mask-image: linear-gradient(to bottom, #000 65%, transparent); }
+.msg > .show-all { display: block; margin: 0.4rem 0 0.1rem; padding: 0.2rem 0.65rem; font-size: 0.85em; }
+.typing .dots { display: inline-flex; gap: 3px; flex: none; padding: 0.45rem 0.6rem; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }
+.typing .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--running); animation: typing-dot 1.2s infinite ease-in-out; }
+.typing .dots i:nth-child(2) { animation-delay: 0.15s; }
+.typing .dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing-dot { 0%, 60%, 100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .typing .dots i { animation: none; opacity: 0.7; } }
+.state-dots { display: none; font-weight: 700; letter-spacing: 0.1em; }
+.state-dots i { font-style: normal; }
+.state-dots i:nth-child(2) { animation: state-dot2 1.2s steps(1, end) infinite; }
+.state-dots i:nth-child(3) { animation: state-dot3 1.2s steps(1, end) infinite; }
+@keyframes state-dot2 { 0% { opacity: 0; } 33.33% { opacity: 1; } }
+@keyframes state-dot3 { 0% { opacity: 0; } 66.67% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .state-dots i { animation: none !important; } }
+
+.chat { min-width: 0; }
+/* Whose chat it is (#360; Josh, 2026-11-06, picked "Whole-chat tint"): a Taskmaster's chat sits on a
+   violet-tinted ground, a minion's on the plain one. --chat-tone and --chat-bg are for other surfaces
+   that want to follow the same split. The tint keeps muted text at 4.5:1 (8% light, 12% dark). */
+.chat { --chat-tone: var(--accent); --chat-bg: var(--bg); }
+.chat.role-taskmaster { --chat-tone: var(--held); --chat-bg: color-mix(in srgb, var(--held) 8%, var(--bg)); }
+@media (prefers-color-scheme: dark) { .chat.role-taskmaster { --chat-bg: color-mix(in srgb, var(--held) 12%, var(--bg)); } }
+/* The ground reaches past the text by the gutter, and up over the head's pull into main's padding, so nothing moves. Square,
+   since the head and composer stick to the screen's edges. */
+.chat.role-taskmaster { background: var(--chat-bg); padding: 0.6rem 0.75rem 0; margin: -0.6rem -0.75rem 0; }
+.chat.role-taskmaster :is(.ticket-head, .composer) { background: var(--chat-bg); }
+.chat.role-taskmaster .msg:not(.user) { border-color: color-mix(in srgb, var(--held) 22%, var(--line)); }
+/* A dismissed minion's message box is tinted grey, so it reads as dismissed before you type. */
+.chat.dismissed .composer textarea { background: color-mix(in srgb, var(--closed) 18%, var(--panel)); border-color: color-mix(in srgb, var(--closed) 45%, var(--line)); }
+
+/* The scheme recap at the bottom of the Taskmaster chat (public/recap.js). */
+.recap { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 10px; background: var(--panel); padding: 0.6rem 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.recap-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.6rem; row-gap: 0.1rem; }
+.recap-head .muted { font-size: 0.85em; }
+.recap-group { display: flex; flex-direction: column; gap: 0.1rem; }
+.recap-group h4 { margin: 0 0 0.1rem; font-size: 0.72em; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.recap-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }

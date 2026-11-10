@@ -35,7 +35,11 @@ function before33(name: string) {
   machine('everywhere-stale-row', null, 0, [joshOn.id, off.id]); // #62's leftovers, unread while unscoped
   machine('chosen', null, 1, [on.id, off.id, joshOn.id, joshOff.id]);
   machine('chosen-none', null, 1, []);
-  machine('ci-host', null, 0, [], JSON.stringify({ at: 1, results: [], runners: true }));
+  const runners = JSON.stringify({ at: 1, results: [], runners: true });
+  machine('ci-host', null, 0, [], runners);
+  machine('ci-host-stale-row', null, 0, [joshOn.id], runners);
+  machine('ci-chosen', null, 1, [on.id, off.id, joshOn.id], runners);
+  machine('ci-removed-owner', null, 1, [], runners); // a removed person's runner PC: ownerless, nothing granted
   machine('bad-check', null, 0, [], '{not json');
   machine('joshs', josh.id, 1, []);
   machine('caras', cara.id, 1, [joshOff.id]);
@@ -61,17 +65,20 @@ test('opening an older database gives every machine a list that lends it exactly
   let lent = 0;
   for (const was of old.machines) {
     const m = store.getMachine(was.id)!;
-    assert.equal(m.scoped, 1, `${m.name} reads the same to an older release`);
+    const ci = !!was.last_check?.includes('"runners":true');
+    // A CI runner host is left alone: its token rule still reads scoped and its rows.
+    assert.equal(m.scoped, ci ? was.scoped : 1, `${m.name} reads the same to an older release`);
+    if (ci) assert.deepEqual(store.machineProjects(m.id), old.rows.filter((r) => r.machine_id === m.id).map((r) => r.project_id), `${m.name}'s rows`);
     for (const p of old.schemes) {
       const project = store.getProject(p.id)!;
       for (const askers of [[], [cara.id], [josh.id], [cara.id, josh.id]]) {
         const now = lendsMachine(store, m, project, askers);
-        assert.equal(now, lentBefore(was, p, askers), `${m.name} in ${p.name} for askers ${askers}`);
+        // The one change: a CI runner host, which offers turns no tools, is no longer lent to them on paper.
+        assert.equal(now, !ci && lentBefore(was, p, askers), `${m.name} in ${p.name} for askers ${askers}`);
         lent += Number(now);
       }
-      // A CI runner host's token fetch never asked for the scheme's switch or a list, and a person's own follows
-      // its owner: both still reach the same schemes.
-      if (was.last_check?.includes('"runners":true') || was.owner_id !== null) assert.equal(mayFetch(store, m, project), fetchedBefore(was, p), `${m.name} fetching for ${p.name}`);
+      // A CI runner host's token fetch and a person's own machine's (which follows its owner) reach the same schemes.
+      if (ci || was.owner_id !== null) assert.equal(mayFetch(store, m, project), fetchedBefore(was, p), `${m.name} fetching for ${p.name}`);
     }
   }
   assert.ok(lent > 10, 'the table has lent cases, not only refusals');
@@ -80,7 +87,6 @@ test('opening an older database gives every machine a list that lends it exactly
   assert.deepEqual(list('everywhere-stale-row'), ['Admin on', 'Member on'], 'old unread rows are replaced');
   assert.deepEqual(list('chosen'), ['Admin on', 'Josh on'], 'rows for schemes with the switch off got nothing, and go');
   assert.deepEqual(list('chosen-none'), []);
-  assert.deepEqual(list('ci-host'), ['Admin on', 'Member on']);
   assert.deepEqual(list('joshs'), ['Josh on', 'Member on'], 'the schemes he is in with the switch on');
   assert.deepEqual(list('caras'), ['Admin on', 'Josh on', 'Member on'], 'an admin is in every scheme');
   store.db.close();
@@ -94,12 +100,19 @@ test('the move runs once: a later change to a list stays, and a machine an older
   store.setMachineProjects(id('joshs'), []);
   // A rollback: the older release's "Every scheme an admin owns" radio unscopes a machine.
   store.db.prepare('UPDATE machines SET scoped = 0 WHERE id = ?').run(id('chosen'));
+  // A list machine that connects as a runner agent keeps its list for tokens, and widens nothing.
+  store.setMachineProjects(id('chosen-none'), [1]);
+  store.updateMachine(id('chosen-none'), { last_check: JSON.stringify({ at: 2, results: [], runners: true }) });
   store.db.close();
   store = new Store(path);
   assert.deepEqual(store.machineProjects(id('everywhere')), [], 'a list emptied since stays empty');
   assert.deepEqual(store.machineProjects(id('joshs')), []);
   assert.deepEqual(store.machineProjects(id('chosen')).map((p) => store.getProject(p)!.name), ['Admin on', 'Member on'], 'as the older release lent it');
   assert.equal(store.getMachine(id('chosen'))!.scoped, 1);
+  const turned = store.getMachine(id('chosen-none'))!;
+  assert.deepEqual(store.listProjects().filter((p) => mayFetch(store, turned, p)).map((p) => p.id), [1]);
+  assert.ok(!store.listProjects().some((p) => lendsMachine(store, turned, p, [1, 2])), 'a runner host lends turns nothing');
+  assert.equal(store.getMachine(id('ci-host'))!.scoped, 0, 'a runner host is never converted');
   store.db.close();
 });
 

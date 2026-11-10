@@ -3,6 +3,7 @@
 import type { Session } from './auth.ts';
 import type { Machine, Project, Store, Ticket, User } from './db.ts';
 import { APP_NAME } from './appname.ts';
+import { storedCheck } from './machines.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 
 /** Stream messages only admins get: Citadel-wide instructions. (The machines list goes to each person filtered: server.ts broadcast.) */
@@ -78,10 +79,11 @@ export function machinesFor<T extends Pick<Machine, 'owner_id'>>(who: Pick<Sessi
  * Whether a turn in this scheme, asked for by `askers`, gets this machine: only if the machine's list of schemes
  * has this one (#438, Cara: "Yes, one list per machine"), whoever owns the scheme. A person's own (#306, Josh:
  * "any scheme they are in ... can use their machine to do stuff on their behalf") also needs its owner to have
- * asked for the turn and to be in the scheme.
+ * asked for the turn and to be in the scheme. A CI runner host lends turns nothing: its rows are for runner tokens
+ * (ci-runner.ts mayFetch).
  */
 export function lendsMachine(store: Store, machine: Machine, project: Project, askers: readonly number[] = []): boolean {
-  if (!store.machineGranted(machine.id, project.id)) return false;
+  if (storedCheck(machine)?.runners || !store.machineGranted(machine.id, project.id)) return false;
   return machine.owner_id === null || ownerAsked(store, machine.owner_id, askers, project.id);
 }
 

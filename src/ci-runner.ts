@@ -4,10 +4,10 @@
 // needs a runner registration token, which only a repo admin can mint, so Citadel mints it with the scheme
 // owner's linked GitHub login and hands back just the token: it lasts about an hour and is never stored.
 // The caller is a machine's agent key (the Machines page), the same credential that PC already uses.
-import { adminOwned, lendsMachine } from './access.ts';
+import { adminOwned } from './access.ts';
 import type { Machine, Project, Store } from './db.ts';
 import type { GithubLink } from './github-link.ts';
-import { storedCheck, type MachineRelay } from './machines.ts';
+import type { MachineRelay } from './machines.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
 
@@ -47,13 +47,13 @@ export function findScheme(store: Store, ref: unknown): Project | undefined {
 
 /**
  * Whether this machine's key may fetch a runner token for the scheme. A person's own machine: if its owner is
- * in the scheme (an admin is in all of them), whatever its own list of schemes says. An ownerless CI runner host
- * (its agent is the runner agent, as its last connection recorded): if an admin owns the scheme, as before #438,
- * since it lends turns nothing and so has no list. Any other ownerless one: if it is lent to that scheme (lendsMachine).
+ * in the scheme (an admin is in all of them), whatever its own list of schemes says. An ownerless one: if the
+ * scheme is on its list, or, for a CI runner host from before #438 that was never given a list (machines.scoped 0,
+ * which nothing else reads now), if an admin owns the scheme, so `ci_runners` keeps working for a new scheme.
  * The token lets a PC run the repo's CI jobs, which a member can already do by pushing a workflow.
  */
 export function mayFetch(store: Store, machine: Machine, project: Project): boolean {
-  if (machine.owner_id === null) return storedCheck(machine)?.runners ? adminOwned(store, project) : lendsMachine(store, machine, project);
+  if (machine.owner_id === null) return machine.scoped ? store.machineGranted(machine.id, project.id) : adminOwned(store, project);
   const owner = store.getUser(machine.owner_id);
   return !!owner && !owner.disabled_at && store.canSee({ uid: owner.id, admin: !!owner.admin }, project.id);
 }

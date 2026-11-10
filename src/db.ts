@@ -810,13 +810,15 @@ export class Store {
    * Lending becomes one list of schemes per machine (#438): each machine's machine_projects rows become exactly
    * the schemes whose minions got it under the old rules, so no scheme gains or loses one. The old rules: a scheme
    * needed projects.machine_tools on; a shared machine went to every scheme an admin owns, or (scoped) to its rows;
-   * a person's own to the schemes its owner is in. (A CI runner host's runners follow ci-runner.ts mayFetch, not
-   * this list.) Once, from schema 34; a shared machine an older release left
-   * unscoped (a rollback) is converted whenever one is found. Says what it did, for the deploy's notes.
+   * a person's own to the schemes its owner is in. A CI runner host is left as it is: it lends turns nothing, and
+   * its runner tokens (ci-runner.ts mayFetch) still read its rows and scoped. Once, from schema 34; a shared machine
+   * an older release left unscoped (a rollback) is converted whenever one is found. Not caught after a rollback:
+   * a person's own machine added there starts lent to no scheme, and a scheme whose switch was turned off there
+   * keeps its place on the lists. Says what it did, for the deploy's notes.
    */
   private lendingLists() {
     const first = (this.getSetting<number>('schema_version') ?? 0) < 34;
-    const machines = (this.db.prepare('SELECT * FROM machines ORDER BY id').all() as unknown as Machine[]).filter((m) => first || (!m.scoped && m.owner_id === null));
+    const machines = (this.db.prepare('SELECT * FROM machines ORDER BY id').all() as unknown as Machine[]).filter((m) => !/"runners":true/.test(m.last_check ?? '') && (first || (!m.scoped && m.owner_id === null)));
     if (!machines.length) return;
     const schemes = this.db.prepare('SELECT id, name, machine_tools, owner_id FROM projects ORDER BY id').all() as { id: number; name: string; machine_tools: number; owner_id: number | null }[];
     const names = (ids: number[]) => ids.map((id) => schemes.find((p) => p.id === id)?.name ?? `scheme ${id}`).join(', ') || 'no scheme';

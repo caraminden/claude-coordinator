@@ -818,13 +818,18 @@ export class Store {
    */
   private lendingLists() {
     const first = (this.getSetting<number>('schema_version') ?? 0) < 34;
-    const machines = (this.db.prepare('SELECT * FROM machines ORDER BY id').all() as unknown as Machine[]).filter((m) => !/"runners":true/.test(m.last_check ?? '') && (first || (!m.scoped && m.owner_id === null)));
+    const machines = (this.db.prepare('SELECT * FROM machines ORDER BY id').all() as unknown as Machine[]).filter((m) => first || (!m.scoped && m.owner_id === null));
     if (!machines.length) return;
     const schemes = this.db.prepare('SELECT id, name, machine_tools, owner_id FROM projects ORDER BY id').all() as { id: number; name: string; machine_tools: number; owner_id: number | null }[];
     const names = (ids: number[]) => ids.map((id) => schemes.find((p) => p.id === id)?.name ?? `scheme ${id}`).join(', ') || 'no scheme';
     this.db.exec('BEGIN IMMEDIATE');
     try {
       for (const m of machines) {
+        if (/"runners":true/.test(m.last_check ?? '')) {
+          // Left as it is, less the rows nothing read while it was unscoped: they would lend it if it ever stopped being a runner host.
+          if (!m.scoped) this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(m.id);
+          continue;
+        }
         const rows = this.machineProjects(m.id);
         const owner = m.owner_id === null ? undefined : this.getUser(m.owner_id);
         const ids = m.owner_id !== null
@@ -1938,6 +1943,8 @@ export class Store {
       this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(machineId);
       const add = this.db.prepare('INSERT OR IGNORE INTO machine_projects (machine_id, project_id) VALUES (?, ?)');
       for (const id of projectIds) add.run(machineId, id);
+      // Only a CI runner host from before #438 is still unscoped; giving it a list ends "every scheme an admin owns" for it.
+      this.db.prepare('UPDATE machines SET scoped = 1 WHERE id = ?').run(machineId);
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');

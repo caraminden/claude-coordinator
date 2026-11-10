@@ -263,6 +263,8 @@ export class MachineRelay {
       mcp_command: machine.mcp_command,
       /** The schemes it is lent to: its list. */
       projects,
+      /** False only for a CI runner host from before #438 with no list: it serves every scheme an admin owns. */
+      scoped: !!machine.scoped,
       servers: agent?.servers ?? [],
       runners: agent ? agent.runners : !!check?.runners,
       workspaces: agent?.workspaces ?? [],

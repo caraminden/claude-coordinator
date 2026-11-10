@@ -228,7 +228,7 @@ export class RunnerJobs {
     const running = this.jobs.get(project.id);
     if (running && running.view.ok === null) throw new HttpError(409, `${project.name} already has a runner job running (${running.view.op}, asked by ${running.view.by}); wait for it.`);
     const machines = this.relay.runnerMachines().filter((m) => mayFetch(this.store, m, project));
-    if (!machines.length) throw new HttpError(409, `No CI runner agent that may act for ${project.name} is online. Cara installs it once on her desktop (tools/ci-runner/README.md, "Install the runner agent"); if it is installed, that PC is off or asleep.`);
+    if (!machines.length) throw new HttpError(409, `No CI runner agent that may act for ${project.name} is online. Cara installs it once on her desktop (tools/ci-runner/README.md, "Install the runner agent"); if it is installed, that PC is off or asleep, or an admin hasn't added ${project.name} to it under Settings → Machines.`);
     const machine = machines.find((m) => !this.busy.has(m.id));
     if (!machine) throw new HttpError(409, `The runner agent on ${machines[0].name} is busy with another scheme's job; try again in a few minutes.`);
     // The same checks the PC's scripts meet (a repo, the owner's GitHub link, a label), so a missing one fails here.

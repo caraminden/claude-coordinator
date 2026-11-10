@@ -945,7 +945,7 @@ function machineBody(m) {
   return h('div', { class: 'machine-body' },
     h('div', { class: 'machine-kv' },
       m.runners ? kv('Does', 'Adds, lists and removes CI runners for schemes, when Citadel asks') : kv('Lends', machineLends(m)),
-      m.runners ? [] : kv('Who gets it',
+      m.runners ? (m.owner_id === null ? kv('Runs CI for', m.scoped ? machineLending(m) : 'Every scheme an admin owns') : []) : kv('Who gets it',
         m.owner_id === null ? '' : h('div', { class: 'small muted' }, `Only turns ${m.created_by} asks for (and their contraptions), in:`),
         machineLending(m)),
       kv('Computer',

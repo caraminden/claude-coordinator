@@ -68,7 +68,7 @@ test('opening an older database gives every machine a list that lends it exactly
     const ci = !!was.last_check?.includes('"runners":true');
     // A CI runner host is left alone: its token rule still reads scoped and its rows.
     assert.equal(m.scoped, ci ? was.scoped : 1, `${m.name} reads the same to an older release`);
-    if (ci) assert.deepEqual(store.machineProjects(m.id), old.rows.filter((r) => r.machine_id === m.id).map((r) => r.project_id), `${m.name}'s rows`);
+    if (ci) assert.deepEqual(store.machineProjects(m.id), was.scoped ? old.rows.filter((r) => r.machine_id === m.id).map((r) => r.project_id) : [], `${m.name}'s rows: kept if they were read`);
     for (const p of old.schemes) {
       const project = store.getProject(p.id)!;
       for (const askers of [[], [cara.id], [josh.id], [cara.id, josh.id]]) {

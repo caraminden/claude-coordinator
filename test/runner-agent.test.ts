@@ -105,6 +105,9 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     assert.deepEqual(online.servers, [], 'turns never get it as an MCP machine');
 
     const project = (await srv.call('/api/projects', { name: 'Vault' })).data;
+    // A new runner host starts with no scheme (#438): until an admin adds one, it acts for none.
+    assert.equal((await srv.call(`/api/projects/${project.id}/ci-runners`, { op: 'list' })).status, 409);
+    assert.equal((await srv.call(`/api/machines/${made.data.machine.id}`, { projects: [project.id] }, 'PATCH')).status, 200);
     const started = await srv.call(`/api/projects/${project.id}/ci-runners`, { op: 'list' });
     assert.equal(started.status, 202, JSON.stringify(started.data));
     const { job } = (await srv.call(`/api/projects/${project.id}/ci-runners?wait=20`)).data;

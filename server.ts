@@ -26,7 +26,7 @@ import { Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
 import { type Chain, githubPrs, LiveWaiters, runsRepo } from './src/wake.ts';
-import { errorText } from './src/scheme-repo.ts';
+import { errorText, followOrigins } from './src/scheme-repo.ts';
 import { catchUpTicketDir, createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { describeCron, pinForOwner, runBrief, runMinion, type Schedule } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
@@ -132,6 +132,8 @@ if (!store.listUsers().some((u) => u.admin)) {
   store.createUser({ name, login: name.toLowerCase().replace(/[^a-z0-9._-]/g, ''), admin: true, server_login: true });
 }
 store.adoptOwnerless(store.listUsers().find((u) => u.admin)!.id);
+// Before anything reads repo_url: a scheme whose repo moved on GitHub follows its checkout's origin (#456).
+await safely('follow repo moves', () => followOrigins(store));
 const credentials = new Credentials(store, process.env.SESSION_SECRET ?? '');
 // Only the live data dir writes the real key folders: a dev copy registering "mandate" mustn't overwrite the live one's files.
 const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '',

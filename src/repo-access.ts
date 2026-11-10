@@ -147,13 +147,15 @@ export class RepoAccess {
     if (!this.on) return;
     const kept = new Set<string>();
     for (const p of this.store.listProjects()) {
-      const github = !!repoSlug(p.repo_url);
+      const slug = repoSlug(p.repo_url);
+      const github = !!slug;
       for (const m of this.store.listMembers(p.id)) {
         // Still a member even if the scheme's repo went: only leaving takes anyone off GitHub.
         kept.add(`${p.id}:${m.id}`);
         if (m.owner || !github) continue;
         const r = this.store.getRepoCollaborator(p.id, m.id);
-        if (!r || r.state === 'failed' || r.state === 'waiting' || r.state === 'invited' || r.error) await this.sync(p.id, m.id);
+        // A row naming another repo is from before the scheme's repo moved (#456): sync starts over on the new one.
+        if (!r || r.state === 'failed' || r.state === 'waiting' || r.state === 'invited' || r.error || r.slug !== slug) await this.sync(p.id, m.id);
       }
     }
     await this.tidy(kept);

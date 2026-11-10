@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { APP_NAME } from './appname.ts';
+import type { Store } from './db.ts';
 import { repoSlug } from './prlinks.ts';
 
 const run = promisify(execFile);
@@ -141,4 +142,21 @@ export async function cloneFolder(src: string, dir: string): Promise<string> {
     return upstream;
   }
   return src;
+}
+
+/**
+ * Bring each scheme's repo_url in line with its checkout's GitHub origin (#456): a repo moved on GitHub
+ * (FuckSpamTexts, KatzMeIfYouCan to caraminden) keeps its old URL otherwise, and PR links, repo access
+ * and CI key on it. Run at boot, so a move takes effect at the next restart.
+ */
+export async function followOrigins(store: Store): Promise<void> {
+  for (const p of store.listProjects()) {
+    if (!p.repo_dir) continue;
+    // As configured, like cloneFolder; repoSlug refuses a URL with a login in it, so no token lands in the DB.
+    const origin = await git(['config', '--get', 'remote.origin.url'], p.repo_dir).catch(() => null);
+    const slug = repoSlug(origin);
+    if (!slug || slug.toLowerCase() === repoSlug(p.repo_url)?.toLowerCase()) continue;
+    store.setProjectUpstream(p.id, origin, null);
+    console.log(`${p.name}'s repo moved: ${p.repo_url ?? 'none'} → ${origin}`);
+  }
 }

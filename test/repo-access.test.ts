@@ -230,3 +230,15 @@ test('members of a scheme whose repo went stay on GitHub at the sweep', async ()
   assert.ok(w.gh.collaborators.get('caraminden/peek-auras')!.has('KatzMeIfYouCan'));
   assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'added');
 });
+
+test('members of a scheme whose repo moved are invited to the new one at the sweep (#456)', async () => {
+  const w = world();
+  w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
+  w.store.addMember(w.scheme.id, w.josh.id);
+  await w.access.sync(w.scheme.id, w.josh.id);
+  w.gh.owners.set('caraminden/peek-auras-2', 'caraminden');
+  w.store.setProjectUpstream(w.scheme.id, 'https://github.com/caraminden/peek-auras-2.git', null);
+  await w.access.sweep();
+  assert.ok(w.gh.collaborators.get('caraminden/peek-auras-2')?.has('KatzMeIfYouCan'));
+  assert.deepEqual(w.access.view(w.scheme.id, w.josh.id), { state: 'added', slug: 'caraminden/peek-auras-2', error: null });
+});

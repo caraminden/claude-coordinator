@@ -192,7 +192,7 @@ Configuration comes from the environment:
 | `COORDINATOR_ADMIN` | `Cara` | Name of the admin made on first start, when the database has no people yet; their login is the name in lower case |
 | `SESSION_SECRET` | (required, 32+ chars) | Signs session cookies, and encrypts people's linked accounts: changing it unlinks everyone's GitHub |
 | `CITADEL_CONTRAPTIONS_DIR` | `~/.config/citadel/contraptions` (another `DATA_DIR`: its `contraptions/`) | Where each contraption's key folder goes (`<name>/identity.pub`, `<name>/contraption.key`), which its own service reads |
-| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | (unset: turns use the box's gh login) | The OAuth App people link their own GitHub through (below) |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | (unset, and no GitHub App either: turns use the box's gh login) | The OAuth App people link their own GitHub through (below) |
 | `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` / `GITHUB_APP_SLUG` | (unset: no limited links) | The GitHub App behind the limited way to link GitHub, and its URL name for the install link (below) |
 | `CITADEL_EMBED_URL` / `CITADEL_EMBED_MODEL` | `http://127.0.0.1:21434` / `Qwen3-Embedding-0.6B-Q8_0` | Semantic memory's embedding service, and the model name stored with each vector: a new name embeds everything again |
 | `CITADEL_MEMORY_SCHEMES` | (unset: the scheme whose code the server runs) | Comma-separated scheme ids whose chats get indexed for search by meaning |
@@ -395,8 +395,8 @@ limited link reaches. To set it up, once:
    scheme repos or all. Only a repo's owner can do this for their own repos; Settings → Your account
    links to the install page.
 
-A scheme owner on a limited link needs the App on the scheme's repo for invites and CI runner tokens
-to work, and a repo moved to another account needs the App installed by its new owner.
+A scheme owner on a limited link needs the App on the scheme's repo for invites, CI runner tokens and
+the server's own reads of the repo (fetches, pull-request state, merges) to work, and a repo moved to another account needs the App installed by its new owner.
 
 Tokens are kept encrypted with a key from `SESSION_SECRET`; changing that secret
 leaves every link needing linking again. Deploys still push `main` with the box's

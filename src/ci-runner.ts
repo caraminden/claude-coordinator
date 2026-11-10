@@ -138,10 +138,11 @@ async function refused(r: Response, ownerName: string, slug: string, hint = ''):
   const body = (await r.json().catch(() => null)) as { message?: string } | null;
   const said = body?.message ? `GitHub said "${body.message}" (${r.status})` : `GitHub answered ${r.status}`;
   if (r.status === 401) return `${ownerName}'s GitHub link stopped working; they link it again in Settings → Your account. (${said})`;
-  const scopes = r.headers.get('x-oauth-scopes');
-  if (scopes !== null && !scopes.split(/[ ,]+/).includes('repo')) return `${ownerName}'s GitHub link lacks the repo permission, which runner tokens need; they link it again in Settings → Your account. (${said})`;
   // A limited link (#464) is refused like a missing repo where the App isn't installed.
   if (hint && (r.status === 403 || r.status === 404)) return `${ownerName}'s GitHub login can't manage runners on ${slug}: registering one needs admin on the repo.${hint} (${said})`;
+  // A limited link has no scopes to lack.
+  const scopes = r.headers.get('x-oauth-scopes');
+  if (!hint && scopes !== null && !scopes.split(/[ ,]+/).includes('repo')) return `${ownerName}'s GitHub link lacks the repo permission, which runner tokens need; they link it again in Settings → Your account. (${said})`;
   // GitHub answers 404 (or 403) when the login isn't an admin of the repo: registering runners needs admin.
   if (r.status === 403 || r.status === 404) return `${ownerName}'s GitHub login isn't an admin of ${slug} (or the repo is gone or renamed), and registering a runner needs admin on the repo. (${said})`;
   return said;

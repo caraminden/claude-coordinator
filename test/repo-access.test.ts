@@ -47,6 +47,7 @@ function fakeGithub(tokens: Record<string, string>) {
       collaborators.get(inv.slug)!.add(inv.login);
       return new Response(null, { status: 204, headers });
     }
+    if ((m = /^\/repos\/([^/]+\/[^/]+)$/.exec(path)) && method === 'GET') return owners.get(m[1]) === me ? Response.json({}, { headers }) : Response.json({ message: 'Not Found' }, { status: 404, headers });
     return Response.json({ message: `unfaked ${method} ${path}` }, { status: 500 });
   }) as typeof globalThis.fetch;
   return { fetch, calls, collaborators, invites, owners, opts };
@@ -270,4 +271,23 @@ test('an owner\'s limited link that can\'t reach the repo says the App isn\'t in
   const v = w.access.view(w.scheme.id, w.josh.id)!;
   assert.equal(v.state, 'failed');
   assert.match(v.error!, /limited kind, which reaches caraminden\/peek-auras only once its owner has installed Citadel's GitHub App/);
+});
+
+test('leaving through an owner\'s limited link that can\'t see the repo keeps the row, so the collaborator isn\'t forgotten (#464)', async () => {
+  const w = world();
+  w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
+  w.store.addMember(w.scheme.id, w.josh.id);
+  await w.access.sync(w.scheme.id, w.josh.id);
+  assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'added');
+  // Cara switches to a limited link, and the App isn't on the repo: GitHub answers 404 for everything there.
+  w.creds.put(w.cara.id, 'github', 'gho_cara', { login: 'caraminden', id: 1, name: null, app: true });
+  w.gh.owners.delete('caraminden/peek-auras');
+  w.store.removeMember(w.scheme.id, w.josh.id);
+  assert.match((await w.access.remove(w.scheme.id, w.josh.id))!, /still a collaborator.*limited kind/);
+  assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'added', 'the row stays for the next sweep');
+  assert.ok(w.gh.collaborators.get('caraminden/peek-auras')!.has('KatzMeIfYouCan'));
+  // With the App installed, the same link takes them off.
+  w.gh.owners.set('caraminden/peek-auras', 'caraminden');
+  assert.equal(await w.access.remove(w.scheme.id, w.josh.id), null);
+  assert.ok(!w.gh.collaborators.get('caraminden/peek-auras')!.has('KatzMeIfYouCan'));
 });

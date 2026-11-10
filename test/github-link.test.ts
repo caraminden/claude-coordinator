@@ -150,6 +150,15 @@ test('a full link is unchanged beside the App, and switching kind replaces the l
   creds.remove(rachel.id, 'github');
 });
 
+test('a GitHub App left handing out expiring tokens links nothing and says which setting to change', async () => {
+  const fetch = (async (url: string) => (url.endsWith('/login/oauth/access_token') ? Response.json({ access_token: 'ghu_short', expires_in: 28800, refresh_token: 'ghr_x' }) : Response.json({ login: 'a', id: 1, name: null }))) as typeof globalThis.fetch;
+  const link = new GithubLink(store, creds, 'cid', 'csecret', fetch, APP);
+  const state = new URL(link.authorizeUrl(rachel.id, project.id, 'cb', true)).searchParams.get('state')!;
+  await link.finish(rachel.id, new URLSearchParams({ state, code: 'c' }), 'cb');
+  assert.match((await link.status(rachel.id)).error!, /Expire user authorization tokens/);
+  assert.equal(creds.get(rachel.id, 'github'), null);
+});
+
 test('each way of linking shows only when it is set up; a limited state is refused once the App is gone', async () => {
   const none = { clientId: '', clientSecret: '', slug: '' };
   const only = new GithubLink(store, creds, '', '', fakeApp([]).fetch, APP);

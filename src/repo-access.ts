@@ -128,6 +128,12 @@ export class RepoAccess {
     };
     if (!ownerToken) return fail(`@${r.login} is still a collaborator on ${r.slug}: ${owner?.name ?? 'the scheme\'s owner'} hasn't linked a working GitHub, so Citadel couldn't take them off. They can remove @${r.login} on GitHub.`);
     try {
+      // A limited link (#464) gets 404 for a repo the App isn't installed on, which would read as "gone already"
+      // below and leave the collaborator on GitHub: only go on when the token can see the repo.
+      if (ownerToken.limited) {
+        const seen = await this.api('GET', `/repos/${r.slug}`, ownerToken.secret);
+        if (seen.status !== 200) return fail(`@${r.login} is still a collaborator on ${r.slug}: @${ownerToken.login} can't reach it.${this.link.installHint(true, r.slug)} (${await githubSays(seen)})`);
+      }
       // A pending invite and an accepted one are separate things on GitHub; 404 on either means it's gone already.
       if (r.invitation_id) {
         const inv = await this.api('DELETE', `/repos/${r.slug}/invitations/${r.invitation_id}`, ownerToken.secret);
@@ -190,7 +196,7 @@ async function explain(r: Response, ownerLogin: string, login: string, slug: str
   if (hint && (r.status === 403 || r.status === 404)) return `@${ownerLogin} can't manage collaborators on ${slug}.${hint} (${said})`;
   if (r.status === 401) return `@${ownerLogin}'s GitHub link stopped working; they link it again in Settings → Your account. (${said})`;
   const scopes = r.headers.get('x-oauth-scopes');
-  if (scopes !== null && !scopes.split(/[ ,]+/).includes('repo')) return `@${ownerLogin}'s GitHub link lacks the repo permission, which inviting collaborators needs; they link it again in Settings → Your account. (${said})`;
+  if (!hint && scopes !== null && !scopes.split(/[ ,]+/).includes('repo')) return `@${ownerLogin}'s GitHub link lacks the repo permission, which inviting collaborators needs; they link it again in Settings → Your account. (${said})`;
   const repoOwner = slug.split('/')[0];
   const notTheirs = repoOwner !== ownerLogin.toLowerCase();
   if (r.status === 403 && notTheirs) return `${slug} belongs to ${repoOwner}, which doesn't let @${ownerLogin} add outside collaborators; an admin of ${repoOwner} adds @${login} instead. (${said})`;

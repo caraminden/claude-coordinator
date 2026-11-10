@@ -1,8 +1,8 @@
 // People link their own GitHub through Citadel's OAuth App (Cara, 2026-10-29: "we want Oauth"), and
 // each turn pushes and opens pull requests as the person it runs for (src/runner.ts turnPerson). The
 // token reaches only that turn's environment, as GH_TOKEN: gh, and git through gh's credential helper,
-// use it. With no OAuth App set up (GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET), turns use the box's
-// own gh login as before.
+// use it. With neither the OAuth App (GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET) nor the GitHub App below
+// set up, turns use the box's own gh login as before.
 //
 // Two ways to link, side by side (#464; Josh, 2026-11-10: "Lets do both?... I want alex to be able to do what
 // he is comfortable with"): the OAuth App's full-access link, and a limited one through Citadel's GitHub App
@@ -137,8 +137,10 @@ export class GithubLink {
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ client_id: client.id, client_secret: client.secret, code: params.get('code') ?? '', redirect_uri: redirectUri }),
       });
-      const body = (await r.json()) as { access_token?: string; scope?: string; error_description?: string };
+      const body = (await r.json()) as { access_token?: string; scope?: string; error_description?: string; expires_in?: number; refresh_token?: string };
       if (!body.access_token) throw new Error(`GitHub didn't give a token: ${body.error_description ?? r.status}`);
+      // Citadel doesn't refresh tokens (a refresh kills the token a person's other turns hold): better no link than one that dies in 8 hours.
+      if (body.expires_in || body.refresh_token) throw new Error('Citadel\'s GitHub App hands out tokens that expire, which Citadel can\'t use. An admin unticks "Expire user authorization tokens" under the App\'s Optional features on GitHub (see the README), then you link again.');
       const granted = (body.scope ?? '').split(/[ ,]+/);
       if (!s.limited && !granted.includes('repo')) throw new Error('GitHub gave a token without the repo permission, so it couldn\'t push.');
       const me = await this.user(body.access_token);
@@ -232,7 +234,7 @@ export class GithubLink {
     this.creds.remove(uid, 'github');
   }
 
-  /** A person's working token and its account, or null: not linked, the link failed, they're disabled, or no OAuth App. */
+  /** A person's working token and its account, or null: not linked, the link failed, they're disabled, or linking isn't set up. */
   token(person: User): { secret: string; login: string; limited: boolean } | null {
     if (!this.configured || person.disabled_at) return null;
     const c = this.creds.get<GithubMeta>(person.id, 'github');
@@ -246,7 +248,7 @@ export class GithubLink {
   }
 
   /**
-   * What a turn run for `person` gets, or null with no OAuth App set up (the box's gh login, as before).
+   * What a turn run for `person` gets, or null with linking not set up either way (the box's gh login, as before).
    * Its gh config folder is an empty one in the turn's folder, so an unlinked turn can't fall back to
    * the box's login; git's prompt is off, so a push without a login fails rather than waits.
    */

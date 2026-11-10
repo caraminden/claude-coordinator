@@ -4,11 +4,10 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { askerKey, onboardingOpen, type EventRow, type Project, type Store, type Ticket } from './db.ts';
-import { APPROVAL_TIMEOUT_MS, Approvals, lines, permissionArgs, pluginDirArgs, turnPluginDirs, type Go } from './approvals.ts';
+import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
 import { KEEP, SENT_BACK } from './link-check.ts';
 import type { SchemeRefs } from './scheme-refs.ts';
@@ -18,15 +17,14 @@ import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, 
 import { Lanes } from './lanes.ts';
 import { projectDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { previewKey } from './previews.ts';
-import { GLOBAL_OWNER } from './properties.ts';
-import { androidEnv, AUTH_VARS, isAuthFailure, resolveClaude, type TurnPlace } from './claude-link.ts';
+import { isAuthFailure, type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
 import { clearTmpDir, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
-import { CHECKOUT, COMPACT_COMMAND, freshStartText, handoffPrompt, machineServers, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
-import { alive, coordinatorAccess, credentialDenies, disallowedTools, LEAN_CONTEXT, linkCheckHooks, MERGE_ASKS, schemeRefsHooks, TASKMASTER_COMPACT_WINDOW, tripwireConfig, tripwireHooks, TURN_BUILD_JOBS, TURN_SETTINGS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wordingHooks } from './turn-launch.ts';
+import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
+import { alive, launchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
 const MAX_TOOL_OUTPUT = 20_000;
@@ -1630,9 +1628,6 @@ export class Runner {
     // to the scheme, and the asker's own (#306): the one person this batch (or the turn it resumes) answers, so
     // a turn no one asked for gets none, and a ride-along message doesn't bring its sender's machines.
     const machines = ticket.kind === 'coordinator' ? [] : this.machines(project, askers.length ? [asker!] : []);
-    // Tool calls matching the merge asks or the project's approval rules wait for a person (threads only:
-    // a Taskmaster can't show cards, so an ask would be a silent deny there).
-    const rules = ticket.kind === 'coordinator' ? [] : [...new Set([...MERGE_ASKS, ...lines(project.approval_rules)])];
     // Codex (#337): a Codex pick, or the sender's "Enable Codex override" (which maps a Claude pick by tier),
     // once their own container is signed in to Codex. Otherwise it runs on Claude, saying why. The server
     // login's Codex turns run in its own container, never on the host (#341): only there is Codex's hook.
@@ -1661,17 +1656,6 @@ export class Runner {
     const deploys = ticket.kind !== 'coordinator' && runsRepo(project.repo_dir, this.liveHead());
     // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
     writeFileSync(join(dir, 'system-prompt.md'), systemPrompt(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : []));
-    const args = [
-      '-p',
-      '--input-format', 'stream-json',
-      '--output-format', 'stream-json',
-      '--verbose',
-      '--permission-mode', ticket.permission_mode,
-      '--append-system-prompt-file', join(dir, 'system-prompt.md'),
-      // A minion's tripwire asks and approval rules become Approve / Deny cards; nobody can answer a
-      // Taskmaster's prompts, so those are denied instead of waiting.
-      ...permissionArgs(ticket.kind !== 'coordinator'),
-    ];
     // Its own temp folder on disk, cleared on dismissal (#218). CLAUDE_CODE_TMPDIR moves Claude Code's
     // /tmp/claude-<uid>, which ignores TMPDIR. A command or script that sets its own TMPDIR still wins.
     let tmp: string | null = null;
@@ -1680,85 +1664,19 @@ export class Runner {
     } catch (err: any) {
       this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${err.message}` });
     }
-    // Lets edit-only sessions write there too, not just in their working directory. The temp folder too:
-    // Claude Code asks before `cd <dir> && rm <glob>` outside the working directories, even in bypassPermissions.
-    const addDirs = [filesDir, sharedDir, tmp].filter((d): d is string => !!d);
-    // One --settings per turn: the tripwire hook and the shared settings, plus approval rules or the Taskmaster's access rules.
-    const deny = credentialDenies(homedir(), claudeConfigDir(process.env), dirname(this.store.path));
     // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
     // A file, not an argument: a scheme's minion list outgrows a command line.
     const refsFile = join(dir, 'scheme-refs.json');
     this.writeRefs(refsFile, ticket);
-    const linkCheck = ticket.cwd ? linkCheckHooks([ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d), pinned(pins.LINK_CHECK), join(dir, 'link-check-nudged'), refsFile) : {};
-    // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
-    // title, state and note. The token travels in the environment (which the MCP server
-    // inherits), never on the command line.
-    const role = ticket.kind === 'coordinator' ? 'coordinator' : 'thread';
-    // A card can wait for days: past MCP_TOOL_TIMEOUT, Claude Code also drops a tool silent for 30 minutes unless its server sets a timeout.
-    const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [pinned(pins.MCP_SERVER)], ...(role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) } };
-    for (const m of machines) {
-      for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: process.execPath, args: [pinned(pins.MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
-    }
-    // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
-    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
-    const tripwire = tripwireHooks(project.id, claudeConfigDir(process.env), ticket.kind !== 'coordinator', pinned(pins.TRIPWIRE));
-    // Codex's managed hook (deploy/claude-container/codex) reads the turn's tripwire from this file: its command can't carry it.
-    // A Codex turn's own run is checked in turn mode: its patches and MCP calls too, with no cards, and never its own folder.
-    // A host turn has no hook, so the server login's Codex reviews run in its Codex container (#398): named here, where
-    // the turn can't change it, and woken if it stopped (a reboot) without replacing one a review may be running in.
+    // A host turn has no Codex hook, so the server login's Codex reviews run in its Codex container (#398): woken
+    // if it stopped (a reboot) without replacing one a review may be running in.
     const codexAt = place.host && person !== null ? this.codexPlaceFor?.(person) ?? null : null;
     const reviewAt = codexAt && !codexAt.host ? codexAt : null;
     if (reviewAt) this.wakeCodex?.(person!);
-    const container = reviewAt ? { container: { name: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } } : {};
-    const codexTripwire = join(dir, 'codex-tripwire.json');
-    writeFileSync(codexTripwire, JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(process.env), false), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), { mode: 0o444 });
-    const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
-      hooks: { ...linkCheck, PreToolUse: [...tripwire.PreToolUse, wordingHooks([filesDir, sharedDir].filter((d): d is string => !!d), join(dir, 'wording-sent'), pinned(pins.WORDING)), schemeRefsHooks(refsFile, join(dir, 'scheme-refs-sent'), pinned(pins.SCHEME_REFS))] }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
-    };
-    if (rules.length) settings.permissions.ask = rules;
-    if (ticket.kind === 'coordinator') {
-      const access = coordinatorAccess(project.repo_dir, this.ticketsDir(project), sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null);
-      addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
-      const { permissions, ...rest } = access.settings;
-      Object.assign(settings, rest);
-      settings.permissions = { ...permissions, deny: [...permissions.deny, ...deny] };
-      settings.autoCompactWindow = TASKMASTER_COMPACT_WINDOW;
-    }
-    settings.permissions.allow = [...(settings.permissions.allow ?? []), ...Object.keys(servers).map((name) => `mcp__${name}`)];
-    // As a file: the Taskmaster's git rules (one per worktree) outgrew Linux's 128 KiB cap on one argument (E2BIG).
-    writeFileSync(join(dir, 'settings.json'), JSON.stringify(settings));
-    args.push('--settings', join(dir, 'settings.json'));
-    if (addDirs.length) args.push('--add-dir', ...addDirs);
-    if (existsSync(pinned(pins.KIT))) args.push('--plugin-dir', pinned(pins.KIT));
-    args.push(...pluginDirArgs(turnPluginDirs(project, ticket), ticket.cwd));
-    if (model) args.push('--model', model);
-    if (effort) args.push('--effort', effort);
-    // The task-list tools (TaskCreate/TaskUpdate) are off by default in headless mode; they drive the progress readout.
-    let env: Record<string, string> = { ...turnEnv(process.env), CLAUDE_CODE_ENABLE_TODO_TOOLS: '1' };
-    if (tmp) env = { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp };
-    args.push('--mcp-config', join(dir, 'mcp.json'), '--disallowedTools', ...disallowedTools(ticket));
-    env = { ...env, ...this.coordinatorEnv(ticket), COORDINATOR_ROLE: role, COORDINATOR_TICKET: String(ticket.id) };
-    // In a container, claude signs in with the person's own login, so nothing of the server's may win over it.
-    if (!place.host) {
-      for (const v of AUTH_VARS) delete env[v];
-      env = { ...env, ...place.env, COORDINATOR_CONTAINER: '1' };
-      // The host's /run/user/<uid> isn't in the container, and .NET keeps named mutexes under
-      // XDG_RUNTIME_DIR: without it every one fails, NuGet's restore included (#225).
-      if (tmp) env.XDG_RUNTIME_DIR = tmp;
-    }
-    env = { ...env, ...androidEnv(homedir(), env.PATH) };
-    env = { ...env, ...this.heavyEnv(ticket, person), PATH: [join(pin, 'bin'), env.PATH].filter(Boolean).join(':') };
-    // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).
-    if (sharedDir) env.COORDINATOR_SHARED_DIR = sharedDir;
-    if (filesDir) env.COORDINATOR_FILES_DIR = filesDir;
-    env.CITADEL_CODEX_TRIPWIRE = codexTripwire;
-    // The thread's MCP server offers the approval tool, which holds its call open until someone clicks.
-    if (ticket.kind !== 'coordinator') env = { ...env, COORDINATOR_APPROVALS: '1', MCP_TOOL_TIMEOUT: String(APPROVAL_TIMEOUT_MS) };
-    if (deploys) env.COORDINATOR_DEPLOYS = '1';
-    if (this.memoryScheme(project.id)) env.COORDINATOR_MEMORY = '1';
+    const coordinator = this.coordinatorEnv(ticket);
+    const heavy = this.heavyEnv(ticket, person);
     // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
     const github = this.githubFor?.(person, dir) ?? null;
-    if (github) env = { ...env, ...github.env };
     // Back on Claude after Codex turns: they come first, verbatim, and their thread goes once this turn succeeds.
     const codexThread = this.store.getSetting<CodexThread>(codexThreadKey(ticket.id));
     const handBack = !codex && codexThread ? [{ author: 'System', text: toClaudePreamble(fitLog(readParts(codexThread.log))), images: [] }] : [];
@@ -1777,20 +1695,28 @@ export class Runner {
     }
     const typers = new Set(batch.filter((m) => m.typed && !m.from).map((m) => this.personOf?.(m.author) ?? null));
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
-    // Whose data this turn may read (#295): the person whose own typed message it answers, as the identity's
-    // `sub`, for contraptions' own hook guards. Set fresh per process and absent (never empty) on any other turn:
-    // a relay, a wake, a schedule, a resume, GitHub or a contraption's post. turnEnv never passes CITADEL_*
-    // through, and a steer can't change a running process's env, so it stays narrower than typedBy, never wider.
     const typer = typedBy ? this.store.getUser(typedBy) : undefined;
-    if (typer && !typer.disabled_at) Object.assign(env, { CITADEL_PERSON_ID: String(typer.id), CITADEL_PERSON_LOGIN: typer.login });
     const from = batch.find((m) => m.from || this.personOf?.(m.author))?.from;
     if (from) this.turnFrom.set(ticket.id, from);
     else this.turnFrom.delete(ticket.id);
-    // Only the Citadel scheme's Taskmaster is offered the app instruction and contraption tools (the API checks too).
-    if (ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER) env.COORDINATOR_APP_INSTRUCTIONS = '1';
-    // A contraption's home scheme may deploy it (#266): its Taskmaster and minions are offered deploy_contraption for it.
     const homeOf = this.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => c.name);
-    if (homeOf.length) env.COORDINATOR_HOME_CONTRAPTIONS = homeOf.join(',');
+    const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
+    // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
+    const same = codexThread?.person === person && codexThread.thread;
+    // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
+    const plan = launchPlan({
+      project, ticket, dir, pins, place, machines, model, effort, deploys, unit,
+      folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path) },
+      codex: codex ? { thread: same || null } : null,
+      codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
+      env: { server: process.env, coordinator, heavy, github: github?.env ?? null },
+      memory: this.memoryScheme(project.id),
+      typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
+      homeContraptions: homeOf,
+      claudeBin: this.claudeBin,
+    });
+    for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
+    const { command, args, env, configDir } = plan;
     // A state describes where the last turn left things; a new turn makes it stale. Pending-deploy
     // outlasts a stray turn (a GitHub ping), so the deploy still dismisses the minion unless the turn
     // sets another state or a person wrote to it (personWrote).
@@ -1808,7 +1734,6 @@ export class Runner {
 
     // The session's transcript, task list and memory live in the database too; put back anything this
     // config dir lacks (another account, a fresh machine) before resuming.
-    const configDir = place.host ? claudeConfigDir(env) : place.configDir;
     let restoreFailed = false;
     let had: Set<string> | null = null;
     try {
@@ -1840,8 +1765,6 @@ export class Runner {
 
     writeFileSync(join(dir, 'prompt.jsonl'), prompt);
     for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
-    // Holds the turn's token: private, and the wrapper deletes it once read.
-    let command = place.host ? this.claudeBin : resolveClaude(this.claudeBin);
     if (codex) {
       // The Claude conversation from its last compaction, then any Codex turns on another person's Codex, verbatim:
       // a new thread starts from it (the shim skips it when it resumes the thread).
@@ -1852,13 +1775,10 @@ export class Runner {
         // No transcript: the hand-over is the Codex turns alone, if any.
       }
       writeFileSync(join(dir, 'handover.md'), fitLog([...claudeParts(claudeJsonl), ...readParts(codexThread?.log ?? '')]));
-      const same = codexThread?.person === person && codexThread.thread;
       if (!same) this.store.setSetting(codexThreadKey(ticket.id), { thread: null, person: person!, log: codexThread?.log ?? '' });
-      command = process.execPath;
-      args.unshift(pinned(pins.CODEX_TURN), '--codex-mode', 'turn', '--codex-log', join(dir, 'codex-log.jsonl'), '--codex-handover', join(dir, 'handover.md'), ...(same ? ['--codex-thread', same] : []));
     }
+    // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command, args, cwd: ticket.cwd, env }), { mode: 0o600 });
-    const unit = this.units && place.host ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
     const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex, ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
@@ -1866,17 +1786,16 @@ export class Runner {
     live.had = had;
     this.setStatus(ticket.id, 'running');
     // Its step on the lane lasts until it has ended and its session is saved (finish).
-    if (!place.host) {
-      this.spawnInContainer(place, dir, pinned(pins.TURN_WRAPPER));
+    if (plan.spawn.how === 'container') {
+      this.spawnInContainer(place as Exclude<TurnPlace, { host: true }>, dir, plan.spawn.wrapper);
       return live.ended;
     }
-    const wrapper = [process.execPath, pinned(pins.TURN_WRAPPER), dir];
-    if (!unit) {
+    const { wrapper } = plan.spawn;
+    if (plan.spawn.how === 'child') {
       this.spawnWrapper(wrapper, dir);
       return live.ended;
     }
-    const run = ['--user', '--collect', '--quiet', `--unit=${unit}`, `--slice=${TURN_SLICE}`, '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper];
-    execFile('systemd-run', run, (err, _out, stderr) => {
+    execFile('systemd-run', plan.spawn.systemdRun, (err, _out, stderr) => {
       if (!err) return;
       console.error(`Ticket ${ticket.id}: systemd-run failed (${String(stderr).trim() || err.message}), so this turn runs as a child of the server.`);
       live.unit = null;

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyEvent, createProgress, progressLine, withoutCount } from '../public/progress.js';
+import { applyEvent, createProgress, describeAction, progressLine, withoutCount } from '../public/progress.js';
 
 // A plan of six steps with the given statuses: c(ompleted), i(n progress), p(ending).
 const plan = (statuses) => ({
@@ -53,4 +53,12 @@ test("a new TodoWrite plan's steps get new ids, so the last plan's actions don't
   todo('t3', 'Test', 'Ship');
   assert.notEqual(p.tasks[0].id, first);
   assert.notEqual(read('r2')[0].taskId, first);
+});
+
+test("git's options before the subcommand don't stand in for it (#468 S11-12)", () => {
+  const words = (command) => describeAction({ name: 'Bash', input: { command } }).text;
+  assert.equal(words('git -C /home/x/repo status'), 'Checked what changed');
+  assert.equal(words('git -c a.b=1 log --oneline'), 'Looked at commit history');
+  assert.equal(words('git --git-dir /x/.git --work-tree /x diff'), 'Looked at code changes');
+  assert.equal(words('git --git-dir=/x/.git show HEAD'), 'Looked at a commit');
 });

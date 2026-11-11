@@ -55,7 +55,11 @@ function describeOne(cmd) {
   const file = args.find((a) => /[./]/.test(a) && !/[|<>$]/.test(a));
   if (!prog || prog === 'cd' || prog === 'true' || prog === 'echo' && /^echo\s*$/.test(c)) return null;
   if (TEST_RE.test(c)) return 'Ran the tests';
-  if (prog === 'git') return GIT_WORDS[args[0]] ?? `Ran git ${args[0] ?? ''}`.trim();
+  if (prog === 'git') {
+    // Options before the subcommand, with the values of those that take one (-C <dir>, -c <name=value>).
+    const sub = rest.find((a, i) => !a.startsWith('-') && !/^(-C|-c|--git-dir|--work-tree)$/.test(rest[i - 1]));
+    return GIT_WORDS[sub] ?? `Ran git ${sub ?? ''}`.trim();
+  }
   if (prog === 'gh') return `Used GitHub (${args.slice(0, 2).join(' ')})`;
   if (/^(npm|pnpm|yarn|bun)$/.test(prog)) return /^(i|install|add|ci)$/.test(args[0]) ? 'Installed dependencies' : `Ran ${prog} ${args.slice(0, 2).join(' ')}`.trim();
   if (/^(pip|pip3|uv)$/.test(prog)) return 'Installed Python packages';

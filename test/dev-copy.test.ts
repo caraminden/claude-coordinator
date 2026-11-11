@@ -89,6 +89,7 @@ test('it refuses unknown arguments and a copy with no live database', () => {
 test('a copy finishes while the live server keeps writing', async () => {
   // Bigger than one backup() step (100 pages), so a restart on every write would never end (#529).
   const db = new DatabaseSync(join(live, 'coordinator.db'));
+  db.exec("INSERT INTO settings (key, value) VALUES ('turn:529', '{}')");
   db.exec('CREATE TABLE filler (b BLOB); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000) INSERT INTO filler SELECT randomblob(4000) FROM n');
   db.close();
   const writer = spawn(process.execPath, ['-e', `
@@ -108,6 +109,7 @@ test('a copy finishes while the live server keeps writing', async () => {
     // The copy is whole: every filler row made before the writer started is in it.
     const copy = new DatabaseSync(join(tmp, 'dev-copy', 'data', 'coordinator.db'), { readOnly: true });
     assert.ok((copy.prepare('SELECT count(*) AS n FROM filler').get() as { n: number }).n >= 2000);
+    assert.equal(copy.prepare("SELECT 1 FROM settings WHERE key = 'turn:529'").get(), undefined, 'scrubbed as a preview copy is');
     copy.close();
   } finally {
     writer.kill('SIGKILL');

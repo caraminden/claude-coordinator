@@ -347,3 +347,13 @@ test("list groups take the scheme's own keys and values, written as stored", () 
   assert.throws(() => s.props.listGroups(1, ['balance']), err(400, /key: value/));
   assert.throws(() => s.props.listGroups(1, 'area: balance'), err(400, /must be a list/));
 });
+
+test('merging a value its scheme promotes as a list group moves the group to the value it merged into (#468 S05-6)', () => {
+  const s = freshStore();
+  s.setProjectSettings(1, { list_groups: JSON.stringify(['area: balance', 'area: ui', 'area: town']) });
+  s.props.review(1, { key: 'area', value: 'balance', action: 'merge', into: 'ui' }, cara);
+  assert.deepEqual(JSON.parse(s.getProject(1)!.list_groups), ['area: ui', 'area: town']);
+  s.props.review(1, { key: 'area', value: 'town', action: 'merge', into: 'dungeons' }, cara);
+  assert.deepEqual(JSON.parse(s.getProject(1)!.list_groups), ['area: ui', 'area: dungeons']);
+  assert.equal(s.getProject(2)!.list_groups, '[]', "another scheme's groups are untouched");
+});

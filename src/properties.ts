@@ -644,6 +644,13 @@ export class Registry {
         const aliases = [...new Set([...aliasesOf(into), v.value, ...aliasesOf(v)])];
         this.db.prepare('UPDATE property_values SET aliases = ? WHERE id = ?').run(JSON.stringify(aliases), into.id);
         this.db.prepare('DELETE FROM property_values WHERE id = ?').run(v.id);
+        // The scheme's promoted list group (#253) follows the value it named.
+        const scheme = k.scope === null ? null : this.db.prepare('SELECT list_groups FROM projects WHERE id = ?').get(k.scope) as { list_groups: string } | undefined;
+        if (scheme) {
+          const groups: string[] = JSON.parse(scheme.list_groups);
+          const moved = [...new Set(groups.map((g) => (g === `${k.key}: ${v.value}` ? `${k.key}: ${into.value}` : g)))];
+          if (moved.join('\n') !== groups.join('\n')) this.db.prepare('UPDATE projects SET list_groups = ? WHERE id = ?').run(JSON.stringify(moved), k.scope);
+        }
         this.db.exec('COMMIT');
       } catch (err) {
         this.db.exec('ROLLBACK');

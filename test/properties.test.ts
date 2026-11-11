@@ -254,6 +254,20 @@ test('proposals, review, archive and merge', () => {
   assert.equal(s.props.list(1).find((k) => k.key === 'enemy')!.status, 'proposed');
 });
 
+test('an archived key can be restored, and an archived value under it too; it still can\'t be set while archived (#468 S05-5)', () => {
+  const s = freshStore();
+  s.props.review(1, { key: 'area', value: 'town', action: 'archive' }, cara);
+  s.props.review(1, { key: 'area', action: 'archive' }, cara);
+  assert.equal(s.props.list(1).find((k) => k.key === 'area')!.status, 'archived');
+  assert.throws(() => s.props.set('minion', ticket(s, 1), 1, { area: 'dungeons' }, 'x'), err(400, /There is no property/));
+  s.props.review(1, { key: 'area', value: 'town', action: 'restore' }, cara);
+  s.props.review(1, { key: 'area', action: 'restore' }, cara);
+  assert.equal(s.props.list(1).find((k) => k.key === 'area')!.status, 'active');
+  const id = ticket(s, 1);
+  s.props.set('minion', id, 1, { area: 'town' }, 'x');
+  assert.deepEqual(s.props.forTarget('minion', id).area, ['town']);
+});
+
 test('properties go when what carries them goes', () => {
   const s = freshStore();
   const id = ticket(s, 1);

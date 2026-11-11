@@ -238,9 +238,10 @@ export class Registry {
   }
 
   /** Find a key the scheme can see by name, ignoring case; unknown names get a "did you mean". */
-  private findKey(projectId: number, name: unknown, opts: { activeOnly?: boolean } = {}): KeyRow {
+  private findKey(projectId: number, name: unknown, opts: { activeOnly?: boolean; archived?: boolean } = {}): KeyRow {
     if (typeof name !== 'string' || !name.trim()) throw new PropertyError('A property key is required');
-    const keys = this.keysFor(projectId).filter((k) => k.status !== 'archived');
+    // Archived keys only for review, which restores them; nothing can set one.
+    const keys = this.keysFor(projectId).filter((k) => opts.archived || k.status !== 'archived');
     const found = keys.find((k) => loose(k.key) === loose(name));
     if (found && (!opts.activeOnly || found.status === 'active')) return found;
     if (found) throw new PropertyError(`${code(found.key)} is proposed and not approved yet, so it can't be set`);
@@ -592,7 +593,7 @@ export class Registry {
   review(projectId: number, input: any, actor: Actor) {
     const action = input?.action;
     if (!['approve', 'reject', 'archive', 'restore', 'merge'].includes(action)) throw new PropertyError('action must be approve, reject, archive, restore or merge');
-    const k = this.findKey(projectId, input.key);
+    const k = this.findKey(projectId, input.key, { archived: true });
     if (!this.mayEdit(k.scope, actor)) throw new PropertyError(`Only ${k.scope === null ? "the Citadel scheme's Taskmaster" : "this scheme's Taskmaster"} or a person can change ${code(k.key)}`, 403);
     if (input.value === undefined || input.value === null) {
       // Keys: only people approve, reject or archive them.

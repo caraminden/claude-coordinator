@@ -85,9 +85,8 @@ test('a dropped live stream shows "Reconnecting…" after a moment, keeps the pa
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the scheme page', `document.querySelector('.scheme-crumb [data-project-name="1"]') && streams.at(-1)?.readyState === 1`);
 
-  await page.eval(`dropStream()`);
-  await new Promise((r) => setTimeout(r, 500));
-  assert.equal(await page.eval(`!!${chip}`), false, 'a blip shorter than 1.5 s shows nothing');
+  // Timed in the page, whose timers run in order, so a loaded box can't let the 1.5 s pass before the look.
+  assert.equal(await page.eval(`dropStream(), new Promise((r) => setTimeout(() => r(!!${chip}), 500))`), false, 'a blip shorter than 1.5 s shows nothing');
   await page.eval(`dropStream()`); // the browser's retries fail too; they must not put the chip off
   await waitFor(page, 'the chip', `${chip}?.textContent === 'Reconnecting…'`);
   assert.equal(await page.eval(`${chip}.getAttribute('role')`), 'status');
@@ -100,9 +99,6 @@ test('a dropped live stream shows "Reconnecting…" after a moment, keeps the pa
 test('a stream back within the moment never shows the chip', { skip }, async () => {
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the scheme page', `streams.at(-1)?.readyState === 1`);
-  await page.eval(`dropStream()`);
-  await new Promise((r) => setTimeout(r, 300));
-  await page.eval(`reopenStream()`);
-  await new Promise((r) => setTimeout(r, 1700));
-  assert.equal(await page.eval(`!!${chip}`), false);
+  // Timed in the page, as above: back after 300 ms, then a look once the 1.5 s would have run out.
+  assert.equal(await page.eval(`dropStream(), new Promise((r) => setTimeout(() => { reopenStream(); setTimeout(() => r(!!${chip}), 1700); }, 300))`), false);
 });

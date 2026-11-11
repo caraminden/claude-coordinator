@@ -10,7 +10,7 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { themeCss } from '../src/theme.ts';
-import { chromium, launch, type Browser, type Page } from './browser.ts';
+import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
@@ -79,6 +79,7 @@ after(async () => {
 });
 
 type Boxes = Record<string, { x: number; y: number; width: number; height: number }>;
+const SHOWN = `[...document.querySelectorAll('.cui-tip')].some((p) => p.matches(':popover-open'))`;
 const LONG = 'Saved 14 files to the build folder, rebuilt the passive tree, recalculated every skill';
 
 /** Each change in turn, then every element's box: what moved, by id, against the first state. */
@@ -143,10 +144,10 @@ test('a cut-off status shows its whole text in a tip on hover; one that fits sho
   assert.equal(await page.eval('getComputedStyle(document.querySelector("#slot .cui-status-text")).textOverflow'), 'ellipsis');
   let c = await page.centre('#slot .cui-status-text');
   await page.mouse(c.x, c.y);
-  await new Promise((r) => setTimeout(r, 350));
+  await waitFor(page, 'the tip', SHOWN);
   assert.equal(await tip(), LONG);
   await page.mouse(5, 590);
-  await new Promise((r) => setTimeout(r, 250));
+  await waitFor(page, 'the tip to close', `!${SHOWN}`);
   await page.eval(`slot.text('Saved')`);
   c = await page.centre('#slot .cui-status-text');
   await page.mouse(c.x, c.y);
@@ -228,11 +229,12 @@ test('on a phone, a tap reads a cut-off status; inside something a tap acts on, 
   await page.eval(`slot.text(${JSON.stringify(LONG)})`);
   let c = await page.centre('#slot .cui-status-text');
   await page.tap(c.x, c.y);
-  await new Promise((r) => setTimeout(r, 100));
+  await waitFor(page, 'the tip', SHOWN);
   assert.equal(await tip(), LONG);
   c = await page.centre('#toggle .cui-status-text');
   await page.touch('touchStart', c.x, c.y);
-  await new Promise((r) => setTimeout(r, 550));
+  // Held until the long press shows its tip, not a set time a loaded box can cut short.
+  await waitFor(page, 'the long press', `${SHOWN} && document.querySelector('.cui-tip:popover-open').textContent !== ${JSON.stringify(LONG)}`);
   await page.touch('touchEnd');
   assert.equal(await tip(), 'A long status inside a header that toggles');
 });

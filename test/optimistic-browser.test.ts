@@ -215,8 +215,8 @@ for (const [label, opts] of [['desktop', { width: 900, height: 600 }], ['phone, 
 
 test('onHide runs once, however the toast goes', { skip }, async () => {
   const page = await open();
-  await page.eval(`window.hid = []; toast('one', { onHide: () => hid.push('one') }); toast('two', { onHide: () => hid.push('two'), ms: 50 })`);
-  assert.deepEqual(await page.eval('hid'), ['one'], 'a newer toast sends the last away');
+  // Read in the same eval: a separate look could come after 'two's 50 ms on a loaded box.
+  assert.deepEqual(await page.eval(`window.hid = []; toast('one', { onHide: () => hid.push('one') }); toast('two', { onHide: () => hid.push('two'), ms: 50 }); [...hid]`), ['one'], 'a newer toast sends the last away');
   await page.eval('new Promise((r) => setTimeout(r, 120))');
   assert.deepEqual(await page.eval('hid'), ['one', 'two'], 'its time ran out');
   await page.eval(`toast('three')`);

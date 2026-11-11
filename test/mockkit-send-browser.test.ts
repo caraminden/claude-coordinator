@@ -7,7 +7,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { chromium, launch, type Browser, type Page } from './browser.ts';
+import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
@@ -25,7 +25,8 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
   }) }) };
   window.citadel = {
     info: async () => ({ person: 'cara' }),
-    send: async (text) => { await new Promise((r) => setTimeout(r, 120)); if (window.fail) { window.fail = false; throw new Error('boom'); } window.posts.push(text); return { sent: true, to: '#419' }; },
+    // labelAtSend: the button's label as the post leaves, read in the page so a loaded box can't let the 120 ms run out first.
+    send: async (text) => { window.labelAtSend = document.querySelector('.mk-dock > button').textContent; await new Promise((r) => setTimeout(r, 120)); if (window.fail) { window.fail = false; throw new Error('boom'); } window.posts.push(text); return { sent: true, to: '#419' }; },
   };
 </script>
 <script src="/mockkit.js"></script>
@@ -70,7 +71,7 @@ test('pressing Send again for the same picks posts nothing more, and the button 
   const page = await browser.page(base);
   await click(page, '[data-pick="a"] [data-v="pick"]');
   await send(page);
-  await wait(250);
+  await waitFor(page, 'the post', 'window.posts.length > 0');
   assert.equal((await posts(page)).length, 1);
   assert.equal(await disabled(page), true, 'no second press is possible');
   assert.match(await label(page), /Sent/);
@@ -83,12 +84,12 @@ test('a changed pick or note makes Send ready again, and the new text posts once
   const page = await browser.page(base);
   await click(page, '[data-pick="a"] [data-v="pick"]');
   await send(page);
-  await wait(250);
+  await waitFor(page, 'the first post', 'window.posts.length > 0');
   await click(page, '[data-pick="b"] [data-v="pick"]');
   assert.equal(await disabled(page), false);
   assert.doesNotMatch(await label(page), /Sent/);
   await send(page);
-  await wait(250);
+  await waitFor(page, 'the second post', 'window.posts.length > 1');
   const p = await posts(page);
   assert.equal(p.length, 2);
   assert.notEqual(p[0], p[1]);
@@ -102,13 +103,12 @@ test('after a reload the same picks are still Sent and cannot post again', { ski
   const page = await browser.page(base);
   await click(page, '[data-pick="a"] [data-v="pick"]');
   await send(page);
-  await wait(250);
+  await waitFor(page, 'the post', 'window.posts.length > 0');
   // The stub's picks live in memory, so put the same pick back after reloading, as the saved ones would be.
   await page.eval(`(() => { location.reload(); })()`).catch(() => {});
-  await wait(500);
-  for (const end = Date.now() + 5000; !(await page.eval('!!window.ready').catch(() => false)) && Date.now() < end; await wait(50));
+  await waitFor(page, 'the reloaded page', 'window.ready && window.posts.length === 0');
   await click(page, '[data-pick="a"] [data-v="pick"]');
-  await wait(100);
+  await waitFor(page, 'the pick to be drawn', '/Sent/.test(document.querySelector(".mk-dock > button").textContent)');
   // Same text as before the reload, apart from who/when, which the summary leaves out.
   assert.equal(await disabled(page), true);
   assert.match(await label(page), /Sent/);
@@ -119,14 +119,14 @@ test('a failed send rolls back to ready, with a toast whose Retry posts it', { s
   await click(page, '[data-pick="a"] [data-v="pick"]');
   await page.eval('window.fail = true');
   await send(page);
-  await wait(10);
-  assert.match(await label(page), /Sent/, 'shows Sent at once');
-  await wait(300);
+  await waitFor(page, 'the post to leave', 'window.labelAtSend !== undefined');
+  assert.match(await page.eval<string>('window.labelAtSend'), /Sent/, 'shows Sent at once, before the post resolves');
+  await waitFor(page, 'the toast', '!!document.querySelector(".mk-toast")');
   assert.equal(await page.eval('!!document.querySelector(".mk-toast")'), true);
   assert.equal(await disabled(page), false);
   assert.doesNotMatch(await label(page), /Sent/);
   await click(page, '.mk-toast .primary');
-  await wait(300);
+  await waitFor(page, 'the retried post', 'window.posts.length > 0');
   assert.equal((await posts(page)).length, 1);
   assert.equal(await disabled(page), true);
 });

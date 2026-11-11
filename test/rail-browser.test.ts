@@ -30,7 +30,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 </script>`;
 
 // What the fake Citadel answers: toc up or down, its icon broken, or no answer at all.
-const state = { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false };
+const state = { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false, asks: 0 };
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#f93"/></svg>';
 let server: Server;
 let browser: Browser;
@@ -48,6 +48,7 @@ before(async () => {
     if (path === '/c/api/me') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"name":"josh"}');
     if (path === '/apps/_citadel/rail.js') return res.writeHead(200, { 'content-type': 'text/javascript' }).end(rail);
     if (path === '/c/api/contraptions/mine') {
+      state.asks++;
       if (state.citadelDown) return req.socket.destroy();
       if (state.citadel502) return res.writeHead(502).end();
       return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify([
@@ -80,6 +81,14 @@ async function until(page: Page, want: string) {
   for (const end = Date.now() + 10_000; (got = await toc(page)) !== want && Date.now() < end; await wait(25));
   return got;
 }
+/** Two more asks from the rail: rechecks follow one another, so the first one's answer has been handled. */
+async function twoAsks() {
+  const from = state.asks;
+  for (const end = Date.now() + 10_000; state.asks < from + 2;) {
+    if (Date.now() > end) throw new Error(`timed out waiting for two rechecks (${state.asks - from} came)`);
+    await wait(25);
+  }
+}
 const mark = (page: Page) => page.eval('document.querySelector(".citadel-rail").dataset.first = "1"');
 const sameRail = (page: Page) => page.eval<boolean>('document.querySelector(".citadel-rail")?.dataset.first === "1"');
 
@@ -88,7 +97,7 @@ test('an app down when the page loaded comes back without a reload, and a rechec
   const page = await browser.page(base, { width: 1000 });
   assert.equal(await until(page, 'tile'), 'tile', 'greyed out at load');
   state.citadelDown = true;
-  await wait(300);
+  await twoAsks();
   assert.equal(await toc(page), 'tile', 'Citadel restarting: the rail stays as it was');
   state.citadelDown = false;
   state.tocUp = true;
@@ -103,14 +112,14 @@ test('a 502 from Citadel (its proxy while it restarts) keeps the rail on a reche
   const page = await browser.page(base, { width: 1000 });
   assert.equal(await until(page, 'tile'), 'tile', 'greyed out at load');
   state.citadel502 = true;
-  await wait(300);
+  await twoAsks();
   assert.equal(await toc(page), 'tile', 'a 502 on a recheck: the rail stays as it was');
   state.citadel502 = false;
   state.tocUp = true;
   assert.equal(await until(page, 'img'), 'img', 'back once it is up');
   state.citadel502 = true;
   const later = await browser.page(base, { width: 1000 });
-  await wait(300);
+  await twoAsks();
   assert.equal(await toc(later), 'none', 'no rail while Citadel answers 502');
   state.citadel502 = false;
   assert.equal(await until(later, 'img'), 'img', 'drawn once Citadel answers');

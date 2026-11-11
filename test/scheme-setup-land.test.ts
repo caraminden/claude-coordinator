@@ -421,7 +421,8 @@ test('the head of the line waits for a lock held outside it (an older land.sh), 
 });
 
 // The CI gate and the stack (#537). CI is faked two ways: a CI_STATUS command that answers from a file named after
-// the commit (its exit code; no file: not started), and for the built-in reader a gh that prints what the test wrote.
+// the commit (its exit code; no file: not started; "<code> once": that answer one time, then not started), and for
+// the built-in reader a gh that prints what the test wrote (runs.once.tsv one time, then runs.tsv).
 // Either way a gh stands first in PATH, so no test reaches GitHub.
 function ciSetup(branches: number, { stack = '3', check = 'true', builtin = false, files = (i: number) => `f${i}.txt` } = {}) {
   const config = builtin ? { CI_WORKFLOWS: 'ci.yml slow.yml', CI_STACK: stack } : { CI_STATUS: '"$CI_FAKE"', CI_STACK: stack };
@@ -430,8 +431,8 @@ function ciSetup(branches: number, { stack = '3', check = 'true', builtin = fals
   const bin = join(q.dir, 'bin');
   mkdirSync(ci);
   mkdirSync(bin);
-  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) cat "$CI_DIR/runs.tsv" 2>/dev/null ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
-  writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\nexit "$(cat "$CI_DIR/${1:0:12}" 2>/dev/null || echo 3)"\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\nf=$CI_DIR/${1:0:12}\nread -r code once <"$f" 2>/dev/null || code=3\n[ -z "$once" ] || rm "$f"\nexit "$code"\n', { mode: 0o755 });
   const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0' };
   const started: ReturnType<typeof q.land>[] = [];
   const land = (i: number, extra: Record<string, string> = {}) => started[started.push(q.land(i, { ...ciEnv, ...extra })) - 1];
@@ -440,7 +441,7 @@ function ciSetup(branches: number, { stack = '3', check = 'true', builtin = fals
   const sent = (l: L) => [...l.stderr().matchAll(/waiting for CI on ([0-9a-f]{12}) \(origin/g)].map((m) => m[1]);
   /** Waits until the landing has sent its nth commit to CI, and returns it. */
   const tip = async (l: L, nth = 1) => { await until(`CI run ${nth}: ${l.stderr()}`, () => sent(l).length >= nth); return sent(l)[nth - 1]; };
-  const verdict = (sha: string, code: number) => writeFileSync(join(ci, sha), `${code}\n`);
+  const verdict = (sha: string, code: number, once = false) => writeFileSync(join(ci, sha), `${code}${once ? ' once' : ''}\n`);
   const parent = (sha: string) => git(q.main, 'rev-parse', `${sha}^`).slice(0, 12);
   const mainAt = () => git(q.main, 'rev-parse', 'main').slice(0, 12);
   const scratch = () => git(q.origin, 'for-each-ref', '--format=%(refname:short) %(objectname)', 'refs/heads/land').split('\n').filter(Boolean).map((l) => l.replace(/^(\S+ .{12}).*/, '$1'));
@@ -576,16 +577,12 @@ test('the stack: a red run in the middle is refused, and the one behind it build
 test('the stack: a run lost mid-way is run again on the same commit, and the one behind keeps its run', async () => {
   const c = ciSetup(3);
   try {
-    const [a] = await c.lands(1);
-    const b = c.land(2, { LAND_CI_GRACE: '3' });
-    await until("the 2nd's ticket", () => c.issued() === 2);
-    const [d] = await c.lands(3);
+    const [a, b, d] = await c.lands(1, 2, 3);
     const [ta, tb, td] = [await c.tip(a), await c.tip(b), await c.tip(d)];
-    await sleep(3100); // past the grace after its first push, so the lost run is believed
-    c.verdict(tb, LOST);
+    c.verdict(tb, LOST, true);
     assert.equal(await c.tip(b, 2), tb, 'the same commit goes to CI again');
     assert.match(b.stderr(), /ended without a verdict \(a runner lost mid-run, or the run cancelled\): running it again, once/);
-    c.verdict(tb, GREEN); // within the grace, in which the lost run is not believed a second time
+    c.verdict(tb, GREEN);
     c.verdict(td, GREEN);
     c.verdict(ta, GREEN);
     for (const l of [a, b, d]) assert.equal(await l.exit, 0, l.stderr());
@@ -771,7 +768,7 @@ test("CI gate: the built-in reader takes the newest run of each workflow, the wo
   const runs = (...rows: string[]) => writeFileSync(join(c.ci, 'runs.tsv'), rows.join(''));
   const gh = () => readFileSync(join(c.ci, 'gh.log'), 'utf8');
   try {
-    const a = c.land(1, { LAND_CI_GRACE: '1' });
+    const a = c.land(1);
     const sha = await c.tip(a);
     assert.match(gh(), new RegExp(`api repos/.*/actions/runs\\?head_sha=${sha}`), 'it asks about the exact commit');
     // One workflow green, the other still running: not green.
@@ -780,14 +777,13 @@ test("CI gate: the built-in reader takes the newest run of each workflow, the wo
     assert.deepEqual(c.landed(), []);
     // The newest run of slow.yml failed with no failed step (its runner went away); an older green one doesn't count.
     writeFileSync(join(c.ci, 'failed-steps'), '0\n');
-    await sleep(1100); // past the grace
-    runs(run('ci.yml', 2, 'completed', 'success'), run('slow.yml', 5, 'completed', 'failure'), run('slow.yml', 1, 'completed', 'success'));
+    writeFileSync(join(c.ci, 'runs.once.tsv'), [run('ci.yml', 2, 'completed', 'success'), run('slow.yml', 5, 'completed', 'failure'), run('slow.yml', 1, 'completed', 'success')].join(''));
     await c.tip(a, 2);
     assert.match(a.stderr(), /slow\.yml: completed failure https:\/\/ci\.test\/5/);
     assert.match(a.stderr(), /running it again, once/);
     // The new run fails in a step: red.
     writeFileSync(join(c.ci, 'failed-steps'), '1\n');
-    await sleep(1100);
+    runs(run('ci.yml', 2, 'completed', 'success'), run('slow.yml', 7, 'completed', 'failure'));
     assert.equal(await a.exit, 1, a.stderr());
     assert.match(a.stderr(), /CI is red on/);
     assert.deepEqual(c.landed(), []);
@@ -797,6 +793,48 @@ test("CI gate: the built-in reader takes the newest run of each workflow, the wo
     assert.equal(await b.exit, 0, b.stderr());
     assert.match(b.stderr(), /CI already passed/);
     assert.deepEqual(c.landed(), ['f1.txt: 1']);
+  } finally {
+    c.stop();
+  }
+});
+
+test('CI gate: an old red run of the same commit is not believed just after the push; a run queued behind busy runners waits, and no answer at all says so', async () => {
+  const c = ciSetup(1, { stack: '1' });
+  try {
+    // Main hasn't moved, so the commit CI gets is the branch's own: red from an earlier try.
+    const sha = git(c.wt, 'rev-parse', 'HEAD').slice(0, 12);
+    c.verdict(sha, RED);
+    const a = c.land(1, { LAND_CI_GRACE: '600', LAND_CI_START: '1' });
+    assert.equal(await c.tip(a), sha, 'it starts a new run');
+    writeFileSync(join(c.ci, 'busy'), '2\n');
+    await until('it to see the runners are busy', () => /runners are busy with other runs: still waiting/.test(a.stderr()));
+    assert.equal(a.child.exitCode, null, 'neither refused on the old red nor parked');
+    c.verdict(sha, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    // A verdict command that can't answer: it parks saying that, not that the runners are off.
+    c.commit(c.wt, 'g.txt', 'more\n');
+    const b = c.land(1, { LAND_CI_START: '1' });
+    c.verdict(await c.tip(b), 5);
+    assert.equal(await b.exit, 75, b.stderr());
+    assert.match(b.stderr(), /CI gave no answer about [0-9a-f]{12} for 1 min \(exit 5 from "\$CI_FAKE"; above\)/);
+  } finally {
+    c.stop();
+  }
+});
+
+test('the stack: a commit made on the detached HEAD a killed landing left is not thrown away', async () => {
+  const c = ciSetup(1, { stack: '1' });
+  try {
+    const a = c.land(1);
+    await c.tip(a);
+    a.child.kill('SIGKILL');
+    await a.exit;
+    c.commit(c.wt, 'late.txt', 'made on the detached commit\n');
+    const again = c.land(1);
+    assert.equal(await again.exit, 1, again.stderr());
+    assert.match(again.stderr(), /left .* on a detached commit \([0-9a-f]{12}\), and HEAD has moved since\. If you committed here, put those commits on ticket\/1-x/);
+    assert.equal(git(c.wt, 'log', '-1', '--format=%s'), 'late.txt: made on the detached commit', 'the commit is still there');
+    assert.deepEqual(c.landed(), []);
   } finally {
     c.stop();
   }

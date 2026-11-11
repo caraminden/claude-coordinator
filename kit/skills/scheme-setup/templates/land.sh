@@ -327,7 +327,9 @@ branch=$(git branch --show-current)
 # A landing that was killed outright left this worktree on its detached commit, and the branch where it was.
 if [ -z "$branch" ] && [ -s "$gitdir/land-branch" ]; then
   git rebase --abort 2>/dev/null || true
-  branch=$(cat "$gitdir/land-branch")
+  { read -r branch; read -r left; } <"$gitdir/land-branch" || true
+  # Anything committed here since would be lost with the detached commit, which may also hold other minions' unlanded work.
+  [ "$(git rev-parse HEAD)" = "$left" ] || refuse "an earlier landing was stopped mid-way and left $here on a detached commit (${left:0:12}), and HEAD has moved since. If you committed here, put those commits on $branch (git checkout $branch, then git cherry-pick each one of yours); otherwise just git checkout $branch. Then run this again"
   git checkout -q "$branch" || refuse "an earlier landing was stopped mid-way and $here could not go back onto $branch (above); a person needs to look"
   say "an earlier landing here was stopped mid-way: $here is back on $branch as it was"
 fi
@@ -356,7 +358,7 @@ blocked='' # why it can't land on $base (a conflict, a clash, a red check, red C
            # shortcut: it waits for the ones ahead to land, not just to turn green; read their verdicts
            # from their tickets if a red landing holding up the ones behind it ever costs real time.
 keep=''    # the rebased commit the branch moves to on the way out, if it sits on main by then
-green='' pushed='' pushed_at='' retried='' ci_clock=0 ci_last=-1 landed=''
+green='' pushed='' pushed_at='' retried='' ci_clock=0 ci_begun='' ci_last=-1 landed=''
 
 # CI's verdict on $tip, by the exit codes in the header at CI_STATUS; what it found goes to $cilog.
 ci_verdict() {
@@ -396,9 +398,10 @@ ci_verdict() {
 # the branch already has (a run to repeat) would start nothing. Forced on purpose: only this script
 # writes land/<branch>, so there is no one's work to overwrite. --no-verify: the check ran above.
 ci_push() {
+  [ -n "$pushed" ] || ci_cancel # what a landing of this branch that was killed left running
   hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true
   hub git push -q --no-verify origin "+$tip:refs/heads/$CI_REF" || refuse "couldn't push ${tip:0:12} to origin's $CI_REF, so CI can't run on it and nothing landed"
-  pushed=1 pushed_at=$SECONDS ci_clock=$SECONDS
+  pushed=1 pushed_at=$SECONDS ci_clock=$SECONDS ci_begun=''
   say "waiting for CI on ${tip:0:12} (origin's $CI_REF)"
 }
 
@@ -412,7 +415,7 @@ ci_cancel() {
 
 # Asks CI about $tip, at most every CI_POLL seconds: sets green, refuses on red, repeats a lost run once, parks at the limits.
 ci_ask() {
-  local rc=0 waited
+  local rc=0 waited busy
   [ $((SECONDS - ci_last)) -ge "$CI_POLL" ] || return 0
   ci_last=$SECONDS
   ci_verdict || rc=$?
@@ -445,8 +448,18 @@ ci_ask() {
   esac
   [ "$Q_AHEAD" = 0 ] || return 0
   waited=$((SECONDS - ci_clock))
-  if [ "$rc" != 2 ] && [ "$waited" -ge "$CI_START" ]; then
+  [ "$rc" != 2 ] || ci_begun=1
+  if [ -z "$ci_begun" ] && [ "$waited" -ge "$CI_START" ]; then
     cat "$cilog" >&2
+    [ "$rc" = 3 ] || park "CI gave no answer about ${tip:0:12} for $(((CI_START + 59) / 60)) min (exit $rc from ${CI_STATUS:-gh}; above), so nothing landed. That is GitHub or this box's gh login, not the runners or the branch: a person needs to look. Park, and run this again after"
+    # Runs going elsewhere in the repo mean the runners are there and busy (the ones stacked behind this, say): the
+    # run is waiting its turn. CI_LIMIT still ends the wait.
+    busy=$(hub gh api "repos/$slug/actions/runs?status=in_progress&per_page=1" --jq .total_count 2>/dev/null) || busy=0
+    if [ "$busy" -gt 0 ] 2>/dev/null; then
+      say "CI hasn't started on ${tip:0:12} yet, but the runners are busy with other runs: still waiting"
+      ci_begun=1
+      return 0
+    fi
     park "no runner has started CI on ${tip:0:12} within $(((CI_START + 59) / 60)) min (the machine they run on is probably off or asleep), so nothing landed. Park, and run this again once a person says the runners are back"
   fi
   if [ "$waited" -ge "$CI_LIMIT" ]; then
@@ -470,10 +483,13 @@ build() {
   fi
   queue_phase "$phase"
   say "rebasing $branch onto $on"
-  echo "$branch" >"$gitdir/land-branch"
+  # The branch, and the commit this leaves the worktree on: how the next run puts things back if this one is killed.
+  printf '%s\n' "$branch" "$pre" >"$gitdir/land-branch"
   # 9>&- on git: a git gc --auto it starts detaches, and mustn't keep the lock.
   git checkout -q --detach "$pre" 9>&-
-  if ! git rebase -q "$want" 9>&-; then
+  if git rebase -q "$want" 9>&-; then
+    printf '%s\n' "$branch" "$(git rev-parse HEAD)" >"$gitdir/land-branch"
+  else
     git rebase --abort 2>/dev/null || true # nothing to abort if it never started
     blocked="the rebase onto $BRANCH failed (see git's output above), so nothing landed. On conflicts: run git rebase $BRANCH, resolve them keeping the other minions' changes, re-test, commit, then run this again"
     return 0
@@ -513,7 +529,7 @@ build() {
 
   tip=$(git rev-parse HEAD)
   if [ -n "$CI_ON" ]; then
-    ci_clock=$SECONDS ci_last=$SECONDS
+    ci_clock=$SECONDS ci_last=$SECONDS ci_begun=''
     # A run of this very commit that is green or going (its pull request's, say) will do; otherwise a new one.
     ci_verdict || rc=$?
     case $rc in
@@ -564,7 +580,7 @@ while :; do
       # Under the lock: another landing fast-forwarding main there looks like uncommitted changes while it runs.
       [ "$(git -C "$MAIN" branch --show-current)" = "$BRANCH" ] || refuse "$MAIN is not on $BRANCH; a person needs to look"
       [ -z "$(git -C "$MAIN" status --porcelain --untracked-files=no)" ] || refuse "$MAIN has uncommitted changes; a person needs to look"
-      seen_main=1 ci_clock=$SECONDS # the limits on CI count from here: until now its run could be waiting on the ones ahead
+      seen_main=1 ci_clock=$SECONDS ci_begun='' # the limits on CI count from here: until now its run could be waiting on the ones ahead
     fi
     want=$(git rev-parse "refs/heads/$BRANCH")
   elif [ "$Q_AHEAD" -lt "$CI_STACK" ] && [ -n "$Q_PRED" ]; then
@@ -595,7 +611,9 @@ while :; do
 done
 
 # The head of the line, holding the lock, with $tip checked (and green in CI) on exactly today's main.
-git -C "$MAIN" merge -q --ff-only "$tip" 9>&- || refuse "could not fast-forward $BRANCH to $branch; nothing landed"
+# The merge keeps the lock, so nobody sees main half moved if this script is killed; gc.auto=0, so no git gc
+# detaches from it holding the lock.
+git -C "$MAIN" -c gc.auto=0 merge -q --ff-only "$tip" || refuse "could not fast-forward $BRANCH to $branch; nothing landed"
 keep=$tip landed=ok # it landed, so its time counts toward the estimate, whatever the push does
 say "$BRANCH is now at $(git log -1 --format='%h "%s"' "$tip")"
 

@@ -3,7 +3,7 @@
 // These copy that state into the app's database after each turn and put it back before the next,
 // so a thread survives a switch of Claude account or config dir.
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -14,6 +14,14 @@ const gz = promisify(gzip);
 
 export function claudeConfigDir(env: NodeJS.ProcessEnv): string {
   return env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+}
+
+/**
+ * A Claude session id fit to be a file name and an argument. They come from a turn's stream, which a person's
+ * container can write, and are joined into paths here: nothing with a separator or dots, nor a leading dash.
+ */
+export function validSessionId(id: unknown): id is string {
+  return typeof id === 'string' && /^\w[\w-]*$/.test(id);
 }
 
 /** Claude Code's folder name for a working directory under `projects/`. */
@@ -68,7 +76,7 @@ interface Scope {
 function scope(ticket: Ticket, project: Project): Scope {
   const cwdSlug = projectSlug(ticket.cwd);
   const ticketRoots = [join('projects', cwdSlug, 'memory')];
-  if (ticket.session_id) {
+  if (validSessionId(ticket.session_id)) {
     ticketRoots.push(
       join('projects', cwdSlug, `${ticket.session_id}.jsonl`),
       join('projects', cwdSlug, ticket.session_id), // saved tool output, subagent transcripts
@@ -84,7 +92,10 @@ async function listFiles(configDir: string, root: string): Promise<string[]> {
   const abs = join(configDir, root);
   let st;
   try {
-    st = await stat(abs);
+    // A person's container owns its volume and can plant links there: none is followed, as the last name or on
+    // the way to it, or the server would read a host file into the database and a restore would hand it over.
+    if (!(await realpath(abs)).startsWith((await realpath(configDir)) + sep)) return [];
+    st = await lstat(abs);
   } catch {
     return [];
   }
@@ -127,7 +138,8 @@ export async function saveSession(store: Store, ticket: Ticket, project: Project
     }
     if (!prunable) continue;
     // A config dir without the session's transcript (a restore that failed) doesn't hold everything: keep the database's copy.
-    if (ticketId !== null && ticket.session_id && !existsSync(transcriptPath(configDir, ticket.cwd, ticket.session_id))) continue;
+    const transcript = ticket.session_id ? transcriptPath(configDir, ticket.cwd, ticket.session_id) : null;
+    if (ticketId !== null && ticket.session_id && !(transcript && existsSync(transcript))) continue;
     const rows = ticketId === null ? store.listClaudeState(project.id, null) : store.listClaudeState(project.id, ticketId);
     for (const row of rows) {
       const inRoots = roots.some((r) => row.path === r || row.path.startsWith(r + sep));
@@ -164,8 +176,9 @@ export function storedPaths(store: Store, ticket: Ticket, project: Project): Set
   return new Set([...store.listClaudeState(project.id, ticket.id), ...store.listClaudeState(project.id, null)].map((r) => r.path));
 }
 
-/** Where Claude Code keeps a session's transcript, for a turn run in `cwd`. */
-export function transcriptPath(configDir: string, cwd: string, sessionId: string): string {
+/** Where Claude Code keeps a session's transcript, for a turn run in `cwd`; null for an id that isn't one (validSessionId). */
+export function transcriptPath(configDir: string, cwd: string, sessionId: string): string | null {
+  if (!validSessionId(sessionId)) return null;
   return join(configDir, 'projects', projectSlug(cwd), `${sessionId}.jsonl`);
 }
 
@@ -176,6 +189,7 @@ export function transcriptPath(configDir: string, cwd: string, sessionId: string
 export function lastEffort(ticket: Ticket, configDir: string): string | null {
   if (!ticket.session_id || !ticket.cwd) return null;
   const path = transcriptPath(configDir, ticket.cwd, ticket.session_id);
+  if (!path) return null;
   let fd;
   try {
     fd = openSync(path, 'r');

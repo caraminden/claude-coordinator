@@ -21,7 +21,7 @@ import type { Contraptions } from './contraptions.ts';
 import type { ContraptionRow, Store } from './db.ts';
 import { claudeParts, codexModelFor, codexSwitchKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_WAITING } from './codex.ts';
 import { USAGE_LIMIT, turnEnv, tripwireConfig } from './turn-launch.ts';
-import { claudeConfigDir, projectSlug } from './sessions.ts';
+import { claudeConfigDir, transcriptPath, validSessionId } from './sessions.ts';
 
 /** Read once at load, like the runner's pinned files: a deploy doesn't change the hook under a running server. */
 const AGENT_CAP = readFileSync(join(import.meta.dirname, 'contraption-agent-cap.ts'), 'utf8');
@@ -365,11 +365,6 @@ export class ContraptionTurns {
     return { onHost: join(place.home, rel), inside: join(homedir(), rel) };
   }
 
-  /** A Claude session's transcript, as this server sees it. */
-  private transcript(configDir: string, cwd: string, claudeSession: string) {
-    return join(configDir, 'projects', projectSlug(cwd), `${claudeSession}.jsonl`);
-  }
-
   /** Forget a session's Codex thread and its log. */
   private dropCodex(key: string, logFile: string | null) {
     this.store.deleteSetting(key);
@@ -378,7 +373,8 @@ export class ContraptionTurns {
 
   /** Delete a Claude session's transcript and its subagents' from the person's Claude folder. */
   private dropTranscript(where: { configDir: string; cwd: string }, claudeSession: string) {
-    const file = this.transcript(where.configDir, where.cwd, claudeSession);
+    const file = transcriptPath(where.configDir, where.cwd, claudeSession);
+    if (!file) return; // an id that isn't one: no path is made from it, least of all to delete
     rmSync(file, { force: true });
     rmSync(file.replace(/\.jsonl$/, ''), { recursive: true, force: true });
   }
@@ -450,7 +446,8 @@ export class ContraptionTurns {
     }
     // Resume the name's session unless asked for a fresh one, or its transcript is gone (a relinked Claude).
     const known = this.store.contraptionSession(c.id, req.person, req.session);
-    const resume = !!known && !req.fresh && existsSync(this.transcript(where.configDir, where.cwd, known.claude_session));
+    const transcript = known ? transcriptPath(where.configDir, where.cwd, known.claude_session) : null;
+    const resume = !!transcript && !req.fresh && existsSync(transcript);
     const claudeSession = resume ? known!.claude_session : randomUUID();
     // The name can never get back to the session it leaves, so that session's transcript goes.
     if (known && !resume) this.dropTranscript(where, known.claude_session);
@@ -486,7 +483,7 @@ export class ContraptionTurns {
       secret('codex-tripwire.json', JSON.stringify({ script: join(dir.inside, 'tripwire.ts'), config: tripwireConfig(0, at.host ? place.configDir : at.configDir, false), mode: 'contraption', mcp: Object.keys(config.mcpServers) }));
       let claudeJsonl = '';
       try {
-        if (resume) claudeJsonl = readFileSync(this.transcript(where.configDir, where.cwd, claudeSession), 'utf8');
+        if (resume) claudeJsonl = readFileSync(transcript!, 'utf8');
       } catch {
         // No Claude transcript: a new thread starts from the Codex turns alone, if any.
       }
@@ -557,7 +554,7 @@ export class ContraptionTurns {
       } else if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.codex_thread === 'string') {
         const t = this.store.getSetting<CodexSession>(ckey);
         if (t) this.store.setSetting(ckey, { ...t, thread: ev.codex_thread });
-      } else if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.session_id === 'string' && ev.session_id !== claudeSession) {
+      } else if (ev.type === 'system' && ev.subtype === 'init' && validSessionId(ev.session_id) && ev.session_id !== claudeSession) {
         this.store.putContraptionSession(c.id, req.person, req.session, ev.session_id);
       } else if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
         emit('compacted', {});

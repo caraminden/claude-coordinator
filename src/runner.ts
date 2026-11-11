@@ -14,7 +14,7 @@ import type { SchemeRefs } from './scheme-refs.ts';
 import { cardHref, cardLabel, cardText, settledHow, type CardLink, type SettledCard } from './card-links.ts';
 import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
-import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath } from './sessions.ts';
+import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
 import { Lanes } from './lanes.ts';
 import { projectDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { previewKey } from './previews.ts';
@@ -1896,7 +1896,7 @@ export class Runner {
     // With no copy of its transcript on this login or in the database, --resume would fail every turn from now on.
     // A restore that failed (disk full, say) still resumes and fails loudly: the database's copy may be fine.
     const transcript = ticket.session_id ? transcriptPath(configDir, ticket.cwd, ticket.session_id) : null;
-    if (ticket.session_id && (restoreFailed || existsSync(transcript!))) {
+    if (ticket.session_id && transcript && (restoreFailed || existsSync(transcript))) {
       if (!codex) args.push('--resume', ticket.session_id);
     } else if (ticket.session_id) {
       this.emit(ticket.id, 'note', { text: `This minion's conversation (session ${ticket.session_id}) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here, but Claude doesn't remember the earlier turns.` });
@@ -2289,7 +2289,8 @@ export class Runner {
       this.contextSizes.delete(ticketId);
     }
     if (DROPPED_TYPES.has(ev.type)) return;
-    if (ev.session_id && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
+    // Joined into paths and passed to --resume later, and a container can write its stream: only what looks like an id.
+    if (validSessionId(ev.session_id) && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
     }
     if (ev.type === 'result') onResult(!!ev.is_error, typeof ev.result === 'string' ? ev.result : null);

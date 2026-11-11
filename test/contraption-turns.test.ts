@@ -66,7 +66,7 @@ take().then((m) => {
   fs.mkdirSync(dir, { recursive: true });
   fs.appendFileSync(path.join(dir, session + '.jsonl'), JSON.stringify({ prompt }) + '\\n');
   // claude's init names the model it runs in full (#409).
-  out({ type: 'system', subtype: 'init', session_id: session, tools: [], model: 'claude-' + (opt('--model') ?? 'default') + '-test' });
+  out({ type: 'system', subtype: 'init', session_id: prompt.includes('odd session id') ? '../../victim' : session, tools: [], model: 'claude-' + (opt('--model') ?? 'default') + '-test' });
   if (prompt.includes('slow')) return setInterval(() => {}, 1000);
   // Ignores SIGTERM, so only the SIGKILL ends it.
   if (prompt.includes('stubborn')) { process.on('SIGTERM', () => {}); return setInterval(() => {}, 1000); }
@@ -515,6 +515,20 @@ test('a container turn runs in the person\'s own container, on their own sign-in
   // A refused sign-in: they link again, and no one else's plan steps in.
   assert.equal(errorOf(await turn(mandate, { person: josh.id, session: 'in-container', prompt: 'expired' })), 'no_plan');
   assert.deepEqual(expired, [josh.id]);
+});
+
+test("a stream's session id that isn't one is never stored, and one stored before never reaches a path (C1)", async () => {
+  const mine = (await turn(mandate, { session: 'odd', prompt: 'odd session id' }))[0].data.claudeSession;
+  assert.equal(store.contraptionSession(mandate.id, cara.id, 'odd')!.claude_session, mine, "the stream's ../ id was not taken");
+  // A row from before the check: dropping "its transcript" would delete a folder two levels up.
+  const victim = join(claudeDir, 'victim');
+  mkdirSync(victim, { recursive: true });
+  writeFileSync(join(victim, 'keep'), 'x');
+  store.putContraptionSession(mandate.id, cara.id, 'odd', '../../victim');
+  const next = (await turn(mandate, { session: 'odd' }))[0].data.claudeSession;
+  assert.match(next, /^[0-9a-f-]{36}$/, 'the name starts a new session');
+  assert.ok(existsSync(join(victim, 'keep')));
+  assert.equal(turns.deleteSession(mandate, cara.id, 'odd'), 'deleted');
 });
 
 test('deleting a session forgets the name and deletes its transcript', async () => {

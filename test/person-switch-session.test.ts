@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { gzipSync } from 'node:zlib';
-import { projectSlug } from '../src/sessions.ts';
+import { projectSlug, restoreSession, saveSession, transcriptPath } from '../src/sessions.ts';
 import { jsonLines, stopTurns, testPins } from './helpers.ts';
 testPins();
 
@@ -152,4 +152,66 @@ test("a restore that fails doesn't cost the database its copy: the turn resumes,
   await until(() => turns().length === 2 && store.getTicket(t.id)!.status !== 'running');
   assert.equal(turns()[1].resume, 'kept');
   assert.equal(store.getTicket(t.id)!.status, 'idle');
+});
+
+// C1: a person's container can write its turn's stream and its own volume, so neither a session id nor a link
+// found there may lead the server's reads (and the restore's writes) outside that login's Claude folder.
+const hostSecret = join(root, 'hosthome', '.ssh');
+mkdirSync(hostSecret, { recursive: true });
+writeFileSync(join(hostSecret, 'id_key'), 'HOST SECRET');
+writeFileSync(join(hostSecret, 'sess-1.jsonl'), 'HOST SECRET');
+function planted(name: string, sessionId: string) {
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Josh' });
+  const cwd = join(root, name);
+  mkdirSync(cwd);
+  store.setTicketDir(t.id, cwd, null);
+  store.updateTicket(t.id, { session_id: sessionId });
+  return { ticket: store.getTicket(t.id)!, cwd, slugDir: join(joshPlace.configDir, 'projects', projectSlug(cwd)) };
+}
+
+test('only a session id that looks like one is taken from the stream (C1)', () => {
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Josh' });
+  const r = runner();
+  const line = (session_id: unknown) => (r as any).handleLine(t.id, JSON.stringify({ type: 'system', subtype: 'init', session_id }), () => {});
+  for (const bad of ['../../../../hosthome/.ssh', 'a/b', '..', '--dangerously-skip-permissions', '', { a: 1 }, 7]) {
+    line(bad);
+    assert.equal(store.getTicket(t.id)!.session_id, null, `refused: ${JSON.stringify(bad)}`);
+  }
+  line('new-123');
+  assert.equal(store.getTicket(t.id)!.session_id, 'new-123');
+  line('0b6f4c0e-9a51-4c0e-8f0e-3d0c5a9b7e21');
+  assert.equal(store.getTicket(t.id)!.session_id, '0b6f4c0e-9a51-4c0e-8f0e-3d0c5a9b7e21');
+});
+
+test('a stored session id with a path in it reaches no file (C1)', async () => {
+  // As a row from before the stream's ids were checked.
+  const { ticket, cwd } = planted('wt-c1-id', '../../../../hosthome/.ssh');
+  assert.equal(transcriptPath(joshPlace.configDir, cwd, ticket.session_id!), null);
+  assert.equal(transcriptPath(joshPlace.configDir, cwd, 'sess-1'), join(joshPlace.configDir, 'projects', projectSlug(cwd), 'sess-1.jsonl'));
+  await saveSession(store, ticket, project, joshPlace.configDir, null);
+  assert.deepEqual(store.listClaudeState(project.id, ticket.id).map((row) => row.path), []);
+});
+
+test("a link planted in the volume isn't followed out of it, so a restore can't hand a host file back (C1)", async () => {
+  // Where the transcript goes: a link to a host file.
+  const a = planted('wt-c1-link', 'sess-1');
+  mkdirSync(a.slugDir, { recursive: true });
+  symlinkSync(join(hostSecret, 'id_key'), join(a.slugDir, 'sess-1.jsonl'));
+  // The session's folder of saved tool output: a link to a host folder.
+  symlinkSync(hostSecret, join(a.slugDir, 'sess-1'));
+  await saveSession(store, a.ticket, project, joshPlace.configDir, null);
+  assert.deepEqual(store.listClaudeState(project.id, a.ticket.id).map((row) => row.path), []);
+  // One level up: the scheme's folder itself is the link, so the transcript's own name is a plain file.
+  const b = planted('wt-c1-dir', 'sess-1');
+  symlinkSync(hostSecret, b.slugDir);
+  await saveSession(store, b.ticket, project, joshPlace.configDir, null);
+  assert.deepEqual(store.listClaudeState(project.id, b.ticket.id).map((row) => row.path), []);
+  rmSync(b.slugDir);
+  assert.equal(restoreSession(store, b.ticket, project, joshPlace.configDir), 0);
+  // A real file beside them is still saved.
+  const c = planted('wt-c1-real', 'sess-1');
+  mkdirSync(c.slugDir, { recursive: true });
+  writeFileSync(join(c.slugDir, 'sess-1.jsonl'), '{}\n');
+  await saveSession(store, c.ticket, project, joshPlace.configDir, null);
+  assert.deepEqual(store.listClaudeState(project.id, c.ticket.id).map((row) => row.path), [join('projects', projectSlug(c.cwd), 'sess-1.jsonl')]);
 });

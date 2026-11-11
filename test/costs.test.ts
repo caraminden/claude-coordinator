@@ -103,3 +103,15 @@ test("a meter whose reset time has passed keeps the last estimate rather than su
   store.recordTurn(t.id, { session_id: 'old', ended_at: now - 8 * 86400_000, session_cost_usd: 700 });
   close(dayBudget(store, { utilization: 0.2, resetsAt: now - 2 * 86400_000 }, now)!, 70 / 0.1 / 7);
 });
+
+test("the day totals and a minion's share of the week count only the server login's turns, as its meter does (#468 S05-3)", () => {
+  const { store, p, t } = setup('shown');
+  const now = new Date(2026, 9, 28, 15, 0).getTime();
+  store.recordTurn(t.id, { session_id: 'host', ended_at: now, session_cost_usd: 2 });
+  store.recordTurn(t.id, { session_id: 'josh', ended_at: now, session_cost_usd: 5, payer: 7 });
+  const today = costDays(store, now)[0];
+  assert.equal(today.total, 2);
+  assert.deepEqual(today.byProject, { [p.id]: 2 });
+  assert.equal(store.ticketCost(t.id), 7, "the minion's own cost is still every turn's");
+  assert.equal(store.ticketCost(t.id, true), 2);
+});

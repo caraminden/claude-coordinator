@@ -344,12 +344,12 @@ export function threadRow(t, href = threadHref(t)) {
   // The state cell already shows steps done, so the activity line drops its own count.
   const activity = st.counted && t.last_activity ? withoutCount(t.last_activity) : t.last_activity;
   const note = (t.status === 'running' ? activity : t.note || activity) || '';
-  const share = t.cost && weekShare(t.cost);
+  const share = t.host_cost && weekShare(t.host_cost); // the meter is the server login's plan
   // People's own note (#146), on a line of its own so the minion's note keeps its place.
   const pnote = !coord && view.personNotes?.[t.id];
   const details = [
     threadFullName(t),
-    [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, !coord && t.parent ? `from #${t.parent}` : '', `updated ${ago(t.updated_at)}`, t.cost ? `${share ? `${share} of the weekly limit, ` : ''}${costText(t.cost)} at API prices` : ''].filter(Boolean).join(' · '),
+    [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, !coord && t.parent ? `from #${t.parent}` : '', `updated ${ago(t.updated_at)}`, t.cost ? `${share ? `${share} of the server login's weekly limit, ` : ''}${costText(t.cost)} at API prices` : ''].filter(Boolean).join(' · '),
     note,
     !coord && t.ship ? `${t.ship.text} · ${t.ship.commit}` : '',
     pnote ? `✎ ${pnote.text} (${pnote.by})` : '',

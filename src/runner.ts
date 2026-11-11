@@ -663,6 +663,8 @@ export class Runner {
       ship: this.ship(ticket.id),
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
+      // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).
+      host_cost: this.store.ticketCost(ticket.id, true),
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
       payer: this.payerView(ticket.person_id),
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),

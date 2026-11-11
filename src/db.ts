@@ -1937,9 +1937,9 @@ export class Store {
     return r?.ended_at ?? null;
   }
 
-  /** What a ticket's turns have cost so far. */
-  ticketCost(ticketId: number): number {
-    return (this.db.prepare('SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE ticket_id = ?').get(ticketId) as { c: number }).c;
+  /** What a ticket's turns have cost so far; `hostOnly`: the server login's turns only. */
+  ticketCost(ticketId: number, hostOnly = false): number {
+    return (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE ticket_id = ?${hostOnly ? ' AND payer IS NULL' : ''}`).get(ticketId) as { c: number }).c;
   }
 
   /** Cost per local day ('2026-10-28') and project, for turns ended at or after `since`; `hostOnly`: the server login's turns only. */

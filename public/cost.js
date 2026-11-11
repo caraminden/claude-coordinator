@@ -29,7 +29,7 @@ export function costChip() {
 
 /** Fetch the daily totals again (a turn just ended) and redraw. */
 export async function renderCost() {
-  if (!account?.admin) return; // costs are Citadel-wide, so only admins see them
+  if (!account?.admin) return; // the server login's costs across Citadel, so only admins see them
   const before = budget;
   try {
     ({ days, dayBudget: budget } = await api('api/costs'));
@@ -44,8 +44,8 @@ export async function renderCost() {
     const over = budget && today > budget;
     chip.querySelector('summary').replaceChildren(budget ? 'Day ' : 'Today ', h('b', { class: over ? 'warn' : '' }, budget ? pct(today) : costText(today)));
     chip.querySelector('summary').title = budget
-      ? `Today's turns: ${costText(today)} at API prices, ${pct(today)} of an even day's share of the weekly limit (${costText(budget)}).${over ? '\nOver it: at this pace the week runs out early.' : ''}`
-      : `Today's turns: ${costText(today)} at API prices. Shown against the weekly limit once its meter reaches 3%.`;
+      ? `Today's turns on the server login: ${costText(today)} at API prices, ${pct(today)} of an even day's share of the weekly limit (${costText(budget)}).${over ? '\nOver it: at this pace the week runs out early.' : ''}`
+      : `Today's turns on the server login: ${costText(today)} at API prices. Shown against the weekly limit once its meter reaches 3%.`;
     if (chip.open) drawPop(chip);
   }
 }
@@ -77,6 +77,6 @@ function drawPop(chip) {
       h('tbody', {}, days.map((d, i) => h('tr', {}, h('th', { scope: 'row' }, label(d.day, i)), cell(here(d)), cell(d.total)))),
       h('tfoot', {}, h('tr', {}, h('th', { scope: 'row' }, budget ? '7-day average' : '7 days'), cell(sum(here), budget ? days.length : 1), cell(sum((d) => d.total), budget ? days.length : 1)))),
     h('p', { class: 'foot' }, budget
-      ? `100% is a seventh of the weekly limit, ≈ ${costText(budget).slice(2)} a day at API prices, worked out from the weekly meter and this week's turns (last week's, early in a week). Over it, the week runs out early. Taskmasters included; not a bill.`
-      : "At API prices, not a bill. Taskmasters included. Shown against the weekly limit once its meter reaches 3%."));
+      ? `100% is a seventh of the weekly limit, ≈ ${costText(budget).slice(2)} a day at API prices, worked out from the weekly meter and this week's turns (last week's, early in a week). Over it, the week runs out early. The server login's turns only, Taskmasters included; not a bill.`
+      : "The server login's turns at API prices, not a bill. Taskmasters included. Shown against the weekly limit once its meter reaches 3%."));
 }

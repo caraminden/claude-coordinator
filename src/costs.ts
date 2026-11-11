@@ -7,7 +7,7 @@ export const COST_DAYS = 7;
 export interface CostDay {
   /** Local date, '2026-10-28'. */
   day: string;
-  /** Every scheme's turns that day. */
+  /** Every scheme's turns that day, the server login's only: what its weekly meter counts (#468 S05-3). */
   total: number;
   /** By project id. */
   byProject: Record<number, number>;
@@ -31,7 +31,7 @@ export function costDays(store: Store, now = Date.now()): CostDay[] {
     days.unshift({ day: localDay(d.getTime()), total: 0, byProject: {} });
   }
   const byDay = new Map(days.map((d) => [d.day, d]));
-  for (const r of store.dailyCosts(start.getTime())) {
+  for (const r of store.dailyCosts(start.getTime(), true)) {
     const d = byDay.get(r.day);
     if (!d) continue;
     d.total += r.cost;

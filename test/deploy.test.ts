@@ -433,7 +433,9 @@ test('deploy.sh retries a report the server never got, but not one it may alread
   const r = await post('http://10.255.255.1:9', { DEPLOY_REPORT_WAIT: '1', DEPLOY_REPORT_RETRY: '3' });
   assert.match(r.stderr, /could not post the report to minion 7's chat \(curl exit (28|7)\)/);
   assert.doesNotMatch(r.stderr, /no answer from the server/);
-  assert.ok(performance.now() - t0 >= 2500, 'retried until DEPLOY_REPORT_RETRY ran out');
+  // bash's SECONDS counts whole wall-clock seconds, so 3 s of retries end after 2 to 3 s (#564: 2.05 s when started just
+  // before a second ticks over). One try with no retry takes about 0 s (refused) or 1 s (timed out).
+  assert.ok(performance.now() - t0 >= 2000, 'retried until DEPLOY_REPORT_RETRY ran out');
   // A refusal won't change on a retry.
   const refused = await standIn(() => 403);
   try {

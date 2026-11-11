@@ -420,3 +420,12 @@ test("a runner list CI health can't read keeps the runner alerts as they were (#
   await w.health.tick(NOW + 4 * OFFLINE_MS);
   assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.open', null], 'cleared once the list says so');
 });
+
+test("an older build's runner alarm moves into the one alert even when the first round after can't read the runner list (#540)", async () => {
+  const w = world();
+  const title = 'CI: runner DESKTOP-G248IJ8 has been offline since Nov 5 03:45';
+  w.store.setSetting(`ci-health:${w.peek.id}`, { offline: { 'DESKTOP-G248IJ8': NOW - OFFLINE_MS }, sent: { 'runner:DESKTOP-G248IJ8': { 1: title } } });
+  w.gh.runnersDenied = true;
+  await w.health.tick(NOW);
+  assert.deepEqual(w.puts, [['Cara', 'ci.runner:DESKTOP-G248IJ8', null], ['Cara', 'ci.open', `CI, Peek Auras: ${title.slice(4)}`]]);
+});

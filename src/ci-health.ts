@@ -358,7 +358,9 @@ export class CiHealth {
     if (Array.isArray(runners?.runners)) out.push(...runnerProblems(runners.runners, saved.offline, now));
     else {
       // Unreadable isn't fine: the runners already alerting stay as they were, and new ones go unseen.
-      out.push(...(saved.problems ?? []).filter((x) => x.key.startsWith('runner:')));
+      // Before #540 only the items' titles were kept, so the first round after it reads them back from those.
+      const was = saved.problems ?? Object.entries(saved.sent).map(([key, by]) => ({ key, title: Object.values(by)[0] ?? '' }));
+      out.push(...was.filter((x) => x.key.startsWith('runner:') && x.title));
       this.sayOnce(`runners:${p.id}`, `CI health: can't list ${slug}'s runners (needs a repo admin's linked GitHub), so offline runners there go unseen.`);
     }
 

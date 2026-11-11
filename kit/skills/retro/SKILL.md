@@ -14,8 +14,8 @@ Create either file when it is first needed.
 
 ## When
 
-- A milestone PR is ready for review. A small task runs none: three lines under "Retro"
-  in its PR description. Otherwise run the retro before the reply that says the PR is
+- A milestone PR is ready for review. A small task runs none: its `Process:` line in
+  `citadel:self-review` stands in for it. Otherwise run the retro before the reply that says the PR is
   ready, and that reply carries the top three findings, even when it is meant to be short:
   they are part of the result.
 - Someone asks how the work went.

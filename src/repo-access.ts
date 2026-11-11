@@ -62,8 +62,12 @@ export class RepoAccess {
     const prev = this.store.getRepoCollaborator(projectId, userId);
     // shortcut: a scheme pointed at a different repo starts over there and forgets the old one, whose collaborator stays on GitHub; track both if repos ever move.
     if ((prev?.state === 'added' || prev?.state === 'existing') && prev.slug === slug && !prev.error) return;
+    // An invite or collaborator Citadel made here stays Citadel's through a failure, so leaving still undoes it.
+    const ours = prev?.slug === slug && (prev.state === 'invited' || prev.state === 'added') ? prev : null;
     const put = (state: RepoCollaborator['state'], fields: Partial<Pick<RepoCollaborator, 'login' | 'invitation_id' | 'error'>> = {}) =>
-      this.store.putRepoCollaborator({ project_id: projectId, user_id: userId, slug, login: null, invitation_id: null, error: null, state, ...fields });
+      this.store.putRepoCollaborator(ours && (state === 'failed' || state === 'waiting')
+        ? { ...ours, error: fields.error ?? null }
+        : { project_id: projectId, user_id: userId, slug, login: null, invitation_id: null, error: null, state, ...fields });
     const login = this.link.login(userId)?.login;
     if (!login) return put('waiting');
     const owner = this.store.getUser(project.owner_id ?? -1);
@@ -80,8 +84,8 @@ export class RepoAccess {
       const check = await this.api('GET', `/repos/${slug}/collaborators/${login}`, ownerToken.secret);
       // Already in: a collaborator Citadel invited earlier who has since accepted stays Citadel's, and so does
       // one Citadel added to the scheme's previous repo, which a GitHub transfer carries over (#456).
-      const ours = prev?.slug === slug ? prev.state === 'invited' : prev?.state === 'added' || prev?.state === 'invited';
-      if (check.status === 204) return put(ours ? 'added' : 'existing', { login });
+      const citadels = prev?.slug === slug ? !!ours : prev?.state === 'added' || prev?.state === 'invited';
+      if (check.status === 204) return put(citadels ? 'added' : 'existing', { login });
       if (check.status !== 404) return put('failed', { login, error: await explain(check, ownerToken.login, login, slug, hint) });
       const invite = await this.api('PUT', `/repos/${slug}/collaborators/${login}`, ownerToken.secret, { permission: 'push' });
       if (invite.status === 204) return put('added', { login });

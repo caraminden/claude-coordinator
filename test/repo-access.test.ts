@@ -113,6 +113,48 @@ test('a member whose link stopped working is left with an invite to accept on Gi
   assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'added');
 });
 
+test('an invite stays Citadel\'s through a failed check, so after it is accepted leaving still takes them off (#468 S02-4)', async () => {
+  const w = world();
+  w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
+  w.creds.fail(w.josh.id, 'github');
+  w.store.addMember(w.scheme.id, w.josh.id);
+  await w.access.sync(w.scheme.id, w.josh.id);
+  assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'invited');
+  // The owner's link stops working: the next sync fails, but the invite is still Citadel's.
+  w.creds.fail(w.cara.id, 'github');
+  await w.access.sync(w.scheme.id, w.josh.id);
+  assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'invited');
+  assert.match(w.access.view(w.scheme.id, w.josh.id)!.error!, /hasn't linked a working GitHub/);
+  // Josh accepts on GitHub, the owner links again, and the sweep settles it.
+  const [[id, inv]] = w.gh.invites;
+  w.gh.invites.delete(id);
+  w.gh.collaborators.get(inv.slug)!.add(inv.login);
+  w.linkGithub(w.cara.id, 'gho_cara', 'caraminden');
+  await w.access.sweep();
+  assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'added');
+  w.store.removeMember(w.scheme.id, w.josh.id);
+  assert.equal(await w.access.remove(w.scheme.id, w.josh.id), null);
+  assert.ok(!w.gh.collaborators.get('caraminden/peek-auras')!.has('KatzMeIfYouCan'));
+});
+
+test('a collaborator Citadel added, left with an error, stays Citadel\'s when synced again (#468 S02-4)', async () => {
+  const w = world();
+  w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
+  w.store.addMember(w.scheme.id, w.josh.id);
+  await w.access.sync(w.scheme.id, w.josh.id);
+  const row = w.store.getRepoCollaborator(w.scheme.id, w.josh.id)!;
+  assert.equal(row.state, 'added');
+  w.store.putRepoCollaborator({ ...row, error: 'Couldn\'t take @KatzMeIfYouCan off caraminden/peek-auras: GitHub was down' });
+  await w.access.sync(w.scheme.id, w.josh.id);
+  assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'added');
+  // Unlinked GitHub: waiting, but still Citadel's collaborator to take off.
+  w.creds.remove(w.josh.id, 'github');
+  w.store.putRepoCollaborator({ ...w.store.getRepoCollaborator(w.scheme.id, w.josh.id)!, error: 'x' });
+  await w.access.sync(w.scheme.id, w.josh.id);
+  assert.equal(w.store.getRepoCollaborator(w.scheme.id, w.josh.id)?.state, 'added');
+  assert.equal(w.store.getRepoCollaborator(w.scheme.id, w.josh.id)?.login, 'KatzMeIfYouCan');
+});
+
 test('leaving takes off only a collaborator Citadel added', async () => {
   const w = world();
   w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');

@@ -26,9 +26,12 @@ export function relayFile(fromShared: string, toShared: string, fromScheme: stri
     throw new HttpError(400, `Your scheme's shared folder (${fromShared}) doesn't exist yet`);
   }
   if (!real.startsWith(root + sep)) throw new HttpError(400, `Only files in your scheme's shared folder (${fromShared}) can be attached`);
-  if (!statSync(real).isFile()) throw new HttpError(400, `${file} is not a file`);
+  const st = statSync(real);
+  if (!st.isFile()) throw new HttpError(400, `${file} is not a file`);
+  const tooBig = () => new HttpError(413, `${file} is over ${RELAY_FILE_MAX / 1024 / 1024} MB: attach a shorter file, or a summary of it`);
+  if (st.size > RELAY_FILE_MAX) throw tooBig(); // before reading: a huge file never comes into memory
   const data = readFileSync(real);
-  if (data.length > RELAY_FILE_MAX) throw new HttpError(413, `${file} is over ${RELAY_FILE_MAX / 1024 / 1024} MB: attach a shorter file, or a summary of it`);
+  if (data.length > RELAY_FILE_MAX) throw tooBig(); // grew since the stat
   const dir = join(toShared, 'inbox', safe(fromScheme));
   mkdirSync(dir, { recursive: true });
   // Its real place, so a symlinked inbox can't send the copy outside the receiver's shared folder.

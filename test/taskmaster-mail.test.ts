@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { TASKMASTER_LOOP_LIMIT } from '../src/prompts.ts';
-import { RELAY_FILE_MAX } from '../src/taskmaster-files.ts';
+import { RELAY_FILE_MAX, relayFile } from '../src/taskmaster-files.ts';
+import { HttpError } from '../src/http.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { agentToken, bootServer, jsonLines, stopProcs, stopTurns, until, testPins } from './helpers.ts';
 testPins();
@@ -154,4 +155,20 @@ test('the route: wake: false leaves held mail, and a file goes into the receiver
   // It carries the two held mails, after the message that woke it.
   const turn = promptTexts().find((t) => t[0].startsWith('[Taskmaster of Mine'))!;
   assert.equal(turn.filter((x: string) => x.startsWith('[Held mail from Taskmaster of Mine')).length, 2);
+});
+
+test('an attachment over 2 MB is refused from its size alone, even one too big for Node to read (#468 S06-7)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'relay-big-'));
+  try {
+    const from = join(dir, 'from');
+    const to = join(dir, 'to');
+    mkdirSync(from);
+    mkdirSync(to);
+    // Sparse, so it takes no disk; past 2 GiB readFileSync throws a plain Error, not the 413.
+    writeFileSync(join(from, 'huge.bin'), '');
+    truncateSync(join(from, 'huge.bin'), 2 ** 31 + 1);
+    assert.throws(() => relayFile(from, to, 'Mine', 'huge.bin'), (e: any) => e instanceof HttpError && e.status === 413);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

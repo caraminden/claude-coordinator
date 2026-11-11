@@ -89,25 +89,42 @@ test('proposalLine reads headings, bold lines and lead-ins, not the words in pas
   assert.equal(proposalLine('Worth a follow-up minion (I didn\'t do it here): the old run-back text.'), 'Worth a follow-up minion (I didn\'t do it here): the old run-back text.');
 });
 
-test('answer hook: logs each hit as a would-refuse line, refuses nothing, and skips stops the job check refuses', () => {
+test('answer hook: logs each hit as a would-refuse line and refuses nothing; the job check runs it only on a stop it lets through', () => {
   const shared = mkdtempSync(join(tmpdir(), 'answer-shared-'));
   const path = join(mkdtempSync(join(tmpdir(), 'answer-t-')), 't.jsonl');
   writeFileSync(path, jsonl(prompt('go'), calls(FIVE), say(PROPOSAL)));
   const input = { hook_event_name: 'Stop', session_id: 's1', prompt_id: 'p1', transcript_path: path, last_assistant_message: 'Now the tests.' };
   const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_SHARED_DIR: shared };
+  const lines = () => {
+    try {
+      return readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).flatMap((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8').split('\n').filter((l) => l.includes('would refuse')));
+    } catch {
+      return [];
+    }
+  };
   // Claude Code's last_assistant_message wins over the transcript.
   assert.deepEqual(answerHook(input, env), ['thin last message · 5 tool calls · "Now the tests."']);
-  const lines = readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).flatMap((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8').split('\n').filter((l) => l.startsWith('- ')));
-  assert.equal(lines.length, 1);
-  assert.match(lines[0], / · would refuse · thin last message · 5 tool calls · "Now the tests\."$/);
-  assert.deepEqual(answerHook({ ...input, background_tasks: [{ id: 'b1', status: 'running', type: 'shell' }] }, env), [], 'the job check refuses this stop');
+  assert.equal(lines().length, 1);
+  assert.match(lines()[0], / · would refuse · thin last message · 5 tool calls · "Now the tests\."$/);
   assert.deepEqual(answerHook(input, { COORDINATOR_SHARED_DIR: shared }), [], 'not a Citadel turn');
   assert.equal(answerHook(input, { ...env, COORDINATOR_ROLE: 'coordinator' }).length, 1, 'Taskmasters keep the rule too');
 
-  const run = spawnSync(process.execPath, [join(import.meta.dirname, '..', 'kit', 'hooks', 'answer-check.ts')], { input: JSON.stringify(input), env: { ...process.env, ...env }, encoding: 'utf8' });
-  assert.equal(run.status, 0);
-  assert.equal(run.stdout, '', 'the trial prints no block');
-  const bad = spawnSync(process.execPath, [join(import.meta.dirname, '..', 'kit', 'hooks', 'answer-check.ts')], { input: '{nope', env: { ...process.env, ...env }, encoding: 'utf8' });
-  assert.equal(bad.status, 0);
-  assert.equal(bad.stdout, '');
+  // Through job-check.ts, as hooks.json runs it: a stop it refuses for a running job is no end of turn;
+  // the third, which it lets through with the job still running, is.
+  const script = (over: object) => spawnSync(process.execPath, [join(import.meta.dirname, '..', 'kit', 'hooks', 'job-check.ts')], { input: JSON.stringify({ ...input, session_id: 's2', ...over }), env: { ...process.env, ...env, TMPDIR: mkdtempSync(join(tmpdir(), 'answer-tmp-')) }, encoding: 'utf8' });
+  const tmp = mkdtempSync(join(tmpdir(), 'answer-tmp-'));
+  const run = (over: object) => spawnSync(process.execPath, [join(import.meta.dirname, '..', 'kit', 'hooks', 'job-check.ts')], { input: JSON.stringify({ ...input, session_id: 's3', ...over }), env: { ...process.env, ...env, TMPDIR: tmp }, encoding: 'utf8' });
+  const job = { background_tasks: [{ id: 'b1', status: 'running', type: 'shell', description: 'tests' }] };
+  const before = lines().length;
+  assert.match(run(job).stdout, /"decision":"block"/);
+  assert.match(run({ ...job, stop_hook_active: true }).stdout, /"decision":"block"/);
+  assert.equal(lines().length, before, 'refused stops log nothing');
+  const last = run({ ...job, stop_hook_active: true });
+  assert.equal(last.status, 0);
+  assert.equal(last.stdout, '', 'the trial prints no block');
+  assert.equal(lines().length, before + 1, 'the stop that ends the turn is judged');
+  const plain = script({});
+  assert.equal(plain.stdout, '');
+  assert.equal(lines().length, before + 2);
+  assert.equal(script({ transcript_path: '/nonexistent/t.jsonl', last_assistant_message: undefined }).status, 0, 'fails open');
 });

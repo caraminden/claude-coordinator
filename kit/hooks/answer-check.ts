@@ -12,8 +12,6 @@
  * its short end may be the steer cutting it off, not a broken rule (#280).
  */
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { runningJobs } from './job-check.ts';
 import { note } from './retro-log.ts';
 
 export const MIN_TOOL_CALLS = 5;
@@ -108,12 +106,13 @@ export function answerCheck(turn: Turn): string[] {
   return hits;
 }
 
-/** Runs the checks for one Stop of a Citadel turn and logs each hit; returns the hits. Never refuses. */
+/**
+ * Runs the checks for one Stop of a Citadel turn and logs each hit; returns the hits. Never refuses.
+ * job-check.ts calls it, only for a stop it lets through: a refused stop isn't the turn's end.
+ */
 export function answerHook(input: any, env = process.env): string[] {
   const role = env.COORDINATOR_ROLE;
   if (role !== 'thread' && role !== 'coordinator') return [];
-  // The job check refuses this stop and the turn carries on, so this isn't its end.
-  if (role === 'thread' && runningJobs(input).length) return [];
   let turn: Turn = { toolCalls: [], finalText: '', steered: false };
   if (input?.transcript_path) turn = readTurn(readFileSync(input.transcript_path, 'utf8'), input.prompt_id ?? undefined);
   // Claude Code's own copy of the last message beats the transcript, which may not be flushed yet.
@@ -121,13 +120,4 @@ export function answerHook(input: any, env = process.env): string[] {
   const hits = answerCheck(turn);
   for (const hit of hits) note(input, 'would refuse', hit, env);
   return hits;
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  // Fails open and prints nothing: the trial never refuses a stop.
-  try {
-    answerHook(JSON.parse(readFileSync(0, 'utf8')));
-  } catch (err: any) {
-    process.stderr.write(`[citadel answer check] skipped: ${err.message}\n`);
-  }
 }

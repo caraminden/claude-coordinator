@@ -9,6 +9,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { answerHook } from './answer-check.ts';
 import { note } from './retro-log.ts';
 
 export const MAX_STOP_BLOCKS = 2;
@@ -53,8 +54,11 @@ export function stopHook(input: any, env = process.env, stateDir = join(tmpdir()
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // Fails open: a broken input lets the turn end.
   try {
-    const out = stopHook(JSON.parse(readFileSync(0, 'utf8')));
+    const input = JSON.parse(readFileSync(0, 'utf8'));
+    const out = stopHook(input);
+    // The answer check's trial (answer-check.ts) judges only a stop that ends the turn.
     if (out) process.stdout.write(out);
+    else answerHook(input);
   } catch (err: any) {
     process.stderr.write(`[citadel job check] skipped: ${err.message}\n`);
   }

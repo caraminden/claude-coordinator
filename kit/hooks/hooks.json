@@ -1,5 +1,5 @@
 {
-  "description": "Citadel kit hooks: the job check, the answer check, the retro log and the after-compact reminder (kit/README.md).",
+  "description": "Citadel kit hooks: the job check (with the answer check), the retro log and the after-compact reminder (kit/README.md).",
   "hooks": {
     "SessionStart": [
       { "matcher": "compact", "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/after-compact.sh\"", "timeout": 30 }] }
@@ -13,7 +13,6 @@
     "Stop": [
       { "hooks": [
         { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/job-check.ts\"", "timeout": 10 },
-        { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/answer-check.ts\"", "timeout": 10 },
         { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/retro-log.ts\"", "timeout": 10 }
       ] }
     ],

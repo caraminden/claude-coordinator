@@ -2408,7 +2408,7 @@ export class Runner {
     let p = this.progress.get(ticketId);
     if (!p) {
       p = createProgress();
-      for (const row of this.store.listEvents(ticketId)) applyEvent(p, row.kind, JSON.parse(row.data));
+      for (const row of this.store.planEvents(ticketId)) applyEvent(p, row.kind, JSON.parse(row.data));
       this.progress.set(ticketId, p);
     }
     return p;

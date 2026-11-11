@@ -141,6 +141,27 @@ test("each page carries the plan as it stood before it, so the readout matches a
   assert.deepEqual(seeded.tasks, full.tasks);
 });
 
+test("planEvents leaves out ordinary tool results yet replays to the same plan as every event (#497)", () => {
+  const { store, t } = setup('plan-filter');
+  const create = (id: string, subject: string) => [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'TaskCreate', input: { subject } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${id.slice(1)} created successfully: ${subject}` }] } },
+  ];
+  const update = (taskId: string, status: string) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `u${++tool}`, name: 'TaskUpdate', input: { taskId, status } }] } });
+  turn(store, t.id, 3, [...create('c7', 'Map'), ...create('c8', 'Build'), update('7', 'completed'), update('8', 'in_progress')]);
+  turn(store, t.id, 2);
+  const replay = (rows: { kind: string; data: string }[]) => {
+    const p = createProgress();
+    for (const e of rows) applyEvent(p, e.kind, JSON.parse(e.data));
+    return { tasks: p.tasks, turnActions: p.turnActions, lastAction: p.lastAction };
+  };
+  const kept = store.planEvents(t.id);
+  assert.deepEqual(replay(kept), replay(store.listEvents(t.id)));
+  assert.deepEqual(replay(kept).tasks.map((x: any) => [x.subject, x.status]), [['Map', 'completed'], ['Build', 'in_progress']]);
+  const results = kept.filter((e) => JSON.parse(e.data).type === 'user');
+  assert.equal(results.length, 2, 'only the TaskCreate results, not the five ordinary tool results');
+});
+
 test('after= is unchanged: every event after an id', () => {
   const { store, t } = setup('after');
   const ids = turn(store, t.id, 2);

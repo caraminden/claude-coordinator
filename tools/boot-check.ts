@@ -12,7 +12,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { promisify } from 'node:util';
-import { DatabaseSync, backup } from 'node:sqlite';
+import { copyDb } from '../src/db-copy.ts';
 import { listeningPort } from '../src/ports.ts';
 
 const [checkout, db] = process.argv.slice(2);
@@ -22,34 +22,49 @@ const { Store } = await import(join(checkout, 'src', 'db.ts'));
 const root = mkdtempSync(join(tmpdir(), 'citadel-boot-check-'));
 const procs: ChildProcess[] = [];
 let log = '';
+// Each step's time goes to stderr (deploy.sh's log), and the 3-minute message names the step it was on.
+const start = Date.now();
+let step = '';
+let stepAt = start;
+const begin = (next: string) => {
+  if (step) console.error(`boot-check: ${step}: ${((Date.now() - stepAt) / 1000).toFixed(1)} s`);
+  [step, stepAt] = [next, Date.now()];
+};
 const fail = (why: string): never => {
   throw new Error(`${why}${log ? `\n--- server output ---\n${log.slice(-3000)}` : ''}`);
 };
 // Whatever hangs (a browser call, a turn), deploy.sh gets an answer. Each step has its own shorter
-// limit; on a loaded box the steps together can take two minutes.
-setTimeout(() => {
-  console.error(`The boot check did not finish within 3 minutes${log ? `\n--- server output ---\n${log.slice(-3000)}` : ''}`);
-  for (const p of procs) p.kill('SIGKILL');
-  rmSync(root, { recursive: true, force: true });
-  process.exit(1);
-}, 180_000).unref();
+// limit; on a loaded box the steps together can take two minutes. Armed again after the copy, which
+// grows with the database while the boot does not, so the copy has its own 3 minutes (#497).
+let backstop: NodeJS.Timeout | undefined;
+const arm = () => {
+  clearTimeout(backstop);
+  backstop = setTimeout(() => {
+    console.error(`The boot check did not finish within 3 minutes (stuck ${((Date.now() - stepAt) / 1000).toFixed(0)} s on: ${step})${log ? `\n--- server output ---\n${log.slice(-3000)}` : ''}`);
+    for (const p of procs) p.kill('SIGKILL');
+    rmSync(root, { recursive: true, force: true });
+    process.exit(1);
+  }, 180_000).unref();
+};
+arm();
 
 try {
+  begin('front-end syntax check');
   // A syntax error in any front-end file blanks the app; node --check finds it without a browser.
   const pub = join(checkout, 'public');
   const scripts = readdirSync(pub).filter((f) => /\.m?js$/.test(f));
   const bad = (await Promise.all(scripts.map((f) => promisify(execFile)(process.execPath, ['--check', join(pub, f)]).then(() => null, (err) => `${f}: ${err.stderr.trim()}`)))).filter(Boolean);
   if (bad.length) fail(`Front-end files don't parse:\n${bad.join('\n')}`);
 
-  // A consistent copy even while the live server writes (WAL).
+  begin('copying the database');
   const copy = join(root, 'coordinator.db');
-  const live = new DatabaseSync(db, { readOnly: true });
-  await backup(live, copy);
-  live.close();
+  await copyDb(db, copy);
+  arm();
 
   // The turns to start: the Taskmaster of the scheme with the most minions (the largest arguments)
   // and a new minion there. Both run in folders of their own, never a real worktree, and nothing is
   // held for the usage limit in the copy.
+  begin('migrating the copy');
   const turnStore = new Store(copy);
   const busiest = turnStore.db.prepare(`select c.id, c.project_id, c.permission_mode, c.branch from tickets c where c.kind = 'coordinator'
     order by (select count(*) from tickets t where t.project_id = c.project_id) desc limit 1`).get() as any;
@@ -74,6 +89,7 @@ try {
   writeFileSync(claude, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(import.meta.dirname, 'boot-check-claude.ts'))} "$@"\n`);
   chmodSync(claude, 0o755);
 
+  begin('server start');
   const password = randomBytes(16).toString('hex');
   const secret = randomBytes(32).toString('hex');
   const server = spawn(process.execPath, [join(checkout, 'server.ts')], {
@@ -91,18 +107,22 @@ try {
   // The checkout's server.ts is the one being deployed, so it reports the port it bound.
   const base = `http://127.0.0.1:${await listeningPort(server).catch((err) => fail(err.message))}`;
 
+  begin('/api/health');
   let health: any = null;
   for (const end = Date.now() + 20_000; !health; await new Promise((r) => setTimeout(r, 100))) {
     if (server.exitCode !== null) fail(`The server exited during boot (code ${server.exitCode})`);
     if (Date.now() > end) fail('The server did not answer /api/health within 20 s');
     health = await fetch(`${base}/api/health`).then((r) => (r.ok ? r.json() : null), () => null);
   }
+  begin('app page and sign-in');
   const page = await fetch(`${base}/`);
   if (page.status !== 200 || !/<html/i.test(await page.text())) fail(`The app page answered ${page.status}`);
   const login = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: adminLogin, password }) });
   const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
   if (!login.ok || !cookie) fail(`Signing in answered ${login.status}`);
+  begin('render in Chromium');
   await pageCheck(`${base}/`, cookie);
+  begin('Taskmaster and minion turns');
 
   // A person's message starts each turn; the stand-in claude leaves report.json in its folder.
   await Promise.all(turnChecks.map(async ({ what, id, dir }) => {
@@ -123,6 +143,8 @@ try {
       if (Date.now() > end) fail(`A ${what} turn did not finish within 30 s`);
     }
   }));
+  begin('');
+  console.error(`boot-check: total ${((Date.now() - start) / 1000).toFixed(1)} s`);
   console.log(health.version);
 } finally {
   for (const p of procs) p.kill();

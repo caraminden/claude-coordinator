@@ -4,6 +4,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync
 import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
@@ -319,4 +320,28 @@ test('the restart refuses to restart when it cannot copy the database first', ()
   assert.equal(r.status, 1);
   assert.match(r.stderr, /FAILED: Could not copy the database to backups\/ .*so nothing restarted/);
   assert.doesNotMatch(r.stderr, /restarting no-such-citadel-unit/);
+});
+
+test('deploy.sh copies the database while the live server keeps writing it (#497)', { timeout: 60_000 }, async () => {
+  const live = join(root, 'busy-live');
+  const dir = join(root, 'busy-data');
+  mkdirSync(dir);
+  execFileSync('git', ['init', '-q', '-b', 'main', live]);
+  execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', '1']);
+  const commit = execFileSync('git', ['-C', live, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+  const file = join(dir, 'coordinator.db');
+  const db = new DatabaseSync(file);
+  db.exec("PRAGMA journal_mode = WAL; CREATE TABLE events (id INTEGER PRIMARY KEY, data TEXT); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000) INSERT INTO events (data) SELECT randomblob(1000) FROM n");
+  const write = db.prepare('INSERT INTO events (data) VALUES (randomblob(100))');
+  // A stepped copy (sqlite3's .backup) restarts on every write from another connection, so it never ends.
+  const writer = setInterval(() => write.run(), 1);
+  const out = await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'backup-db', commit], { encoding: 'utf8', timeout: 20_000, env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: file } })
+    .finally(() => clearInterval(writer));
+  db.close();
+  const saved = out.stdout.trim();
+  assert.equal(saved, join(dir, 'backups', `pre-deploy-${commit}.db`));
+  const copy = new DatabaseSync(saved, { readOnly: true });
+  assert.equal(copy.prepare('PRAGMA integrity_check').get()!.integrity_check, 'ok');
+  assert.ok((copy.prepare('SELECT count(*) n FROM events').get()!.n as number) >= 20000);
+  copy.close();
 });

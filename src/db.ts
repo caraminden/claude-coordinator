@@ -1720,12 +1720,12 @@ export class Store {
 
   /**
    * A ticket's events before `before` that can change its task list (progress.js applyEvent): turn
-   * starts, Claude's messages and tool calls, and the results that give a TaskCreate its id.
+   * starts, Claude's messages and tool calls, and the results that give a TaskCreate its id. Tool results
+   * are most of the bytes, so they are left out by prefix, without parsing anyone's JSON (#497).
    */
-  planEvents(ticketId: number, before: number): EventRow[] {
+  planEvents(ticketId: number, before = Number.MAX_SAFE_INTEGER): EventRow[] {
     return this.db.prepare(`
-      SELECT * FROM events WHERE ticket_id = ? AND id < ? AND kind = 'claude' AND (
-        json_extract(data, '$.type') IN ('system', 'assistant') OR (json_extract(data, '$.type') = 'user' AND data LIKE '%Task #%'))
+      SELECT * FROM events WHERE ticket_id = ? AND id < ? AND kind = 'claude' AND (data NOT LIKE '{"type":"user"%' OR instr(data, 'Task #') > 0)
       ORDER BY id`).all(ticketId, before) as unknown as EventRow[];
   }
 

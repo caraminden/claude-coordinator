@@ -139,7 +139,10 @@ turn_units() {
 
 # Copy the database to backups/pre-deploy-<commit $1>.db before the new code migrates it. Prints the
 # copy's path; no database (a dev copy) prints nothing. A copy already there stays: a retry after a
-# rollback would otherwise replace the clean copy with what the failed code left.
+# rollback would otherwise replace the clean copy with what the failed code left. VACUUM INTO copies in
+# one read transaction: sqlite3's .backup steps 100 pages at a time and restarts on every write the
+# live server makes in between, so on a busy box it ran for minutes (#497). The copy is set back to WAL
+# like the live file, so restoring it by hand is a drop-in.
 backup_db() {
   [ -f "$DB" ] || return 0
   local dir out tmp
@@ -147,7 +150,7 @@ backup_db() {
   out=$dir/pre-deploy-$(git_live rev-parse --short "$1").db || return 1
   if [ ! -e "$out" ]; then
     tmp=$dir/.pre-deploy.db.tmp
-    (umask 077 && mkdir -p "$dir" && rm -f "$tmp" && sqlite3 "$DB" ".timeout 30000" ".backup '$tmp'" && mv -f "$tmp" "$out") || { rm -f "$tmp"; return 1; }
+    (umask 077 && mkdir -p "$dir" && rm -f "$tmp" && sqlite3 "$DB" ".timeout 30000" "VACUUM INTO '$tmp'" && sqlite3 "$tmp" "PRAGMA journal_mode = WAL" >/dev/null && mv -f "$tmp" "$out") || { rm -f "$tmp"; return 1; }
   fi
   echo "$out"
 }

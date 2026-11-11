@@ -62,3 +62,17 @@ test("git's options before the subcommand don't stand in for it (#468 S11-12)", 
   assert.equal(words('git --git-dir /x/.git --work-tree /x diff'), 'Looked at code changes');
   assert.equal(words('git --git-dir=/x/.git show HEAD'), 'Looked at a commit');
 });
+
+test("an amended plan's steps keep their ids, so a step's actions still show under it (#468 S11-8 review)", () => {
+  const p = createProgress();
+  const todo = (id, todos) => applyEvent(p, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'TodoWrite', input: { todos: todos.map(([s, status]) => ({ content: s, activeForm: s, status })) } }] } });
+  const read = (id) => applyEvent(p, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Read', input: { file_path: '/a.js' } }] } });
+  todo('t1', [['Look', 'in_progress'], ['Fix', 'pending']]);
+  const look = read('r1')[0].taskId;
+  const fix = p.tasks[1].id;
+  todo('t2', [['Look', 'completed'], ['Fix', 'in_progress'], ['Add a test', 'pending']]);
+  assert.deepEqual(p.tasks.slice(0, 2).map((t) => t.id), [look, fix], 'a step added to the plan leaves the others theirs');
+  assert.ok(![look, fix].includes(p.tasks[2].id));
+  todo('t3', [['Fix', 'completed'], ['Add a test', 'in_progress']]);
+  assert.equal(p.tasks[0].id, fix, 'nor does a step dropped from it');
+});

@@ -15,7 +15,7 @@ const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
 const pub = join(import.meta.dirname, '..', 'public');
 const rail = readFileSync(join(pub, 'rail.js'));
 // Citadel's page, as far as the rail goes: it draws its own (public/rail.js as Citadel imports it).
-const CITADEL = `<!doctype html><meta charset="utf-8"><body><script type="module">import { showRail } from '/c/rail.js'; showRail();</script>`;
+const CITADEL = `<!doctype html><meta charset="utf-8"><body><script type="module">import { showRail } from '/c/rail.js'; showRail(); window.ready = true;</script>`;
 
 const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><body>
 <script>
@@ -157,6 +157,13 @@ test("in a tab, the rail's entries stay plain links into Citadel", { skip }, asy
   assert.equal(await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').getAttribute('href')`), '/c/#/apps/toc');
   await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))`);
   assert.equal(await layer(page), 'none');
+});
+
+test("Citadel loaded at a framed app's address: its own entry still points at a view, so a click doesn't reload Citadel (#468 S12-7)", { skip }, async () => {
+  Object.assign(state, { tocUp: true, iconBroken: false, citadelDown: false, citadel502: false });
+  const page = await browser.page(base.replace('/apps/peek/', '/c/#/apps/toc'), { width: 1000 });
+  await waitFor(page, "Citadel's rail", `!!document.querySelector('.citadel-rail a[data-app="toc"]')`);
+  assert.equal(await page.eval(`document.querySelector('.citadel-rail a[data-app=""]').getAttribute('href')`), '/c/#/');
 });
 
 test("Alt+\` switches apps on a contraption's own page too", { skip }, async () => {

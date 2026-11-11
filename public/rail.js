@@ -274,7 +274,7 @@ function showHint(text) {
   setTimeout(gone, 10_000);
 }
 
-let lastView = ''; // Citadel's own view before a frame, where its entry goes back to
+let lastView = '#/'; // Citadel's own view before a frame, where its entry goes back to (#/ when it loaded on a frame's address)
 
 /** In Citadel: mark the view showing (Citadel or a framed contraption), and point Citadel's entry back at its last own view. */
 function syncRail() {

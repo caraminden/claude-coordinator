@@ -8,7 +8,7 @@ import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
 import { recapEvent, showRecap } from './recap.js';
 import { noteStrike, struckSource } from './strike.js';
-import { narrationSorter } from './narration.js';
+import { isNarration, narrationSorter } from './narration.js';
 import { gist, groupTitle, gruntName, gruntOf } from './grunts.js';
 import { stepMark } from './ui/chat.js';
 import { optimistic } from './ui/optimistic.js';
@@ -18,7 +18,7 @@ import { askHeader } from './askcard.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerChip, payerLine } from './payer.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
-import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, withoutCount, workPhases } from './progress.js';
+import { actionLabel, applyEvent, createProgress, liveSteps, nowDoing, progressLine, stepInfo, withoutCount, workPhases } from './progress.js';
 import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, speaker } from './cards.js';
 
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
@@ -31,7 +31,8 @@ export function chatView(chatId, ticket) {
     ui: progressUi(chatId),
     actions: new Map(), // tool_use_id -> { block, taskId, result }
     turnActions: [], // actions of the current (or last) turn, in order
-    typingEl: h('div', { class: 'typing', hidden: true, 'aria-live': 'polite', role: 'button', tabindex: '0' }), // below the chat log
+    typingEl: liveCard(), // below the chat log
+    liveRemark: null, // the remark the live card shows: { el, body, text, fate }, its bubble hidden in the log
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
     pendingMessages: chatId ? outbox(chatId) : [], // messages on their way or not sent (composer.js), replaced by the server's copy
     cards: new Map(), // question card id -> { el, markAnswered }; plan card id -> { el, settle }; approval card id -> { settle }
@@ -129,7 +130,7 @@ function renderHistory() {
     lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
     actions: new Map(), turnActions: [], cards: new Map(), heldCards: [], gruntStarts: new Map(),
     // The session started on an earlier page, if there is one.
-    sawInit: page.more, latestReply: null, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, pendingRequest: [], turnRequest: undefined,
+    sawInit: page.more, latestReply: null, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, liveRemark: null, pendingRequest: [], turnRequest: undefined,
   });
   const earlier = page.more && h('button', { type: 'button', class: 'small secondary', onclick: (e) => showEarlier(e.currentTarget) }, 'Load earlier');
   log.replaceChildren(...(earlier ? [h('div', { class: 'load-earlier' }, earlier)] : []));
@@ -236,8 +237,9 @@ export function chatSection(chatId, ticket) {
     renderProgress();
     view.progressEl.scrollIntoView({ block: 'nearest' });
   };
-  view.typingEl.onclick = openReadout;
-  view.typingEl.onkeydown = (e) => {
+  const top = view.typingEl.parts.top;
+  top.onclick = openReadout;
+  top.onkeydown = (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReadout(); }
   };
   // Opening at the first unread message leaves the newest out of sight; this takes you there.
@@ -792,6 +794,7 @@ export function appendEvent(event, scroll = true) {
     view.turnInitAt = event.created_at;
     view.narration = narrationSorter();
     view.narrationEl = null;
+    releaseRemark(true);
     // Messages queued since the last turn are what this turn works on.
     if (view.pendingRequest?.length) view.turnRequest = view.pendingRequest;
     view.pendingRequest = [];
@@ -928,9 +931,17 @@ export function appendEvent(event, scroll = true) {
         if (block.type === 'text' && block.text.trim() && !data.replaced) {
           const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
           const msg = stamped(h('div', { class: 'msg' }, h('div', { class: 'who' }, speaker()), body), event);
+          const text = { el: msg, body, text: block.text };
+          // While the turn runs, a short remark shows in the live card, not as a bubble that collapses a
+          // moment later; the one it replaces takes its place in the chat (#543).
+          releaseRemark();
+          if (turnLive() && isNarration(block.text)) {
+            msg.hidden = true;
+            view.liveRemark = text;
+          }
           nodes.push(msg);
           view.latestReply = event.id;
-          settle.push(...view.narration.text({ el: msg, body, text: block.text }));
+          settle.push(...view.narration.text(text));
         } else if (block.type === 'tool_use') {
           settle.push(...view.narration.tool(block.name));
         }
@@ -938,9 +949,10 @@ export function appendEvent(event, scroll = true) {
     } else if (data.type === 'user') {
       for (const block of data.message?.content ?? []) {
         const action = block.type === 'tool_result' && view.actions.get(block.tool_use_id);
-        if (action) action.result = { content: block.content, is_error: block.is_error };
+        if (action) Object.assign(action, { result: { content: block.content, is_error: block.is_error }, doneAt: event.created_at });
       }
     } else if (data.type === 'result') {
+      releaseRemark(true);
       // Tool calls stay out of the chat; each turn gets one collapsed line listing them.
       const acts = view.turnActions;
       const bits = [];
@@ -1079,7 +1091,13 @@ function stamped(el, event) {
  * was.
  */
 function settleText(t, fate) {
+  // The live card's remark keeps its place there until the next words or the turn's end (releaseRemark).
+  if (t === view.liveRemark) {
+    t.fate = fate;
+    return;
+  }
   if (fate !== 'fold') {
+    t.el.hidden = false;
     if (fate === 'clamp') clamp(t.el);
     view.narrationEl = null;
     return;
@@ -1316,31 +1334,89 @@ function elapsedText(ms) {
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
 }
 
+/** Whether the running turn is under way here: its init event has arrived (initSeen). */
+function turnLive() {
+  return view.ticket?.status === 'running' && initSeen();
+}
+
 /**
- * The working line under the chat while a turn runs, on one line: what's running right now, how
- * long the turn has gone and what's queued. The plan step sits in the thread bar's readout just
- * above, so it isn't repeated here; clicking the line opens that readout.
+ * Let go of the live card's remark: settle it as the sorter did meanwhile, and at the turn's end
+ * (`end`) show it whole if it was never settled, as the turn's last words always are. One the
+ * sorter hasn't settled yet stays hidden for it to settle now.
+ */
+function releaseRemark(end = false) {
+  const t = view.liveRemark;
+  if (!t) return;
+  view.liveRemark = null;
+  if (!t.el.isConnected) return; // replaced by its rewrite (#281)
+  if (t.fate) settleText(t, t.fate);
+  else if (end) t.el.hidden = false;
+}
+
+/** The live card's parts, drawn once and filled in place by renderTyping, so nothing in it jumps or restarts (#543). */
+function liveCard() {
+  const parts = {
+    top: h('div', { class: 'top', role: 'button', tabindex: '0', title: 'Show the work so far' }),
+    title: h('span', { class: 't' }),
+    count: h('span', { class: 'count' }),
+    queued: h('span', { class: 'queued' }),
+    time: h('span', { class: 'time', 'aria-hidden': 'true' }),
+    remark: h('div', { class: 'remark', hidden: true }),
+    act: h('div', { class: 'act' }),
+    what: h('span', { class: 'what' }),
+    prev: h('div', { class: 'prev', hidden: true }),
+  };
+  parts.top.append(h('span', { class: 'mark', 'aria-hidden': 'true' }), parts.title, parts.count, parts.queued, parts.time);
+  parts.act.append(h('span', { class: 'pulse', 'aria-hidden': 'true' }), parts.what);
+  const el = h('div', { class: 'typing', hidden: true, 'aria-live': 'polite' }, parts.top, parts.remark, parts.act, parts.prev);
+  el.parts = parts;
+  return el;
+}
+
+/** Set a part's text only when it changed, hiding it when empty. */
+function fill(el, text) {
+  if (el.textContent !== text) el.textContent = text;
+  el.hidden = !text;
+}
+
+/**
+ * The live card under the chat while a turn runs: the plan step and how long the turn has gone,
+ * the latest remark whole, what's running now, and the last two steps done. Clicking its top line
+ * opens the readout in the thread bar. Ticks every second, changing only what changed.
  */
 export function renderTyping() {
   const el = view?.typingEl;
   if (!el || !view.ticket) return;
   const t = view.ticket;
-  const show = t.status === 'running' || view.sendingTo === t.id;
+  const running = t.status === 'running';
+  // A turn that stopped without its result (stopped, crashed) still shows its last words.
+  if (!running) releaseRemark(true);
+  const show = running || view.sendingTo === t.id;
   const wasHidden = el.hidden;
   el.hidden = !show;
   if (!show) return;
-  const running = t.status === 'running';
-  const last = running && initSeen() && view.turnActions.at(-1);
-  const doing = last && !last.result ? actionLabel(last.block) : 'thinking…';
-  const sep = () => h('span', { class: 'sep' }, '·');
-  el.title = 'Show the work so far';
-  el.replaceChildren(
-    h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
-    h('span', { class: 'line' },
-      h('span', { class: 'lead' }, t.approvals ? 'Waiting for someone to approve or deny' : running ? 'Claude is working' : 'Claude is thinking…'),
-      running && !t.approvals ? [sep(), h('span', { class: 'what' }, doing)] : '',
-      running && t.turnStartedAt ? [sep(), h('span', { class: 'time', 'aria-hidden': 'true' }, elapsedText(Date.now() - t.turnStartedAt))] : '',
-      t.queued ? [sep(), h('span', { class: 'queued', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, `${t.queued} queued`)] : ''));
+  const live = running && initSeen();
+  const q = el.parts;
+  const { title, count, finished } = liveSteps(view.progress, running);
+  fill(q.title, t.approvals ? 'Waiting for someone to approve or deny' : live ? title : 'Working');
+  fill(q.count, live && !t.approvals ? count : '');
+  fill(q.queued, t.queued ? `${t.queued} queued` : '');
+  q.queued.title = t.queued ? `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` : '';
+  fill(q.time, running && t.turnStartedAt ? elapsedText(Date.now() - t.turnStartedAt) : '');
+  fill(q.what, t.approvals ? '' : live ? nowDoing(view.turnActions, Date.now()) : 'Starting…');
+  q.act.hidden = q.what.hidden;
+  const remark = live && view.liveRemark?.el.isConnected ? view.liveRemark : null;
+  if (q.remark.shows !== remark) {
+    q.remark.shows = remark;
+    q.remark.replaceChildren(remark ? markdown(remark.text, t.id) : '');
+    q.remark.hidden = !remark;
+  }
+  const steps = live ? finished.map((s) => `✓ ${s.subject}${s.outcome ? `: ${s.outcome}` : ''}`) : [];
+  if (q.prev.shows !== steps.join('\n')) {
+    q.prev.shows = steps.join('\n');
+    q.prev.replaceChildren(...steps.map((line) => h('div', { title: line }, line)));
+    q.prev.hidden = !steps.length;
+  }
   if (wasHidden && followChat) scrollToBottom();
 }
 
@@ -1356,9 +1432,7 @@ setInterval(() => {
   slot.replaceChildren(line ?? '');
 }, 60_000);
 
-/** Ticks the turn timer without rebuilding the line (and without re-announcing it to screen readers). */
+/** Ticks the turn timer, and turns the running line to "Thinking…" once nothing has run for a while. */
 setInterval(() => {
-  const time = view?.typingEl?.querySelector('.time');
-  const at = view?.ticket?.turnStartedAt;
-  if (time && at && !view.typingEl.hidden) time.textContent = elapsedText(Date.now() - at);
+  if (view?.typingEl && !view.typingEl.hidden) renderTyping();
 }, 1000);

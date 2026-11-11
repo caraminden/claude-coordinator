@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyEvent, createProgress, describeAction, progressLine, withoutCount } from '../public/progress.js';
+import { applyEvent, createProgress, describeAction, liveSteps, nowDoing, progressLine, THINKING_AFTER, withoutCount } from '../public/progress.js';
 
 // A plan of six steps with the given statuses: c(ompleted), i(n progress), p(ending).
 const plan = (statuses) => ({
@@ -142,4 +142,27 @@ test('an error after a turn finished well (a deploy warning) or during one that 
   applyEvent(p, 'claude', { type: 'result', subtype: 'error_during_execution', is_error: true });
   applyEvent(p, 'error', { text: 'API Error' });
   assert.equal(progressLine(p, false), 'Last turn failed: see the error below');
+});
+
+test('the live card keeps a finished call\'s label for a few seconds, then says Thinking (#543)', () => {
+  const read = { block: { type: 'tool_use', name: 'Read', input: { file_path: '/x/runner.ts' } } };
+  const label = describeAction(read.block).text;
+  assert.equal(nowDoing([], 0), 'Thinking…');
+  assert.equal(nowDoing([{ ...read, result: null }], 99_999), label, 'a call underway shows however long it runs');
+  const done = { ...read, result: { content: 'ok' }, doneAt: 10_000 };
+  assert.equal(nowDoing([done], 10_000 + THINKING_AFTER - 1), label, 'the gap before the next call keeps the label');
+  assert.equal(nowDoing([done], 10_000 + THINKING_AFTER), 'Thinking…');
+});
+
+test('the live card counts steps done like every readout, and shows the last two steps done (#518, #543)', () => {
+  const p = plan('cccipp');
+  p.tasks[1].outcome = 'Found it';
+  const card = liveSteps(p, true);
+  assert.equal(card.title, 'Moving turns 4');
+  assert.equal(card.count, '3 of 6 done');
+  assert.deepEqual(card.finished.map((t) => t.subject), ['Move turns 2', 'Move turns 3']);
+  assert.deepEqual(liveSteps(createProgress(), true), { title: 'Working', count: '', finished: [] });
+  // A step an earlier turn left underway isn't this turn's until the plan moves.
+  const stale = { ...plan('cipppp'), planMoved: false };
+  assert.equal(liveSteps(stale, true).title, 'Working');
 });

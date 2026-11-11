@@ -321,19 +321,26 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .turn-end .branch-status .state.open { color: var(--running); border-color: color-mix(in srgb, var(--running) 40%, var(--line)); }
 .turn-end .branch-status .state.draft, .turn-end .branch-status .state.closed { color: var(--muted); }
 
-/* The working line under the chat while a turn runs, one line: who's working · what's running · time · queued */
-.typing { display: flex; align-items: center; gap: 0.4rem; margin: 0.25rem 0 0.75rem; color: var(--muted); font-size: 0.9em; white-space: nowrap; cursor: pointer; }
-.typing:hover .what, .typing:focus-visible .what { text-decoration: underline; }
-.typing .line { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
-.typing .lead { flex: none; }
-.typing .what { min-width: 3em; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
-/* With no action beside it, a long lead ("Waiting for someone to approve or deny") truncates on a phone. */
-.typing .line:not(:has(.what)) .lead { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.typing .time, .typing .queued { flex: none; font-variant-numeric: tabular-nums; }
-.typing .sep { flex: none; opacity: 0.6; }
-/* No turn running: the line keeps its room, empty, so a turn starting or ending moves nothing (rule 13). */
-.typing { min-height: calc(0.9rem + 8px); } /* the dots pill: its padding, dots and border */
+/* The live card under the chat while a turn runs (#543): step and time, the latest remark, what's running, the last steps done.
+   Only the running line's dot moves. */
+.typing { display: grid; gap: 0.3rem; margin: 0.25rem 0 0.75rem; padding: 0.55rem 0.8rem; border: 1px solid color-mix(in srgb, var(--running) 45%, var(--line)); border-radius: 10px; background: var(--panel); font-size: 0.9em; min-width: 0; }
+.typing .top { display: flex; align-items: center; gap: 0.5rem; min-width: 0; font-weight: 600; cursor: pointer; }
+.typing .top:hover .t, .typing .top:focus-visible .t { text-decoration: underline; }
+.typing .mark { flex: none; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--running); }
+.typing .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.typing .count, .typing .time, .typing .queued { flex: none; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+.typing .remark { font-size: 1.05em; overflow-wrap: anywhere; }
+.typing .remark p { margin: 0; }
+.typing .act { display: flex; align-items: center; gap: 0.5rem; min-width: 0; color: var(--muted); }
+.typing .act .pulse { flex: none; width: 6px; height: 6px; margin: 0 0.15rem; border-radius: 50%; background: var(--running); animation: pulse 1.4s infinite; }
+.typing .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.typing .prev { display: grid; gap: 0.1rem; padding-top: 0.3rem; border-top: 1px dashed var(--line); color: var(--muted); font-size: 0.92em; }
+.typing .prev > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.typing [hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .typing .act .pulse { animation: none; } }
+/* No turn running: the card keeps its top line's room, empty, so a turn starting or ending moves the chat less (rule 13). */
 .typing[hidden] { visibility: hidden; }
+.typing[hidden] > :not(.top) { display: none; }
 /* A turn's in-between remarks, collapsed into a row per stretch between messages */
 .unread-divider { display: flex; align-items: center; gap: 0.5rem; margin: 0.75rem 0; color: var(--accent); font-size: 0.8em; font-weight: 600; }
 .unread-divider::before, .unread-divider::after { content: ''; flex: 1; border-top: 1px solid var(--accent); }
@@ -350,12 +357,6 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 /* A long message from the middle of a turn: its first lines, fading out above "Show all" */
 .msg.clamped > .md { max-height: 16em; overflow: hidden; mask-image: linear-gradient(to bottom, #000 65%, transparent); }
 .msg > .show-all { display: block; margin: 0.4rem 0 0.1rem; padding: 0.2rem 0.65rem; font-size: 0.85em; }
-.typing .dots { display: inline-flex; gap: 3px; flex: none; padding: 0.45rem 0.6rem; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }
-.typing .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--running); animation: typing-dot 1.2s infinite ease-in-out; }
-.typing .dots i:nth-child(2) { animation-delay: 0.15s; }
-.typing .dots i:nth-child(3) { animation-delay: 0.3s; }
-@keyframes typing-dot { 0%, 60%, 100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
-@media (prefers-reduced-motion: reduce) { .typing .dots i { animation: none; opacity: 0.7; } }
 .state-dots { display: none; font-weight: 700; letter-spacing: 0.1em; }
 .state-dots i { font-style: normal; }
 .state-dots i:nth-child(2) { animation: state-dot2 1.2s steps(1, end) infinite; }

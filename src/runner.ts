@@ -165,6 +165,8 @@ interface LiveTurn {
   timer: NodeJS.Timeout;
   ticks: number;
   stopTimer?: NodeJS.Timeout;
+  /** Stopped before its claude had started (no pid.json): signalled once it has. */
+  stopPending?: boolean;
   /** Resolves once the turn has ended and its session is saved: its step on the minion's lane. */
   ended: Promise<void>;
   end: () => void;
@@ -1418,6 +1420,7 @@ export class Runner {
     this.queues.delete(ticketId);
     this.saveTurn(ticketId, { stopped: true, queued: [], steered: [] });
     this.emit(ticketId, 'note', { text: 'Stopped by user.' });
+    live.stopPending = !existsSync(join(live.dir, 'pid.json'));
     this.signal(live, 'SIGTERM');
     // A turn that ignores the stop (or hadn't started claude yet) gets killed.
     clearTimeout(live.stopTimer);
@@ -1900,6 +1903,11 @@ export class Runner {
       const exited = existsSync(join(live.dir, 'exit.json'));
       this.readStream(ticketId, live, exited);
       if (exited) return this.finish(ticketId, live, JSON.parse(readFileSync(join(live.dir, 'exit.json'), 'utf8')));
+      // Stopped while still starting: its claude has a pid now (#468 S03-2). The SIGKILL retry still follows.
+      if (live.stopPending && existsSync(join(live.dir, 'pid.json'))) {
+        live.stopPending = false;
+        this.signal(live, 'SIGTERM');
+      }
       // Gone without a word: killed with its unit (out of memory, say).
       if (++live.ticks % 20 === 0 && this.gone(live)) {
         this.readStream(ticketId, live, true);

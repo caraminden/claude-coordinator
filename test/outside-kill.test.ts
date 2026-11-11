@@ -111,6 +111,20 @@ test('a turn killed together with its wrapper (no exit record) fails the turn ra
   }
 });
 
+test('a stop before claude has started signals it as soon as it starts, not at the 15 s retry (#468 S03-2)', async () => {
+  const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(t.id, root, null);
+  runner.send(t.id, 'Cara', 'wait');
+  const dir = (runner as any).turns.get(t.id).dir;
+  assert.ok(!existsSync(join(dir, 'pid.json')), 'stopped before the wrapper started claude');
+  const started = Date.now();
+  runner.stop(t.id);
+  for (let i = 0; i < 500 && runner.isRunning(t.id); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(!runner.isRunning(t.id), 'the turn ended');
+  assert.ok(Date.now() - started < 8000, `ended after ${Date.now() - started} ms`);
+  assert.equal(store.getTicket(t.id)!.status, 'idle');
+});
+
 test('a turn a person stops is not reported as killed', async () => {
   const { ticket, errors } = await turn('wait', true);
   assert.equal(ticket.status, 'idle');

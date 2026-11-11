@@ -464,13 +464,23 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
   const restarts = () => (existsSync(log) ? execFileSync('grep', ['-c', ' restart ', log], { encoding: 'utf8' }).trim() : '0');
   let n = 0;
   const state = join(live, '.git', 'cc-deploy');
-  // What a waiting landing would see: the restart's phase at each health check, and whether the lock was free when a report came.
+  // What a waiting landing would see: the restart's phase at each request. Each report's answer is held until all
+  // three minions' reports are in (or 5 s: posted one after another, the first would wait on the others for ever),
+  // and each notes whether the restart still held the lock: letting go there has the next deploy find the unit
+  // "already" queued, with its restart behind it.
   const phases = new Set<string>();
+  const lockHeldAtReport: boolean[] = [];
+  const held: (() => void)[] = [];
+  let together = true;
   const srv = await standIn((req) => {
     try { phases.add(readFileSync(join(state, 'restart'), 'utf8').split('\n')[1]); } catch {}
-    // Each report takes the server 700 ms: three minions' reports one after another would be 1.4 s apart.
-    if (req.url !== '/api/health') return new Promise<string>((ok) => setTimeout(() => ok('{}'), 700));
-    return health(Number(restarts()), ++n, { good, target, pidFile });
+    if (req.url === '/api/health') return health(Number(restarts()), ++n, { good, target, pidFile });
+    lockHeldAtReport.push(spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status !== 0);
+    return new Promise<string>((ok) => {
+      const late = setTimeout(() => { together = false; ok('{}'); }, 5000);
+      held.push(() => { clearTimeout(late); ok('{}'); });
+      if (held.length === 3) for (const go of held) go();
+    });
   });
   mkdirSync(state);
   writeFileSync(join(state, 'reporters'), `${srv.url} tok 9\n${srv.url} tok 10\n${srv.url} tok 11\n`);
@@ -483,7 +493,7 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
     }).then((o) => ({ status: 0, stderr: o.stderr }), (e) => ({ status: e.code as number, stderr: e.stderr as string }));
     const reports = srv.seen.filter((s) => s.url === '/api/tickets/9/deploy').map((s) => ({ ...JSON.parse(s.body), at: s.at }));
     const healthAt = srv.seen.filter((s) => s.url === '/api/health').map((s) => s.at);
-    return { ...r, good, target, reports, healthAt, phases: [...phases], reportsAt: srv.seen.filter((s) => /^\/api\/tickets\/\d+\/deploy$/.test(s.url)).map((s) => s.at), noteLeft: existsSync(join(state, 'restart')), head: git('rev-parse', 'HEAD'), lastGood: git('rev-parse', 'last-good'), restarts: Number(restarts()) };
+    return { ...r, good, target, reports, healthAt, phases: [...phases], lockHeldAtReport, together: () => together, noteLeft: existsSync(join(state, 'restart')), head: git('rev-parse', 'HEAD'), lastGood: git('rev-parse', 'last-good'), restarts: Number(restarts()) };
   } finally {
     srv.close();
   }
@@ -506,8 +516,8 @@ test('the restart checks health again a little after the first OK, and rolls bac
   assert.match(r.phases[0], /^restarting citadel-test on [0-9a-f]{7} since \d\d:\d\d$/);
   assert.match(r.phases[1], /^rolling back to [0-9a-f]{7} since \d\d:\d\d$/);
   assert.match(r.phases[2], /^posting its reports since \d\d:\d\d$/);
-  assert.equal(r.reportsAt.length, 3);
-  assert.ok(r.reportsAt[2] - r.reportsAt[0] < 600, `the three reports were posted at once: ${r.reportsAt.map((at) => Math.round(at - r.reportsAt[0])).join(', ')} ms`);
+  assert.deepEqual(r.lockHeldAtReport, [true, true, true], 'the restart still held the lock at each report');
+  assert.ok(r.together(), 'all three reports were in before any was answered: posted at once');
   assert.equal(r.noteLeft, false);
   // Healthy at both checks, but systemd brought it back in between (Restart=always): it died, so it rolls back too.
   const back = await restartWith('respawned', (restarts, n, { good, target, pidFile }) => {
@@ -530,5 +540,6 @@ test('a server that is only slow at the second check is not rolled back, and the
   assert.equal(r.reports[0].ok, true);
   assert.ok(r.healthAt.length >= 3 && r.healthAt[1] - r.healthAt[0] >= 2000, 'checked again DEPLOY_SETTLE s after the first OK');
   assert.ok(r.reports[0].at > r.healthAt.at(-1)!, 'reported only after the second check');
+  assert.deepEqual(r.lockHeldAtReport, [true, true, true], 'the restart still held the lock at each report');
   assert.equal(r.noteLeft, false);
 });

@@ -28,7 +28,7 @@ const AGENT_CAP = readFileSync(join(import.meta.dirname, 'contraption-agent-cap.
 /** The stdio stand-in for a machine's MCP server, as minion turns use it (src/machine-mcp.ts). */
 const MACHINE_MCP = readFileSync(join(import.meta.dirname, 'machine-mcp.ts'), 'utf8');
 // A Codex turn (#337) runs the shim from its own folder in the container, and Codex's managed hook imports the tripwire from there.
-const CODEX_FILES = ['codex-turn.ts', 'codex.ts', 'tripwire.ts'].map((f) => [f, readFileSync(join(import.meta.dirname, f), 'utf8')] as const);
+const CODEX_FILES = ['codex-turn.ts', 'codex-lock.ts', 'codex.ts', 'tripwire.ts'].map((f) => [f, readFileSync(join(import.meta.dirname, f), 'utf8')] as const);
 
 /** A contraption session's Codex thread while its turns run on Codex: dropped on the first Claude turn after, or a fresh session. */
 const codexKey = (c: number, person: number, session: string) => `codex:contraption:${c}:${person}:${session}`;

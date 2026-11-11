@@ -405,6 +405,12 @@ test('deploy.sh retries a report the server never got, but not one it may alread
   } finally {
     slow.close();
   }
+  // A connection never made in time is a report the server never got: it goes again.
+  const t0 = Date.now();
+  const r = await post('http://10.255.255.1:9', { DEPLOY_REPORT_WAIT: '1', DEPLOY_REPORT_RETRY: '3' });
+  assert.match(r.stderr, /could not post the report to minion 7's chat \(curl exit (28|7)\)/);
+  assert.doesNotMatch(r.stderr, /no answer from the server/);
+  assert.ok(Date.now() - t0 >= 2500, 'retried until DEPLOY_REPORT_RETRY ran out');
   // A refusal won't change on a retry.
   const refused = await standIn(() => 403);
   try {
@@ -417,7 +423,7 @@ test('deploy.sh retries a report the server never got, but not one it may alread
 });
 
 // The queued restart against a stand-in server and systemctl: commits good (last-good) and target (HEAD).
-async function restartWith(name: string, health: (restarts: number, n: number, commits: { good: string; target: string }) => 'hang' | number | string | Promise<string>) {
+async function restartWith(name: string, health: (restarts: number, n: number, ctx: { good: string; target: string; pidFile: string }) => 'hang' | number | string | Promise<string>) {
   const live = join(root, `${name}-live`);
   const git = (...args: string[]) => execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
   execFileSync('git', ['init', '-q', '-b', 'main', live]);
@@ -429,10 +435,12 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
   const bin = join(root, `${name}-bin`);
   const log = join(root, `${name}-systemctl.log`);
   mkdirSync(bin);
-  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "$*" >>'${log}'\nexit 0\n`, { mode: 0o755 });
+  const pidFile = join(root, `${name}-mainpid`);
+  writeFileSync(pidFile, '100');
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "$*" >>'${log}'\n[ "$2" = show ] && cat '${pidFile}'\nexit 0\n`, { mode: 0o755 });
   const restarts = () => (existsSync(log) ? execFileSync('grep', ['-c', ' restart ', log], { encoding: 'utf8' }).trim() : '0');
   let n = 0;
-  const srv = await standIn((req) => (req.url === '/api/health' ? health(Number(restarts()), ++n, { good, target }) : 201));
+  const srv = await standIn((req) => (req.url === '/api/health' ? health(Number(restarts()), ++n, { good, target, pidFile }) : 201));
   const state = join(live, '.git', 'cc-deploy');
   mkdirSync(state);
   writeFileSync(join(state, 'reporters'), `${srv.url} tok 9\n`);
@@ -462,7 +470,15 @@ test('the restart checks health again a little after the first OK, and rolls bac
   assert.equal(r.lastGood, r.good);
   assert.equal(r.reports.length, 1);
   assert.equal(r.reports[0].ok, false);
-  assert.match(r.reports[0].text, /stopped answering healthy .*Rolled back to last-good/);
+  assert.match(r.reports[0].text, /answered healthy on it, then stopped answering or was restarted within 2 s\. Rolled back to last-good/);
+  // Healthy at both checks, but systemd brought it back in between (Restart=always): it died, so it rolls back too.
+  const back = await restartWith('respawned', (restarts, n, { good, target, pidFile }) => {
+    if (restarts === 1 && n === 2) writeFileSync(pidFile, '200');
+    return health(restarts >= 2 ? good : target);
+  });
+  assert.equal(back.status, 1, back.stderr);
+  assert.equal(back.lastGood, back.good);
+  assert.match(back.reports[0].text, /stopped answering or was restarted/);
 });
 
 test('a server that is only slow at the second check is not rolled back, and the report waits for that check (#520)', { timeout: 60_000 }, async () => {

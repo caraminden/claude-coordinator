@@ -450,8 +450,10 @@ interrupt turns:
    `interruptible`: turns an older server started as its own children), and
    gives up after 2 h of that. On `SIGTERM` the old server has 5 s to finish
    its requests. Then it waits up to 30 s for `/api/health` to answer from the
-   new commit, and tags it `last-good`. If it doesn't come up, it resets to
-   `last-good` and restarts again. `tools/deploy.sh --now` restarts without
+   new commit, checks again 30 s later (the same 30 s to answer, as the first
+   minute after a restart is slow, and the same server process), and only then
+   tags it `last-good` and reports. If it doesn't come up or stay up, it resets
+   to `last-good` and restarts again. `tools/deploy.sh --now` restarts without
    waiting, cutting off those turns (#33's auto-resume picks them up); the
    tripwire asks a person before it runs.
 4. Once the new code is live (after the reload, or after the healthy restart

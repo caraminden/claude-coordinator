@@ -32,6 +32,7 @@ NOW=${DEPLOY_NOW:-} # set: restart without waiting for interruptible turns (--no
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-30}
 SETTLE=${DEPLOY_SETTLE:-30} # after the first healthy answer, check again this much later (#520)
 REPORT_WAIT=${DEPLOY_REPORT_WAIT:-30} # seconds to wait for the server to take a deploy report
+REPORT_RETRY=${DEPLOY_REPORT_RETRY:-60} # and how long to keep trying one that never reached it
 REMOTE=${DEPLOY_REMOTE-origin} # set it empty to skip the push (dev copies)
 BACKUPS=${DEPLOY_BACKUPS:-3} # pre-deploy copies of the database to keep
 
@@ -66,22 +67,24 @@ init_state() {
 # error and notifies) or fail. ok and warn dismiss a minion in pending-deploy.
 # A server just restarted can take a while to answer (#520: 10 s stalls, so the old 10 s limit gave up on
 # reports it then posted), so each try waits REPORT_WAIT s. One that never reached the server (dropped, or a
-# 5xx) goes again with backoff for about a minute; one with no answer in time doesn't, since the server
-# has it queued and a second would post twice.
+# 5xx, or no connection made in time) goes again with backoff for about a minute; one sent with no answer
+# in time doesn't, since the server has it queued and a second would post twice.
 post_report() {
-  local api=$1 token=$2 ticket=$3 ok=$4 text=$5 body code rc left pause=1 start=$SECONDS
+  local api=$1 token=$2 ticket=$3 ok=$4 text=$5 body out code connected rc left pause=1 start=$SECONDS
   body=$(node -e 'const k=process.argv[1];console.log(JSON.stringify({ok:k!=="fail",warn:k==="warn",text:process.argv[2]}))' "$ok" "$text")
   while :; do
     rc=0
-    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$REPORT_WAIT" -X POST "$api/api/tickets/$ticket/deploy" \
+    out=$(curl -sS -o /dev/null -w '%{http_code} %{time_connect}' --max-time "$REPORT_WAIT" -X POST "$api/api/tickets/$ticket/deploy" \
       -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d "$body" 2>/dev/null) || rc=$?
+    read -r code connected <<<"$out"
     [ "$rc" = 0 ] && [ "${code:0:1}" = 2 ] && return 0
-    if [ "$rc" = 28 ]; then
+    # curl's 28 is any timeout: only one after the connection was made means the server has the report.
+    if [ "$rc" = 28 ] && [ "${connected//[0.]/}" != "" ]; then
       say "no answer from the server within $REPORT_WAIT s to the report for minion $ticket's chat; it likely still arrives"
       return 0
     fi
     [ "$rc" = 0 ] && [ "${code:0:1}" != 5 ] && break
-    left=$((60 - (SECONDS - start)))
+    left=$((REPORT_RETRY - (SECONDS - start)))
     [ "$left" -gt 0 ] || break
     sleep $((pause < left ? pause : left))
     pause=$((pause * 2))
@@ -192,18 +195,23 @@ healthy() {
   return 1
 }
 
-# Restart the service and wait for it to answer healthy from commit $1, then again SETTLE s later: a server
-# can answer once and die in its first minute (#520). The second check gets the same wait, as that first
-# minute is slow (re-attaching turns, startup checks) and slow isn't down.
+main_pid() { systemctl --user show -p MainPID --value "$SERVICE" 2>/dev/null || true; }
+
+# Restart the service and wait for it to answer healthy from commit $1 (else 1), then again SETTLE s later
+# from the same process (else 2): a server can answer once and die in its first minute, and systemd's
+# Restart=always would bring it back healthy-looking (#520). The second check gets the same wait, as that
+# first minute is slow (re-attaching turns, startup checks) and slow isn't down.
 restart_healthy() {
   systemctl --user restart "$SERVICE" || return 1
   healthy "$1" || return 1
+  local pid
+  pid=$(main_pid)
   sleep "$SETTLE"
-  healthy "$1"
+  healthy "$1" && [ "$(main_pid)" = "$pid" ] || return 2
 }
 
 # Queued as the restart unit: restart once no turn would be cut off (at once with --now), roll back if
-# the new code doesn't come up.
+# the new code doesn't come up or stay up.
 restart() {
   rm -f "$0" # a private copy (see deploy); bash keeps reading it from the open file
   init_state
@@ -233,7 +241,9 @@ restart() {
   fi
   [ -n "$saved" ] && say "database copied to $saved"
   say "restarting $SERVICE on $(short "$target")"
-  if restart_healthy "$target"; then
+  local rc=0
+  restart_healthy "$target" || rc=$?
+  if [ "$rc" = 0 ]; then
     git_live tag -f last-good "$target" >/dev/null
     rotate_backups
     local pushed kind=ok
@@ -241,7 +251,8 @@ restart() {
     report "$kind" "Deployed $(short "$target"): the server restarted and is healthy.$pushed"
     return 0
   fi
-  local why="the server did not answer healthy on it within ${HEALTHY_WAIT} s, or stopped answering healthy ${SETTLE} s later"
+  local why="the server did not answer healthy on it within ${HEALTHY_WAIT} s"
+  [ "$rc" = 2 ] && why="the server answered healthy on it, then stopped answering or was restarted within ${SETTLE} s"
   good=$(git_live rev-parse -q --verify 'last-good^{commit}' || true)
   if [ -z "$good" ] || [ "$good" = "$target" ]; then
     report fail "Deploy of $(short "$target") failed: $why, and there is no older last-good commit to roll back to. Check journalctl --user -u $SERVICE."

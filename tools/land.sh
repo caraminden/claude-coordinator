@@ -35,8 +35,6 @@ cd "$here" # the tests run from the worktree's top, wherever in it this was star
 branch=$(git branch --show-current)
 { [ -n "$branch" ] && [ "$branch" != main ]; } || refuse "run it from a minion's branch, not main or a detached HEAD"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || refuse "$here has uncommitted changes: commit them first"
-[ "$(git -C "$SOURCE" branch --show-current)" = main ] || refuse "$SOURCE is not on main; a person needs to look"
-[ -z "$(git -C "$SOURCE" status --porcelain --untracked-files=no)" ] || refuse "$SOURCE has uncommitted changes; a person needs to look"
 
 state=$(git -C "$LIVE" rev-parse --absolute-git-dir)/cc-deploy
 mkdir -p -m 700 "$state"
@@ -49,6 +47,9 @@ unset LAND_REBASED
 # The rebased copy is the same process, so the ticket it was started with (none, from a land.sh older than the
 # line) still names it; only the trap that removes it at the end has to be set again.
 if [ -n "$resumed" ]; then trap queue_done EXIT; else queue_lock "$state" "$branch" || exit 1; fi
+# Under the lock: another landing fast-forwarding main there looks like uncommitted changes while it runs.
+[ "$(git -C "$SOURCE" branch --show-current)" = main ] || refuse "$SOURCE is not on main; a person needs to look"
+[ -z "$(git -C "$SOURCE" status --porcelain --untracked-files=no)" ] || refuse "$SOURCE has uncommitted changes; a person needs to look"
 
 old=$(git -C "$SOURCE" rev-parse main)
 [ -n "$resumed" ] || queue_phase "rebasing onto main"

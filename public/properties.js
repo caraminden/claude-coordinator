@@ -39,7 +39,7 @@ function assignPicker(t) {
   const userKeys = propFilter.keys.filter((k) => k.value_kind === 'user').map((k) => k.key);
   // One spelling per person, the one already in use before the signed-in name, as the server matches them.
   const byLower = new Map();
-  for (const n of [...[...view.tickets.values()].flatMap((m) => userKeys.map((k) => m.properties?.[k])), me]) if (n && !byLower.has(n.toLowerCase())) byLower.set(n.toLowerCase(), n);
+  for (const n of [...[...view.tickets.values()].flatMap((m) => userKeys.flatMap((k) => m.properties?.[k] ?? [])), me]) if (n && !byLower.has(n.toLowerCase())) byLower.set(n.toLowerCase(), n);
   const names = [...byLower.values()].sort();
   const list = h('datalist', { id: `assign-names-${t.id}` }, names.map((n) => h('option', { value: n })));
   const note = h('span', { class: 'muted small', role: 'status' });

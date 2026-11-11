@@ -410,7 +410,8 @@ export class GithubWatcher {
 
   async poll(ticket: Ticket, repoDir: string, repo: string) {
     const prev = this.schedule.get(ticket.id);
-    const { pr, self } = await this.fetch(repoDir, repo, ticket.branch!, this.as(repoDir));
+    const as = this.as(repoDir);
+    const { pr, self } = await this.fetch(repoDir, repo, ticket.branch!, as);
     if (!pr) {
       this.schedule.set(ticket.id, { nextAt: Date.now() + NO_PR_MS, wait: OPEN_MS, last: '' });
       return;
@@ -431,8 +432,10 @@ export class GithubWatcher {
     }
     // With GitHub linking, the minion's turns push as its person's own account too.
     // shortcut: only the person of its latest turn, not each turn's; fine while a minion's people rarely change.
+    // Read as a person's token (#321: the scheme owner's), the viewer is that person, not the minion.
     const linked = ticket.person_id ? this.store.getCredential(ticket.person_id, 'github') : null;
-    const selves = linked ? [...(self ? [self] : []), (JSON.parse(linked.meta) as { login: string }).login] : self;
+    const viewer = as ? [] : self ? [self] : [];
+    const selves = linked ? [...viewer, (JSON.parse(linked.meta) as { login: string }).login] : as ? [] : self;
     // shortcut: these clocks live in memory, so a restart starts them again; fine for a once-per-commit nudge.
     const now = Date.now();
     const head = prev?.head?.sha === pr.headSha ? prev.head : { sha: pr.headSha, at: now, queued: {} };

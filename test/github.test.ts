@@ -336,3 +336,27 @@ test("a scheme's PRs are read as the GitHub login it names (#321: its owner's, f
   await w.poll(store.getTicket(ticket.id)!, root, 'o/r');
   assert.deepEqual(asked, [{ GH_TOKEN: 'owner-token' }]);
 });
+
+test("read as the scheme owner, the owner's remarks during a minion's turn still reach it: only its person's login is its own (#468 S02-3)", async () => {
+  const store = new Store(join(root, 'owner-viewer.db'));
+  const project = store.createProject('P', null);
+  const bob = store.createUser({ name: 'Bob', login: 'bob' });
+  const ticket = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Bob' });
+  store.setTicketDir(ticket.id, root, 'ticket/1-t');
+  store.updateTicket(ticket.id, { person_id: bob.id });
+  store.putCredential(bob.id, 'github', 'bob-token', { login: 'bob' });
+  let snapshot = pr();
+  const sent: string[] = [];
+  const w = new GithubWatcher(store, (_id, text) => sent.push(text), async () => ({ pr: snapshot, self: 'owner' }));
+  w.as = () => ({ GH_TOKEN: 'owner-token' });
+  await w.poll(store.getTicket(ticket.id)!, root, 'o/r'); // first look
+  // A turn is running (a start with no end), and both the owner and Bob's own account comment in it.
+  store.addEvent(ticket.id, 'claude', { type: 'system', subtype: 'init', session_id: 's' });
+  const at = Date.now() + 1000;
+  snapshot = pr({ remarks: [remark(1, { author: 'owner', body: 'Please rename it', createdAt: at }), remark(2, { author: 'bob', body: 'Done', createdAt: at })] });
+  await w.poll(store.getTicket(ticket.id)!, root, 'o/r');
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /owner/);
+  assert.match(sent[0], /Please rename it/);
+  assert.doesNotMatch(sent[0], /Done/, "Bob's linked account is the minion's own");
+});

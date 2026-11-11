@@ -81,12 +81,13 @@ const setRelease = (words: string) => {
 };
 const turnsRun = () => lines(prompts).length;
 
-const LIMIT = "You've hit your 5-hour limit · resets 3:30pm (America/Los_Angeles)";
+// Two hours from now: a fixed time came round once a day, and a run in the minute before it saw no wait to speak of (#564).
+const LIMIT = `You've hit your 5-hour limit · resets ${new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' }).replace(' ', '').toLowerCase()} (America/Los_Angeles)`;
 const IDENTITY = 'API Error: 400 Identity verification is required to continue.';
 
 test('the reset time comes from Claude\'s words, in the zone they name', () => {
   const now = Date.parse('2026-10-29T10:00:00Z'); // 3am in Los Angeles (PDT, UTC-7)
-  assert.equal(parseResetTime(LIMIT, now), Date.parse('2026-10-29T22:30:00Z'));
+  assert.equal(parseResetTime("You've hit your 5-hour limit · resets 3:30pm (America/Los_Angeles)", now), Date.parse('2026-10-29T22:30:00Z'));
   // Already past today: tomorrow's.
   assert.equal(parseResetTime("You've hit your session limit · resets 2am (America/Los_Angeles)", now), Date.parse('2026-10-30T09:00:00Z'));
   assert.equal(parseResetTime('resets 12:15am (UTC)', now), Date.parse('2026-10-30T00:15:00Z'));

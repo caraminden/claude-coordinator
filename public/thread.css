@@ -392,7 +392,14 @@ div.recap { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line))
 .recap-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.6rem; row-gap: 0.1rem; }
 .recap-head .muted { font-size: 0.85em; }
 .recap-group { display: flex; flex-direction: column; gap: 0.1rem; }
-.recap-group h4 { margin: 0 0 0.1rem; font-size: 0.72em; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.recap-group h4, .recap-group > summary { margin: 0 0 0.1rem; font-size: 0.72em; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+/* Dismissed starts collapsed to its count, with the sidebar's ▸/▾ (.thread-group > summary). */
+details.recap-group { display: block; }
+details.recap-group:not([open]) > summary { margin: 0; }
+.recap-group > summary { cursor: pointer; list-style: none; width: fit-content; }
+.recap-group > summary::-webkit-details-marker { display: none; }
+.recap-group > summary::after { content: ' ▸'; }
+.recap-group[open] > summary::after { content: ' ▾'; }
 .recap-group .thread-row:nth-of-type(even) { background: color-mix(in srgb, var(--line) 45%, transparent); }
 /* What it waits on (#544, public/wait.js): one line under the meter that opens to a landing's track. */
 /* The readout line's "now" part (#551): what's running, or what it waits on (#544), whose bar takes the meter's place. */

@@ -1,9 +1,9 @@
 // A dev copy of this checkout's Citadel for a minion to try a change on (#482), run by the
 // citadel-dev-copy command every turn has on its PATH:
 //   citadel-dev-copy start [--data copy|empty] | status | stop
-// start: a fresh folder under $TMPDIR, the live database copied in read-only the way a preview copies
-// it (or none), a free port, server.ts in preview mode (no turns, no pushes, no new minions), and it
-// prints the URL, a sign-in and the pid. A second start replaces the first. stop: ends that pid, only
+// start: a fresh folder under $TMPDIR, the live database copied in read-only in one read transaction
+// and scrubbed as a preview's copy is (or none), a free port, server.ts in preview mode (no turns, no
+// pushes, no new minions), and it prints the URL, a sign-in and the pid. A second start replaces the first. stop: ends that pid, only
 // that one, and removes the folder. Never by name: every turn and Citadel itself run as one account.
 //
 // Preview mode exits once its parent goes, so the server runs under a small sh that waits on it and
@@ -14,8 +14,9 @@ import { existsSync, mkdirSync, openSync, closeSync, readFileSync, realpathSync,
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { copyDb } from '../src/db-copy.ts';
 import { freePort } from '../src/ports.ts';
-import { copyData, previewEnv } from '../src/previews.ts';
+import { previewEnv, scrub } from '../src/previews.ts';
 
 const BOOT_TIMEOUT_MS = 30_000;
 const STOP_TIMEOUT_MS = 8000;
@@ -100,12 +101,9 @@ async function start(args: string[]): Promise<void> {
   await stop(true);
   mkdirSync(data, { recursive: true, mode: 0o700 });
   if (from === 'copy') {
-    const src = new DatabaseSync(liveDb, { readOnly: true });
-    try {
-      await copyData(src, join(data, 'coordinator.db'));
-    } finally {
-      src.close();
-    }
+    // One read transaction: copyData's stepped backup() from this second connection restarts on every live write (#529).
+    await copyDb(liveDb, join(data, 'coordinator.db'));
+    scrub(join(data, 'coordinator.db'));
   }
 
   const port = await freePort();

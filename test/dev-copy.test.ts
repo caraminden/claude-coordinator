@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 
@@ -83,4 +84,33 @@ test('it refuses unknown arguments and a copy with no live database', () => {
   const r = run(['start'], { CITADEL_LIVE_DATA_DIR: join(root, 'nowhere') });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /use --data empty/);
+});
+
+test('a copy finishes while the live server keeps writing', async () => {
+  // Bigger than one backup() step (100 pages), so a restart on every write would never end (#529).
+  const db = new DatabaseSync(join(live, 'coordinator.db'));
+  db.exec('CREATE TABLE filler (b BLOB); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000) INSERT INTO filler SELECT randomblob(4000) FROM n');
+  db.close();
+  const writer = spawn(process.execPath, ['-e', `
+    const db = new (require('node:sqlite').DatabaseSync)(process.argv[1]);
+    db.exec('PRAGMA busy_timeout = 5000; PRAGMA synchronous = OFF');
+    const put = db.prepare('INSERT INTO filler VALUES (randomblob(100))');
+    process.stdout.write('writing\\n');
+    for (;;) put.run();`, join(live, 'coordinator.db')], { stdio: ['ignore', 'pipe', 'inherit'] });
+  seen.push(writer.pid!);
+  try {
+    await new Promise((ok) => writer.stdout!.once('data', ok));
+    const r = spawnSync(cmd, ['start'], { cwd: repo, env, encoding: 'utf8', timeout: 30_000 });
+    assert.equal(r.status, 0, `start did not finish: ${r.error ?? r.stderr}`);
+    const s = state();
+    seen.push(s.pid, s.holder);
+    assert.match(r.stdout, /on a copy of the live data/);
+    // The copy is whole: every filler row made before the writer started is in it.
+    const copy = new DatabaseSync(join(tmp, 'dev-copy', 'data', 'coordinator.db'), { readOnly: true });
+    assert.ok((copy.prepare('SELECT count(*) AS n FROM filler').get() as { n: number }).n >= 2000);
+    copy.close();
+  } finally {
+    writer.kill('SIGKILL');
+    run(['stop']);
+  }
 });

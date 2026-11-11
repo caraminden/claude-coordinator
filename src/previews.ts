@@ -58,13 +58,20 @@ async function end(proc: ChildProcess): Promise<void> {
 }
 
 /**
- * Copy the database for a server that runs on it beside the live one (a preview, tools/dev-copy.ts):
- * consistent even while the live server writes (WAL), minus the push subscriptions, the running turns'
- * records (their systemd units) and the running ultra reviews' (their folders), which only the live
- * server may act on.
+ * Copy the database for a preview that runs on it beside the live one, through the live server's own
+ * connection: consistent even while it writes (WAL), and its writes don't restart the backup. Another
+ * process copies with copyDb (src/db-copy.ts) and then scrubs, as tools/dev-copy.ts does (#529).
  */
 export async function copyData(from: DatabaseSync, to: string): Promise<void> {
   await backup(from, to);
+  scrub(to);
+}
+
+/**
+ * Drop from a copy what only the live server may act on: the push subscriptions, the running turns'
+ * records (their systemd units) and the running ultra reviews' (their folders).
+ */
+export function scrub(to: string): void {
   const copy = new DatabaseSync(to);
   copy.exec("DELETE FROM push_subscriptions; DELETE FROM settings WHERE key LIKE 'turn:%' OR key = 'ultrareview_running'");
   copy.close();

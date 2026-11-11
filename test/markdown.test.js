@@ -148,6 +148,14 @@ test('rules, comments and CRLF', () => {
   assert.equal(md('a\n---\n<!-- index -->\n***\r\nb\r\n'), '<p>a</p><hr><hr><p>b</p>');
 });
 
+test('an HTML comment in code is code: in a fence or a code span it shows, and it can\'t swallow a fence', () => {
+  assert.equal(md('```html\n<!-- the nav -->\n<nav></nav>\n```'),
+    '<pre><code class="language-html">&lt;!-- the nav --&gt;\n&lt;nav&gt;&lt;/nav&gt;</code></pre>');
+  assert.equal(md('Write `<!-- TODO -->` above it <!-- gone -->'), '<p>Write <code>&lt;!-- TODO --&gt;</code> above it</p>');
+  assert.match(md('a <!-- note\n\n```\nx\n```\n\n-->'), /<pre><code>x<\/code><\/pre>/);
+  assert.equal(markdownLine('Write `<!-- TODO -->` above it'), 'Write <code>&lt;!-- TODO --&gt;</code> above it');
+});
+
 test('chat: #N refs link outside code, and #127\'s strikes render', () => {
   assert.equal(chat('see #12, not `#13`'), '<p>see <a class="thread-ref" href="#/p/2/t/12">#12</a>, not <code>#13</code></p>');
   const struck = struckSource('- the build is green\n- next', [{ text: 'the build is green' }]);

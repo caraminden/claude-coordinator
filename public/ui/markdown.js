@@ -40,6 +40,40 @@ const startsBlock = (lines, i, breaks) => {
     || (!!item && item[3] != null && (breaks || !/\d/.test(item[2]) || /^0*1\D/.test(item[2])));
 };
 
+/** A code span (not across a blank line) or an HTML comment, for stripComments. */
+const CODE_OR_COMMENT = /(`+)(?!`)(?:(?!\n[ \t>]*\n)[\s\S])*?[^`]\1(?!`)|<!--[\s\S]*?-->/g;
+
+/**
+ * `src` without its HTML comments, except where they are code: inside a fenced block (tracked by
+ * character and length, as blocks() does) or a code span. A comment never reaches across a fence.
+ */
+function stripComments(src) {
+  const out = [];
+  let run = [];
+  let close = null;
+  const flush = () => {
+    if (run.length) out.push(run.join('\n').replace(CODE_OR_COMMENT, (m) => (m.startsWith('<') ? '' : m)));
+    run = [];
+  };
+  for (const line of src.split('\n')) {
+    if (close) {
+      out.push(line);
+      if (close.test(line)) close = null;
+      continue;
+    }
+    const m = FENCE.exec(line.replace(/^[\s>]*/, ''));
+    if (!m) {
+      run.push(line);
+      continue;
+    }
+    flush();
+    out.push(line);
+    close = new RegExp(`^[\\s>]*${m[1][0]}{${m[1].length},}\\s*$`);
+  }
+  flush();
+  return out.join('\n');
+}
+
 /** GitHub's id for a heading: lower case, punctuation dropped, spaces to hyphens. */
 export function slug(html) {
   return unescapeHtml(html.replace(/<[^>]*>/g, '')).toLowerCase().trim().replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '').replace(/ /g, '-');
@@ -316,7 +350,7 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
   };
 
   // \0 marks held-out pieces inside inline(), so the text itself can't carry it (nor \1, which once did too).
-  let lines = src.replace(/[\u0000\u0001]/g, '\uFFFD').replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '').split('\n');
+  let lines = stripComments(src.replace(/[\u0000\u0001]/g, '\uFFFD').replace(/\r\n?/g, '\n')).split('\n');
   let front = '';
   // YAML front matter stays apart from the doc, as GitHub keeps it.
   const fm = !breaks && lines[0] === '---' ? lines.indexOf('---', 1) : -1;
@@ -336,7 +370,7 @@ export function markdownLine(src, { streaming = false } = {}) {
   if (streaming) src = mendStreaming(src);
   const plain = { link: (_href, html) => html, image: (_href, alt) => alt, breaks: true };
   const out = [];
-  for (const raw of src.replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '').split('\n')) {
+  for (const raw of stripComments(src.replace(/\r\n?/g, '\n')).split('\n')) {
     if (!raw.trim() || FENCE.test(raw) || HR.test(raw) || (raw.includes('|') && DELIM.test(raw) && raw.includes('-'))) continue;
     let l = raw.replace(/^(?: {0,3}>)+ ?/, '').trim();
     const item = ITEM.exec(l);

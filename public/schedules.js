@@ -13,7 +13,7 @@ function scheduleRow(s) {
   return h('li', { class: `schedule${s.paused ? ' paused' : ''}` },
     h('div', { class: 'row' }, h('strong', { class: 'name' }, s.name), h('span', { class: 'spacer' }),
       s.paused ? h('span', { class: 'chip' }, 'paused') : h('span', { class: 'muted small', title: new Date(s.next_run_at).toString() }, 'next ', when(s.next_run_at))),
-    h('div', { class: 'muted small' }, h('span', { title: `cron: ${s.cron} (server time)` }, s.when), runsAs(s), ' · last run ', last),
+    h('div', { class: 'muted small' }, h('span', { title: `cron: ${s.cron}` }, s.when, ' (server time)'), runsAs(s), ' · last run ', last),
     s.last_error ? h('p', { class: 'error small' }, "Last run didn't start: ", s.last_error) : '',
     h('div', { class: 'row schedule-actions' },
       h('button', { type: 'button', class: 'secondary small', onclick: (e) => pause(s, e.currentTarget.closest('li')) }, s.paused ? 'Resume' : 'Pause'),

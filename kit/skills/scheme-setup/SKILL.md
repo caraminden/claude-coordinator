@@ -167,6 +167,19 @@ number, version or ledger id main already has, as the Numbered things line names
 each (`git log --diff-filter=A` on a migrations folder, version lines, numbered ledger entries), and
 check each regex matches what it should (`perl -ne 'print "$1\n" if /<regex>/' <file>`).
 
+When the plan has CI decide what lands (the scheme's checks run on runners, not on the shared
+box), turn on `land.sh`'s CI gate: set `CI_WORKFLOWS` to the workflow files that must be green,
+add `'land/**'` to each one's `push: branches:`, and give each a concurrency group per ref. Set
+`CHECK` to what should still run on the box before anything is pushed (`true` for nothing). Then
+a landing pushes its rebased commit to `land/<branch>`, waits for CI on exactly that commit, and
+only then moves main. The first `CI_STACK` landings in line (3) run CI at once, each built on the
+one ahead, so a landing doesn't wait a whole CI round per place in line. When "every workflow
+green" is not the rule (a workflow that only blocks when red, one that runs for some paths), set
+`CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. Exit 75 means
+CI gave no verdict (the runners' machine is off): nothing is wrong with the branch, so the minion
+parks and runs it again once a person says the runners are back. Say all of this in the "How a
+change ships" line, and that the worktree sits on a detached commit while a landing waits.
+
 `--install` sets `core.hooksPath` in the repo's shared config, so the main checkout gets the
 hook once your merge brings `.githooks/` there. Then prove it:
 

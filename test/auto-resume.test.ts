@@ -8,7 +8,9 @@ import { MAX_RESUMES, Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
 testPins();
 
-// A stand-in for `claude -p` that logs each prompt it gets and runs until a release file appears.
+// A stand-in for `claude -p` that logs each prompt it gets and runs until a release file appears. It ignores
+// SIGTERM, as a claude still writing its reply may for a while: otherwise a stop could end the turn, and
+// delete its folder, before the test's crash finds pid.json (#470; crash's SIGKILLs still end it).
 const root = mkdtempSync(join(tmpdir(), 'auto-resume-'));
 after(async () => {
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
@@ -21,6 +23,7 @@ writeFileSync(
   fake,
   `#!${process.execPath}
 const { appendFileSync, existsSync } = require('node:fs');
+process.on('SIGTERM', () => {});
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => appendFileSync(${JSON.stringify(prompts)}, input + '\\n'));
 const wait = setInterval(() => {
   if (!existsSync(${JSON.stringify(join(root, 'release'))})) return;
@@ -104,9 +107,12 @@ test('an interrupted turn resumes after a restart, with the messages queued behi
 
 test('a stopped turn is not resumed, even if the server restarts before it ends', async () => {
   const id = newTicket();
+  writeFileSync(prompts, '');
   const before = server();
   before.send(id, 'Cara', 'build it');
   before.send(id, 'Cara', 'never mind');
+  // Stopped once its claude has its prompt, and so its SIGTERM handler: a stop while it still starts lands as it starts (#470).
+  await until(() => readFileSync(prompts, 'utf8').includes('build it'));
   before.stop(id);
   await crash(before, id);
 

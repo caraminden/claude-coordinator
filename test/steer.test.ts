@@ -148,6 +148,34 @@ test('a steer that came in as the reply went out starts the next turn', async ()
   await until(() => !r.isRunning(t.id));
 });
 
+test('a message sent after Stop, before the turn has died, queues for a turn of its own (#468 S03-1)', async () => {
+  const t = newTicket();
+  const r = server();
+  await started(r, t);
+  assert.equal(r.stop(t.id), true);
+  // The stopped turn is still followed until its process exits: a steer into it would be dropped.
+  assert.ok(r.isRunning(t.id));
+  r.send(t.id, 'Cara', 'do this instead', [], {}, true);
+  assert.equal(events(t.id, 'user_message')[1].steered, undefined, 'not steered into the dying turn');
+  await until(() => seen(t.dir).length === 2);
+  assert.equal(seen(t.dir)[1], '[Cara]: do this instead');
+  writeFileSync(join(t.dir, 'release'), '');
+  await until(() => !r.isRunning(t.id));
+});
+
+test('a message queued after Stop survives a restart that finds the stopped turn gone (#468 S03-1)', async () => {
+  const t = newTicket();
+  const r = server();
+  r.resumeGapMs = 10;
+  store.updateTicket(t.id, { status: 'running' });
+  store.setSetting(`turn:${t.id}`, { resumes: 0, stopped: true, queued: [{ author: 'Cara', text: 'after the stop', images: [] }] });
+  r.recover();
+  await until(() => seen(t.dir).length === 1);
+  assert.equal(seen(t.dir)[0], '[Cara]: after the stop');
+  writeFileSync(join(t.dir, 'release'), '');
+  await until(() => !r.isRunning(t.id));
+});
+
 test('the Taskmaster steers its minion; a minion\'s message to a busy Taskmaster queues', async () => {
   const coord = newTicket('coordinator');
   const t = newTicket();

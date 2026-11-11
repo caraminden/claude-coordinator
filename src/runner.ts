@@ -846,8 +846,15 @@ export class Runner {
           const unsent = turn ? unsentSteers(turn) : [];
           if (turn?.dir) rmSync(turn.dir, { recursive: true, force: true });
           this.setStatus(t.id, 'idle');
-          // Stopped on purpose: it already says so, and nothing queued survives a stop.
-          if (turn?.stopped) continue;
+          // Stopped on purpose: it already says so, and no resume. What was queued before the stop went with it;
+          // what came after waits for a turn of its own.
+          if (turn?.stopped) {
+            if (turn.queued?.length) {
+              this.queues.set(t.id, [...turn.queued]);
+              later.push(() => !this.isRunning(t.id) && this.next(t.id));
+            }
+            continue;
+          }
           if (turn?.queued?.length || unsent.length) this.queues.set(t.id, [...(turn?.queued ?? []), ...unsent]);
           const resumes = turn?.resumes ?? 0;
           let skipped: string | null = null;
@@ -1152,8 +1159,8 @@ export class Runner {
     // Nor one someone else asked for (#255): a non-member's relay runs as the owner, whose message waits.
     // Nor one typed for by someone else (#295): its process carries their CITADEL_PERSON_ID, which can't change mid-turn.
     const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker) || (extra.typed && turn.typedBy && turn.typedBy !== person)));
-    // Nor a Taskmaster's fresh-start step: what's said now goes to the fresh session.
-    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !otherPerson && existsSync(join(live.dir, 'steer.jsonl')));
+    // Nor a Taskmaster's fresh-start step: what's said now goes to the fresh session. Nor a stopped turn, still dying: it would drop it.
+    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.stopped && !otherPerson && existsSync(join(live.dir, 'steer.jsonl')));
     const row = this.emit(ticketId, 'user_message', {
       author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}),
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}),

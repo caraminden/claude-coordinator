@@ -896,6 +896,7 @@ test('a target the tripwire can now pin down: a function argument bound at its c
     ["get(){ gh api \"repos/$1/contents/$2?ref=$3\" -H 'Accept: application/vnd.github.raw' > \"$4\"; }; get jame581/GodotPrompter skills/csharp-godot/SKILL.md d7b26cd cg.md"],
     ['function save() { rm -f "${1}.old"; mv "$1" "$1.old"; }; save notes.md'],
     ['f() { rm -f "$1"; }; for x in a.txt b.txt; do f "$x"; done', tmp],
+    ['cd "$TMPDIR" && f(){ gh api "repos/$1" > "$2"; }; f a/b out.md; f c/d out2.md'],
     // #1034: a single name from basename, in a folder it knows
     ['cd $TMPDIR && for f in apps/_citadel/rail.js apps/_citadel/theme.css; do curl -s http://127.0.0.1:8573/$f > "$(basename $f)"; done'],
     ['curl -s "$URL" > "$(basename "$URL").json"', tmp],
@@ -922,6 +923,24 @@ test('a target the tripwire can now pin down: a function argument bound at its c
     [`f(){ shift; rm -f "$1"; }; f a.txt ${data}/state.db`, tmp],
     [`f(){ set -- "$2"; rm -f "$1"; }; f a.txt b.txt`, tmp],
     [`f(){ local x="$1"; rm -f "$x"; }; f a.txt`, tmp],
+    // a shell started inside the function has $1… of its own
+    [`f(){ echo ${data} | xargs sh -c 'rm -rf "$1"' _; }; f a.txt`, tmp],
+    [`f(){ bash -c 'rm -rf "$1"' sh "$2"; }; f a.txt ${data}`, tmp],
+    // a word bash splits, globs or brace-expands moves the words after it
+    [`f(){ rm -rf "$2"; }; f {a.txt,${data}} x.txt`, tmp],
+    [`f(){ rm -rf "$2"; }; f ${data}/* x.txt`, tmp],
+    [`D="a.txt ${data}"; f(){ rm -rf "$2"; }; f $D x.txt`, tmp],
+    [`f(){ rm -rf "$2"; }; f "$E" ${data} x.txt`, tmp],
+    // a definition that may not last, or calls the tripwire can't see
+    [`f(){ rm -rf "$1"; }; ( f(){ :; } ); f ${data}`, tmp],
+    [`f(){ rm -rf "$1"; }; true || f(){ :; }; f ${data}`, tmp],
+    [`f(){ rm -rf "$1"; }; f(){ :; } & f ${data}`, tmp],
+    [`f(){ :; }; if true; then f(){ rm -rf "$1"; }; fi; f ${data}`, tmp],
+    [`f(){ :; }; for i in 1; do f(){ rm -rf "$1"; }; done; f ${data}`, tmp],
+    ['f(){ rm -rf "$1"; }; f a.txt; . ./x.sh', tmp],
+    ['f(){ rm -rf "$1"; }; f a.txt; source x.sh', tmp],
+    // a command's own basename may print anything
+    [`basename(){ echo ${data}/; }; cp x.db "$(basename y)state.db"`, tmp],
     // more calls than it follows
     [`f(){ rm -f "$1"; }; ${Array.from({ length: 65 }, (_, i) => `f a${i}`).join('; ')}`, tmp],
     // basename names a file in the current folder: the folder must be known, and not the live data

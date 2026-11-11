@@ -1173,7 +1173,10 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
       const scripts = script.length === 1 ? expand(script[0], st, cfg).map(text) : [script.map((w) => text(expand(w, st, cfg)[0])).join(' ')];
       for (const inner of scripts) {
         // `DATA_DIR=… PORT=… bash -c '…'`: the shell starts with the variables set before it (#468 S01-11).
-        const why = commandReason(inner, { cwd: st.cwd, vars: new Set([...vars, '__unknown']), values: new Map(st.values) }, cfg);
+        // Its $1…$9 are its own words, not those of a function it sits in.
+        const values = new Map(st.values);
+        if (name !== 'eval') for (let n = 1; n <= 9; n++) values.delete(`__${n}`);
+        const why = commandReason(inner, { cwd: st.cwd, vars: new Set([...vars, '__unknown', ...(name === 'eval' ? [] : ['__1', '__2', '__3', '__4', '__5', '__6', '__7', '__8', '__9'])]), values }, cfg);
         if (why) return why;
       }
       return null;
@@ -1344,7 +1347,7 @@ const PROCESS_KILL_WHY = "That `kill` takes its pids from a process listing (ps 
  * $1…$9 unknown.
  */
 function traceableFunctions(toks: Tok[]): Set<string> {
-  const defined = new Set<string>();
+  const defined = new Map<string, number>();
   const called = new Set<string>();
   const named: string[] = [];
   let blind = false;
@@ -1354,11 +1357,15 @@ function traceableFunctions(toks: Tok[]): Set<string> {
     if (t.kind === 'redir') return;
     const head = words.map((w) => w.text);
     const next = toks[k + 1];
-    if (t.text === '(' && next?.kind === 'op' && next.text === ')' && (head.length === 1 || (head.length === 2 && head[0] === 'function'))) defined.add(head.at(-1)!);
-    else if (words.length) {
+    if (t.text === '(' && next?.kind === 'op' && next.text === ')' && words.length) {
+      // Defined once: a second definition (in a subshell, after ||, in an if) may or may not have replaced the first.
+      const plain = head.length === 1 || (head.length === 2 && head[0] === 'function');
+      defined.set(head.at(-1)!, plain ? (defined.get(head.at(-1)!) ?? 0) + 1 : 2);
+    } else if (words.length) {
       const c = commandOf({ words, redirects: [] });
       const at = words.length - c.args.length - 1;
-      if (words[at]?.unknown) blind = true;
+      // A sourced file can call any function unseen.
+      if (words[at]?.unknown || c.name === '.' || c.name === 'source') blind = true;
       else if (c.name) called.add(c.name);
       named.push(...words.filter((w, j) => j !== at && !w.text.startsWith('-')).map((w) => w.tmpl ?? w.text));
     }
@@ -1366,7 +1373,7 @@ function traceableFunctions(toks: Tok[]): Set<string> {
   });
   if (words.length) named.push(...words.map((w) => w.tmpl ?? w.text));
   const edge = '[\\s;&|(){}`\'"]';
-  return new Set(blind ? [] : [...defined].filter((f) => called.has(f) && /^[A-Za-z_][\w-]*$/.test(f) && !named.some((t) => new RegExp(`(^|${edge})${f}($|${edge})`).test(t))));
+  return new Set(blind ? [] : [...defined].filter(([, n]) => n === 1).map(([f]) => f).filter((f) => called.has(f) && /^[A-Za-z_][\w-]*$/.test(f) && !named.some((t) => new RegExp(`(^|${edge})${f}($|${edge})`).test(t))));
 }
 
 /** Where the `}` that closes the body opened at toks[from - 1] is, or -1. */
@@ -1423,7 +1430,9 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
   // A function every call of which shows is checked at each call: its body is spliced in after the
   // call, between a bind of $1…$9 to the call's words and an unbind (#485).
   type Step = Tok | { kind: 'bind'; name: string; args: Word[] | null } | { kind: 'unbind' };
-  const toks: Step[] = [...lex(command, cfg.home), { kind: 'op', text: ';' }];
+  // A command that defines its own basename can't count on $(basename …) being one name.
+  const own = /(^|[\s;&|({])(function\s+)?basename\s*\(|alias\s+basename=/.test(command);
+  const toks: Step[] = [...lex(command, cfg.home), { kind: 'op', text: ';' }].map((t) => (own && t.kind === 'word' && t.word.tmpl?.includes(`\0${ONE_NAME}\0`) ? { kind: 'word', word: { ...t.word, tmpl: t.word.tmpl.replaceAll(`\0${ONE_NAME}\0`, '\0\0') } } : t));
   const traceable = traceableFunctions(toks as Tok[]);
   const funcs = new Map<string, Step[]>();
   const calls = new WeakSet<Step>();
@@ -1432,8 +1441,15 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
   for (let k = 0; k < toks.length; k++) {
     const tok = toks[k];
     if (tok.kind === 'bind') {
-      // Every word is read before any is bound: `g "$2" "$1"` inside f reads f's own.
-      const values = Array.from({ length: 9 }, (_, n) => (tok.args?.[n] ? known(expand(tok.args[n], st, cfg), cfg) : undefined));
+      // Every word is read before any is bound: `g "$2" "$1"` inside f reads f's own. From a word bash may
+      // split, glob, brace-expand or drop when empty, the words after it land at other numbers: unknown.
+      let moved = false;
+      const values = Array.from({ length: 9 }, (_, n) => {
+        const a = tok.args?.[n];
+        const v = a && !moved ? known(expand(a, st, cfg), cfg) : undefined;
+        if (!v || /[*?[{]/.test(a!.text) || (a!.tmpl && v.some((x) => !x || /[\s*?[{]/.test(x)))) return void (moved = true);
+        return v;
+      });
       const saved: [string, boolean, string[] | undefined][] = [];
       values.forEach((v, n) => {
         saved.push([`__${n + 1}`, st.vars.has(`__${n + 1}`), st.values.get(`__${n + 1}`)]);

@@ -349,6 +349,11 @@ const BLOCKED: [string, string?][] = [
   ['rm -rf ~u/.local/share/claude-coordinator/state.db'],
   ['cat ~u/.ssh/id_rsa'],
   ['D=~u/.local/share/claude-coordinator; rm -f $D/state.db'],
+  // #468 S01-14: what stays blocked next to command -v and perl -M
+  ['command pkill -f node'],
+  ['command -p pkill -f node'],
+  ["perl -Mstrict -pi -e 's/a/b/' ~/claude-coordinator/src/x.ts"],
+  ["perl -MList::Util -i -pe 's/a/b/' ~/.local/share/claude-coordinator/state.db"],
 ];
 
 const ALLOWED = [
@@ -561,6 +566,12 @@ const ALLOWED = [
   // #468 S01-13: a glob inside the minion's own worktree or TMPDIR
   `rm -rf ${data}/projects/2/tickets/9/build/* ../9/dist/*`,
   'ls ~u && ls ~u/.config',
+  // #468 S01-14: command -v only looks a name up; perl -M loads a module
+  'command -v pkill',
+  'command -V pkill && command -v killall',
+  'perl -Mstrict -e \'print 1\' "$f"',
+  'perl -MList::Util=sum -e \'print sum(1, 2)\' "$f"',
+  'perl -Ilib -wMstrict -e \'print 1\' "$f"',
 ];
 
 // Things a person may reasonably allow once: a card for that exact call.

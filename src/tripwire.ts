@@ -686,7 +686,9 @@ function writeTargets(name: string, args: Word[]): Word[] {
     case 'dd':
       return args.filter((w) => w.text.startsWith('of='));
     case 'sed': case 'perl': {
-      if (!a.some((t) => /^-[a-zA-Z]*i/.test(t) || t.startsWith('--in-place'))) return [];
+      // perl's -M, -m and -I take the rest of the word (`-Mstrict` is no -i; #468 S01-14).
+      const cut = (t: string) => (name === 'perl' ? t.replace(/^(-[a-zA-Z]*?)[MmI].*$/, '$1') : t);
+      if (!a.some((t) => /^-[a-zA-Z]*i/.test(cut(t)) || t.startsWith('--in-place'))) return [];
       // The files, not the script: that follows -e, or is the first plain word.
       const files: Word[] = [];
       let script = false;
@@ -1024,6 +1026,8 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     if (KEYWORDS.has(name)) i++;
     else if (WRAPPERS.has(name)) {
       if (name === 'xargs') viaXargs = true;
+      // `command -v pkill` only looks the name up (#468 S01-14).
+      if (name === 'command' && /^-[pvV]*[vV]/.test(words[i + 1]?.text ?? '')) return null;
       i++;
       while (i < words.length && words[i].text.startsWith('-')) {
         const opt = words[i++].text;
@@ -1213,6 +1217,7 @@ function commandOf(seg: Segment): { name: string; args: Word[] } {
   let i = 0;
   for (let wrapped = false; i < w.length; i++) {
     const t = w[i].text;
+    if (basename(t) === 'command' && /^-[pvV]*[vV]/.test(w[i + 1]?.text ?? '')) return { name: '', args: [] };
     if (WRAPPERS.has(basename(t))) wrapped = true;
     else if (!/^[A-Za-z_]\w*=/.test(t) && !KEYWORDS.has(t) && !(wrapped && (t.startsWith('-') || /^[\d.]+[smhd]?$/.test(t)))) break;
   }

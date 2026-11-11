@@ -17,6 +17,8 @@ echo "$*" >>'${calls}'
 # A client that finds no server starts one, which lives on with whatever descriptors it inherited.
 [ -n "\${ADB_STUB_SERVER:-}" ] && { sleep 30 </dev/null >/dev/null 2>&1 & echo $! >>'${sdk}/server.pids'; }
 [ "$1" = -s ] && shift 2
+# An emulator on another computer: not there until the starter has been asked.
+if [ -n "\${ADB_STUB_FAR:-}" ] && [ ! -e '${sdk}/far-up' ]; then case "$*" in *getprop*|get-state) exit 1 ;; esac; fi
 case "$*" in
   'shell getprop sys.boot_completed') echo 1 ;;
   get-state) [ -e '${sdk}/killed' ] && exit 1; echo device ;;
@@ -37,7 +39,8 @@ const server = createServer((s) => s.end());
 let env: NodeJS.ProcessEnv;
 before(async () => {
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  env = { ...process.env, ANDROID_HOME: sdk, ANDROID_ADB_SERVER_PORT: String((server.address() as AddressInfo).port), CITADEL_HEAVY_DIR: join(root, 'locks') };
+  // Port 1 for the starter: nothing listens there, and the real one on this box would start the real emulator.
+  env = { ...process.env, ANDROID_HOME: sdk, ANDROID_ADB_SERVER_PORT: String((server.address() as AddressInfo).port), CITADEL_HEAVY_DIR: join(root, 'locks'), CITADEL_ANDROID_STARTER: '1' };
 });
 after(() => {
   server.close();
@@ -156,6 +159,31 @@ test('serve waits for a step that holds the screen before it stops the emulator'
   }
 });
 
+// A stub console: banner, then OK to each line, KO to a command before auth.
+async function stubConsole(onLine: (line: string) => void = () => {}) {
+  const got: string[] = [];
+  const consoleServer = createServer((s) => {
+    let authed = false;
+    let buf = '';
+    s.write('Android Console: Authentication required\r\nOK\r\n');
+    s.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\r\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        got.push(line);
+        if (line === 'quit') s.end();
+        else if (line === 'auth sekrit') { authed = true; s.write('OK\r\n'); }
+        else s.write(authed ? 'OK\r\n' : 'KO: unknown command\r\n');
+        if (authed) onLine(line);
+      }
+    });
+  });
+  await new Promise<void>((r) => consoleServer.listen(0, '127.0.0.1', r));
+  return { got, consoleServer, port: String((consoleServer.address() as AddressInfo).port) };
+}
+
 // Console steps (#442): the turn's side checks its words, serve checks them again and talks to the console.
 test('sms refuses a bad sender or text without touching the emulator', () => {
   rmSync(calls, { force: true });
@@ -172,27 +200,7 @@ test('sms goes through serve to the console with the host token, and serve refus
   const home = join(root, 'home');
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, '.emulator_console_auth_token'), 'sekrit\n');
-  // A stub console: banner, then OK to each line, KO to a command before auth.
-  const got: string[] = [];
-  const consoleServer = createServer((s) => {
-    let authed = false;
-    let buf = '';
-    s.write('Android Console: Authentication required\r\nOK\r\n');
-    s.on('data', (d) => {
-      buf += d;
-      let i;
-      while ((i = buf.indexOf('\r\n')) >= 0) {
-        const line = buf.slice(0, i);
-        buf = buf.slice(i + 2);
-        got.push(line);
-        if (line === 'quit') s.end();
-        else if (line === 'auth sekrit') { authed = true; s.write('OK\r\n'); }
-        else s.write(authed ? 'OK\r\n' : 'KO: unknown command\r\n');
-      }
-    });
-  });
-  await new Promise<void>((r) => consoleServer.listen(0, '127.0.0.1', r));
-  const port = String((consoleServer.address() as AddressInfo).port);
+  const { got, consoleServer, port } = await stubConsole();
   for (const f of [join(sdk, 'emu.pid'), join(sdk, 'killed'), calls]) rmSync(f, { force: true });
   const s = spawn(helper, ['serve'], { env: { ...env, HOME: home, CITADEL_HEAVY_DIR: locks, CITADEL_ANDROID_IDLE: '60', CITADEL_ANDROID_CONSOLE_PORT: port }, stdio: 'ignore' });
   const done = new Promise((r) => s.on('close', r));
@@ -241,6 +249,112 @@ test('sms goes through serve to the console with the host token, and serve refus
     s.kill('SIGTERM');
     await done;
     if (alive(pid)) process.kill(pid);
+    consoleServer.close();
+  }
+});
+
+// The emulator on Cara's desktop (#533): its tunnel puts the starter and the emulator's ports on this box's loopback.
+const runAsync = async (args: string[], extra: NodeJS.ProcessEnv) => {
+  const c = spawn(helper, args, { env: { ...env, CITADEL_HEAVY_WHO: 'a', ...extra }, stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  c.stderr!.on('data', (d) => (stderr += d));
+  return { status: await new Promise<number | null>((r) => c.on('close', r)), stderr };
+};
+
+test('up says the desktop is not connected when no starter answers, at once or after a short wait', async () => {
+  rmSync(join(sdk, 'far-up'), { force: true });
+  const t0 = Date.now();
+  const none = await runAsync(['up'], { CITADEL_HEAVY_DIR: join(root, 'far-none'), ADB_STUB_FAR: '1' });
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /desktop isn't connected \(asleep, restarting, or Cara isn't logged on there\)/);
+  assert.ok(Date.now() - t0 < 3000, 'no wait when nothing listens');
+
+  // A tunnel whose desktop went to sleep: the port still takes connections and never answers.
+  const open = new Set<import('node:net').Socket>();
+  const asleep = createServer((s) => { open.add(s); });
+  await new Promise<void>((r) => asleep.listen(0, '127.0.0.1', r));
+  try {
+    const t1 = Date.now();
+    const r = await runAsync(['install', helper], { CITADEL_HEAVY_DIR: join(root, 'far-asleep'), ADB_STUB_FAR: '1', CITADEL_ANDROID_STARTER: String((asleep.address() as AddressInfo).port) });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /desktop isn't connected/);
+    assert.ok(Date.now() - t1 < 12000, `gave up in ${Date.now() - t1} ms`);
+  } finally {
+    for (const s of open) s.destroy();
+    asleep.close();
+  }
+});
+
+test('up starts the far emulator through the starter and points the adb server here at its port', async () => {
+  rmSync(join(sdk, 'far-up'), { force: true });
+  let asked = 0;
+  const starter = createServer((s) => {
+    asked++;
+    // The emulator answers a moment after the first ask.
+    setTimeout(() => writeFileSync(join(sdk, 'far-up'), ''), 300);
+    s.end('asked the desktop to start citadel-android.service\n');
+  });
+  let told = '';
+  const adbServer = createServer((s) => { s.on('data', (d) => (told += d)); s.on('error', () => {}); setTimeout(() => s.end('OKAY'), 20); });
+  await new Promise<void>((r) => starter.listen(0, '127.0.0.1', r));
+  await new Promise<void>((r) => adbServer.listen(0, '127.0.0.1', r));
+  try {
+    const r = await runAsync(['up'], {
+      CITADEL_HEAVY_DIR: join(root, 'far-up-locks'), ADB_STUB_FAR: '1',
+      CITADEL_ANDROID_STARTER: String((starter.address() as AddressInfo).port), ANDROID_ADB_SERVER_PORT: String((adbServer.address() as AddressInfo).port),
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /asked the desktop to start/);
+    assert.match(r.stderr, /up after \d+s \(emulator-5554\)/);
+    assert.match(told, /0012host:emulator:5555/);
+    // The finished step marks the emulator used too: that is all its idle stop on the desktop can see.
+    for (let i = 0; i < 100 && asked < 2; i++) await new Promise((res) => setTimeout(res, 25));
+    assert.ok(asked >= 2, `the starter heard ${asked} time(s)`);
+  } finally {
+    rmSync(join(sdk, 'far-up'), { force: true });
+    starter.close();
+    adbServer.close();
+  }
+});
+
+test('on the desktop serve starts no adb server and stops the idle emulator through the console', async () => {
+  const home = join(root, 'home-desktop');
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, '.emulator_console_auth_token'), 'sekrit\n');
+  const { got, consoleServer, port } = await stubConsole((line) => { if (line === 'kill') process.kill(Number(readFileSync(join(sdk, 'emu.pid'), 'utf8'))); });
+  for (const f of [join(sdk, 'emu.pid'), join(sdk, 'killed'), calls]) rmSync(f, { force: true });
+  const s = spawn(helper, ['serve'], { env: { ...env, HOME: home, CITADEL_HEAVY_DIR: join(root, 'serve-desktop'), CITADEL_ANDROID_IDLE: '1', CITADEL_ANDROID_ROLE: 'desktop', CITADEL_ANDROID_CONSOLE_PORT: port }, stdio: 'ignore' });
+  const done = new Promise<number | null>((r) => s.on('close', r));
+  const pid = await emulatorPid();
+  try {
+    assert.equal(await done, 0);
+    assert.ok(!alive(pid), 'the emulator is gone');
+    assert.deepEqual(got.slice(0, 2), ['auth sekrit', 'kill']);
+    assert.ok(!existsSync(calls), 'adb was never run');
+  } finally {
+    if (alive(pid)) process.kill(pid);
+    consoleServer.close();
+  }
+});
+
+test('adb-serve keeps the adb server here and answers console steps with the token kept here', async () => {
+  const locks = join(root, 'adb-serve');
+  const home = join(root, 'home-adb');
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, '.emulator_console_auth_token'), 'sekrit\n');
+  const { got, consoleServer, port } = await stubConsole();
+  rmSync(calls, { force: true });
+  const s = spawn(helper, ['adb-serve'], { env: { ...env, HOME: home, CITADEL_HEAVY_DIR: locks, CITADEL_ANDROID_CONSOLE_PORT: port }, stdio: 'ignore' });
+  const done = new Promise((r) => s.on('close', r));
+  try {
+    for (let i = 0; i < 200 && !existsSync(calls); i++) await new Promise((r) => setTimeout(r, 25));
+    assert.match(readFileSync(calls, 'utf8'), /^start-server$/m);
+    const r = await runAsync(['sms', '5551234', 'hello'], { CITADEL_HEAVY_DIR: locks });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(got, ['auth sekrit', 'sms send 5551234 hello', 'quit']);
+  } finally {
+    s.kill('SIGTERM');
+    await done;
     consoleServer.close();
   }
 });

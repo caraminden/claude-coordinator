@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
-# The shared headless Android emulator on perigee (#381), one AVD (`citadel`) for every scheme:
+# The shared headless Android emulator (#381), one AVD (`citadel`) for every scheme:
 #   citadel-android up | install <apk> | open <url> | shot <file.png> | offline on|off | sms <from> <text> | down
-# The emulator runs in the user service citadel-android.service (deploy/), never always-on: perigee is
-# short of RAM, so `serve` (its main process) stops it after IDLE seconds with no citadel-android call.
-# Container turns share the host's network, so their adb reaches the host's adb server on 127.0.0.1:5037,
-# but they can't start a host unit: `up` connects to citadel-android-starter.socket on 127.0.0.1:$STARTER,
-# which starts the service. On the host without that socket it falls back to systemctl --user.
+# Since #533 the emulator runs on Cara's desktop, in the WSL distro citadel-android (deploy/desktop/android/),
+# and turns still run here on perigee. perigee can't open a connection to the desktop, so the desktop dials
+# in: its SSH tunnel puts the starter (127.0.0.1:$STARTER) and the emulator's console and adb ports
+# (127.0.0.1:5554 and :5555) on perigee's loopback. The adb server stays on perigee
+# (citadel-android-adb.service, `adb-serve`), so the device is emulator-5554 as before and `adb reverse`
+# and `adb forward` end here, where the dev servers are. While the desktop is asleep, off or logged out
+# the starter doesn't answer, and `up` says so.
+# The emulator runs in citadel-android.service there, never always-on: `serve` (its main process) stops it
+# after IDLE seconds unused. `up` and every finished step connect to the starter, which starts the service
+# and marks it used. Container turns share the host's network, so all of this reaches them too.
+# perigee's own units (deploy/citadel-android.service and its starter socket) still work as the way back:
+# with that socket on :$STARTER instead of the tunnel, the emulator runs here.
 # The screen is one lock in citadel-heavy's folder ($CITADEL_HEAVY_DIR): each step holds a flock, and its
 # holder keeps the screen for LEASE seconds after a step, so its next step (install, open, shot) comes
 # before anyone else's. Others wait and say for whom; nothing ever kills another holder's work.
@@ -18,10 +25,9 @@ say() { echo "citadel-android: $*" >&2; }
 SDK=${ANDROID_HOME:-$HOME/.local/share/android-sdk}
 ADB="$SDK/platform-tools/adb"
 AVD=citadel
-CONSOLE=5554
+CONSOLE=${CITADEL_ANDROID_PORT:-5554} # rehearsals only: a second emulator beside the shared one
 SERIAL="emulator-$CONSOLE"
-STARTER=18590
-UNIT=citadel-android.service
+STARTER=${CITADEL_ANDROID_STARTER:-18590}
 IDLE=${CITADEL_ANDROID_IDLE:-900}
 LEASE=120
 BOOT_WAIT=360
@@ -35,9 +41,18 @@ SMS_MAX=500
 # 9>&-: an adb that finds no server starts one, which would hold the screen lock for as long as it runs (#496).
 adb() { "$ADB" -s "$SERIAL" "$@" 9>&-; }
 port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
-booted() { port_open "$ADB_PORT" && [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; }
+# A quick question to the emulator. The time limit is for a desktop that went to sleep: its tunnel's ports
+# stay open here for a while, and a question into them would never come back.
+ask() { timeout 5 "$ADB" -s "$SERIAL" "$@" 9>&-; }
+booted() { port_open "$ADB_PORT" && [ "$(ask shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; }
 # The adb server must be the service's: one started from a container has another key, and the emulator refuses it.
 need_server() { port_open "$ADB_PORT" || { say "the emulator isn't up; run citadel-android up"; exit 1; }; }
+# Tells the adb server here to look at the emulator's adb port, in adb's own words (an emulator on this
+# computer says the same when it starts). The server only looks by itself when it starts.
+nudge() { local m="host:emulator:$((CONSOLE + 1))"; (exec 3<>"/dev/tcp/127.0.0.1/$ADB_PORT" && printf '%04x%s' ${#m} "$m" >&3 && timeout 2 head -c 4 <&3) >/dev/null 2>&1; }
+# Connects to the starter and prints what it says: that starts the emulator's service if it is down and
+# marks it used. Nothing printed: no starter, or a tunnel whose desktop has stopped answering.
+poke() { (exec 2>/dev/null 3<>"/dev/tcp/127.0.0.1/$STARTER" 9>&- && timeout 5 cat <&3); }
 
 # Holder file: "<until epoch>\t<who>". Taking the screen waits while another holder's lease runs.
 take_screen() {
@@ -58,7 +73,7 @@ take_screen() {
   touch "$used"
 }
 # After a step: the lease runs from now, and the flock goes when the process exits.
-keep_screen() { printf '%s\t%s\n' "$(($(date +%s) + LEASE))" "$who" >"$holder"; touch "$used"; }
+keep_screen() { printf '%s\t%s\n' "$(($(date +%s) + LEASE))" "$who" >"$holder"; touch "$used"; (poke >/dev/null 9>&- &); }
 
 # A console step's arguments, checked on both sides: nothing but these words ever reaches the console, and
 # a line break or other control character in the text would start a console command of its own.
@@ -139,32 +154,25 @@ relay() {
   return 0
 }
 
-start_service() {
-  local reply
-  if reply=$(exec 2>/dev/null 3<>"/dev/tcp/127.0.0.1/$STARTER" && timeout 20 cat <&3); then
-    [ -n "$reply" ] || say "the starter on 127.0.0.1:$STARTER said nothing; on the host: journalctl --user -u 'citadel-android-starter@*' -n 20"
-    [ -z "$reply" ] || say "$reply"
-  elif [ ! -e /run/.containerenv ] && command -v systemctl >/dev/null; then
-    systemctl --user start --no-block "$UNIT" || { say "can't start $UNIT: is deploy/$UNIT installed?"; exit 1; }
-  else
-    say "nothing listens on 127.0.0.1:$STARTER to start the emulator: citadel-android-starter.socket isn't installed or running on the host"
+up() {
+  local reply t0=$SECONDS poked=$SECONDS
+  reply=$(poke)
+  booted && return 0
+  if [ -z "$reply" ]; then
+    say "the emulator's desktop isn't connected (asleep, restarting, or Cara isn't logged on there). It comes back by itself when the PC does; nothing here needs fixing. Until then there is no emulator: say so rather than wait."
     exit 1
   fi
-}
-
-up() {
-  booted && return 0
   say "starting the emulator ($AVD); a quick boot takes seconds, a cold one a few minutes"
-  start_service
-  local t0=$SECONDS poked=$SECONDS
+  say "$reply"
   until booted; do
+    nudge
     # A service still winding down from a `down` or the idle stop ignores the start: ask again once it's gone.
-    if [ $((SECONDS - poked)) -ge 15 ] && ! { port_open "$ADB_PORT" && adb get-state >/dev/null 2>&1; }; then
-      start_service >/dev/null 2>&1
+    if [ $((SECONDS - poked)) -ge 15 ] && ! { port_open "$ADB_PORT" && ask get-state >/dev/null 2>&1; }; then
+      poke >/dev/null
       poked=$SECONDS
     fi
     if [ $((SECONDS - t0)) -ge $BOOT_WAIT ]; then
-      say "not booted after ${BOOT_WAIT}s; on the host: journalctl --user -u $UNIT -u 'citadel-android-starter@*' -n 50"
+      say "not booted after ${BOOT_WAIT}s; ask your Taskmaster: the emulator's log is on Cara's desktop (deploy/desktop/android/README.md, \"When it doesn't work\")"
       exit 1
     fi
     sleep 2
@@ -177,19 +185,32 @@ up() {
   say "up after $((SECONDS - t0))s ($SERIAL)"
 }
 
-# The service's main process: the adb server and the emulator, stopped after IDLE seconds unused.
+# perigee's side when the emulator is on the desktop (citadel-android-adb.service): the adb server every turn
+# talks to, and the console steps, which reach the console through the tunnel with the token kept here.
+adb_serve() {
+  mkdir -p "$dir"
+  "$ADB" start-server 9>&-
+  while port_open "$ADB_PORT"; do sleep 1; relay; done
+  say "the adb server is gone"; exit 1
+}
+
+# The emulator's service, wherever it runs: the emulator, stopped after IDLE seconds unused. On the desktop
+# (CITADEL_ANDROID_ROLE=desktop) there is no adb server, and "used" is the starter's mark, not a step's
+# lock: shortcut: a single step that runs longer than IDLE can meet the idle stop, give the starter a
+# "busy" word if one ever does.
 serve() {
-  local emu="$SDK/emulator/emulator" pid
+  local emu="$SDK/emulator/emulator" pid far=
+  [ "${CITADEL_ANDROID_ROLE:-}" != desktop ] || far=1
   mkdir -p "$dir" && touch "$used"
-  "$ADB" start-server
+  [ -n "$far" ] || "$ADB" start-server
   # Saving the quick-boot snapshot writes ~2.6 GB and took 17s here; the emulator's default 20s cut one short.
   export ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL=90
   "$emu" -avd "$AVD" -port "$CONSOLE" -no-window -no-audio -no-boot-anim -no-metrics \
-    -gpu swiftshader_indirect -feature -Vulkan -memory 2048 -cores 2 &
+    -gpu swiftshader_indirect -feature -Vulkan -memory "${CITADEL_ANDROID_MEMORY:-2048}" -cores "${CITADEL_ANDROID_CORES:-2}" &
   pid=$!
   # `adb emu kill` shuts it down cleanly, which saves the quick-boot snapshot; plain signals are the fallback.
   stop() {
-    adb emu kill >/dev/null 2>&1
+    if [ -n "$far" ]; then console kill >/dev/null 2>&1; else adb emu kill >/dev/null 2>&1; fi
     for _ in $(seq 100); do kill -0 "$pid" 2>/dev/null || return 0; sleep 1; done
     kill "$pid" 2>/dev/null
   }
@@ -218,12 +239,12 @@ serve() {
 }
 
 down() {
-  if ! port_open "$ADB_PORT" || ! adb get-state >/dev/null 2>&1; then say "not running"; return 0; fi
+  if ! port_open "$ADB_PORT" || ! ask get-state >/dev/null 2>&1; then say "not running"; return 0; fi
   say "stopping the emulator (saving its quick-boot snapshot)"
   adb emu kill >/dev/null 2>&1
   local t0=$SECONDS
   # Once the service ends its adb server goes too: asking again would start a stray one here.
-  while port_open "$ADB_PORT" && adb get-state >/dev/null 2>&1 && [ $((SECONDS - t0)) -lt 100 ]; do sleep 1; done
+  while port_open "$ADB_PORT" && ask get-state >/dev/null 2>&1 && [ $((SECONDS - t0)) -lt 100 ]; do sleep 1; done
   : >"$holder"
 }
 
@@ -231,6 +252,7 @@ cmd=${1:-}
 [ $# -gt 0 ] && shift
 case "$cmd" in
   serve) serve ;;
+  adb-serve) adb_serve ;;
   up) take_screen; up; keep_screen ;;
   install)
     [ $# -eq 1 ] && [ -f "$1" ] || { say "usage: citadel-android install <file.apk>"; exit 2; }
@@ -244,7 +266,8 @@ case "$cmd" in
   shot)
     [ $# -eq 1 ] || { say "usage: citadel-android shot <file.png>"; exit 2; }
     take_screen; need_server
-    adb exec-out screencap -p >"$1" && [ -s "$1" ]; s=$?
+    # shot is the one step that doesn't run `up` first, so it carries its own limit for a desktop that went to sleep.
+    timeout 30 "$ADB" -s "$SERIAL" exec-out screencap -p >"$1" 9>&- && [ -s "$1" ]; s=$?
     keep_screen
     [ $s = 0 ] && say "saved $1" || say "screenshot failed"
     exit $s ;;

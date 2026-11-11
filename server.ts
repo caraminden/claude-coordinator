@@ -838,7 +838,7 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
     } else if (preview) {
       const session = auth.session(req);
       // An HTML page's files under its file token come from a frame that sends no cookies; the preview checks the token.
-      const tokened = preview[2]?.startsWith('/api/files/') && (req.method === 'GET' || req.method === 'HEAD');
+      const tokened = /^\/(c\/)?api\/files\//.test(preview[2] ?? '') && (req.method === 'GET' || req.method === 'HEAD');
       // People only, signed in to the live app; a page load without a login goes to the login.
       if (!tokened && (!session || session.agent !== undefined)) {
         if (req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? ''))) return void res.writeHead(302, { Location: '/' }).end();

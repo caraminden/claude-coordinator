@@ -382,9 +382,17 @@ export async function apiReachable(): Promise<boolean> {
 /** Auto-resumes in a row before a thread is left alone, in case its own turn is what kills the server. */
 export const MAX_RESUMES = 2;
 // A turn's GitHub token is in its env (#182), so `env` or `echo $GH_TOKEN` would print it into the
-// chat, which everyone in the scheme reads; GitHub's token formats are distinctive enough to hide.
-const GITHUB_TOKEN = /\b(gh[opsur]_[A-Za-z0-9]{30,}|github_pat_\w{40,})\b/g;
-export const hideTokens = (s: string) => s.replace(GITHUB_TOKEN, '[GitHub token hidden]');
+// chat, which everyone in the scheme reads. These shapes are distinctive enough to hide (#481 added
+// Citadel's machine tokens from machines.ts, Anthropic and AWS keys, and PEM private keys).
+const TOKENS: [RegExp, string][] = [
+  [/\b(gh[opsur]_[A-Za-z0-9]{30,}|github_pat_\w{40,})\b/g, '[GitHub token hidden]'],
+  [/\bccm_\d+_[\w-]{43}/g, '[Citadel machine token hidden]'],
+  [/\bsk-ant-[\w-]{20,}/g, '[Anthropic key hidden]'],
+  [/\b(AKIA|ASIA)[A-Z0-9]{16}\b/g, '[AWS key hidden]'],
+  // To its END line, or to the end of the text when the output was cut off inside it.
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[private key hidden]'],
+];
+export const hideTokens = (s: string) => TOKENS.reduce((out, [shape, hidden]) => out.replace(shape, hidden), s);
 
 function truncate(s: string): string {
   return s.length > MAX_TOOL_OUTPUT ? s.slice(0, MAX_TOOL_OUTPUT) + `\n… [truncated ${s.length - MAX_TOOL_OUTPUT} chars]` : s;
@@ -1163,7 +1171,7 @@ export class Runner {
     const ticket = this.store.getTicket(ticketId);
     const refused = ticket && this.refuseTurn?.(ticket, author);
     if (refused) {
-      this.emit(ticketId, 'user_message', { author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra });
+      this.emit(ticketId, 'user_message', { author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra });
       this.emit(ticketId, 'note', { text: refused });
       return;
     }
@@ -1178,8 +1186,9 @@ export class Runner {
     const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker) || (extra.typed && turn.typedBy && turn.typedBy !== person)));
     // Nor a Taskmaster's fresh-start step: what's said now goes to the fresh session. Nor a stopped turn, still dying: it would drop it.
     const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.stopped && !otherPerson && existsSync(join(live.dir, 'steer.jsonl')));
+    // The chat shows it masked; the turn still gets it as typed, for a key someone hands over on purpose.
     const row = this.emit(ticketId, 'user_message', {
-      author, text, ...(images.length ? { images: images.map((i) => i.name) } : {}),
+      author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}),
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}),
     });
     const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id: row.id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), asker };
@@ -1299,7 +1308,7 @@ export class Runner {
    * and time. It carries no person, so it never decides whose turn that is.
    */
   private mail(to: number, author: string, text: string, from?: number, cold = false) {
-    const row = this.emit(to, 'user_message', { author, text, mail: true, ...(cold ? { cold: true } : {}), ...(from ? { from } : {}) });
+    const row = this.emit(to, 'user_message', { author, text: hideTokens(text), mail: true, ...(cold ? { cold: true } : {}), ...(from ? { from } : {}) });
     if (cold && !this.store.getSetting<number>(coldKey(to))) this.store.setSetting(coldKey(to), this.now());
     const sent = new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ');
     const list = this.store.getSetting<QueuedMessage[]>(mailKey(to)) ?? [];

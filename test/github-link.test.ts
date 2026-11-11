@@ -7,6 +7,7 @@ import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { GithubLink, personGithub } from '../src/github-link.ts';
 import { asEnv } from '../src/scheme-repo.ts';
+import { newToken } from '../src/machines.ts';
 import { hideTokens, pushKind, Runner, slimEvent } from '../src/runner.ts';
 import { jsonLines, stopTurns, testPins } from './helpers.ts';
 testPins();
@@ -253,6 +254,24 @@ test('GitHub tokens are hidden in what the chat stores: tool output and replies'
   assert.equal(hideTokens('ghost_town and gho_short stay'), 'ghost_town and gho_short stay');
 });
 
+test("Citadel's machine tokens, Anthropic and AWS keys and PEM private keys are hidden too (#481)", () => {
+  // Made up, in each real shape: machines.ts's ccm_<id>_<32 bytes base64url>, and the rest as their issuers print them.
+  const machine = newToken(12);
+  const anthropic = `sk-ant-api03-${'Zq9_'.repeat(20)}`;
+  const aws = 'AKIAIOSFODNN7EXAMPLE';
+  const pem = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\nAAAA\n-----END OPENSSH PRIVATE KEY-----';
+  assert.equal(hideTokens(`Authorization: Bearer ${machine}`), 'Authorization: Bearer [Citadel machine token hidden]');
+  assert.equal(hideTokens(`ANTHROPIC_API_KEY=${anthropic}\nX=1`), 'ANTHROPIC_API_KEY=[Anthropic key hidden]\nX=1');
+  assert.equal(hideTokens(`aws_access_key_id = ${aws}`), 'aws_access_key_id = [AWS key hidden]');
+  assert.equal(hideTokens(`key:\n${pem}\ndone`), 'key:\n[private key hidden]\ndone');
+  assert.equal(hideTokens('cut off:\n-----BEGIN RSA PRIVATE KEY-----\nMIIEow'), 'cut off:\n[private key hidden]');
+  // Lookalikes stay: a short ccm_ id, a public key, prose.
+  for (const s of ['ccm_12_short', '-----BEGIN PUBLIC KEY-----', 'ask-ant-farm', 'AKIA is how AWS key ids start']) assert.equal(hideTokens(s), s);
+  // In tool output and in a person's message as the chat stores it.
+  const ev = slimEvent({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: `TOKEN=${machine}` }] } });
+  assert.equal(ev.message.content[0].content, 'TOKEN=[Citadel machine token hidden]');
+});
+
 // Through the runner: a fake claude that writes its GitHub env, and, asked to, "runs" a push.
 const fake = join(root, 'claude-fake');
 writeFileSync(
@@ -389,4 +408,15 @@ test('through the server: Link GitHub goes to GitHub for a scheme you can see; a
   } finally {
     await s.stop();
   }
+});
+
+test("a person's message shows with its key hidden, and the turn still gets it as typed (#481)", async () => {
+  const t = newTicket();
+  const r = runner();
+  r.send(t.id, 'Josh', 'the key is AKIAIOSFODNN7EXAMPLE');
+  await until(() => seen(t.dir).length > 0);
+  const stored = store.listEvents(t.id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data).text);
+  assert.deepEqual(stored, ['the key is [AWS key hidden]']);
+  assert.match(seen(t.dir)[0], /the key is AKIAIOSFODNN7EXAMPLE/);
+  await finish(r, t);
 });

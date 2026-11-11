@@ -808,6 +808,7 @@ function renderMachineSetup() {
   };
   el.replaceChildren(h('div', { class: 'machine-setup' },
     h('strong', {}, `Connect ${t.name}`),
+    h('p', { class: 'small' }, "Don't screenshot this or paste it in a chat: the line holds the token, and anyone who has it can act as this machine."),
     h('p', { class: 'small' }, 'The token is shown only now; if you lose it, make a new one. Paste this on that computer:'),
     h('div', { class: 'row machine-setup-ways' },
       t.runners ? '' : h('div', { class: 'row', role: 'group', 'aria-label': 'Which computer' },

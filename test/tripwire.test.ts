@@ -325,6 +325,11 @@ const BLOCKED: [string, string?][] = [
   [`[[ $(echo x > ${data}/state.db) ]]`],
   ['echo $(( $(pkill -f node) + 1 ))'],
   [`echo "$(( n > 1 ))" > ${data}/state.db`],
+  // #468 S01-10 review: a redirect glued to the ]] that ends the condition
+  ['[[ 1 ]]>>~/.local/share/claude-coordinator/coordinator.db'],
+  ['[[ 1 ]]>~/claude-coordinator/src/server.ts'],
+  [`[[ -n $x ]]&>${data}/state.db`],
+  [`[[ $a < $b ]]<${home}/.ssh/id_rsa`],
   // #468 S01-11: server.ts as the script, an option's value, or the argument of an eval still runs it
   ['node --import ./x.ts server.ts'],
   ['node -r ./x.cjs --env-file .env server.ts'],

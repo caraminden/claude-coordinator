@@ -438,7 +438,10 @@ export function lex(s: string, home: string): Tok[] {
       }
       continue;
     }
-    if ((c === '<' || c === '>' || (c === '&' && s[i + 1] === '>')) && !cond && !inArith()) {
+    const redirecting = c === '<' || c === '>' || (c === '&' && s[i + 1] === '>');
+    // `]]>file`: the ]] ends the condition, so the > glued to it redirects (#468 S01-10 review).
+    if (redirecting && cond && text === ']]' && inWord && !unknown && !quotedStart) flush();
+    if (redirecting && !cond && !inArith()) {
       // A bare number right before is the file descriptor, not a word.
       if (inWord && !quotedStart && !unknown && /^\d+$/.test(text)) {
         text = tmpl = '';

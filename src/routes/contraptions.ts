@@ -223,6 +223,10 @@ function jsonTagged(req: IncomingMessage, res: Ctx['res'], body: unknown) {
   return json(res, 200, body, { ETag: tag, 'Cache-Control': 'no-cache' });
 }
 
+/** A call to the embed route: at most this many texts, each about 1,000 tokens at most, well inside one llama-server slot. */
+const EMBED_TEXTS = 16;
+const EMBED_CHARS = 4000;
+
 /** The most minions one list read names. */
 const MINIONS_MAX = 50;
 
@@ -242,6 +246,19 @@ export const contraptionRoutes: Route[] = [
   { method: ['PUT', 'DELETE'], path: '/api/mandate/items/:key', who: ['taskmaster', 'minion'], refuse: 'Only a minion or Taskmaster puts items for its scheme', handler: mandateItem },
   // contraption_read (#295): a minion or Taskmaster reads its asker's data in a contraption, through the app's read commands.
   { method: 'POST', path: '/api/contraption-read/:app', who: ['taskmaster', 'minion'], refuse: "Only a minion or Taskmaster reads a person's contraption data", handler: contraptionRead },
+  // Semantic memory's model for the app's own data (#488): texts in, unit vectors out. The box's CPU does it,
+  // so nothing leaves it; the app stores and searches the vectors itself, and keeps them with `model`.
+  fromContraption('POST', '/api/contraptions/embed', async ({ req, res, app }) => {
+    const { texts } = await readJson(req);
+    if (!Array.isArray(texts) || !texts.length || texts.length > EMBED_TEXTS || texts.some((t) => typeof t !== 'string' || !t.trim() || t.length > EMBED_CHARS)) {
+      throw new HttpError(400, `texts: 1 to ${EMBED_TEXTS} non-empty strings of at most ${EMBED_CHARS} characters`);
+    }
+    const vecs = await app.memory.embed(texts).catch((err) => {
+      console.error('Embedding for a contraption failed:', err?.cause?.code ?? err?.message ?? err);
+      throw new HttpError(503, "The embedding service isn't answering");
+    });
+    return json(res, 200, { model: app.memory.model, vectors: vecs.map((v) => [...v]) });
+  }),
   // #421: whether a person is a member of the app's home scheme, and its minions' progress for members.
   fromContraption('GET', '/api/contraptions/home', ({ res, app, url }, c) => {
     const { scheme, member } = homeOf(app, c, enabledPerson(app, c, url));

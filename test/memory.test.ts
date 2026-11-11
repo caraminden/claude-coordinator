@@ -1,6 +1,6 @@
 // Semantic memory (#331): what gets indexed, what never does, and that a search never crosses schemes.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createInterface } from 'node:readline';
@@ -9,7 +9,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { Embed } from '../src/memory.ts';
-import { agentToken, bootServer } from './helpers.ts';
+import { Contraptions } from '../src/contraptions.ts';
+import { agentToken, bootServer, SECRET } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'memory-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -193,7 +194,9 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     let body = '';
     for await (const c of req) body += c;
     const { input } = JSON.parse(body) as { input: string[] };
-    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ data: input.map((t, index) => ({ index, embedding: [...fakeVec(t)] })) }));
+    // A query's instruction is the same words every time: left in, they'd swamp the fake model's word counts.
+    const embedding = (t: string) => [...fakeVec(t.replace(/^Instruct:[\s\S]*?\nQuery: /, ''))];
+    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ data: input.map((t, index) => ({ index, embedding: embedding(t) })) }));
   });
   await new Promise<void>((r) => fake.listen(0, '127.0.0.1', r));
   const embedUrl = `http://127.0.0.1:${(fake.address() as { port: number }).port}`;
@@ -202,15 +205,21 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
   const boot = mkdtempSync(join(tmpdir(), 'memory-boot-'));
   const data = join(boot, 'data');
   mkdirSync(data, { recursive: true });
-  const { store, A, B, a1, b1 } = world(join(data, 'coordinator.db'));
+  const { store, A, B, a1, a2, b1 } = world(join(data, 'coordinator.db'));
   turn(store, a1.id, 'Cara', 'Where do we keep the dentist reminders?', 'In the Mandate app.');
   turn(store, b1.id, 'Cara', 'B dentist secret', 'B reply');
+  store.db.prepare("UPDATE tickets SET status = 'closed' WHERE id = ?").run(a2.id);
+  const tmA = store.createTicket({ project_id: A.id, title: 'A', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' });
+  const contraptions = new Contraptions(store, SECRET, join(data, 'contraptions'));
+  contraptions.register({ name: 'notes', title: 'Notes', port: 9177, icon: null, home_scheme: A.id, open_paths: '[]', default_model: null, turn_cap: null });
+  const appKey = readFileSync(join(data, 'contraptions', 'notes', 'contraption.key'), 'utf8');
   store.db.close();
 
-  const srv = await bootServer({ root: boot, env: { CITADEL_EMBED_URL: embedUrl, CITADEL_MEMORY_SCHEMES: `${A.id},${B.id}`, CITADEL_MEMORY_EVERY_MS: '100' } });
+  // No CITADEL_MEMORY_SCHEMES: every scheme is indexed (#488).
+  const srv = await bootServer({ root: boot, env: { CITADEL_EMBED_URL: embedUrl, CITADEL_MEMORY_SCHEMES: undefined, CITADEL_MEMORY_EVERY_MS: '100' } });
   try {
-    const search = (project: number, q: string, headers: Record<string, string> = { Cookie: srv.cookie }) =>
-      fetch(`${srv.base}/api/projects/${project}/memory?q=${encodeURIComponent(q)}`, { headers }).then(async (r) => ({ status: r.status, data: await r.json() }));
+    const search = (project: number, q: string, headers: Record<string, string> = { Cookie: srv.cookie }, more = '') =>
+      fetch(`${srv.base}/api/projects/${project}/memory?q=${encodeURIComponent(q)}${more}`, { headers }).then(async (r) => ({ status: r.status, data: await r.json() }));
     let r = await search(A.id, 'dentist reminders');
     for (let i = 0; i < 100 && !r.data.hits?.length; i++) {
       await new Promise((ok) => setTimeout(ok, 100));
@@ -246,6 +255,43 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     const text = (await mcp(true, 'tools/call', { name: 'search_memory', arguments: { query: 'dentist reminders' } })).content[0].text;
     assert.match(text, new RegExp(`^#${a1.number} Dentist reminders · \\d{4}-\\d\\d-\\d\\d · `));
     assert.ok(!text.includes('B dentist secret'));
+
+    // Open minions only, titles and notes only: the duplicate check's scope (#488).
+    const minions = (await search(A.id, 'dentist reminders usage bar', undefined, '&scope=minions')).data.hits;
+    assert.deepEqual(minions.map((h: any) => [h.source_kind, h.ticket_id, h.status]), [['ticket', a1.id, 'new']], 'no turns, and not the dismissed Usage bar');
+
+    // create_ticket, as the Taskmaster: refused when an open minion reads like the same work, until not_duplicate.
+    const create = async (args: object) => {
+      const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
+        env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(data, tmA.id), COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(tmA.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_MEMORY: '1' },
+        stdio: ['pipe', 'pipe', 'inherit'],
+      });
+      try {
+        const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
+        child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_ticket', arguments: { properties: { type: 'feature' }, ...args } } }) + '\n');
+        const r = await reply;
+        return r.result?.content?.[0]?.text ?? JSON.stringify(r);
+      } finally {
+        child.kill();
+      }
+    };
+    const twin = await create({ title: 'Dentist reminders', message: 'Remind people about the dentist' });
+    assert.match(twin, /^Not created: /);
+    assert.match(twin, new RegExp(`^- #${a1.number} Dentist reminders \\(new, [01]\\.\\d+\\)$`, 'm'));
+    assert.match(await create({ title: 'Usage bar', message: 'Show the usage bar' }), /^Created /, 'a dismissed minion is no twin');
+    assert.match(await create({ title: 'Dentist reminders', message: 'Remind people about the dentist', not_duplicate: true }), /^Created /);
+
+    // The embed route (#488): a contraption's own server, with its key, gets the model's vectors.
+    const embedCall = (body: unknown, headers: Record<string, string> = { Authorization: `Bearer ${appKey}` }) =>
+      fetch(`${srv.base}/api/contraptions/embed`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json() }));
+    const got = await embedCall({ texts: ['dentist on tuesday', 'usage bar'] });
+    assert.equal(got.status, 200);
+    assert.equal(got.data.model, 'Qwen3-Embedding-0.6B-Q8_0');
+    const dot = (a: number[], b: Float32Array) => a.reduce((s, x, i) => s + x * b[i], 0);
+    assert.deepEqual(got.data.vectors.map((v: number[], i: number) => Math.round(dot(v, fakeVec(['dentist on tuesday', 'usage bar'][i])) * 1000) / 1000), [1, 1], 'each text its own vector, in order');
+    assert.equal((await embedCall({ texts: ['x'] }, {})).status, 401, 'no key, no vectors');
+    assert.equal((await embedCall({ texts: ['x'] }, { Cookie: srv.cookie })).status, 403, "a person's browser can't call it");
+    for (const texts of [[], ['ok', ''], ['a'.repeat(4001)], Array(17).fill('a'), 'dentist', [3]]) assert.equal((await embedCall({ texts })).status, 400, JSON.stringify(texts).slice(0, 40));
   } finally {
     await srv.stop();
     rmSync(boot, { recursive: true, force: true });

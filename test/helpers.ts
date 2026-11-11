@@ -135,6 +135,8 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
     env: {
       ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
+      // No scheme has id 0, so none is indexed: a test server never calls the box's live embedding service.
+      CITADEL_MEMORY_SCHEMES: '0',
       ...opts.env,
     },
     stdio: ['ignore', 'pipe', 'inherit'],

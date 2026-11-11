@@ -19,6 +19,7 @@ the test on purpose.
 - [Asks: bug reports, feature asks and data](#asks-bug-reports-feature-asks-and-data)
 - [Your home scheme and its minions](#your-home-scheme-and-its-minions)
 - [The relay: calling another contraption](#the-relay-calling-another-contraption)
+- [Embeddings: `POST /api/contraptions/embed`](#embeddings-post-apicontraptionsembed)
 - [Sessions reading a person's data: `/app-api/read`](#sessions-reading-a-persons-data-app-apiread)
 - [What Citadel serves your pages](#what-citadel-serves-your-pages)
 - [Running and deploying: `citadel-app.json`](#running-and-deploying-citadel-appjson)
@@ -430,6 +431,24 @@ on every one of them.
 Mandate alone may call `scheme-<id>` at `/mandate-hook`, to tell a scheme its person ticked one of
 the scheme's items.
 
+## Embeddings: `POST /api/contraptions/embed`
+
+For searching your own data by meaning, with the same local model Citadel's memory uses
+(Qwen3-Embedding-0.6B on perigee's CPU, so nothing leaves the box). From your server, with your
+bearer key: `{ "texts": ["…", "…"] }` → `{ "model": "Qwen3-Embedding-0.6B-Q8_0", "vectors":
+[[…], […]] }`, one unit-length vector (1,024 numbers) per text, in order (tested). Rank by the dot
+product.
+
+- 1 to 16 non-empty texts of at most 4,000 characters each, else 400 (tested): chunk longer things
+  yourself. 503 when the embedding service is down.
+- Store `model` with each vector, and embed everything again when it changes: vectors from two
+  models don't compare.
+- The model wants an instruction on the **query** side only, as part of the text:
+  `Instruct: Given a question about my notes, retrieve the notes that answer it\nQuery: <the question>`.
+  Embed what you index without it.
+- It's CPU work shared with Citadel, about 7 CPU-seconds per 500 tokens of text, so index in the background, a
+  batch at a time, never while a person waits.
+
 ## Sessions reading a person's data: `/app-api/read`
 
 Citadel's minions and Taskmasters have a `contraption_read` tool. When a person asks one about
@@ -548,6 +567,7 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 | Asks per person per 10 minutes | 10 bug/feature, 60 data |
 | Minions in one list read | 50 |
 | Relay body, timeout | 64 KiB, 10 s |
+| Embed call | 16 texts of 4,000 characters |
 | `/app-api/read` timeout, answer | 15 s, 64 KB |
 | Open paths, relay paths | 20 each |
 | Timers | 5 |
@@ -558,6 +578,8 @@ admin-only (Settings → Contraptions, or Citadel's Taskmaster's `contraption_se
 
 Newest first.
 
+- **2026-11-10:** `POST /api/contraptions/embed` turns texts into vectors with Citadel's local
+  embedding model, for search by meaning over your own data.
 - **2026-11-09:** `GET /api/contraptions/home` says whether a person is a member of your home
   scheme, and `GET /api/contraptions/minions/<n>` (or `?n=` for several) gives members a minion's
   status, state, step and waiting card, with ETags for cheap polling.

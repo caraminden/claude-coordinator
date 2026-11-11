@@ -82,6 +82,12 @@
 
 /* Search: threads list and find-in-chat */
 .thread-search { margin: 0 0 0.5rem; padding: 0.3rem 0.55rem; font-size: 0.9em; }
+/* Search by meaning (#488): a button under the title results, then the chat chunks it found */
+.meaning .meaning-go { font-size: 0.85em; padding: 0.3rem 0.6rem; margin-bottom: 0.4rem; }
+.meaning-hit { display: grid; gap: 0.1rem; padding: 0.35rem 0.45rem; border-radius: 6px; border: 1px solid transparent; text-decoration: none; color: var(--ink); font-size: 0.9em; }
+.meaning-hit:hover { border-color: var(--line); }
+.meaning-hit .num { color: var(--muted); }
+.meaning-hit .snippet { color: var(--muted); font-size: 0.9em; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
 /* Property filter: one checklist dropdown per key, under the search */
 .prop-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin: 0 0 0.6rem; }
 .prop-filter:empty { display: none; }

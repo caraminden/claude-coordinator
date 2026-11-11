@@ -30,8 +30,11 @@ export type SourceKind = 'turn' | 'ticket';
 
 export interface MemoryHit {
   ticket_id: number;
-  number: number;
+  /** null for the Taskmaster's chat (kind 'coordinator'). */
+  number: number | null;
   title: string;
+  kind: string;
+  status: string;
   source_kind: SourceKind;
   source_id: number;
   ts: number;
@@ -207,15 +210,16 @@ export class Memory {
 
   /**
    * The scheme's `limit` chunks closest in meaning to `query`, best first; `ticketId` narrows it to one
-   * minion's, `personId` to one person's messages.
+   * minion's, `personId` to one person's messages, `openMinions` to the titles and notes of minions not dismissed.
    * shortcut: brute force over every vector of the scheme; past ~100k rows, cache them or move to sqlite-vec.
    */
-  async search(projectId: number, query: string, embed: Embed, model: string, opts: { limit?: number; ticketId?: number; personId?: number } = {}): Promise<MemoryHit[]> {
+  async search(projectId: number, query: string, embed: Embed, model: string, opts: { limit?: number; ticketId?: number; personId?: number; openMinions?: boolean } = {}): Promise<MemoryHit[]> {
     const [q] = await embed([query], true);
     const limit = Math.min(Math.max(Math.floor(opts.limit ?? 5), 1), 20);
     const rows = this.db.prepare(`SELECT m.id, m.vec FROM memory_chunks m JOIN tickets t ON t.id = m.ticket_id
       WHERE m.project_id = ?1 AND t.project_id = ?1 AND m.model = ?2 AND m.ts >= t.created_at
-        ${opts.ticketId !== undefined ? 'AND m.ticket_id = ?3' : opts.personId !== undefined ? "AND m.person_id = ?3 AND m.source_kind = 'turn'" : ''}`)
+        ${opts.ticketId !== undefined ? 'AND m.ticket_id = ?3' : opts.personId !== undefined ? "AND m.person_id = ?3 AND m.source_kind = 'turn'" : ''}
+        ${opts.openMinions ? "AND m.source_kind = 'ticket' AND t.status != 'closed'" : ''}`)
       .all(projectId, model, ...[opts.ticketId ?? opts.personId].filter((x) => x !== undefined)) as { id: number; vec: Uint8Array }[];
     const top: { id: number; score: number }[] = [];
     for (const r of rows) {
@@ -229,7 +233,7 @@ export class Memory {
         if (top.length > limit) top.pop();
       }
     }
-    const get = this.db.prepare('SELECT m.ticket_id, t.number, t.title, m.source_kind, m.source_id, m.ts, m.text FROM memory_chunks m JOIN tickets t ON t.id = m.ticket_id WHERE m.id = ?');
+    const get = this.db.prepare('SELECT m.ticket_id, t.number, t.title, t.kind, t.status, m.source_kind, m.source_id, m.ts, m.text FROM memory_chunks m JOIN tickets t ON t.id = m.ticket_id WHERE m.id = ?');
     return top.map(({ id, score }) => ({ ...(get.get(id) as unknown as Omit<MemoryHit, 'score'>), score: Math.round(score * 1000) / 1000 }));
   }
 

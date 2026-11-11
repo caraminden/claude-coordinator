@@ -1,6 +1,6 @@
 // The scheme switcher and the minions list: new-minion box, search and rows.
 import { weekShare } from './cost.js';
-import { account, ago, api, costText, h, isCoordinator, isSeen, listGroupsOf, schemeIcon, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { account, ago, api, costText, h, isCoordinator, isSeen, jumpHref, listGroupsOf, schemeIcon, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, sending, setSending, usage } from './core.js';
 import { fitHeight, loadDraft, saveDraft } from './composer.js';
 import { propFilter, renderPropFilter } from './properties.js';
@@ -262,11 +262,12 @@ export function revealActiveRow() {
 
 // ---------- search ----------
 
-// The threads search, kept across thread switches within a project.
-const threadSearch = { projectId: null, q: '' };
+// The threads search, kept across thread switches within a project. `meaning`: the last search of
+// the chats by meaning (#488), which only Enter or its button runs: each costs the box a CPU-second.
+const threadSearch = { projectId: null, q: '', meaning: null };
 
 export function threadSearchBox(projectId) {
-  if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '' });
+  if (threadSearch.projectId !== projectId) Object.assign(threadSearch, { projectId, q: '', meaning: null });
   const input = h('input', { type: 'search', class: 'thread-search', placeholder: 'Search titles, numbers and properties…', value: threadSearch.q, autocomplete: 'off' });
   input.addEventListener('input', () => {
     threadSearch.q = input.value.trim();
@@ -277,11 +278,50 @@ export function threadSearchBox(projectId) {
       input.value = '';
       input.dispatchEvent(new Event('input'));
     }
+    if (e.key === 'Enter' && threadSearch.q.length >= 2) searchByMeaning();
   });
   return input;
 }
 
-/** Search results: threads whose title, number or properties match. */
+/** Search the scheme's chats by meaning for the box's text; the answer shows under the title results. */
+async function searchByMeaning() {
+  const { projectId, q } = threadSearch;
+  const run = (threadSearch.meaning = { q, busy: true });
+  renderSidebar();
+  try {
+    run.hits = (await api(`api/projects/${projectId}/memory?q=${encodeURIComponent(q)}&limit=10`)).hits;
+  } catch (err) {
+    run.error = err.message;
+  }
+  run.busy = false;
+  if (threadSearch.meaning === run) renderSidebar(); // a newer search, or another scheme, owns the list now
+}
+
+/** One chunk the search found: its minion and date, linked to the message (or the minion), and what was said. */
+function meaningHit(hit) {
+  const t = { project_id: threadSearch.projectId, number: hit.number, id: hit.ticket_id, kind: hit.kind };
+  const href = hit.source_kind === 'turn' ? jumpHref(t, hit.source_id) : threadHref(t);
+  const day = new Date(hit.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  return h('a', { class: 'meaning-hit', href, title: hit.text },
+    h('span', { class: 'name' }, isCoordinator(t) ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, hit.number), ' ', hit.title], h('span', { class: 'muted' }, ` · ${day}`)),
+    h('span', { class: 'snippet' }, hit.text));
+}
+
+/** The chats-by-meaning part of the results: a button until it runs, then what it found. */
+function meaningSection() {
+  const { q, meaning } = threadSearch;
+  const ran = meaning?.q === q ? meaning : null;
+  const button = h('button', { type: 'button', class: 'secondary meaning-go', disabled: q.length < 2 || ran?.busy, onclick: searchByMeaning },
+    ran?.busy ? 'Searching chats…' : ran ? 'Search again' : 'Search chats by meaning ⏎');
+  const body = !ran || ran.busy ? h('p', { class: 'muted small' }, 'What people and minions said, closest in meaning first, not just exact words.')
+    : ran.error ? h('p', { class: 'muted small' }, ran.error)
+    : ran.hits.length ? ran.hits.map(meaningHit)
+    : h('p', { class: 'muted small' }, 'Nothing in the chats comes close.');
+  return h('section', { class: 'column meaning', 'aria-busy': ran?.busy ? 'true' : 'false' },
+    h('h3', {}, 'In chats, by meaning', ran?.hits ? h('span', { class: 'count' }, ran.hits.length) : ''), button, body);
+}
+
+/** Search results: threads whose title, number or properties match, then the chats by meaning. */
 function renderThreadResults(el, tickets) {
   // The Taskmaster's row stays above the search, so results are minions only.
   const results = tickets.filter((t) => threadMatches(t, threadSearch.q));
@@ -290,7 +330,8 @@ function renderThreadResults(el, tickets) {
       h('h3', {}, 'Results', h('span', { class: 'count' }, results.length)),
       results.length
         ? results.map((t) => threadRow(t))
-        : h('p', { class: 'muted small' }, 'No minion has that in its title, number or properties.')));
+        : h('p', { class: 'muted small' }, 'No minion has that in its title, number or properties.')),
+    meaningSection());
 }
 
 /** One compact row: number + short ask and the state on top, the thread's note (or what it is doing) below. */

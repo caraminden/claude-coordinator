@@ -746,17 +746,18 @@ export const projectRoutes: Route[] = [
     },
   },
   // Search by meaning (#331): the scheme's chunks closest to q. scope mine: the calling minion's own
-  // chat, or a person's own messages. The router keeps people to their schemes and agents to their own.
+  // chat, or a person's own messages; minions: open minions' titles and notes (create_ticket's duplicate check, #488). The router keeps people to their schemes and agents to their own.
   {
     method: 'GET', path: '/api/projects/:project/memory', who: ['person', 'taskmaster', 'minion'],
     async handler({ res, url, app, project, caller, session }) {
       const q = (url.searchParams.get('q') ?? '').trim().slice(0, 1000);
       if (q.length < 2) throw new HttpError(400, 'Say what to look for (q)');
-      const mine = oneOf(url.searchParams.get('scope'), ['scheme', 'mine'], 'scope') === 'mine';
+      const scope = oneOf(url.searchParams.get('scope'), ['scheme', 'mine', 'minions'], 'scope');
+      const mine = scope === 'mine';
       const limit = Number(url.searchParams.get('limit')) || 5;
       if (!app.memory.indexed(project.id)) throw new HttpError(409, `${project.name}'s chats aren't indexed for search by meaning yet`);
       const hits = await app.store.memory
-        .search(project.id, q, app.memory.embed, app.memory.model, { limit, ...(mine ? (caller ? { ticketId: caller.id } : { personId: session.uid ?? -1 }) : {}) })
+        .search(project.id, q, app.memory.embed, app.memory.model, { limit, openMinions: scope === 'minions', ...(mine ? (caller ? { ticketId: caller.id } : { personId: session.uid ?? -1 }) : {}) })
         .catch((err) => {
           console.error('Semantic memory search failed:', err?.cause?.code ?? err?.message ?? err);
           throw new HttpError(503, "The embedding service isn't answering, so search by meaning is down; exact-text search still works");

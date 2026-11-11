@@ -293,6 +293,7 @@ const TOOLS = [
         effort: EFFORT,
         workflow: WORKFLOW,
         plugin_folders: PLUGIN_FOLDERS,
+        not_duplicate: { type: 'boolean', description: 'true when create_ticket refused because open minions looked like the same work, and you checked they are not' },
       },
       // properties is asked for but not required, so a client holding an older schema isn't refused before the fallback below.
       required: ['title', 'message'],
@@ -677,11 +678,26 @@ const SEARCH_MEMORY = {
   },
 };
 
+/**
+ * create_ticket's duplicate check (#488): open minions whose title and note are this close in meaning to the
+ * new one's title and brief. Measured on Citadel's minions: the same work scored 0.67, unrelated ones
+ * mostly 0.50-0.60, so false alarms happen and not_duplicate overrides. A search that fails checks nothing.
+ */
+const TWIN_SCORE = 0.62;
+async function openTwins(title: string, message: string): Promise<{ number: number; title: string; status: string; score: number }[]> {
+  const q = new URLSearchParams({ q: `${title}\n${message}`.slice(0, 1000), scope: 'minions', limit: '3' });
+  // One try, not call()'s two minutes of retries: a down embedding service mustn't hold up a new minion.
+  const res = await fetch(`${API}/api/projects/${PROJECT}/memory?${q}`, { headers: { Authorization: `Bearer ${TOKEN}` }, signal: AbortSignal.timeout(30_000) }).catch(() => null);
+  if (!res?.ok) return [];
+  const { hits } = (await res.json().catch(() => ({}))) as { hits?: any[] };
+  return (hits ?? []).filter((h) => h.score >= TWIN_SCORE);
+}
+
 /** search_memory's answer: each hit as a header line and its text, cut so a call stays small. */
 function memoryText(hits: any[]): string {
   if (!hits.length) return 'Nothing indexed matches yet.';
   const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-  return hits.map((h) => `#${h.number} ${h.title} · ${day(h.ts)} · ${h.source_kind === 'turn' ? `event ${h.source_id}` : 'title and note'} · score ${h.score}\n${h.text.length > 1200 ? `${h.text.slice(0, 1200)}…` : h.text}`).join('\n\n');
+  return hits.map((h) => `${h.kind === 'coordinator' ? 'Taskmaster' : `#${h.number} ${h.title}`} · ${day(h.ts)} · ${h.source_kind === 'turn' ? `event ${h.source_id}` : 'title and note'} · score ${h.score}\n${h.text.length > 1200 ? `${h.text.slice(0, 1200)}…` : h.text}`).join('\n\n');
 }
 
 /** What contraption_read hands back: a list of read commands, or a command's answer. */
@@ -1093,6 +1109,14 @@ async function runTool(name: string, args: any): Promise<string> {
       if (untyped) properties.type = 'other';
       // A chained minion's brief waits for its leader, which may be the one writing the file.
       if (args.start_after == null) sharedFilesExist(args.message, 'Start this minion');
+      const twins = MEMORY && args.not_duplicate !== true ? await openTwins(String(args.title ?? ''), String(args.message ?? '')) : [];
+      if (twins.length) {
+        return [
+          'Not created: these open minions read like the same work (closeness by meaning, 1 is the same):',
+          ...twins.map((h) => `- #${h.number} ${h.title} (${h.status}, ${h.score})`),
+          'If one is, message it instead (message_ticket). If not, call create_ticket again with not_duplicate: true.',
+        ].join('\n');
+      }
       const t = await call('POST', `/api/projects/${PROJECT}/tickets`, {
         title: args.title,
         tag: args.tag ?? undefined,

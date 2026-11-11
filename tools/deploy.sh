@@ -238,14 +238,21 @@ restart() {
 
 deploy() {
   init_state
-  # DEPLOY_LOCKED: run by tools/land.sh, which already holds the lock on fd 9. Trusted (DEPLOY_TESTED with it) only
-  # when fd 9 really is this lock file: a leaked env (a test run under a deploy, a nested run) must still lock (#514).
+  # The line for the lock, shared with tools/land.sh. Sourced here, not at the top: the queued restart
+  # runs a private copy of this file alone, and takes the lock outside the line.
+  # shellcheck source=tools/deploy-queue.sh
+  . "$(dirname "${BASH_SOURCE[0]}")/deploy-queue.sh"
+  # DEPLOY_LOCKED: run by tools/land.sh, which already holds the lock on fd 9 and its place in the line. Trusted
+  # (DEPLOY_TESTED with it) only when fd 9 really is this lock file: a leaked env (a test run under a deploy, a
+  # nested run) must still wait in line and lock (#514).
   local inherited=
   if [ -n "${DEPLOY_LOCKED:-}" ]; then
     if [ /dev/fd/9 -ef "$STATE/lock" ]; then inherited=1; else say "DEPLOY_LOCKED is set but fd 9 isn't the deploy lock; taking the lock"; fi
   fi
-  [ -n "$inherited" ] || { exec 9>"$STATE/lock"; DEPLOY_TESTED=; }
-  flock -w 900 9 || { say "another deploy has held the lock for 15 min; try again later"; exit 1; }
+  if [ -z "$inherited" ]; then
+    DEPLOY_TESTED=
+    queue_lock "$STATE" "tools/deploy.sh" || exit 1
+  fi
   [ -f "$STATE/FAILED" ] && say "warning: the last rollback failed too (see journalctl --user -u $UNIT); carrying on" && rm -f "$STATE/FAILED"
   if [ -n "$(git_live status --porcelain --untracked-files=no)" ]; then
     say "$LIVE has local changes; refusing to deploy over them"
@@ -284,12 +291,14 @@ deploy() {
     say "skipping the tests: land.sh just ran them on $(short "$new")"
   else
     say "running the tests"
+    queue_phase "deploying: running the tests since $(date +%H:%M)"
     if ! (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log"); then
       tail -n 40 "$STATE/test.log" >&2
       say "tests failed (full log: $STATE/test.log); nothing deployed"
       false
     fi
   fi
+  queue_phase "deploying: boot check since $(date +%H:%M)"
   say "boot check: the new code on a spare port with a copy of the database"
   if ! version=$(node "$LIVE/tools/boot-check.ts" "$LIVE" "$DB"); then
     say "boot check failed; nothing deployed"
@@ -297,6 +306,7 @@ deploy() {
   fi
   trap - ERR INT TERM HUP
 
+  queue_phase "deploying: going live"
   if [ "$kind" = frontend ] && [ "$(health reload)" = sighup ]; then
     systemctl --user kill -s HUP --kill-whom=main "$SERVICE"
     for _ in $(seq 10); do
@@ -342,6 +352,7 @@ deploy() {
     exit 1
   fi
   # The queued restart takes the lock before it restarts: let go, or it waits out the 60 s below.
+  queue_done
   flock -u 9
   # Usually it is live within seconds; say so here, as this turn carries on through the restart.
   for _ in $(seq 60); do

@@ -179,6 +179,7 @@ uses the built-in `node:sqlite`.
 | `deploy/backup.sh`, `deploy/prune.sh` | Nightly database backup; pruning of long-closed minions (each with a `.service` and `.timer`) |
 | `deploy/offbox.sh`, `deploy/offbox-serve.sh`, `deploy/desktop/` | The off-box copy set backup.sh refreshes, the forced command the desktop's key runs, and the desktop's pull script and setup |
 | `tools/land.sh` | Lands a minion's branch: rebase onto main, test, fast-forward main, deploy, under the deploy lock |
+| `tools/deploy-queue.sh` | The line for the deploy lock, sourced by `land.sh` and `deploy.sh`: oldest waiter first, each told its place |
 | `tools/deploy.sh`, `tools/boot-check.ts` | Safe deploys: checks, front-end reloads, restarts that keep turns running, rollback |
 | `tools/ci-runner/`, `src/ci-runner.ts`, `public/runner-agent.mjs` | Every scheme's CI on self-hosted runners on Cara's desktop: the runner agent there (installed once, as SYSTEM) that adds, lists and removes a scheme's runners when a member asks through `ci_runners`, its scripts, the `runs-on` line, and the route that mints runner tokens with the scheme owner's GitHub login |
 
@@ -410,6 +411,16 @@ the deploy lock it rebases the branch onto the local `main`, runs `node --test`,
 fast-forwards `main` in the scheme repo, then runs `tools/deploy.sh`. A conflict
 or a red test stops it before `main` moves; a deploy whose checks fail puts
 `main` back too.
+
+Landings and deploys wait for the deploy lock in a line (`tools/deploy-queue.sh`),
+oldest first: each takes a numbered ticket in `.git/cc-deploy/queue/` of the live
+checkout, and only the oldest ticket tries the lock. A waiter prints its place, an
+estimate from the last few landings, and what the one ahead is doing. It has no
+time limit while the line moves; it gives up only after 15 minutes with no change
+at the head of the line (no new head, no new phase), which means the holder is
+stuck and a person needs to look. A waiter whose process is gone drops out by
+itself, so a stopped run loses its place: run `land.sh` in the background with a
+long timeout. The queued restart takes the lock outside the line.
 
 `tools/deploy.sh` on its own deploys whatever is on `main`. Restarting doesn't
 interrupt turns:

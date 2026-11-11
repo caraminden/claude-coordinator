@@ -16,7 +16,7 @@ after(() => rmSync(root, { recursive: true, force: true }));
 // COORDINATOR_* would have the real deploy.sh report to the live server; CITADEL_HEAVY_* would queue it in the host's slots;
 // DEPLOY_LOCKED and DEPLOY_TESTED, set when a real land runs these tests, would have a test's deploy.sh skip its own lock
 // ("flock: 9: Bad file descriptor") or its tests; an empty DEPLOY_TEST_CPU_WEIGHT makes no real systemd scope.
-const env = { ...process.env, COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: join(root, 'heavy'), DEPLOY_TEST_CPU_WEIGHT: '', DEPLOY_LOCKED: undefined, DEPLOY_TESTED: undefined, NODE_TEST_CONTEXT: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
+const env = { ...process.env, COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: join(root, 'heavy'), DEPLOY_TEST_CPU_WEIGHT: '', DEPLOY_LOCKED: undefined, DEPLOY_TESTED: undefined, DEPLOY_QUEUE_TICKET: undefined, NODE_TEST_CONTEXT: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
 
 let n = 0;
@@ -32,6 +32,7 @@ function setup() {
 lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/lock
 flock -n "$lock" true && held=no || held=yes
 echo "locked=$DEPLOY_LOCKED held=$held" >"$DEPLOY_NOTE"
+until [ -z "\${FAKE_DEPLOY_GATE:-}" ] || [ -e "\$FAKE_DEPLOY_GATE" ]; do sleep 0.05; done
 exit "\${FAKE_DEPLOY_EXIT:-0}"
 `);
   chmodSync(join(source, 'tools', 'deploy.sh'), 0o755);
@@ -209,12 +210,12 @@ test('a deploy that fails before going live puts main back', () => {
 });
 
 // Run land.sh in its own process group, so a run that hangs can be stopped with everything it started.
-function landAsync(cwd: string, extra: Record<string, string>, limit: number): Promise<{ status: number | null; stderr: string; ms: number }> {
+function landAsync(cwd: string, extra: Record<string, string>, limit: number, seen?: (stderr: string) => void): Promise<{ status: number | null; stderr: string; ms: number }> {
   return new Promise((resolve) => {
     const t = Date.now();
     const child = spawn('bash', [land], { cwd, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, ...extra } });
     let stderr = '';
-    child.stderr!.on('data', (d) => (stderr += d));
+    child.stderr!.on('data', (d) => seen?.((stderr += d)));
     const timer = setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} }, limit);
     child.on('close', (status) => { clearTimeout(timer); resolve({ status, stderr, ms: Date.now() - t }); });
   });
@@ -265,7 +266,7 @@ test("refuses uncommitted work, main itself, arguments, running inside a citadel
 // where the tests ran.
 async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>) => Promise<{ stderr: string }>, runs: () => string[]) => Promise<void>) {
   const r = setup();
-  for (const f of ['deploy.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real deploy.sh');
@@ -368,7 +369,7 @@ test('deploy.sh told DEPLOY_LOCKED without the lock on fd 9 takes the lock itsel
 // A person pressing Stop, or a Bash time limit, ends the whole run with a signal (#468 S10-5).
 test('a land killed while the deploy tests the live checkout puts the checkout and main back', async () => {
   const r = setup();
-  for (const f of ['deploy.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   // Run in the live checkout (the deploy's own test run), it says so and takes a few seconds.
   writeFileSync(join(r.source, 'test', 'slow.test.mjs'), `import { realpathSync, writeFileSync } from 'node:fs';
 if (process.env.KILL_MARK && realpathSync(process.cwd()) === realpathSync(process.env.DEPLOY_LIVE)) {
@@ -411,4 +412,129 @@ if (process.env.KILL_MARK && realpathSync(process.cwd()) === realpathSync(proces
   assert.equal(git(r.source, 'rev-parse', 'main'), base, `main is back:\n${stderr}`);
   assert.match(stderr, /putting the checkout back/);
   assert.match(stderr, /main is back at/);
+});
+
+// The line for the deploy lock (tools/deploy-queue.sh, #502). The kernel grants a flock in no order, so ten
+// landings waiting on it at once (2026-11-10) meant some lost every round and timed out.
+const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+async function until(what: string, cond: () => boolean, ms = 30_000) {
+  for (const end = Date.now() + ms; !cond(); await sleep(20)) if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+}
+const tickets = (state: string) => (existsSync(join(state, 'queue')) ? readdirSync(join(state, 'queue')).filter((f) => /^\d+$/.test(f)).sort() : []);
+const issued = (state: string) => (existsSync(join(state, 'queue', '.seq')) ? Number(readFileSync(join(state, 'queue', '.seq'), 'utf8')) : 0);
+
+test('ten landings started together land in the order they arrived, each told its place in line', async () => {
+  const r = setup();
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  const extra = { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), FAKE_DEPLOY_GATE: join(r.dir, 'gate'), DEPLOY_QUEUE_POLL: '0.05' };
+  const wts = [r.wt];
+  for (let i = 2; i <= 10; i++) git(r.source, 'worktree', 'add', '-q', '-b', `ticket/${i}-x`, wts[wts.push(join(r.dir, `wt${i}`)) - 1]);
+  wts.forEach((wt, i) => r.commit(wt, `f${i + 1}.txt`, `${i + 1}\n`));
+  const lands: ReturnType<typeof landAsync>[] = [];
+  let last = '';
+  for (let i = 1; i <= 10; i++) {
+    lands.push(landAsync(wts[i - 1], extra, 120_000, (stderr) => i === 10 && (last = stderr)));
+    await until(`landing ${i}'s ticket`, () => issued(state) === i); // arrival order is the order of the tickets
+  }
+  // The first holds the lock until all ten are in line and the last has been told its place.
+  await until('the last to say its place', () => /queue: 10th in line for the deploy lock, about 45 min \(ahead: ticket\/1-x, deploying\)/.test(last));
+  writeFileSync(join(r.dir, 'gate'), '');
+  const done = await Promise.all(lands);
+  done.forEach((d, i) => assert.equal(d.status, 0, `landing ${i + 1}: ${d.stderr}`));
+  assert.deepEqual(git(r.source, 'log', '--reverse', '--format=%s', 'main').split('\n'), ['base', ...done.map((_, i) => `f${i + 1}.txt: ${i + 1}`)]);
+  assert.doesNotMatch(done[0].stderr, /in line/, 'the first had nobody to wait for');
+  assert.match(done[9].stderr, /queue: 2nd in line for the deploy lock, about \d+ min \(ahead: ticket\/9-x, /);
+  assert.match(done[9].stderr, /queue: got the deploy lock/);
+  assert.deepEqual(tickets(state), [], 'every ticket is gone');
+  assert.equal(spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status, 0, 'the deploy lock is free');
+});
+
+// Fake work for the line itself: wait in line, note the turn, then hold the lock while $3 runs.
+const queueLib = join(import.meta.dirname, '..', 'tools', 'deploy-queue.sh');
+function waiter(state: string, label: string, work: string, extra: Record<string, string> = {}) {
+  const child = spawn('bash', ['-c', '. "$0"; queue_lock "$1" "$2" || exit 1; echo "$2" >>"$1/order"; eval "$3"', queueLib, state, label, work], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', ...extra } });
+  let stderr = '';
+  child.stderr!.on('data', (d) => (stderr += d));
+  const exit = new Promise<number | null>((ok) => child.on('close', ok));
+  return { child, exit, stderr: () => stderr };
+}
+const order = (state: string) => (existsSync(join(state, 'order')) ? readFileSync(join(state, 'order'), 'utf8').trim().split('\n') : []);
+const queueState = () => {
+  const state = join(root, `queue-${++n}`);
+  mkdirSync(state);
+  return state;
+};
+
+test('a waiter that is killed leaves the line, and the one behind it goes next', async () => {
+  const state = queueState();
+  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
+  await until('a to hold the lock', () => order(state).length === 1);
+  const b = waiter(state, 'b', 'true');
+  await until("b's ticket", () => issued(state) === 2);
+  const c = waiter(state, 'c', 'true');
+  await until('c to see its place', () => /3rd in line/.test(c.stderr()));
+  b.child.kill('SIGKILL');
+  await b.exit;
+  assert.equal(tickets(state).length, 3, 'a killed waiter leaves its ticket behind');
+  await until('c to move up past the dead ticket', () => /2nd in line/.test(c.stderr()));
+  assert.equal(tickets(state).length, 2, 'the waiter behind it removed it');
+  writeFileSync(join(state, 'go'), '');
+  assert.equal(await a.exit, 0);
+  assert.equal(await c.exit, 0, c.stderr());
+  assert.deepEqual(order(state), ['a', 'c']);
+});
+
+test('a holder that is killed leaves the line too, and its lock goes with it', async () => {
+  const state = queueState();
+  const a = waiter(state, 'a', 'exec sleep 600');
+  await until('a to hold the lock', () => order(state).length === 1);
+  const b = waiter(state, 'b', 'true');
+  await until('b to wait', () => /2nd in line/.test(b.stderr()));
+  a.child.kill('SIGKILL');
+  assert.equal(await b.exit, 0, b.stderr());
+  assert.deepEqual(order(state), ['a', 'b']);
+});
+
+test('waiters outlast the stall limit while the holder moves on, and give up once nothing moves', async () => {
+  const state = queueState();
+  // Three seconds of work in phases, against a two-second limit on no progress (bash counts whole seconds, so it can be a second short).
+  const a = waiter(state, 'a', `for i in $(seq 10); do queue_phase "step $i"; sleep 0.3; done; touch '${state}/stuck'; exec sleep 600`);
+  await until('a to hold the lock', () => order(state).length === 1);
+  const b = waiter(state, 'b', 'true', { DEPLOY_QUEUE_STALL: '2' });
+  const t = Date.now();
+  assert.equal(await b.exit, 1, 'it gives up in the end');
+  try {
+    assert.ok(existsSync(join(state, 'stuck')), `not while the holder was still moving: gave up after ${Date.now() - t} ms\n${b.stderr()}`);
+    assert.match(b.stderr(), /2nd in line for the deploy lock, about 5 min \(ahead: a, step 1\)/);
+    assert.match(b.stderr(), /nothing has moved for .* \(ahead: a, step 10\), so this gave up/);
+    assert.deepEqual(tickets(state).length, 1, 'its ticket went with it');
+    assert.deepEqual(order(state), ['a']);
+  } finally {
+    a.child.kill('SIGKILL');
+  }
+});
+
+test('the head of the line waits for a lock held outside it (the queued restart), and the estimate comes from past landings', async () => {
+  const state = queueState();
+  mkdirSync(join(state, 'queue'));
+  writeFileSync(join(state, 'queue', '.took'), '100\n140\n');
+  const restart = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 600', join(state, 'lock')], { stdio: 'ignore' }); // one process, so killing it frees the lock
+  try {
+    await until('the lock to be held', () => spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status !== 0);
+    const a = waiter(state, 'a', 'sleep 1.2');
+    await until('a to say it waits', () => /next in line for the deploy lock \(ahead: a queued restart/.test(a.stderr()));
+    const b = waiter(state, 'b', 'true');
+    await until('b to say its place', () => /2nd in line for the deploy lock, about 2 min \(ahead: a, waiting\)/.test(b.stderr()));
+    assert.deepEqual(order(state), []);
+    restart.kill('SIGKILL');
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(await b.exit, 0, b.stderr());
+    assert.deepEqual(order(state), ['a', 'b']);
+    // Each noted how long it held the lock; a held it for a second or two.
+    const took = readFileSync(join(state, 'queue', '.took'), 'utf8').trim().split('\n').map(Number);
+    assert.equal(took.length, 4);
+    assert.ok(took[2] >= 1 && took[2] <= 30, `a's time: ${took[2]}`);
+  } finally {
+    restart.kill('SIGKILL');
+  }
 });

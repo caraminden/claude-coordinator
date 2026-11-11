@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Land a minion's branch: run it from the minion's worktree once its work is committed.
 #   tools/land.sh
-# Under the deploy lock (the one tools/deploy.sh takes), so landings and deploys go one at a time:
+# Under the deploy lock (the one tools/deploy.sh takes), so landings and deploys go one at a time, in the
+# order they asked (tools/deploy-queue.sh): it says its place in line, and waits as long as the line moves.
 # 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here. If the rebase
 #    changed land.sh itself, the rebased copy takes over from here, still holding the lock.
 # 2. Runs the tests on the rebased branch. A failure stops here, with main untouched. Not in a citadel-heavy
@@ -43,10 +44,14 @@ mkdir -p -m 700 "$state"
 resumed=
 [ -n "${LAND_REBASED:-}" ] && [ /dev/fd/9 -ef "$state/lock" ] && resumed=1
 unset LAND_REBASED
-[ -n "$resumed" ] || exec 9>"$state/lock"
-flock -w 900 9 || refuse "another deploy or landing has held the lock for 15 min; try again later"
+# shellcheck source=tools/deploy-queue.sh
+. "$tools/deploy-queue.sh"
+# The rebased copy is the same process, so the ticket it was started with (none, from a land.sh older than the
+# line) still names it; only the trap that removes it at the end has to be set again.
+if [ -n "$resumed" ]; then trap queue_done EXIT; else queue_lock "$state" "$branch" || exit 1; fi
 
 old=$(git -C "$SOURCE" rev-parse main)
+[ -n "$resumed" ] || queue_phase "rebasing onto main"
 [ -n "$resumed" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
 if ! git rebase -q main; then
   # Which files collide is worth a retro-log line (the architecture check counts them). Best effort: land.sh has no
@@ -69,6 +74,7 @@ fi
 [ -n "$resumed" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 exec bash "$tools/land.sh"
 
 say "running the tests"
+queue_phase "running the tests since $(date +%H:%M)"
 # A file the tests saw that isn't in the commit (never git-added, or ignored) means deploy.sh tests it again.
 [ -z "$(git status --porcelain --ignored)" ] && tested=$(git rev-parse HEAD) || tested=
 log="$state/land-test.log"
@@ -91,6 +97,7 @@ trap 'main_back; exit 143' TERM
 trap 'main_back; exit 129' HUP
 git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
+queue_phase "deploying"
 
 if ! DEPLOY_LOCKED=1 DEPLOY_TESTED="$tested" "$here/tools/deploy.sh"; then
   main_back

@@ -46,11 +46,11 @@ const $ = (s) => document.querySelector(s);
 const until = async (s, ms = 8000) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) { const el = typeof s === 'string' ? $(s) : s(); if (el) return el; } throw new Error('never showed: ' + s); };
 const phone = innerWidth <= 800;
 const drawer = async (side) => { const b = $('.citadel-drawer-handle.' + side); if (!b) throw new Error('no ' + side + ' drawer handle'); b.click(); await sleep(500); };
-const scrollChatTo = async (sel) => { const el = await until(sel); el.scrollIntoView({ block: 'center' }); await sleep(300); };
+const scrollChatTo = async (sel) => { await until(sel); await sleep(600); const el = [...document.querySelectorAll(sel)].at(-1); el.scrollIntoView({ block: 'center' }); await sleep(400); el.scrollIntoView({ block: 'center' }); };
 `;
 
 // Minions in the live data that show a state; a re-run months on may need new picks (the copy is live).
-const T = { plan: 475, cardsForJosh: 441, images: 470, failed: 364, ultra: 476, long: 466 };
+const T = { plan: 475, cardsForJosh: 441, images: 464, ultra: 476, long: 466, other: 474 };
 
 export const SCREENS: Screen[] = [
   { name: 'login', anon: true, hash: '', about: 'The sign-in page: login and password form.' },
@@ -66,12 +66,12 @@ export const SCREENS: Screen[] = [
   { name: 'scheme-menu', hash: `#/p/${S}`, before: `if (phone) await drawer('left'); const b = await until('button.switch'); b.click(); await sleep(500);`, about: 'The scheme switcher menu, opened from the scheme name in the top bar.' },
   { name: 'new-scheme', hash: `#/p/${S}`, before: `if (phone) await drawer('left'); const b = await until('button.switch'); b.click(); await sleep(300); (await until('#scheme-menu .add')).click(); await sleep(400);`, about: 'The New scheme dialog.' },
   { name: 'usage-pop', hash: `#/p/${S}`, before: `if (phone) await drawer('left'); const c = await until(() => [...document.querySelectorAll('.cost-chip > summary')].find((x) => x.offsetParent)); c.click(); await sleep(500);`, about: 'The usage meters in the top bar with today\'s use opened into the last 7 days.' },
-  { name: 'chat-plan-open', hash: `#/p/${S}/t/${T.plan}`, before: `await scrollChatTo('.pcard, .plan-card, [data-kind=plan]');`, about: 'A minion chat with a plan card waiting for Approve or Revise.' },
-  { name: 'chat-questions', hash: `#/p/${S}/t/${T.cardsForJosh}`, before: `await scrollChatTo('.qcard, .question-card, [data-kind=question]');`, about: 'A minion chat with open question cards (multiple choice with a recommended option).' },
-  { name: 'chat-answered', hash: `#/p/${S}/t/${T.long}`, about: 'A finished minion chat with answered cards, the readout and long messages.' },
-  { name: 'chat-images', hash: `#/p/${S}/t/${T.images}`, about: 'A minion chat whose replies show images and file cards.' },
+  { name: 'chat-plan-open', hash: `#/p/${S}/t/${T.plan}`, before: `await until('.pcard'); await sleep(800); const c = $('.to-card:not([hidden])'); if (c) { c.click(); await sleep(800); } else await scrollChatTo('.pcard');`, about: 'A minion chat with a plan card waiting for Approve or Revise.' },
+  { name: 'chat-questions', hash: `#/p/${S}/t/${T.cardsForJosh}`, before: `await scrollChatTo('.qcard');`, about: 'A minion chat with open question cards (multiple choice with a recommended option).' },
+  { name: 'chat-answered', hash: `#/p/${S}/t/${T.long}`, before: `await scrollChatTo('.qcard');`, about: 'A finished minion chat with answered cards, the readout and long messages.' },
+  { name: 'chat-images', hash: `#/p/${S}/t/${T.images}`, before: `await scrollChatTo('.msg img, #log img');`, about: 'A minion chat whose replies show images and file cards.' },
   { name: 'chat-table', hash: `#/p/${S}`, before: `await scrollChatTo('.msg table, table');`, about: 'The Taskmaster chat scrolled to a long markdown table in a reply.' },
-  { name: 'chat-failed', hash: `#/p/${S}/t/${T.failed}`, before: `await scrollChatTo('.error, .ev-error, [data-kind=error]');`, about: 'A minion chat where a turn failed (an API error).' },
+  { name: 'chat-failed', hash: '#/p/1/t/111', before: `await scrollChatTo('.note.error');`, about: 'A minion chat (another scheme) where a turn failed with an API error.' },
   { name: 'chat-ultrareview', hash: `#/p/${S}/t/${T.ultra}`, about: 'A parked minion waiting on ultra review runs.' },
   { name: 'composer-typed', hash: `#/p/${S}/t/${T.plan}`, before: `const b = await until('.composer textarea'); b.focus(); b.value = 'A longer message that wraps onto a few lines so we can see how the composer grows.\\nSecond line\\nThird line'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(300);`, about: 'The composer under a chat, focused with a three-line message typed.' },
   { name: 'ultra-review-dialog', hash: `#/p/${S}/t/${T.plan}`, before: `const b = await until(() => [...document.querySelectorAll('button')].find((x) => /^Ultra/.test(x.textContent.trim()))); b.click(); await sleep(500);`, about: 'The Ultra review dialog, opened from a minion chat\'s head.' },
@@ -88,13 +88,15 @@ export const SCREENS: Screen[] = [
   { name: 'settings-account', hash: `#/p/${S}/account`, about: 'Settings → Your account: linked Claude, GitHub, Codex, password.' },
   { name: 'settings-machines', hash: `#/p/${S}/machines`, about: 'Settings → Machines: computers lent to the scheme, and the line to connect one.' },
   { name: 'not-found', hash: `#/p/${S}/t/999999`, about: 'A link to a minion that does not exist: the error state.' },
-  { name: 'empty-scheme', hash: '#/p/__EMPTY__', about: 'A brand-new scheme with no minions yet: the empty states of the chat and the minions list.' },
+  { name: 'empty-scheme', hash: '#/p/__EMPTY__', before: `if (phone) await drawer('right');`, about: 'A brand-new scheme with no minions yet: the empty states of the chat and the minions list.' },
   // Flows: a click with the network slowed, shot after (rule 23: the result shows at once).
   { name: 'flow-switch-scheme', flow: true, hash: `#/p/${S}`, before: `if (phone) await drawer('left'); const b = await until('button.switch'); b.click(); await sleep(400);`, click: '#scheme-menu a.nav-item:not(.active)', about: 'Flow: picking another scheme in the switcher. Shot right after the click with a slow network.' },
-  { name: 'flow-send', flow: true, hash: `#/p/${S}/t/${T.plan}`, before: `const b = await until('.composer textarea'); b.focus(); b.value = 'Looks good, build it.'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(200);`, click: '.composer button[type=submit], .composer .send', about: 'Flow: sending a message in a minion chat. Shot right after the click with a slow network.' },
+  { name: 'flow-send', flow: true, widths: [1440], hash: `#/p/${S}/t/${T.other}`, before: `const b = await until('.composer textarea'); b.focus(); b.value = 'Looks good, build it.'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(200);`, click: '.composer button[type=submit], .composer .send', about: 'Flow: sending a message in a minion chat. Shot right after the click with a slow network.' },
+  { name: 'flow-send-phone', flow: true, widths: [390], hash: `#/p/${S}/t/${T.ultra}`, before: `const b = await until('.composer textarea'); b.focus(); b.value = 'Looks good, build it.'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(200);`, click: '.composer button[type=submit], .composer .send', about: 'Flow (phone): sending a message in a minion chat. Shot right after the click with a slow network.' },
   { name: 'flow-answer-card', flow: true, hash: `#/p/${S}/t/${T.cardsForJosh}`, before: `await scrollChatTo('.qcard, .question-card');`, click: '.qcard button.opt, .qcard .options button, .question-card button', about: 'Flow: answering a question card by tapping an option. Shot right after the click with a slow network.' },
-  { name: 'flow-approve-plan', flow: true, hash: `#/p/${S}/t/${T.plan}`, before: `await scrollChatTo('.pcard, .plan-card');`, click: '.pcard button.approve, .pcard button, .plan-card button', about: 'Flow: approving a plan card. Shot right after the click with a slow network.' },
-  { name: 'flow-new-minion', flow: true, hash: `#/p/${S}`, before: `if (phone) await drawer('right'); const b = await until('.new-thread textarea'); b.focus(); b.value = 'Check the sweep'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(200);`, click: '.new-thread button[type=submit], .new-thread button', about: 'Flow: starting a new minion from the new-minion box (in a preview this is refused, so the shot shows how a refusal reads).' },
+  // Only one open plan in the live data, and approving settles it: one width.
+  { name: 'flow-approve-plan', flow: true, widths: [390], hash: `#/p/${S}/t/${T.plan}`, before: `await scrollChatTo('.pcard'); [...[...document.querySelectorAll('.pcard')].at(-1).querySelectorAll('button')].find((b) => b.textContent.trim() === 'Approve').dataset.sweep = 'go';`, click: '[data-sweep=go]', about: 'Flow (phone): approving a plan card. Shot right after the click with a slow network.' },
+  { name: 'flow-new-minion', flow: true, hash: `#/p/${S}`, before: `if (phone) await drawer('right'); const b = await until('.new-thread textarea'); b.focus(); b.value = 'Check the sweep'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(200); b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); await sleep(150);`, about: 'Flow: starting a new minion by pressing Enter in the new-minion box; shot 150 ms later (in a preview this is refused, so the shot shows how a refusal reads).' },
 ];
 
 function args(argv: string[]) {
@@ -126,9 +128,18 @@ async function main() {
   // As src/previews.ts does, plus an empty scheme for the empty states.
   const copy = new DatabaseSync(db);
   copy.exec("DELETE FROM push_subscriptions; DELETE FROM settings WHERE key LIKE 'turn:%'");
+  // The picked minions' own shared folders, so their chats' images load.
+  const ownShared = Object.values(T).map((n) => (copy.prepare('SELECT id FROM tickets WHERE project_id = ? AND number = ?').get(S, n) as { id: number } | undefined)?.id).filter(Boolean);
   const admin = copy.prepare('SELECT id, name FROM users WHERE admin = 1 ORDER BY id LIMIT 1').get() as { id: number; name: string };
   const emptyId = Number((copy.prepare("INSERT INTO projects (name, owner_id, created_at) VALUES ('Sweep empty', ?, datetime('now')) RETURNING id").get(admin.id) as { id: number })?.id ?? 0);
   copy.close();
+  const shared = join(homedir(), `.local/share/claude-coordinator/projects/${S}/shared/project`);
+  mkdirSync(join(dir, `projects/${S}/shared`), { recursive: true });
+  for (const id of ownShared) {
+    const from = join(homedir(), `.local/share/claude-coordinator/projects/${S}/shared/${id}`);
+    if (existsSync(from)) execFileSync('rsync', ['-a', `${from}/`, join(dir, `projects/${S}/shared/${id}/`)]);
+  }
+  if (existsSync(shared)) execFileSync('rsync', ['-a', '--exclude=inbox', `${shared}/`, join(dir, `projects/${S}/shared/project/`)]);
 
   const port = await freePort();
   const password = randomBytes(16).toString('hex');
@@ -166,6 +177,8 @@ async function main() {
     const hash = s.hash.replace('__EMPTY__', String(emptyId));
     const shots = join(dir, 'shots', s.name);
     rmSync(shots, { recursive: true, force: true });
+    const scheme = hash.match(/^#\/p\/(\d+)/)?.[1];
+    if (scheme && !s.anon) await fetch(`${base}api/projects/${scheme}`, { headers: { cookie } }).catch(() => {});
     const run = () => measure({
       urls: [base + hash], widths: s.widths ?? [1440, 390], settle: 700, cookies: s.anon ? [] : [cookie], headers: [], ignore: [], dark: false,
       shots, before: `${helpers}\n${s.before ?? 'await sleep(300);'}`, click: s.click,

@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { FRESH_CONTEXT_TOKENS, FRESH_IDLE_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { jsonLines, lines, stopTurns, testPins } from './helpers.ts';
+import { jsonLines, lines, stopTurns, testPins, until } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'fresh-session-'));
@@ -19,7 +19,7 @@ after(async () => {
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const calls = join(root, 'calls.jsonl');
 // A stand-in for `claude -p`: logs its argv and prompt, says which session it runs (the one it resumes,
-// else a new one), reports a context size (20k, or the size file's), then ends the turn once the release file says ok or error.
+// else a new one), reports a context size (20k, or the size file's), then, once it has its prompt, ends the turn when the release file says ok or error.
 const fake = join(root, 'claude-fake');
 writeFileSync(
   fake,
@@ -38,8 +38,11 @@ process.stdin.on('data', (d) => {
   const sizeFile = ${JSON.stringify(join(root, 'size'))};
   const size = existsSync(sizeFile) ? Number(readFileSync(sizeFile, 'utf8')) - 10 : 20000;
   console.log(JSON.stringify({ type: 'assistant', session_id: session, message: { content: [], usage: { input_tokens: 10, cache_read_input_tokens: size } } }));
+  waitForRelease();
 });
-const wait = setInterval(() => {
+// Only once the prompt is logged: tests write release right after the turn starts, often before this
+// process has read its stdin, and a turn ended first would log no call and report no size (#470).
+const waitForRelease = () => { const wait = setInterval(() => {
   const release = ${JSON.stringify(join(root, 'release'))};
   if (!existsSync(release)) return;
   clearInterval(wait);
@@ -47,7 +50,7 @@ const wait = setInterval(() => {
   unlinkSync(release); // one turn's release, never the next turn's too
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: outcome === 'error', result: 'done', session_id: session }));
   process.exit(0);
-}, 20);
+}, 20); };
 `,
 );
 chmodSync(fake, 0o755);
@@ -70,8 +73,9 @@ function taskmaster(session = 'old') {
   return t.id;
 }
 
+// The waits give up (helpers' until, 30 s) so a test that timed out stops polling and lets the file exit (#470).
 async function started(id: number) {
-  while (!runner.isRunning(id)) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to start', () => runner.isRunning(id));
 }
 
 /** End the running turn; returns once the server has handled its end, though a queued turn may have started since. */
@@ -79,22 +83,19 @@ async function endTurn(id: number, outcome: 'ok' | 'error') {
   const turn = () => store.getSetting<{ startedAt: number }>(`turn:${id}`)?.startedAt;
   const was = turn();
   writeFileSync(join(root, 'release'), outcome);
-  while (turn() === was) await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to end', () => turn() !== was);
 }
 
 /** The last turn's argv and prompt, once the fake has logged it. */
 async function lastCall(count: number) {
-  for (;;) {
-    const all = jsonLines(calls);
-    if (all.length > count) return all[all.length - 1] as { args: string[]; prompt: any };
-    await new Promise((r) => setTimeout(r, 20));
-  }
+  const all = await until('the fake to log its call', () => { const a = jsonLines(calls); return a.length > count && a; });
+  return all[all.length - 1] as { args: string[]; prompt: any };
 }
 const callCount = () => lines(calls).length;
 const promptText = (p: any) => (typeof p === 'string' ? p : p.map((b: any) => b.text).join('\n'));
 const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 const waitIdle = async (id: number) => {
-  while (runner.isRunning(id) || store.getTicket(id)!.status === 'running') await new Promise((r) => setTimeout(r, 20));
+  await until('the turn to go idle', () => !runner.isRunning(id) && store.getTicket(id)!.status !== 'running');
 };
 
 test('only a Taskmaster with a session can start fresh', () => {
@@ -264,7 +265,7 @@ const contextSize = (tokens: number | null) => (tokens === null ? rmSync(join(ro
 const freshNotes = (id: number) => notes(id).filter((t) => t.startsWith('Starting a fresh session'));
 /** The prompts of the turns started since count, once there are want of them. */
 async function prompts(count: number, want: number) {
-  while (callCount() < count + want) await new Promise((r) => setTimeout(r, 20));
+  await until('the fake to log its calls', () => callCount() >= count + want);
   return jsonLines(calls).slice(count).map((l) => promptText(l.prompt));
 }
 

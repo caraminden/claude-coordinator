@@ -3,7 +3,8 @@
   --panel: #ffffff;
   --ink: #1d1c1a;
   --muted: #6b6862;
-  --line: #e2dfd8;
+  --line: #e2dfd8; /* dividers and card outlines: subtle on purpose */
+  --control-line: #8a867f; /* control borders (inputs, selects, bordered buttons): 3.2-3.6:1 on --bg, --panel and --code-bg, WCAG 1.4.11 (#556) */
   --accent: #c2410c;
   --running: #2563eb;
   --waiting: #b45309;
@@ -23,6 +24,7 @@
     --ink: #ecebe7;
     --muted: #9b978f;
     --line: #34322e;
+    --control-line: #7a766e; /* 3.2-4.0:1 on --bg, --panel and --code-bg */
     --accent: #fb923c;
     --running: #60a5fa;
     --waiting: #fbbf24;
@@ -99,12 +101,12 @@ button {
   padding: 0.45rem 0.9rem;
   cursor: pointer;
 }
-button.secondary, a.button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+button.secondary, a.button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--control-line); }
 a.button { display: inline-block; text-decoration: none; border-radius: 6px; padding: 0.2rem 0.65rem; font-size: 0.85em; }
 button:disabled { opacity: 0.5; cursor: default; }
 input, textarea, select {
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 6px;
   padding: 0.45rem 0.6rem;
   width: 100%;

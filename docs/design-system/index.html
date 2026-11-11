@@ -15,7 +15,8 @@ window.COLOURS = [
   ['surface', 'panels, cards, inputs', '#ffffff', '#201f1d', '--panel'],
   ['text', 'body text', '#1d1c1a', '#ecebe7', '--ink'],
   ['muted', 'secondary text, icons', '#6b6862', '#9b978f', '--muted'],
-  ['border', 'borders, dividers, hover fills', '#e2dfd8', '#34322e', '--line'],
+  ['border', 'dividers, card outlines, hover fills: subtle on purpose', '#e2dfd8', '#34322e', '--line'],
+  ['control-border', 'borders of inputs, selects, bordered buttons and choices: 3:1 on every surface (WCAG 1.4.11)', '#8a867f', '#7a766e', '--control-line'],
   ['accent', 'links, primary buttons, selection', '#c2410c', '#fb923c', '--accent'],
   ['on-accent', 'text and icons on accent', '#ffffff', '#1d1c1a', null],
   ['focus', 'focus ring (same as accent)', '#c2410c', '#fb923c', null, 'accent'],
@@ -77,7 +78,7 @@ window.COLOURS = [
   min-height: var(--citadel-control-h); padding: var(--citadel-space-1) var(--citadel-space-3);
   border: 1px solid transparent; border-radius: var(--citadel-radius-sm);
   font: 500 15px/1.25 var(--citadel-font); white-space: nowrap; cursor: pointer;
-  background: var(--citadel-surface); color: var(--citadel-text); border-color: var(--citadel-border);
+  background: var(--citadel-surface); color: var(--citadel-text); border-color: var(--citadel-control-border);
   transition: background-color var(--citadel-motion), border-color var(--citadel-motion), color var(--citadel-motion);
 }
 .cui-scope .cui-btn:hover:not(:disabled) { border-color: color-mix(in srgb, var(--citadel-accent) 60%, var(--citadel-border)); }
@@ -85,7 +86,7 @@ window.COLOURS = [
 .cui-scope .cui-btn.cui-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--citadel-accent) 88%, var(--citadel-text)); }
 .cui-scope .cui-btn.cui-ghost { background: transparent; border-color: transparent; }
 .cui-scope .cui-btn.cui-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--citadel-text) 7%, transparent); border-color: transparent; }
-.cui-scope .cui-btn.cui-danger { color: var(--citadel-danger); border-color: color-mix(in srgb, var(--citadel-danger) 55%, var(--citadel-border)); background: color-mix(in srgb, var(--citadel-danger) 9%, var(--citadel-surface)); font-weight: 600; }
+.cui-scope .cui-btn.cui-danger { color: var(--citadel-danger); border-color: color-mix(in srgb, var(--citadel-danger) 55%, var(--citadel-control-border)); background: color-mix(in srgb, var(--citadel-danger) 9%, var(--citadel-surface)); font-weight: 600; }
 .cui-scope .cui-btn.cui-danger:hover:not(:disabled) { border-color: var(--citadel-danger); }
 .cui-scope .cui-btn.cui-small { min-height: 26px; padding: 2px var(--citadel-space-2); font-size: 13px; }
 .cui-scope .cui-btn.cui-icon { width: var(--citadel-control-h); padding-inline: 0; font-size: 17px; }
@@ -97,10 +98,10 @@ window.COLOURS = [
   display: block; width: 100%; margin: 0;
   font: 15px/1.25 var(--citadel-font); color: var(--citadel-text);
   padding: calc((var(--citadel-control-h) - 2px - 1.25em) / 2) var(--citadel-space-3);
-  background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-sm);
+  background: var(--citadel-surface); border: 1px solid var(--citadel-control-border); border-radius: var(--citadel-radius-sm);
   transition: border-color var(--citadel-motion);
 }
-.cui-scope .cui-input:hover { border-color: color-mix(in srgb, var(--citadel-muted) 50%, var(--citadel-border)); }
+.cui-scope .cui-input:hover { border-color: color-mix(in srgb, var(--citadel-muted) 50%, var(--citadel-control-border)); }
 .cui-scope .cui-input::placeholder { color: var(--citadel-muted); }
 .cui-scope textarea.cui-input { resize: vertical; line-height: 1.25; }
 @media (max-width: 800px) { .cui-scope .cui-input { font-size: 16px; } }
@@ -128,7 +129,7 @@ window.COLOURS = [
   min-height: var(--citadel-control-h); padding: var(--citadel-space-1) var(--citadel-space-3);
   border-radius: var(--citadel-radius-pill); font: 600 13px/1.25 var(--citadel-font); cursor: pointer;
   background: color-mix(in srgb, var(--citadel-accent) 8%, var(--citadel-surface));
-  border: 1px solid color-mix(in srgb, var(--citadel-accent) 55%, var(--citadel-border));
+  border: 1px solid color-mix(in srgb, var(--citadel-accent) 55%, var(--citadel-control-border));
   color: color-mix(in srgb, var(--citadel-accent) 82%, var(--citadel-text));
   transition: background-color var(--citadel-motion);
 }

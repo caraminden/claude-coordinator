@@ -24,7 +24,7 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 .qcard .qtitle { font-weight: 600; margin-bottom: 0.4rem; overflow-wrap: anywhere; }
 .qcard .chip { display: inline-block; font-size: 0.72em; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--running); border: 1px solid color-mix(in srgb, var(--running) 40%, var(--line)); border-radius: 999px; padding: 0 0.45rem; margin-right: 0.4rem; vertical-align: 0.1em; }
 .qcard .opts { display: flex; flex-direction: column; gap: 0.35rem; }
-.qcard .opt { display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; text-align: left; width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 0.45rem 0.7rem; font: inherit; cursor: pointer; }
+.qcard .opt { display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; text-align: left; width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--control-line); border-radius: 8px; padding: 0.45rem 0.7rem; font: inherit; cursor: pointer; }
 .qcard .opt:hover:not(:disabled) { border-color: var(--running); }
 .qcard .opt.picked { border-color: var(--running); background: color-mix(in srgb, var(--running) 12%, var(--panel)); }
 .qcard .opt .label { font-weight: 600; }
@@ -87,5 +87,5 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 
 /* "Cara picked Tabs ↑": an answer given in a card far above, pointing back to it */
 .answer-ref { display: flex; justify-content: flex-end; }
-.answer-ref button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: 0.85em; color: var(--muted); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 999px; padding: 0.25rem 0.75rem; cursor: pointer; }
+.answer-ref button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: 0.85em; color: var(--muted); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--control-line)); border-radius: 999px; padding: 0.25rem 0.75rem; cursor: pointer; }
 .answer-ref button:hover { color: var(--ink); }

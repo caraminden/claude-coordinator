@@ -64,7 +64,7 @@ your own.
 Follow the device's light or dark mode, as Citadel does. Names are stable; values change when
 Citadel's do, so use the variables and never copy a hex value.
 
-- **Colours:** `bg`, `surface`, `text`, `muted`, `border`, `accent`, `on-accent` (text and icons on
+- **Colours:** `bg`, `surface`, `text`, `muted`, `border` (dividers and card outlines, subtle), `control-border` (a home-made input, select or bordered button: 3:1 on every surface, WCAG 1.4.11), `accent`, `on-accent` (text and icons on
   the accent: white in light, near-black in dark), `focus`, `danger`, `ok`, `warn`, `warn-tint`,
   `info`, `neutral`, `violet`, `code-bg`.
 - **Type:** `font`, `mono`; `size-body` 15, `size-small` 13 (tool rows, small buttons), `size-meta`

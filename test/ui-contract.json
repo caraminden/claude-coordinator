@@ -152,6 +152,7 @@
     "--citadel-bg",
     "--citadel-border",
     "--citadel-code-bg",
+    "--citadel-control-border",
     "--citadel-control-h",
     "--citadel-danger",
     "--citadel-focus",

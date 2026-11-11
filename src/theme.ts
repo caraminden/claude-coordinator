@@ -12,6 +12,7 @@ export const THEME_NAMES: Record<string, string> = {
   ink: 'text',
   muted: 'muted',
   line: 'border',
+  'control-line': 'control-border',
   accent: 'accent',
   error: 'danger',
   done: 'ok',

@@ -40,7 +40,7 @@
 .ticket-head .meta { color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ticket-head button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
 /* The minion header's Stop, Dismiss and Reopen, tinted by what they do so the minion's state reads at a glance (#166). */
-button.secondary:is(.act-stop, .act-dismiss, .act-reopen) { color: var(--act); border-color: color-mix(in srgb, var(--act) 55%, var(--line)); background: color-mix(in srgb, var(--act) 9%, transparent); font-weight: 600; }
+button.secondary:is(.act-stop, .act-dismiss, .act-reopen) { color: var(--act); border-color: color-mix(in srgb, var(--act) 55%, var(--control-line)); background: color-mix(in srgb, var(--act) 9%, transparent); font-weight: 600; }
 button.secondary.act-stop { --act: var(--error); }
 button.secondary.act-dismiss { --act: var(--waiting); }
 button.secondary.act-reopen { --act: var(--done); }
@@ -205,7 +205,7 @@ a.file-chip:hover { border-color: var(--muted); }
 /* "into the running turn", "queued for the next turn" with its ✕, "taken back by …" */
 .msg .who .msg-tag { margin-left: 0.4rem; display: inline-flex; align-items: center; gap: 0.3rem; }
 .msg .who .msg-tag::before { content: '·'; margin-right: 0.1rem; }
-.msg .who .take-back { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; padding: 0; border-radius: 50%; background: transparent; color: var(--muted); border: 1px solid var(--line); font-size: 0.75rem; line-height: 1; }
+.msg .who .take-back { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; padding: 0; border-radius: 50%; background: transparent; color: var(--muted); border: 1px solid var(--control-line); font-size: 0.75rem; line-height: 1; }
 .msg .who .take-back:hover, .msg .who .take-back:focus-visible { color: var(--ink); border-color: var(--accent); }
 .msg.user.withdrawn { opacity: 0.55; }
 .msg.user.withdrawn > :not(.who), .msg.user.withdrawn > summary .preview { text-decoration: line-through; }
@@ -223,7 +223,7 @@ a.file-chip:hover { border-color: var(--muted); }
 .md .file-preview .caption { display: block; font-size: 0.82em; color: var(--muted); margin-top: 0.2rem; }
 /* Not clickable until the server has found the file (checkFileLinks in core.js). */
 /* The markdown Copy button (ui/markdown.js), as the Machines page's: the global button rule would make it an accent button. */
-.md .cui-copy { background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 0.15rem 0.5rem; font: 500 var(--citadel-size-small)/1.3 var(--citadel-font); }
+.md .cui-copy { background: transparent; color: var(--ink); border: 1px solid var(--control-line); border-radius: 6px; padding: 0.15rem 0.5rem; font: 500 var(--citadel-size-small)/1.3 var(--citadel-font); }
 .md .checking { pointer-events: none; }
 .md .file-missing .mark { font-size: 0.82em; color: var(--muted); }
 
@@ -385,7 +385,7 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .chat.role-taskmaster :is(.ticket-head, .composer) { background: var(--chat-bg); }
 .chat.role-taskmaster .msg:not(.user) { border-color: color-mix(in srgb, var(--held) 22%, var(--line)); }
 /* A dismissed minion's message box is tinted grey, so it reads as dismissed before you type. */
-.chat.dismissed .composer textarea { background: color-mix(in srgb, var(--closed) 18%, var(--panel)); border-color: color-mix(in srgb, var(--closed) 45%, var(--line)); }
+.chat.dismissed .composer textarea { background: color-mix(in srgb, var(--closed) 18%, var(--panel)); border-color: color-mix(in srgb, var(--closed) 45%, var(--control-line)); }
 
 /* The scheme recap at the bottom of the Taskmaster chat (public/recap.js). */
 div.recap { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 10px; background: var(--panel); padding: 0.6rem 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; }

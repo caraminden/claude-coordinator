@@ -37,7 +37,7 @@
 :where(.cui-btn) {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--citadel-space-2);
   box-sizing: border-box; min-height: var(--citadel-control-h); margin: 0; padding: var(--citadel-space-1) var(--citadel-space-3);
-  border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-sm);
+  border: 1px solid var(--citadel-control-border); border-radius: var(--citadel-radius-sm);
   font: 500 var(--citadel-size-body)/1.25 var(--citadel-font); white-space: nowrap; cursor: pointer;
   background: var(--citadel-surface); color: var(--citadel-text);
   transition: background-color var(--citadel-motion), border-color var(--citadel-motion), color var(--citadel-motion);
@@ -49,7 +49,7 @@
 :where(.cui-btn.cui-ghost:hover:not(:disabled)) { background: color-mix(in srgb, var(--citadel-text) 7%, transparent); border-color: transparent; }
 :where(.cui-btn.cui-danger) {
   color: var(--citadel-danger); font-weight: 600;
-  border-color: color-mix(in srgb, var(--citadel-danger) 55%, var(--citadel-border));
+  border-color: color-mix(in srgb, var(--citadel-danger) 55%, var(--citadel-control-border));
   background: color-mix(in srgb, var(--citadel-danger) 9%, var(--citadel-surface));
 }
 :where(.cui-btn.cui-danger:hover:not(:disabled)) { border-color: var(--citadel-danger); }
@@ -65,10 +65,10 @@
   display: block; box-sizing: border-box; width: 100%; margin: 0;
   font: var(--citadel-size-body)/1.25 var(--citadel-font); color: var(--citadel-text);
   padding: calc((var(--citadel-control-h) - 2px - 1.25em) / 2) var(--citadel-space-3);
-  background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: var(--citadel-radius-sm);
+  background: var(--citadel-surface); border: 1px solid var(--citadel-control-border); border-radius: var(--citadel-radius-sm);
   transition: border-color var(--citadel-motion);
 }
-:where(.cui-input:hover) { border-color: color-mix(in srgb, var(--citadel-muted) 50%, var(--citadel-border)); }
+:where(.cui-input:hover) { border-color: color-mix(in srgb, var(--citadel-muted) 50%, var(--citadel-control-border)); }
 :where(.cui-input)::placeholder { color: var(--citadel-muted); }
 :where(textarea.cui-input) { resize: vertical; }
 @media (max-width: 800px) { :where(.cui-input) { font-size: 16px; } }
@@ -91,7 +91,7 @@
   box-sizing: border-box; min-height: var(--citadel-control-h); margin: 0; padding: var(--citadel-space-1) var(--citadel-space-3);
   border-radius: var(--citadel-radius-pill); font: 600 var(--citadel-size-small)/1.25 var(--citadel-font); cursor: pointer;
   background: color-mix(in srgb, var(--citadel-accent) 8%, var(--citadel-surface));
-  border: 1px solid color-mix(in srgb, var(--citadel-accent) 55%, var(--citadel-border));
+  border: 1px solid color-mix(in srgb, var(--citadel-accent) 55%, var(--citadel-control-border));
   color: color-mix(in srgb, var(--citadel-accent) 82%, var(--citadel-text));
   transition: background-color var(--citadel-motion);
 }

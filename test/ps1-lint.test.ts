@@ -48,3 +48,17 @@ test('Citadel\'s .ps1 files lint clean, and the lint still finds planted mistake
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A glob that matches nothing linted nothing: that's "couldn't run", not "clean" (#468 S14-10).
+test('a path that matches no files is exit 2, not clean', { skip, timeout: 120_000 }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ps1-lint-'));
+  try {
+    const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', lint, join(dir, '*.ps1')], { encoding: 'utf8' });
+    const out = r.stdout + r.stderr;
+    assert.equal(r.status, 2, out);
+    assert.match(out, /lint-ps1: couldn't run: no \.ps1 files matched/);
+    assert.doesNotMatch(out, /clean/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

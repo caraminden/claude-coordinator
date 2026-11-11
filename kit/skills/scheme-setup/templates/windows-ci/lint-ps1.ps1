@@ -94,6 +94,11 @@ function Find-Type([string]$Name, [string[]]$Namespaces) {
 }
 
 $files = @(foreach ($p in $Path) { Resolve-Path -Path $p | ForEach-Object { $_.ProviderPath } })
+# A wildcard that matches nothing gives no files and no error: linting nothing isn't clean.
+if (-not $files.Count) {
+  Write-Output "lint-ps1: couldn't run: no .ps1 files matched $($Path -join ', ')"
+  exit 2
+}
 try {
 foreach ($file in $files) {
   $tokens = $null

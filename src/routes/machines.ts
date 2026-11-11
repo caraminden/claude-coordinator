@@ -64,7 +64,7 @@ const agent = (method: string, path: string, handler: (ctx: Ctx, machine: Machin
 export const agentRoutes: Route[] = [
   agent('GET', '/api/machines/connect', ({ url, res, app }, machine) => {
     const info = (k: string) => (url.searchParams.get(k) ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200);
-    return app.machines.connectAgent(machine, res, { host: info('host'), command: info('command'), runners: url.searchParams.get('kind') === 'runners', managed: url.searchParams.get('v') === '2' });
+    return app.machines.connectAgent(machine, res, { host: info('host'), command: info('command'), runners: url.searchParams.get('kind') === 'runners', managed: url.searchParams.get('v') === '2', os: url.searchParams.get('os') === 'linux' ? 'linux' : 'windows' });
   }),
   agent('POST', '/api/machines/send', async ({ req, res, app }, machine) => {
     // Room for screenshots, which MCP servers send as base64 images.

@@ -93,9 +93,10 @@ export class RunnerTokens {
     return { scheme: project.name, repo: slug, label, token: body.token, expires_at: expires || null };
   }
 
-  /** The runners GitHub lists for a scheme's repo with its label (#328), asked with the owner's login. */
-  async listed(project: Project): Promise<{ name: string; status: string; busy: boolean }[]> {
-    const { slug, owner, ownerToken, label, hint } = this.repoOf(project);
+  /** The runners GitHub lists for a scheme's repo with its label, or `label` (a Linux runner's, #510), asked with the owner's login (#328). */
+  async listed(project: Project, want?: string): Promise<{ name: string; status: string; busy: boolean }[]> {
+    const { slug, owner, ownerToken, label: own, hint } = this.repoOf(project);
+    const label = want ?? own;
     const r = await this.github(ownerToken, 'GET', `/repos/${slug}/actions/runners?per_page=100`);
     if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
     const body = (await r.json().catch(() => ({}))) as { runners?: any[] };
@@ -156,6 +157,8 @@ async function refused(r: Response, ownerName: string, slug: string, hint = ''):
 // messages?"): it changes nothing, and the caller already has its output.
 
 export type RunnerOp = 'add' | 'list' | 'remove';
+/** Which agent a job goes to (#510): the Windows one, or the Linux one in WSL on the same PC, whose runners take the label <scheme-slug>-ci-linux. */
+export type RunnerOs = 'windows' | 'linux';
 /** GitHub runs one job per runner, and Josh picked four of them for Peek Auras' builds. */
 export const MAX_RUNNERS = 4;
 const IDLE_WAIT_MS = 120_000;
@@ -167,6 +170,7 @@ const NOTE_LINES = 60;
 export interface RunnerJobView {
   op: RunnerOp;
   count: number | null;
+  os: RunnerOs;
   scheme: string;
   machine: string;
   by: string;
@@ -184,16 +188,20 @@ function why(text: string): string {
   return last.length > 160 ? `${last.slice(0, 159)}…` : last;
 }
 
-/** The ask from a route body: an op, and for add a count of 1 to MAX_RUNNERS (default 1). Throws a 400 otherwise. */
-export function runnerAsk(body: { op?: unknown; count?: unknown }): { op: RunnerOp; count: number | null } {
+export type RunnerAsk = { op: RunnerOp; count: number | null; os: RunnerOs };
+
+/** The ask from a route body: an op, for add a count of 1 to MAX_RUNNERS (default 1), and an os (default windows). Throws a 400 otherwise. */
+export function runnerAsk(body: { op?: unknown; count?: unknown; os?: unknown }): RunnerAsk {
   if (body.op !== 'add' && body.op !== 'list' && body.op !== 'remove') throw new HttpError(400, 'op must be add, list or remove');
+  const os = body.os ?? 'windows';
+  if (os !== 'windows' && os !== 'linux') throw new HttpError(400, 'os must be windows or linux');
   if (body.op !== 'add') {
     if (body.count !== undefined && body.count !== null) throw new HttpError(400, 'count goes with add only');
-    return { op: body.op, count: null };
+    return { op: body.op, count: null, os };
   }
   const count = body.count ?? 1;
   if (!Number.isInteger(count) || (count as number) < 1 || (count as number) > MAX_RUNNERS) throw new HttpError(400, `count must be a whole number from 1 to ${MAX_RUNNERS}`);
-  return { op: 'add', count: count as number };
+  return { op: 'add', count: count as number, os };
 }
 
 export class RunnerJobs {
@@ -223,23 +231,29 @@ export class RunnerJobs {
    * Start a job for `project`, asked by person `askerId`, who must be a member (an admin is in every scheme). It runs in the
    * background: wait() follows it. Throws an HttpError when it can't start, before anything reaches the PC.
    */
-  async start(project: Project, askerId: number | null, ask: { op: RunnerOp; count: number | null }): Promise<RunnerJobView> {
+  async start(project: Project, askerId: number | null, ask: RunnerAsk): Promise<RunnerJobView> {
     const asker = askerId === null ? undefined : this.store.getUser(askerId);
     if (!asker || asker.disabled_at || !this.store.canSee({ uid: asker.id, admin: !!asker.admin }, project.id)) {
       throw new HttpError(403, `Only ${project.name}'s members can change its CI runners, and this ask isn't from one.`);
     }
     const running = this.jobs.get(project.id);
     if (running && running.view.ok === null) throw new HttpError(409, `${project.name} already has a runner job running (${running.view.op}, asked by ${running.view.by}); wait for it.`);
-    const machines = this.relay.runnerMachines().filter((m) => mayFetch(this.store, m, project));
-    if (!machines.length) throw new HttpError(409, `No CI runner agent that may act for ${project.name} is online. Cara installs it once on her desktop (tools/ci-runner/README.md, "Install the runner agent"); if it is installed, that PC is off or asleep, or an admin hasn't added ${project.name} to it under Settings → Machines.`);
+    const machines = this.relay.runnerMachines(ask.os).filter((m) => mayFetch(this.store, m, project));
+    if (!machines.length) {
+      const where = ask.os === 'linux' ? 'Linux CI runner agent (the one in WSL)' : 'CI runner agent';
+      const install = ask.os === 'linux' ? '"Linux runners in WSL"' : '"Install the runner agent"';
+      throw new HttpError(409, `No ${where} that may act for ${project.name} is online. Cara installs it once on her desktop (tools/ci-runner/README.md, ${install}); if it is installed, that PC is off or asleep${ask.os === 'linux' ? ', WSL is stopped' : ''}, or an admin hasn't added ${project.name} to it under Settings → Machines.`);
+    }
     const machine = machines.find((m) => !this.busy.has(m.id));
     if (!machine) throw new HttpError(409, `The runner agent on ${machines[0].name} is busy with another scheme's job; try again in a few minutes.`);
     // The same checks the PC's scripts meet (a repo, the owner's GitHub link, a label), so a missing one fails here.
     const names = ask.op === 'list' ? null : await this.tokens.issue(machine, project.id, false);
-    const view: RunnerJobView = { op: ask.op, count: ask.count, scheme: project.name, machine: machine.name, by: asker.name, started_at: Date.now(), finished_at: null, ok: null, text: '' };
+    const view: RunnerJobView = { op: ask.op, count: ask.count, os: ask.os, scheme: project.name, machine: machine.name, by: asker.name, started_at: Date.now(), finished_at: null, ok: null, text: '' };
     this.busy.add(machine.id);
     this.tokenNotes.set(project.id, { machineId: machine.id, lines: [] });
-    const done = this.run(project, machine, ask, names?.label ?? '', view)
+    // A Linux runner's label (#510): add-runner.sh makes the same one from the label Citadel hands it.
+    const label = names ? (ask.os === 'linux' ? `${names.label}-linux` : names.label) : '';
+    const done = this.run(project, machine, ask, label, view)
       .catch((err) => Object.assign(view, { ok: false, text: `Citadel failed while following the job: ${err?.message ?? err}`, finished_at: Date.now() }))
       .then(() => this.note(project, view))
       .catch((err) => console.error(`Couldn't note ${project.name}'s runner job:`, err))
@@ -248,13 +262,13 @@ export class RunnerJobs {
     return { ...view };
   }
 
-  private async run(project: Project, machine: Machine, ask: { op: RunnerOp; count: number | null }, label: string, view: RunnerJobView) {
+  private async run(project: Project, machine: Machine, ask: RunnerAsk, label: string, view: RunnerJobView) {
     const job = ask.op === 'add' ? { op: 'add' as const, scheme: project.id, count: ask.count! } : ask.op === 'remove' ? { op: 'remove' as const, scheme: project.id } : { op: 'list' as const };
     const r = await this.relay.runnerJob(machine.id, job);
     let text = r.output.trim() || '(it printed nothing)';
     let ok = r.ok;
     if (ok && ask.op === 'add') {
-      const idle = await this.waitIdle(project, ask.count!);
+      const idle = await this.waitIdle(project, ask.count!, label);
       ok = idle.ok;
       text += `\n\nOn GitHub (label ${label}): ${idle.text}`;
     }
@@ -275,7 +289,8 @@ export class RunnerJobs {
   /** An add's or remove's one note, when it ends however it ends: who, what, where, how it went; the output goes under it. */
   private note(project: Project, view: RunnerJobView) {
     if (view.op === 'list') return;
-    const what = view.op === 'add' ? `${view.count} CI runner${view.count === 1 ? '' : 's'} for ${project.name}` : `${project.name}'s CI runners`;
+    const linux = view.os === 'linux' ? 'Linux ' : '';
+    const what = view.op === 'add' ? `${view.count} ${linux}CI runner${view.count === 1 ? '' : 's'} for ${project.name}` : `${project.name}'s ${linux}CI runners`;
     const words = view.ok
       ? `✓ ${view.by} ${view.op === 'add' ? 'added' : 'removed'} ${what} on ${view.machine}`
       : `✗ ${view.by} tried to ${view.op} ${what} on ${view.machine}, and it failed: ${why(view.text)}`;
@@ -284,13 +299,13 @@ export class RunnerJobs {
     this.onNote(project, words, [...(this.tokenNotes.get(project.id)?.lines ?? []), ...kept].join('\n'));
   }
 
-  /** Wait until GitHub shows at least `count` of the scheme's runners online and not busy, up to idleWaitMs. */
-  private async waitIdle(project: Project, count: number): Promise<{ ok: boolean; text: string }> {
+  /** Wait until GitHub shows at least `count` of the scheme's runners with `label` online and not busy, up to idleWaitMs. */
+  private async waitIdle(project: Project, count: number, label: string): Promise<{ ok: boolean; text: string }> {
     const end = Date.now() + this.idleWaitMs;
     let last = '';
     for (;;) {
       try {
-        const runners = await this.tokens.listed(project);
+        const runners = await this.tokens.listed(project, label);
         const idle = runners.filter((x) => x.status === 'online' && !x.busy).length;
         last = runners.length ? runners.map((x) => `${x.name} ${x.status !== 'online' ? x.status : x.busy ? 'Active' : 'Idle'}`).join(', ') : 'none listed yet';
         if (idle >= count) return { ok: true, text: last };

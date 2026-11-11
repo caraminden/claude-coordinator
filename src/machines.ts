@@ -189,6 +189,8 @@ interface Agent {
   timers: NodeJS.Timeout[];
   /** A CI runner agent (public/runner-agent.mjs, #328): it serves no MCP server, only runner jobs. */
   runners: boolean;
+  /** Which runners it adds (#510): Windows services, or Linux ones inside WSL. An agent that doesn't say is a Windows one. */
+  os: 'windows' | 'linux';
   /** When it last beat; null for an agent from before beats, which is never dropped for missing them. */
   beat?: number;
 }
@@ -362,7 +364,7 @@ export class MachineRelay {
   }
 
   /** A machine's agent connected: hold the stream open and send it its sessions' messages. */
-  connectAgent(machine: Machine, res: ServerResponse, info: { host: string; command: string; runners?: boolean; managed?: boolean }) {
+  connectAgent(machine: Machine, res: ServerResponse, info: { host: string; command: string; runners?: boolean; managed?: boolean; os?: 'windows' | 'linux' }) {
     // A newer connection wins: the old one is a laptop that dropped off without the server noticing.
     // Told so, the old one waits a while before it tries again: two agents with one token would otherwise drop each other at once, forever.
     const old = this.agents.get(machine.id);
@@ -374,7 +376,7 @@ export class MachineRelay {
     res.write(`data: ${JSON.stringify({ hello: machine.name })}\n\n`);
     const mcp = !info.runners && machine.mcp_kind === null && mcpFromAgent(info.command);
     if (mcp) this.store.updateMachine(machine.id, mcp);
-    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: info.runners || info.managed ? [] : ['mcp'], managed: !info.runners && !!info.managed, found: [], workspaces: [], problems: [], timers: [], runners: !!info.runners };
+    const agent: Agent = { res, host: info.host, command: info.command, since: Date.now(), sessions: new Set(), servers: info.runners || info.managed ? [] : ['mcp'], managed: !info.runners && !!info.managed, found: [], workspaces: [], problems: [], timers: [], runners: !!info.runners, os: info.os ?? 'windows' };
     this.agents.set(machine.id, agent);
     // A runner host's check is its agent connecting: an hourly runner list could collide with a person's add, which the agent would refuse as busy.
     this.store.updateMachine(machine.id, { last_seen_at: agent.since, ...(info.runners ? { last_check: JSON.stringify({ at: agent.since, results: [], runners: true }) } : {}) });
@@ -485,9 +487,9 @@ export class MachineRelay {
     if (stale || missing.length) this.check(machineId, CHECK_MS, stale ? undefined : missing).catch(() => {});
   }
 
-  /** Machines whose CI runner agent is connected now (#328). */
-  runnerMachines(): Machine[] {
-    return this.store.listMachines().filter((m) => this.agents.get(m.id)?.runners);
+  /** Machines whose CI runner agent for `os` (#510) is connected now (#328). */
+  runnerMachines(os: 'windows' | 'linux' = 'windows'): Machine[] {
+    return this.store.listMachines().filter((m) => { const a = this.agents.get(m.id); return a?.runners && a.os === os; });
   }
 
   /** Send a runner agent one job and wait for its answer; a refusal, an offline agent or no answer in time comes back as ok: false. */

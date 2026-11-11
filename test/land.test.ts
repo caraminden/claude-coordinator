@@ -3,7 +3,7 @@ import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { after, test } from 'node:test';
 
@@ -100,6 +100,17 @@ test('a test that hangs is stopped at the time limit, says so, and lets go of th
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   const lock = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'lock');
   assert.equal(spawnSync('flock', ['-n', lock, 'true']).status, 0, 'the deploy lock is free');
+});
+
+// The tests run from the worktree's top, wherever in it land.sh was started (#468 S10-7).
+test('run from a subfolder of the worktree, it tests and lands the same', () => {
+  const r = setup();
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  // By a relative path, as a person in the subfolder would type it: its helpers are found all the same.
+  const res = spawnSync('bash', [relative(join(r.wt, 'test'), land)], { cwd: join(r.wt, 'test'), encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note') } });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+  assert.equal(r.note(), 'locked=1 held=yes');
 });
 
 test('a conflict aborts the rebase and lands nothing', () => {

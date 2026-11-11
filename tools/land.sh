@@ -25,7 +25,9 @@ refuse() { say "$*"; exit 1; }
 # Inside a slot it would hold a heavy slot, shared by every scheme, while it waits on the deploy lock.
 [ -z "${CITADEL_HEAVY_HELD:-}" ] || refuse "run it on its own, not under citadel-heavy: it would hold a heavy slot other schemes need while it waits for the deploy lock"
 [ $# -eq 0 ] || refuse "takes no arguments (for --now, land first, then run tools/deploy.sh --now with a person's OK)"
+tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) # before the cd below, which would break a relative path to it
 here=$(git rev-parse --show-toplevel)
+cd "$here" # the tests run from the worktree's top, wherever in it this was started
 branch=$(git branch --show-current)
 { [ -n "$branch" ] && [ "$branch" != main ]; } || refuse "run it from a minion's branch, not main or a detached HEAD"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || refuse "$here has uncommitted changes: commit them first"
@@ -58,7 +60,7 @@ fi
 
 say "running the tests"
 log="$state/land-test.log"
-if ! "$(dirname "${BASH_SOURCE[0]}")/run-tests.sh" "$log"; then
+if ! "$tools/run-tests.sh" "$log"; then
   tail -n 40 "$log" >&2
   refuse "tests failed on the rebased branch (full log: $log), so main is untouched"
 fi

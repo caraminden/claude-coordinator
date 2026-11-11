@@ -17,7 +17,7 @@ import type { QueuedMessage } from './runner.ts';
 export const CHECKOUT = join(import.meta.dirname, '..');
 
 /** The minion prompt's line on citadel-heavy. */
-export const HEAVY_LINE = 'Heavy builds and full test suites (a whole-workspace `cargo build`, `test`, `check` or `clippy`, a cross-target or release build, a full `npm test`) go through `citadel-heavy <command...>`, as in `citadel-heavy cargo test --workspace`: a few host-wide slots, so it may queue. Give it a long timeout or run it in the background. Leave quick single-crate checks, dev servers and watchers out, and don\'t wrap a script that takes its own lock (tools/land.sh): wrap the step inside it.';
+export const HEAVY_LINE = 'Heavy builds and full test suites (a whole-workspace `cargo build`, `test`, `check` or `clippy`, a cross-target or release build, a full `npm test`) go through `citadel-heavy <command...>`, as in `citadel-heavy cargo test --workspace`: a few host-wide slots, so it may queue. Give it a long timeout or run it in the background. Leave quick single-crate checks, dev servers and watchers out, and don\'t run a script that takes its own lock (tools/land.sh) under it: you would hold a slot while it waits on the lock. A step inside a lock that waits on a slot holds up everyone queued on that lock, so take the slot outside the lock, or leave a light step unslotted when the lock already serialises it.';
 
 /** Messages between two schemes' Taskmasters (both ways) per TASKMASTER_LOOP_WINDOW_MS before the next waits for a person. */
 export const TASKMASTER_LOOP_LIMIT = 6;

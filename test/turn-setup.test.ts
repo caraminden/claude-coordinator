@@ -280,6 +280,9 @@ test('every turn finds citadel-heavy first on its PATH, pinned, with the shared 
   assert.equal(host.CITADEL_HEAVY_WHO, t.env.CITADEL_HEAVY_WHO);
   assert.ok(t.system.includes(HEAVY_LINE));
   assert.match(HEAVY_LINE, /`citadel-heavy cargo test --workspace`/);
+  // A step inside a lock must not wait on a slot (#499): the line no longer says "wrap the step inside it".
+  assert.match(HEAVY_LINE, /take the slot outside the lock/);
+  assert.doesNotMatch(HEAVY_LINE, /wrap the step inside/);
   const tm = await turn('coordinator', 'connected');
   assert.ok(!tm.system.includes(HEAVY_LINE));
 });

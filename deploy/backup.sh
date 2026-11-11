@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Nightly backup of Citadel's database (run by claude-coordinator-backup.timer).
 #
-# Takes an online `sqlite3 .backup` (safe while the server is writing), proves it restores, then
+# Takes an online copy with `VACUUM INTO` (one read transaction, safe while the server is writing; a
+# stepped `.backup` restarts on every write and can run for minutes, #497), proves it restores, then
 # keeps the newest 7 dailies and 4 weeklies under $DATA_DIR/backups, all mode 600. Session state
 # (state.db) gets its own state-<day>.db, 3 dailies and no weeklies. Hand-made copies
 # there (coordinator-before-<what>.db, taken before a risky change) go once they are 7 days old, when
@@ -30,7 +31,8 @@ tmp=$DIR/.coordinator-$day.db.tmp
 rm -f "$tmp"
 trap 'rm -f "$tmp"' EXIT
 
-sqlite3 "$DB" ".timeout 30000" ".backup '$tmp'"
+sqlite3 "$DB" ".timeout 30000" "VACUUM INTO '$tmp'"
+sqlite3 "$tmp" "PRAGMA journal_mode = WAL" >/dev/null # like the live file, so a restore is a drop-in
 
 # The restore check: load the copy into a scratch in-memory database the way a restore would,
 # and require a clean integrity check and the tables the app can't start without.
@@ -66,7 +68,8 @@ if [[ -f $state ]]; then
   tmp=$DIR/.state-$day.db.tmp
   rm -f "$tmp"
   trap 'rm -f "$tmp"' EXIT
-  sqlite3 "$state" ".timeout 30000" ".backup '$tmp'"
+  sqlite3 "$state" ".timeout 30000" "VACUUM INTO '$tmp'"
+  sqlite3 "$tmp" "PRAGMA journal_mode = WAL" >/dev/null
   scheck=$(sqlite3 :memory: ".restore '$tmp'" "PRAGMA integrity_check;" "SELECT 'rows', count(*) FROM claude_state;")
   [[ $scheck == ok$'\n'rows\|* ]] || { echo "Session state backup failed its restore check: $scheck" >&2; exit 1; }
   chmod 600 "$tmp"

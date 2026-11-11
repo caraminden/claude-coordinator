@@ -422,6 +422,8 @@ const ALLOWED = [
   'f=$(mktemp); echo hi > "$f"; rm -f "$f"',
   `D=${data}; sqlite3 -readonly $D/state.db "select 1"; cp $D/coordinator.db "$TMPDIR/"; ls -la $D`,
   'sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db ".backup $TMPDIR/copy.db"',
+  // The copy the block messages advise (#497).
+  `sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db "VACUUM INTO '$TMPDIR/copy.db'"`,
   'rm -f /tmp/cc-$USER.log out-$N.txt',
   'for f in src/*.ts test/*.ts; do sed -i "s/a/b/" "$f"; done',
   'for f in a.png b.png; do mv "$f" "$TMPDIR/"; done',

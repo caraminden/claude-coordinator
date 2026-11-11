@@ -233,7 +233,7 @@ systemctl --user daemon-reload
 The socket takes effect at the next restart after that; until then the server
 binds the port itself.
 
-**Backups.** `deploy/backup.sh` takes an online `sqlite3 .backup` at 04:00 into
+**Backups.** `deploy/backup.sh` takes an online copy (`VACUUM INTO`, one read transaction) at 04:00 into
 `$DATA_DIR/backups/`, checks the copy restores (integrity check plus the core
 tables), and keeps 7 dailies and 4 weeklies (hard links), mode 600. Hand-made
 `backups/coordinator-before-<what>.db` copies go once they are 7 days old.

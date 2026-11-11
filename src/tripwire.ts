@@ -655,7 +655,7 @@ function sqliteOperands(args: Word[]): Word[] {
   return rest;
 }
 
-const SCRATCH = 'Read the live database with `sqlite3 -readonly`; for a copy to work on, back it up into your TMPDIR: `sqlite3 -readonly <db> ".backup $TMPDIR/copy.db"`.';
+const SCRATCH = 'Read the live database with `sqlite3 -readonly`; for a copy to work on, copy it into your TMPDIR in one step: `sqlite3 -readonly <db> "VACUUM INTO \'$TMPDIR/copy.db\'"` (a `.backup` restarts on every live write and can run for minutes).';
 
 /** A NAME=value word: the name, and the values it can take when they can be known. */
 function assignment(w: Word, st: State, cfg: TripwireConfig): [string, string[] | undefined] {

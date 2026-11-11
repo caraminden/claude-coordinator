@@ -101,24 +101,27 @@ report_me() {
 
 # What the landings waiting in line see of the queued restart, which holds the lock with no ticket (deploy-queue.sh).
 restart_phase() {
-  printf '%s\n' "$$" "$1 since $(date +%H:%M)" >"$STATE/restart.tmp" && mv -f "$STATE/restart.tmp" "$STATE/restart"
+  local stat
+  stat=$(cat "/proc/$$/stat") && stat=${stat##*) } || return 0
+  # shellcheck disable=SC2206
+  stat=($stat)
+  printf '%s\n' "$$ ${stat[19]}" "$1 since $(date +%H:%M)" >"$STATE/restart.tmp" && mv -f "$STATE/restart.tmp" "$STATE/restart"
 }
 
-# Tell the minions that asked for this deploy, and the journal. $1 is ok, warn or fail. The restart's last act
-# (every caller ends after it), so the lock goes first (#553): a report to a server that is down retries for
-# REPORT_RETRY s a minion, and the landings in line were waiting on that. The list is taken under the lock, so a
-# deploy that starts meanwhile adds to a new one.
+# Tell the minions that asked for this deploy, and the journal. $1 is ok, warn or fail. All at once (#553): the
+# restart still holds the lock here (letting go first would let the next deploy find this unit "already" queued,
+# with its restart behind it), and a server that is down costs REPORT_RETRY s a report, which one after another
+# outlasted the landings waiting in line.
 report() {
-  local ok=$1 text=$2 api token ticket list="$STATE/reporters.$$"
+  local ok=$1 text=$2 api token ticket
   case "$ok" in ok) say "$text" ;; warn) say "WARNING: $text" ;; *) say "FAILED: $text" ;; esac
-  [ ! -f "$STATE/reporters" ] || mv -f "$STATE/reporters" "$list"
-  rm -f "$STATE/restart"
-  flock -u 9 2>/dev/null || true
-  [ -f "$list" ] || return 0
+  [ -f "$STATE/reporters" ] || return 0
+  restart_phase "posting its reports"
   while read -r api token ticket; do
-    post_report "$api" "$token" "$ticket" "$ok" "$text"
-  done < <(tac "$list" | sort -su -k3,3) # one note per minion, with the newest of its turns' tokens
-  rm -f "$list"
+    post_report "$api" "$token" "$ticket" "$ok" "$text" &
+  done < <(tac "$STATE/reporters" | sort -su -k3,3) # one note per minion, with the newest of its turns' tokens
+  wait
+  rm -f "$STATE/reporters"
 }
 
 # Push live commit $1 to $REMOTE's main, so GitHub matches what runs and keeps a copy off the box.
@@ -227,6 +230,7 @@ restart_healthy() {
 restart() {
   case "$0" in */cc-deploy/restart-*.sh) rm -f "$0" ;; esac # the unit's private copy (see deploy), never the tracked script; bash keeps reading it from the open file
   init_state
+  trap 'rm -f "$STATE/restart"' EXIT
   local i=0
   # $STATE/now: a --now deploy that found this restart already queued and waiting.
   while [ -z "$NOW" ] && [ ! -e "$STATE/now" ]; do
@@ -246,7 +250,6 @@ restart() {
   flock 9
   rm -f "$STATE/now"
   local target good saved
-  trap 'rm -f "$STATE/restart"' EXIT
   restart_phase "copying the database"
   target=$(git_live rev-parse HEAD)
   if ! saved=$(backup_db "$target"); then

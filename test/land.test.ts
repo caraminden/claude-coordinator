@@ -773,13 +773,18 @@ test('a waiter that is frozen is passed over: the one behind it takes the lock, 
   try {
     await until('b to say its place', () => /2nd in line/.test(b.stderr()));
     process.kill(b.child.pid!, 'SIGSTOP');
-    c = waiter(state, 'c', 'true', { DEPLOY_QUEUE_STALL: '3' });
+    c = waiter(state, 'c', `until [ -e '${state}/go2' ]; do sleep 0.05; done`, { DEPLOY_QUEUE_STALL: '3' });
     const cs = c.stderr;
     await until('c to say its place', () => /in line/.test(cs()));
     writeFileSync(join(state, 'go'), '');
-    assert.equal(await c.exit, 0, cs());
+    await until('c to take the lock', () => order(state).length === 2);
     assert.deepEqual(order(state), ['a', 'c']);
+    // Awake again while the one that passed it has the lock: that is a landing in line, not something outside it.
     process.kill(b.child.pid!, 'SIGCONT');
+    await until('b to say what it waits for now', () => /next in line for the deploy lock \(ahead: c, starting\)/.test(b.stderr()));
+    assert.doesNotMatch(b.stderr(), /outside the line/);
+    writeFileSync(join(state, 'go2'), '');
+    assert.equal(await c.exit, 0, cs());
     assert.equal(await b.exit, 0, b.stderr());
     assert.deepEqual(order(state), ['a', 'c', 'b']);
   } finally {
@@ -789,7 +794,7 @@ test('a waiter that is frozen is passed over: the one behind it takes the lock, 
 
 test('giving up names the process at the head of the line, its state and whether the lock is held', { timeout: 60_000 }, async () => {
   const state = queueState();
-  const a = waiter(state, 'a', 'sleep 60');
+  const a = waiter(state, 'a', 'exec sleep 60'); // exec: the same pid, so killing it leaves nothing behind
   let b: ReturnType<typeof waiter> | undefined;
   try {
     await until('a to hold the lock', () => order(state).length === 1);
@@ -804,22 +809,26 @@ test('giving up names the process at the head of the line, its state and whether
 
 // F8: an orphan of a killed landing (its test run, its boot check) keeps the lock with no ticket, and the waiters
 // were told "a queued restart, or a landing started from a branch older than the line", which it never was.
-test('a waiter behind a lock held from outside the line names the processes that have the lock file open', { timeout: 60_000 }, async () => {
+test('a waiter behind a lock held from outside the line names the process that holds it, and not the waiters behind or their children', { timeout: 60_000 }, async () => {
   const state = queueState();
   const outside = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 41', join(state, 'lock')], { stdio: 'ignore' }); // one process, the lock on its fd 9
-  let b: ReturnType<typeof waiter> | undefined;
+  const ws: ReturnType<typeof waiter>[] = [];
   try {
     await until('the lock to be held', () => spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status !== 0);
-    b = waiter(state, 'b', 'true');
-    const bs = b.stderr;
-    await until('b to say what it waits for', () => /next in line/.test(bs()));
-    assert.match(bs(), /next in line for the deploy lock \(ahead: outside the line, the lock is open in pid \d+ \([^)]*sleep 41\)/);
-    assert.doesNotMatch(bs(), new RegExp(`pid ${b.child.pid} `), 'not itself');
+    const b = ws[ws.push(waiter(state, 'b', 'true', { DEPLOY_QUEUE_STALL: '2' })) - 1];
+    await until('b to say what it waits for', () => /next in line/.test(b.stderr()));
+    // Two behind it, whose own children (the sleep between polls) have the lock file open too.
+    const [c, d] = [waiter(state, 'c', 'true'), waiter(state, 'd', 'true')];
+    ws.push(c, d);
+    assert.equal(await b.exit, 1, b.stderr());
+    const named = new RegExp(`\\(ahead: outside the line, the lock is open in pid ${outside.pid} \\(sleep 41\\)\\)`, 'g');
+    assert.equal(b.stderr().match(named)?.length, 2, `when it arrived and when it gave up, the holder and nothing else:\n${b.stderr()}`);
     outside.kill('SIGKILL');
-    assert.equal(await b.exit, 0, bs());
+    assert.equal(await c.exit, 0, c.stderr());
+    assert.equal(await d.exit, 0, d.stderr());
   } finally {
     outside.kill('SIGKILL');
-    b?.child.kill('SIGKILL');
+    for (const w of ws) w.child.kill('SIGKILL');
   }
 });
 
@@ -828,7 +837,8 @@ test('a waiter behind a lock held from outside the line names the processes that
 test("the queued restart's phases show to the waiters and count as progress", { timeout: 60_000 }, async () => {
   const state = queueState();
   const restart = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 42', join(state, 'lock')], { stdio: 'ignore' }); // one process, the lock on its fd 9
-  const phase = (text: string) => writeFileSync(join(state, 'restart'), `${restart.pid}\n${text}\n`);
+  const started = () => readFileSync(`/proc/${restart.pid}/stat`, 'utf8').split(') ').pop()!.split(' ')[19];
+  const phase = (text: string) => writeFileSync(join(state, 'restart'), `${restart.pid} ${started()}\n${text}\n`);
   let b: ReturnType<typeof waiter> | undefined;
   try {
     await until('the lock to be held', () => spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status !== 0);

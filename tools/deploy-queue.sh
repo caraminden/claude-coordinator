@@ -13,7 +13,7 @@
 # label, and its phase. A ticket whose process is gone is deleted by whoever waits behind it.
 # Outside the line, the queued restart (deploy.sh restart) and a land.sh from a branch older than this
 # take the flock directly; the head of the line waits for them like for anyone else. The restart says what it
-# is doing in <state>/restart ("<pid>", then its phase), which counts as progress like a ticket's phase (#553).
+# is doing in <state>/restart ("<pid> <the pid's start time>", then its phase), which counts as progress like a ticket's phase (#553).
 # The kit's land.sh template (kit/skills/scheme-setup/templates/land.sh) carries a copy of these functions
 # inline, so a scheme copies one file: a fix to either belongs in both.
 
@@ -48,18 +48,26 @@ queue_state() {
 queue_restart() {
   local l
   mapfile -t l 2>/dev/null <"$1/restart" || return 0
-  [ -n "${l[0]:-}" ] && [ -d "/proc/${l[0]}" ] || return 0
+  [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || return 0
   echo "${l[1]:-}"
 }
 
 # <state>: who holds the lock when nobody in line does and no restart says so: the processes that have the lock
-# file open and no ticket, such as what a killed landing left running. Run with fd 9 closed, or it names itself.
+# file open and are neither in line nor started by someone in line (a waiter's sleep inherits fd 9), such as what
+# a killed landing left running. Run with fd 9 closed, or it names itself.
 queue_outside() {
-  local lock p who="" count=0 inline=" "
+  local lock p up stat who="" count=0 inline=" "
   lock=$(realpath "$1/lock" 2>/dev/null) || lock=$1/lock
   for p in "$1"/queue/[0-9]*; do inline="$inline$(head -n 1 "$p" 2>/dev/null | cut -d' ' -f1) "; done
   for p in $(find /proc/[0-9]*/fd -maxdepth 1 -lname "$lock" 2>/dev/null | cut -d/ -f3 | sort -un); do
-    case $inline in *" $p "*) continue ;; esac
+    up=$p
+    while [ "${up:-0}" -gt 1 ]; do
+      case $inline in *" $up "*) continue 2 ;; esac
+      stat=$(cat "/proc/$up/stat" 2>/dev/null) || break
+      stat=${stat##*) }
+      stat=${stat#* }
+      up=${stat%% *} # its parent
+    done
     count=$((count + 1))
     [ "$count" -le 3 ] || continue
     who="$who${who:+, }pid $p ($(tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null | cut -c1-80 | sed 's/ *$//'))"
@@ -141,9 +149,19 @@ queue_lock() {
         queue_write "$DEPLOY_QUEUE_TICKET" "$me" "$(date +%s)" "$label" starting
         return 0
       fi
-      phase=$(queue_restart "$1")
-      # No restart says it has it: who does is looked up (queue_outside) only when there is a line to print.
-      if [ -n "$phase" ]; then head="outside $n $phase" headname="the queued restart, $phase"; else head="outside $n" headname=""; fi
+      # Held by a landing behind this one in line: it passed this one while it was stopped.
+      head=""
+      for t in "$q"/[0-9]*; do
+        [[ ${t##*/} =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$t" || continue
+        [ "${l[1]:-0}" != 0 ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]:-}" ] || continue
+        head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}"
+        break
+      done
+      if [ -z "$head" ]; then
+        phase=$(queue_restart "$1")
+        # No restart says it has it: who does is looked up (queue_outside) only when there is a line to print.
+        if [ -n "$phase" ]; then head="outside $n $phase" headname="the queued restart, $phase"; else head="outside $n" headname=""; fi
+      fi
     fi
 
     # Progress is any change at the head of the line: a new head, or the head's next phase.

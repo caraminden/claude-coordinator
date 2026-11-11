@@ -51,7 +51,7 @@ if ! git rebase -q main; then
     [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
     dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
     mkdir -p "$dir" || exit 0
-    [ -e "$dir/land.md" ] || printf '# Retro log: land.sh\n\nWritten by tools/land.sh (no session id, so one file per day). One line per rebase conflict.\n\n' >>"$dir/land.md"
+    [ -e "$dir/land.md" ] || printf '# Retro log: land.sh\n\nWritten by tools/land.sh and tools/run-tests.sh (no session id, so one file per day). One line per rebase conflict, and per test file that failed in a land or deploy run and passed alone (flake).\n\n' >>"$dir/land.md"
     if [ -n "$conflicted" ]; then what=" onto $(git log -1 --format=%h main): $conflicted"; else what=": no conflicted files found (the rebase may not have started)"; fi
     printf -- '- %sZ · land conflict · %s%s\n' "$(date -u +%T)" "$branch" "$what" >>"$dir/land.md"
   ) >/dev/null 2>&1 || true

@@ -244,7 +244,7 @@ test("refuses uncommitted work, main itself, arguments, running inside a citadel
 // where the tests ran.
 async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>) => Promise<{ stderr: string }>, runs: () => string[]) => Promise<void>) {
   const r = setup();
-  for (const f of ['deploy.sh', 'run-tests.sh']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  for (const f of ['deploy.sh', 'run-tests.sh', 'failed-files-reporter.ts']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real deploy.sh');
@@ -319,7 +319,7 @@ test('deploy.sh on its own, or told of a different tested commit, still runs the
 // A person pressing Stop, or a Bash time limit, ends the whole run with a signal (#468 S10-5).
 test('a land killed while the deploy tests the live checkout puts the checkout and main back', async () => {
   const r = setup();
-  for (const f of ['deploy.sh', 'run-tests.sh']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  for (const f of ['deploy.sh', 'run-tests.sh', 'failed-files-reporter.ts']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   // Run in the live checkout (the deploy's own test run), it says so and takes a few seconds.
   writeFileSync(join(r.source, 'test', 'slow.test.mjs'), `import { realpathSync, writeFileSync } from 'node:fs';
 if (process.env.KILL_MARK && realpathSync(process.cwd()) === realpathSync(process.env.DEPLOY_LIVE)) {

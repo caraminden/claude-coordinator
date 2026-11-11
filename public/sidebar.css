@@ -101,7 +101,7 @@
 /* The panel takes a line of its own under the button and chips, and pushes the list down. */
 .pf-panel { flex: 1 0 100%; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 0.3rem 0.6rem; }
 .pf-key + .pf-key { border-top: 1px solid var(--line); }
-.pf-key > summary { display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.1rem; cursor: pointer; color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
+.pf-key > summary { display: flex; align-items: center; gap: 0.4rem; padding: max(0.45rem, var(--tap-pad)) 0.1rem; cursor: pointer; color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
 .pf-key > summary .pf-n { margin-left: auto; color: var(--accent); }
 .pf-key[open] > summary { color: var(--ink); }
 .pf-key > summary::before { content: "▸"; width: 0.7rem; }

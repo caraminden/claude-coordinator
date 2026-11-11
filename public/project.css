@@ -67,7 +67,7 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 .scheme-hide:hover, .scheme-hide:focus-visible { background: var(--panel); color: var(--ink); }
 @media (hover: hover) { #schemes-shelf > .scheme-row:not(:hover, :focus-within) > .scheme-hide { opacity: 0; } }
 .hidden-schemes { margin-top: 0.25rem; }
-.hidden-schemes > summary { cursor: pointer; padding: 0.3rem 0.5rem; color: var(--muted); font-size: 0.85em; }
+.hidden-schemes > summary { cursor: pointer; padding: max(0.3rem, var(--tap-pad)) 0.5rem; color: var(--muted); font-size: 0.85em; }
 .hidden-schemes .nav-item { color: var(--muted); }
 .hidden-note { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; padding: 0.35rem 0.7rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); font-size: 0.85em; }
 .hidden-note[hidden] { display: none; }
@@ -215,16 +215,16 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
 /* The name's text lines up with the panel's edge, or sits just after the scheme's icon. */
 .shelf[open] > summary .project-title .scheme-icon:not([hidden]) + .label { margin-left: -0.25rem; }
 .shelf:not([open]) > summary .project-title .label { padding: 0; margin: 0; }
-:is(.shelf, .sidebar) > summary .rename { flex: none; min-width: 32px; min-height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 6px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
+:is(.shelf, .sidebar) > summary .rename { flex: none; min-width: var(--control-h); min-height: var(--control-h); padding: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; border-radius: 6px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
 :is(.shelf, .sidebar) > summary .rename:is(:hover, :focus-visible) { color: var(--accent); background: var(--panel); }
 .shelf > summary .rename-input { flex: 1; min-width: 0; font-weight: 650; padding: 0.25rem 0.4rem; user-select: text; -webkit-user-select: text; }
 :is(.shelf, .sidebar):not([open]) > summary .rename { display: none; }
-.shelf .column h3 .browse { display: inline-block; padding-block: 4px; margin-block: -4px; font-size: 0.85em; text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--accent); text-decoration: none; }
+.shelf .column h3 .browse { --b: max(4px, (var(--control-h) - 1lh) / 2); display: inline-block; padding-block: var(--b); margin-block: calc(-1 * var(--b)); font-size: 0.85em; text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--accent); text-decoration: none; }
 .shelf .column h3 .more:hover, .shelf .column h3 .browse:hover, .shelf .column h3 .browse.active { text-decoration: underline; }
 .shelf .sub { margin-top: 0.6rem; }
 .shelf .sub h4 { margin: 0 0 0.3rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); display: flex; gap: 0.4rem; align-items: center; }
 .shelf .sub h4 .count { font-weight: normal; }
-.shelf .sub.fold > summary { cursor: pointer; list-style: none; margin: 0 0 0.3rem; padding: 0.15rem 0; font-size: 0.8rem; font-weight: 600; color: var(--muted); display: flex; gap: 0.4rem; align-items: center; user-select: none; }
+.shelf .sub.fold > summary { cursor: pointer; list-style: none; margin: 0 0 0.3rem; padding: max(0.15rem, var(--tap-pad)) 0; font-size: 0.8rem; font-weight: 600; color: var(--muted); display: flex; gap: 0.4rem; align-items: center; user-select: none; }
 .shelf .sub.fold > summary::-webkit-details-marker { display: none; }
 .shelf .sub.fold > summary::before { content: '▸'; }
 .shelf .sub.fold[open] > summary::before { content: '▾'; }
@@ -382,4 +382,4 @@ dialog.viewer .composer :is(.picker, .plugin-picker, .settings-picker) { display
   dialog.viewer .ticket-head { margin-bottom: 0.5rem; }
 }
 /* After the rows' own rules, which set their padding: phones give them --control-h of tap room (#471). */
-@media (max-width: 800px) { .nav-item, .shelf .shared-link { padding-block: max(0.3rem, (var(--control-h) - 1lh) / 2); } }
+@media (max-width: 800px) { .nav-item, .shelf .shared-link { padding-block: max(0.3rem, (var(--control-h) - 1lh) / 2); } .scheme-hide { min-height: var(--control-h); } }

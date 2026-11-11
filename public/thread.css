@@ -341,7 +341,7 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .load-earlier > button { display: inline-flex; align-items: center; gap: 0.45em; }
 .load-earlier > button[aria-busy='true'] { opacity: 1; color: var(--muted); }
 .narration { margin: 0.25rem 0 0.5rem; color: var(--muted); font-size: 0.9em; }
-.narration > summary { cursor: pointer; padding: 0.3rem 0; list-style: none; }
+.narration > summary { cursor: pointer; padding: max(0.3rem, var(--tap-pad)) 0; list-style: none; }
 .narration > summary::-webkit-details-marker { display: none; }
 .narration > summary:hover { color: var(--ink); }
 .narration .notes { border-left: 2px solid var(--line); padding: 0 0 0 0.75rem; margin: 0.25rem 0 0.5rem 0.3rem; }

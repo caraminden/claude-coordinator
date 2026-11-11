@@ -12,8 +12,9 @@
        priority and holds it all together to -CpuPercent of the whole PC (a hard cap). A process started by one in
        the job is in the job from its first instruction, so a job's cargo, MSBuild, node or dotnet is held too; the
        sweep only catches what started before this script did;
-    3. starts any runner service that is set to start automatically but is stopped (the BIOS reboot of 2026-11-11
-       left them all stopped), at most once every 5 minutes each. To keep one stopped, set it to Manual.
+    3. in the first 30 minutes after the PC starts, starts any runner service that is set to start automatically but
+       is stopped (the BIOS reboot of 2026-11-11 left them all stopped), at most once every 5 minutes each. After
+       that a stopped runner stays stopped: someone stopped it, or a removal is under way.
   It holds the job open for as long as it runs, and ends when the agent (-AgentPid) does. It never stops, removes or
   re-registers a runner, and never restarts the PC.
 
@@ -74,13 +75,15 @@ public static class CitadelCiJob {
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateJobObject(IntPtr job, uint exitCode);
   [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);
 
   const uint LIMIT_PRIORITY_CLASS = 0x20, LIMIT_BREAKAWAY_OK = 0x800, BELOW_NORMAL = 0x4000;
   const uint RATE_ENABLE = 0x1, RATE_HARD_CAP = 0x4;
   const uint SET_QUOTA = 0x100, TERMINATE = 0x1, QUERY_LIMITED = 0x1000;
 
   // A job that runs everything in it at below-normal priority, all of it together held to percent of every core.
-  // Breakaway is allowed so a tool that asks for it still starts (it would fail otherwise); the sweep takes it back.
+  // Breakaway is allowed so a tool that asks for it still starts (it would fail otherwise); the sweep takes it back
+  // while a runner is still above it. shortcut: one whose parent ended first escapes; make breakaway fail if one does.
   public static IntPtr Create(string name, int percent) {
     IntPtr job = CreateJobObjectW(IntPtr.Zero, name);
     if (job == IntPtr.Zero) throw new Win32Exception();
@@ -95,12 +98,20 @@ public static class CitadelCiJob {
     return job;
   }
 
-  // 0 when the process is in the job now, else the Win32 error (5: it is in another job this one can't nest under).
-  public static int Assign(IntPtr job, int pid) {
+  // 0 when the process is in the job now; -1 when it can't be opened (it ended, or is protected); -2 when its pid now
+  // belongs to a process other than the one started at `created` (a FILETIME, UTC; 0 skips the check); else the Win32
+  // error of the assignment (5: it is in another job this one can't nest under).
+  public static int Assign(IntPtr job, int pid, long created) {
     IntPtr p = OpenProcess(SET_QUOTA | TERMINATE | QUERY_LIMITED, false, pid);
-    if (p == IntPtr.Zero) return Marshal.GetLastWin32Error();
-    try { return AssignProcessToJobObject(job, p) ? 0 : Marshal.GetLastWin32Error(); } finally { CloseHandle(p); }
+    if (p == IntPtr.Zero) return -1;
+    try {
+      long start, end, kernel, user;
+      if (created != 0 && (!GetProcessTimes(p, out start, out end, out kernel, out user) || Math.Abs(start - created) > 10000)) return -2;
+      return AssignProcessToJobObject(job, p) ? 0 : Marshal.GetLastWin32Error();
+    } finally { CloseHandle(p); }
   }
+
+  public static void Close(IntPtr job) { CloseHandle(job); }
 
   public static bool InJob(IntPtr job, int pid) {
     IntPtr p = OpenProcess(QUERY_LIMITED, false, pid);
@@ -130,7 +141,7 @@ if ($Prove) {
   $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($burn))
   $parent = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile', '-EncodedCommand', $encoded -WindowStyle Hidden -PassThru
   try {
-    $err = [CitadelCiJob]::Assign($job, $parent.Id)
+    $err = [CitadelCiJob]::Assign($job, $parent.Id, 0)
     if ($err) { throw "Couldn't put the test's parent process in its job (Win32 error $err)." }
     Start-Sleep -Seconds 8
     $kids = @(Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $($parent.Id)" | Where-Object { $_.Name -eq 'cmd.exe' })
@@ -186,16 +197,24 @@ for (;;) {
       $inside = $false
       foreach ($j in $own) { if ([CitadelCiJob]::InJob($j, $id)) { $inside = $true; break } }
       if ($inside) { continue }
-      $err = [CitadelCiJob]::Assign($job, $id)
+      # Its start as the snapshot saw it, so a pid used again since is never taken for the runner's (1 ms: WMI keeps microseconds).
+      $created = $tree[$id].CreationDate.ToFileTimeUtc()
+      $err = [CitadelCiJob]::Assign($job, $id, $created)
       if ($err -eq 5) {
         $nested = [CitadelCiJob]::Create([NullString]::Value, $CpuPercent)
-        $err = [CitadelCiJob]::Assign($nested, $id)
+        $err = [CitadelCiJob]::Assign($nested, $id, $created)
+        if ($err -ne 0) { [CitadelCiJob]::Close($nested) }
         if ($err -eq 0) { $own.Add($nested); Write-Host "$($tree[$id].Name) ($id) was in another job already: it has a job of its own, nested in that one, with the same limits." }
       }
       if ($err -eq 0) { $held++; continue }
-      # It ended meanwhile (87), or can't be put in any job: lower it alone, once.
+      # Ended, or its pid is someone else's now: nothing of the runner's to hold.
+      if ($err -eq -2) { continue }
+      # It can't be opened or put in any job: lower it alone, once, if it is still the same process.
       $proc = Get-Process -Id $id -ErrorAction SilentlyContinue
       if (-not $proc) { continue }
+      # A start it can't read can't be checked: leave that process alone.
+      $started = try { $proc.StartTime } catch { $null }
+      if ($null -eq $started -or [math]::Abs(($started - $tree[$id].CreationDate).TotalMilliseconds) -gt 1) { continue }
       try {
         if ('Normal', 'AboveNormal', 'High' -contains [string]$proc.PriorityClass) { $proc.PriorityClass = 'BelowNormal' }
         Write-Host "$($tree[$id].Name) ($id) couldn't join a job (Win32 error $err): set to below-normal priority alone, without the cap."
@@ -208,14 +227,18 @@ for (;;) {
     foreach ($id in @($priorityOnly.Keys)) { if (-not $tree.ContainsKey($id)) { $priorityOnly.Remove($id) } }
 
     $now = Get-Date
-    foreach ($s in @(Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'actions.runner.%' AND StartMode = 'Auto' AND State = 'Stopped'")) {
-      if ($lastStart.ContainsKey($s.Name) -and ($now - $lastStart[$s.Name]).TotalMinutes -lt 5) { continue }
-      $lastStart[$s.Name] = $now
-      try {
-        Start-Service -Name $s.Name
-        Write-Host "Started $($s.Name): it is set to start automatically but was stopped."
-      } catch {
-        Write-Host "Couldn't start $($s.Name): $($_.Exception.Message)"
+    # Only just after a boot: a runner stopped later was stopped by someone, or by a removal under way.
+    $boot = (Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime
+    if (($now - $boot).TotalMinutes -lt 30) {
+      foreach ($s in @(Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'actions.runner.%' AND StartMode = 'Auto' AND State = 'Stopped'")) {
+        if ($lastStart.ContainsKey($s.Name) -and ($now - $lastStart[$s.Name]).TotalMinutes -lt 5) { continue }
+        $lastStart[$s.Name] = $now
+        try {
+          Start-Service -Name $s.Name
+          Write-Host "Started $($s.Name): it is set to start automatically but was stopped."
+        } catch {
+          Write-Host "Couldn't start $($s.Name): $($_.Exception.Message)"
+        }
       }
     }
   } catch {

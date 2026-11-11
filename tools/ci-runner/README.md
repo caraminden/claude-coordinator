@@ -303,11 +303,12 @@ everything started under them, and puts what isn't held yet into the job. The jo
 priority and caps all of it together at 75% of every core (a hard cap: past it, the job's threads wait for the next
 scheduling interval). A process started by one in the job is in the job from its start, so a step's cargo, MSBuild,
 node or dotnet is held too; the sweep only catches runners that started before it did, and processes that asked to
-break away. A runner already in another job (a session runner's logon task puts it in one) gets a job of its own,
-nested in that one, with the same limits. It also starts any `actions.runner.*` service that is set to start
-automatically but is stopped, at most every 5 minutes each (the BIOS reboot of 2026-11-11 left them all stopped): **to keep
-one stopped, set it to Manual** (`Set-Service <name> -StartupType Manual`). It never stops, removes or re-registers a
-runner.
+break away (one whose parent ended before the next sweep stays out: breakaway is allowed because refusing it makes
+the tool that asks fail to start). A runner already in another job (a session runner's logon task puts it in one) gets a job of its own,
+nested in that one, with the same limits (so a busy session runner can take more than the shared 75%, at
+below-normal priority still). In the first 30 minutes after the PC starts, it also starts any `actions.runner.*`
+service that is set to start automatically but is stopped, at most every 5 minutes each (the BIOS reboot of 2026-11-11
+left them all stopped); a runner stopped after that stays stopped. It never stops, removes or re-registers a runner.
 
 It comes back by itself: the agent starts it at every boot and every install, and again a minute after it ever ends;
 it ends with the agent. A job's limits stay on its processes while they run, so an agent install leaves the running

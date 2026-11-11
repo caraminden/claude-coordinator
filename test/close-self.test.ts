@@ -127,6 +127,10 @@ test('refuses while a question or plan card waits on people, or the state is try
   }
   store.updateTicket(t, { state: 'try' });
   assert.match(runner.keptOpen(t, true)!, /state is try/);
+  // Complete is finished work kept open on purpose (#547): unlike ready, close_self's own call refuses it too.
+  store.updateTicket(t, { state: 'complete', note: 'read: the report' });
+  assert.match(runner.keptOpen(t, true)!, /state is complete, which keeps it open/);
+  assert.match(runner.keptOpen(t)!, /state is complete/);
   for (const state of [null, 'parked', 'pending-deploy']) {
     store.updateTicket(t, { state });
     assert.equal(runner.keptOpen(t), null);

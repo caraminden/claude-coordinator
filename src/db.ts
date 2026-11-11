@@ -89,7 +89,7 @@ export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
  * blocked: stuck on something outside the thread · outside: work still running elsewhere (CI, someone's machine) ·
  * pending-deploy: deployed, not live yet; outlasts a new turn, and a successful deploy dismisses the thread ·
  * limited: the last turn hit the account's usage limit (set by the server, not the thread). */
-export const TICKET_STATES = ['ready', 'try', 'parked', 'blocked', 'outside', 'pending-deploy', 'limited'] as const;
+export const TICKET_STATES = ['ready', 'complete', 'try', 'parked', 'blocked', 'outside', 'pending-deploy', 'limited'] as const;
 export type TicketState = (typeof TICKET_STATES)[number];
 
 export interface Ticket {

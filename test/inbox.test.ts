@@ -18,7 +18,8 @@ test('a scheme\'s inbox: open cards, ready/try minions and ones offering replies
   const p1 = store.createProject('One', null).id;
   const p2 = store.createProject('Two', null).id;
   const a = minion(p1, 'a'), b = minion(p1, 'b'), gone = minion(p1, 'gone'), elsewhere = minion(p2, 'elsewhere');
-  const ready = minion(p1, 'ready'), parked = minion(p1, 'parked'), offering = minion(p1, 'offering');
+  const ready = minion(p1, 'ready'), parked = minion(p1, 'parked'), offering = minion(p1, 'offering'), complete = minion(p1, 'complete');
+  store.updateTicket(complete, { state: 'complete', note: 'read: the report', replies: JSON.stringify(['Close it']) });
   store.updateTicket(ready, { state: 'ready', replies: JSON.stringify(['Merge it']) });
   store.updateTicket(parked, { state: 'parked' });
   store.updateTicket(offering, { replies: JSON.stringify(['Do it']) });
@@ -41,7 +42,7 @@ test('a scheme\'s inbox: open cards, ready/try minions and ones offering replies
   const items = inboxItems(store, approvals, p1, 'Cara');
   assert.deepEqual([items[0].kind, items[0].ticketId, (items[0].card as any).id], ['approval', a, approvalId]);
   assert.deepEqual(items.slice(1).map((i) => [i.kind, i.ticketId, (i.card as any)?.id ?? null]).sort(),
-    [['plan', b, 'p-open'], ['question', a, 'q-open'], ['replies', offering, null], ['state', ready, null]], 'a ready minion with replies is listed once');
+    [['plan', b, 'p-open'], ['question', a, 'q-open'], ['replies', offering, null], ['state', complete, null], ['state', ready, null]].sort(), 'a ready or complete minion with replies is listed once');
   for (let i = 2; i < items.length; i++) assert.ok(items[i - 1].at >= items[i].at);
   assert.equal((items[0].card as any).tool, 'Bash');
 });

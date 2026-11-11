@@ -821,7 +821,7 @@ export class Runner {
 
   /**
    * Why close_self must leave this minion open for people, or null: a question, plan or approval card still
-   * waiting on them, or a state (try, ready) that tells them something is theirs to do. The deploy's
+   * waiting on them, or a state (try, ready, complete) that tells them something is theirs to do. The deploy's
    * own dismissal (deployLive) has its own checks. `atCall`, for close_self's own answer: the card
    * reason carries the card's link, and ready doesn't count, since a finished minion sets it by habit
    * before close_self (closeAfterTurn clears it, #480). At the turn end it does count: a ready set
@@ -834,6 +834,8 @@ export class Runner {
     }
     const state = this.store.getTicket(ticketId)?.state;
     if (state === 'try' || (state === 'ready' && !atCall)) return `its state is ${state}, which tells people something is waiting for them`;
+    // Complete is finished work kept open on purpose (#547): a report to read, or a person's close.
+    if (state === 'complete') return 'its state is complete, which keeps it open for people to read or close';
     return null;
   }
 

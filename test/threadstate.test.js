@@ -17,6 +17,7 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
     // what the minion is                                         rank, family, text
     [{}, [0, 'you', 'reply 5m']],
     [{ state: 'ready' }, [0, 'done', 'ready 5m']],
+    [{ state: 'complete', note: 'nothing left' }, [0, 'done', 'complete 5m']],
     [{ state: 'try' }, [0, 'you', 'try it 5m']],
     [{ state: 'ready', pending_card_at: NOW - 2 * HOUR }, [0, 'you', '? 2h']],
     [{ approvals: 1, status: 'running' }, [0, 'you', 'approve 5m']],
@@ -33,6 +34,11 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
     [{ status: 'closed', state: 'ready' }, [5, 'idle', 'dismissed']],
   ];
   for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
+});
+
+test('rowState: a complete minion says what is left in its label (#547)', () => {
+  assert.equal(rowState(t({ state: 'complete', note: 'read: the audit report' }), null, NOW).label, 'Complete: read: the audit report');
+  assert.equal(rowState(t({ state: 'complete' }), null, NOW).label, 'Complete: no work left');
 });
 
 test('rowState: ages and the steps flag', () => {

@@ -207,6 +207,11 @@ export const ticketRoutes: Route[] = [
       if (body.note !== undefined) fields.note = body.note ? str(body.note, 'Note', 60) : null;
       if (body.build !== undefined) fields.build = buildNumber(body.build);
       if (body.replies !== undefined) fields.replies = replyList(body.replies);
+      // Complete always says what's left (#547; Josh, 2026-11-11): its note comes with it, and stays while it holds.
+      const clearsNote = ticket.state === 'complete' && body.state === undefined && body.note !== undefined;
+      if ((body.state === 'complete' || clearsNote) && !fields.note) {
+        throw new HttpError(400, 'State complete needs a note in the same call saying what is left: "nothing left", or what people should read now ("read: the PR #12 report"), at most 60 characters. Link the files themselves in your reply');
+      }
       // shortcut: an old session's retired tag (#254) sets its type through type's aliases (process → chore, idea → ideation); remove after a release.
       if (body.tag && ticket.kind === 'ticket') {
         store.props.set('minion', id, ticket.project_id, { type: body.tag }, session.name);

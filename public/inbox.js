@@ -8,7 +8,7 @@ import { iconSrc } from './schemes.js';
 const inbox = { projectId: null, items: [], timer: 0, countsTimer: 0 };
 
 const ticketOf = (id) => (view?.coordinator?.id === id ? view.coordinator : view?.tickets?.get(id));
-// A ready/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
+// A ready/complete/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
 const faded = (item) => (item.kind === 'state' || item.kind === 'replies') && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 });
 
 /** Fetch the scheme's items again, then redraw the strip. */
@@ -68,7 +68,7 @@ export function inboxOtherTicket(ticket) {
 }
 
 // What each kind of item asks of you, as a chip on its minion's row.
-const ASKS = { approval: '✋ Approve', question: '❓ Question', plan: '📋 Plan', ready: '✅ Ready', try: '🧪 Try it', replies: '💬 Reply' };
+const ASKS = { approval: '✋ Approve', question: '❓ Question', plan: '📋 Plan', ready: '✅ Ready', complete: '🏁 Complete', try: '🧪 Try it', replies: '💬 Reply' };
 const OPEN_KEY = 'cc-inbox-open'; // whether this browser keeps the strip opened
 
 // One strip, kept across scheme pages so it doesn't flicker as they redraw. Made on first use: a module's top-level code must not call into another while they load.

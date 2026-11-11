@@ -31,6 +31,8 @@ export function rowState(t, usage, now = Date.now()) {
   // An open question or plan card is the more specific ask than ready, try it or reply; timed from when it was posted.
   if (t.pending_card_at) return { rank: 0, fam: 'you', cell: `? ${shortAgo(t.pending_card_at, now)}`, label: 'Waiting for you to answer a question or plan', since: t.pending_card_at };
   if (t.state === 'ready') return { rank: 0, fam: 'done', cell: waited('ready'), label: state.label };
+  // Complete carries what's left (nothing, or what to read) in its note, so the label says it at a glance (#547).
+  if (t.state === 'complete') return { rank: 0, fam: 'done', cell: waited('complete'), label: t.note ? `Complete: ${t.note}` : state.label };
   if (t.state === 'try') return { rank: 0, fam: 'you', cell: waited('try it'), label: state.label };
   return { rank: 0, fam: 'you', cell: waited('reply'), label: 'Your move' };
 }

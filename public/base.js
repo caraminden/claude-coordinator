@@ -27,6 +27,7 @@ export function listGroupsOf(p) {
 }
 export const STATES = {
   ready: { emoji: '✅', label: 'Ready to merge or pick up' },
+  complete: { emoji: '🏁', label: 'Complete: no work left' },
   try: { emoji: '🧪', label: 'Ready for you to try' },
   parked: { emoji: '🧊', label: 'Parked' },
   blocked: { emoji: '⛔', label: 'Blocked on something outside the minion' },

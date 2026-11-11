@@ -3,7 +3,7 @@ import type { Approvals } from './approvals.ts';
 import type { Store } from './db.ts';
 
 export interface InboxItem {
-  /** A card kind ('approval', 'question', 'plan': the chat event's kind), 'state' for a minion in state ready or try, or 'replies' for one offering one-tap replies in another state. */
+  /** A card kind ('approval', 'question', 'plan': the chat event's kind), 'state' for a minion in state ready, complete or try, or 'replies' for one offering one-tap replies in another state. */
   kind: string;
   ticketId: number;
   /** When it started waiting. */
@@ -30,9 +30,9 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
       .map(({ ticketId, at, card }) => ({ kind: 'approval', ticketId, at, card, eventId: store.cardEventId(ticketId, 'approval', (card as { id: string }).id) ?? undefined, key: `approval:${(card as { id: string }).id}` })),
     // A new stored card kind only needs adding to Store.openCards.
     ...store.openCards(projectId).filter((e) => awake.has(e.ticket_id)).map((e) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card: JSON.parse(e.data), eventId: e.id, key: `${e.kind}:${e.id}` })),
-    ...tickets.filter((t) => t.state === 'ready' || t.state === 'try').map((t) => ({ kind: 'state', ticketId: t.id, at: t.updated_at, key: `state:${t.id}` })),
+    ...tickets.filter((t) => ['ready', 'complete', 'try'].includes(t.state ?? '')).map((t) => ({ kind: 'state', ticketId: t.id, at: t.updated_at, key: `state:${t.id}` })),
     // Minions set replies as a turn ends, so a running one is listed with its chips hidden for a moment.
-    ...tickets.filter((t) => t.replies && !['ready', 'try', 'parked'].includes(t.state ?? '')).map((t) => ({ kind: 'replies', ticketId: t.id, at: t.updated_at, key: `replies:${t.id}` })),
+    ...tickets.filter((t) => t.replies && !['ready', 'complete', 'try', 'parked'].includes(t.state ?? '')).map((t) => ({ kind: 'replies', ticketId: t.id, at: t.updated_at, key: `replies:${t.id}` })),
   ];
   return items.sort((a, b) => Number(b.kind === 'approval') - Number(a.kind === 'approval') || b.at - a.at);
 }

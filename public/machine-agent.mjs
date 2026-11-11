@@ -236,6 +236,24 @@ function run(command, args, opts) {
   });
 }
 
+// cmd.exe's special characters, escaped with ^ (the rules are cross-spawn's, MIT).
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
+/**
+ * One line for cmd.exe /d /s /c to run a program with its arguments, each argument quoted for the program's own
+ * parser and cmd's special characters escaped, so spaces, quotes and & | ; stay literal. Node's shell option
+ * joins a program and its arguments with bare spaces. An npm shim under node_modules\.bin hands its arguments
+ * to cmd again, so they are escaped twice.
+ */
+export function cmdLine(command, args) {
+  const shim = /node_modules[\\/]\.bin[\\/][^\\/]+\.cmd$/i.test(command);
+  const quote = (arg) => {
+    const quoted = `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, '$1$1')}"`.replace(CMD_META, '^$1');
+    return shim ? quoted.replace(CMD_META, '^$1') : quoted;
+  };
+  return [command.replace(CMD_META, '^$1'), ...args.map(quote)].join(' ');
+}
+
 // Off Windows a task runs in a process group of its own, so stopping it reaches what it started too.
 const OWN_GROUP = process.platform !== 'win32';
 /** Task process groups still running: ended with the agent, which a Ctrl-C would no longer reach. */
@@ -1013,7 +1031,7 @@ async function main() {
     }
     if (claudeMcp || managed) {
       const s = claudeServer(claudeMcp ?? lentServer);
-      // An absolute path may hold spaces, which a shell would split; only batch files need one.
+      // Only batch files need a shell (cmdLine quotes for it).
       return { ...s, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(s.command) };
     }
     // npx and friends are .cmd files on Windows, which only start through a shell.
@@ -1104,7 +1122,8 @@ async function main() {
       log(`Session ${id.slice(0, 6)} could not start: ${err.message}`);
       spec = { command: process.execPath, args: ['-e', 'process.exit(1)'], env: {}, shell: false };
     }
-    const proc = spawn(spec.command, spec.args, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...spec.env }, shell: spec.shell });
+    const opts = { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...spec.env }, shell: spec.shell };
+    const proc = spec.shell ? spawn(cmdLine(spec.command, spec.args), [], opts) : spawn(spec.command, spec.args, opts);
     const s = { proc, chain: Promise.resolve() };
     sessions.set(id, s);
     log(`Session ${id.slice(0, 6)} started ${managed ? lentServer : describe}`);

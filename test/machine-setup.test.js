@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { machineSetupPosix, machineSetupRunnerAgent, machineSetupWindows } from '../public/machine-setup.js';
-import { backgroundService, claudeServerNames, loadConfig } from '../public/machine-agent.mjs';
+import { backgroundService, claudeServerNames, cmdLine, loadConfig } from '../public/machine-agent.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'machine-setup-'));
 
@@ -166,4 +166,17 @@ test('the runner agent line carries the real address and token, nothing to edit'
   assert.ok(t.startsWith("$u = 'http://10.0.0.5:8574';"));
   assert.match(t, /-CitadelUrl \$u -MachineToken 'ccm_12_abc'$/);
   assert.doesNotMatch(t, /perigee|…|</);
+});
+
+// Windows only (not run here): an MCP server from the config file, or after --, starts through cmd.exe, since
+// npx and friends are .cmd files. Node's shell option joins the program and its arguments with bare spaces, so
+// the agent hands it one line with each argument quoted and cmd's special characters escaped (as cross-spawn does).
+test('a server started through cmd.exe on Windows gets each argument quoted, so spaces and & ; | stay literal', () => {
+  assert.equal(cmdLine('npx', ['-y', 'godot mcp', 'a&b;echo x|y']), 'npx ^"-y^" ^"godot^ mcp^" ^"a^&b^;echo^ x^|y^"');
+  // Quotes inside an argument, and backslashes before a quote or at the end, as the program's own parser reads them.
+  assert.equal(cmdLine('uvx', ['say "hi"', 'C:\\dir\\', 'a\\"b']), 'uvx ^"say^ \\^"hi\\^"^" ^"C:\\dir\\\\^" ^"a\\\\\\^"b^"');
+  assert.equal(cmdLine('C:\\Program Files\\nodejs\\npx.cmd', ['%PATH%', '!x!', '(y)']), 'C:\\Program^ Files\\nodejs\\npx.cmd ^"^%PATH^%^" ^"^!x^!^" ^"^(y^)^"');
+  // An npm shim under node_modules\.bin hands its arguments to cmd a second time, so they are escaped twice.
+  assert.equal(cmdLine('C:\\p\\node_modules\\.bin\\srv.cmd', ['a b']), 'C:\\p\\node_modules\\.bin\\srv.cmd ^^^"a^^^ b^^^"');
+  assert.equal(cmdLine('srv', []), 'srv');
 });

@@ -3,7 +3,9 @@
 #   tools/land.sh
 # Under the deploy lock (the one tools/deploy.sh takes), so landings and deploys go one at a time:
 # 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here.
-# 2. Runs the tests on the rebased branch, in a citadel-heavy slot. A failure stops here, with main untouched.
+# 2. Runs the tests on the rebased branch. A failure stops here, with main untouched. Not in a citadel-heavy
+#    slot: the deploy lock already lets only one landing test at a time, and waiting on a slot other schemes'
+#    builds can hold for an hour, while holding the lock, starved every other landing (#499).
 # 3. Fast-forwards main in the scheme repo to the branch.
 # 4. Runs tools/deploy.sh (it inherits the lock). If that deploys nothing because a check failed and
 #    the live checkout went back, main goes back too, so main only ever holds what passed.
@@ -20,8 +22,8 @@ refuse() { say "$*"; exit 1; }
 
 # A turn in its person's Claude container (#213) has no deploy lock, user bus or GitHub login here.
 [ "${COORDINATOR_CONTAINER:-}" != 1 ] || refuse "this turn runs in a container: call the land tool (mcp__thread) instead, which runs land.sh on the host"
-# Its tests take a citadel-heavy slot under the deploy lock; a land.sh inside a slot would hold them the other way round.
-[ -z "${CITADEL_HEAVY_HELD:-}" ] || refuse "run it on its own, not under citadel-heavy: it runs its tests in a heavy slot itself"
+# Inside a slot it would hold a heavy slot, shared by every scheme, while it waits on the deploy lock.
+[ -z "${CITADEL_HEAVY_HELD:-}" ] || refuse "run it on its own, not under citadel-heavy: it would hold a heavy slot other schemes need while it waits for the deploy lock"
 [ $# -eq 0 ] || refuse "takes no arguments (for --now, land first, then run tools/deploy.sh --now with a person's OK)"
 here=$(git rev-parse --show-toplevel)
 branch=$(git branch --show-current)
@@ -54,9 +56,9 @@ if ! git rebase -q main; then
   refuse "the rebase onto main failed (see git's output above), so nothing landed${conflicted:+; conflicted files: $conflicted}. On conflicts: run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again"
 fi
 
-say "running the tests (in a citadel-heavy slot, shared host-wide)"
+say "running the tests"
 log="$state/land-test.log"
-if ! "$(dirname "${BASH_SOURCE[0]}")/citadel-heavy" "$(dirname "${BASH_SOURCE[0]}")/run-tests.sh" "$log"; then
+if ! "$(dirname "${BASH_SOURCE[0]}")/run-tests.sh" "$log"; then
   tail -n 40 "$log" >&2
   refuse "tests failed on the rebased branch (full log: $log), so main is untouched"
 fi

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -57,9 +57,7 @@ test('rebases onto main, tests, fast-forwards main, and deploys holding the lock
   r.commit(r.source, 'c.txt', 'someone else\n');
   const res = r.run();
   assert.equal(res.status, 0, res.stderr);
-  // The tests ran in a citadel-heavy slot (#325), here the test's own lock folder.
-  assert.match(res.stderr, /running the tests \(in a citadel-heavy slot/);
-  assert.ok(existsSync(join(env.CITADEL_HEAVY_DIR, 'slot-0')));
+  assert.match(res.stderr, /running the tests/);
   assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
   assert.equal(git(r.source, 'log', '--format=%s', '-3'), 'b.txt: mine\nc.txt: someone else\nbase');
   assert.ok(existsSync(join(r.source, 'b.txt')), "the scheme repo's checkout moves with main");
@@ -177,13 +175,51 @@ test('a deploy that fails before going live puts main back', () => {
   assert.ok(!existsSync(join(r.source, 'b.txt')));
 });
 
+// Run land.sh in its own process group, so a run that hangs can be stopped with everything it started.
+function landAsync(cwd: string, extra: Record<string, string>, limit: number): Promise<{ status: number | null; stderr: string; ms: number }> {
+  return new Promise((resolve) => {
+    const t = Date.now();
+    const child = spawn('bash', [land], { cwd, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, ...extra } });
+    let stderr = '';
+    child.stderr!.on('data', (d) => (stderr += d));
+    const timer = setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} }, limit);
+    child.on('close', (status) => { clearTimeout(timer); resolve({ status, stderr, ms: Date.now() - t }); });
+  });
+}
+
+// Other schemes' builds can hold every heavy slot for an hour. A landing that waited for one while
+// holding the deploy lock held up every other landing (#499): landings run their tests without one.
+test('two landings both land while other jobs hold every heavy slot', async () => {
+  const r = setup();
+  const wt2 = join(r.dir, 'wt2');
+  git(r.source, 'worktree', 'add', '-q', '-b', 'ticket/2-y', wt2);
+  r.commit(r.wt, 'b.txt', 'one\n');
+  r.commit(wt2, 'c.txt', 'two\n');
+  const heavy = join(r.dir, 'heavy');
+  mkdirSync(heavy);
+  writeFileSync(join(heavy, 'slots'), '1\n');
+  // A stand-in for someone's cargo build, holding the only slot until this test stops it.
+  const build = spawn('flock', [join(heavy, 'slot-0'), 'sleep', '600'], { detached: true, stdio: 'ignore' });
+  try {
+    while (spawnSync('flock', ['-n', join(heavy, 'slot-0'), 'true']).status === 0) await new Promise((ok) => setTimeout(ok, 50));
+    const extra = { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), CITADEL_HEAVY_DIR: heavy };
+    const [a, b] = await Promise.all([landAsync(r.wt, extra, 60_000), landAsync(wt2, extra, 60_000)]);
+    assert.equal(a.status, 0, `first landing: ${a.stderr}`);
+    assert.equal(b.status, 0, `second landing: ${b.stderr}`);
+    assert.doesNotMatch(a.stderr + b.stderr, /heavy slots .* busy/, 'neither waited on the build');
+    assert.deepEqual(git(r.source, 'log', '--format=%s', 'main').split('\n').sort(), ['b.txt: one', 'base', 'c.txt: two']);
+  } finally {
+    try { process.kill(-build.pid!, 'SIGKILL'); } catch {}
+  }
+});
+
 test("refuses uncommitted work, main itself, arguments, running inside a citadel-heavy slot, and a person's container", () => {
   const r = setup();
   writeFileSync(join(r.wt, 'a.txt'), 'dirty\n');
   assert.match(r.run().stderr, /uncommitted changes/);
   git(r.wt, 'checkout', '--', 'a.txt');
   assert.match(spawnSync('bash', [land, '--now'], { cwd: r.wt, encoding: 'utf8', env }).stderr, /takes no arguments/);
-  // Under citadel-heavy it would take the deploy lock while holding a slot, the reverse of its own order.
+  // Under citadel-heavy it would hold a slot other schemes need while it waits on the deploy lock.
   assert.match(r.run({ CITADEL_HEAVY_HELD: '1' }).stderr, /not under citadel-heavy/);
   // A person's Claude container has no deploy lock or GitHub login: the land tool runs it on the host.
   assert.match(r.run({ COORDINATOR_CONTAINER: '1' }).stderr, /runs in a container: call the land tool/);

@@ -101,7 +101,17 @@ jobs:
       - name: the full suite
         run: |
           rc=0
+          # The log streams while the suite runs (#560): a run cancelled at land.sh's cap used to show nothing,
+          # since the log was only printed once run-tests.sh ended. node prints files in order, so the hung file
+          # is the first one with no results.
+          : >"$RUNNER_TEMP/tests.log"
+          tail -n +1 -f "$RUNNER_TEMP/tests.log" &
           DEPLOY_TEST_CPU_WEIGHT= tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
-          cat "$RUNNER_TEMP/tests.log"
+          sleep 1; kill $! # tail prints what it has read: a second for the last lines
           [ "$rc" != 0 ] || grep -q '^ℹ skipped 0$' "$RUNNER_TEMP/tests.log" || { echo "tests were skipped on this runner (the lines with ﹣ above): install what they need"; exit 1; }
           exit "$rc"
+      # A cancelled step's processes live on until the job ends, so a hang still shows what it was waiting in:
+      # the test file's node process and whatever it started.
+      - name: what was still running
+        if: cancelled() || failure()
+        run: ps -u "$(id -u)" -o pid,ppid,etimes,stat,args --forest | cut -c1-400

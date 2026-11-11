@@ -303,7 +303,7 @@ export function parseSnapshot(data: any): { pr: PrSnapshot | null; self: string 
 async function fetchSnapshot(repoDir: string, repo: string, branch: string, as?: GithubEnv) {
   const [owner, name] = repo.split('/');
   const { stdout } = await run('gh', [
-    'api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `branch=${branch}`,
+    'api', 'graphql', '-f', `query=${QUERY}`, '-f', `owner=${owner}`, '-f', `name=${name}`, '-f', `branch=${branch}`,
   ], { cwd: repoDir, env: asEnv(as), timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
   return parseSnapshot(JSON.parse(stdout).data);
 }

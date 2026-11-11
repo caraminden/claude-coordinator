@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -360,6 +360,22 @@ test("read as the scheme owner, the owner's remarks during a minion's turn still
   assert.match(sent[0], /owner/);
   assert.match(sent[0], /Please rename it/);
   assert.doesNotMatch(sent[0], /Done/, "Bob's linked account is the minion's own");
+});
+
+test('the PR query passes the owner, repo and branch as strings, even all digits (#468 S02-6)', async () => {
+  const bin = mkdtempSync(join(root, 'gh-'));
+  const log = join(bin, 'args.json');
+  writeFileSync(join(bin, 'gh'), `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));\nconsole.log(JSON.stringify({ data: { viewer: { login: 'cara' }, repository: { pullRequests: { nodes: [] } } } }));\n`, { mode: 0o755 });
+  const store = new Store(join(root, 'fields.db'));
+  const project = store.createProject('P', null);
+  const ticket = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(ticket.id, root, 'ticket/1-t');
+  const w = new GithubWatcher(store, () => {});
+  w.as = () => ({ PATH: `${bin}:${process.env.PATH}` });
+  await w.poll(store.getTicket(ticket.id)!, root, '2024/true');
+  const args: string[] = JSON.parse(readFileSync(log, 'utf8'));
+  const field = (name: string) => args[args.findIndex((a) => a.startsWith(`${name}=`)) - 1];
+  assert.deepEqual(['owner', 'name', 'branch'].map(field), ['-f', '-f', '-f']);
 });
 
 test("the watcher reads a scheme's origin again: after it had none, and after it changed (#468 S02-5)", async (t) => {

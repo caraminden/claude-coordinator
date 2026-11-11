@@ -28,16 +28,17 @@ test('fails once', () => {
 `,
   'always.test.mjs': "import test from 'node:test';\ntest('always red', () => { throw new Error('red'); });\n",
   'hang.test.mjs': "import test from 'node:test';\ntest('hangs', () => new Promise(() => setInterval(() => {}, 1000)));\n",
-  // Fails in the full run, then hangs when run alone.
-  'once-then-hang.test.mjs': `import test from 'node:test';
+};
+// Fails in the full run, then hangs when run alone; a counter file per copy.
+const onceThenHang = (name: string) => `import test from 'node:test';
 import { existsSync, writeFileSync } from 'node:fs';
 test('fails, then hangs', () => {
-  if (existsSync('ran-hang')) return new Promise(() => setInterval(() => {}, 1000));
-  writeFileSync('ran-hang', '');
+  if (existsSync('ran-${name}')) return new Promise(() => setInterval(() => {}, 1000));
+  writeFileSync('ran-${name}', '');
   throw new Error('first run fails');
 });
-`,
-};
+`;
+for (const name of ['once-then-hang', 'once-then-hang2', 'once-then-hang3']) FIXTURES[`${name}.test.mjs`] = onceThenHang(name);
 
 let n = 0;
 async function run(files: string[], extra: Record<string, string> = {}) {
@@ -103,7 +104,7 @@ test('a hang is never rerun: the time limit fails the run with its line, and not
   assert.equal(r.code, 124, r.log);
   assert.match(r.stderr, /ran past 4s and were stopped: a test hung/);
   assert.doesNotMatch(r.log, /passed alone|failed again alone/);
-  assert.equal(existsSync(join(r.dir, 'ran-once')), true, 'the full run did reach once.test.mjs');
+  assert.equal(existsSync(join(r.dir, 'land-test-rerun.log')), false, 'nothing was rerun');
   assert.equal(r.retro, '');
 });
 
@@ -112,6 +113,15 @@ test('a file that hangs when rerun alone is stopped and counts as a real failure
   assert.equal(r.code, 1, r.log);
   assert.match(r.log, /test\/once-then-hang\.test\.mjs: hung when rerun alone \(stopped after 3s\): a real failure/);
   assert.deepEqual(flakeLines(r.retro), []);
+});
+
+test('the reruns share one time budget: once it is spent, the files left are not rerun, and the run fails', async () => {
+  const r = await run(['once-then-hang.test.mjs', 'once-then-hang2.test.mjs', 'once-then-hang3.test.mjs'], { DEPLOY_RERUN_TIMEOUT: '3', DEPLOY_RERUN_BUDGET: '5' });
+  assert.equal(r.code, 1, r.log);
+  assert.match(r.log, /test\/once-then-hang\.test\.mjs: hung when rerun alone \(stopped after 3s\)/);
+  assert.match(r.log, /test\/once-then-hang2\.test\.mjs: hung when rerun alone \(stopped after [12]s\)/);
+  assert.match(r.log, /test\/once-then-hang3\.test\.mjs: not rerun: the reruns' 5s ran out/);
+  assert.equal(existsSync(join(r.dir, 'ran-once-then-hang3')), true, 'the full run did reach the third file');
 });
 
 test('more failed files than a load blip explains are not rerun, and the run fails', async () => {

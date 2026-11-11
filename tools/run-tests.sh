@@ -8,11 +8,13 @@
 # A red run stays red (Cara, 2026-11-10, "Keep failing, log it"). When it fails, each failed file runs again alone,
 # once, only to label it: one that passes alone is a likely flake from load, and gets a `flake` line with the load
 # average in the scheme's retro log (retro-log/<date>/land.md) so flaky files get counted. A hang is never rerun.
-# DEPLOY_RERUN_TIMEOUT limits each rerun in seconds (default 180).
+# The reruns hold the deploy lock too, and a waiting land gives up after 15 minutes: DEPLOY_RERUN_TIMEOUT limits
+# each in seconds (default 120), DEPLOY_RERUN_BUDGET all of them together (default 300); a file left over is not rerun.
 set -uo pipefail
 log=$1
 limit=${DEPLOY_TEST_TIMEOUT:-600}
-rerun_limit=${DEPLOY_RERUN_TIMEOUT:-180}
+rerun_limit=${DEPLOY_RERUN_TIMEOUT:-120}
+budget=${DEPLOY_RERUN_BUDGET:-300}
 max_reruns=5 # more failed files than this is a broken change, not load
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 failed=$(mktemp)
@@ -48,12 +50,19 @@ log_flake() (
 rerun_log=${log%.log}-rerun.log
 : >"$rerun_log"
 say "${#files[@]} test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in $rerun_log)"
+SECONDS=0
 for f in "${files[@]}"; do
+  left=$((budget - SECONDS))
+  if [ "$left" -le 0 ]; then
+    say "$f: not rerun: the reruns' ${budget}s ran out"
+    continue
+  fi
+  this=$((left < rerun_limit ? left : rerun_limit))
   echo "== $f" >>"$rerun_log"
-  timeout -k 10 "$rerun_limit" node --test --test-force-exit "$f" >>"$rerun_log" 2>&1
+  timeout -k 10 "$this" node --test --test-force-exit "$f" >>"$rerun_log" 2>&1
   case $? in
     0) say "$f: failed in the full run, passed alone: likely load, not your change (1-minute load $load)"; log_flake "$f" ;;
-    124 | 137) say "$f: hung when rerun alone (stopped after ${rerun_limit}s): a real failure" ;;
+    124 | 137) say "$f: hung when rerun alone (stopped after ${this}s): a real failure" ;;
     *) say "$f: failed again alone: a real failure" ;;
   esac
 done

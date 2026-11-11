@@ -119,6 +119,19 @@ test('a turn still running after a day holds the mark no longer: its reply so fa
   store.db.close();
 });
 
+test('each embed request carries at most 2 texts, so a full batch stays well inside the timeout on a busy box (#525)', async () => {
+  const { store, A, a1 } = world(join(root, 'small.db'));
+  for (let i = 0; i < 7; i++) turn(store, a1.id, 'Cara', `Ask number ${i}`, `Reply number ${i}`);
+  const sizes: number[] = [];
+  const counting: Embed = async (texts) => {
+    sizes.push(texts.length);
+    return texts.map(fakeVec);
+  };
+  assert.equal(await store.memory.index(A.id, counting, 'fake', 8), 8);
+  assert.deepEqual(sizes, [2, 2, 2, 2]);
+  store.db.close();
+});
+
 test("a running turn waits, and holds the mark, until its result; then it's indexed once", async () => {
   const { store, A, a1, a2 } = world(join(root, 'two.db'));
   const running = turn(store, a1.id, 'Cara', 'Still thinking about kiwis', 'Half an answer', false);

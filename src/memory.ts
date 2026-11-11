@@ -60,6 +60,8 @@ const REPLY_MAX = 1500;
 const STUCK_MS = 60 * 60_000;
 /** A turn whose minion still runs holds the scheme's mark this long at most: past it, later turns past the window of 200 wait no more. */
 const LIVE_MS = 24 * 60 * 60_000;
+/** Texts per embed request. */
+const PER_REQUEST = 2;
 /** Messages that aren't a person's or a relay's ask: CI and server notices are noise. */
 const NOT_ASKS = new Set(['GitHub', 'System']);
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -116,8 +118,9 @@ export class Memory {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (source_kind, source_id) DO UPDATE SET project_id = excluded.project_id, ticket_id = excluded.ticket_id, person_id = excluded.person_id,
         ts = excluded.ts, text = excluded.text, vec = excluded.vec, model = excluded.model`);
-    for (let i = 0; i < todo.length; i += 8) {
-      const part = todo.slice(i, i + 8);
+    // Two texts a request: 8 full chunks took ~85 s of a whole core (#525), too near llamaEmbed's 120 s timeout on a busy box.
+    for (let i = 0; i < todo.length; i += PER_REQUEST) {
+      const part = todo.slice(i, i + PER_REQUEST);
       const vecs = await embed(part.map((p) => p.text));
       part.forEach((p, j) => put.run(p.project_id, p.ticket_id, p.person_id, p.source_kind, p.source_id, p.ts, p.text, new Uint8Array(vecs[j].buffer), model));
     }

@@ -430,9 +430,9 @@ export function renderTicketHead() {
     view.progressEl);
   if (had?.isConnected && document.activeElement !== had) had.focus({ preventScroll: true });
   renderTyping();
-  // While a turn runs, a sent message waits for it; said on hover rather than in a line of its own.
+  // While a turn runs, Send steers it (composer.js); said on hover rather than in a line of its own.
   const send = document.querySelector('.composer button[type=submit]');
-  if (send) send.title = t.status === 'running' ? 'Runs after the current turn' : '';
+  if (send) send.title = t.status === 'running' ? 'Claude reads it between steps of the running turn; ▾ sends it after this turn' : '';
   scheduleProgress();
 }
 

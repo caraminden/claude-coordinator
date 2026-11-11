@@ -49,6 +49,7 @@ import { CiHealth } from './src/ci-health.ts';
 import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
 import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
+import { TimerAlerts } from './src/timer-alerts.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { ticketRoutes } from './src/routes/tickets.ts';
@@ -512,6 +513,14 @@ if (!BOOT_CHECK) ciLoad.start();
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
 fallbacks.alert = adminAlert(store, (project, person, key, title, link) => mandateAlert('In-server fallback', project, person, key, title, link));
 fallbacks.clear = adminClear(store, (project, person, key) => mandateAlert('In-server fallback', project, person, key, null));
+// Contraptions' timer jobs (#555): a failed run is one Mandate alert for every admin and the app's home-scheme owner,
+// cleared once a run of that job succeeds. Only a server that manages app services reads them.
+const timerAlerts = new TimerAlerts(store, {
+  runs: (rows) => services.timerRuns(rows),
+  journal: (unit) => services.journalTail(unit),
+  mandate: (from, person, key, title, link) => mandateAlert('Timer alerts', from, person, key, title, link),
+});
+if (!BOOT_CHECK && !services.opts.off) timerAlerts.start();
 // Members already in schemes get their invites, and leavers' are withdrawn (#310); it settles, so later boots only retry what failed.
 if (!BOOT_CHECK) void safely('repo access sweep', () => repoAccess.sweep());
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);

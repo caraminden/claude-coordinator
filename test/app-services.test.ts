@@ -135,6 +135,23 @@ test('install writes its units, reloads, enables and (re)starts them; start, sto
   assert.match(await services.logs(m, 5), /^journal --user -u citadel-app-mandate-backup.service -u citadel-app-mandate-backup.timer -u citadel-app-mandate.service -n 5 --no-pager/);
 });
 
+test("timerRuns reads each owned timer job's last run, and journalTail drops systemd's own lines", async () => {
+  appFolder('mandate');
+  const m = row('mandate', 7341);
+  assert.deepEqual(await services.timerRuns([m]), [], 'nothing installed, nothing to read');
+  await services.install(m);
+  const [ok] = await services.timerRuns([m]);
+  assert.deepEqual({ ...ok, app: ok.app.name }, { app: 'mandate', job: 'backup', unit: 'citadel-app-mandate-backup.service', active: 'inactive', result: 'success', status: '0', exitAt: null });
+  writeFileSync(join(root, `systemd${n}`, 'citadel-app-mandate-backup.service.failed'), '');
+  const [bad] = await services.timerRuns([m]);
+  assert.equal(bad.active, 'failed');
+  assert.equal(bad.result, 'exit-code');
+  assert.equal(bad.status, '1');
+  assert.equal(bad.exitAt, 1794380400_000);
+  assert.ok(fake.calls().includes('--user show citadel-app-mandate-backup.service --timestamp=unix -p ActiveState -p Result -p ExecMainStatus -p ExecMainExitTimestamp'));
+  assert.deepEqual(await services.journalTail('citadel-app-mandate-backup.service'), ['journal --user -u citadel-app-mandate-backup.service -n 30 --no-pager -o cat']);
+});
+
 test('install creates a missing DATA_DIR at 0700 and leaves an existing one exactly as it is', async () => {
   appFolder('fresh');
   const data = join(home, '.local/share/fresh');

@@ -176,7 +176,7 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
   return { base, port, root, data, proc, cookie, call, stop };
 }
 
-/** A stand-in systemctl: logs each call to $FAKE_SYSTEMD/calls and keeps units' states as files there. */
+/** A stand-in systemctl: logs each call to $FAKE_SYSTEMD/calls and keeps units' states as files there (<unit>.failed: its last run failed). */
 export function fakeSystemd(dir: string) {
   mkdirSync(dir, { recursive: true });
   const bin = join(dir, 'systemctl');
@@ -184,8 +184,9 @@ export function fakeSystemd(dir: string) {
 d="${dir}"; echo "$*" >> "$d/calls"; shift; verb=$1; shift
 case $verb in
   show) u=$1; a=inactive; s=dead; e=disabled; l=loaded
-    [ -f "$d/$u.active" ] && a=active && s=running; [ -f "$d/$u.enabled" ] && e=enabled
-    printf 'LoadState=%s\\nActiveState=%s\\nSubState=%s\\nUnitFileState=%s\\n' $l $a $s $e;;
+    [ -f "$d/$u.active" ] && a=active && s=running; [ -f "$d/$u.enabled" ] && e=enabled; r=success; x=0; t=
+    [ -f "$d/$u.failed" ] && a=failed && s=failed && r=exit-code && x=1 && t=@1794380400
+    printf 'LoadState=%s\\nActiveState=%s\\nSubState=%s\\nUnitFileState=%s\\nResult=%s\\nExecMainStatus=%s\\nExecMainExitTimestamp=%s\\n' $l $a $s $e $r $x "$t";;
   enable|disable|start|restart|stop) now=; for u; do
       [ "$u" = --now ] && now=1 && continue
       case $verb in enable) touch "$d/$u.enabled"; [ -n "$now" ] && touch "$d/$u.active";;

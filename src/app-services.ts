@@ -172,6 +172,21 @@ export interface UnitState {
   enabled: string;
 }
 
+/** A timer job's last run (AppServices.timerRuns). */
+export interface TimerRun {
+  app: ContraptionRow;
+  job: string;
+  /** Its service, citadel-app-<name>-<job>.service. */
+  unit: string;
+  /** failed after a run that failed, inactive after one that worked or none, activating while it runs. */
+  active: string;
+  /** systemd's Result: success, exit-code, signal, timeout, … */
+  result: string;
+  /** The exit status of its command. */
+  status: string;
+  exitAt: number | null;
+}
+
 /** A unit someone installed by hand for this app before Citadel did. */
 export interface HandUnit extends UnitState {
   path: string;
@@ -700,6 +715,34 @@ export class AppServices {
       await new Promise((r) => setTimeout(r, Math.min(3000, this.opts.healthMs / 10)));
     }
     throw new Error(`Not healthy after ${Math.round(this.opts.healthMs / 1000)}s: ${seen || 'no answer'}. Its journal: contraption_service logs.`);
+  }
+
+  /**
+   * Each timer job's last run, for the timer units Citadel owns of every app in `rows` (#555, src/timer-alerts.ts):
+   * the job's service state (failed, inactive, activating, …), how it ended, and when, in ms (null: never ran).
+   */
+  async timerRuns(rows: ContraptionRow[]): Promise<TimerRun[]> {
+    this.guard();
+    const out: TimerRun[] = [];
+    for (const row of rows) {
+      for (const timer of (await this.owned(row.name)).filter((f) => f.endsWith('.timer')).sort()) {
+        const unit = timer.replace(/\.timer$/, '.service');
+        const r = await this.systemctl('show', unit, '--timestamp=unix', '-p', 'ActiveState', '-p', 'Result', '-p', 'ExecMainStatus', '-p', 'ExecMainExitTimestamp');
+        if (r.code) continue;
+        const v = Object.fromEntries(r.out.split('\n').map((l) => l.split(/=(.*)/s).slice(0, 2)));
+        const at = /^@(\d+)/.exec(v.ExecMainExitTimestamp ?? '');
+        out.push({ app: row, job: unit.slice(unitName(row.name).length + 1, -'.service'.length), unit, active: v.ActiveState ?? 'unknown', result: v.Result ?? '', status: v.ExecMainStatus ?? '', exitAt: at ? Number(at[1]) * 1000 : null });
+      }
+    }
+    return out;
+  }
+
+  /** A unit's own output from its last `lines` journal lines, without systemd's lines about it. */
+  async journalTail(unit: string, lines = 30): Promise<string[]> {
+    this.guard();
+    const r = await run(this.opts.journalctl, ['--user', '-u', unit, '-n', String(lines), '--no-pager', '-o', 'cat']);
+    if (r.code) return [];
+    return r.out.split('\n').filter((l) => l.trim() && !l.startsWith(`${unit}:`) && !/^(Starting|Started|Finished|Failed to start) /.test(l));
   }
 
   /** The last lines of its units' journal. */

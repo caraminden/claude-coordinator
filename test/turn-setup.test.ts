@@ -217,12 +217,14 @@ test("only Citadel's own Taskmaster may read the live checkout, never write it, 
   for (const tm of [own, await turn('coordinator', 'connected')]) assert.match(tm.system, /Read-only shell commands [^\n]*`git -C <folder> [^\n]*`cd <folder> && …` or a path in a variable is denied/);
 });
 
-test("minion and Taskmaster turns both keep the Read tool out of the logins, keys, env file and state.db (#185)", async () => {
+test("minion and Taskmaster turns both keep the Read tool out of the logins and state.db by file; keys and the env file's folder are the tripwire's (#185, #485)", async () => {
   for (const kind of ['ticket', 'coordinator'] as const) {
     const { deny } = (await turn(kind, 'connected')).settings.permissions;
-    for (const rule of [`Read(/${homedir()}/.claude/.credentials.json)`, `Read(/${homedir()}/.ssh/**)`, `Read(/${homedir()}/.config/claude-coordinator/**)`, `Read(/${homedir()}/.config/gh/hosts.yml)`, `Read(/${dirname(store.path)}/state.db*)`]) {
+    for (const rule of [`Read(/${homedir()}/.claude/.credentials.json)`, `Read(/${homedir()}/.config/gh/hosts.yml)`, `Read(/${dirname(store.path)}/state.db*)`]) {
       assert.ok(deny.includes(rule), `${kind}: ${rule}`);
     }
+    // A folder-wide Read rule refuses every Bash read after an unresolved cd: ~/.ssh and the rest are guarded in test/tripwire.test.ts.
+    assert.ok(!deny.some((r: string) => r.startsWith('Read(') && r.endsWith('/**)')), `${kind}: ${deny.join(' ')}`);
     if (kind === 'coordinator') assert.ok(deny.some((r: string) => r.startsWith('Edit(')), 'the Taskmaster keeps its own Edit denies');
   }
 });

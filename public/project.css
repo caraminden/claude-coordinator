@@ -179,6 +179,11 @@ button.nav-item.add { width: 100%; text-align: left; background: none; border: 0
   .split { gap: 0; }
   /* In a drawer the panel's bar closes it. */
   .panels > details.citadel-drawer > summary::after { content: '✕'; }
+  /* ...and stays at the top while the list under it scrolls, so ✕ is always in reach. */
+  .panels > details.citadel-drawer > summary {
+    position: sticky; z-index: 2; top: calc(-0.75rem - env(safe-area-inset-top, 0px)); min-height: 2.5rem; background: var(--bg);
+    margin: calc(-0.75rem - env(safe-area-inset-top, 0px)) -0.9rem 0.5rem; padding: calc(0.75rem + env(safe-area-inset-top, 0px)) 0.9rem 0.25rem;
+  }
   body .citadel-drawer-handle { z-index: 7; }
   body .citadel-drawer-handle::before { background: var(--muted); }
   /* Handles only where there's something to open: the panels, or on the left the app rail. */

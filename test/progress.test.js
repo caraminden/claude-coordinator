@@ -76,3 +76,12 @@ test("an amended plan's steps keep their ids, so a step's actions still show und
   todo('t3', [['Fix', 'completed'], ['Add a test', 'in_progress']]);
   assert.equal(p.tasks[0].id, fix, 'nor does a step dropped from it');
 });
+
+test('a turn that died says so, not the Done of a plan an earlier turn finished', () => {
+  const p = plan('cccccc');
+  applyEvent(p, 'error', { text: 'API Error: Can\'t reach the API server' });
+  assert.equal(progressLine(p, false), 'Last turn failed: see the error below');
+  // The next turn's start clears it (and drops the finished plan).
+  applyEvent(p, 'claude', { type: 'system', subtype: 'init' });
+  assert.equal(progressLine(p, false), '');
+});

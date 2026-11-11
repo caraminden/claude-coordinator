@@ -232,6 +232,12 @@ h2 { font-size: 1.15rem; margin: 0; }
 /* While another view loads, dim the one on screen (after a beat, so quick switches don't flicker). */
 body.navigating { cursor: progress; }
 body.navigating #app .split > :last-child, body.navigating #app > :not(.split) { opacity: 0.55; transition: opacity 0.15s 0.12s; }
+/* A load that takes a moment (a scheme switch is about 3 s on a busy box) shows a spinner, not just the dim. */
+body.navigating::after { content: ''; position: fixed; z-index: 60; top: calc(40vh - 14px); left: calc(50% - 14px); width: 28px; height: 28px; box-sizing: border-box; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--accent) 25%, var(--bg)); border-top-color: var(--accent); background: var(--bg); box-shadow: 0 0 0 4px var(--bg); animation: nav-busy-in 0s 0.3s both, scheme-spin 0.8s linear infinite; }
+@keyframes nav-busy-in { from { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { body.navigating::after { animation: nav-busy-in 0s 0.3s both; } }
+.route-error { max-width: 40rem; margin: 2rem auto; }
+.route-error > p { margin: 0.25rem 0; }
 
 /* Project pages drop the top bar; its account and usage live in the overview panel. With no bar to
    clear the notch, a strip of page colour covers the status bar area and the thread bar sticks below it. */

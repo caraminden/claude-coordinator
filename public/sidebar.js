@@ -154,7 +154,9 @@ export function toggleSchemeMenu(button) {
   button.setAttribute('aria-expanded', 'true');
   const r = button.getBoundingClientRect();
   menu.style.top = `${r.bottom + 4}px`;
-  menu.style.left = `${Math.max(8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8))}px`;
+  // Never under the app rail (z-index 50, over the menu): the switch sits near the panel's left edge.
+  const rail = document.querySelector('.citadel-rail')?.getBoundingClientRect().right || 0;
+  menu.style.left = `${Math.max(rail + 8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8))}px`;
   // The counts came with the page; other schemes' minions have moved since, so fetch them again.
   refreshSchemeCounts();
 }
@@ -163,7 +165,7 @@ export function newTicketForm(projectId) {
   // A one-line chat box: what you type becomes the new thread's first message. The thread names
   // and types itself from it, and every thread gets full access.
   const box = h('textarea', { name: 'message', required: true, rows: 1, placeholder: 'New minion: what should it work on?', 'aria-label': 'Start a new minion', 'data-draft': true });
-  const err = h('p', { class: 'error', hidden: true });
+  const err = h('p', { class: 'error cui-notice', 'data-tone': 'danger', role: 'alert', hidden: true });
   const form = h('form', { class: 'new-thread' }, box, err);
   const fit = () => fitHeight(box);
   const draftKey = `cc-new-thread:${projectId}`;

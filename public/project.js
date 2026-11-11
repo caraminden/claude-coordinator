@@ -13,6 +13,7 @@ import { schedulesButton, showSchedules } from './schedules.js';
 import { replaceHash } from './navstack.js';
 import { accountPage, membersPage, peoplePage } from './people.js';
 import { contraptionsPage } from './contraptions.js';
+import { toast } from './ui/status.js';
 
 /** Old links address a thread by its global id (#/t/<id>); send them to its project address. */
 export async function showTicket(ticketId) {
@@ -71,7 +72,11 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   let chatId = null;
   if (main.kind === 'chat') {
     chatId = main.id ?? (main.number == null ? coordinator.id : tickets.find((t) => t.number === main.number)?.id);
-    if (!chatId) throw new Error(`There is no minion #${main.number} in ${project.name}.`);
+    if (!chatId) {
+      // An old or mistyped link: open the scheme, with the page around it, and say why.
+      if (seq === routeSeq) { toast(`There is no minion #${main.number} in ${project.name}.`, { tone: 'warn', ms: 8000 }); replaceHash(`#/p/${projectId}`); }
+      return;
+    }
   }
   const [{ ticket }, page] = chatId
     ? await Promise.all([api(`api/tickets/${chatId}`), loadEvents(chatId)])

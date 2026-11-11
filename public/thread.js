@@ -1277,7 +1277,10 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
 /** A collapsed message's one line: its text without Markdown marks, struck words keeping their line. */
 function previewNodes(text, strikes) {
   const flat = (t) => t.replace(/[#*_`>\[\]~]/g, '').replace(/\s+/g, ' ');
-  return struckSource((text ?? '').trim(), strikes).split(/~~(.+?)~~/).map((part, i) => (i % 2 ? h('del', {}, flat(part)) : flat(part)));
+  // A URL in the one-line preview is still a link (Citadel-wide: links are clickable); it opens without toggling the message.
+  const links = (t) => flat(t).split(/(https?:\/\/[^\s()<>]+[^\s()<>.,;:!?'"])/).map((bit, i) => (i % 2
+    ? h('a', { href: bit, target: '_blank', rel: 'noopener', onclick: (e) => e.stopPropagation() }, bit) : bit));
+  return struckSource((text ?? '').trim(), strikes).split(/~~(.+?)~~/).flatMap((part, i) => (i % 2 ? h('del', {}, flat(part)) : links(part)));
 }
 
 /** An attached file in a message: images and PDFs open in a tab (the server says so), anything else downloads. */

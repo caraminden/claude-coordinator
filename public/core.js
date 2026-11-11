@@ -778,7 +778,12 @@ async function route() {
     else await openStartScheme();
   } catch (err) {
     if (err.message !== 'Not logged in' && seq === routeSeq) {
-      app.replaceChildren(h('p', { class: 'error' }, err.message));
+      // A notice with a way out, not a bare red line on a blank page.
+      const scheme = hash.match(/^#\/[ps]\/(\d+)/)?.[1];
+      app.replaceChildren(h('div', { class: 'cui-notice route-error', role: 'alert', 'data-tone': 'danger' },
+        h('p', {}, err.message),
+        h('p', {}, scheme ? h('a', { href: `#/p/${scheme}` }, 'Back to the scheme') : null, scheme ? ' · ' : null,
+          h('a', { href: '#/' }, 'Home'), ' · ', h('a', { href: location.hash, onclick: (e) => { e.preventDefault(); route(); } }, 'Try again'))));
       // The old view is gone from the page, so the next resync routes again instead of refreshing it in place.
       setView(null);
     }

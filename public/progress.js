@@ -15,6 +15,7 @@ export function createProgress() {
     tasks: [], // { id, subject, activeForm, description, outcome, note, status: 'pending' | 'in_progress' | 'completed', actions }
     pendingCreates: new Map(), // tool_use_id -> TaskCreate input, until its result tells us the task id
     turnActions: 0,
+    turnFailed: false, // the last turn ended in an error event (no init since)
     lastAction: null,
   };
 }
@@ -292,9 +293,12 @@ function allDone(p) {
  */
 export function applyEvent(p, kind, data) {
   const actions = [];
+  // A turn that died says so, rather than the "Done" of a plan an earlier turn finished.
+  if (kind === 'error') p.turnFailed = true;
   if (kind !== 'claude' || !data) return actions;
 
   if (data.type === 'system' && data.subtype === 'init') {
+    p.turnFailed = false;
     p.turnActions = 0;
     p.lastAction = null;
     // A plan finished in an earlier turn belongs to that chunk of work, not this one.
@@ -371,6 +375,7 @@ export function stepInfo(p) {
 export function progressLine(p, running) {
   const { total, done, current, step } = stepInfo(p);
   // A finished plan from an earlier turn says nothing about a turn that is running now.
+  if (!running && p.turnFailed) return 'Last turn failed: see the error below';
   if (total && !(running && !current && done === total)) {
     if (current) return running ? `Step ${step} of ${total}: ${current.activeForm || current.subject}…` : `Paused at step ${step} of ${total}: ${current.subject}`;
     if (done === total) return `Done · ${total}/${total} steps`;

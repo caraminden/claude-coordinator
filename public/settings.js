@@ -538,7 +538,10 @@ export function appInstructionsEditor() {
       textarea.disabled = false;
       status.textContent = '';
       renderAppInstructionsHead();
-      textarea.focus();
+      if (!matchMedia('(pointer: coarse)').matches) {
+        textarea.focus({ preventScroll: true });
+        textarea.setSelectionRange(0, 0);
+      }
     } catch (err) {
       status.textContent = `Could not load them: ${err.message}`;
     }
@@ -662,7 +665,12 @@ export function instructionsEditor() {
   loadHistory();
   setTimeout(() => {
     renderInstructionsHead();
-    textarea.focus();
+    // Ready to type, but at the start of the text, and not on touch, where it would raise the keyboard.
+    if (!matchMedia('(pointer: coarse)').matches) {
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(0, 0);
+      textarea.scrollTop = 0;
+    }
   });
   return section;
 }

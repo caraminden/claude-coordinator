@@ -10,6 +10,7 @@ import { ClaudeLink } from '../src/claude-link.ts';
 import { Containers, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
+import { until } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'claude-link-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -56,4 +57,33 @@ test('a sign-in started again while the container starts leaves no orphan sign-i
   assert.equal(second.state, 'waiting for code', second.error);
   await first;
   assert.equal(execCount() - before, 1, 'only the newer start ran claude auth login');
+});
+
+test('a sign-in that shows no link in 60 seconds says so, and the exit after its kill keeps that (#468 S02-8)', async (t) => {
+  process.env.FAKE_PODMAN = 'silent';
+  const { link, uid } = newLink();
+  link.ensure = async () => {};
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const started = link.link(uid);
+  // until() would wait on the mocked setTimeout.
+  while (!readFileSync(execs, 'utf8').includes(`citadel-claude-l${n}-${uid} `)) await new Promise((r) => setImmediate(r));
+  t.mock.timers.tick(60_000);
+  const status = await started;
+  assert.match(status.error ?? '', /didn't show a link within 60 seconds/);
+  t.mock.timers.reset();
+  await new Promise((r) => setTimeout(r, 200));
+  assert.match(link.status(uid).error ?? '', /didn't show a link within 60 seconds/);
+});
+
+test('a sign-in that ends while waiting for the code says so instead of waiting on (#468 S02-8)', async () => {
+  process.env.FAKE_PODMAN = 'link-then-exit';
+  const { link, uid } = newLink();
+  link.ensure = async () => {};
+  assert.equal((await link.link(uid)).state, 'waiting for code');
+  const status = await until('the sign-in to end', () => {
+    const s = link.status(uid);
+    return s.state !== 'waiting for code' && s;
+  }, 5000);
+  assert.equal(status.state, 'not linked');
+  assert.match(status.error ?? '', /ended/);
 });

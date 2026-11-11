@@ -101,6 +101,8 @@ interface Login {
   url?: string;
   error?: string;
   exited?: Promise<number>;
+  /** The person's code went in (code()), which then reads how the sign-in ended. */
+  sent?: boolean;
 }
 
 /** The `claude` executable's real file, so its folder (every installed version) can be mounted read-only. */
@@ -326,7 +328,10 @@ export class ClaudeLink {
         child.stdout!.on('data', take);
         child.stderr!.on('data', take);
         void login.exited!.then((code) => {
-          if (!login.url) login.error = `The sign-in ended (code ${code}) before showing a link: ${lastLines(login.out)}`;
+          // The 60-second error stays: the kill after it is what ended the sign-in.
+          if (!login.url && !login.error) login.error = `The sign-in ended (code ${code}) before showing a link: ${lastLines(login.out)}`;
+          // Ended while waiting for the code: the link is dead, so don't keep offering it.
+          else if (login.url && !login.sent && !login.error) login.error = `The sign-in ended (code ${code}) before the code was pasted: start linking again. ${lastLines(login.out)}`;
           clearTimeout(timer);
           resolve();
         });
@@ -342,6 +347,7 @@ export class ClaudeLink {
     const login = this.logins.get(uid);
     if (!login?.child || !login.url || !login.exited) throw new Error('No sign-in is waiting for a code: start linking again.');
     login.child.stdin!.on('error', () => {}); // the sign-in may already have ended
+    login.sent = true;
     login.child.stdin!.write(`${code}\r`);
     const exit = await Promise.race([login.exited, new Promise<null>((r) => setTimeout(() => r(null), 60_000))]);
     if (exit === null) login.child.kill();

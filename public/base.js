@@ -69,6 +69,8 @@ export async function api(path, opts = {}) {
     showLogin();
     throw new Error('Not logged in');
   }
+  // Caddy's answer while nothing serves: a restart that outlasted systemd's socket, or a failed one (#493).
+  if (!res.ok && !data.error && [502, 503, 504].includes(res.status)) throw new Error('%APP_NAME% is restarting, try again in a moment');
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }

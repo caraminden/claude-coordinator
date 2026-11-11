@@ -167,6 +167,8 @@ h2 { font-size: 1.15rem; margin: 0; }
   font-size: 0.9em;
   text-align: center;
 }
+/* core.js's "Reconnecting…" while the live stream is down: floats over the page, so nothing moves. */
+.reconnecting { position: fixed; top: calc(0.5rem + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); z-index: 50; box-shadow: 0 4px 12px rgb(0 0 0 / 0.12); }
 .update-banner button { padding: 0.15rem 0.6rem; font-size: 0.85em; margin-left: 0.25rem; }
 
 /* Weekly usage of the Claude account, in the top bar */

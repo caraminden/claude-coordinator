@@ -11,13 +11,27 @@ self.addEventListener('fetch', (event) => {
   if (path.startsWith('/apps/')) return;
   // Nor the backup chat (src/backup.html), which must load however broken the app's own files are.
   if (path === '/backup' || path.startsWith('/backup/')) return;
-  event.respondWith(fetch(event.request).catch(() => new Response(
-    '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Offline</title>' +
-    '<body style="font:16px system-ui;padding:2rem;text-align:center">%APP_NAME% can\'t be reached right now. ' +
-    '<a href="">Try again</a></body>',
-    { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
-  )));
+  event.respondWith(fetch(event.request).then(
+    // Caddy's bare 502 when nothing serves the port: a restart that outlasted systemd's socket, or a failed one (#493).
+    // Not a preview's: its own 502 and 503 pages say why it stopped (src/previews.ts).
+    (res) => [502, 503, 504].includes(res.status) && !path.startsWith('/preview/') ? restarting() : res,
+    () => new Response(
+      '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Offline</title>' +
+      '<body style="font:16px system-ui;padding:2rem;text-align:center">%APP_NAME% can\'t be reached right now. ' +
+      '<a href="">Try again</a></body>',
+      { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+    ),
+  ));
 });
+
+/** A page that says the server is restarting and reloads itself every 3 s until the app loads instead. */
+const restarting = () => new Response(
+  '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark">' +
+  '<meta http-equiv="refresh" content="3">' +
+  '<title>Restarting…</title><body style="font:16px system-ui;padding:2rem;text-align:center">' +
+  '<p>%APP_NAME% is restarting. Trying again…</p><p><a href="">Try now</a></p></body>',
+  { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Retry-After': '3' } },
+);
 
 // A question card, a failed turn, or a thread that is ready or blocked (src/push.ts). One
 // notification per thread: a newer one replaces the last, and still alerts.

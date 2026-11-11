@@ -251,6 +251,26 @@ window.addEventListener('pagehide', saveScroll);
 let streamRetry = 0;
 let streamTimer = null;
 
+// While the live stream is down (a restart, mostly) the page stays as it is, clicks wait for the next server,
+// and after a moment this chip says why, until the stream is back (#493).
+let reconnectChip = null;
+let reconnectTimer = null;
+function reconnecting(on) {
+  if (on && (reconnectChip || reconnectTimer)) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  if (on) {
+    reconnectTimer = setTimeout(() => {
+      reconnectChip = h('div', { class: 'cui-chip reconnecting', 'data-tone': 'warn', role: 'status' },
+        h('span', { class: 'cui-spin', 'aria-hidden': 'true' }), 'Reconnecting…');
+      document.body.append(reconnectChip);
+    }, 1500);
+  } else {
+    reconnectChip?.remove();
+    reconnectChip = null;
+  }
+}
+
 function connectStream(catchUp = false) {
   if (stream || !me) return;
   clearTimeout(streamTimer);
@@ -258,6 +278,7 @@ function connectStream(catchUp = false) {
   stream = es;
   es.onopen = () => {
     streamRetry = 0;
+    reconnecting(false);
     // Anything broadcast while we were disconnected was missed; fetch it.
     if (catchUp) resync();
     catchUp = true;
@@ -304,6 +325,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };
   es.onerror = () => {
+    reconnecting(true);
     // EventSource retries dropped connections itself, but gives up for good on a non-200
     // reply (e.g. Caddy's 502 while the server restarts), so reconnect by hand then.
     if (es.readyState !== EventSource.CLOSED) return;
@@ -932,6 +954,7 @@ export async function logout() {
   clearTimeout(streamTimer);
   stream?.close();
   stream = null;
+  reconnecting(false);
   setAccount(null);
   renderLogin();
 }

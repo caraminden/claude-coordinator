@@ -319,6 +319,7 @@ function openViewer(ticket, file, inPlace) {
   viewer.dialog.setAttribute('aria-label', file.name);
   viewer.stage.className = `viewer-stage k-${file.kind}`;
   viewer.stage.replaceChildren();
+  viewer.stage.textLoad = null; // a text file still loading for the last file is dropped
   if (file.missing) viewer.stage.append(h('p', { class: 'muted' }, `${file.missing}.`));
   else {
     // A page's Send goes to the chat beside it.
@@ -521,6 +522,8 @@ function fillWindow(frame) {
  * file is, see addBriefButtons).
  */
 function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, bridge, urlFor = (p) => fileUrl(ticketId, p), hrefFor = (p) => fileHref(ticketId, p) }) {
+  // The full-screen viewer reuses its stage: a text answer for a file opened before the one showing is dropped.
+  const load = (body.textLoad = {});
   if (kind === 'image') {
     body.append(h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { class: 'artifact-media', src, alt: name })));
   } else if (kind === 'video') {
@@ -541,6 +544,7 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
     body.append(h('p', { class: 'muted' }, `Too large to preview (${formatSize(size)}). Open or download it instead.`));
   } else {
     body.append(h('p', { class: 'muted' }, 'Loading…'));
+    const show = (el) => body.textLoad === load && body.replaceChildren(el);
     fetch(src).then(async (res) => {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       const text = await res.text();
@@ -557,8 +561,8 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
       // Plain text keeps its URLs clickable too (#440): linkify escapes everything else.
       const pre = h('pre', { class: 'artifact-text' });
       if (!doc) pre.innerHTML = linkify(shown);
-      body.replaceChildren(doc ? h('div', { class: 'msg doc' }, doc) : pre);
-    }).catch((err) => body.replaceChildren(h('p', { class: 'error' }, `Could not load: ${err.message}`)));
+      show(doc ? h('div', { class: 'msg doc' }, doc) : pre);
+    }).catch((err) => show(h('p', { class: 'error' }, `Could not load: ${err.message}`)));
   }
 }
 

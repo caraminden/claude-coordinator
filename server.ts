@@ -280,7 +280,8 @@ const ultrareviews = new UltraReviews({
   claudeBin: process.env.CLAUDE_BIN ?? 'claude', place: (uid) => claudeLink.place(uid), scratch: (uid) => claudeLink.turnsDir(uid),
   emit: (ticketId, kind, data) => runner.emit(ticketId, kind, data), getSetting: (k) => store.getSetting(k), setSetting: (k, v) => store.setSetting(k, v), hostEnv: turnEnv(process.env),
 });
-ultrareviews.recover();
+// A boot check's or preview's copy names the live reviews' folders: only the live server may clear them.
+if (!BOOT_CHECK) ultrareviews.recover();
 claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container);
 const landings = new Landings();
 // Contraption turns, app deploys and ultra reviews run as the server's children: a restart waits for them like landings.

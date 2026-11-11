@@ -144,12 +144,13 @@ export class Previews {
     const dir = join(this.root, String(ticket.id));
     rmSync(dir, { recursive: true, force: true });
     await mkdir(dir, { recursive: true });
-    // A consistent copy even while this server writes (WAL), minus the push subscriptions and the
-    // running turns' records (their systemd units), which only the live server may act on.
+    // A consistent copy even while this server writes (WAL), minus the push subscriptions, the
+    // running turns' records (their systemd units) and the running ultra reviews' (their folders),
+    // which only the live server may act on.
     const db = join(dir, 'coordinator.db');
     await backup(this.store.db, db);
     const copy = new DatabaseSync(db);
-    copy.exec("DELETE FROM push_subscriptions; DELETE FROM settings WHERE key LIKE 'turn:%'");
+    copy.exec("DELETE FROM push_subscriptions; DELETE FROM settings WHERE key LIKE 'turn:%' OR key = 'ultrareview_running'");
     copy.close();
 
     const port = await freePort();

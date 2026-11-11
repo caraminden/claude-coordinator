@@ -43,6 +43,10 @@ store.setTicketDir(ticket.id, cwd, null);
 // Copied mid-turn from the live database: live, this would be resumed at boot.
 store.updateTicket(ticket.id, { status: 'running' });
 store.setSetting(`turn:${ticket.id}`, { resumes: 0 });
+// A live ultra review running in its clone, as the copy's record of it names (#468 S08-1).
+const reviewClone = join(root, 'review-clone');
+mkdirSync(reviewClone);
+store.setSetting('ultrareview_running', [{ ticketId: ticket.id, uid: 1, id: 'r1', dir: reviewClone }]);
 
 let base = '';
 let cookie = '';
@@ -106,6 +110,10 @@ test('nothing resumes the copied mid-turn minion, and no claude ever ran', async
   // Live, recover() resumes interrupted turns resumeGapMs (3 s) apart.
   await new Promise((r) => setTimeout(r, 3500));
   assert.equal(existsSync(marker), false);
+});
+
+test("a running ultra review's folder, named in the copy, is left alone (#468 S08-1)", () => {
+  assert.equal(existsSync(reviewClone), true);
 });
 
 test('a preview exits once the server that started it is gone', async () => {

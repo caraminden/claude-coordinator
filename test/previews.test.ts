@@ -109,6 +109,8 @@ test('the proxy serves the preview to a signed-in person, as that person, withou
   const copy = new DatabaseSync(join(data, 'previews', String(ticket.id), 'coordinator.db'), { readOnly: true });
   assert.equal(copy.prepare('SELECT count(*) AS n FROM push_subscriptions').get()!.n, 0);
   assert.equal(copy.prepare("SELECT count(*) AS n FROM settings WHERE key LIKE 'turn:%'").get()!.n, 0);
+  // Nor the running ultra reviews, whose folders a branch's older server.ts would delete (#468 S08-1).
+  assert.equal(copy.prepare("SELECT count(*) AS n FROM settings WHERE key = 'ultrareview_running'").get()!.n, 0);
   copy.close();
 });
 

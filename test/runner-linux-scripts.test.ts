@@ -51,9 +51,10 @@ before(async () => {
   stub(bin, 'chown', 'echo "chown $*" >> "$LOG"');
   stub(bin, 'systemctl', 'echo "systemctl $*" >> "$LOG"; [ "$1" = is-active ] && echo active; true');
   stub(bin, 'curl', 'while [ $# -gt 0 ]; do [ "$1" = -o ] && cp "$FAKE_TARBALL" "$2"; shift; done');
-  // The runner tarball: config.sh and svc.sh that log their arguments and leave the files the real ones do.
+  // The runner tarball: a config.sh that leaves the .runner file the real one does, and bin/runsvc.sh for the unit.
   const pkg = join(tmp, 'pkg');
-  mkdirSync(pkg);
+  mkdirSync(join(pkg, 'bin'), { recursive: true });
+  stub(join(pkg, 'bin'), 'runsvc.sh', 'exit 0');
   stub(pkg, 'config.sh', 'if [ "$1" = remove ]; then rm -f .runner; else echo "{}" > .runner; fi');
   execFileSync('tar', ['-czf', join(tmp, 'runner.tar.gz'), '-C', pkg, '.']);
   sha = createHash('sha256').update(readFileSync(join(tmp, 'runner.tar.gz'))).digest('hex');
@@ -69,7 +70,7 @@ after(() => {
 function run(script: string, args: string[], env: Record<string, string> = {}): Promise<{ code: number; out: string }> {
   return new Promise((resolve) => {
     const child = spawn('bash', [join(scripts, script), ...args], {
-      env: { PATH: process.env.PATH_FOR_SCRIPTS!, HOME: tmp, CC_MACHINE_TOKEN: TOKEN, CITADEL_RUNNER_ROOT: root, CITADEL_RUNNER_UNITS: units, USERS: join(tmp, 'users'), RUNNER_SHA256: sha, RUNNER_NAME: 'DESK', FAKE_TARBALL: join(tmp, 'runner.tar.gz'), LOG: log, ...env },
+      env: { PATH: process.env.PATH_FOR_SCRIPTS!, HOME: tmp, CC_MACHINE_TOKEN: TOKEN, CITADEL_RUNNER_ROOT: root, CITADEL_RUNNER_UNITS: units, USERS: join(tmp, 'users'), RUNNER_SHA256: sha, RUNNER_NAME: 'DESK', CITADEL_RUNNER_SETTLE: '0', FAKE_TARBALL: join(tmp, 'runner.tar.gz'), LOG: log, ...env },
     });
     let out = '';
     child.stdout.on('data', (c) => { out += c; });
@@ -94,7 +95,9 @@ test('add, add again, list, remove: the whole life of a scheme\'s Linux runners'
     assert.ok(logged().includes(`as ${USER} HOME=${dir}/home token=${REG} machine=none: ./config.sh --unattended --url https://github.com/caraminden/theory-of-crafting --name ${name} --labels theory-of-crafting-ci-linux --work _work\n`), logged());
     const unit = readFileSync(unitOf(suffix), 'utf8');
     assert.match(unit, /^# citadel-repo=caraminden\/theory-of-crafting\n/);
-    assert.match(unit, new RegExp(`^ExecStart=${dir}/runsvc.sh\nUser=${USER}\nWorkingDirectory=${dir}\n`, 'm'));
+    assert.match(unit, new RegExp(`^ExecStart=/bin/bash ${dir}/bin/runsvc.sh\nUser=${USER}\nWorkingDirectory=${dir}\n`, 'm'));
+    assert.ok(existsSync(join(dir, 'bin', 'runsvc.sh')), 'the unit runs a file the tarball has');
+    assert.ok(logged().includes(`chown -R ${USER}: ${dir}\n`), 'the scheme\'s user owns it');
     assert.ok(logged().includes(`systemctl enable --now citadel-runner-caraminden-theory-of-crafting${suffix}.service\n`), logged());
   }
   assert.doesNotMatch(logged(), /--token|svc\.sh/, 'no token on a command line; root never runs the runner\'s svc.sh');
@@ -142,6 +145,27 @@ test('add, add again, list, remove: the whole life of a scheme\'s Linux runners'
   rmSync(join(root, 'actions-runner-theory-of-crafting-3'), { recursive: true });
   rmSync(join(root, 'actions-runner-other'), { recursive: true });
   rmSync(unitOf('-3'));
+});
+
+test('an add cut off before config.sh leaves a unit remove can find; a unit pointing elsewhere is left alone', async () => {
+  // Cut off: its unit and folder, but no .runner, as when the agent ends an add at 15 minutes.
+  mkdirSync(join(root, 'actions-runner-theory-of-crafting'));
+  writeFileSync(unitOf(''), `# citadel-repo=caraminden/theory-of-crafting\nUser=${USER}\nWorkingDirectory=${root}/actions-runner-theory-of-crafting\n`);
+  writeFileSync(join(tmp, 'users', USER), '');
+  const add = await run('add-runner.sh', ['7', base, '1']);
+  assert.equal(add.code, 1);
+  assert.match(add.out, /was never registered \(an add cut off\?\): ci_runners remove, then add again/);
+  // A unit naming the repo but another user or a folder outside /opt/actions-runner-*: root's, yet not acted on.
+  writeFileSync(unitOf('-2'), `# citadel-repo=caraminden/theory-of-crafting\nUser=root\nWorkingDirectory=${root}/actions-runner-theory-of-crafting-2\n`);
+  writeFileSync(unitOf('-3'), `# citadel-repo=caraminden/theory-of-crafting\nUser=${USER}\nWorkingDirectory=${tmp}\n`);
+  const remove = await run('remove-runner.sh', ['7', base]);
+  assert.equal(remove.code, 1, remove.out);
+  assert.ok(!existsSync(join(root, 'actions-runner-theory-of-crafting')) && !existsSync(unitOf('')), 'the cut-off one is cleared');
+  assert.ok(existsSync(unitOf('-2')) && existsSync(unitOf('-3')) && existsSync(tmp), 'the odd ones stay');
+  assert.match(remove.out, /2 runner\(s\) weren't removed/);
+  rmSync(unitOf('-2'));
+  rmSync(unitOf('-3'));
+  rmSync(join(tmp, 'users', USER), { force: true });
 });
 
 test('a download whose SHA-256 is wrong installs nothing; Citadel\'s refusal and bad arguments stop it before anything', async () => {

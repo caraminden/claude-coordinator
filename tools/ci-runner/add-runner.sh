@@ -71,7 +71,11 @@ for i in $(seq 1 "$count"); do
   dir=$root/actions-runner-$repo_name$suffix
   unit=citadel-runner-$owner-$repo_name$suffix.service
   theirs=$(sed -n '1s/^# citadel-repo=//p' "$units/$unit" 2>/dev/null || true)
-  if [[ -f $units/$unit && $theirs == "$repo" ]]; then
+  if [[ -f $units/$unit && $theirs == "$repo" && ! -f $dir/.runner ]]; then
+    # Its unit is written before config.sh, so an add that was cut off leaves this.
+    taken=$((taken + 1))
+    echo "$name$suffix in $dir was never registered (an add cut off?): ci_runners remove, then add again." >&2
+  elif [[ -f $units/$unit && $theirs == "$repo" ]]; then
     echo "Already here, left as it is: $name$suffix in $dir (service $(systemctl is-active "$unit" || true))"
   elif [[ -e $units/$unit || -e $dir ]]; then
     # Repo foo's second instance and repo foo-2's first share these names; or a runner made by hand sits there.
@@ -102,39 +106,14 @@ fi
 
 token=''
 failed=0
+undo() { failed=$((failed + 1)); echo "$runner: $1; removing $dir and $unit, which this run made." >&2; rm -rf "$dir"; rm -f "$units/$unit"; }
 for suffix in "${missing[@]}"; do
   dir=$root/actions-runner-$repo_name$suffix
   runner=$name$suffix
   unit=citadel-runner-$owner-$repo_name$suffix.service
-  mkdir -p "$dir"
-  if ! (
-    set -e
-    tar -xzf "$tarball" -C "$dir"
-    # 3. The runner reads .env at start: telemetry off, and a home of its own, so runners never share tool caches (#370).
-    mkdir -p "$dir/home"
-    printf '%s\n' 'DOTNET_CLI_TELEMETRY_OPTOUT=1' 'DOTNET_NOLOGO=1' "HOME=$dir/home" > "$dir/.env"
-    printf '{"repo": "%s", "label": "%s", "name": "%s", "mode": "linux", "unit": "%s", "added_at": "%s"}\n' "$repo" "$label" "$runner" "$unit" "$(date -u +%FT%TZ)" > "$dir/.citadel-runner"
-    chown -R "$user:" "$dir"
-    chmod 700 "$dir"
-  ); then
-    failed=$((failed + 1)); echo "$runner: couldn't unpack into $dir; removing it." >&2; rm -rf "$dir"; continue
-  fi
-  # 4. The token, as late as possible: it lasts about an hour, and one registers every instance of this run.
-  if [[ -z $token ]]; then
-    mapfile -t reg < <(citadel true) || true
-    token=${reg[2]:-}
-    [[ -n $token ]] || { rm -rf "$dir"; die 'Citadel gave no registration token (the line above says why).'; }
-  fi
-  echo "Registering $runner on $repo with label $label"
-  # As the scheme's user, without the machine token, and with the registration token in its environment
-  # (ACTIONS_RUNNER_INPUT_TOKEN is config.sh's --token), never in any command line `ps` shows. -m keeps that HOME.
-  if ! (cd "$dir" && unset CC_MACHINE_TOKEN && export HOME=$dir/home ACTIONS_RUNNER_INPUT_TOKEN=$token &&
-    runuser -m -u "$user" -- ./config.sh --unattended --url "https://github.com/$repo" --name "$runner" --labels "$label" --work _work); then
-    failed=$((failed + 1)); echo "$runner: config.sh failed; removing $dir, which this run made." >&2; rm -rf "$dir"; continue
-  fi
-  # 5. Its unit, written here from the runner's own svc.sh template, as the scheme's user, started now and at every
-  #    start of the distro. The repo line is what remove-runner.sh reads. KillMode=mixed, not the template's process:
-  #    a job's leftover processes end with the runner instead of outliving it.
+  # 3. Its unit first, so whatever happens next, remove-runner.sh can find this folder: written here from the runner's
+  #    svc.sh template (root never runs svc.sh, which CI jobs can change), as the scheme's user. Its first line is what
+  #    remove-runner.sh reads. KillMode=mixed, not the template's process: a job's leftovers end with the runner.
   cat > "$units/$unit" <<EOF
 # citadel-repo=$repo
 # Made by Citadel's add-runner.sh (#510); remove-runner.sh removes it.
@@ -143,7 +122,7 @@ Description=GitHub Actions runner $runner for $repo ($label)
 After=network-online.target
 
 [Service]
-ExecStart=$dir/runsvc.sh
+ExecStart=/bin/bash $dir/bin/runsvc.sh
 User=$user
 WorkingDirectory=$dir
 KillMode=mixed
@@ -153,7 +132,29 @@ TimeoutStopSec=5min
 [Install]
 WantedBy=multi-user.target
 EOF
-  if ! { systemctl daemon-reload && systemctl enable --now "$unit"; }; then
+  # 4. The runner, owned by the scheme's user. It reads .env at start: telemetry off, and a home of its own, so
+  #    runners never share tool caches (#370).
+  if ! { mkdir -p "$dir/home" && tar -xzf "$tarball" -C "$dir" &&
+    printf '%s\n' 'DOTNET_CLI_TELEMETRY_OPTOUT=1' 'DOTNET_NOLOGO=1' "HOME=$dir/home" > "$dir/.env" &&
+    printf '{"repo": "%s", "label": "%s", "name": "%s", "mode": "linux", "unit": "%s", "added_at": "%s"}\n' "$repo" "$label" "$runner" "$unit" "$(date -u +%FT%TZ)" > "$dir/.citadel-runner" &&
+    chown -R "$user:" "$dir" && chmod 700 "$dir"; }; then
+    undo "couldn't unpack"; continue
+  fi
+  # 5. The token, as late as possible: it lasts about an hour, and one registers every instance of this run.
+  if [[ -z $token ]]; then
+    mapfile -t reg < <(citadel true) || true
+    token=${reg[2]:-}
+    [[ -n $token ]] || { undo 'no token'; die 'Citadel gave no registration token (the line above says why).'; }
+  fi
+  echo "Registering $runner on $repo with label $label"
+  # As the scheme's user, without the machine token, and with the registration token in its environment
+  # (ACTIONS_RUNNER_INPUT_TOKEN is config.sh's --token), never in any command line `ps` shows. -m keeps that HOME.
+  if ! (cd "$dir" && unset CC_MACHINE_TOKEN && export HOME=$dir/home ACTIONS_RUNNER_INPUT_TOKEN=$token &&
+    runuser -m -u "$user" -- ./config.sh --unattended --url "https://github.com/$repo" --name "$runner" --labels "$label" --work _work); then
+    undo 'config.sh failed'; continue
+  fi
+  # 6. Started now and at every start of the distro; a service that dies at once (enable still says yes) is a failure.
+  if ! { systemctl daemon-reload && systemctl enable --now "$unit" && sleep "${CITADEL_RUNNER_SETTLE:-3}" && systemctl is-active --quiet "$unit"; }; then
     failed=$((failed + 1)); echo "$runner is registered on GitHub but $unit didn't start; it stays: look in $dir/_diag, then remove it (remove-runner.sh) before trying again." >&2; continue
   fi
   echo "Added: $unit is $(systemctl is-active "$unit" || true), folder $dir"

@@ -202,6 +202,8 @@ test('lets through open cards, links that say the card is answered, neutral ment
     'Waiting on you: nothing.\n\nI ran the root step from [#523\'s card](#/p/2/t/523?e=50).',
     'Already answered:\n- [#523\'s card](#/p/2/t/523?e=50), still waiting on CI meanwhile',
     '`Waiting on you: [#523\'s card](#/p/2/t/523?e=50)`',
+    'No need to answer [#523\'s card](#/p/2/t/523?e=50) any more.',
+    'CI is pending.\n\n- Reference: [#523\'s card](#/p/2/t/523?e=50)',
   ]) assert.deepEqual(flagged(ok), [], ok);
   assert.deepEqual(staleCards('Waiting on you: [#523\'s card](#/p/2/t/523?e=50)', []), []);
 });

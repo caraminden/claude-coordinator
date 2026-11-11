@@ -2564,9 +2564,9 @@ export class Runner {
     return [...asks, ...stored].sort((a, b) => a.at - b.at || a.id - b.id).map((c) => c.card);
   }
 
-  /** The scheme's cards from the last week that aren't in `open`, newest 200, with what happened to each (#531). */
+  /** The scheme's newest 500 cards that aren't in `open`, with what happened to each (#531). No time cutoff: a card asked weeks ago may be answered today. */
   private settledCards(projectId: number, open: Set<string>): SettledCard[] {
-    return this.store.recentCards(projectId, Date.now() - 7 * 86_400_000, 200).flatMap((r) => {
+    return this.store.recentCards(projectId, 500).flatMap((r) => {
       const href = cardHref({ project_id: projectId, kind: r.tkind, number: r.number, id: r.ticket_id }, r.id);
       if (open.has(href)) return [];
       const kind = r.kind as CardLink['kind'];

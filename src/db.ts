@@ -1795,11 +1795,11 @@ export class Store {
   }
 
   /**
-   * A project's question, plan and approval cards posted since `since`, newest `limit` of them, oldest first,
+   * A project's newest `limit` question, plan and approval cards, oldest first,
    * each with its minion and how it was settled: the first person's message after it in its chat that isn't
    * a click on another card (`reply`), and an approval's result (`result`). For the link check (#531).
    */
-  recentCards(projectId: number, since: number, limit: number): (EventRow & { number: number | null; tkind: string; tstatus: string; reply: string | null; result: string | null })[] {
+  recentCards(projectId: number, limit: number): (EventRow & { number: number | null; tkind: string; tstatus: string; reply: string | null; result: string | null })[] {
     const bots = NOT_PEOPLE.map((n) => n.toLowerCase());
     return this.db.prepare(`
       SELECT * FROM (
@@ -1814,9 +1814,9 @@ export class Store {
           (SELECT json_set(r.data, '$.at', r.created_at) FROM events r WHERE r.ticket_id = e.ticket_id AND r.kind = 'approval_result' AND r.id > e.id
               AND json_extract(r.data, '$.id') = json_extract(e.data, '$.id') ORDER BY r.id LIMIT 1) AS result
         FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
-        WHERE t.project_id = ? AND e.kind IN ('question', 'plan', 'approval') AND e.created_at >= ?
+        WHERE t.project_id = ? AND e.kind IN ('question', 'plan', 'approval')
         ORDER BY e.id DESC LIMIT ?)
-      ORDER BY id`).all(...bots, projectId, since, limit) as any;
+      ORDER BY id`).all(...bots, projectId, limit) as any;
   }
 
   private openCardsWhere(scope: string, id: number): EventRow[] {

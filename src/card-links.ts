@@ -137,13 +137,15 @@ export function explainCards(missing: CardLink[][], self: number | null): string
 const PENDING = /\b(?:wait(?:s|ing)?|awaits|awaiting|needs?|pending|unanswered|still open|open (?:card|question)s?|from you|on you|for you to|go card|to (?:answer|approve|pick|decide))\b/i;
 /** A request at the start of a sentence or list item: "Tap Done on [the card](…)". */
 const ASKS = /^\s*(?:[-*+]|\d+[.)])?\s*(?:please\s+)?(?:tap|click|answer|approve|pick|choose|decide)\b/i;
-/** Words that say the card is dealt with, which let the link through. */
-const DONE = /\b(?:answered|settled|approved|picked|chose|already|closed|dismissed|resolved|replied|denied|allowed|expired|revised)\b/i;
+/** Words that say the card is dealt with, or that nothing is asked, which let the link through. */
+const DONE = /\b(?:answered|settled|approved|picked|chose|already|closed|dismissed|resolved|replied|denied|allowed|expired|revised|no (?:need|longer)|nothing|not needed|(?:don't|doesn't|do not|does not) need)\b/i;
+/** A line that introduces a list: ends in a colon, or is a heading or a bold line ("Waiting on you:", "**Needs you**"). */
+const INTRO = /:\s*$|^\s*#{1,6}\s|^\s*\*\*[^*]+\*\*:?\s*$/;
 const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s/;
 
 /**
  * The settled cards `text` links as if they still waited on people (#531): the link's sentence, or the
- * line leading into its list ("Waiting on you:"), reads as pending, and neither says it's dealt with.
+ * line introducing its list ("Waiting on you:"), reads as pending, and neither says it's dealt with.
  */
 export function staleCards(text: string, settled: SettledCard[]): SettledCard[] {
   if (!settled.length) return [];
@@ -162,7 +164,7 @@ export function staleCards(text: string, settled: SettledCard[]): SettledCard[] 
         if (card && (PENDING.test(said) || ASKS.test(sentence)) && !DONE.test(said)) stale.add(card);
       }
     }
-    if (!item) lead = line;
+    if (!item) lead = INTRO.test(line) ? line : '';
   }
   return [...stale];
 }

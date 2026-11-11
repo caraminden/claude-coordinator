@@ -22,7 +22,7 @@ export interface SchemeRefs {
   self?: number | null;
   /** This scheme's cards waiting on people (card-links.ts), refreshed when a card is posted mid-turn. */
   cards?: CardLink[];
-  /** This scheme's cards from the last week that no longer wait on people, with what happened to them (#531). */
+  /** This scheme's newest cards that no longer wait on people, with what happened to them (#531). */
   settled?: SettledCard[];
 }
 

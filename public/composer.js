@@ -6,6 +6,7 @@ import { codex, reloadWhenIdle, scrollToBottom, sending, setSending } from './co
 import { adoptTicket, base64Url, renderTyping, userBubble } from './thread.js';
 import { mountComposer } from './ui/composer.js';
 import { optimistic } from './ui/optimistic.js';
+import { pastedFiles } from './paste.js';
 
 // ---------- drafts ----------
 
@@ -165,7 +166,7 @@ export function composer(chatId, ticket) {
     h('span', { class: 'spacer' }),
     modelPicker(chatId), sendGroup);
   textarea.addEventListener('paste', (e) => {
-    const files = [...(e.clipboardData?.files ?? [])];
+    const files = pastedFiles(e.clipboardData);
     if (!files.length) return;
     e.preventDefault();
     attachments.add(files);

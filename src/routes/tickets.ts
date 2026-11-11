@@ -13,6 +13,7 @@ import { parseMerge, prInfo } from '../merge-card.ts';
 import { previewPath } from '../previews.ts';
 import { NOTIFY_STATES } from '../push.ts';
 import { tripwireConfig } from '../turn-launch.ts';
+import { tmpDirFor } from '../turn-tmp.ts';
 import { runsRepo } from '../wake.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { MAX_UPLOAD_BYTES, saveUpload } from '../uploads.ts';
@@ -529,7 +530,9 @@ export const ticketRoutes: Route[] = [
       const nearTarget = near ? mergeTarget(nearPr, schemeRepo) : null;
       const retry = nearTarget && { target: nearTarget, command: `gh pr merge ${nearTarget.number} --repo ${schemeRepo} ${near!.method === 'merge' ? '--merge' : '--squash'}${near!.auto ? ' --auto' : ''}` };
       if ((merge || goCall) && !runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
-      const r = runner.approvals.ask(id, tool, input, ticket.cwd, tripwireConfig(project.id, claudeConfigDir(process.env), true), rules, merge ? { ...merge, pr } : undefined, target, retry);
+      // Judged with the turn's TMPDIR (src/turn-launch.ts), as its hook judged it, not the server's own.
+      const cfg = { ...tripwireConfig(project.id, claudeConfigDir(process.env), true), env: { ...process.env, TMPDIR: tmpDirFor(runner.tmpRoot(project.id), id) } };
+      const r = runner.approvals.ask(id, tool, input, ticket.cwd, cfg, rules, merge ? { ...merge, pr } : undefined, target, retry);
       return json(res, 'id' in r ? 201 : 200, r);
     },
   },

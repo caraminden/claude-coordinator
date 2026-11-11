@@ -9,7 +9,7 @@ import { after, test } from 'node:test';
 import { APPROVAL_TOOL, Approvals, cleanPluginDirs, cleanPluginPicks, cleanRules, permissionArgs, pluginDirArgs, turnPluginDirs, unsettledCards } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { agentToken, bootServer, stopTurns, testPins, until } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'approvals-'));
@@ -345,4 +345,27 @@ test('after a restart, cards left waiting show as expired', () => {
   new Runner(store, () => {}, () => ({}), fake).recover();
   const result = store.listEvents(t.id).find((e) => e.kind === 'approval_result');
   assert.deepEqual(JSON.parse(result!.data), { id: 'abc', state: 'expired', reason: 'The server restarted while this waited.' });
+});
+
+test("through the route, a card is judged with the turn's own TMPDIR, not the server's (#468 S01-7)", async () => {
+  const forever = join(root, 'claude-forever');
+  writeFileSync(forever, `#!${process.execPath}\nprocess.stdin.resume();\nsetInterval(() => {}, 1000);\n`);
+  chmodSync(forever, 0o755);
+  // The server has no TMPDIR of its own, as under its systemd unit.
+  const srv = await bootServer({ env: { CLAUDE_BIN: forever, NODE_NO_WARNINGS: '1', TMPDIR: undefined } });
+  try {
+    const project = (await srv.call('/api/projects', { name: 'Scheme' })).data;
+    const created = (await srv.call(`/api/projects/${project.id}/tickets`, { message: 'tidy up' })).data;
+    const t = created.ticket ?? created;
+    const minion = { Authorization: `Bearer ${agentToken(srv.data, t.id)}`, 'Content-Type': 'application/json' };
+    await until('the turn', async () => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion })).ok);
+    const bak = join(srv.data, 'coordinator.db.bak-x');
+    const command = `cp ${bak} "$TMPDIR/" && rm ${bak}`;
+    const r = await (await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, {
+      method: 'POST', headers: minion, body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Move the stale copy Cara named out of the data dir' } }),
+    })).json();
+    assert.ok(r.id, JSON.stringify(r));
+  } finally {
+    await srv.stop();
+  }
 });

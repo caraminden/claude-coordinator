@@ -769,7 +769,7 @@ export function appendEvent(event, scroll = true) {
   const data = JSON.parse(event.data);
   recapEvent(event, data);
   // A steer was read by the turn already running, so it isn't part of what the next turn works on.
-  if (event.kind === 'user_message' && !data.steered) (view.pendingRequest ??= []).push({ author: data.author, text: data.text || '(image)' });
+  if (event.kind === 'user_message' && !data.steered) (view.pendingRequest ??= []).push({ id: event.id, author: data.author, text: data.text || '(image)' });
   if (event.kind === 'claude' && data.type === 'system' && data.subtype === 'init') {
     view.turnActions = [];
     view.turnNote = null;
@@ -838,6 +838,8 @@ export function appendEvent(event, scroll = true) {
       nodes.push(bubble);
     }
   } else if (event.kind === 'unqueued') {
+    // Taken back before its turn: not what the next turn works on.
+    view.pendingRequest = view.pendingRequest?.filter((m) => m.id !== data.id);
     const bubble = log.querySelector(`[data-event="${data.id}"]`);
     if (bubble) showTakenBack(bubble, data.by, false);
   } else if (event.kind === 'question') {

@@ -45,6 +45,12 @@ function stageOf(w) {
   return { at, label: at >= 0 ? TRACK[at][1] : w.kind === 'ci' ? 'CI' : OWN[w.stage] ?? w.stage };
 }
 
+/** The wait in plain words, for a list row's subtitle (#551): what is happening, with the server's detail. */
+export function waitWords(w) {
+  const lead = w.kind === 'ci' ? 'CI' : ['restart', 'live'].includes(w.stage) ? 'Going live' : w.stage === 'line' ? 'Waiting to land' : w.kind === 'land' ? 'Landing' : '';
+  return lead ? `${lead}: ${w.text}` : w.text.charAt(0).toUpperCase() + w.text.slice(1);
+}
+
 /** The readout line's "now" part while it waits (#551): the stage, "3/6" on a landing, and the detail. */
 export function waitNow(w) {
   const { at, label } = stageOf(w);

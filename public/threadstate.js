@@ -18,13 +18,12 @@ export function byUrgency(a, b, usage, now = Date.now()) {
  */
 export function rowState(t, usage, now = Date.now()) {
   const st = baseState(t, usage, now);
-  // While it works or waits elsewhere, what it waits on (#544) says more than a step count: "line · 2nd".
+  // While it works or waits elsewhere, the wait (#544) colours the chip; the chip keeps the plan's steps and the
+  // row's subtitle says the wait in words (#551, Josh 2026-11-11: "What does "line 2nd" mean? that isnt a useful
+  // progress indicator"), as its bar shows tests or jobs done.
   if (!t.wait || t.status === 'closed' || (st.rank !== 1 && st.rank !== 2) || st.fam === 'broken') return st;
   const fam = waitFam(t.wait);
-  // A wait with counts (tests, CI jobs) shows them in its bar, so the chip's x/y stays the plan's steps:
-  // "land 3/5" (#551, Josh 2026-11-11). Every such chip starts with its word: "land · 152/218", "tests 12/40", "CI · 1/3 jobs".
-  const cell = t.wait.total ? `${t.wait.chip.split(' ')[0]}${t.steps ? ` ${t.steps.done}/${t.steps.total}` : ''}` : t.wait.chip;
-  return { ...st, fam, cell, pulse: fam === 'work', counted: !!(t.wait.total && t.steps) };
+  return { ...st, fam, pulse: fam === 'work' };
 }
 
 function baseState(t, usage, now) {

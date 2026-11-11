@@ -92,37 +92,38 @@ test('SHIP: every stage has a colour family, and only a branch has no badge', ()
   }
 });
 
-// What a minion waits on (#544, src/waits.ts): its chip stands in for the steps while it works or waits elsewhere.
-test('rowState: a wait shows its chip while working or outside, never over a needs-you state', () => {
+// What a minion waits on (#544, src/waits.ts) colours its chip, which keeps the plan's steps (#551, Josh 2026-11-11:
+// "the x/y should be the top level steps we always had before"; "What does "line 2nd" mean?"): the row's subtitle says the wait.
+test('rowState: a wait colours the chip while working or outside, which keeps the steps; never over a needs-you state', () => {
   const line = { kind: 'land', stage: 'line', chip: 'line · 2nd', text: '2nd in line, behind #513 (testing)', since: NOW - MIN, usual: 160 };
-  const testing = { ...line, stage: 'test', chip: 'land · tests', text: 'running the tests on the rebased code' };
+  const testing = { ...line, stage: 'test', chip: 'land · 152/218', text: 'running the tests: 152 of 218 files', done: 152, total: 218 };
   const rows = [
-    [{ status: 'running', steps: { done: 4, total: 5 }, wait: line }, [1, 'wait', 'line · 2nd']],
-    [{ status: 'running', wait: testing }, [1, 'work', 'land · tests', 'pulse']],
-    [{ state: 'outside', wait: testing }, [2, 'work', 'land · tests', 'pulse']],
-    [{ state: 'pending-deploy', wait: { ...line, kind: 'restart', stage: 'restart', chip: 'restart · 2 turns' } }, [2, 'wait', 'restart · 2 turns']],
+    [{ status: 'running', steps: { done: 4, total: 5 }, wait: line }, [1, 'wait', '4/5']],
+    [{ status: 'running', steps: { done: 3, total: 5 }, wait: testing }, [1, 'work', '3/5', 'pulse']],
+    [{ status: 'running', wait: testing }, [1, 'work', 'working', 'pulse']],
+    [{ state: 'outside', wait: testing }, [2, 'work', 'waiting', 'pulse']],
+    [{ state: 'pending-deploy', steps: { done: 5, total: 5 }, wait: { ...line, kind: 'restart', stage: 'restart', chip: 'restart · 2 turns' } }, [2, 'wait', 'deploying 5/5']],
     [{ state: 'ready', wait: line }, [0, 'done', 'ready 5m']],
     [{ status: 'running', approvals: 1, wait: line }, [0, 'you', 'approve 5m']],
     [{ status: 'closed', wait: line }, [5, 'idle', 'dismissed']],
     // A PR's CI run (#546): violet while queued, blue while its jobs run, green or red once it ends.
-    [{ state: 'outside', wait: { ...line, kind: 'ci', stage: 'queued', chip: 'CI · queued' } }, [2, 'wait', 'CI · queued']],
-    [{ state: 'outside', wait: { ...line, kind: 'ci', stage: 'jobs', chip: 'CI · 1/3 jobs' } }, [2, 'work', 'CI · 1/3 jobs', 'pulse']],
-    [{ state: 'outside', wait: { ...line, kind: 'ci', stage: 'passed', chip: 'CI · passed' } }, [2, 'done', 'CI · passed']],
-    [{ state: 'outside', wait: { ...line, kind: 'ci', stage: 'failed', chip: 'CI · failed' } }, [2, 'broken', 'CI · failed']],
+    [{ state: 'outside', steps: { done: 4, total: 5 }, wait: { ...line, kind: 'ci', stage: 'queued', chip: 'CI · queued' } }, [2, 'wait', 'waiting 4/5']],
+    [{ state: 'outside', wait: { ...line, kind: 'ci', stage: 'jobs', chip: 'CI · 1/3 jobs', done: 1, total: 3 } }, [2, 'work', 'waiting', 'pulse']],
+    [{ state: 'outside', wait: { ...line, kind: 'ci', stage: 'passed', chip: 'CI · passed' } }, [2, 'done', 'waiting']],
+    [{ state: 'outside', wait: { ...line, kind: 'ci', stage: 'failed', chip: 'CI · failed' } }, [2, 'broken', 'waiting']],
   ];
   for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
 });
 
-// Josh, 2026-11-11: "it should instead show the progress of all tests, and the x/y should be the top level steps we always had before".
-test("rowState: a wait's counts go to its bar, so the chip's x/y is the plan's steps (#551)", () => {
-  const tests = { kind: 'land', stage: 'test', chip: 'land · 152/218', text: 'running the tests: 152 of 218 files', since: NOW - MIN, usual: 160, done: 152, total: 218 };
-  const rows = [
-    [{ status: 'running', steps: { done: 3, total: 5 }, wait: tests }, [1, 'work', 'land 3/5', 'pulse']],
-    [{ state: 'outside', wait: tests }, [2, 'work', 'land', 'pulse']],
-    [{ state: 'outside', steps: { done: 4, total: 5 }, wait: { ...tests, kind: 'heavy', stage: 'run', chip: 'tests 12/40', done: 12, total: 40 } }, [2, 'work', 'tests 4/5', 'pulse']],
-    [{ state: 'outside', steps: { done: 4, total: 5 }, wait: { ...tests, kind: 'ci', stage: 'jobs', chip: 'CI · 1/3 jobs', done: 1, total: 3 } }, [2, 'work', 'CI 4/5', 'pulse']],
-  ];
-  for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
+test("a row's subtitle says the wait in plain words, not the chip's shorthand (#551)", async () => {
+  const { waitWords } = await import('../public/wait.js');
+  const words = (w) => waitWords({ since: NOW, usual: null, chip: '', ...w });
+  assert.equal(words({ kind: 'land', stage: 'line', text: '2nd in line, behind #552 (testing)' }), 'Waiting to land: 2nd in line, behind #552 (testing)');
+  assert.equal(words({ kind: 'land', stage: 'test', text: 'running the tests: 152 of 218 files' }), 'Landing: running the tests: 152 of 218 files');
+  assert.equal(words({ kind: 'land', stage: 'restart', text: 'waiting for 2 turns' }), 'Going live: waiting for 2 turns');
+  assert.equal(words({ kind: 'restart', stage: 'restart', text: 'the restart waits for 2 running turns to end' }), 'Going live: the restart waits for 2 running turns to end');
+  assert.equal(words({ kind: 'heavy', stage: 'slot', text: '2nd in line for a heavy slot, all held (#544)' }), '2nd in line for a heavy slot, all held (#544)');
+  assert.equal(words({ kind: 'ci', stage: 'jobs', text: 'PR #900 · 1 of 3 jobs done' }), 'CI: PR #900 · 1 of 3 jobs done');
 });
 
 test('a wait bar fills by its counts when it has them, by elapsed against usual otherwise (#551)', async () => {

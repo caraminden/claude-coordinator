@@ -9,7 +9,7 @@ import { threadMatches, threadSections } from './threadgroups.js';
 import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { byUrgency, rowState, SHIP } from './threadstate.js';
-import { waitBar } from './wait.js';
+import { waitBar, waitClock, waitWords } from './wait.js';
 import { refreshSchemeCounts, renderInbox, schemeCount } from './inbox.js';
 import { replaceHash } from './navstack.js';
 import { continueList } from './ui/composer.js';
@@ -362,7 +362,7 @@ export function threadRow(t, href = threadHref(t)) {
     threadFullName(t),
     [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, !coord && t.parent ? `from #${t.parent}` : '', `updated ${ago(t.updated_at)}`, t.cost ? `${share ? `${share} of the server login's weekly limit, ` : ''}${costText(t.cost)} at API prices` : ''].filter(Boolean).join(' · '),
     note,
-    !coord && t.status !== 'closed' && t.wait ? t.wait.text : '',
+    !coord && t.status !== 'closed' && t.wait ? waitWords(t.wait) : '',
     !coord && t.ship ? `${t.ship.text} · ${t.ship.commit}` : '',
     pnote ? `✎ ${pnote.text} (${pnote.by})` : '',
   ].filter(Boolean).join('\n');
@@ -380,7 +380,8 @@ export function threadRow(t, href = threadHref(t)) {
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     st.cell ? h('span', { class: 'state' }, st.pulse && h('i', { class: 'pulse' }), st.cell) : '',
-    note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
+    wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, waitWords(wait), ' · ', waitClock(wait))
+      : note || ship ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, note) : '',
     t.cost ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',
     wait ? waitBar(wait) : '');

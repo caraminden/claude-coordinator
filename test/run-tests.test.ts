@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,6 +40,10 @@ test('fails, then hangs', () => {
 });
 `;
 for (const name of ['once-then-hang', 'once-then-hang2', 'once-then-hang3']) FIXTURES[`${name}.test.mjs`] = onceThenHang(name);
+
+// Four files that each log "+" when they start and "-" when done, 700 ms apart: the log shows how many ran at once.
+const OVERLAP = "import { appendFileSync } from 'node:fs';\nimport test from 'node:test';\ntest('t', async () => { appendFileSync(process.env.OVERLAP_LOG, '+'); await new Promise((r) => setTimeout(r, 700)); appendFileSync(process.env.OVERLAP_LOG, '-'); });\n";
+for (const i of [1, 2, 3, 4]) FIXTURES[`overlap${i}.test.mjs`] = OVERLAP;
 
 let n = 0;
 async function run(files: string[], extra: Record<string, string> = {}) {
@@ -139,4 +143,28 @@ test('without a shared folder the flake is still labelled in the output, and not
   assert.equal(r.code, 1, r.log);
   assert.match(r.log, /passed alone: likely load/);
   assert.equal(existsSync(join(r.dir, 'shared')), false);
+});
+
+function peakOverlap(marks: string) {
+  let now = 0, peak = 0;
+  for (const c of marks) { now += c === '+' ? 1 : -1; peak = Math.max(peak, now); }
+  return peak;
+}
+
+test('CITADEL_TEST_CONCURRENCY caps how many test files run at once, and the default is half the cores (#521)', async () => {
+  const files = [1, 2, 3, 4].map((i) => `overlap${i}.test.mjs`);
+  const one = join(root, 'overlap-one');
+  const r1 = await run(files, { CITADEL_TEST_CONCURRENCY: '1', OVERLAP_LOG: one });
+  assert.equal(r1.code, 0, r1.log);
+  assert.equal(peakOverlap(readFileSync(one, 'utf8')), 1);
+  const two = join(root, 'overlap-two');
+  const r2 = await run(files, { CITADEL_TEST_CONCURRENCY: '2', OVERLAP_LOG: two });
+  assert.equal(r2.code, 0, r2.log);
+  assert.equal(peakOverlap(readFileSync(two, 'utf8')), 2);
+  // Unset: half the cores (rounded up), never the whole box.
+  const cores = Number(execFileSync('nproc', { encoding: 'utf8' }));
+  const def = join(root, 'overlap-default');
+  const r3 = await run(files, { CITADEL_TEST_CONCURRENCY: '', OVERLAP_LOG: def });
+  assert.equal(r3.code, 0, r3.log);
+  assert.equal(peakOverlap(readFileSync(def, 'utf8')), Math.min(4, Math.ceil(cores / 2)));
 });

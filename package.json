@@ -9,6 +9,6 @@
   },
   "scripts": {
     "start": "node server.ts",
-    "test": "tools/citadel-node --test --test-global-setup=test/leak-guard.ts test/"
+    "test": "tools/citadel-node --test --test-concurrency=${CITADEL_TEST_CONCURRENCY:-$(( ($(nproc) + 1) / 2 ))} --test-global-setup=test/leak-guard.ts test/"
   }
 }

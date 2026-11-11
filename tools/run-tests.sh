@@ -5,6 +5,10 @@
 # failed test never closed), and the time limit stops a test that hangs outright, with a line saying so.
 # DEPLOY_TEST_TIMEOUT sets the limit in seconds (default 600; the suite takes 1-2 minutes).
 #
+# Test files run at most half the cores at once (#521): node's default is about 15 at a time on the 16-core box, and since
+# #506 took away the idle-priority brake one run could fill it. CITADEL_TEST_CONCURRENCY overrides the number (npm test
+# reads it too).
+#
 # A red run stays red (Cara, 2026-11-10, "Keep failing, log it"). When it fails, each failed file runs again alone,
 # once, only to label it: one that passes alone is a likely flake from load, and gets a `flake` line with the load
 # average in the scheme's retro log (retro-log/<date>/land.md) so flaky files get counted. A hang is never rerun.
@@ -22,6 +26,7 @@ log=$1
 limit=${DEPLOY_TEST_TIMEOUT:-600}
 rerun_limit=${DEPLOY_RERUN_TIMEOUT:-120}
 budget=${DEPLOY_RERUN_BUDGET:-300}
+concurrency=${CITADEL_TEST_CONCURRENCY:-$((($(nproc 2>/dev/null || echo 2) + 1) / 2))}
 max_reruns=5 # more failed files than this is a broken change, not load
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 weight=${DEPLOY_TEST_CPU_WEIGHT-500}
@@ -33,7 +38,7 @@ scope+=(--)
 [ -n "$weight" ] && timeout 20 "${scope[@]}" true >/dev/null 2>&1 || scope=()
 failed=$(mktemp)
 trap 'rm -f "$failed"' EXIT
-timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-force-exit --test-reporter=spec --test-reporter-destination=stdout \
+timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-concurrency="$concurrency" --test-force-exit --test-reporter=spec --test-reporter-destination=stdout \
   --test-reporter="$tools/failed-files-reporter.ts" --test-reporter-destination="$failed" test/ >"$log" 2>&1
 rc=$?
 load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || load='?'

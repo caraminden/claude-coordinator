@@ -99,8 +99,14 @@ jobs:
       # `npm test` here), and labels a file that fails under load. Perigee skips no test, so a skip here means this
       # runner lacks something a test needs, and the gate would be weaker than the one it replaces: that is red too.
       - name: the full suite
+        # Files at once on the desktop (#564). run-tests.sh's half-the-cores default ran 8 once #552 capped the VM at 16
+        # processors, and the suite went from about 60 s to 150 s with the tests' own time unchanged: they mostly wait
+        # on servers and timers. GitHub's 4-core runners keep the default.
+        env:
+          CITADEL_TEST_CONCURRENCY: ${{ vars.CI_RUNNER != 'github' && '16' || '' }}
         run: |
           rc=0
+          echo "nproc $(nproc), $([ -n "$CITADEL_TEST_CONCURRENCY" ] && echo "$CITADEL_TEST_CONCURRENCY" || echo $((($(nproc) + 1) / 2))) test files at once"
           # The log streams while the suite runs (#560): a run cancelled at land.sh's cap used to show nothing,
           # since the log was only printed once run-tests.sh ended. node prints files in order, so the hung file
           # is the first one with no results.

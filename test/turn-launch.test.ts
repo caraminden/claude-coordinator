@@ -58,7 +58,7 @@ runner.sharedDir = (project) => join(root, 'projects', String(project.id), 'shar
 runner.ticketsDir = (project) => join(root, 'projects', String(project.id), 'tickets');
 // Nothing is started: the two spawn paths record what they were handed (a unit goes to the fake systemd-run).
 (runner as any).spawnWrapper = (wrapper: string[], dir: string) => spawned.push({ how: 'child', dir, wrapper });
-(runner as any).spawnInContainer = (place: { container: string }, dir: string, wrapper: string) => spawned.push({ how: `container ${place.container}`, dir, wrapper: [wrapper] });
+(runner as any).spawnInContainer = (place: { container: string }, dir: string, wrapper: string[]) => spawned.push({ how: `container ${place.container}`, dir, wrapper });
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Paths, ids and times that differ per run, by name. Longest first, so a folder inside another keeps its own name. */

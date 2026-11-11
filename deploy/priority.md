@@ -60,8 +60,28 @@ systemctl --user daemon-reload   # the service file is a link into the checkout:
 The restart after that (the next deploy) starts it clean. Check 1 below should then show `CLS TS`,
 `NI 0`.
 
-**Everything else needs root:** turn wrappers, MCP servers and claude still run under `SCHED_IDLE`,
-and shells (with the compilers they start) at −4. Whoever has root on perigee can turn ananicy-cpp off.
+**Turns and test runs, no sudo (#506):** the same trick, by a link instead of systemd's `@`, since
+`spawn()` and an `mcp.json` command take a path:
+
+- Every turn's `pin/bin/citadel-node` links to the server's node (`pinTurnFiles`, `TURN_NODE` in
+  `src/turn-launch.ts`). The turn wrapper (host and container), the thread and machine MCP servers
+  and the Codex shim run through it, and claude inherits the wrapper's policy. In a container the
+  link points at the host's `/usr/bin/node`, which the image links to its own node.
+- `tools/citadel-node` runs node from a link of that name in `$TMPDIR/citadel-node-<uid>/`, plus a
+  preload (`tools/citadel-node.cjs`) that points `process.execPath` at the link. `node --test` and
+  child spawns use `process.execPath`, so test files and the servers they start keep the name.
+  `tools/run-tests.sh` (lands, deploys) and `npm test` use it.
+- Resetting the policy from inside (`chrt -o -p 0` on itself) doesn't stick: ananicy re-applies
+  every 15 s to whatever matches.
+- Still `node`, so still idle: the short-lived tripwire, link-check, wording and scheme-refs hooks;
+  a minion's own `node` commands (`node --test test/x.ts` typed by hand, other schemes' mise node,
+  vitest and npm); previews and dev copies; contraptions started as `node server.ts`. For another
+  scheme, the same pattern applies: run its node from a link not named `node`, and preload the
+  `process.execPath` change for test runners that spawn children.
+
+Check: `ps -eo pid,cls,ni,args | grep -E 'citadel-node|turn-wrapper|mcp\.ts'`: all `TS`.
+
+**Shells need root:** shells (with the compilers they start) still run at −4. Whoever has root on perigee can turn ananicy-cpp off.
 Its rules are written for a desktop (13,500 of them are games), and on a build server they work
 against systemd's cgroup weights.
 

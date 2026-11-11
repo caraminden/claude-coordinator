@@ -30,7 +30,7 @@ file contents and finished subagent reports, keeping one line for what each conc
 The kit's skills and agents read this repo's paths and commands from here. "None" means that
 skill step is skipped or uses its default.
 
-- **Check commands:** `npm test` (`node --test test/`, failing if it leaves processes running: `test/leak-guard.ts`; it also lints the `.ps1` files with pwsh, `test/ps1-lint.test.ts`). No build step. A UI change is
+- **Check commands:** `npm test` (`node --test test/` through `tools/citadel-node`, so it escapes ananicy's idle `node` rule: `deploy/priority.md`; failing if it leaves processes running: `test/leak-guard.ts`; it also lints the `.ps1` files with pwsh, `test/ps1-lint.test.ts`). No build step. A UI change is
   also checked in a dev copy (`citadel-dev-copy start`, then `stop`) or preview (scheme instructions,
   "UI checks").
 - **Front end:** `public/`, plain JS with no build step.

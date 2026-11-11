@@ -33,7 +33,7 @@ scope+=(--)
 [ -n "$weight" ] && timeout 20 "${scope[@]}" true >/dev/null 2>&1 || scope=()
 failed=$(mktemp)
 trap 'rm -f "$failed"' EXIT
-timeout -k 30 "$limit" "${scope[@]}" node --test --test-force-exit --test-reporter=spec --test-reporter-destination=stdout \
+timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-force-exit --test-reporter=spec --test-reporter-destination=stdout \
   --test-reporter="$tools/failed-files-reporter.ts" --test-reporter-destination="$failed" test/ >"$log" 2>&1
 rc=$?
 load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || load='?'
@@ -73,7 +73,7 @@ for f in "${files[@]}"; do
   fi
   this=$((left < rerun_limit ? left : rerun_limit))
   echo "== $f" >>"$rerun_log"
-  timeout -k 10 "$this" "${scope[@]}" node --test --test-force-exit "$f" >>"$rerun_log" 2>&1
+  timeout -k 10 "$this" "${scope[@]}" "$tools/citadel-node" --test --test-force-exit "$f" >>"$rerun_log" 2>&1
   case $? in
     0) say "$f: failed in the full run, passed alone: likely load, not your change (1-minute load $load)"; log_flake "$f" ;;
     124 | 137) say "$f: hung when rerun alone (stopped after ${this}s): a real failure" ;;

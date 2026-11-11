@@ -76,7 +76,7 @@ test("a container turn carries none of the server's sign-in, takes the container
   assert.equal(p.env.COORDINATOR_CONTAINER, '1');
   assert.equal(p.env.XDG_RUNTIME_DIR, '/t');
   assert.equal(p.configDir, '/vol/.claude');
-  assert.deepEqual(p.spawn, { how: 'container', wrapper: join(dir, 'pin', 'turn-wrapper.ts') });
+  assert.deepEqual(p.spawn, { how: 'container', wrapper: [join(dir, 'pin', 'bin', 'citadel-node'), join(dir, 'pin', 'turn-wrapper.ts'), dir] });
 });
 
 test('a host turn is a unit when it has one and a child when not, with the same wrapper', () => {
@@ -85,7 +85,7 @@ test('a host turn is a unit when it has one and a child when not, with the same 
   assert.equal(child.how, 'child');
   assert.ok(unit.how === 'unit' && child.how === 'child');
   assert.deepEqual(unit.wrapper, child.wrapper);
-  assert.deepEqual(unit.wrapper, [process.execPath, join(dir, 'pin', 'turn-wrapper.ts'), dir]);
+  assert.deepEqual(unit.wrapper, [join(dir, 'pin', 'bin', 'citadel-node'), join(dir, 'pin', 'turn-wrapper.ts'), dir]);
   assert.ok(unit.systemdRun.includes('--unit=citadel-turn-x'));
   assert.deepEqual(unit.systemdRun.slice(-3), unit.wrapper);
 });
@@ -117,7 +117,7 @@ test('a Codex turn runs the shim in claude\'s place, on its thread when it has o
   const fresh = plan({ codex: { thread: null } });
   const resumed = plan({ codex: { thread: 'th-1' } });
   assert.equal(plan({ claudeBin: '/opt/claude' }).command, '/opt/claude');
-  assert.equal(plan({ claudeBin: '/opt/claude', codex: { thread: null } }).command, process.execPath);
+  assert.equal(plan({ claudeBin: '/opt/claude', codex: { thread: null } }).command, join(dir, 'pin', 'bin', 'citadel-node'));
   assert.equal(fresh.args[0], join(dir, 'pin', 'codex-turn.ts'));
   assert.deepEqual(fresh.args.slice(-claude.args.length), claude.args);
   assert.equal(flag(fresh, '--codex-thread'), undefined);

@@ -1948,7 +1948,7 @@ export class Runner {
    * which goes once the turn ends. The wrapper's pids are the container's, so the `container` file
    * tells wrapperAlive to go by its heartbeat instead.
    */
-  private spawnInContainer(place: Extract<TurnPlace, { host: false }>, dir: string, wrapper: string) {
+  private spawnInContainer(place: Extract<TurnPlace, { host: false }>, dir: string, wrapper: string[]) {
     writeFileSync(join(dir, 'container'), place.container);
     const beat = () => writeFileSync(join(dir, 'beat'), '');
     beat();
@@ -1957,7 +1957,7 @@ export class Runner {
     const run = ([cmd, ...args]: string[]) => new Promise<void>((resolve, reject) => {
       execFile(cmd, args, (err, _out, stderr) => (err ? reject(new Error(String(stderr).trim() || err.message)) : resolve()));
     });
-    const exec = ['podman', 'exec', '-d', place.container, 'node', wrapper, dir];
+    const exec = ['podman', 'exec', '-d', place.container, ...wrapper];
     const scoped = ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${TURN_SLICE}`, ...exec];
     place.ensure()
       // As with host turns, a failed systemd-run still runs the turn, though a restart then SIGKILLs its conmon.

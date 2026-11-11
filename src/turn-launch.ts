@@ -1,7 +1,7 @@
 // What a turn is launched with: the pinned copies of the server files it runs, its hooks, settings,
 // environment and tool lists. The runner (src/runner.ts) and contraption turns (src/contraption-turns.ts)
 // both build their launches from these.
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
@@ -95,6 +95,9 @@ export function pinTurnFiles(dataDir: string): TurnPins {
     const source = join(import.meta.dirname, '..', 'tools', tool);
     if (existsSync(source)) cpSync(source, join(MCP_DIR, 'bin', tool));
   }
+  // node under another name, so ananicy-cpp's stock `node` rule (SCHED_IDLE) misses the wrapper, claude under it and the MCP servers (#506, deploy/priority.md).
+  mkdirSync(join(MCP_DIR, 'bin'), { recursive: true });
+  symlinkSync(process.execPath, join(MCP_DIR, 'bin', TURN_NODE));
   const CODEX_REVIEW = pinnedCopy('codex-review.ts');
   const CODEX_TURN = pinnedCopy('codex-turn.ts');
   const CODEX_REVIEW_BIN = join(import.meta.dirname, '..', 'tools', 'citadel-codex-review');
@@ -107,6 +110,9 @@ export function turnPins(): TurnPins {
   if (!pins) throw new Error('The pinned turn files were never made: call pinTurnFiles(dataDir) once at start, before any turn (src/turn-launch.ts)');
   return pins;
 }
+
+/** The name a turn's long-lived node processes run under, from a link to node in the turn's pin/bin: anything but `node` (#506). */
+export const TURN_NODE = 'citadel-node';
 
 /** A build's default parallelism in turns, so the few heavy jobs at once (citadel-heavy's 2 slots) leave cores for the rest. */
 export const TURN_BUILD_JOBS = '4';
@@ -370,7 +376,7 @@ export interface LaunchPlan {
   configDir: string;
   /** Files for the turn's folder, in the order to write them. */
   files: { name: string; text: string; mode?: number }[];
-  spawn: { how: 'container'; wrapper: string } | { how: 'unit'; systemdRun: string[]; wrapper: string[] } | { how: 'child'; wrapper: string[] };
+  spawn: { how: 'container'; wrapper: string[] } | { how: 'unit'; systemdRun: string[]; wrapper: string[] } | { how: 'child'; wrapper: string[] };
 }
 
 /** What a turn is launched with, from its facts. It writes nothing and reads no store. From disk it only looks: is the kit in the turn's pin folder, a Taskmaster's minion folders (coordinatorAccess), this machine's Android toolchain (androidEnv) and, for a container turn, where claude is (resolveClaude, which throws when it isn't on the server's PATH). */
@@ -379,6 +385,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const { files: filesDir, shared: sharedDir, memory: memoryDir, tmp } = facts.folders;
   const pin = join(dir, 'pin');
   const pinned = (file: string) => join(pin, basename(file));
+  const node = join(pin, 'bin', TURN_NODE);
   // Tool calls matching the merge asks or the project's approval rules wait for a person (threads only:
   // a Taskmaster can't show cards, so an ask would be a silent deny there).
   const rules = ticket.kind === 'coordinator' ? [] : [...new Set([...MERGE_ASKS, ...lines(project.approval_rules)])];
@@ -407,9 +414,9 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // inherits), never on the command line.
   const role = ticket.kind === 'coordinator' ? 'coordinator' : 'thread';
   // A card can wait for days: past MCP_TOOL_TIMEOUT, Claude Code also drops a tool silent for 30 minutes unless its server sets a timeout.
-  const servers: Record<string, object> = { [role]: { type: 'stdio', command: process.execPath, args: [pinned(pins.MCP_SERVER)], ...(role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) } };
+  const servers: Record<string, object> = { [role]: { type: 'stdio', command: node, args: [pinned(pins.MCP_SERVER)], ...(role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) } };
   for (const m of machines) {
-    for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: process.execPath, args: [pinned(pins.MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
+    for (const s of machineServers(m)) servers[s.name] = { type: 'stdio', command: node, args: [pinned(pins.MACHINE_MCP_SERVER), String(m.id), s.name, s.server] };
   }
   const files: LaunchPlan['files'] = [];
   // Files, like the prompt: machine names (perigee-godot) in claude's argv would let a turn's `pkill -f godot` hit claude.
@@ -483,11 +490,11 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   let command = place.host ? facts.claudeBin : resolveClaude(facts.claudeBin);
   if (codex) {
     // The shim runs in claude's place (src/codex-turn.ts), from the hand-over the runner writes; it skips that when it resumes the thread.
-    command = process.execPath;
+    command = node;
     args.unshift(pinned(pins.CODEX_TURN), '--codex-mode', 'turn', '--codex-log', join(dir, 'codex-log.jsonl'), '--codex-handover', join(dir, 'handover.md'), ...(codex.thread ? ['--codex-thread', codex.thread] : []));
   }
-  const wrapper = [process.execPath, pinned(pins.TURN_WRAPPER), dir];
-  const spawn: LaunchPlan['spawn'] = !place.host ? { how: 'container', wrapper: pinned(pins.TURN_WRAPPER) }
+  const wrapper = [node, pinned(pins.TURN_WRAPPER), dir];
+  const spawn: LaunchPlan['spawn'] = !place.host ? { how: 'container', wrapper }
     : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', `--unit=${facts.unit}`, `--slice=${TURN_SLICE}`, '-p', 'TimeoutStopSec=15', '-p', 'UMask=0077', ...wrapper], wrapper }
     : { how: 'child', wrapper };
   return { command, args, env, configDir, files, spawn };

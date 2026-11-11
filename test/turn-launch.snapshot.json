@@ -138,7 +138,7 @@
    "mcpServers": {
     "thread": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/1-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/1-<TIME>/pin/mcp.ts"
      ],
@@ -174,7 +174,7 @@
    {
     "how": "child",
     "wrapper": [
-     "<NODE>",
+     "<ROOT>/run/turns/1-<TIME>/pin/bin/citadel-node",
      "<ROOT>/run/turns/1-<TIME>/pin/turn-wrapper.ts",
      "<ROOT>/run/turns/1-<TIME>"
     ]
@@ -332,7 +332,7 @@
    "mcpServers": {
     "thread": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/2-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/2-<TIME>/pin/mcp.ts"
      ],
@@ -340,7 +340,7 @@
     },
     "perigee-godot": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/2-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/2-<TIME>/pin/machine-mcp.ts",
       "7",
@@ -350,7 +350,7 @@
     },
     "caras-laptop": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/2-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/2-<TIME>/pin/machine-mcp.ts",
       "8",
@@ -360,7 +360,7 @@
     },
     "caras-laptop-ws": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/2-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/2-<TIME>/pin/machine-mcp.ts",
       "8",
@@ -406,7 +406,7 @@
     "TimeoutStopSec=15",
     "-p",
     "UMask=0077",
-    "<NODE>",
+    "<ROOT>/run/turns/2-<TIME>/pin/bin/citadel-node",
     "<ROOT>/run/turns/2-<TIME>/pin/turn-wrapper.ts",
     "<ROOT>/run/turns/2-<TIME>"
    ]
@@ -749,7 +749,7 @@
    "mcpServers": {
     "coordinator": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/3-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/3-<TIME>/pin/mcp.ts"
      ]
@@ -784,7 +784,7 @@
    {
     "how": "child",
     "wrapper": [
-     "<NODE>",
+     "<ROOT>/run/turns/3-<TIME>/pin/bin/citadel-node",
      "<ROOT>/run/turns/3-<TIME>/pin/turn-wrapper.ts",
      "<ROOT>/run/turns/3-<TIME>"
     ]
@@ -1077,7 +1077,7 @@
    "mcpServers": {
     "coordinator": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/4-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/4-<TIME>/pin/mcp.ts"
      ]
@@ -1112,7 +1112,7 @@
    {
     "how": "child",
     "wrapper": [
-     "<NODE>",
+     "<ROOT>/run/turns/4-<TIME>/pin/bin/citadel-node",
      "<ROOT>/run/turns/4-<TIME>/pin/turn-wrapper.ts",
      "<ROOT>/run/turns/4-<TIME>"
     ]
@@ -1259,7 +1259,7 @@
    "mcpServers": {
     "thread": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/person-2/5-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/person-2/5-<TIME>/pin/mcp.ts"
      ],
@@ -1295,7 +1295,9 @@
    {
     "how": "container citadel-claude-test-2",
     "wrapper": [
-     "<ROOT>/run/turns/person-2/5-<TIME>/pin/turn-wrapper.ts"
+     "<ROOT>/run/turns/person-2/5-<TIME>/pin/bin/citadel-node",
+     "<ROOT>/run/turns/person-2/5-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-2/5-<TIME>"
     ]
    }
   ],
@@ -1440,7 +1442,7 @@
    "mcpServers": {
     "thread": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/person-2/6-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/person-2/6-<TIME>/pin/mcp.ts"
      ],
@@ -1476,7 +1478,9 @@
    {
     "how": "container citadel-claude-test-2",
     "wrapper": [
-     "<ROOT>/run/turns/person-2/6-<TIME>/pin/turn-wrapper.ts"
+     "<ROOT>/run/turns/person-2/6-<TIME>/pin/bin/citadel-node",
+     "<ROOT>/run/turns/person-2/6-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-2/6-<TIME>"
     ]
    }
   ],
@@ -1486,7 +1490,7 @@
   "launched": true,
   "notes": [],
   "spec": {
-   "command": "<NODE>",
+   "command": "<ROOT>/run/turns/person-2/7-<TIME>/pin/bin/citadel-node",
    "args": [
     "<ROOT>/run/turns/person-2/7-<TIME>/pin/codex-turn.ts",
     "--codex-mode",
@@ -1628,7 +1632,7 @@
    "mcpServers": {
     "thread": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/person-2/7-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/person-2/7-<TIME>/pin/mcp.ts"
      ],
@@ -1674,7 +1678,9 @@
    {
     "how": "container citadel-claude-test-2",
     "wrapper": [
-     "<ROOT>/run/turns/person-2/7-<TIME>/pin/turn-wrapper.ts"
+     "<ROOT>/run/turns/person-2/7-<TIME>/pin/bin/citadel-node",
+     "<ROOT>/run/turns/person-2/7-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-2/7-<TIME>"
     ]
    }
   ],
@@ -1684,7 +1690,7 @@
   "launched": true,
   "notes": [],
   "spec": {
-   "command": "<NODE>",
+   "command": "<ROOT>/run/turns/person-2/8-<TIME>/pin/bin/citadel-node",
    "args": [
     "<ROOT>/run/turns/person-2/8-<TIME>/pin/codex-turn.ts",
     "--codex-mode",
@@ -1832,7 +1838,7 @@
    "mcpServers": {
     "thread": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/person-2/8-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/person-2/8-<TIME>/pin/mcp.ts"
      ],
@@ -1840,7 +1846,7 @@
     },
     "perigee-godot": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/person-2/8-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/person-2/8-<TIME>/pin/machine-mcp.ts",
       "7",
@@ -1890,7 +1896,9 @@
    {
     "how": "container citadel-claude-test-2",
     "wrapper": [
-     "<ROOT>/run/turns/person-2/8-<TIME>/pin/turn-wrapper.ts"
+     "<ROOT>/run/turns/person-2/8-<TIME>/pin/bin/citadel-node",
+     "<ROOT>/run/turns/person-2/8-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-2/8-<TIME>"
     ]
    }
   ],
@@ -2035,7 +2043,7 @@
    "mcpServers": {
     "thread": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/person-2/9-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/person-2/9-<TIME>/pin/mcp.ts"
      ],
@@ -2071,7 +2079,9 @@
    {
     "how": "container citadel-claude-test-2",
     "wrapper": [
-     "<ROOT>/run/turns/person-2/9-<TIME>/pin/turn-wrapper.ts"
+     "<ROOT>/run/turns/person-2/9-<TIME>/pin/bin/citadel-node",
+     "<ROOT>/run/turns/person-2/9-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-2/9-<TIME>"
     ]
    }
   ],
@@ -2081,7 +2091,7 @@
   "launched": true,
   "notes": [],
   "spec": {
-   "command": "<NODE>",
+   "command": "<ROOT>/run/turns/person-1/10-<TIME>/pin/bin/citadel-node",
    "args": [
     "<ROOT>/run/turns/person-1/10-<TIME>/pin/codex-turn.ts",
     "--codex-mode",
@@ -2223,7 +2233,7 @@
    "mcpServers": {
     "thread": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/person-1/10-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/person-1/10-<TIME>/pin/mcp.ts"
      ],
@@ -2269,7 +2279,9 @@
    {
     "how": "container citadel-claude-test-cara",
     "wrapper": [
-     "<ROOT>/run/turns/person-1/10-<TIME>/pin/turn-wrapper.ts"
+     "<ROOT>/run/turns/person-1/10-<TIME>/pin/bin/citadel-node",
+     "<ROOT>/run/turns/person-1/10-<TIME>/pin/turn-wrapper.ts",
+     "<ROOT>/run/turns/person-1/10-<TIME>"
     ]
    }
   ],
@@ -2414,7 +2426,7 @@
    "mcpServers": {
     "thread": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/11-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/11-<TIME>/pin/mcp.ts"
      ],
@@ -2458,7 +2470,7 @@
    {
     "how": "child",
     "wrapper": [
-     "<NODE>",
+     "<ROOT>/run/turns/11-<TIME>/pin/bin/citadel-node",
      "<ROOT>/run/turns/11-<TIME>/pin/turn-wrapper.ts",
      "<ROOT>/run/turns/11-<TIME>"
     ]
@@ -2607,7 +2619,7 @@
    "mcpServers": {
     "thread": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/12-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/12-<TIME>/pin/mcp.ts"
      ],
@@ -2643,7 +2655,7 @@
    {
     "how": "child",
     "wrapper": [
-     "<NODE>",
+     "<ROOT>/run/turns/12-<TIME>/pin/bin/citadel-node",
      "<ROOT>/run/turns/12-<TIME>/pin/turn-wrapper.ts",
      "<ROOT>/run/turns/12-<TIME>"
     ]
@@ -2792,7 +2804,7 @@
    "mcpServers": {
     "thread": {
      "type": "stdio",
-     "command": "<NODE>",
+     "command": "<ROOT>/run/turns/13-<TIME>/pin/bin/citadel-node",
      "args": [
       "<ROOT>/run/turns/13-<TIME>/pin/mcp.ts"
      ],
@@ -2828,7 +2840,7 @@
    {
     "how": "child",
     "wrapper": [
-     "<NODE>",
+     "<ROOT>/run/turns/13-<TIME>/pin/bin/citadel-node",
      "<ROOT>/run/turns/13-<TIME>/pin/turn-wrapper.ts",
      "<ROOT>/run/turns/13-<TIME>"
     ]

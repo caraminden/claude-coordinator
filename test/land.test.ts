@@ -67,6 +67,25 @@ test('rebases onto main, tests, fast-forwards main, and deploys holding the lock
   assert.equal(r.note(), 'locked=1 held=yes');
 });
 
+test("a rebase that changes land.sh hands over to the rebased copy, which keeps the lock and lands (#500)", () => {
+  const r = setup();
+  // The worktree runs its own tools/land.sh, as a minion does; main's newer one says it is the one running.
+  for (const f of ['land.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'real land.sh');
+  git(r.wt, 'rebase', '-q', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const script = join(r.source, 'tools', 'land.sh');
+  writeFileSync(script, readFileSync(script, 'utf8').replace('say "running the tests"', 'say "running the tests (the rebased land.sh)"'));
+  git(r.source, 'commit', '-qam', 'newer land.sh');
+  const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note') } });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /running the tests \(the rebased land\.sh\)/);
+  assert.equal(res.stderr.match(/rebasing/g)?.length, 1, res.stderr);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+  assert.equal(r.note(), 'locked=1 held=yes', 'the deploy still runs under the lock');
+});
+
 test('red tests stop it before main moves', () => {
   const r = setup();
   r.commit(r.wt, 'b.txt', 'mine\n');

@@ -2,7 +2,8 @@
 # Land a minion's branch: run it from the minion's worktree once its work is committed.
 #   tools/land.sh
 # Under the deploy lock (the one tools/deploy.sh takes), so landings and deploys go one at a time:
-# 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here.
+# 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here. If the rebase
+#    changed land.sh itself, the rebased copy takes over from here, still holding the lock.
 # 2. Runs the tests on the rebased branch. A failure stops here, with main untouched. Not in a citadel-heavy
 #    slot: the deploy lock already lets only one landing test at a time, and waiting on a slot other schemes'
 #    builds can hold for an hour, while holding the lock, starved every other landing (#499).
@@ -27,6 +28,7 @@ refuse() { say "$*"; exit 1; }
 [ -z "${CITADEL_HEAVY_HELD:-}" ] || refuse "run it on its own, not under citadel-heavy: it would hold a heavy slot other schemes need while it waits for the deploy lock"
 [ $# -eq 0 ] || refuse "takes no arguments (for --now, land first, then run tools/deploy.sh --now with a person's OK)"
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) # before the cd below, which would break a relative path to it
+self=$(stat -c %d:%i "$tools/land.sh") # which file bash is reading; the rebase below may replace it
 here=$(git rev-parse --show-toplevel)
 cd "$here" # the tests run from the worktree's top, wherever in it this was started
 branch=$(git branch --show-current)
@@ -37,11 +39,15 @@ branch=$(git branch --show-current)
 
 state=$(git -C "$LIVE" rev-parse --absolute-git-dir)/cc-deploy
 mkdir -p -m 700 "$state"
-exec 9>"$state/lock"
+# LAND_REBASED: this is the rebased land.sh, started below by the one that rebased, and it holds the lock on fd 9.
+resumed=
+[ -n "${LAND_REBASED:-}" ] && [ /dev/fd/9 -ef "$state/lock" ] && resumed=1
+unset LAND_REBASED
+[ -n "$resumed" ] || exec 9>"$state/lock"
 flock -w 900 9 || refuse "another deploy or landing has held the lock for 15 min; try again later"
 
 old=$(git -C "$SOURCE" rev-parse main)
-say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
+[ -n "$resumed" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
 if ! git rebase -q main; then
   # Which files collide is worth a retro-log line (the architecture check counts them). Best effort: land.sh has no
   # session id, so the line goes in the day's land.md; any failure here is swallowed and the abort and refusal go on as before.
@@ -58,6 +64,9 @@ if ! git rebase -q main; then
   git rebase --abort 2>/dev/null || true # nothing to abort if it never started (an untracked file in the way)
   refuse "the rebase onto main failed (see git's output above), so nothing landed${conflicted:+; conflicted files: $conflicted}. On conflicts: run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again"
 fi
+# Bash goes on reading the file it started from, so a rebase that replaced land.sh would land with the old one (#500):
+# go on in the rebased one instead. It keeps the lock on fd 9, and its own rebase finds nothing to do.
+[ -n "$resumed" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 exec bash "$tools/land.sh"
 
 say "running the tests"
 # A file the tests saw that isn't in the commit (never git-added, or ignored) means deploy.sh tests it again.

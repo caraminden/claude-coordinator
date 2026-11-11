@@ -168,6 +168,12 @@ test('chat: #N refs link outside code, and #127\'s strikes render', () => {
   assert.equal(chat('~~**bold** struck~~ then ~~ spaced ~~'), '<p><del><strong>bold</strong> struck</del> then ~~ spaced ~~</p>');
 });
 
+test('a text hook that rewrites digits, or leaves a stray NUL, can\'t hang the render', () => {
+  const text = (h) => h.replace(/\b\d+\b/g, (n) => `<b>${n}</b>`);
+  assert.equal(md('Paid `rent` 1200 today', { text }), '<p>Paid <code>rent</code> <b>1200</b> today</p>');
+  assert.equal(md('a `b` c', { text: (h) => `${h}\u0000` }), '<p>a <code>b</code> c</p>');
+});
+
 test('a NUL or \\u0001 in the text can neither hang the render nor reach held HTML', () => {
   assert.equal(md('a\u0000b `c\u0000d`'), '<p>a�b <code>c�d</code></p>');
   const image = (href, alt) => `<img src="${href}" alt="${alt}">`;

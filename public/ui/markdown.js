@@ -209,11 +209,14 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
     .replace(/(^|[\s([{]|&quot;|&#39;)_(?=[^_\s])(.+?)(?<=[^_\s])_(?=$|[\s.,;:!?)\]}]|&quot;|&#39;)/g, '$1<em>$2</em>');
 
   const inline = (t) => {
-    // Code, escapes, links and URLs are held out as \0n\0 so emphasis can't reach into them.
+    // Code, escapes, links and URLs are held out as \0n\0 so emphasis can't reach into them; n is
+    // written in private-use digits, not ASCII ones, so a `text` hook that rewrites numbers leaves it be.
     const held = [];
-    const hold = (html) => `\u0000${held.push(html) - 1}\u0000`;
+    const hold = (html) => `\u0000${String(held.push(html) - 1).replace(/\d/g, (d) => String.fromCharCode(0xE000 + Number(d)))}\u0000`;
+    const MARK = /\u0000([\uE000-\uE009]+)\u0000/g;
+    const at = (n) => held[Number([...n].map((c) => c.charCodeAt(0) - 0xE000).join(''))] ?? '';
     // An image's alt is an attribute, so what was held in it comes back as text.
-    const plain = (html) => html.replace(/\u0000(\d+)\u0000/g, (_, i) => held[i].replace(/<[^>]*>/g, ''));
+    const plain = (html) => html.replace(MARK, (_, n) => at(n).replace(/<[^>]*>/g, ''));
     let s = escapeHtml(t)
       .replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (_, _ticks, c) => hold(`<code>${/^ .*[^ ].* $/.test(c) ? c.slice(1, -1) : c}</code>`))
       // shortcut: only the escapes Markdown needs, not all punctuation, so Windows paths like
@@ -227,8 +230,9 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
       // outside: "**https://x/**." is bold, then a full stop.
       .replace(/&lt;(https?:\/\/(?:(?!&lt;|&gt;)[^\s<>\u0000])+)&gt;/gi, (_, url) => hold(link(unescapeHtml(url), url)));
     s = text(emphasis(linkBare(s, link, hold)));
-    while (s.includes('\u0000')) s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => held[i]);
-    return s;
+    // A held piece can hold others, so at most one pass per piece; what a hook broke is dropped.
+    for (let pass = 0; pass <= held.length && s.includes('\u0000'); pass++) s = s.replace(MARK, (_, n) => at(n));
+    return s.replace(/\u0000[\uE000-\uE009]*/g, '');
   };
 
   /**

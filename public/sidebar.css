@@ -155,5 +155,5 @@
 @media (prefers-reduced-motion: reduce) { .sidebar[aria-busy='true'] > summary .label::after { animation: nav-busy-in 0s 0.2s both; } }
 /* What a minion waits on (#544, public/wait.js): elapsed against usual under the row, amber once it runs late. */
 .wait-bar { grid-column: 1 / -1; display: block; height: 3px; margin: 0.2rem 0 0.1rem 12px; border-radius: 2px; background: var(--line); overflow: hidden; }
-.wait-bar > i { display: block; height: 100%; background: var(--running); transition: width 1s linear; }
+.wait-bar > i { display: block; height: 100%; background: var(--running); }
 .wait-bar.late > i { background: var(--waiting-tint); }

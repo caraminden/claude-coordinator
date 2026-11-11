@@ -22,6 +22,11 @@ test('parseMerge reads --repo in its forms, and the repo from a PR URL', () => {
   assert.deepEqual(parseMerge('gh pr merge --squash -R caraminden/gamedevtest 192'), call({ repo: 'caraminden/gamedevtest' }));
   assert.deepEqual(parseMerge('gh pr merge 192 --repo=github.com/o/r -s'), call({ repo: 'o/r' }));
   assert.deepEqual(parseMerge("gh pr merge 'https://github.com/o/r/pull/45' --merge"), call({ target: '45', repo: 'o/r', method: 'merge' }));
+  // A value attached to -R, as gh takes it (#468 S06-2).
+  assert.deepEqual(parseMerge('gh pr merge 12 -Rother/repo --squash'), call({ target: '12', repo: 'other/repo' }));
+  assert.deepEqual(parseMerge('gh pr merge 12 -R=other/repo --squash'), call({ target: '12', repo: 'other/repo' }));
+  assert.deepEqual(parseMerge('gh pr merge 12 -sRother/repo'), call({ target: '12', repo: 'other/repo' }));
+  assert.equal(parseMerge('gh pr merge 12 -s/R -R o/r'), null, 'a word that is no switch bundle');
   // A URL for one repo with --repo naming another is a contradiction, not a guess.
   assert.equal(parseMerge('gh pr merge https://github.com/o/r/pull/45 --repo o/other'), null);
 });

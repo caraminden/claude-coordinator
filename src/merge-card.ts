@@ -184,17 +184,18 @@ function mergeArgs(args: { word: string }[]): MergeCall | null {
     if (flag.startsWith('--') && flag.includes('=')) {
       value = { word: flag.slice(flag.indexOf('=') + 1) };
       flag = flag.slice(0, flag.indexOf('='));
-    } else if (/^-[A-Za-z]{2,}$/.test(flag)) {
-      // Bundled switches (-sd); a value flag ends the bundle and takes the rest, or the next word.
+    } else if (/^-[A-Za-z]./.test(flag)) {
+      // Bundled switches (-sd); a value flag ends the bundle and takes the rest (-Ro/r, -R=o/r), or the next word.
       const letters = flag.slice(1);
       let k = 0;
       for (; k < letters.length && !VALUED.has(`-${letters[k]}`); k++) {
+        if (!/[A-Za-z]/.test(letters[k])) return null;
         const m = METHODS[`-${letters[k]}`];
         if (m) methods.add(m);
       }
       if (k === letters.length) continue;
       flag = `-${letters[k]}`;
-      if (k + 1 < letters.length) value = { word: letters.slice(k + 1) };
+      if (k + 1 < letters.length) value = { word: letters.slice(k + 1).replace(/^=/, '') };
     }
     if (flag === '--') return null;
     if (METHODS[flag]) methods.add(METHODS[flag]);

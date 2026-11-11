@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import type { Store } from './db.ts';
 import type { Ship } from './branch.ts';
 import type { CiRuns } from './ci-wait.ts';
+import type { LandSeen } from './ci-health.ts';
 
 export interface Wait {
   /** Its source: land (the land line and its landing), heavy (a heavy slot), ci (a PR's CI run), restart. */
@@ -234,6 +235,8 @@ export interface WaitDeps {
   /** CI runs (#546): a landing's CI gate and a minion's PR; its repo's "owner/name" for the landing's. */
   ci?: CiRuns;
   ciSlug?: () => string | null;
+  /** Every poll: the land line with each landing's phase and its gate run, for the land alarm (#561, CiHealth.land). */
+  landLine?: (seen: LandSeen[], now: number) => void;
 }
 
 /** The waits of every minion, polled from disk; a change re-sends that minion's row. */
@@ -327,6 +330,11 @@ export class Waits {
     const next = new Map<number, Wait & { key?: string }>();
     if (this.d.deployState) {
       const { line, took } = readLandLine(this.d.deployState, this.d.alive);
+      // Before ci.landings below lets go of a landing that left its CI wait, so its run's last stage is still there.
+      this.d.landLine?.(line.map((t) => {
+        const id = this.ticketFor(t.label);
+        return { seq: t.seq, name: t.label === 'tools/deploy.sh' ? t.label : this.name(t.label), phase: t.got > 0 ? landPhase(t.phase).key : 'line', ci: id != null ? this.d.ci?.view(id)?.stage ?? null : null, run: id != null ? this.d.ci?.runOf(id) ?? null : null };
+      }), now);
       for (const [label, w] of landWaits(line, took, now, this.usual, this.name)) {
         const id = this.ticketFor(label);
         const holder = line.find((t) => t.label === label && t.got > 0);

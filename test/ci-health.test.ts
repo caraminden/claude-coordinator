@@ -8,6 +8,7 @@ import { after, test } from 'node:test';
 import {
   CiHealth, OFFLINE_MS, addRunnerWaiter, onlineRunners, runnerWaiters, QUEUED_MS, VERDICT_MS, bundleTitle, deadGroups, deadProblem, ghGet, itemKey, neverStarted, queuedProblems,
   runnerProblems, sharedHost, skippedProblem, verdictPair, verdictProblem, type GhAnswer, type Job, type Run,
+  clock, landProblems, landStep, newLandState, type LandState,
 } from '../src/ci-health.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
@@ -473,4 +474,100 @@ test('onlineRunners matches the scheme label and its -linux twin, online only', 
   const r = (name: string, status: string, ...labels: string[]) => ({ name, status, labels: labels.map((name) => ({ name })) });
   const got = onlineRunners([r('a', 'online', 'peek-auras-ci'), r('b', 'online', 'peek-auras-ci-linux'), r('c', 'offline', 'peek-auras-ci'), r('d', 'online', 'peek-auras-ci-mac'), { name: 'e', status: 'online' }], 'Peek Auras');
   assert.deepEqual(got.map((x) => x.name), ['a', 'b']);
+});
+
+// ---------- the land gate's alarm (#561) ----------
+// Waits.poll feeds every landing in the line each 2 s: its phase (landPhase's key, or 'line' while it waits) and
+// its CI gate run's stage as ci-wait last read it.
+const land = (seq: number, name: string, phase: string, ci: string | null = null, run: number | null = null) => ({ seq, name, phase, ci, run });
+
+/** One landing's whole way through the line, a poll per phase, from `t`; returns the time it left. */
+function through(state: LandState, seq: number, name: string, phases: [string, string | null, number][], t: number, run: number | null = null): number {
+  for (const [phase, ci, ms] of phases) {
+    landStep(state, [land(seq, name, phase, ci, ci ? run : null)], t);
+    t += ms;
+  }
+  landStep(state, [], t);
+  return t;
+}
+const capHit: [string, string | null, number][] = [['rebase', null, 5_000], ['ci', null, 20_000], ['ci', 'jobs', 6 * MIN], ['tests', null, 4 * MIN], ['deploy', null, MIN]];
+const noJob: [string, string | null, number][] = [['rebase', null, 5_000], ['ci', null, 95_000], ['tests', null, 4 * MIN], ['deploy', null, MIN]];
+const green: [string, string | null, number][] = [['rebase', null, 5_000], ['ci', 'jobs', 2 * MIN], ['deploy', null, MIN]];
+const desktopOff: [string, string | null, number][] = [['rebase', null, 5_000], ['tests', null, 4 * MIN], ['deploy', null, MIN]];
+
+test('the land gate alarms once CI falls back to perigee on 2 lands in a row, naming each and why, and the next green land clears it (#561)', () => {
+  const s = newLandState();
+  let t = NOW;
+  t = through(s, 1, '#544', capHit, t, 43082450082);
+  assert.deepEqual(landProblems(s, t), [], 'one fallback is no alarm');
+  t = through(s, 2, '#555', noJob, t);
+  assert.deepEqual(landProblems(s, t), [{
+    key: 'land:fallback',
+    title: "CI: the land gate fell back to perigee on 2 lands in a row: #544 (the desktop suite hit the 6-min cap, run 43082450082), #555 (GitHub never started its run)",
+  }]);
+  t = through(s, 3, '#556', capHit, t, 7);
+  assert.match(landProblems(s, t)[0].title, /^CI: the land gate fell back to perigee on 3 lands in a row: #544 .*, #555 .*, #556 \(the desktop suite hit the 6-min cap, run 7\)$/);
+  t = through(s, 4, '#557', green, t);
+  assert.deepEqual(landProblems(s, t), [], 'a green gate clears it');
+  t = through(s, 5, '#558', capHit, t);
+  assert.deepEqual(landProblems(s, t), [], 'and starts the count again');
+});
+
+test("the land gate's alarm: a job no runner took is named as that, not as a cap hit; a land that never reached CI (desktop off, LAND_CI=0) neither counts nor clears (#561)", () => {
+  const s = newLandState();
+  let t = NOW;
+  t = through(s, 1, '#1', [['rebase', null, 5_000], ['ci', 'queued', 95_000], ['tests', null, 4 * MIN], ['deploy', null, MIN]], t, 9);
+  t = through(s, 2, '#2', desktopOff, t);
+  assert.deepEqual(landProblems(s, t), [], "the desktop off isn't the gate failing: the runner-offline alert covers it");
+  // Only what CI said while the land waited on it counts: ci-wait drops the run once the land moves on.
+  t = through(s, 3, '#3', [['rebase', null, 5_000], ['ci', 'jobs', 30_000], ['ci', 'failed', 2_000], ['tests', null, 4 * MIN], ['deploy', null, MIN]], t, 10);
+  assert.equal(landProblems(s, t)[0]?.title, 'CI: the land gate fell back to perigee on 2 lands in a row: #1 (no runner started its job, run 9), #3 (its run failed before the tests ran, run 10)');
+  t = through(s, 4, '#4', desktopOff, t);
+  assert.equal(landProblems(s, t).length, 1, 'still open: only a green gate clears it');
+  // A land refused in CI (red tests) leaves from the CI phase: no fallback, no green.
+  t = through(s, 5, '#5', [['rebase', null, 5_000], ['ci', 'failed', 3 * MIN]], t);
+  assert.equal(landProblems(s, t).length, 1);
+  // tools/deploy.sh on its own goes straight to deploying: not a land, so not green either.
+  assert.equal(landProblems(s, through(s, 6, 'tools/deploy.sh', [['deploy', null, MIN]], t)).length, 1);
+});
+
+test('a land in the line over 30 min alarms, waiting in line included, until that land ends (#561)', () => {
+  const s = newLandState();
+  const t = NOW;
+  landStep(s, [land(1, '#549', 'tests'), land(2, '#551', 'line')], t);
+  landStep(s, [land(1, '#549', 'tests'), land(2, '#551', 'line')], t + 29 * MIN);
+  assert.deepEqual(landProblems(s, t + 29 * MIN), []);
+  landStep(s, [land(2, '#551', 'rebase'), land(3, '#552', 'line')], t + 31 * MIN);
+  const slow = landProblems(s, t + 31 * MIN);
+  assert.deepEqual(slow, [{ key: 'land:slow', title: `CI: #551 has been landing since ${clock(t)} (over 30 min)` }]);
+  assert.deepEqual(landProblems(s, t + 40 * MIN), slow, 'the words stay put as the minutes pass, so it is not re-sent');
+  landStep(s, [land(3, '#552', 'rebase')], t + 41 * MIN);
+  assert.deepEqual(landProblems(s, t + 41 * MIN), [], 'cleared when #551 left the line');
+  landStep(s, [land(3, '#552', 'rebase'), land(4, '#553', 'line')], t + 70 * MIN);
+  assert.match(landProblems(s, t + 70 * MIN)[0].title, /^CI: #552 has been landing since /);
+});
+
+test("the land alarm joins CI health's one alert under the live scheme, rings within the poll, and clears itself (#561)", async () => {
+  const w = world();
+  let t = NOW;
+  const seen = (seq: number, name: string, phase: string, ci: string | null = null) => w.health.land(w.peek.id, [land(seq, name, phase, ci)], t);
+  for (const [seq, name] of [[1, '#544'], [2, '#555']] as const) {
+    for (const [phase, ci, ms] of capHit) { await seen(seq, name, phase, ci); t += ms; }
+    await w.health.land(w.peek.id, [], t);
+  }
+  assert.deepEqual(w.puts, [['Cara', 'ci.open', 'CI, Peek Auras: the land gate fell back to perigee on 2 lands in a row: #544 (the desktop suite hit the 6-min cap), #555 (the desktop suite hit the 6-min cap)']]);
+  assert.deepEqual(w.quiet, [], 'an alarm');
+  // The 5-min poll keeps it, with GitHub's own problems beside it.
+  await w.health.tick(t);
+  assert.equal(w.puts.length, 1, 'not re-sent');
+  for (const [phase, ci, ms] of green) { await seen(3, '#556', phase, ci); t += ms; }
+  await w.health.land(w.peek.id, [], t);
+  assert.deepEqual(w.puts.at(-1), ['Cara', 'ci.open', null]);
+  // A restart remembers the line and the count.
+  for (const [phase, ci, ms] of capHit) { await seen(4, '#557', phase, ci); t += ms; }
+  await w.health.land(w.peek.id, [], t);
+  const again = new CiHealth(w.store, w.deps);
+  for (const [phase, ci, ms] of capHit) { await again.land(w.peek.id, [land(5, '#558', phase, ci)], t); t += ms; }
+  await again.land(w.peek.id, [], t);
+  assert.match(w.puts.at(-1)![2]!, /2 lands in a row: #557 .*#558/);
 });

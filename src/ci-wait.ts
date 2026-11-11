@@ -187,6 +187,11 @@ export class CiRuns {
   }
 
   /** Where a minion's CI stands, with what it is for ("PR #88", "" for a landing) and the usual length in s. */
+  /** The run a minion's watch follows (a landing's gate run once found), for the land alarm (#561). */
+  runOf(ticketId: number): number | null {
+    return this.watches.get(ticketId)?.runs[0] ?? null;
+  }
+
   view(ticketId: number): (CiNow & { what: string; usual: number | null }) | null {
     const w = this.watches.get(ticketId);
     if (!w) return null;

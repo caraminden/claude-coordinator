@@ -46,6 +46,7 @@ import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens } from './src/ci-runner.ts';
 import { CiHealth } from './src/ci-health.ts';
+import { repoSlug } from './src/prlinks.ts';
 import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
 import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
@@ -404,7 +405,14 @@ const deployState = (() => {
 const ciRuns = new CiRuns({ changed: (id) => waits.check(id) });
 let liveSlug: string | null = null;
 void originRepo(import.meta.dirname).then((slug) => (liveSlug = slug));
-const waits = new Waits({ store, deployState, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ship: ships.ship, interruptible: () => runner.interruptible(), changed: (id) => runner.broadcastTicket(id), ci: ciRuns, ciSlug: () => liveSlug });
+const waits = new Waits({ store, deployState, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ship: ships.ship, interruptible: () => runner.interruptible(), changed: (id) => runner.broadcastTicket(id), ci: ciRuns, ciSlug: () => liveSlug,
+  // The land gate's alarm (#561), under the scheme whose repo the live checkout is.
+  // Not before the live repo is known: a guess of no scheme would clear the alarm, and a restart would ring it again.
+  landLine: (seen, now) => {
+    const live = liveSlug && store.listProjects().find((p) => repoSlug(p.repo_url) === liveSlug);
+    if (live) ciHealth.land(live.id, seen, now).catch((err) => console.error(`Land alarm: ${err?.message ?? err}`));
+  },
+});
 runner.wait = waits.wait;
 
 runner.onFilesMayChange = (ticketId) => {

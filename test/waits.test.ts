@@ -212,3 +212,25 @@ test("a test run's counts (#545): the landing's run and a heavy Node suite show 
   assert.equal(waits.wait(c.id)!.done, undefined);
   assert.equal(waits.wait(d.id)!.chip, 'heavy run');
 });
+
+test('every poll hands the land line to the land alarm (#561): each landing by its minion, phase and gate run', () => {
+  const { state, heavy, ticket } = setup();
+  const seen: unknown[] = [];
+  const views = new Map<number, string>();
+  const a = minion(), b = minion();
+  const ci = { view: (id: number) => (views.has(id) ? { stage: views.get(id), short: 'step 3/8', text: 'test-linux step 3 of 8', since: now, what: '', usual: null } : null), runOf: (id: number) => (views.has(id) ? 4308 : null), landings: () => {} } as any;
+  const waits = new Waits({
+    store, deployState: state, heavyDir: heavy, interruptible: () => 0, changed: () => {}, now: () => now, ship: () => null,
+    alive: () => true, held: () => true, ci, landLine: (line, at) => seen.push([line, at]),
+  });
+  views.set(a.id, 'jobs');
+  ticket(1, a.branch, now / 1000 - 60, 'waiting for CI since 14:00', 30);
+  ticket(2, b.branch, 0, 'waiting', 10);
+  ticket(3, 'tools/deploy.sh', 0, 'waiting', 5);
+  waits.poll();
+  assert.deepEqual(seen, [[[
+    { seq: 1, name: `#${a.number}`, phase: 'ci', ci: 'jobs', run: 4308 },
+    { seq: 2, name: `#${b.number}`, phase: 'line', ci: null, run: null },
+    { seq: 3, name: 'tools/deploy.sh', phase: 'line', ci: null, run: null },
+  ], now]]);
+});

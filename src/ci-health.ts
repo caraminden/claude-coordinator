@@ -205,6 +205,98 @@ const BUNDLE_ITEM = 'ci.open';
 /** A Mandate item key for a problem (Mandate allows A-Z a-z 0-9 . _ : - and 128 characters). */
 export const itemKey = (key: string) => `ci.${key.replace(/[^A-Za-z0-9._:-]+/g, '_')}`.slice(0, 128);
 
+// ---------- the land gate (#561) ----------
+// Josh's pick, 2026-11-11 ("Add the live alarm"): the CI gate that tools/land.sh waits on hung for hours on 11-11 and
+// nobody heard. So the one alert also says when the gate fell back to perigee on LAND_STREAK lands in a row (cleared by
+// the next land whose gate is green), or a land has been in the line LAND_SLOW_MS (cleared when it leaves). Read from
+// what Waits.poll already sees every 2 s, the land line and ci-wait's view of each gate run: no GitHub calls of its own.
+// On 11-10 and 11-11, 130 lands: 30 min was passed once outside the outage; 2 fallbacks in a row only in it, and
+// while Cara's desktop was off, which isn't the gate failing (the runner-offline alert says it), so a land that never
+// reached the CI wait (no runner online, LAND_CI=0, GitHub not answering) neither counts nor clears.
+export const LAND_STREAK = 2;
+export const LAND_SLOW_MS = 30 * 60_000;
+// land.sh's CI_LIMIT is 360 s: a run still going this far into the CI wait was cut off by it.
+const LAND_CAP_MS = 5 * 60_000;
+
+/** A landing in the line as Waits.poll sees it. */
+export interface LandSeen {
+  /** Its ticket's number in the line (tools/deploy-queue.sh). */
+  seq: number;
+  /** "#551", or its label. */
+  name: string;
+  /** landPhase's key while it holds the lock (rebase, ci, tests, deploy); 'line' while it waits. */
+  phase: string;
+  /** Its gate run's stage as ci-wait last read it (CiNow's), and the run's id. */
+  ci: string | null;
+  run: number | null;
+}
+interface Landing {
+  name: string;
+  joined: number;
+  ciSince?: number;
+  ci?: string | null;
+  run?: number | null;
+  tests?: boolean;
+  green?: boolean;
+}
+export interface LandState {
+  /** By seq: the landings in the line now. */
+  lands: Record<string, Landing>;
+  /** The fallbacks since the last green gate, oldest first. */
+  fellBack: { name: string; why: string; run: number | null }[];
+}
+export const newLandState = (): LandState => ({ lands: {}, fellBack: [] });
+
+/** Why a land's gate fell back, from what CI said while it waited. shortcut: a rate-limited ci-wait reads as GitHub's; land.sh's own reason would need it to say so in the line. */
+function fellBackWhy(l: Landing, now: number): string {
+  if (!l.ci) return 'GitHub never started its run';
+  if (l.ci === 'queued') return 'no runner started its job';
+  if (l.ci === 'failed') return 'its run failed before the tests ran';
+  if (l.ci === 'jobs' && now - (l.ciSince ?? now) >= LAND_CAP_MS) return 'the desktop suite hit the 6-min cap';
+  return 'CI gave no verdict';
+}
+
+/** One look at the line: landings join and leave, a fallback adds to the count, a green gate ends it. Updates `s` in place. */
+export function landStep(s: LandState, seen: LandSeen[], now: number): LandState {
+  const here = new Set<string>();
+  for (const x of seen) {
+    if (x.name === 'tools/deploy.sh') continue; // a deploy on its own isn't a land
+    const key = String(x.seq);
+    here.add(key);
+    const l = (s.lands[key] ??= { name: x.name, joined: now });
+    if (x.phase === 'ci') {
+      l.ciSince ??= now;
+      if (x.ci) l.ci = x.ci;
+      if (x.run) l.run = x.run;
+    } else if (x.phase === 'tests' && !l.tests) {
+      l.tests = true;
+      if (l.ciSince != null) s.fellBack.push({ name: l.name, why: fellBackWhy(l, now), run: l.run ?? null });
+    } else if (x.phase === 'deploy' && !l.tests && !l.green) {
+      l.green = true;
+      s.fellBack = [];
+    }
+  }
+  for (const key of Object.keys(s.lands)) if (!here.has(key)) delete s.lands[key];
+  return s;
+}
+
+/** The land gate's problems now, for the one alert. */
+export function landProblems(s: LandState, now: number): Problem[] {
+  const out: Problem[] = [];
+  const n = s.fellBack.length;
+  if (n >= LAND_STREAK) {
+    const named = s.fellBack.slice(-3).map((f) => `${f.name} (${f.why}${f.run ? `, run ${f.run}` : ''})`);
+    out.push({ key: 'land:fallback', title: `CI: the land gate fell back to perigee on ${n} lands in a row: ${n > 3 ? `${n - 3} more, then ` : ''}${named.join(', ')}` });
+  }
+  const slow = Object.values(s.lands).filter((l) => now - l.joined >= LAND_SLOW_MS).sort((a, b) => a.joined - b.joined);
+  if (slow.length) {
+    const names = slow.map((l) => l.name);
+    const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)} have` : `${names[0]} has`;
+    out.push({ key: 'land:slow', title: `CI: ${who} been landing since ${clock(slow[0].joined)} (over 30 min)` });
+  }
+  return out;
+}
+
 // ---------- wake_when_runners_back (#541) ----------
 // A landing whose CI gate got no verdict (the kit's land.sh exits 75: no runner took the run, nearly always the
 // desktop off) parks its minion. Its CI ran on a scratch branch the PR watcher never sees, so this poll wakes it:
@@ -274,6 +366,14 @@ interface Saved {
   /** Quiet problem key → user id → the title their Mandate item has (alarm keys only until an older build's are cleared). */
   sent: Record<string, Record<string, string>>;
 }
+
+/** The land gate's alarm (#561) as kept: whose scheme it is, the line, and its problems. */
+interface LandWatch {
+  project: number;
+  state: LandState;
+  problems: Problem[];
+}
+const LAND_WATCH = 'ci-health:land';
 
 export interface CiHealthDeps {
   /** The GitHub login to read a scheme's repo as: its owner's linked one, or undefined for the box's. */
@@ -358,12 +458,36 @@ export class CiHealth {
     return this.store.listUsers().filter((u) => u.admin && !u.disabled_at && this.store.contraptionEnabled('mandate', u.id));
   }
 
-  /** Every admin's one alert, from every scheme's open problems: put when its words change, cleared when none are left. */
-  async alert() {
+  /**
+   * The land line as Waits.poll saw it (#561), for the live checkout's scheme: the gate's alarm, kept across restarts,
+   * goes into the one alert as soon as its words change rather than at the next poll.
+   */
+  async land(projectId: number, seen: LandSeen[], now = Date.now()) {
+    const kept = this.store.getSetting<LandWatch>(LAND_WATCH);
+    const w: LandWatch = { project: projectId, state: kept?.state ?? newLandState(), problems: [] };
+    const before = JSON.stringify(kept?.state);
+    landStep(w.state, seen, now);
+    w.problems = landProblems(w.state, now);
+    const rang = JSON.stringify([kept?.project, kept?.problems ?? []]) !== JSON.stringify([w.project, w.problems]);
+    if (rang || before !== JSON.stringify(w.state)) this.store.setSetting(LAND_WATCH, w);
+    if (rang) await this.alert();
+  }
+
+  private alerting: Promise<void> = Promise.resolve();
+  /** Every admin's one alert, from every scheme's open problems: put when its words change, cleared when none are left. One at a time, as the land line's calls come between polls. */
+  alert(): Promise<void> {
+    const next = this.alerting.then(() => this.sendAlert());
+    this.alerting = next.catch(() => {});
+    return next;
+  }
+
+  private async sendAlert() {
     const open: { scheme: string; problem: Problem; id: number }[] = [];
+    const land = this.store.getSetting<LandWatch>(LAND_WATCH);
     for (const p of this.store.listProjects()) {
       if (!repoSlug(p.repo_url)) continue;
-      for (const x of this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []) if (!x.quiet) open.push({ scheme: p.name, problem: x, id: p.id });
+      const mine = [...(this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []), ...(land?.project === p.id ? land.problems : [])];
+      for (const x of mine) if (!x.quiet) open.push({ scheme: p.name, problem: x, id: p.id });
     }
     // User id → the title their item has.
     const sent = this.store.getSetting<Record<string, string>>('ci-health:alert') ?? {};

@@ -176,10 +176,18 @@ export function contraptionsPage() {
   const list = h('div', { class: 'contraption-list' });
   let people = [];
   let all = [];
-  const render = () => list.replaceChildren(...(all.length ? all.map((c) => card(c, people, (next) => {
-    all = all.map((x) => (x.name === next.name ? next : x));
-    render();
-  })) : [h('p', { class: 'muted' }, 'No contraptions yet.')]));
+  // A save or a key rotation redraws only its own card (keeping its Settings open), so typing in the others survives.
+  const cardFor = (c) => {
+    const el = card(c, people, (next) => {
+      all = all.map((x) => (x.name === next.name ? next : x));
+      if (!el.isConnected) return render();
+      const fresh = cardFor(next);
+      fresh.querySelector(':scope > details').open = el.querySelector(':scope > details').open;
+      el.replaceWith(fresh);
+    });
+    return el;
+  };
+  const render = () => list.replaceChildren(...(all.length ? all.map(cardFor) : [h('p', { class: 'muted' }, 'No contraptions yet.')]));
   const name = h('input', { name: 'name', placeholder: 'mandate', required: true, maxlength: 32, pattern: '[a-z0-9]([a-z0-9\\-]*[a-z0-9])?', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
   const title = h('input', { name: 'title', placeholder: 'Mandate', required: true, maxlength: 60, autocomplete: 'off' });
   const port = h('input', { name: 'port', type: 'number', min: 1024, max: 65535, placeholder: '9101', required: true });

@@ -51,6 +51,16 @@ jobs:
           [ -S "$dir/bus" ] || { echo "No systemd user manager for $(id -un). As root in the distro: loginctl enable-linger $(id -un)"; exit 1; }
           echo "XDG_RUNTIME_DIR=$dir" >>"$GITHUB_ENV"
           echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$dir/bus" >>"$GITHUB_ENV"
+      # On 2026-11-11 the distro's kernel tick was 10721, not 10000: its clocks ran 7% fast, NTP stepped the wall clock
+      # back 2.2 s every 32 s, and timing tests failed at random. The raw clock is the one nothing adjusts.
+      - name: the runner's clock
+        run: |
+          python3 -c "
+          import time as t
+          a, b = t.monotonic(), t.clock_gettime(t.CLOCK_MONOTONIC_RAW); t.sleep(2)
+          d = (t.monotonic() - a) / (t.clock_gettime(t.CLOCK_MONOTONIC_RAW) - b) - 1
+          print(f'the clock runs {d:+.2%} against the raw clock')
+          if abs(d) > 0.01: raise SystemExit('The kernel clock is skewed. As root in the distro, set the tick back to 10000 (tools/ci-runner/README.md).')"
       # test/ps1-lint.test.ts skips without pwsh and PSScriptAnalyzer, so a failed install fails the job
       # rather than quietly dropping the lint. Both go in the runner's own home (no root), once.
       - name: pwsh and PSScriptAnalyzer for the .ps1 lint

@@ -293,6 +293,13 @@ their units with `systemd-run --user` as they do on perigee. As root in the dist
 `loginctl enable-linger ci-claude-coordinator-4590fb` (the user `ci_runners` made; the workflow's step names it
 when it's missing).
 
+The workflow's step "the runner's clock" fails when the distro's kernel clock is skewed. On 2026-11-11 its tick
+was 10721 instead of 10000 (who set it is not known): every clock but the raw one ran 7% fast, NTP stepped the
+wall clock back 2.2 s every 32 s, and tests that time things failed at random. As root in the distro, this sets
+it back and prints 0:
+`python3 -c "import ctypes;b=(ctypes.c_long*26)();ctypes.cast(b,ctypes.POINTER(ctypes.c_uint))[0]=0x4000;b[11]=10000;print(ctypes.CDLL(None).adjtimex(b))"`
+(`wsl --shutdown` from Windows resets it too, and stops every runner in the distro while it restarts.)
+
 When the runner can't answer (Cara is logged off, GitHub is down, no runner takes the job within 90 s, the run
 takes more than 6 minutes), `land.sh` prints `CI FALLBACK` with the reason, runs the suite on perigee as it used
 to, and adds a `ci fallback` line to the day's retro log (`retro-log/<date>/land.md`), so they can be counted. A red

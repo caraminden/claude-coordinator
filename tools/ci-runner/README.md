@@ -170,10 +170,11 @@ second copy of the runner agent that runs inside that distro.
 | | Each scheme's Linux runner |
 |---|---|
 | Where | the WSL distro `citadel-ci`, which belongs to the Windows account that installed it (Cara's) |
-| Folder | `/opt/actions-runner-<repo>`, then `-2` … (up to 4), each with a `.citadel-runner` marker (`"mode": "linux"`) |
+| Folder | `/opt/actions-runner-<repo>`, then `-2` … (up to 4), the scheme's user's alone, with a `.citadel-runner` marker for people (`"mode": "linux"`) |
 | Label | `<scheme-slug>-ci-linux` (`theory-of-crafting-ci-linux`); GitHub adds `self-hosted`, `Linux`, `X64` |
 | Name | `<PC>-linux`, then `<PC>-linux-2` … |
-| Runs as | the user `citadel-ci` (no sudo), as a systemd service (the runner's own `svc.sh`); one job at a time |
+| Runs as | the scheme's own user `ci-<repo>-<6 hex>` (no sudo), so one scheme's jobs can't touch another's runners; one job at a time |
+| Service | `citadel-runner-<owner>-<repo>[-n].service`, which `add-runner.sh` writes itself from the runner's `svc.sh` template; its first line `# citadel-repo=<owner>/<repo>` is Citadel's record of whose it is |
 | `.env` | telemetry off, and `HOME` in its own folder, so runners never share tool caches (#370) |
 | Agent | `/opt/citadel-runner-agent` (root's alone), the systemd service `citadel-runner-agent`, its own machine host on the Machines page |
 | Kept up by | the logon task **Citadel WSL runners** (`keep-wsl-up.ps1`), which holds the distro open: WSL stops a distro seconds after the last program using it exits, and its services with it |
@@ -185,8 +186,11 @@ runner's scheme-specific tools.
 
 What it shares with the Windows agent: it runs only its own scripts, with the numbers Citadel's job carries; never
 downloads code (installing again is how its scripts change); never sees a registration token (the scripts fetch it);
-one job at a time, ended after 15 minutes. `remove` only removes folders with the scheme's marker; `/opt` is root's
-alone, so a marker there is one `add-runner.sh` wrote (`remove-runner.sh` refuses if that ever stops being true).
+one job at a time, ended after 15 minutes. As root it never runs a file from a runner folder (CI jobs can write
+there): `config.sh` runs as the scheme's user, with the registration token in its environment, never its command
+line, and no machine token. `remove` trusts only the service files in `/etc/systemd/system`, root's alone
+(`remove-runner.sh` refuses if that ever stops being true), never a folder's marker, which a job could forge; it
+deletes the scheme's user with its last runner.
 
 Its one limit: WSL distros are each Windows user's own, so the task runs **while Cara is logged on**, like the
 session runners. After a reboot, the Linux runners come back when she logs on. (A SYSTEM task can't reliably start a
@@ -250,9 +254,10 @@ the Machines page if it's lost). To stop everything: `Disable-ScheduledTask -Tas
 `wsl --terminate citadel-ci`.
 
 **What has been tested** (#510): the scripts ran end to end on perigee against a fake Citadel, a fake runner
-tarball and stubbed `systemctl`/`runuser` (`test/runner-linux-scripts.test.ts`), and `keep-wsl-up.ps1` passes the
-`.ps1` lint. Nothing has run in WSL yet: the real `config.sh` and `svc.sh`, systemd in the distro, the tailnet from
-WSL's network, and whether the logon task really holds the distro up are first tried by Cara's setup.
+tarball and stubbed `systemctl`, `runuser`, `useradd` and `userdel` (`test/runner-linux-scripts.test.ts`), and
+`keep-wsl-up.ps1` passes the `.ps1` lint. Nothing has run in WSL yet: the real `config.sh` and runner service,
+systemd in the distro, the tailnet from WSL's network, and whether the logon task really holds the distro up are
+first tried by Cara's setup.
 
 ## Point the workflows at it
 

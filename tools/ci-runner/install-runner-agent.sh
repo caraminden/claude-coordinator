@@ -7,16 +7,16 @@
 #   bash install-runner-agent.sh <citadel machines url>        # asks for the machine token, or reads CC_MACHINE_TOKEN
 #
 # It:
-#   1. installs what the agent and the runners need from Ubuntu's archive (Node, git, curl, the runner's libicu);
-#   2. writes /etc/wsl.conf: systemd on, and the distro cut off from Windows (no C: drive, no running Windows
+#   1. writes /etc/wsl.conf: systemd on, and the distro cut off from Windows (no C: drive, no running Windows
 #      programs), so a CI job here can't reach Cara's files or act as her on Windows. If that changed anything, it
-#      stops and says to restart the distro, then run it again;
-#   3. makes the user citadel-ci, which every runner's jobs run as (no sudo);
-#   4. downloads runner-agent.mjs, add-runner.sh, list-runners.sh and remove-runner.sh from Citadel into
+#      stops there and says to restart the distro, then run it again;
+#   2. installs what the agent and the runners need from Ubuntu's archive (Node, git, curl, the runner's libicu);
+#   3. downloads runner-agent.mjs, add-runner.sh, list-runners.sh and remove-runner.sh from Citadel into
 #      /opt/citadel-runner-agent, root's alone (the agent never downloads code itself), and prints their SHA-256;
-#   5. keeps the machine token in a file there;
-#   6. installs the systemd service citadel-runner-agent (restarted if it ever stops) and waits until it connects.
-# It touches no runner and nothing on Windows.
+#   4. keeps the machine token in a file there;
+#   5. installs the systemd service citadel-runner-agent (restarted if it ever stops) and waits until it connects.
+# Each scheme's runners get a user of their own (no sudo) when add-runner.sh adds them. It touches no runner and
+# nothing on Windows.
 set -euo pipefail
 
 url=${1:-}
@@ -32,14 +32,7 @@ token=${CC_MACHINE_TOKEN:-}
 if [[ -z $token ]]; then read -rsp 'Machine token (ccm_..., from the Machines page): ' token; echo; fi
 [[ $token =~ ^ccm_[0-9]+_[A-Za-z0-9_-]{43}$ ]] || die "That isn't a machine token (ccm_...) from the Machines page."
 
-# 1. What it needs. libicu: the runner's .NET refuses to start without it.
-if ! command -v node >/dev/null || ! command -v git >/dev/null || ! command -v curl >/dev/null || ! ldconfig -p | grep -q libicuuc; then
-  apt-get update -q
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends nodejs git curl ca-certificates "$(apt-cache search --names-only '^libicu[0-9]+$' | cut -d' ' -f1 | sort -V | tail -1)"
-fi
-node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' || die "Node $(node -v) is too old: the agent needs 18 or newer."
-
-# 2. systemd on (the runners are its services); no Windows drives or programs. [user] keeps root as the distro's default.
+# 1. systemd on (the runners are its services); no Windows drives or programs. [user] keeps root as the distro's default.
 want='# Citadel CI runners (#510, tools/ci-runner/install-runner-agent.sh): systemd for the runner services, and nothing
 # of Windows reachable from here, so CI jobs never see Cara'"'"'s files or run Windows programs as her.
 [boot]
@@ -64,10 +57,14 @@ fi
 [[ -d /run/systemd/system ]] || die 'systemd is not running although /etc/wsl.conf turns it on: in PowerShell, wsl --terminate citadel-ci, then run this again.'
 [[ ! -d /mnt/c/Windows ]] || die 'C: is still mounted although /etc/wsl.conf turns that off: in PowerShell, wsl --terminate citadel-ci, then run this again.'
 
-# 3. The runners' user: no password, no sudo.
-id citadel-ci >/dev/null 2>&1 || useradd --system --create-home --shell /bin/bash citadel-ci
+# 2. What it needs. libicu: the runner's .NET refuses to start without it.
+if ! command -v node >/dev/null || ! command -v git >/dev/null || ! command -v curl >/dev/null || ! ldconfig -p | grep -q libicuuc; then
+  apt-get update -q
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends nodejs git curl ca-certificates "$(apt-cache search --names-only '^libicu[0-9]+$' | cut -d' ' -f1 | sort -V | tail -1)"
+fi
+node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' || die "Node $(node -v) is too old: the agent needs 18 or newer."
 
-# 4. The agent and its scripts, as Citadel serves them now, in a folder only root can read or change.
+# 3. The agent and its scripts, as Citadel serves them now, in a folder only root can read or change.
 systemctl stop citadel-runner-agent 2>/dev/null || true
 install -d -m 700 -o root -g root "$dir"
 for f in runner-agent.mjs ci-runner/add-runner.sh ci-runner/list-runners.sh ci-runner/remove-runner.sh; do
@@ -77,10 +74,10 @@ for f in runner-agent.mjs ci-runner/add-runner.sh ci-runner/list-runners.sh ci-r
   echo "$(sha256sum "$to" | cut -d' ' -f1)  ${f#ci-runner/}"
 done
 
-# 5. The token, in that folder, never on the service's command line.
+# 4. The token, in that folder, never on the service's command line.
 ( umask 077; printf '%s' "$token" > "$dir/machine-token" )
 
-# 6. The service: started now and at every start of the distro, again a minute after it ever stops.
+# 5. The service: started now and at every start of the distro, again a minute after it ever stops.
 cat > /etc/systemd/system/citadel-runner-agent.service <<EOF
 [Unit]
 Description=Citadel CI runner agent (adds, lists and removes schemes' Linux runners when Citadel asks)

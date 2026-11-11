@@ -7,10 +7,14 @@
 #
 # It asks Citadel which repo and label the scheme has (no token yet) and skips each instance already here; then for
 # each missing one it unpacks the stock runner (checked against GitHub's SHA-256) into /opt/actions-runner-<repo>
-# (then -2 ...), writes its .env and a .citadel-runner marker (remove-runner.sh only removes folders with one),
-# registers it with label <scheme-slug>-ci-linux and name <PC>-linux (then -linux-2 ...) as the user citadel-ci,
-# and installs it as a systemd service with the runner's own svc.sh. One registration token, fetched as late as
-# possible with the machine token in CC_MACHINE_TOKEN, never written down. It never touches another runner.
+# (then -2 ...), owned by the scheme's own user ci-<repo>-<hash> (one per scheme, so one scheme's jobs can't read or
+# change another's runners), registers it with label <scheme-slug>-ci-linux and name <PC>-linux (then -linux-2 ...),
+# and writes its systemd unit citadel-runner-<owner>-<repo>[-n].service itself.
+#
+# Root never runs a file from a runner folder: CI jobs can write there. config.sh runs as the scheme's user, and the
+# unit (in /etc/systemd/system, root's alone) is the record remove-runner.sh trusts; the folder's .citadel-runner
+# marker is for people. One registration token, fetched as late as possible with the machine token in
+# CC_MACHINE_TOKEN, handed to config.sh in its environment (never its arguments), never written down.
 set -euo pipefail
 
 scheme=${1:-}
@@ -19,7 +23,7 @@ url=${url%/}
 count=${3:-1}
 # For tests; the agent never sets these.
 root=${CITADEL_RUNNER_ROOT:-/opt}
-user=${CITADEL_RUNNER_USER:-citadel-ci}
+units=${CITADEL_RUNNER_UNITS:-/etc/systemd/system}
 version=${RUNNER_VERSION:-2.338.0}
 # From the release notes of that version (<!-- BEGIN SHA linux-x64 -->); set both to change version.
 sha=${RUNNER_SHA256:-af4b794c1bc41d73d40535e3fe092a39f9679cd8d965954c2aca25a05ca41d32}
@@ -30,13 +34,12 @@ die() { echo "add-runner: $*" >&2; exit 1; }
 [[ -n $scheme && -n $url ]] || die 'usage: add-runner.sh <scheme> <citadel url> [count]'
 [[ $count =~ ^[1-4]$ ]] || die "count must be 1 to 4, not $count"
 [[ -n ${CC_MACHINE_TOKEN:-} ]] || die 'No machine token: set CC_MACHINE_TOKEN (the runner agent does).'
-[[ $(id -u) == 0 ]] || die 'Run this as root: installing a systemd service needs it.'
-id "$user" >/dev/null 2>&1 || die "No user $user; install-runner-agent.sh makes it."
+[[ $(id -u) == 0 ]] || die 'Run this as root: adding users and systemd services needs it.'
 [[ -d /run/systemd/system ]] || die 'systemd is not running in this distro; install-runner-agent.sh turns it on in /etc/wsl.conf.'
 
 # Citadel's answer about the scheme: repo, label and, when $1 is true, a token, one per line; or why not.
 citadel() {
-  node --input-type=module - "$url" "$scheme" "$1" "${2:-register}" <<'JS'
+  node --input-type=module - "$url" "$scheme" "$1" register <<'JS'
 const [url, scheme, mint, kind] = process.argv.slice(-4);
 const res = await fetch(`${url}/api/machines/runner-token`, {
   method: 'POST',
@@ -55,29 +58,31 @@ mapfile -t names < <(citadel false) || true
 [[ ${#names[@]} -ge 2 && -n ${names[0]} ]] || die 'Citadel gave no repo for the scheme (the line above says why).'
 repo=${names[0]}
 label=${names[1]}-linux
+[[ $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "Citadel named an odd repo: $repo"
+owner=${repo%%/*}
 repo_name=${repo#*/}
+# The scheme's user: readable, unique by the hash, and inside Linux's 32 characters.
+user=ci-$(tr -c 'a-z0-9\n' '-' <<< "${repo_name,,}" | cut -c1-20)-$(printf %s "$repo" | sha256sum | cut -c1-6)
 
 missing=()
 taken=0
 for i in $(seq 1 "$count"); do
   suffix=$([[ $i == 1 ]] && echo '' || echo "-$i")
   dir=$root/actions-runner-$repo_name$suffix
-  theirs=''
-  [[ -f $dir/.citadel-runner ]] && theirs=$(node -e 'try { console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).repo) } catch { console.log("(unreadable)") }' "$dir/.citadel-runner")
-  if [[ -n $theirs && $theirs != "$repo" ]]; then
-    # Repo foo's second instance and repo foo-2's first share a folder name.
+  unit=citadel-runner-$owner-$repo_name$suffix.service
+  theirs=$(sed -n '1s/^# citadel-repo=//p' "$units/$unit" 2>/dev/null || true)
+  if [[ -f $units/$unit && $theirs == "$repo" ]]; then
+    echo "Already here, left as it is: $name$suffix in $dir (service $(systemctl is-active "$unit" || true))"
+  elif [[ -e $units/$unit || -e $dir ]]; then
+    # Repo foo's second instance and repo foo-2's first share these names; or a runner made by hand sits there.
     taken=$((taken + 1))
-    echo "$dir already holds a runner for $theirs, so $name$suffix can't go there; nothing changed for it." >&2
-  elif [[ -e $dir ]]; then
-    state='no service'
-    [[ -f $dir/.service ]] && state="service $(systemctl is-active "$(cat "$dir/.service")" || true)"
-    echo "Already here, left as it is: $name$suffix in $dir ($state)"
+    echo "$dir or $unit is already there, not as $repo's (${theirs:-no Citadel unit}), so $name$suffix can't go there; nothing changed for it." >&2
   else
     missing+=("$suffix")
   fi
 done
 if [[ ${#missing[@]} == 0 ]]; then
-  [[ $taken == 0 ]] || die "$taken runner(s) couldn't be added: their folders belong to another repo's runners."
+  [[ $taken == 0 ]] || die "$taken runner(s) couldn't be added: see above."
   echo "$repo already has $count Linux runner(s) here, so nothing changed."
   exit 0
 fi
@@ -90,11 +95,17 @@ curl -fsSL -o "$tarball" "https://github.com/actions/runner/releases/download/v$
 got=$(sha256sum "$tarball" | cut -d' ' -f1)
 [[ $got == "$sha" ]] || die "The download's SHA-256 is $got, not $sha from the release notes; nothing installed."
 
+if ! id "$user" >/dev/null 2>&1; then
+  useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$user"
+  echo "Made the user $user for $repo's runners (no password, no sudo)."
+fi
+
 token=''
 failed=0
 for suffix in "${missing[@]}"; do
   dir=$root/actions-runner-$repo_name$suffix
   runner=$name$suffix
+  unit=citadel-runner-$owner-$repo_name$suffix.service
   mkdir -p "$dir"
   if ! (
     set -e
@@ -102,8 +113,9 @@ for suffix in "${missing[@]}"; do
     # 3. The runner reads .env at start: telemetry off, and a home of its own, so runners never share tool caches (#370).
     mkdir -p "$dir/home"
     printf '%s\n' 'DOTNET_CLI_TELEMETRY_OPTOUT=1' 'DOTNET_NOLOGO=1' "HOME=$dir/home" > "$dir/.env"
-    printf '{"repo": "%s", "label": "%s", "name": "%s", "mode": "linux", "added_at": "%s"}\n' "$repo" "$label" "$runner" "$(date -u +%FT%TZ)" > "$dir/.citadel-runner"
+    printf '{"repo": "%s", "label": "%s", "name": "%s", "mode": "linux", "unit": "%s", "added_at": "%s"}\n' "$repo" "$label" "$runner" "$unit" "$(date -u +%FT%TZ)" > "$dir/.citadel-runner"
     chown -R "$user:" "$dir"
+    chmod 700 "$dir"
   ); then
     failed=$((failed + 1)); echo "$runner: couldn't unpack into $dir; removing it." >&2; rm -rf "$dir"; continue
   fi
@@ -114,14 +126,37 @@ for suffix in "${missing[@]}"; do
     [[ -n $token ]] || { rm -rf "$dir"; die 'Citadel gave no registration token (the line above says why).'; }
   fi
   echo "Registering $runner on $repo with label $label"
-  if ! (cd "$dir" && runuser -u "$user" -- ./config.sh --unattended --url "https://github.com/$repo" --token "$token" --name "$runner" --labels "$label" --work _work); then
+  # As the scheme's user, without the machine token, and with the registration token in its environment
+  # (ACTIONS_RUNNER_INPUT_TOKEN is config.sh's --token), never in any command line `ps` shows. -m keeps that HOME.
+  if ! (cd "$dir" && unset CC_MACHINE_TOKEN && export HOME=$dir/home ACTIONS_RUNNER_INPUT_TOKEN=$token &&
+    runuser -m -u "$user" -- ./config.sh --unattended --url "https://github.com/$repo" --name "$runner" --labels "$label" --work _work); then
     failed=$((failed + 1)); echo "$runner: config.sh failed; removing $dir, which this run made." >&2; rm -rf "$dir"; continue
   fi
-  # 5. A systemd service as $user (the runner's own svc.sh), started now and at every boot of the distro.
-  if ! (cd "$dir" && ./svc.sh install "$user" && ./svc.sh start); then
-    failed=$((failed + 1)); echo "$runner is registered on GitHub but its service didn't start; $dir stays: look in its _diag, then remove it (remove-runner.sh) before trying again." >&2; continue
+  # 5. Its unit, written here from the runner's own svc.sh template, as the scheme's user, started now and at every
+  #    start of the distro. The repo line is what remove-runner.sh reads. KillMode=mixed, not the template's process:
+  #    a job's leftover processes end with the runner instead of outliving it.
+  cat > "$units/$unit" <<EOF
+# citadel-repo=$repo
+# Made by Citadel's add-runner.sh (#510); remove-runner.sh removes it.
+[Unit]
+Description=GitHub Actions runner $runner for $repo ($label)
+After=network-online.target
+
+[Service]
+ExecStart=$dir/runsvc.sh
+User=$user
+WorkingDirectory=$dir
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=5min
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  if ! { systemctl daemon-reload && systemctl enable --now "$unit"; }; then
+    failed=$((failed + 1)); echo "$runner is registered on GitHub but $unit didn't start; it stays: look in $dir/_diag, then remove it (remove-runner.sh) before trying again." >&2; continue
   fi
-  echo "Added: $(cat "$dir/.service") is $(systemctl is-active "$(cat "$dir/.service")"), folder $dir"
+  echo "Added: $unit is $(systemctl is-active "$unit" || true), folder $dir"
 done
 
 echo

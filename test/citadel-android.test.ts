@@ -13,7 +13,7 @@ const sdk = join(root, 'sdk');
 const calls = join(sdk, 'calls');
 // Stands in for a booted emulator; `emu kill` makes it go away (and ends the stub emulator, if one runs).
 const adb = `#!/bin/sh
-echo "$*" >>'${calls}'
+echo "$*\${ADB_LOCAL_TRANSPORT_MAX_PORT:+ scan<=$ADB_LOCAL_TRANSPORT_MAX_PORT}" >>'${calls}'
 # A client that finds no server starts one, which lives on with whatever descriptors it inherited.
 [ -n "\${ADB_STUB_SERVER:-}" ] && { sleep 30 </dev/null >/dev/null 2>&1 & echo $! >>'${sdk}/server.pids'; }
 [ "$1" = -s ] && shift 2
@@ -348,7 +348,8 @@ test('adb-serve keeps the adb server here and answers console steps with the tok
   const done = new Promise((r) => s.on('close', r));
   try {
     for (let i = 0; i < 200 && !existsSync(calls); i++) await new Promise((r) => setTimeout(r, 25));
-    assert.match(readFileSync(calls, 'utf8'), /^start-server$/m);
+    // The server's own scan is off: through the tunnel it would knock on a stopped emulator every second.
+    assert.match(readFileSync(calls, 'utf8'), /^start-server scan<=5553$/m);
     const r = await runAsync(['sms', '5551234', 'hello'], { CITADEL_HEAVY_DIR: locks });
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(got, ['auth sekrit', 'sms send 5551234 hello', 'quit']);
@@ -362,11 +363,11 @@ test('adb-serve keeps the adb server here and answers console steps with the tok
 test("the desktop key's script on perigee answers its two questions and nothing else", () => {
   const home = join(root, 'home-key');
   mkdirSync(join(home, '.android'), { recursive: true });
-  writeFileSync(join(home, '.android', 'adbkey.pub'), 'QAAAAKEY cara@perigee\n');
+  writeFileSync(join(home, '.android', 'adbkey'), 'PRIVATE KEY\n');
   writeFileSync(join(home, '.emulator_console_auth_token'), 'sekrit\n');
   const script = join(import.meta.dirname, '..', 'deploy', 'desktop', 'android', 'perigee-key.sh');
   const ask = (cmd?: string) => spawnSync(script, [], { env: { PATH: process.env.PATH, HOME: home, CITADEL_ANDROID_PORT: '1', ...(cmd === undefined ? {} : { SSH_ORIGINAL_COMMAND: cmd }) }, encoding: 'utf8' });
-  assert.equal(ask('facts').stdout, 'adbkey QAAAAKEY cara@perigee\ntoken sekrit\n');
+  assert.equal(ask('facts').stdout, `adbkey ${Buffer.from('PRIVATE KEY\n').toString('base64')}\ntoken sekrit\n`);
   for (const cmd of [undefined, 'cat /etc/passwd', 'facts; id']) {
     const r = ask(cmd);
     assert.equal(r.status, 2);

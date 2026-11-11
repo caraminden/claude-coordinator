@@ -13,11 +13,13 @@
 #   4. downloads citadel-android and install-sdk.sh from Citadel into /opt/citadel-android (root's);
 #   5. installs the Android SDK, the emulator and the `citadel` AVD, as on perigee (a few GB, once);
 #   6. makes an SSH key and asks perigee, with it, for the two things the emulator must share with perigee:
-#      perigee's adb public key (so its adb server is let in) and its console token (so `sms` and `down`
-#      work from there). Until Cara has added the key on perigee it prints the line to add and stops;
+#      perigee's adb key (so its adb server is let in) and its console token (so `sms` and `down` work
+#      from there). Until Cara has added the SSH key on perigee it prints the line to add and stops;
 #   7. installs three services: the emulator (started on demand, stops itself when idle), its starter on
 #      127.0.0.1:18590, and the tunnel, which dials perigee and puts the starter and the emulator's two
 #      ports on perigee's loopback. perigee can't reach this PC, so everything goes through that tunnel.
+#      The tunnel also gives the emulator perigee's adb server on 127.0.0.1:15037 here: the emulator runs
+#      adb commands of its own, and a second adb server here would take the phone away from perigee's.
 # It touches nothing on Windows and never restarts the PC.
 set -euo pipefail
 
@@ -28,9 +30,10 @@ dir=/opt/citadel-android
 user=android
 home=/home/$user
 key=$home/.ssh/citadel_android
-# perigee's side of the key: tools reach perigee's loopback through these three ports and nothing else.
+# perigee's side of the key: it may hold these three ports open on perigee's loopback, and reach perigee's adb server.
 helper='/home/cara/claude-coordinator/deploy/desktop/android/perigee-key.sh'
 ports=(18590 5554 5555)
+adb_here=15037 # not 5037: with WSL's mirrored networking that is Windows' own adb server, when Cara runs one
 
 die() { echo "setup: $*" >&2; exit 1; }
 as_android() { runuser -u "$user" -- env HOME="$home" "$@"; }
@@ -100,19 +103,20 @@ if ! facts=$(as_android ssh "${ssh_opts[@]}" "$target" facts 2>/dev/null) || ! g
   echo
   echo "perigee doesn't know this distro's key yet (or $target can't be reached from here)."
   echo 'SSH into perigee as usual and run this one line there. It lets the key hold those three ports open on'
-  echo "perigee's own loopback and ask one script two questions, nothing else (no shell, no other ports):"
+  echo "perigee's own loopback, reach perigee's adb server and ask one script two questions, nothing else (no shell):"
   echo
-  echo "echo 'restrict,port-forwarding,${listen}permitopen=\"127.0.0.1:1\",command=\"$helper\" $(cat "$key.pub")' >> ~/.ssh/authorized_keys"
+  echo "echo 'restrict,port-forwarding,${listen}permitopen=\"127.0.0.1:5037\",command=\"$helper\" $(cat "$key.pub")' >> ~/.ssh/authorized_keys"
   echo
   echo 'Then run this same setup line again.'
   exit 0
 fi
 adbkey=$(sed -n 's/^adbkey //p' <<< "$facts")
-[[ -n $adbkey ]] || die "perigee has no adb key (~/.android/adbkey.pub) yet. Tell the minion."
-printf '%s\n' "$adbkey" > "$home/.android/adbkey.pub"
+[[ -n $adbkey ]] || die "perigee has no adb key (~/.android/adbkey) yet. Tell the minion."
+# The emulator works the public half out itself; one left from another key would only mislead.
+rm -f "$home/.android/adbkey.pub"
 # An empty token file turns the console's check off, which is right when perigee has none either.
-( umask 077; sed -n 's/^token //p' <<< "$facts" > "$home/.emulator_console_auth_token" )
-chown "$user:$user" "$home/.android/adbkey.pub" "$home/.emulator_console_auth_token"
+( umask 077; base64 -d <<< "$adbkey" > "$home/.android/adbkey"; sed -n 's/^token //p' <<< "$facts" > "$home/.emulator_console_auth_token" )
+chown "$user:$user" "$home/.android/adbkey" "$home/.emulator_console_auth_token"
 
 # 7. The services.
 cat > /etc/systemd/system/citadel-android.service <<EOF
@@ -128,6 +132,8 @@ Environment=CITADEL_HEAVY_DIR=$home/.heavy
 Environment=CITADEL_ANDROID_ROLE=desktop
 Environment=CITADEL_ANDROID_CORES=4
 Environment=CITADEL_ANDROID_MEMORY=4096
+# perigee's adb server, through the tunnel: where the emulator announces itself and sends its own adb commands.
+Environment=ANDROID_ADB_SERVER_PORT=$adb_here
 ExecStart=$dir/citadel-android serve
 # TERM to the serve loop, which shuts the emulator down cleanly (saving quick boot); the rest after that.
 KillMode=mixed
@@ -174,7 +180,7 @@ Wants=network-online.target
 [Service]
 User=$user
 ExecStartPre=-$ssh_run $target takeover
-ExecStart=$ssh_run -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3$(printf ' -R 127.0.0.1:%s:127.0.0.1:%s' "${ports[0]}" "${ports[0]}" "${ports[1]}" "${ports[1]}" "${ports[2]}" "${ports[2]}") $target
+ExecStart=$ssh_run -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -L 127.0.0.1:$adb_here:127.0.0.1:5037$(printf ' -R 127.0.0.1:%s:127.0.0.1:%s' "${ports[0]}" "${ports[0]}" "${ports[1]}" "${ports[1]}" "${ports[2]}" "${ports[2]}") $target
 Restart=always
 RestartSec=10
 

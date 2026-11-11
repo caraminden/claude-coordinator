@@ -47,8 +47,8 @@ ask() { timeout 5 "$ADB" -s "$SERIAL" "$@" 9>&-; }
 booted() { port_open "$ADB_PORT" && [ "$(ask shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; }
 # The adb server must be the service's: one started from a container has another key, and the emulator refuses it.
 need_server() { port_open "$ADB_PORT" || { say "the emulator isn't up; run citadel-android up"; exit 1; }; }
-# Tells the adb server here to look at the emulator's adb port, in adb's own words (an emulator on this
-# computer says the same when it starts). The server only looks by itself when it starts.
+# Tells the adb server here to look at the emulator's adb port, in adb's own words (an emulator says the
+# same when it starts, but not again after its tunnel reconnects). adb-serve turns the server's own scan off.
 nudge() { local m="host:emulator:$((CONSOLE + 1))"; (exec 3<>"/dev/tcp/127.0.0.1/$ADB_PORT" && printf '%04x%s' ${#m} "$m" >&3 && timeout 2 head -c 4 <&3) >/dev/null 2>&1; }
 # Connects to the starter and prints what it says: that starts the emulator's service if it is down and
 # marks it used. Nothing printed: no starter, or a tunnel whose desktop has stopped answering.
@@ -189,7 +189,9 @@ up() {
 # talks to, and the console steps, which reach the console through the tunnel with the token kept here.
 adb_serve() {
   mkdir -p "$dir"
-  "$ADB" start-server 9>&-
+  # No scan of the emulator ports: it knocks every second, and through the tunnel each knock on a stopped
+  # emulator is a line in perigee's sshd log. `up` points the server at the emulator instead (nudge).
+  ADB_LOCAL_TRANSPORT_MAX_PORT=$((CONSOLE - 1)) "$ADB" start-server 9>&-
   while port_open "$ADB_PORT"; do sleep 1; relay; done
   say "the adb server is gone"; exit 1
 }

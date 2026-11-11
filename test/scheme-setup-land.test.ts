@@ -531,14 +531,15 @@ test("CI gate: a landed commit's runs on the scratch branch are left to finish; 
     c.verdict(sha, GREEN);
     assert.equal(await a.exit, 0, a.stderr());
     assert.deepEqual(cancelled(), ['12'], 'the landed run goes on; the stale one is cancelled');
+    // The next landing's cleanup before its push spares the landed run too; a refused landing's run is cancelled.
     writeFileSync(join(c.ci, 'gh.log'), '');
-    writeFileSync(join(c.ci, 'branch-runs'), '');
+    writeFileSync(join(c.ci, 'branch-runs'), `11\t${full(sha)}\n12\t${old}\n`);
     const b = c.land(2);
     const shb = await c.tip(b);
-    writeFileSync(join(c.ci, 'branch-runs'), `21\t${full(shb)}\n`);
+    writeFileSync(join(c.ci, 'branch-runs'), `11\t${full(sha)}\n21\t${full(shb)}\n`);
     c.verdict(shb, RED);
     assert.equal(await b.exit, 1, b.stderr());
-    assert.deepEqual(cancelled(), ['21'], 'nothing landed, so its run is cancelled');
+    assert.deepEqual(cancelled(), ['12', '21'], 'nothing landed, so its run is cancelled; the landed one still goes on');
   } finally {
     c.stop();
   }

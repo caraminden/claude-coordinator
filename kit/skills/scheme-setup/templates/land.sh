@@ -403,19 +403,19 @@ ci_verdict() {
 # the branch already has (a run to repeat) would start nothing. Forced on purpose: only this script
 # writes land/<branch>, so there is no one's work to overwrite. --no-verify: the check ran above.
 ci_push() {
-  [ -n "$pushed" ] || ci_cancel # what a landing of this branch that was killed left running
+  [ -n "$pushed" ] || ci_cancel # what a landing of this branch that was killed left running (a landed one's runs go on)
   hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true
   hub git push -q --no-verify origin "+$tip:refs/heads/$CI_REF" || refuse "couldn't push ${tip:0:12} to origin's $CI_REF, so CI can't run on it and nothing landed"
   pushed=1 pushed_at=$SECONDS ci_clock=$SECONDS ci_begun=''
   say "waiting for CI on ${tip:0:12} (origin's $CI_REF)"
 }
 
-# Stops the scratch branch's runs nobody waits for now, so they don't hold a runner. Best effort.
-#   ci_cancel [commit]   spares that commit's runs: the one that just landed, whose finished jobs main's CI may reuse
+# Stops the scratch branch's runs nobody waits for now, so they don't hold a runner. Best effort. A run of a
+# commit already on main is left to finish: main's CI may reuse what it passes.
 ci_cancel() {
   local id sha
   while read -r id sha; do
-    [ -z "$id" ] || [ "$sha" = "${1:-}" ] || hub gh api -X POST "repos/$slug/actions/runs/$id/cancel" >/dev/null 2>&1 || true
+    [ -z "$id" ] || git merge-base --is-ancestor "$sha" "refs/heads/$BRANCH" 2>/dev/null || hub gh api -X POST "repos/$slug/actions/runs/$id/cancel" >/dev/null 2>&1 || true
   done < <(hub gh api "repos/$slug/actions/runs?branch=$CI_REF&per_page=20" --jq '.workflow_runs[] | select(.status != "completed") | [.id, .head_sha] | @tsv' 2>/dev/null)
 }
 
@@ -573,7 +573,7 @@ leave() {
   queue_done $landed
   exec 9>&-
   if [ -n "$pushed" ]; then
-    ci_cancel "${landed:+$tip}"
+    ci_cancel
     hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null
   fi
   exit "$rc"

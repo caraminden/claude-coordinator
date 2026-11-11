@@ -364,3 +364,116 @@ test('deploy.sh copies the database while the live server keeps writing it (#497
   assert.ok((copy.prepare('SELECT count(*) n FROM events').get()!.n as number) >= 20000);
   copy.close();
 });
+
+// A stand-in server whose answer to each request the test picks: 'reset' drops the connection unanswered,
+// 'hang' never answers, a number is the status to answer with, a string is a 200 JSON body.
+async function standIn(answer: (req: import('node:http').IncomingMessage, body: string) => 'reset' | 'hang' | number | string | Promise<string>) {
+  const seen: { url: string; body: string; at: number }[] = [];
+  const srv = createHttpServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => (body += d)).on('end', async () => {
+      seen.push({ url: req.url ?? '', body, at: Date.now() });
+      const a = await answer(req, body);
+      if (a === 'reset') return req.socket.destroy();
+      if (a === 'hang') return;
+      if (typeof a === 'number') return res.writeHead(a).end('{}');
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(a);
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  return { url: `http://127.0.0.1:${(srv.address() as any).port}`, seen, close: () => { srv.closeAllConnections(); srv.close(); } };
+}
+
+test('deploy.sh retries a report the server never got, but not one it may already have (#520)', { timeout: 60_000 }, async () => {
+  const post = (url: string, env: object = {}) => promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'post-report', url, 'tok', '7', 'ok', 'Deployed abc1234'], { encoding: 'utf8', env: { ...hostEnv, ...env } });
+  // Dropped unanswered, then a 503: neither got the report in, so it goes again, with the same body.
+  const flaky = await standIn((req) => (flaky.seen.length === 1 ? 'reset' : flaky.seen.length === 2 ? 503 : 201));
+  try {
+    const r = await post(flaky.url);
+    assert.equal(flaky.seen.length, 3);
+    assert.ok(flaky.seen.every((s) => s.url === '/api/tickets/7/deploy' && JSON.parse(s.body).text === 'Deployed abc1234'));
+    assert.doesNotMatch(r.stderr, /could not post/);
+  } finally {
+    flaky.close();
+  }
+  // No answer in time: the server has the request (a slow restart handles it seconds later), so a retry would post it twice.
+  const slow = await standIn(() => 'hang');
+  try {
+    const r = await post(slow.url, { DEPLOY_REPORT_WAIT: '1' });
+    assert.equal(slow.seen.length, 1);
+    assert.match(r.stderr, /no answer from the server within 1 s/);
+  } finally {
+    slow.close();
+  }
+  // A refusal won't change on a retry.
+  const refused = await standIn(() => 403);
+  try {
+    const r = await post(refused.url);
+    assert.equal(refused.seen.length, 1);
+    assert.match(r.stderr, /could not post the report to minion 7's chat \(HTTP 403\)/);
+  } finally {
+    refused.close();
+  }
+});
+
+// The queued restart against a stand-in server and systemctl: commits good (last-good) and target (HEAD).
+async function restartWith(name: string, health: (restarts: number, n: number, commits: { good: string; target: string }) => 'hang' | number | string | Promise<string>) {
+  const live = join(root, `${name}-live`);
+  const git = (...args: string[]) => execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['init', '-q', '-b', 'main', live]);
+  git('commit', '-q', '--allow-empty', '-m', 'good');
+  const good = git('rev-parse', 'HEAD');
+  git('tag', 'last-good');
+  git('commit', '-q', '--allow-empty', '-m', 'target');
+  const target = git('rev-parse', 'HEAD');
+  const bin = join(root, `${name}-bin`);
+  const log = join(root, `${name}-systemctl.log`);
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "$*" >>'${log}'\nexit 0\n`, { mode: 0o755 });
+  const restarts = () => (existsSync(log) ? execFileSync('grep', ['-c', ' restart ', log], { encoding: 'utf8' }).trim() : '0');
+  let n = 0;
+  const srv = await standIn((req) => (req.url === '/api/health' ? health(Number(restarts()), ++n, { good, target }) : 201));
+  const state = join(live, '.git', 'cc-deploy');
+  mkdirSync(state);
+  writeFileSync(join(state, 'reporters'), `${srv.url} tok 9\n`);
+  const copy = join(root, `${name}-deploy.sh`);
+  cpSync(join(repo, 'tools', 'deploy.sh'), copy);
+  try {
+    const r = await promisify(execFile)('bash', [copy, 'restart'], {
+      encoding: 'utf8',
+      env: { ...hostEnv, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: live, DEPLOY_DB: join(root, `${name}-no.db`), DEPLOY_NOW: '1', DEPLOY_URL: srv.url, DEPLOY_SERVICE: 'citadel-test', DEPLOY_REMOTE: '', DEPLOY_HEALTHY_WAIT: '3', DEPLOY_SETTLE: '2' },
+    }).then((o) => ({ status: 0, stderr: o.stderr }), (e) => ({ status: e.code as number, stderr: e.stderr as string }));
+    const reports = srv.seen.filter((s) => s.url === '/api/tickets/9/deploy').map((s) => ({ ...JSON.parse(s.body), at: s.at }));
+    const healthAt = srv.seen.filter((s) => s.url === '/api/health').map((s) => s.at);
+    return { ...r, good, target, reports, healthAt, head: git('rev-parse', 'HEAD'), lastGood: git('rev-parse', 'last-good'), restarts: Number(restarts()) };
+  } finally {
+    srv.close();
+  }
+}
+
+test('the restart checks health again a little after the first OK, and rolls back if it has gone (#520)', { timeout: 60_000 }, async () => {
+  const health = (commit: string) => JSON.stringify({ ok: true, commit });
+  // Healthy once, then gone (crashed in its first minute): the rollback path, as if the first check had failed.
+  const r = await restartWith('gone', (restarts, n, { good, target }) => (restarts >= 2 ? health(good) : n === 1 ? health(target) : 503));
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /rolling back to last-good/);
+  assert.equal(r.restarts, 2);
+  assert.equal(r.head, r.good);
+  assert.equal(r.lastGood, r.good);
+  assert.equal(r.reports.length, 1);
+  assert.equal(r.reports[0].ok, false);
+  assert.match(r.reports[0].text, /stopped answering healthy .*Rolled back to last-good/);
+});
+
+test('a server that is only slow at the second check is not rolled back, and the report waits for that check (#520)', { timeout: 60_000 }, async () => {
+  const health = (commit: string) => JSON.stringify({ ok: true, commit });
+  // The second check's first ask goes unanswered past health's 3 s limit, as in a restart's busy first minute.
+  const r = await restartWith('slow', (_restarts, n, { target }) => (n === 2 ? new Promise((res) => setTimeout(() => res(health(target)), 4000)) : health(target)));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.restarts, 1);
+  assert.equal(r.lastGood, r.target);
+  assert.equal(r.reports.length, 1);
+  assert.equal(r.reports[0].ok, true);
+  assert.ok(r.healthAt.length >= 3 && r.healthAt[1] - r.healthAt[0] >= 2000, 'checked again DEPLOY_SETTLE s after the first OK');
+  assert.ok(r.reports[0].at > r.healthAt.at(-1)!, 'reported only after the second check');
+});

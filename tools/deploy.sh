@@ -8,8 +8,8 @@
 # 2. A change to public/ only: SIGHUP, and the server reloads its front end. No restart, no killed turns.
 # 3. Anything else: queues the fixed-name restart unit, which restarts straight away (running turns
 #    carry on in their own units and the new server re-attaches; it only waits while turns a restart
-#    would cut off are running, see interruptible), waits up to 30 s for a healthy server and tags it
-#    last-good. If the new code doesn't come up, it rolls the checkout back to last-good and restarts
+#    would cut off are running, see interruptible), waits up to 30 s for a healthy server, checks it is still
+#    healthy 30 s later, and tags it last-good. If the new code doesn't come up or stay up, it rolls the checkout back to last-good and restarts
 #    again. It reports how it went in the deploying minion's chat (failures as errors, which push) and
 #    in the journal. Before restarting it copies the database to backups/pre-deploy-<commit>.db (newest
 #    3 kept, rotated only after a healthy deploy), so a rollback that can't read what the new code
@@ -30,6 +30,8 @@ UNIT=${DEPLOY_UNIT:-cc-restart-when-idle}
 IDLE_TRIES=${DEPLOY_IDLE_TRIES:-720} # 10 s apart: 2 h
 NOW=${DEPLOY_NOW:-} # set: restart without waiting for interruptible turns (--now)
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-30}
+SETTLE=${DEPLOY_SETTLE:-30} # after the first healthy answer, check again this much later (#520)
+REPORT_WAIT=${DEPLOY_REPORT_WAIT:-30} # seconds to wait for the server to take a deploy report
 REMOTE=${DEPLOY_REMOTE-origin} # set it empty to skip the push (dev copies)
 BACKUPS=${DEPLOY_BACKUPS:-3} # pre-deploy copies of the database to keep
 
@@ -62,12 +64,29 @@ init_state() {
 
 # Post a deploy report in one minion's chat: ok, warn (live, but something needs a look: shows as an
 # error and notifies) or fail. ok and warn dismiss a minion in pending-deploy.
+# A server just restarted can take a while to answer (#520: 10 s stalls, so the old 10 s limit gave up on
+# reports it then posted), so each try waits REPORT_WAIT s. One that never reached the server (dropped, or a
+# 5xx) goes again with backoff for about a minute; one with no answer in time doesn't, since the server
+# has it queued and a second would post twice.
 post_report() {
-  local api=$1 token=$2 ticket=$3 ok=$4 text=$5
-  curl -fsS --max-time 10 -X POST "$api/api/tickets/$ticket/deploy" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "$(node -e 'const k=process.argv[1];console.log(JSON.stringify({ok:k!=="fail",warn:k==="warn",text:process.argv[2]}))' "$ok" "$text")" >/dev/null ||
-    say "could not post the report to minion $ticket's chat"
+  local api=$1 token=$2 ticket=$3 ok=$4 text=$5 body code rc left pause=1 start=$SECONDS
+  body=$(node -e 'const k=process.argv[1];console.log(JSON.stringify({ok:k!=="fail",warn:k==="warn",text:process.argv[2]}))' "$ok" "$text")
+  while :; do
+    rc=0
+    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$REPORT_WAIT" -X POST "$api/api/tickets/$ticket/deploy" \
+      -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d "$body" 2>/dev/null) || rc=$?
+    [ "$rc" = 0 ] && [ "${code:0:1}" = 2 ] && return 0
+    if [ "$rc" = 28 ]; then
+      say "no answer from the server within $REPORT_WAIT s to the report for minion $ticket's chat; it likely still arrives"
+      return 0
+    fi
+    [ "$rc" = 0 ] && [ "${code:0:1}" != 5 ] && break
+    left=$((60 - (SECONDS - start)))
+    [ "$left" -gt 0 ] || break
+    sleep $((pause < left ? pause : left))
+    pause=$((pause * 2))
+  done
+  say "could not post the report to minion $ticket's chat ($([ "$rc" = 0 ] && echo "HTTP $code" || echo "curl exit $rc"))"
 }
 
 # Live already, so the minion running this deploy hears now (and is dismissed when its turn ends).
@@ -164,14 +183,23 @@ rotate_backups() {
   { ls -1t "$(dirname "$DB")"/backups/pre-deploy-*.db 2>/dev/null || true; } | tail -n +$((BACKUPS + 1)) | xargs -r rm -f -- || true
 }
 
-# Restart the service and wait for it to answer healthy from commit $1.
-restart_healthy() {
-  systemctl --user restart "$SERVICE" || return 1
+# Wait up to HEALTHY_WAIT s for the service to answer healthy from commit $1.
+healthy() {
   for _ in $(seq "$HEALTHY_WAIT"); do
     sleep 1
     [ "$(health commit)" = "$1" ] && systemctl --user is-active -q "$SERVICE" && return 0
   done
   return 1
+}
+
+# Restart the service and wait for it to answer healthy from commit $1, then again SETTLE s later: a server
+# can answer once and die in its first minute (#520). The second check gets the same wait, as that first
+# minute is slow (re-attaching turns, startup checks) and slow isn't down.
+restart_healthy() {
+  systemctl --user restart "$SERVICE" || return 1
+  healthy "$1" || return 1
+  sleep "$SETTLE"
+  healthy "$1"
 }
 
 # Queued as the restart unit: restart once no turn would be cut off (at once with --now), roll back if
@@ -213,7 +241,7 @@ restart() {
     report "$kind" "Deployed $(short "$target"): the server restarted and is healthy.$pushed"
     return 0
   fi
-  local why="the server did not answer healthy on it within ${HEALTHY_WAIT} s"
+  local why="the server did not answer healthy on it within ${HEALTHY_WAIT} s, or stopped answering healthy ${SETTLE} s later"
   good=$(git_live rev-parse -q --verify 'last-good^{commit}' || true)
   if [ -z "$good" ] || [ "$good" = "$target" ]; then
     report fail "Deploy of $(short "$target") failed: $why, and there is no older last-good commit to roll back to. Check journalctl --user -u $SERVICE."
@@ -334,7 +362,7 @@ deploy() {
   local out
   if out=$(systemd-run --user --collect --unit="$UNIT" --description="Restart $SERVICE (tools/deploy.sh)" \
     --setenv=DEPLOY_LIVE="$LIVE" --setenv=DEPLOY_SERVICE="$SERVICE" --setenv=DEPLOY_URL="$URL" --setenv=DEPLOY_DB="$DB" \
-    --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
+    --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_SETTLE="$SETTLE" --setenv=DEPLOY_REPORT_WAIT="$REPORT_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
     --setenv=DEPLOY_NOW="$NOW" --setenv=DEPLOY_BACKUPS="$BACKUPS" --setenv=PATH="$PATH" \
     bash "$copy" restart 2>&1); then
     if [ -n "$NOW" ]; then say "restart queued as $UNIT with --now: it restarts at once, cutting off turns not in a unit of their own (this one too, if so)"
@@ -373,7 +401,8 @@ case "${1:-}" in
   turn-units) turn_units ;;
   change-kind) change_kind "$2" "$3" "$4" ;;
   push-github) push_github "$2" ;;
+  post-report) post_report "$2" "$3" "$4" "$5" "$6" ;;
   backup-db) backup_db "$2" ;;
   rotate-backups) rotate_backups ;;
-  *) echo "usage: $0 [--now | restart | interruptible | turn-units | change-kind <dir> <from> <to> | push-github <commit> | backup-db <commit> | rotate-backups]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--now | restart | interruptible | turn-units | change-kind <dir> <from> <to> | push-github <commit> | post-report <api> <token> <ticket> <ok|warn|fail> <text> | backup-db <commit> | rotate-backups]" >&2; exit 2 ;;
 esac

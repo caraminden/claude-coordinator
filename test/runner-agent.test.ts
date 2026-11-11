@@ -131,7 +131,8 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     assert.equal(pc.now.queue, 2);
     assert.equal(pc.now.idle_sec, 180);
     assert.deepEqual(pc.restarts, [], 'a restart from before the last day is history');
-    assert.match(pc.verdict.text, /^Fine: CPU averaged \d+% /);
+    // The CPU is this machine's own, so a busy test host may be judged overloaded: only that it was judged is this test's.
+    assert.notEqual(pc.verdict.kind, 'none', pc.verdict.text);
     // Only a runner host's token sends them, and only a sample that checks out.
     const post = (token: string, body: unknown) => fetch(`${srv.base}/api/machines/runner-load`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     assert.equal((await post(made.data.token, { os: 'windows', host: 'x', cores: 1, cpu: 500, mem_total: 1, mem_free: 1, runners: [] })).status, 400);

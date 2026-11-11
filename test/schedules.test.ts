@@ -38,7 +38,15 @@ test('in the hour repeated when clocks go back, nextRun never returns a time at 
     // 2026-11-01: 01:00-02:00 comes twice, PDT (08:00 UTC) then PST (09:00 UTC).
     const pst = (h: number, m: number, s = 0) => Date.UTC(2026, 10, 1, h + 8, m, s);
     assert.equal(nextRun('*/10 * * * *', pst(1, 0, 5)), pst(1, 10));
-    assert.equal(nextRun('30 1 * * *', pst(1, 10)), pst(1, 30));
+    // A schedule at a set hour runs in the first pass only, as cron's do: not again an hour later (#468 S04-3 review).
+    const nextDay = Date.UTC(2026, 10, 2, 9, 30);
+    assert.equal(nextRun('30 1 * * *', pst(1, 10)), nextDay);
+    assert.equal(nextRun('30 1 * * *', pst(0, 30)), nextDay, 'from its run at 01:30 PDT');
+    assert.equal(nextRun('0 1 * * *', pst(0, 0)), Date.UTC(2026, 10, 2, 9, 0), 'from its run at 01:00 PDT');
+    assert.equal(nextRun('*/15 1 * * *', pst(0, 45)), Date.UTC(2026, 10, 2, 9, 0), 'from its last run at 01:45 PDT');
+    assert.equal(nextRun('30 1 * * *', pst(0, 10)), pst(0, 30), 'its first pass still runs');
+    // Every-hour schedules run in both passes.
+    assert.equal(nextRun('@hourly', pst(0, 30)), pst(1, 0));
     for (const after of [pst(1, 0, 5), pst(1, 10), pst(1, 59)]) {
       for (const cron of ['*/10 * * * *', '30 1 * * *', '@hourly', '0 3 * * *']) assert.ok(nextRun(cron, after)! > after, `${cron} after ${new Date(after).toISOString()}`);
     }

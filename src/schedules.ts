@@ -118,7 +118,9 @@ export function nextRun(expr: string, after: number): number | null {
       if (skipped(h)) return d.getTime();
       continue;
     }
-    if (d.getTime() <= after) { d.setTime(d.getTime() + 60_000); continue; }
+    // In the hour repeated when clocks go back, a schedule at set hours ran in its first pass: as cron, not again (#468 S04-3 review).
+    const secondPass = c.hour.size < 24 && new Date(d.getTime() - 3_600_000).getHours() === h;
+    if (d.getTime() <= after || secondPass) { d.setTime(d.getTime() + 60_000); continue; }
     return d.getTime();
   }
   return null;

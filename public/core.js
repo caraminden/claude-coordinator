@@ -273,7 +273,8 @@ function connectStream(catchUp = false) {
       assetVersion ??= msg.version;
     }
     if (msg.type === 'hello' || msg.type === 'codex') {
-      codex = msg.codex ?? null;
+      // The broadcast hello of a front-end-only deploy carries only `version`: it leaves Codex as it was.
+      if ('codex' in msg) codex = msg.codex ?? null;
       if (msg.type === 'codex') renderUsage();
       renderModelPicker();
     }

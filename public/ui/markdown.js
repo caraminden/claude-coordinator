@@ -360,7 +360,8 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
   let front = '';
   // YAML front matter stays apart from the doc, as GitHub keeps it.
   const fm = !breaks && lines[0] === '---' ? lines.indexOf('---', 1) : -1;
-  if (fm > 0 && lines.slice(1, fm).every((l) => !l.trim() || /^[\w-]+:|^\s|^-/.test(l))) {
+  // At least one "key:" line, so a rule then a list (or two rules) stays the doc's own.
+  if (fm > 0 && lines.slice(1, fm).every((l) => !l.trim() || /^[\w-]+:|^\s|^-/.test(l)) && lines.slice(1, fm).some((l) => /^[\w-]+:/.test(l))) {
     front = `<pre class="cui-front-matter"><code>${escapeHtml(lines.slice(1, fm).join('\n'))}</code></pre>`;
     lines = lines.slice(fm + 1);
   }

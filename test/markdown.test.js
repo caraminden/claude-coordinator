@@ -159,6 +159,11 @@ test('front matter in a doc shows apart; chat never reads it', () => {
   assert.equal(chat('---\nx: y\n---'), '<hr><p>x: y</p><hr>');
 });
 
+test('a doc that opens with a rule and a list, or two rules, has no front matter', () => {
+  assert.equal(md('---\n- a\n- b\n---\nrest'), '<hr><ul><li>a</li><li>b</li></ul><hr><p>rest</p>');
+  assert.equal(md('---\n\n---\nrest'), '<hr><hr><p>rest</p>');
+});
+
 test('rules, comments and CRLF', () => {
   assert.equal(md('a\n---\n<!-- index -->\n***\r\nb\r\n'), '<p>a</p><hr><hr><p>b</p>');
 });

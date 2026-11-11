@@ -128,9 +128,10 @@ export function renderInbox() {
   const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
   const running = !hidden && [view.coordinator, ...view.tickets.values()].some(isWorking);
   const working = hidden ? 0 : [...view.tickets.values()].filter((t) => t.kind !== 'coordinator' && isWorking(t)).length;
-  const moved = seenHere.projectId !== view.projectId || seenHere.chatId !== view.id;
+  // Settings or Artifacts (no chat open) isn't moving minions: coming back to the same chat sees nothing more.
+  const moved = seenHere.projectId !== view.projectId || (view.id != null && seenHere.chatId !== view.id);
   const keys = seenInScheme(seenHere.keys, waiting, view.id, moved);
-  Object.assign(seenHere, { projectId: view.projectId, chatId: view.id, keys, fresh: waiting.some((i) => !keys.has(i.key)) });
+  Object.assign(seenHere, { projectId: view.projectId, chatId: view.id ?? seenHere.chatId, keys, fresh: waiting.some((i) => !keys.has(i.key)) });
   if (!hidden) markItemsSeen(view.projectId, [...keys]);
   for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running, working }));
   strip.hidden = !items.length;

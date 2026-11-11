@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -124,6 +124,14 @@ test('with a slot free but the box busy, the job waits, says the pressure, and s
     const b = job(env, 'Peek #5', touch(join(root, 'load-up-2')));
     await until('the next to queue', () => /others are in line/.test(b.err()));
     assert.ok(!existsSync(join(root, 'load-up-2')));
+    // Each waiter leaves a wait-<pid> file for Citadel's wait readout (#544): who, what, since, on what.
+    const waits = () => readdirSync(dir).filter((f) => /^wait-\d+$/.test(f)).map((f) => readFileSync(join(dir, f), 'utf8').split('\n'));
+    await until('both waiter files', () => waits().length === 2);
+    const byWho = Object.fromEntries(waits().map((l) => [l[0], l]));
+    assert.equal(byWho['Peek #4'][3], 'load');
+    assert.equal(byWho['Peek #5'][3], 'line');
+    assert.match(byWho['Peek #4'][1], /^sh -c/);
+    assert.ok(Math.abs(Number(byWho['Peek #4'][2]) - Date.now() / 1000) < 60, 'since is now, in seconds');
     writeFileSync(pressureFile, psi(49));
     assert.equal(await b.done, 0);
   } finally {
@@ -133,6 +141,7 @@ test('with a slot free but the box busy, the job waits, says the pressure, and s
   assert.ok(existsSync(join(root, 'load-up')));
   assert.doesNotMatch(a.err(), /starts anyway in slot/);
   assert.ok(!existsSync(join(dir, 'slot-0.who')));
+  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('wait-')), [], 'a waiter that got its slot takes its wait file with it');
 });
 
 test('a job never waits on load past the limit: then it takes the free slot anyway, and says so', async () => {

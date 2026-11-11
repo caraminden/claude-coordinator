@@ -120,20 +120,30 @@ tell() {
   fi
 }
 
+# While it waits, wait-<pid> says who for, what, since when and on what (line, slots, load), so Citadel can
+# show the minion's wait (#544; src/waits.ts reads it). Written by a rename, so nobody reads half of it.
+waitfile="$dir/wait-$$"
+waiting_on() { printf '%s\n' "$who" "$what" "$started" "$1" >"$waitfile.tmp" 2>/dev/null && mv -f "$waitfile.tmp" "$waitfile" 2>/dev/null; }
+started=$(date +%s)
+trap 'rm -f "$waitfile" "$waitfile.tmp"' EXIT
+
 # The line: whoever holds the queue lock is next and polls for a free slot; the rest wait behind it.
 exec 7<>"$dir/queue"
 since=$SECONDS
 if ! flock -n 7; then
+  waiting_on line
   say "others are in line for a heavy slot first; waiting ($who: $what)"
   holders
   flock 7
 fi
 if ! admit; then
+  waiting_on "$waiting"
   tell ""
   told=$SECONDS
   said=$waiting
   until admit; do
     sleep "${CITADEL_HEAVY_POLL:-2}"
+    [ "$waiting" = "$said" ] || waiting_on "$waiting"
     if [ "$waiting" != "$said" ] || [ $((SECONDS - told)) -ge 60 ]; then
       tell "still waiting after $(((SECONDS - since) / 60)) min: "
       told=$SECONDS
@@ -142,11 +152,12 @@ if ! admit; then
   done
 fi
 exec 7>&-
+rm -f "$waitfile"
 [ -z "$forced" ] || say "the box is still busy ($(load_text)) after $(dur "$load_wait") waiting on it, so this starts anyway in slot $((slot + 1))"
 [ $((SECONDS - since)) -lt 2 ] || [ -n "$forced" ] || say "got slot $((slot + 1)) after $((SECONDS - since))s"
 
 printf '%s: %s (since %s, pid %s)\n' "$who" "$what" "$(date +%H:%M)" "$$" >"$dir/slot-$slot.who" 2>/dev/null
-trap 'rm -f "$dir/slot-$slot.who"' EXIT
+trap 'rm -f "$dir/slot-$slot.who" "$waitfile" "$waitfile.tmp"' EXIT
 # The command runs as a child without the lock's fd, so a daemon it leaves behind (sccache, a build
 # server) can't keep the slot; this shell holds it until the command ends.
 export CITADEL_HEAVY_HELD=1

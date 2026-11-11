@@ -1017,6 +1017,11 @@ export class Store {
     return this.db.prepare('SELECT * FROM tickets WHERE project_id = ? AND number = ?').get(projectId, number) as unknown as Ticket | undefined;
   }
 
+  /** The minion on a branch (the land line names its waiters by branch, src/waits.ts): an open one first, then the newest. */
+  ticketByBranch(branch: string): Ticket | undefined {
+    return this.db.prepare("SELECT * FROM tickets WHERE branch = ? ORDER BY status = 'closed', id DESC LIMIT 1").get(branch) as unknown as Ticket | undefined;
+  }
+
   listProjects(): Project[] {
     return this.db.prepare('SELECT * FROM projects ORDER BY name').all() as unknown as Project[];
   }

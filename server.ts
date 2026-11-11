@@ -54,6 +54,7 @@ import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { ticketRoutes } from './src/routes/tickets.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
+import { Waits } from './src/waits.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { themeCss } from './src/theme.ts';
 
@@ -389,6 +390,17 @@ const ships = new ShipStatus({ store, runner, broadcast, liveHead: () => waiters
 const ticketBranch = ships.branch;
 runner.ship = ships.ship;
 
+// What each minion waits on (#544): the land line in this checkout's git dir (tools/deploy-queue.sh), the heavy slots.
+const deployState = (() => {
+  try {
+    return join(execFileSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: import.meta.dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(), 'cc-deploy');
+  } catch {
+    return null;
+  }
+})();
+const waits = new Waits({ store, deployState, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ship: ships.ship, interruptible: () => runner.interruptible(), changed: (id) => runner.broadcastTicket(id) });
+runner.wait = waits.wait;
+
 runner.onFilesMayChange = (ticketId) => {
   artifacts.schedule(ticketId);
   ships.scheduleCheck(ticketId);
@@ -449,6 +461,8 @@ const SHIP_POLL_MS = 15_000;
 if (!BOOT_CHECK || PREVIEW) {
   void safely('branch sweep', () => ships.sweep());
   setInterval(() => void safely('ship poll', () => ships.poll()), SHIP_POLL_MS).unref();
+  // A few small files, so every 2 s: a landing's phases last tens of seconds.
+  setInterval(() => void safely('waits', () => waits.poll()), 2_000).unref();
 }
 
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".

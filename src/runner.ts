@@ -13,6 +13,7 @@ import { KEEP, SENT_BACK } from './link-check.ts';
 import type { SchemeRefs } from './scheme-refs.ts';
 import { cardHref, cardLabel, cardText, settledHow, type CardLink, type SettledCard } from './card-links.ts';
 import type { Ship } from './branch.ts';
+import type { Wait } from './waits.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreSession, saveSession, storedPaths, transcriptPath } from './sessions.ts';
 import { Lanes } from './lanes.ts';
 import { projectDir, restoreTicketDir, surveyReports } from './workspace.ts';
@@ -535,6 +536,8 @@ export class Runner {
   onFilesMayChange: (ticketId: number) => void = () => {};
   /** Where the minion's change is, branch to live (src/branch.ts), for its bar and its row's badge. */
   ship: (ticketId: number) => Ship | null = () => null;
+  /** What it waits on now: the land line, a heavy slot, the restart (src/waits.ts), for its row's badge and bar. */
+  wait: (ticketId: number) => Wait | null = () => null;
   /** Called when a turn's process has exited, however the turn ended. */
   onTurnEnd: (ticketId: number) => void = () => {};
   /** What a minion parked on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
@@ -668,6 +671,7 @@ export class Runner {
       properties: this.store.props.forTarget('minion', ticket.id),
       preview: !!this.store.getSetting(previewKey(ticket.id)),
       ship: this.ship(ticket.id),
+      wait: closed ? null : this.wait(ticket.id),
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
       // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).

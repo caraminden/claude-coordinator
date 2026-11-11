@@ -180,7 +180,7 @@ export function contraptionsPage() {
     all = all.map((x) => (x.name === next.name ? next : x));
     render();
   })) : [h('p', { class: 'muted' }, 'No contraptions yet.')]));
-  const name = h('input', { name: 'name', placeholder: 'mandate', required: true, maxlength: 32, pattern: '[a-z0-9]([a-z0-9-]*[a-z0-9])?', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
+  const name = h('input', { name: 'name', placeholder: 'mandate', required: true, maxlength: 32, pattern: '[a-z0-9]([a-z0-9\\-]*[a-z0-9])?', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
   const title = h('input', { name: 'title', placeholder: 'Mandate', required: true, maxlength: 60, autocomplete: 'off' });
   const port = h('input', { name: 'port', type: 'number', min: 1024, max: 65535, placeholder: '9101', required: true });
   const iconIn = h('input', { name: 'icon', placeholder: ICON_HINT, autocomplete: 'off', spellcheck: 'false', title: 'A path on its service, from its base. Empty: the rail shows its first letter until a deploy fills it from its web manifest.' });

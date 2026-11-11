@@ -31,7 +31,7 @@ test('the tests run in a scope in citadel.slice with CPUWeight=500, bound to the
   assert.equal(r.status, 0);
   assert.match(r.log, /ℹ pass 1/);
   assert.equal(r.calls.length, 2, 'a probe, then the run');
-  assert.match(r.calls[1], /^--user --scope --quiet --collect --slice=citadel\.slice -p CPUWeight=500 .*-- node --test --test-force-exit .* test\/$/);
+  assert.match(r.calls[1], /^--user --scope --quiet --collect --slice=citadel\.slice -p CPUWeight=500 .*-- \S*\/citadel-node --test --test-force-exit .* test\/$/);
   const cgroup = readFileSync('/proc/self/cgroup', 'utf8').trim();
   const unit = /\/user@\d+\.service\/.+\/([^/]+\.(?:service|scope))$/.exec(cgroup)?.[1];
   if (unit) assert.ok(r.calls[1].includes(`-p BindsTo=${unit} --`), 'stopping the landing turn still stops its tests');
@@ -55,7 +55,7 @@ test('a failing test still fails the run through the scope, and its rerun alone 
   try {
     const r = run();
     assert.equal(r.status, 1);
-    assert.match(r.calls[2], /CPUWeight=500 .*-- node --test --test-force-exit test\/b\.test\.mjs$/);
+    assert.match(r.calls[2], /CPUWeight=500 .*-- \S*\/citadel-node --test --test-force-exit test\/b\.test\.mjs$/);
   } finally {
     rmSync(join(repo, 'test', 'b.test.mjs'));
   }

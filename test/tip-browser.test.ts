@@ -148,7 +148,7 @@ test('one tip open on the page, across mounts; a redraw\'s copy of the thing kee
   const o = await page.centre('#other');
   await page.mouse(o.x, o.y);
   await waitFor(page, "#other's tip", 'opened.length === 2');
-  assert.ok(await page.eval<number>('opened[1] - over.other') < 250, 'warm: quicker from one tip to the next than the first (250 ms)');
+  assert.ok(await page.eval<number>('opened[1] - over.other') < 150, 'warm: quicker from one tip to the next (60 ms, not 250)');
   assert.equal((await tipBox(page))?.text, 'From another mount');
   assert.equal(await page.eval('document.querySelectorAll(".cui-tip:popover-open").length'), 1);
   // Back on #top, then the page redraws it.

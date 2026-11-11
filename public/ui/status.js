@@ -110,6 +110,11 @@ let say = null;
 let timer = 0;
 let onHide = null;
 
+/** The topmost open modal dialog, or null (also where :modal isn't supported). */
+function topModal() {
+  try { return [...document.querySelectorAll('dialog:modal')].at(-1) ?? null; } catch { return null; }
+}
+
 function hideToast() {
   clearTimeout(timer);
   if (pop?.matches(':popover-open')) pop.hidePopover();
@@ -137,6 +142,9 @@ export function toast(text, opts = {}) {
     document.body.append(pop, say);
   }
   hideToast();
+  // Inside the topmost open modal dialog, if any: everything outside one is inert, so its button couldn't be clicked nor its words heard.
+  const home = topModal() ?? document.body;
+  if (pop.parentNode !== home) home.append(pop, say);
   if (TONES.has(opts.tone)) pop.dataset.tone = opts.tone;
   else delete pop.dataset.tone;
   pop.textContent = text;

@@ -201,6 +201,10 @@ export function mountTips(root = document.body, o = {}) {
     pinned = pin;
     hovered = hover;
     describe(at, true);
+    // Inside the topmost open modal dialog, if any: everything outside one is inert, so the tip's links couldn't be clicked.
+    let home = document.body;
+    try { home = [...document.querySelectorAll('dialog:modal')].at(-1) ?? home; } catch {}
+    if (pop.parentNode !== home) home.append(pop); // moving it closes it, so it opens again below
     if (!pop.matches(':popover-open')) pop.showPopover();
     shown = close;
     watch.observe(root, { childList: true, subtree: true });

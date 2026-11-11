@@ -246,3 +246,25 @@ test('a toast goes on a tap', { skip }, async () => {
   assert.equal(await page.eval('document.querySelector(".cui-toast").matches(":popover-open")'), false);
   assert.equal(await page.eval('document.querySelector(".cui-toast-say").textContent'), '');
 });
+
+test("a toast's Retry can be clicked, and its words heard, over an open modal dialog", { skip }, async () => {
+  const page = await browser.page(base, { width: 900, height: 700 });
+  await page.eval(`(() => {
+    const d = document.createElement('dialog');
+    d.className = 'cui-dialog';
+    d.textContent = 'A modal';
+    document.body.append(d);
+    d.showModal();
+    window.retried = 0;
+    toast('Not saved', { action: { label: 'Retry', run: () => window.retried++ } });
+  })()`);
+  const { x, y } = await page.centre('.cui-toast-action');
+  await page.mouse(x, y);
+  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+  await page.eval('window.frame()');
+  assert.equal(await page.eval('window.retried'), 1, 'the click reached Retry');
+  assert.equal(await page.eval('document.querySelector(".cui-toast-say").closest("dialog") !== null'), true, 'the live region is inside the modal, so it is heard');
+  // With the dialog closed, the next toast is back in the page.
+  await page.eval(`document.querySelector('dialog').close(); toast('Saved')`);
+  assert.equal(await page.eval('document.querySelector(".cui-toast").parentElement === document.body'), true);
+});

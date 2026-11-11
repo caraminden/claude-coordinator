@@ -176,3 +176,23 @@ test('a tap on a button does the button\'s thing; a long press shows its tip and
   assert.equal((await tipBox(page))?.text, 'What it does');
   assert.equal(await page.eval('window.clicks'), 1);
 });
+
+test('a tip for a thing inside a modal dialog sits in it, so its buttons can be clicked', { skip }, async () => {
+  const page = await open();
+  await page.eval(`import('/ui/tip.js').then(({ mountTips }) => {
+    const d = document.createElement('dialog');
+    d.innerHTML = '<span id="in-dialog" data-dtip="x">In the dialog</span>';
+    document.body.append(d);
+    d.showModal();
+    window.tipClicks = 0;
+    mountTips(d, { selector: '[data-dtip]', body: () => Object.assign(document.createElement('button'), { id: 'in-tip', textContent: 'Go', onclick: () => window.tipClicks++ }) });
+  })`);
+  const c = await page.centre('#in-dialog');
+  await page.mouse(c.x, c.y);
+  await wait(350);
+  const b = await page.centre('#in-tip');
+  await page.mouse(b.x, b.y);
+  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: b.x, y: b.y, button: 'left', clickCount: 1 });
+  await wait(50);
+  assert.equal(await page.eval('window.tipClicks'), 1, 'the click reached the tip\'s button');
+});

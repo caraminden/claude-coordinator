@@ -61,7 +61,7 @@ test('the land line: the holder by its phase, each waiter by its place and who i
   dead.add(ticket(4, d.branch, 0, 'waiting', 5)); // its process is gone
   waits.poll();
 
-  assert.deepEqual(waits.wait(a.id), { kind: 'land', stage: 'test', chip: 'land · tests', text: 'running the tests on the rebased code', since: now - 30_000, usual: null });
+  assert.deepEqual(waits.wait(a.id), { kind: 'land', stage: 'test', chip: 'land · tests', text: 'CI fell back: running the full suite on perigee', since: now - 30_000, usual: null });
   const wb = waits.wait(b.id)!;
   assert.equal(wb.chip, 'line · 2nd');
   assert.equal(wb.text, `2nd in line, behind #${a.number} (testing)`);

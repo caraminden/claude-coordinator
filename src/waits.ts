@@ -1,17 +1,18 @@
 // What a minion waits on (#544): its place in the land line and that landing's phase, a heavy slot, or
 // the idle restart. One shape for every kind, read from what's already on disk or in the server: the
 // land line's ticket files (tools/deploy-queue.sh), citadel-heavy's slot and waiter files, and the ship
-// line's "deploying" stage. Later sources (test counts, CI jobs) fill the same record.
+// line's "deploying" stage. CI runs (#546, src/ci-wait.ts) fill the same record: a PR's run, and a landing's CI gate.
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Store } from './db.ts';
 import type { Ship } from './branch.ts';
+import type { CiRuns } from './ci-wait.ts';
 
 export interface Wait {
-  /** Its source: land (the land line and its landing), heavy (a heavy slot), restart. */
+  /** Its source: land (the land line and its landing), heavy (a heavy slot), ci (a PR's CI run), restart. */
   kind: string;
-  /** Where it is: a landing's stage (line, rebase, test, deploy, restart) or a lone wait's own (slot, run). */
+  /** Where it is: a landing's stage (line, rebase, test, deploy, restart) or a lone wait's own (slot, run; CI's queued, jobs, passed, failed, cancelled). */
   stage: string;
   /** The row's badge, as short as it gets: "line · 2nd". */
   chip: string;
@@ -23,6 +24,8 @@ export interface Wait {
   usual: number | null;
   done?: number;
   total?: number;
+  /** When it ended, ms: a CI run's pass or fail, shown a while after; its time stops there. */
+  ended?: number;
 }
 
 /** A landing's stages, in order: a wait at one of these shows the track. */
@@ -71,7 +74,8 @@ export function readLandLine(stateDir: string, alive = procAlive): { line: LandT
 export function landPhase(phase: string): { stage: string; word: string; key: string; text: string } {
   const p = phase.replace(/ since \d\d:\d\d$/, '');
   if (/^waiting for CI/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: 'waiting for CI on the rebased commit' };
-  if (/^running the tests/.test(p)) return { stage: 'test', word: 'tests', key: 'tests', text: 'running the tests on the rebased code' };
+  // land.sh runs the suite itself only when CI couldn't answer (its CI FALLBACK, #523).
+  if (/^running the tests/.test(p)) return { stage: 'test', word: 'tests', key: 'tests', text: 'CI fell back: running the full suite on perigee' };
   if (/^deploying/.test(p)) return { stage: 'deploy', word: 'deploy', key: 'deploy', text: p.replace(/^deploying(: )?/, '') || 'deploying' };
   return { stage: 'rebase', word: 'rebase', key: 'rebase', text: p === 'starting' ? 'starting' : 'rebasing onto main' };
 }
@@ -157,6 +161,23 @@ export function heavyWaits({ holders, waiters }: ReturnType<typeof readHeavy>, u
   return out;
 }
 
+type CiView = NonNullable<ReturnType<CiRuns['view']>>;
+
+/** A landing waiting for CI, with the run's jobs and steps; its usual stays the landing's own. */
+export function landCi(w: Wait, ci: CiView): Wait {
+  const short = `CI ${ci.short.replace(/^step /, '')}`;
+  const text = ci.stage === 'queued' ? `waiting for CI: ${ci.text}; if none starts it soon, the suite runs on perigee` : `waiting for CI: ${ci.text}`;
+  return { ...w, chip: `land · ${short}`, text, ...(ci.total ? { done: ci.done, total: ci.total } : {}) };
+}
+
+/** A minion's PR waiting on its CI run. */
+export function prCi(ci: CiView): Wait {
+  const w: Wait = { kind: 'ci', stage: ci.stage, chip: `CI · ${ci.short}`, text: `${ci.what} · ${ci.text}`, since: ci.since, usual: ci.usual };
+  if (ci.total) Object.assign(w, { done: ci.done, total: ci.total });
+  if (ci.ended) w.ended = ci.ended;
+  return w;
+}
+
 const USUALS = 'wait-usual'; // { [key]: the last five lengths in s }
 // { [ticket id]: when its restart wait began, ms }: kept, as the restart it waits for restarts this server.
 const RESTARTS = 'wait-restart-since';
@@ -174,6 +195,9 @@ export interface WaitDeps {
   now?: () => number;
   alive?: (proc: string) => boolean;
   held?: (slotFile: string) => boolean;
+  /** CI runs (#546): a landing's CI gate and a minion's PR; its repo's "owner/name" for the landing's. */
+  ci?: CiRuns;
+  ciSlug?: () => string | null;
 }
 
 /** The waits of every minion, polled from disk; a change re-sends that minion's row. */
@@ -205,7 +229,13 @@ export class Waits {
   /** A minion's wait, for its row (Runner.view). */
   wait = (ticketId: number): Wait | null => {
     const w = this.current.get(ticketId);
-    if (w) { const { key: _, ...rest } = w; return rest; }
+    const ci = this.d.ci?.view(ticketId);
+    if (w) {
+      const { key, ...rest } = w;
+      return key === 'land:ci' && ci ? landCi(rest, ci) : rest;
+    }
+    // A PR's CI shows once the turn has ended (outside): while it runs, its steps say more.
+    if (ci?.what && this.d.store.getTicket(ticketId)?.status !== 'running') return prCi(ci);
     return this.restart(ticketId);
   };
 
@@ -287,6 +317,9 @@ export class Waits {
     }
     const ids = new Set([...this.current.keys(), ...next.keys()]);
     this.current = next;
+    const gates = new Map<number, { branch: string; since: number }>();
+    for (const [id, w] of next) if (w.key === 'land:ci') gates.set(id, { branch: this.d.store.getTicket(id)?.branch ?? '', since: w.since });
+    this.d.ci?.landings(this.d.ciSlug?.() ?? null, gates);
     for (const id of ids) this.check(id);
   }
 

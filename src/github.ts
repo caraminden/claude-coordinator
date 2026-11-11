@@ -343,6 +343,8 @@ export class GithubWatcher {
   onMerged: (repoDir: string) => void = () => {};
   /** The GitHub login a scheme's PRs are read as (#321: its owner's, for a private repo); undefined is the box's. */
   as: (repoDir: string) => GithubEnv = () => undefined;
+  /** What each poll saw of a minion's PR (null: none), read as `as`: its CI runs in flight become its wait (#546). */
+  onPr: (ticketId: number, repo: string, as: GithubEnv, pr: PrSnapshot | null) => void = () => {};
 
   constructor(store: Store, send: (ticketId: number, text: string) => void, fetch = fetchSnapshot) {
     this.store = store;
@@ -417,6 +419,7 @@ export class GithubWatcher {
     const prev = this.schedule.get(ticket.id);
     const as = this.as(repoDir);
     const { pr, self } = await this.fetch(repoDir, repo, ticket.branch!, as);
+    this.onPr(ticket.id, repo, as, pr);
     if (!pr) {
       this.schedule.set(ticket.id, { nextAt: Date.now() + NO_PR_MS, wait: OPEN_MS, last: '' });
       return;

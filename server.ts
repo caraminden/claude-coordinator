@@ -17,7 +17,7 @@ import { Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
-import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
+import { GITHUB_NAME, GithubWatcher, originRepo } from './src/github.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { Store, type Artifact, type Project, type User } from './src/db.ts';
 import { MachineRelay } from './src/machines.ts';
@@ -55,6 +55,7 @@ import { ticketRoutes } from './src/routes/tickets.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Waits } from './src/waits.ts';
+import { CiRuns } from './src/ci-wait.ts';
 import { fileRoutes } from './src/routes/files.ts';
 import { themeCss } from './src/theme.ts';
 
@@ -398,7 +399,11 @@ const deployState = (() => {
     return null;
   }
 })();
-const waits = new Waits({ store, deployState, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ship: ships.ship, interruptible: () => runner.interruptible(), changed: (id) => runner.broadcastTicket(id) });
+// CI runs in flight (#546): a minion's PR (the PR watcher below names its runs) and a landing's CI gate, every 20 s.
+const ciRuns = new CiRuns({ changed: (id) => waits.check(id) });
+let liveSlug: string | null = null;
+void originRepo(import.meta.dirname).then((slug) => (liveSlug = slug));
+const waits = new Waits({ store, deployState, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ship: ships.ship, interruptible: () => runner.interruptible(), changed: (id) => runner.broadcastTicket(id), ci: ciRuns, ciSlug: () => liveSlug });
 runner.wait = waits.wait;
 
 runner.onFilesMayChange = (ticketId) => {
@@ -463,11 +468,13 @@ if (!BOOT_CHECK || PREVIEW) {
   setInterval(() => void safely('ship poll', () => ships.poll()), SHIP_POLL_MS).unref();
   // A few small files, so every 2 s: a landing's phases last tens of seconds.
   setInterval(() => void safely('waits', () => waits.poll()), 2_000).unref();
+  ciRuns.start();
 }
 
 // Tickets hear about their PR's CI, reviews, comments, merge and close as messages from "GitHub".
 const github = new GithubWatcher(store, (ticketId, text) => runner.send(ticketId, GITHUB_NAME, text));
 github.as = githubOf;
+github.onPr = (id, repo, as, pr) => ciRuns.pr(id, repo, as, pr);
 if (!BOOT_CHECK) github.start();
 /** Put (with `title`) or clear (null) a Mandate item for `person`, from `project`, an alert unless `quiet`; true once Mandate has it settled. `what` names the sender in the log. */
 async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>, person: User, key: string, title: string | null, link = `/c/#/p/${project.id}`, quiet = false): Promise<boolean> {

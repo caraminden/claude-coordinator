@@ -104,6 +104,11 @@ test('rowState: a wait shows its chip while working or outside, never over a nee
     [{ state: 'ready', wait: line }, [0, 'done', 'ready 5m']],
     [{ status: 'running', approvals: 1, wait: line }, [0, 'you', 'approve 5m']],
     [{ status: 'closed', wait: line }, [5, 'idle', 'dismissed']],
+    // A PR's CI run (#546): violet while queued, blue while its jobs run, green or red once it ends.
+    [{ state: 'outside', wait: { ...line, kind: 'ci', stage: 'queued', chip: 'CI · queued' } }, [2, 'wait', 'CI · queued']],
+    [{ state: 'outside', wait: { ...line, kind: 'ci', stage: 'jobs', chip: 'CI · 1/3 jobs' } }, [2, 'work', 'CI · 1/3 jobs', 'pulse']],
+    [{ state: 'outside', wait: { ...line, kind: 'ci', stage: 'passed', chip: 'CI · passed' } }, [2, 'done', 'CI · passed']],
+    [{ state: 'outside', wait: { ...line, kind: 'ci', stage: 'failed', chip: 'CI · failed' } }, [2, 'broken', 'CI · failed']],
   ];
   for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
 });
@@ -116,4 +121,7 @@ test('a wait reads elapsed against its usual, and runs late past 15% over', asyn
   assert.equal(waitLate(w, NOW), false);
   assert.equal(waitLate(w, NOW - 59_000 + 160_000 * 1.15 + 1000), true);
   assert.equal(waitLate({ since: NOW - HOUR, usual: null }, NOW), false);
+  // A CI run that ended stops its clock there, and isn't late any more.
+  assert.equal(waitTime({ since: NOW - HOUR, ended: NOW - HOUR + 95_000, usual: 160 }, NOW), '1m 35s of ~2m 40s');
+  assert.equal(waitLate({ since: NOW - HOUR, ended: NOW - 1000, usual: 160 }, NOW), false);
 });

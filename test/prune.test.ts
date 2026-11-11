@@ -167,3 +167,22 @@ test('a scheme name with a space is listed, counted and deleted like any other (
   assert.equal(s.db.listClaudeState(spaced.project_id, spaced.id).length, 0);
   assert.equal(s.db.listClaudeState(plain.project_id, plain.id).length, 0);
 });
+
+test('a worktree git will not remove is reported, and the rest of the prune still runs, then exits non-zero (#468 S10-4)', () => {
+  const s = scratch('Demo');
+  const locked = s.closed(0, 'locked');
+  const orphan = s.closed(0, 'orphan');
+  const after = s.closed(0, 'after');
+  git(['worktree', 'lock', locked.cwd], locked.repo);
+  // Its admin entry gone, as after a moved repo or hand damage: git status itself fails there.
+  rmSync(git(['rev-parse', '--absolute-git-dir'], orphan.cwd), { recursive: true });
+  const res = s.exec('--apply', '--stale-backups');
+  assert.equal(res.status, 1, res.stdout + res.stderr);
+  assert.match(res.stdout, new RegExp(`Could not remove \\(git's reason above\\): Demo #${locked.number}, ${locked.cwd}`));
+  assert.match(res.stdout, new RegExp(`Skipping \\(git status failed there\\): Demo #${orphan.number}, ${orphan.cwd}`));
+  assert.ok(existsSync(locked.cwd) && existsSync(orphan.cwd), 'neither is touched');
+  assert.ok(!existsSync(after.cwd), 'the worktree after them is still pruned');
+  assert.match(res.stdout, /== Ad-hoc database copies/, 'the backups section still runs');
+  assert.match(res.stderr, /2 worktree\(s\) could not be pruned/);
+  git(['worktree', 'unlock', locked.cwd], locked.repo);
+});

@@ -71,25 +71,41 @@ fi
 cutoff=$((now - WORKTREE_DAYS * 86400000))
 echo "== Worktrees of minions closed over $WORKTREE_DAYS days ago (branches kept)"
 total=0
+# One worktree git can't read or remove is reported and skipped, so it can't stop the prune at the
+# same row every night; the script exits non-zero at the end instead, so the unit shows as failed.
+stuck=0
+finish() {
+  if ((stuck)); then echo "prune: $stuck worktree(s) could not be pruned (above); a person needs to look" >&2; exit 1; fi
+  exit 0
+}
 while IFS=$'\t' read -r name num cwd repo; do
   [[ -n ${cwd:-} && -d $cwd && -f $cwd/.git && $cwd == "$DATA_DIR"/projects/* ]] || continue
-  if [[ -n $(git -C "$cwd" status --porcelain 2>/dev/null) ]]; then
+  if ! changes=$(git -C "$cwd" status --porcelain 2>/dev/null); then
+    echo "Skipping (git status failed there): $name #$num, $cwd"
+    stuck=$((stuck + 1))
+    continue
+  fi
+  if [[ -n $changes ]]; then
     echo "Skipping (uncommitted changes): $name #$num, $cwd"
     continue
   fi
   kb=$(du -sk "$cwd" | cut -f1)
   echo "$verb: $name #$num, $cwd, $(mb $((kb * 1024)))"
+  if [[ $apply == 1 ]] && ! git -C "$repo" worktree remove "$cwd"; then
+    echo "Could not remove (git's reason above): $name #$num, $cwd"
+    stuck=$((stuck + 1))
+    continue
+  fi
   total=$((total + kb * 1024))
-  if [[ $apply == 1 ]]; then git -C "$repo" worktree remove "$cwd"; fi
 done < <(sql -separator $'\t' "SELECT p.name, t.number, t.cwd, p.repo_dir FROM tickets t JOIN projects p ON p.id = t.project_id WHERE t.status = 'closed' AND t.kind = 'ticket' AND t.branch IS NOT NULL AND p.repo_dir IS NOT NULL AND t.updated_at < $cutoff ORDER BY p.name, t.number")
 echo "Total: $(mb $total)"
 
-[[ $backups == 1 ]] || exit 0
+[[ $backups == 1 ]] || finish
 echo "== Ad-hoc database copies beside coordinator.db"
 latest=$(ls -1 "$DATA_DIR"/backups/coordinator-[0-9]*.db 2>/dev/null | sort | tail -n 1 || true)
 if [[ -z $latest ]] || [[ -z $(find "$latest" -mmin -2880) ]] || [[ $(sqlite3 :memory: ".restore '$latest'" "PRAGMA integrity_check;") != ok ]]; then
   echo "Keeping them: no nightly backup from the last 2 days that passes its restore check."
-  exit 0
+  finish
 fi
 echo "Nightly backup checked: $latest"
 total=0
@@ -105,3 +121,4 @@ for f in "$DB".backup-* "$DB".bak-*; do
   if [[ $apply == 1 ]]; then rm -f -- "$f"; fi
 done
 echo "Total: $(mb $total)"
+finish

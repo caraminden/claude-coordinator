@@ -452,7 +452,7 @@ test('deploy.sh retries a report the server never got, but not one it may alread
 });
 
 // The queued restart against a stand-in server and systemctl: commits good (last-good) and target (HEAD).
-async function restartWith(name: string, health: (restarts: number, n: number, ctx: { good: string; target: string; pidFile: string }) => 'hang' | number | string | Promise<string>) {
+async function restartWith(name: string, health: (restarts: number, n: number, ctx: { good: string; target: string; pidFile: string }) => 'hang' | number | string | Promise<string>, extra: Record<string, string> = {}) {
   const live = join(root, `${name}-live`);
   const git = (...args: string[]) => execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
   execFileSync('git', ['init', '-q', '-b', 'main', live]);
@@ -495,7 +495,7 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
   try {
     const r = await promisify(execFile)('bash', [copy, 'restart'], {
       encoding: 'utf8',
-      env: { ...hostEnv, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: live, DEPLOY_DB: join(root, `${name}-no.db`), DEPLOY_NOW: '1', DEPLOY_URL: srv.url, DEPLOY_SERVICE: 'citadel-test', DEPLOY_REMOTE: '', DEPLOY_HEALTHY_WAIT: '3', DEPLOY_SETTLE: '2' },
+      env: { ...hostEnv, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: live, DEPLOY_DB: join(root, `${name}-no.db`), DEPLOY_NOW: '1', DEPLOY_URL: srv.url, DEPLOY_SERVICE: 'citadel-test', DEPLOY_REMOTE: '', DEPLOY_HEALTHY_WAIT: '3', DEPLOY_SETTLE: '2', ...extra },
     }).then((o) => ({ status: 0, stderr: o.stderr }), (e) => ({ status: e.code as number, stderr: e.stderr as string }));
     const reports = srv.seen.filter((s) => s.url === '/api/tickets/9/deploy').map((s) => ({ ...JSON.parse(s.body), at: s.at }));
     const healthAt = srv.seen.filter((s) => s.url === '/api/health').map((s) => s.at);
@@ -504,6 +504,17 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
     srv.close();
   }
 }
+
+// F6: after a failed rollback the unit can read "active" while health is silent; the restart then waited its whole
+// 2 h on a server that could not say whether a turn was running, with nothing logged.
+test('a restart whose server stays up but silent stops waiting after a short while, says why, and restarts', { timeout: 60_000 }, async () => {
+  const health = (commit: string) => JSON.stringify({ ok: true, commit });
+  const r = await restartWith('silent', (restarts, _n, { target }) => (restarts >= 1 ? health(target) : 503), { DEPLOY_NOW: '', DEPLOY_IDLE_TRIES: '15', DEPLOY_IDLE_POLL: '0.2', DEPLOY_UNKNOWN_WAIT: '1' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /the server has not answered for 1 s while its unit is up, so it can't say which turns are running: restarting now/);
+  assert.equal(r.restarts, 1);
+  assert.equal(r.lastGood, r.target);
+});
 
 test('the restart checks health again a little after the first OK, and rolls back if it has gone (#520)', { timeout: 60_000 }, async () => {
   const health = (commit: string) => JSON.stringify({ ok: true, commit });

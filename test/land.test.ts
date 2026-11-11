@@ -279,6 +279,30 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
   }
 });
 
+// F11: with CI stuck, every landing in line waited its own 90 s (or 6 min) to learn the same thing.
+test('after CI gave no answer in time, the landings of the next minutes skip the wait and say why; past that CI is asked again, and a green run clears it', () => {
+  const r = setup();
+  const c = ci(r);
+  const down = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'ci-down');
+  r.commit(r.wt, 'b.txt', 'one\n');
+  let res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '1' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.ok(existsSync(down), 'the first landing leaves a note');
+  const asked = c.calls();
+  r.commit(r.wt, 'b.txt', 'two\n');
+  res = c.run({ FAKE_CI: 'queued', LAND_CI_START: '30' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI FALLBACK: CI gave no answer to a landing \d+ s ago \(no runner started the job within 1s\), so this one doesn't wait for it \(it is asked again from \d\d:\d\d\)/);
+  assert.equal(c.calls(), asked, 'GitHub is not asked');
+  assert.equal(c.localRuns(), 2);
+  r.commit(r.wt, 'b.txt', 'three\n');
+  res = c.run({ LAND_CI_DOWN: '0' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /CI passed/);
+  assert.ok(!existsSync(down), 'a green run takes the note away');
+  assert.equal(c.localRuns(), 2);
+});
+
 test('a red run here after a fallback still refuses', () => {
   const r = setup();
   const c = ci(r);

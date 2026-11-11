@@ -77,7 +77,9 @@ unset DEPLOY_LOCKED DEPLOY_TESTED DEPLOY_QUEUE_TICKET
   const server = createServer((_, res) => {
     const commit = readFileSync(running, 'utf8').trim();
     if (!commit) { res.statusCode = 503; res.end(); return; }
-    res.end(JSON.stringify({ ok: true, commit, interruptible: 0 }));
+    // An "interruptible" file: how many running turns a restart would cut off.
+    const busy = join(dir, 'interruptible');
+    res.end(JSON.stringify({ ok: true, commit, interruptible: existsSync(busy) ? Number(readFileSync(busy, 'utf8')) : 0 }));
   });
   await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
   t.after(() => server.close());
@@ -242,4 +244,36 @@ test('while main holds a commit whose deploy was rolled back, only a landing tha
   assert.match(later.stderr, /live now: the server restarted on/);
   assert.deepEqual(subjects(p.source), ['b.txt: innocent', 'the fix', 'RUN_BAD: never comes up', 'base']);
   assert.deepEqual(await p.restarts(3), ['1', '1', '0']);
+});
+
+// F5: boot-check.ts's own backstop is a timer a blocking call defeats; nothing outside bounded it, so the lock
+// stayed held until a person killed it.
+test('a boot check that never returns is stopped at its time limit, called a hang, and lets go of the lock', { timeout: 120_000 }, async (t) => {
+  const p = await pipe(t, 1);
+  p.commit(p.wts[0], 'b.txt', 'innocent\n');
+  const gate = join(p.dir, 'boot-go');
+  const giveUp = setTimeout(() => writeFileSync(gate, ''), 30_000); // so a missing limit fails this test instead of hanging it
+  const res = await p.run(land, p.wts[0], { BOOT_MARK: join(p.dir, 'boot-started'), BOOT_GATE: gate, DEPLOY_BOOT_TIMEOUT: '2' });
+  clearTimeout(giveUp);
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /the boot check hung: stopped after 2 s/);
+  assert.doesNotMatch(res.stderr, /boot check failed/, 'a hang is not a verdict on the change');
+  assert.equal(git(p.live, 'rev-parse', 'HEAD'), p.base, 'the live checkout is back');
+  assert.equal(git(p.source, 'rev-parse', 'main'), p.base, 'main is back');
+  assert.ok(p.lockFree(), 'the deploy lock is free');
+});
+
+// F6: the landing said only "not live yet", then nothing for up to 2 h.
+test('a restart waiting on running turns says so to the landing: how many, for how long at most, and how to skip the wait', { timeout: 120_000 }, async (t) => {
+  const p = await pipe(t, 1);
+  const tip = p.commit(p.wts[0], 'b.txt', 'innocent\n');
+  writeFileSync(join(p.dir, 'interruptible'), '1');
+  t.after(() => writeFileSync(join(p.dir, 'interruptible'), '0')); // a failed test leaves no restart waiting
+  const res = await p.run(land, p.wts[0], { DEPLOY_IDLE_POLL: '0.2' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /not live yet: the restart is waiting for 1 running turn a restart would cut off to finish \(at most \d+ min more\).*tools\/deploy\.sh --now/);
+  assert.match(p.restartLog(), /waiting for 1 running turn a restart would cut off/, 'the restart says so in its own log too');
+  writeFileSync(join(p.dir, 'interruptible'), '0');
+  assert.deepEqual(await p.restarts(1), ['0']);
+  assert.equal(git(p.live, 'rev-parse', 'last-good'), tip);
 });

@@ -191,3 +191,44 @@ test('a job gets its slot\'s progress file for a test run\'s counts (#545), clea
   assert.equal(r.stdout, `${join(dir, 'slot-0.progress')}\n`, "a run before this one left counts that aren't this run's");
   assert.equal(existsSync(join(dir, 'slot-0.progress')), false);
 });
+
+// #553 F10: a frozen container or stopped turn at the head of the line blocked every heavy job behind it, in silence.
+test('a job behind a head of the line that has stopped moving names it, goes past it, and runs', async () => {
+  const { env } = folder(1);
+  const go = join(root, 'go-head');
+  const a = job(env, 'Peek #1', `${touch(join(root, 'head-a-up'))}; ${waitFor(go)}`);
+  await until('the first job running', () => existsSync(join(root, 'head-a-up')));
+  const b = job(env, 'Peek #2', 'true');
+  await until('the second to be next in line', () => /all heavy slots/.test(b.err()));
+  const c = job({ ...env, CITADEL_HEAVY_HEAD_STALE: '1' }, 'Delve #3', touch(join(root, 'head-c-up')));
+  try {
+    await until('the third to say whom it waits behind', () => /others are in line for a heavy slot first \(next: Peek #2: sh -c true/.test(c.err()));
+    process.kill(b.child.pid!, 'SIGSTOP');
+    writeFileSync(go, '');
+    assert.equal(await a.done, 0);
+    await until('the third job to run with the head still stopped', () => existsSync(join(root, 'head-c-up')));
+    assert.equal(await c.done, 0);
+    assert.match(c.err(), /the job next in line \(Peek #2: sh -c true.*\) has not moved for \d+ s \(stopped or frozen\), so this one goes past it/);
+  } finally {
+    writeFileSync(go, '');
+    process.kill(b.child.pid!, 'SIGCONT');
+  }
+  assert.equal(await b.done, 0, 'the stopped job runs once it is woken');
+});
+
+test('a job that waits while no slot changes hands gives up at the limit, loudly, without running', async () => {
+  const { dir, env } = folder(1);
+  const go = join(root, 'go-cap');
+  const a = job(env, 'Peek #1', `${touch(join(root, 'cap-a-up'))}; ${waitFor(go)}`);
+  await until('the first job running', () => existsSync(join(root, 'cap-a-up')));
+  const b = job({ ...env, CITADEL_HEAVY_MAX_WAIT: '1' }, 'Delve #3', touch(join(root, 'cap-b-up')));
+  try {
+    assert.equal(await b.done, 75);
+    assert.match(b.err(), /gave up: no heavy slot has changed hands in 1 s of waiting, so nothing ran \(Delve #3: sh -c.*\)\. .*\n.*slot 1: Peek #1: sh -c/);
+    assert.ok(!existsSync(join(root, 'cap-b-up')), 'its command never ran');
+    assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('wait-')), [], 'its wait file is gone');
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await a.done, 0);
+});

@@ -58,11 +58,12 @@ fi
 [[ -d /run/systemd/system ]] || die 'systemd is not running although /etc/wsl.conf turns it on: in PowerShell, wsl --terminate citadel-ci, then run this again.'
 [[ ! -d /mnt/c/Windows ]] || die 'C: is still mounted although /etc/wsl.conf turns that off: in PowerShell, wsl --terminate citadel-ci, then run this again.'
 
-# One clock keeper, not two (#542). WSL's own init (3.x) runs a chrony outside the distro that steers this kernel's
-# clock to the Windows clock (/dev/ptp0, every 8 s), and Ubuntu turns systemd-timesyncd on in WSL to steer the same
-# clock to NTP. Neither sees the other: each timesyncd step reads to chrony as a clock running fast or slow, it
+# One clock keeper, not two (#542). WSL's own init (3.x) runs a chrony outside the distros that steers the kernel
+# clock they all share to the Windows clock (/dev/ptp0, every 8 s), and Ubuntu turns systemd-timesyncd on in WSL to
+# steer the same clock to NTP. Neither sees the other: each timesyncd step reads to chrony as a clock running fast or slow, it
 # retunes the kernel tick to make up for it, the clock then really runs off (+7% and -2% on 2026-11-11), and
-# timesyncd steps it again every 32 s for as long as the distro is up. So where WSL keeps the clock, timesyncd is off.
+# timesyncd steps it again every 32 s for as long as it runs. So where WSL keeps the clock, timesyncd is off, here
+# and in every other distro on the PC (README, "Citadel's own tests").
 if grep -qa 'refclock PHC' /init 2>/dev/null && [[ $(systemctl is-enabled systemd-timesyncd 2>/dev/null) != masked ]]; then
   systemctl mask --now systemd-timesyncd
   echo 'Turned systemd-timesyncd off: WSL keeps this clock by the Windows clock, and the two fought over it (#542).'

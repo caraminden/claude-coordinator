@@ -51,10 +51,11 @@ jobs:
           [ -S "$dir/bus" ] || { echo "No systemd user manager for $(id -un). As root in the distro: loginctl enable-linger $(id -un)"; exit 1; }
           echo "XDG_RUNTIME_DIR=$dir" >>"$GITHUB_ENV"
           echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$dir/bus" >>"$GITHUB_ENV"
-      # Two clock keepers in the distro skew its clock (#542): WSL's own chrony steers it to the Windows clock while
-      # systemd-timesyncd steps it to NTP, and chrony retunes the kernel tick after every step. On 2026-11-11 the
-      # clocks ran 7% fast, then 2% slow after a reboot, with the wall clock stepped every 32 s, and timing tests
-      # failed at random. The raw clock is the one nothing adjusts (measured then: within 0.005% of NTP).
+      # Two clock keepers skew the WSL clock, which every distro on the PC shares (#542): WSL's own chrony steers it
+      # to the Windows clock while a distro's systemd-timesyncd steps it to NTP, and chrony retunes the kernel tick
+      # after every step. On 2026-11-11 the clocks ran 7% fast, then 2% slow after a reboot, with the wall clock
+      # stepped every 32 s, and timing tests failed at random. The raw clock is the one nothing adjusts (measured
+      # then: within 0.005% of NTP).
       - name: the runner's clock
         run: |
           python3 -c "
@@ -63,10 +64,11 @@ jobs:
           d = (t.monotonic() - a) / (t.clock_gettime(t.CLOCK_MONOTONIC_RAW) - b) - 1
           print(f'the clock runs {d:+.2%} against the raw clock')
           if abs(d) > 0.01: raise SystemExit(1)" && exit 0
-          echo "The kernel clock is skewed. systemd-timesyncd here is $(systemctl is-active systemd-timesyncd 2>&1), $(systemctl is-enabled systemd-timesyncd 2>&1)."
-          echo "It must be masked, so only WSL keeps the clock. On the desktop, in PowerShell:"
-          echo "  wsl -d citadel-ci -u root -- systemctl mask --now systemd-timesyncd"
-          echo "The clock settles within a few minutes (tools/ci-runner/README.md, Citadel's own tests)."
+          echo "The kernel clock is skewed: a systemd-timesyncd in some WSL distro on this PC is fighting WSL's own clock keeper."
+          echo "Here it is $(systemctl is-active systemd-timesyncd 2>&1), $(systemctl is-enabled systemd-timesyncd 2>&1). It must be masked in every distro (wsl -l -v lists them)."
+          echo "On the desktop, in PowerShell, for each:"
+          echo "  wsl -d <distro> -u root -- systemctl mask --now systemd-timesyncd"
+          echo "The clock settles within a minute (tools/ci-runner/README.md, Citadel's own tests)."
           exit 1
       # test/ps1-lint.test.ts skips without pwsh and PSScriptAnalyzer, so a failed install fails the job
       # rather than quietly dropping the lint. Both go in the runner's own home (no root), once.

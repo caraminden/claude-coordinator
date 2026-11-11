@@ -321,24 +321,29 @@ their units with `systemd-run --user` as they do on perigee. As root in the dist
 when it's missing).
 
 The workflow's step "the runner's clock" fails when the distro's kernel clock runs more than 1% off its raw clock.
-That happens when two programs keep the same clock (#542). WSL's own init (3.x) runs a chrony outside the distro,
-where `ps` in the distro doesn't show it, that steers the distro's clock to the Windows clock every 8 s. Ubuntu
-also turns `systemd-timesyncd` on in WSL, which steers it to NTP. Each timesyncd step looks to chrony like a clock
-running fast or slow, so it retunes the kernel tick to make up for it; the clock then really runs off, and
-timesyncd steps it again every 32 s, for as long as the distro is up. Whichever way the first step went sets the
-sign: on 2026-11-11 the clocks ran 7% fast (tick 10721), and after a reboot 2% slow (tick about 9784), and tests
-that time things failed at random. The Windows clock and the raw clock were both right throughout (within 0.02 s
-and 0.005% of NTP), so setting the tick back by hand only lasts until chrony's next update, seconds later.
+That happens when two programs keep the same clock (#542). Every WSL distro on the PC shares one kernel, so one
+clock. WSL's own init (3.x) runs a chrony outside the distros, where `ps` doesn't show it, that steers that clock
+to the Windows clock every 8 s. Ubuntu also turns `systemd-timesyncd` on in WSL, in each distro, which steers it
+to NTP. Each timesyncd step looks to chrony like a clock running fast or slow, so it retunes the kernel tick to
+make up for it; the clock then really runs off, and timesyncd steps it again every 32 s, for as long as it runs.
+On 2026-11-11 the clocks ran 7% fast (tick 10721), and after a reboot 2% slow (tick about 9784), and tests that
+time things failed at random. The raw clock was right throughout (within 0.005% of NTP), so setting the tick back
+by hand only lasts until chrony's next update, seconds later.
 
-The fix is one keeper: `install-runner-agent.sh` masks `systemd-timesyncd` when WSL has its own. A distro set up
-before that needs it once, from PowerShell on the desktop; it survives reboots and `wsl --shutdown`:
+The fix is one keeper: `install-runner-agent.sh` masks `systemd-timesyncd` when WSL has its own, and so does the
+Android distro's `deploy/desktop/android/setup.sh`. One distro with it still on skews the clock for all of them:
+masking it in `citadel-ci` alone changed nothing, and masking it in `citadel-android` as well brought the tick
+back to 10000 within 20 seconds. So any distro on that PC needs it, once, from PowerShell; it survives reboots and
+`wsl --shutdown`:
 
 ```powershell
-wsl -d citadel-ci -u root -- systemctl mask --now systemd-timesyncd
+wsl -d <distro> -u root -- systemctl mask --now systemd-timesyncd
 ```
 
-The clock settles within a few minutes. To look at it from a CI job without root: the tick is `adjtimex`'s `tick`
-field (10000 when nothing is wrong), and `timedatectl timesync-status` shows timesyncd stuck at its 32 s poll.
+`wsl -l -v` lists the distros. To look at the clock from a CI job without root: the tick is `adjtimex`'s `tick`
+field (10000 when nothing is wrong), and a timesyncd in another distro shows as a UDP socket in `/proc/net/udp`
+that opens for a tenth of a second every 32 s, with the wall clock stepping as it closes. The clock now follows
+the Windows clock, so it is as right as that is (0.4 s behind NTP when measured).
 
 When the runner can't answer (Cara is logged off, GitHub is down, no runner takes the job within 90 s, the run
 takes more than 6 minutes), `land.sh` prints `CI FALLBACK` with the reason, runs the suite on perigee as it used

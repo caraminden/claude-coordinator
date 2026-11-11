@@ -26,3 +26,6 @@ way").
 - `ShipStatus` imports `DEPLOY_FAILURE` from `src/routes/tickets.ts`, which writes it, rather than
   moving the key.
 - A new background job goes in a module of its own, the same way, with its timer line in `server.ts`.
+- The report's other leftover, one object per MCP tool in `src/mcp.ts`, was not done. Cara, on #475's
+  card on 2026-11-11: "Skip it, close #475". It would reshuffle about 1,000 lines of text every turn
+  reads for what the report called a modest gain.

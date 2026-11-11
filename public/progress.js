@@ -12,13 +12,17 @@ export const isWorkTool = (name) => !TASK_TOOLS.has(name) && !HIDDEN_TOOLS.has(n
 
 export function createProgress() {
   return {
-    tasks: [], // { id, subject, activeForm, description, outcome, note, status: 'pending' | 'in_progress' | 'completed', actions, estimate, startedAt }
+    // work: a step's milliseconds underway inside running turns; workFrom: when the running turn's share began (null between turns).
+    tasks: [], // { id, subject, activeForm, description, outcome, note, status: 'pending' | 'in_progress' | 'completed', actions, estimate, startedAt, work, workFrom }
     pendingCreates: new Map(), // tool_use_id -> TaskCreate input, until its result tells us the task id
     turnActions: 0,
     turnFailed: false, // the last turn ended in an error event (no init since)
     turnOk: false, // the last turn sent a successful result, so a later error (a deploy report) isn't its failure
     lastAction: null,
     planMoved: true, // the task list changed since the last turn ended; until it does, a step left underway isn't this turn's
+    model: null, // the running or last turn's model, from its init
+    lastAt: null, // the newest event's time, where a turn that ended with no result stopped counting
+    finished: null, // [] collects finished steps for step_times (#571), which the runner drains; null collects nothing
   };
 }
 
@@ -298,8 +302,17 @@ export function applyEvent(p, kind, data, at = null) {
   // A turn that died says so, rather than the "Done" of a plan an earlier turn finished.
   if (kind === 'error' && !p.turnOk) p.turnFailed = true;
   if (kind !== 'claude' || !data) return actions;
+  // A Grunt's own task list isn't the minion's plan (#571).
+  if (data.parent_tool_use_id && data.message?.content?.some?.((b) => b.type === 'tool_use' && TASK_TOOLS.has(b.name))) return actions;
+  const lastAt = p.lastAt;
+  if (at != null) p.lastAt = at;
   // A turn that finished well wasn't failed by an error on the way (its MCP server not connecting).
-  if (data.type === 'result') { p.turnOk = !data.is_error; if (p.turnOk) p.turnFailed = false; p.planMoved = false; }
+  if (data.type === 'result') {
+    p.turnOk = !data.is_error;
+    if (p.turnOk) p.turnFailed = false;
+    p.planMoved = false;
+    for (const t of p.tasks) settle(t, at);
+  }
 
   if (data.type === 'system' && data.subtype === 'init') {
     p.turnFailed = false;
@@ -307,8 +320,14 @@ export function applyEvent(p, kind, data, at = null) {
     p.turnActions = 0;
     p.lastAction = null;
     p.planMoved = false;
+    if (typeof data.model === 'string') p.model = data.model;
     // A plan finished in an earlier turn belongs to that chunk of work, not this one.
     if (p.tasks.length && allDone(p)) p.tasks = [];
+    // A step underway counts working time again; a turn that died with no result stopped at its last event.
+    for (const t of p.tasks) {
+      settle(t, lastAt);
+      if (t.status === 'in_progress' && at != null) t.workFrom = at;
+    }
   } else if (data.type === 'assistant') {
     for (const block of data.message?.content ?? []) {
       if (block.type === 'text' && block.text?.trim()) {
@@ -328,12 +347,17 @@ export function applyEvent(p, kind, data, at = null) {
         if (idx < 0) continue;
         const task = p.tasks[idx];
         if (input.status === 'deleted') p.tasks.splice(idx, 1);
-        else if (input.status) {
-          if (input.status === 'in_progress' && task.status !== 'in_progress') task.startedAt = at;
-          task.status = input.status;
-        }
         const est = estimateOf(input);
         if (est) task.estimate = est;
+        if (input.status && input.status !== 'deleted') {
+          // A TaskUpdate comes from a running turn, so a step's working time starts with it.
+          if (input.status === 'in_progress' && task.status !== 'in_progress') Object.assign(task, { startedAt: at, work: 0, workFrom: at });
+          if (input.status !== 'in_progress') settle(task, at);
+          if (input.status === 'completed' && task.status === 'in_progress' && task.startedAt != null && at != null) {
+            p.finished?.push({ id: task.id, subject: input.subject || task.subject, estimate: task.estimate ?? null, startedAt: task.startedAt, finishedAt: at, work: task.work ?? 0, model: p.model });
+          }
+          task.status = input.status;
+        }
         if (input.subject) task.subject = input.subject;
         if (input.activeForm) task.activeForm = input.activeForm;
         if (input.description) task.description = input.description;
@@ -348,7 +372,7 @@ export function applyEvent(p, kind, data, at = null) {
           const was = i < 0 ? null : old.splice(i, 1)[0];
           const id = was?.id ?? `todo-${block.id}-${n}`;
           const startedAt = t.status !== 'in_progress' ? undefined : was?.status === 'in_progress' ? was.startedAt : at;
-          return { id, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0, startedAt };
+          return { id, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0, startedAt, work: was?.work ?? 0, workFrom: t.status === 'in_progress' ? was?.workFrom ?? at : null };
         });
       } else if (isWorkTool(block.name)) {
         const task = stepInfo(p, true).current;
@@ -373,6 +397,13 @@ export function applyEvent(p, kind, data, at = null) {
   return actions;
 }
 
+/** Close a step's running share of working time at `at` (#571). */
+function settle(task, at) {
+  if (task.workFrom == null) return;
+  if (at != null) task.work = (task.work ?? 0) + Math.max(0, at - task.workFrom);
+  task.workFrom = null;
+}
+
 /** A step's guessed minutes (metadata.estimate, #551), from Claude's own tool input: a sane number or nothing. */
 function estimateOf(input) {
   const n = Number(input.metadata?.estimate);
@@ -382,15 +413,21 @@ function estimateOf(input) {
 /**
  * What the plan's guesses (#551) say while its step runs: the step's start and guessed seconds, for the
  * bar, and the minutes left of the plan (what's left of this step's guess plus the steps not started).
+ * `ratio` is what steps really took against their guesses (#571, Store.stepRatio), so the guesses are
+ * scaled by it. The step's time is its working time: `since` is moved on past the gaps between turns.
  * Null when the step underway has no guess or start.
  */
-export function planEstimate(p, running, now = Date.now()) {
+export function planEstimate(p, running, now = Date.now(), ratio = 1) {
   const { current } = stepInfo(p, running);
   if (!current?.estimate || !current.startedAt) return null;
-  const usual = current.estimate * 60;
-  const pending = p.tasks.filter((t) => t.status === 'pending').reduce((s, t) => s + (t.estimate ?? 0), 0);
-  const left = Math.max(0, usual - (now - current.startedAt) / 1000) / 60 + pending;
-  return { since: current.startedAt, usual, left: Math.ceil(left) };
+  const scale = ratio > 0 ? ratio : 1;
+  // Whole seconds, so a scaled guess doesn't round up a minute on float noise (20 × 0.3 = 6.000000000000001).
+  const usual = Math.round(current.estimate * 60 * scale);
+  const pending = Math.round(p.tasks.filter((t) => t.status === 'pending').reduce((s, t) => s + (t.estimate ?? 0), 0) * 60 * scale);
+  // A step from before working time was counted (no work yet) falls back to its wall clock.
+  const since = current.work == null ? current.startedAt : (current.workFrom ?? now) - current.work;
+  const left = (Math.max(0, usual - (now - since) / 1000) + pending) / 60;
+  return { since, usual, left: Math.ceil(left) };
 }
 
 /**

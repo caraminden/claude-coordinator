@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
-import { askerKey, onboardingOpen, planKey, type EventRow, type Project, type Store, type Ticket } from './db.ts';
+import { askerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
 import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
 import { KEEP, SENT_BACK } from './link-check.ts';
@@ -474,6 +474,7 @@ export class Runner {
   /** Minions whose deploy went live mid-turn: dismissed when that turn ends, if still pending-deploy. */
   private deployedMidTurn = new Set<number>();
   private progress = new Map<number, ReturnType<typeof createProgress>>();
+  private stepRatios = new Map<number, { at: number; ratio: number }>();
   /** The minion whose relayed message started each ticket's current turn, when a relay came before any person's message. */
   private turnFrom = new Map<number, number>();
   /** A parked minion's state and note when a turn answering a message started: put back at its end, while still parked (#261). */
@@ -659,14 +660,17 @@ export class Runner {
     // scheme's list: after a restart that read every dismissed minion's events, 16 s for 500 of them (#527).
     const p = closed ? null : this.progressFor(ticket.id);
     const { total, done } = p ? stepInfo(p) : { total: 0, done: 0 };
+    // What steps took against their guesses (#571), which both bars scale the guesses by.
+    const ratio = closed ? 1 : this.stepRatio(ticket.project_id);
     // The running step's start and guessed seconds, so the list row's bar fills as the chat head's does (#573).
-    const est = p && ticket.status === 'running' ? planEstimate(p, true) : null;
+    const est = p && ticket.status === 'running' ? planEstimate(p, true, Date.now(), ratio) : null;
     const cards = closed ? [] : this.store.openCardsOf(ticket.id);
     return {
       // A network wait's held messages are queued too: they go first into its resume (takeQueue).
       ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (this.netWait(ticket.id)?.queued?.length ?? 0), queued_ids: [...(this.netWait(ticket.id)?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
       turnStartedAt: this.turns.get(ticket.id)?.startedAt ?? null,
+      step_ratio: ratio,
       // When it resumes by itself after the usage limit, if it waits for that.
       limit_resume_at: this.limitWait(ticket.id)?.at ?? null,
       approvals: this.approvals.waiting(ticket.id),
@@ -2338,6 +2342,7 @@ export class Runner {
     const row = this.emit(ticketId, 'claude', slim);
     // The stored event's own time, so a step's start matches what a replay of the events (history, the backfill) finds.
     applyEvent(progress, 'claude', slim, row.created_at);
+    this.recordSteps(ticketId, progress);
     const activity = progress.tasks.length ? progressLine(progress, ev.type !== 'result') : describeActivity(ev);
     if (activity && activity !== this.store.getTicket(ticketId)?.last_activity) {
       this.store.updateTicket(ticketId, { last_activity: activity });
@@ -2467,6 +2472,8 @@ export class Runner {
       p = usable ? { ...saved.p, pendingCreates: new Map(saved.p.pendingCreates) } as ReturnType<typeof createProgress> : createProgress();
       const rows = this.store.planEvents(ticketId, undefined, usable ? saved.upTo : 0);
       for (const row of rows) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
+      // Steps finishing from here on are recorded (#571); those before were, live or by backfillStepTimes.
+      p.finished = [];
       this.progress.set(ticketId, p);
       // The full replay is paid once: an idle minion would otherwise pay it after every restart.
       if (!usable) this.savePlan(ticketId, p, rows.at(-1)?.id ?? 0);
@@ -2476,7 +2483,47 @@ export class Runner {
 
   /** Save a ticket's task-list state, which holds every event up to `upTo`. */
   private savePlan(ticketId: number, p: ReturnType<typeof createProgress>, upTo: number) {
-    this.store.setSetting(planKey(ticketId), { rules: PLAN_RULES, upTo, p: { ...p, pendingCreates: [...p.pendingCreates] } });
+    this.store.setSetting(planKey(ticketId), { rules: PLAN_RULES, upTo, p: { ...p, pendingCreates: [...p.pendingCreates], finished: undefined } });
+  }
+
+  /** Write the steps a ticket's plan finished since the last call to step_times (#571). */
+  private recordSteps(ticketId: number, p: ReturnType<typeof createProgress>) {
+    if (!p.finished?.length) return;
+    const t = this.store.getTicket(ticketId);
+    try {
+      this.store.addStepTimes(ticketId, p.finished.splice(0), t?.last_effort ?? t?.effort ?? null);
+    } catch (err) {
+      console.error(`Ticket ${ticketId}: could not record its finished steps:`, err);
+    }
+  }
+
+  /**
+   * The readout's ratio of what steps took to their guesses (#571), per scheme, read at most once a minute:
+   * every minion's view carries it.
+   */
+  private stepRatio(projectId: number): number {
+    const hit = this.stepRatios.get(projectId);
+    if (hit && Date.now() - hit.at < 60_000) return hit.ratio;
+    const ratio = this.store.stepRatio(projectId);
+    this.stepRatios.set(projectId, { at: Date.now(), ratio });
+    return ratio;
+  }
+
+  /**
+   * Fill step_times once from every minion's stored events (#571), so the ratio has data from its first day.
+   * One minion per tick, off the boot's hot path; a restart part way starts over, and rows already there stay.
+   */
+  async backfillStepTimes() {
+    if (this.store.getSetting('step_times_backfilled')) return;
+    for (const project of this.store.listProjects()) {
+      for (const t of this.store.listTickets(project.id)) {
+        const p = { ...createProgress(), finished: [] as FinishedStep[] };
+        for (const row of this.store.planEvents(t.id)) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
+        this.store.addStepTimes(t.id, p.finished, t.last_effort ?? t.effort ?? null);
+        await new Promise((r) => setImmediate(r));
+      }
+    }
+    this.store.setSetting('step_times_backfilled', true);
   }
 
   get usage(): Usage | null {

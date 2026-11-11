@@ -190,3 +190,57 @@ test("a step's guessed minutes fill the readout's bar from when it started, and 
   call('u5', 'TaskUpdate', { taskId: '3', metadata: { estimate: 5 } }, at(10));
   assert.deepEqual(planEstimate(p, true, at(10)), { since: at(9), usual: 300, left: 24 });
 });
+
+test("the plan's guesses are scaled by what steps really took, and a step counts only its working time (#571)", () => {
+  const p = createProgress();
+  const at = (min) => 1_000_000 + min * 60_000;
+  const ev = (data, t) => applyEvent(p, 'claude', data, t);
+  const call = (id, name, input, t) => ev({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } }, t);
+  const made = (id, n, t) => ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${n} created successfully` }] } }, t);
+  ev({ type: 'system', subtype: 'init' }, at(0));
+  call('c1', 'TaskCreate', { subject: 'Build', description: 'x', metadata: { estimate: 20 } }, at(0)); made('c1', 1, at(0));
+  call('c2', 'TaskCreate', { subject: 'Ship', description: 'x', metadata: { estimate: 10 } }, at(0)); made('c2', 2, at(0));
+  call('u1', 'TaskUpdate', { taskId: '1', status: 'in_progress' }, at(0));
+  assert.deepEqual(planEstimate(p, true, at(0), 0.3), { since: at(0), usual: 360, left: 9 }, 'a 20-minute guess is a 6-minute bar, and the 10 not started are 3');
+  assert.deepEqual(planEstimate(p, true, at(0)), { since: at(0), usual: 1200, left: 30 }, 'no ratio is the guesses as they are');
+  assert.equal(planEstimate(p, true, at(0), 0).usual, 1200, 'a ratio that is no use is ignored');
+  // The turn ends 2 minutes in and waits an hour on a card; the next turn picks the step up again.
+  ev({ type: 'result', is_error: false }, at(2));
+  ev({ type: 'system', subtype: 'init' }, at(62));
+  call('u2', 'TaskUpdate', { taskId: '1', metadata: { estimate: 20 } }, at(62));
+  const est = planEstimate(p, true, at(63), 0.3);
+  assert.equal(at(63) - est.since, 3 * 60_000, '2 minutes in the first turn and 1 in this one, not the hour between');
+  assert.equal(est.left, 3 + 3, '3 of the 6 minutes left, plus the 3 not started');
+});
+
+test('a finished step is collected with its working time across turns, once, and only when asked for (#571)', () => {
+  const at = (min) => 1_000_000 + min * 60_000;
+  const replay = (p) => {
+    const ev = (data, t) => applyEvent(p, 'claude', data, t);
+    const call = (id, name, input, t, extra = {}) => ev({ type: 'assistant', ...extra, message: { content: [{ type: 'tool_use', id, name, input }] } }, t);
+    const made = (id, n, t) => ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${n} created successfully` }] } }, t);
+    ev({ type: 'system', subtype: 'init', model: 'claude-opus-5-5' }, at(0));
+    call('c1', 'TaskCreate', { subject: 'Build', description: 'x', metadata: { estimate: 20 } }, at(0)); made('c1', 1, at(0));
+    call('c2', 'TaskCreate', { subject: 'Ship', description: 'x' }, at(0)); made('c2', 2, at(0));
+    call('c3', 'TaskCreate', { subject: 'Never started', description: 'x' }, at(0)); made('c3', 3, at(0));
+    call('u1', 'TaskUpdate', { taskId: '1', status: 'in_progress' }, at(1));
+    ev({ type: 'result', is_error: false }, at(5));
+    // A turn that dies with no result stops counting at its last event.
+    ev({ type: 'system', subtype: 'init', model: 'claude-opus-5-5' }, at(30));
+    call('r1', 'Read', { file_path: 'a.js' }, at(32));
+    ev({ type: 'system', subtype: 'init', model: 'claude-fable-5-2' }, at(90));
+    call('u2', 'TaskUpdate', { taskId: '1', status: 'completed' }, at(93));
+    call('u3', 'TaskUpdate', { taskId: '1', status: 'completed' }, at(94)); // completing it again isn't another step
+    call('g1', 'TaskUpdate', { taskId: '2', status: 'in_progress' }, at(94), { parent_tool_use_id: 'agent1' }); // a Grunt's list
+    call('u4', 'TaskUpdate', { taskId: '3', status: 'completed' }, at(95));
+    ev({ type: 'result', is_error: false }, at(96));
+  };
+  const p = { ...createProgress(), finished: [] };
+  replay(p);
+  assert.deepEqual(p.finished, [{ id: '1', subject: 'Build', estimate: 20, startedAt: at(1), finishedAt: at(93), work: (4 + 2 + 3) * 60_000, model: 'claude-fable-5-2' }],
+    '4 minutes in the first turn, 2 in the one that died, 3 in the last; the step never started and the Grunt\'s own list write nothing');
+  assert.equal(p.tasks[1].status, 'pending', "a Grunt's own task list doesn't move the minion's plan");
+  const plain = createProgress();
+  replay(plain);
+  assert.equal(plain.finished, null, 'the readout collects nothing');
+});

@@ -381,6 +381,9 @@ if (!BOOT_CHECK && !PREVIEW) {
   setInterval(sweepBuild, 24 * 60 * 60_000).unref();
 }
 
+// Steps' times from before step_times (#571), once, a minute after boot.
+if (!BOOT_CHECK) setTimeout(() => void safely('step times backfill', () => runner.backfillStepTimes()), 60_000).unref();
+
 // Embed what was said since the last pass, a little at a time, never in a request (src/memory.ts).
 const memoryIndexer = new MemoryIndexer(store, embed, EMBED_MODEL, memoryScheme);
 if (!BOOT_CHECK) setInterval(() => void safely('memory', () => memoryIndexer.run()), Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000).unref();

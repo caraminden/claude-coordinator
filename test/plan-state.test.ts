@@ -45,10 +45,10 @@ const HISTORY: object[] = [
 
 const plain = (p: any) => JSON.parse(JSON.stringify({ ...p, pendingCreates: [...p.pendingCreates] }));
 function fullReplay(ticketId: number) {
-  // As the runner replays: timed by the stored events.
+  // As the runner replays: timed by the stored events, collecting the steps that finish after (#571).
   const p = createProgress();
   for (const row of store.planEvents(ticketId)) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
-  return p;
+  return { ...p, finished: [] };
 }
 
 test('after a restart at any point, the saved state plus the events since equals a full replay', () => {
@@ -132,4 +132,11 @@ test("a running minion's row gets its step's start and guess for the list's bar 
   // Not running: the row's bar counts steps done, so no time goes out.
   store.updateTicket(t.id, { status: 'idle' });
   assert.deepEqual(live.view(store.getTicket(t.id)!).steps, { done: 0, total: 2 });
+  // Once steps have taken half their guesses (#571), the row's bar is scaled as the chat head's is.
+  const done = newTicket();
+  store.addStepTimes(done.id, Array.from({ length: 30 }, (_, i) => ({ id: String(i), subject: 's', estimate: 10, startedAt: i, finishedAt: i, work: 5 * 60_000, model: null })), null);
+  store.updateTicket(t.id, { status: 'running' });
+  const row = restart().view(store.getTicket(t.id)!);
+  assert.equal(row.step_ratio, 0.5);
+  assert.deepEqual(row.steps, { done: 0, total: 2, since: started, usual: 90 });
 });

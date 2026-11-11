@@ -448,6 +448,21 @@ CREATE TABLE IF NOT EXISTS runner_load (
   data TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS runner_load_at ON runner_load(at);
+-- What each finished step of a minion's plan took (#571): its guess and its working time (the part of start to
+-- finish inside running turns), written as the step is marked completed, for the readout's ratio (Store.stepRatio).
+CREATE TABLE IF NOT EXISTS step_times (
+  ticket_id INTEGER NOT NULL REFERENCES tickets(id),
+  task_id TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  estimate REAL,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER NOT NULL,
+  work_ms INTEGER NOT NULL,
+  model TEXT,
+  effort TEXT,
+  PRIMARY KEY (ticket_id, task_id, started_at)
+);
+CREATE INDEX IF NOT EXISTS step_times_finished ON step_times(finished_at);
 CREATE TABLE IF NOT EXISTS github_seen (
   ticket_id INTEGER NOT NULL REFERENCES tickets(id),
   key TEXT NOT NULL,
@@ -782,8 +797,15 @@ export const SCHEMA_HISTORY = [
   [38, 'project_seen_items (#539)'],
   [39, 'last_actions (#538)'],
   [40, 'runner_load (#534)'],
+  [41, 'step_times (#571)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
+
+/** Store.stepRatio's numbers (#571): steps it sums, a scheme's own it needs, and the fewest it uses at all. */
+export const STEP_RATIO = { recent: 200, scheme: 50, least: 30 };
+
+/** A finished step as public/progress.js applyEvent collects it (#571). */
+export type FinishedStep = { id: string; subject: string; estimate: number | null; startedAt: number; finishedAt: number; work: number; model: string | null };
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".
@@ -1424,6 +1446,7 @@ export class Store {
     this.db.prepare('DELETE FROM brief_starts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM ticket_pins WHERE ticket_id = ?').run(id);
+    this.db.prepare('DELETE FROM step_times WHERE ticket_id = ?').run(id);
     this.memory.deleteTicket(id);
     this.db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
@@ -2038,6 +2061,37 @@ export class Store {
   }
 
   /** When a ticket's last finished turn ended (ms), or null before its first. */
+  /** Record finished steps (#571, public/progress.js applyEvent's `finished`); one already recorded (same start) is kept. */
+  addStepTimes(ticketId: number, steps: FinishedStep[], effort: string | null) {
+    if (!steps.length) return;
+    const add = this.db.prepare(`INSERT OR IGNORE INTO step_times (ticket_id, task_id, subject, estimate, started_at, finished_at, work_ms, model, effort)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    this.db.exec('BEGIN');
+    try {
+      for (const s of steps) add.run(ticketId, s.id, s.subject, s.estimate, s.startedAt, s.finishedAt, Math.round(s.work), s.model, effort);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /**
+   * What steps really took against their guesses (#571): working minutes over guessed minutes, summed over the
+   * newest STEP_RATIO.recent finished steps with a guess. The scheme's own once it has STEP_RATIO.scheme of them,
+   * else every scheme's, and 1 until there are STEP_RATIO.least anywhere. A sum, not the median step's ratio:
+   * that undershoots whole plans (progress-estimates-2026-11 report).
+   */
+  stepRatio(projectId: number): number {
+    const sum = (where: string, ...args: number[]) => this.db.prepare(`SELECT COUNT(*) AS n, SUM(work_ms) AS work, SUM(estimate) AS guess FROM (
+      SELECT s.work_ms, s.estimate FROM step_times s JOIN tickets t ON t.id = s.ticket_id WHERE s.estimate IS NOT NULL ${where}
+      ORDER BY s.finished_at DESC LIMIT ${STEP_RATIO.recent})`).get(...args) as { n: number; work: number | null; guess: number | null };
+    const own = sum('AND t.project_id = ?', projectId);
+    const pick = own.n >= STEP_RATIO.scheme ? own : sum('');
+    const ratio = pick.n >= STEP_RATIO.least && pick.guess ? pick.work! / 60_000 / pick.guess : 1;
+    return ratio > 0 ? ratio : 1;
+  }
+
   lastTurnEnd(ticketId: number): number | null {
     const r = this.db.prepare('SELECT ended_at FROM turns WHERE ticket_id = ? ORDER BY id DESC LIMIT 1').get(ticketId) as { ended_at: number } | undefined;
     return r?.ended_at ?? null;

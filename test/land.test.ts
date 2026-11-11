@@ -71,7 +71,7 @@ test('rebases onto main, tests, fast-forwards main, and deploys holding the lock
 test("a rebase that changes land.sh hands over to the rebased copy, which keeps the lock and lands (#500)", () => {
   const r = setup();
   // The worktree runs its own tools/land.sh, as a minion does; main's newer one says it is the one running.
-  for (const f of ['land.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  for (const f of ['land.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real land.sh');
   git(r.wt, 'rebase', '-q', 'main');
@@ -85,6 +85,11 @@ test("a rebase that changes land.sh hands over to the rebased copy, which keeps 
   assert.equal(res.stderr.match(/rebasing/g)?.length, 1, res.stderr);
   assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
   assert.equal(r.note(), 'locked=1 held=yes', 'the deploy still runs under the lock');
+  // The rebased copy kept the first one's ticket in the line (#502), took it out at the end, and its time was noted.
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  assert.deepEqual(tickets(state), []);
+  assert.equal(issued(state), 1, 'one ticket for the whole landing');
+  assert.match(readFileSync(join(state, 'queue', '.took'), 'utf8'), /^\d+\n$/);
 });
 
 test('red tests stop it before main moves', () => {

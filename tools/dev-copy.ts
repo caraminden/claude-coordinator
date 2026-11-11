@@ -3,8 +3,9 @@
 //   citadel-dev-copy start [--data copy|empty] | status | stop
 // start: a fresh folder under $TMPDIR, the live database copied in read-only in one read transaction
 // and scrubbed as a preview's copy is (or none), a free port, server.ts in preview mode (no turns, no
-// pushes, no new minions), and it prints the URL, a sign-in and the pid. A second start replaces the first. stop: ends that pid, only
-// that one, and removes the folder. Never by name: every turn and Citadel itself run as one account.
+// pushes, no new minions), and it prints the URL, a sign-in and the pid. A second start replaces the
+// first. stop: ends that pid, only that one, and removes the folder. Never by name: every turn and
+// Citadel itself run as one account.
 //
 // Preview mode exits once its parent goes, so the server runs under a small sh that waits on it and
 // exits with it; the Bash call that ran start returns at once, since neither holds its output.

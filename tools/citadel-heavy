@@ -120,9 +120,11 @@ tell() {
   fi
 }
 
-# While it waits, wait-<pid> says who for, what, since when and on what (line, slots, load), so Citadel can
-# show the minion's wait (#544; src/waits.ts reads it). Written by a rename, so nobody reads half of it.
-waitfile="$dir/wait-$$"
+# While it waits, wait-<pid>-<random> says who for, what, since when and on what (line, slots, load), so
+# Citadel can show the minion's wait (#544; src/waits.ts reads it). Written by a rename, so nobody reads half
+# of it, and freshened at least every 20 s: one older than a minute is a waiter killed past its trap. The
+# random part: containers' pids can repeat each other's.
+waitfile="$dir/wait-$$-$RANDOM$RANDOM"
 waiting_on() { printf '%s\n' "$who" "$what" "$started" "$1" >"$waitfile.tmp" 2>/dev/null && mv -f "$waitfile.tmp" "$waitfile" 2>/dev/null; }
 started=$(date +%s)
 trap 'rm -f "$waitfile" "$waitfile.tmp"' EXIT
@@ -134,7 +136,7 @@ if ! flock -n 7; then
   waiting_on line
   say "others are in line for a heavy slot first; waiting ($who: $what)"
   holders
-  flock 7
+  until flock -w 20 7; do touch "$waitfile" 2>/dev/null; done
 fi
 if ! admit; then
   waiting_on "$waiting"
@@ -143,7 +145,7 @@ if ! admit; then
   said=$waiting
   until admit; do
     sleep "${CITADEL_HEAVY_POLL:-2}"
-    [ "$waiting" = "$said" ] || waiting_on "$waiting"
+    if [ "$waiting" = "$said" ]; then touch "$waitfile" 2>/dev/null; else waiting_on "$waiting"; fi
     if [ "$waiting" != "$said" ] || [ $((SECONDS - told)) -ge 60 ]; then
       tell "still waiting after $(((SECONDS - since) / 60)) min: "
       told=$SECONDS

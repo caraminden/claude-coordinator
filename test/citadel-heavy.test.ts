@@ -124,8 +124,8 @@ test('with a slot free but the box busy, the job waits, says the pressure, and s
     const b = job(env, 'Peek #5', touch(join(root, 'load-up-2')));
     await until('the next to queue', () => /others are in line/.test(b.err()));
     assert.ok(!existsSync(join(root, 'load-up-2')));
-    // Each waiter leaves a wait-<pid> file for Citadel's wait readout (#544): who, what, since, on what.
-    const waits = () => readdirSync(dir).filter((f) => /^wait-\d+$/.test(f)).map((f) => readFileSync(join(dir, f), 'utf8').split('\n'));
+    // Each waiter leaves a wait-<pid>-<random> file for Citadel's wait readout (#544): who, what, since, on what.
+    const waits = () => readdirSync(dir).filter((f) => /^wait-\d+-\d+$/.test(f)).map((f) => readFileSync(join(dir, f), 'utf8').split('\n'));
     await until('both waiter files', () => waits().length === 2);
     const byWho = Object.fromEntries(waits().map((l) => [l[0], l]));
     assert.equal(byWho['Peek #4'][3], 'load');

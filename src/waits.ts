@@ -2,6 +2,7 @@
 // the idle restart. One shape for every kind, read from what's already on disk or in the server: the
 // land line's ticket files (tools/deploy-queue.sh), citadel-heavy's slot and waiter files, and the ship
 // line's "deploying" stage. Later sources (test counts, CI jobs) fill the same record.
+import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Store } from './db.ts';
@@ -96,9 +97,10 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
     } else {
       const head = ahead[0], word = head.got > 0 ? HEAD_WORD[landPhase(head.phase).key] : 'waiting';
       text = `${place} in line, behind ${name(head.label)} (${word})${ahead.length > 1 ? ` and ${ahead.length - 1} more` : ''}`;
-      // What's left of the holder's landing, then a whole one for each other waiter ahead.
-      const left = ahead.reduce((s, a) => s + (a === holder ? Math.max(0, typical - (now / 1000 - a.got)) : typical), 0);
-      usualS = Math.round((now - t.mtime) / 1000 + left);
+      // From when it joined: what was left of the holder's landing then, and a whole one for each other waiter
+      // ahead. Fixed while the line stands, so a holder running long turns the bar amber.
+      const joined = t.mtime / 1000;
+      usualS = Math.round(ahead.reduce((s, a) => s + (a === holder ? Math.max(0, typical - Math.max(0, joined - a.got)) : typical), 0));
     }
     out.set(t.label, { kind: 'land', stage: 'line', chip: `line · ${place}`, text, since: t.mtime, usual: usualS });
   });
@@ -107,8 +109,20 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
 
 export interface HeavyJob { who: string; what: string; since: number; reason?: string; slot?: number }
 
-/** citadel-heavy's holders (slot-N.who: "who: what (since HH:MM, pid N)") and waiters (wait-<pid>: who, what, since s, reason). */
-export function readHeavy(dir: string): { holders: HeavyJob[]; waiters: HeavyJob[] } {
+/** Whether a heavy slot's lock is held: a holder killed past its trap leaves its .who behind, but not the lock. */
+export function slotHeld(file: string): boolean {
+  // The probe holds a free slot for a moment, so a job taking it then waits one more poll (2 s) at most.
+  const r = spawnSync('flock', ['-n', '-E', '75', file, 'true'], { timeout: 2000 });
+  return r.status !== 0; // 75: held; no flock at all: trust the file
+}
+
+const STALE_WAITER_MS = 60_000; // citadel-heavy freshens a waiter's file at least every 20 s
+
+/**
+ * citadel-heavy's holders (slot-N.who: "who: what (since HH:MM, pid N)", while slot-N's lock is held) and
+ * waiters (wait-<pid>-<random>: who, what, since s, reason; freshened while it waits).
+ */
+export function readHeavy(dir: string, now = Date.now(), held = slotHeld): { holders: HeavyJob[]; waiters: HeavyJob[] } {
   const holders: HeavyJob[] = [], waiters: HeavyJob[] = [];
   for (const name of files(dir)) {
     const f = join(dir, name);
@@ -116,11 +130,10 @@ export function readHeavy(dir: string): { holders: HeavyJob[]; waiters: HeavyJob
     if (m) {
       const text = read(f)?.trim(), at = mtime(f);
       const w = text?.match(/^(.*?): (.*) \(since \d\d:\d\d, pid \d+\)$/);
-      if (w && at != null) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1 });
+      if (w && at != null && held(join(dir, `slot-${m[1]}`))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1 });
       continue;
     }
-    m = name.match(/^wait-\d+$/);
-    if (m) {
+    if (/^wait-\d+-\d+$/.test(name) && now - (mtime(f) ?? 0) < STALE_WAITER_MS) {
       const [who, what, since, reason] = (read(f) ?? '').split('\n');
       if (who && Number(since)) waiters.push({ who, what, since: Number(since) * 1000, reason });
     }
@@ -145,6 +158,8 @@ export function heavyWaits({ holders, waiters }: ReturnType<typeof readHeavy>, u
 }
 
 const USUALS = 'wait-usual'; // { [key]: the last five lengths in s }
+// { [ticket id]: when its restart wait began, ms }: kept, as the restart it waits for restarts this server.
+const RESTARTS = 'wait-restart-since';
 
 export interface WaitDeps {
   store: Store;
@@ -158,16 +173,22 @@ export interface WaitDeps {
   changed: (ticketId: number) => void;
   now?: () => number;
   alive?: (proc: string) => boolean;
+  held?: (slotFile: string) => boolean;
 }
 
 /** The waits of every minion, polled from disk; a change re-sends that minion's row. */
 export class Waits {
   private current = new Map<number, Wait & { key?: string }>();
-  private restartSince = new Map<number, number>();
+  private restartSince: Map<number, number>;
   private shown = new Map<number, string>();
   private d: WaitDeps;
   constructor(d: WaitDeps) {
     this.d = d;
+    this.restartSince = new Map(Object.entries(d.store.getSetting<Record<string, number>>(RESTARTS) ?? {}).map(([k, v]) => [Number(k), v]));
+  }
+
+  private saveRestarts() {
+    this.d.store.setSetting(RESTARTS, Object.fromEntries(this.restartSince));
   }
 
   private now = () => (this.d.now ?? Date.now)();
@@ -196,11 +217,15 @@ export class Waits {
       if (since != null) {
         if (stage === 'live') this.record('restart', (this.now() - since) / 1000);
         this.restartSince.delete(ticketId);
+        this.saveRestarts();
       }
       return null;
     }
     const at = since ?? this.now();
-    this.restartSince.set(ticketId, at);
+    if (since == null) {
+      this.restartSince.set(ticketId, at);
+      this.saveRestarts();
+    }
     const n = this.d.interruptible();
     return {
       kind: 'restart', stage: 'restart', since: at, usual: this.usual('restart'),
@@ -209,7 +234,8 @@ export class Waits {
     };
   }
 
-  private byLabel = new Map<string, number | null>();
+  /** Labels found to be a minion; a miss is looked up again next time, as its minion may not be there yet. */
+  private byLabel = new Map<string, number>();
   private ticketFor(label: string): number | null {
     if (!this.byLabel.has(label)) {
       const { store } = this.d;
@@ -219,7 +245,7 @@ export class Waits {
         const p = store.listProjects().find((x) => x.name === m[1]);
         t = p && store.getTicketByNumber(p.id, Number(m[2]));
       }
-      this.byLabel.set(label, t ? t.id : null);
+      if (t) this.byLabel.set(label, t.id);
     }
     return this.byLabel.get(label) ?? null;
   }
@@ -241,7 +267,7 @@ export class Waits {
         if (id != null) next.set(id, { ...w, key: holder ? `land:${landPhase(holder.phase).key}` : undefined });
       }
     }
-    const heavy = readHeavy(this.d.heavyDir);
+    const heavy = readHeavy(this.d.heavyDir, now, this.d.held);
     for (const [who, w] of heavyWaits(heavy, this.usual, this.name)) {
       const id = this.ticketFor(who);
       // A heavy job runs inside its minion's turn; its files can outlive a killed job, so only a running minion shows one.
@@ -250,11 +276,13 @@ export class Waits {
       next.set(id, { ...w, key: w.stage === 'run' ? `heavy:run:${h?.what}` : 'heavy:slot' });
     }
     // A stage that moved on (or a slot or run that ended) adds its length to that stage's usual. A landing
-    // that left the line before deploying stopped early (a conflict, a red test): its stage doesn't count.
+    // that left the line before deploying stopped early (a conflict, a red test), and a heavy job whose
+    // minion stopped was cut off: those don't count.
     for (const [id, old] of this.current) {
       const now2 = next.get(id);
       if (!old.key || (now2 && now2.stage === old.stage && now2.since === old.since)) continue;
-      const movedOn = now2 ? TRACK.indexOf(now2.stage) > TRACK.indexOf(old.stage) || old.kind === 'heavy' : old.kind === 'heavy' || old.stage === 'deploy';
+      const movedOn = now2 ? TRACK.indexOf(now2.stage) > TRACK.indexOf(old.stage) || old.kind === 'heavy'
+        : old.kind === 'heavy' ? this.d.store.getTicket(id)?.status === 'running' : old.stage === 'deploy';
       if (movedOn) this.record(old.key, (now - old.since) / 1000);
     }
     const ids = new Set([...this.current.keys(), ...next.keys()]);

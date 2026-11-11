@@ -3,7 +3,7 @@
 :is(.shelf, .sidebar) > summary .schedules-btn[aria-pressed='true'] { color: var(--accent); }
 .schedule-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
 .schedule { border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.75rem; display: grid; gap: 0.2rem; }
-.schedule.paused > :not(.schedule-actions) { opacity: 0.65; }
+.schedule.paused > :not(.schedule-actions, :first-child) { opacity: 0.65; }
 .schedule .row { gap: 0.5rem; }
 .schedule .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .schedule .error { margin: 0.2rem 0 0; }

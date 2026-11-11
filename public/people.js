@@ -139,9 +139,16 @@ export function peoplePage() {
       onchange: (e) => patch({ server_login: e.target.checked }, `switch ${u.name}'s turns to ${e.target.checked ? 'the server login' : 'their own Claude'}`) });
     const claude = u.server_login ? 'Claude: server login' : u.claude === 'linked' ? 'Claude linked' : u.claude === 'expired' ? 'Claude needs linking again' : 'Claude not linked';
     const self = u.id === account?.id;
+    // One status chip leads the row (#492): the first thing that needs someone, else Ready.
+    const [tone, word, tip] = u.disabled ? ['neutral', 'Disabled', 'They cannot sign in']
+      : state === 'invite expired' ? ['danger', 'Invite expired', 'Make a new invite for them']
+      : state === 'invited' ? ['info', 'Invited', 'They have not set a password yet']
+      : !u.server_login && u.claude !== 'linked' ? ['warn', 'Needs linking', `${claude}: their messages wait in the chat until they link it in Your account`]
+      : u.github?.failed ? ['warn', 'Needs linking', 'GitHub needs linking again']
+      : ['ok', 'Ready', 'They can sign in and their messages start turns'];
     return h('div', { class: 'person-row' },
       h('span', { class: 'text' },
-        h('span', { class: 'name' }, u.name, u.admin ? ' · admin' : ''),
+        h('span', { class: 'name' }, u.name, u.admin ? ' · admin' : '', ' ', h('span', { class: 'cui-chip state-chip', 'data-tone': tone, title: tip }, word)),
         h('span', { class: 'meta' }, [u.login, state, claude, u.week && `week ${Math.round(u.week.utilization * 100)}%`, u.github ? `GitHub @${u.github.login}${u.github.failed ? ' (needs linking again)' : ''}` : 'GitHub not linked'].filter(Boolean).join(' · '))),
       h('span', { class: 'person-actions' },
       turns && h('label', { class: 'small turns-toggle', title: 'Your messages start and steer turns on the server\'s Claude login. Off: they run on the Claude you link in Your account.' }, turns, 'Turns'),

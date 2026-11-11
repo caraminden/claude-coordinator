@@ -9,11 +9,18 @@ const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', month: 
 function scheduleRow(s) {
   const last = s.last_number != null
     ? h('a', { href: `#/p/${s.project_id}/t/${s.last_number}` }, `#${s.last_number}`, ' ', ago(s.last_run_at))
-    : s.last_run_at ? ago(s.last_run_at) : 'not yet';
+    : s.last_run_at ? ago(s.last_run_at) : '';
+  // One status chip leads the row (#492); the facts stay as quiet text under the name.
+  const [tone, word, tip] = s.paused ? ['warn', 'Paused', 'It starts nothing until resumed']
+    : s.last_error ? ['danger', 'Failed', "Its last run didn't start"]
+    : s.last_run_at ? ['ok', 'OK', 'Its last run started']
+    : ['neutral', 'New', 'It has not run yet'];
+  const cron = `${s.when} (server time) · cron: ${s.cron}`;
   return h('li', { class: `schedule${s.paused ? ' paused' : ''}` },
     h('div', { class: 'row' }, h('strong', { class: 'name' }, s.name), h('span', { class: 'spacer' }),
-      s.paused ? h('span', { class: 'chip' }, 'paused') : h('span', { class: 'muted small', title: new Date(s.next_run_at).toString() }, 'next ', when(s.next_run_at))),
-    h('div', { class: 'muted small' }, h('span', { title: `cron: ${s.cron}` }, s.when, ' (server time)'), runsAs(s), ' · last run ', last),
+      h('span', { class: 'cui-chip state-chip', 'data-tone': tone, title: tip }, word)),
+    h('div', { class: 'muted small', title: cron }, s.paused ? ['Would run ', s.when] : ['Next ', h('span', { title: new Date(s.next_run_at).toString() }, when(s.next_run_at)), ' · ', s.when]),
+    h('div', { class: 'muted small' }, runsAs(s), s.last_run_at || s.last_number != null ? ['last run ', last] : 'not run yet'),
     s.last_error ? h('p', { class: 'error small' }, "Last run didn't start: ", s.last_error) : '',
     h('div', { class: 'row schedule-actions' },
       h('button', { type: 'button', class: 'secondary small', onclick: (e) => pause(s, e.currentTarget.closest('li')) }, s.paused ? 'Resume' : 'Pause'),
@@ -54,7 +61,7 @@ function remove(s, row) {
 /** The model and effort each run starts with, when the schedule sets them; nothing for the scheme's defaults. */
 function runsAs(s) {
   const set = [s.model && modelName(s.model), s.effort && `${s.effort} effort`].filter(Boolean);
-  return set.length ? [' · ', h('span', { title: 'What each run starts with' }, set.join(', '))] : '';
+  return set.length ? [h('span', { title: 'What each run starts with' }, set.join(', ')), ' · '] : '';
 }
 
 /** Someone added, changed or ran a schedule: redraw the list if it is open on that scheme. */

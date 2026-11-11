@@ -384,32 +384,36 @@ export function approvalsEditor() {
     status.textContent = '';
     sync();
   };
+  const adminOnly = account?.admin ? '' : ' Only an admin changes these.';
+  // Help where it applies (#492): each list is a card with one line on what it is, examples that fill
+  // the field at a click, and a caution beside the field it is about.
+  const card = (title, field, examples, caution, ...about) => h('div', { class: 'settings-card' },
+    h('h3', { class: 'settings-label' }, title),
+    h('p', { class: 'muted small' }, ...about),
+    field,
+    examples.length && !field.readOnly ? h('div', { class: 'settings-examples' }, h('span', { class: 'muted small' }, 'Add an example:'),
+      examples.map((x) => h('button', { type: 'button', class: 'chip', title: 'Add this line to the list', onclick: () => {
+        if (splitLines(field.value).includes(x)) return field.focus();
+        field.value = [field.value.trimEnd(), x].filter(Boolean).join('\n');
+        field.dispatchEvent(new Event('input'));
+      } }, '+ ', h('code', {}, x)))) : '',
+    caution ? h('p', { class: 'cui-notice small' }, caution) : '');
   const section = h('section', { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head' },
       h('div', { class: 'row' }, h('h2', {}, 'Settings'), h('span', { class: 'spacer' }), tuneUpButton(),
         h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster is not affected.')),
-    h('h3', { class: 'settings-label' }, 'Needs approval'),
-    h('p', { class: 'muted small' },
-      'Claude Code permission rules, one per line. A minion\'s tool call that matches one waits in its chat with Approve and Deny buttons until someone signed in clicks; everything else runs without asking. ',
-      'Examples: ', h('code', {}, 'Bash(gh pr merge:*)'), ', ', h('code', {}, 'mcp__*__merge_pull_request'), '. ',
-      'Bash rules match how a command starts, so they catch mistakes rather than a determined workaround.'),
-    rules,
-    h('h3', { class: 'settings-label' }, 'Plugin folders'),
-    h('p', { class: 'muted small' },
-      'Folders relative to the repo root, one per line, like ', h('code', {}, 'tools/mods/delve'),
-      ', or absolute paths. Each minion loads the ones that exist (relative ones in its worktree) as Claude Code plugins (', h('code', {}, '--plugin-dir'), ').', account?.admin ? '' : ' Only an admin changes these.'),
-    dirs,
-    h('h3', { class: 'settings-label' }, 'Optional plugin folders'),
-    h('p', { class: 'muted small' },
-      'Folders as above that a minion loads only when it picks them: the Taskmaster when it starts the minion, or the Plugins picker beside its Send button. For plugins too costly for every minion, like ', h('code', {}, 'tools/plugins/devtools'), '.', account?.admin ? '' : ' Only an admin changes these.'),
-    optional,
-    h('h3', { class: 'settings-label' }, 'List groups'),
-    h('p', { class: 'muted small' },
+    card('Needs approval', rules, ['Bash(gh pr merge:*)', 'mcp__*__merge_pull_request'],
+      'Bash rules match how a command starts: they catch mistakes, not a determined workaround.',
+      'Tool calls that wait for Approve or Deny in the minion\'s chat. One Claude Code permission rule per line; everything else runs without asking.'),
+    card('Plugin folders', dirs, ['tools/mods/delve'], '',
+      'Claude Code plugins every minion loads (', h('code', {}, '--plugin-dir'), '). One folder per line, relative to the repo root or absolute; a folder that is not there is skipped.', adminOnly),
+    card('Optional plugin folders', optional, ['tools/plugins/devtools'], '',
+      'Plugins too costly for every minion: one loads them only when picked, by the Taskmaster when it starts the minion or in the Plugins picker beside Send.', adminOnly),
+    card('List groups', groups, [], '',
       'Values of this scheme\'s own properties, one per line, like ', h('code', {}, 'area: balance'),
-      '. Minions outside a build that carry one get their own group at the top of the minions list instead of sitting under their type; one that matches two sits in the first.'),
-    groups,
+      '. Minions outside a build that carry one get their own group at the top of the minions list; one that matches two sits in the first.'),
     h('div', { class: 'row instructions-actions' }, save, discard, status));
   sync();
   return section;
@@ -722,7 +726,12 @@ function machineAddForm(runners, label) {
     alwaysOn ? h('label', { class: 'check', title: 'On: offline over 5 minutes shows as Down. Off: a laptop that comes and goes shows as Asleep.' }, alwaysOn, h('span', {}, 'Always on (untick for a laptop)')) : '',
     mine ? h('label', { class: 'check', title: 'Off: a shared machine, lent to schemes under Who gets it. On: only turns you ask for get it, in schemes you are in, and your contraptions\' turns.' }, mine, h('span', {}, 'Mine: only my turns use it')) : '',
     h('button', { type: 'submit' }, label),
-    status);
+    status,
+    // The steps sit in the form they are about (#492), not in a paragraph under the list.
+    runners ? '' : h('ol', { class: 'settings-steps' },
+      h('li', {}, h('strong', {}, 'Name it'), ' and press Add machine.'),
+      h('li', {}, h('strong', {}, 'Paste the line it shows'), ' on that computer. It needs Node 18 or newer.'),
+      h('li', {}, h('strong', {}, 'Open its line and tick what to lend.'), ' It reports the MCP servers set up for Claude Code there, and the servers and folders its owner lists in ', h('code', {}, 'machine-agent.json'), '.')));
   const toggle = h('button', { type: 'button', class: runners ? 'secondary small' : 'machine-add-toggle', 'aria-expanded': 'false' }, runners ? 'Add a CI runner host' : 'Add a machine');
   const show = (on) => {
     form.hidden = !on;
@@ -770,13 +779,15 @@ export function machinesPage() {
     ciDesktopPanel(),
     runners ? h('div', { class: 'row machines-bar runners-bar' }, h('span', { class: 'muted small' }, 'A CI runner host adds and removes schemes\' CI runners on its PC (tools/ci-runner/README.md).'), h('span', { class: 'spacer' }), runners.toggle) : '',
     runners ? runners.form : '',
-    h('p', { class: 'muted small' },
-      'Adding a machine is a name and one line to paste on that computer (it needs Node 18 or newer). Once connected it reports the MCP servers set up for Claude Code there, by name, and the servers and folders its owner lists in machine-agent.json beside the agent; open its line and tick what to lend. ',
-      'One MCP server per machine: add another machine for a second one. Its tools reach minions as mcp__<name>__…, and its ticked folders as mcp__<name>-ws__…: git sync and the tasks its owner lists in that file, nothing else. ',
-      'Nothing typed here can run a command there: commands and tasks live only in that file, on that computer. ',
-      'A person\'s own machine goes only to turns they ask for: their minions\' turns in schemes they are in, and their contraptions\' turns. ',
-      'A minion gets the tools of every machine online and lent to its scheme when its turn starts, plus the machine\'s notes, and the tools act on that computer, ',
-      'so only tick servers you trust minions to run.'));
+    h('p', { class: 'muted small' }, 'Nothing typed here runs a command on a machine.'),
+    h('details', { class: 'small machine-facts' },
+      h('summary', {}, 'What a lent machine can and cannot do'),
+      h('ul', { class: 'muted' },
+        h('li', {}, h('strong', {}, 'One MCP server per machine.'), ' Add another machine for a second one.'),
+        h('li', {}, h('strong', {}, 'How minions see it.'), ' Its tools as ', h('code', {}, 'mcp__<name>__…'), ', its ticked folders as ', h('code', {}, 'mcp__<name>-ws__…'), ': git sync and the tasks its owner lists, nothing else.'),
+        h('li', {}, h('strong', {}, 'Commands live on that computer.'), ' Commands and tasks are only in ', h('code', {}, 'machine-agent.json'), ' there, beside the agent.'),
+        h('li', {}, h('strong', {}, 'A person\'s own machine'), ' goes only to turns they ask for: their minions\' turns in schemes they are in, and their contraptions\' turns.'),
+        h('li', {}, h('strong', {}, 'When a minion gets it.'), ' At the start of its turn: the tools of every machine online and lent to its scheme, plus the machine\'s notes.'))));
   setTimeout(() => {
     renderMachineSetup();
     renderMachineList();
@@ -1014,11 +1025,12 @@ function machineLends(m) {
     online
       ? (servers.length || folders.length ? '' : h('p', { class: 'muted small' }, 'It found no MCP server in Claude Code\'s config there and no machine-agent.json entries.'))
       : h('p', { class: 'muted small' }, m.last_seen_at ? 'Offline: what it finds there shows once it connects.' : 'Once it connects, what it finds on that computer shows here to tick.'),
+    servers.length || folders.length ? h('p', { class: 'cui-notice small' }, 'Minions run these tools on this computer, so only tick what you trust them with.') : '',
     online ? machineConfigHelp(!servers.length && !folders.length) : '',
     ...problems, m.checked?.results.length ? checked : '');
 }
 
-/** One line of the quiet list (#437, take A): dot, name, reason, fix button; click it for the rest. */
+/** One line of the quiet list (#437, take A): name, reason, status chip (#492), fix button; click it for the rest. */
 function machineLine(m) {
   const isOpen = view.machineOpen.has(m.id);
   const toggle = () => {
@@ -1032,10 +1044,10 @@ function machineLine(m) {
   const word = { ready: 'Ready', fix: 'Needs a fix', down: 'Down', asleep: 'Asleep', checking: 'Checking' }[m.status];
   const head = h('div', { class: 'machine-head' },
     h('button', { type: 'button', class: 'machine-open', 'aria-expanded': String(isOpen), onclick: toggle },
-      h('span', { class: `dot ${m.status}`, title: word, role: 'img', 'aria-label': word }),
       h('span', { class: 'text' },
         h('span', { class: 'name' }, m.name),
-        h('span', { class: 'meta' }, machineStatusText(m)))),
+        h('span', { class: 'meta' }, machineStatusText(m))),
+      h('span', { class: 'cui-chip state-chip', 'data-tone': { ready: 'ok', fix: 'warn', down: 'danger' }[m.status] ?? 'neutral' }, word)),
     fixButton(m, open));
   return h('div', { class: `machine-row machine-line ${m.status}${isOpen ? ' open' : ''}` }, head, isOpen ? machineBody(m) : '');
 }

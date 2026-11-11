@@ -23,6 +23,26 @@
 /* Approval rules and plugin folders: the editor's two lists */
 .instructions-text.settings-list { min-height: 7rem; }
 .settings-label { margin: 1rem 0 0.2rem; font-size: 1em; }
+/* Help where it applies (#492): a card per setting, its examples as chips that fill the field, a caution
+   beside what it is about, steps as a numbered list; help text never runs wider than about 75 characters. */
+.settings-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 0.75rem 0.9rem; margin-top: 0.75rem; }
+.settings-card .settings-label { margin-top: 0; }
+.settings-card > p { margin: 0 0 0.5rem; }
+.settings-card .instructions-text { display: block; }
+.settings-examples { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.5rem; }
+.settings-examples .chip { cursor: pointer; min-width: 0; overflow-wrap: anywhere; text-align: left; }
+.settings-examples .chip:hover { border-color: var(--accent); }
+.settings-examples .chip code { background: none; padding: 0; }
+.settings-card > .cui-notice, .machine-lends > .cui-notice { margin: 0.5rem 0 0; font-size: 0.88em; }
+:is(.instructions-main, .machines-main, .people-main) :is(p.muted, p.cui-notice, .ticket-head > .meta, .settings-card > p), .settings-steps, .machine-facts { max-width: 75ch; }
+.settings-steps { flex-basis: 100%; margin: 0.3rem 0 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 0.5rem; font-size: 0.9rem; }
+.settings-steps > li { counter-increment: step; display: grid; grid-template-columns: 1.6rem 1fr; gap: 0 0.6rem; align-items: start; }
+.settings-steps > li::before { content: counter(step); width: 1.6rem; height: 1.6rem; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); display: grid; place-items: center; font-size: 0.8em; font-weight: 700; }
+.settings-steps > li > * { grid-column: 2; }
+.machine-facts { margin: 0.2rem 0 1rem; }
+.machine-facts summary { cursor: pointer; color: var(--accent); }
+.machine-facts ul { margin: 0.3rem 0 0; padding-left: 1.2rem; display: grid; gap: 0.3rem; }
+.machine-facts strong { color: var(--ink); font-weight: 600; }
 .instructions-history details { margin: 0.3rem 0; }
 .instructions-history summary { cursor: pointer; padding: max(0.2rem, var(--tap-pad)) 0; }
 .instructions-diff { margin: 0.3rem 0 0.6rem; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }

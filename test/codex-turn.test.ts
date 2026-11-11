@@ -105,6 +105,11 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   if (m.method === 'account/rateLimits/read') send({ id: m.id, result: { rateLimits: { primary: { usedPercent: 20, resetsAt: 2000000000, windowDurationMins: 300 }, secondary: null } } });
   if (m.method === 'thread/start') send({ id: m.id, result: { thread: { id: 'th1' } } });
   if (m.method === 'thread/resume') send(m.params.threadId === 'gone' ? { id: m.id, error: { message: 'no rollout' } } : { id: m.id, result: { thread: { id: m.params.threadId } } });
+  if (m.method === 'turn/steer' && mode === 'late-steer') {
+    // The turn ends just before the steer reaches it: Codex refuses a steer for a finished turn.
+    note('turn/completed', { turn: { id: 'tu1', status: 'completed' } });
+    return send({ id: m.id, error: { message: 'no active turn to steer' } });
+  }
   if (m.method === 'turn/steer') {
     send({ id: m.id, result: { turnId: 'tu1' } });
     note('turn/completed', { turn: { id: 'tu1', status: 'completed' } });
@@ -113,7 +118,7 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   if (m.method !== 'turn/start') return;
   turns++;
   send({ id: m.id, result: { turn: { id: 'tu' + turns } } });
-  if (mode === 'hang' || mode === 'steer' && turns === 1) return;
+  if (mode === 'hang' || (mode === 'steer' || mode === 'late-steer') && turns === 1) return;
   if (mode === 'limit') {
     note('account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 100, resetsAt: Math.floor(Date.now() / 1000) + 3600 }, secondary: null } });
     return note('turn/completed', { turn: { id: 'tu1', status: 'failed', error: { message: 'usage limit', codexErrorInfo: 'usageLimitExceeded' } } });
@@ -220,6 +225,15 @@ test('a message mid-turn steers it, and one replayed comes back marked as taken'
   assert.deepEqual([steer.params.threadId, steer.params.expectedTurnId, steer.params.input[0].text], ['th1', 'tu1', 'also this']);
   assert.deepEqual(r.events.filter((e) => e.isReplay).map((e) => e.uuid), ['u1', 'u2']);
 }, );
+
+test('a steer refused because the turn just ended starts the next turn, rather than waiting out the quiet timer (#468 S04-2)', async () => {
+  const r = await run([], { fake: 'late-steer', env: { CITADEL_CODEX_QUIET_MS: '3000' }, steer: { type: 'user', message: { role: 'user', content: 'also this' } } });
+  const starts = r.calls.filter((c) => c.method === 'turn/start');
+  assert.deepEqual(starts.map((c) => c.params.input.at(-1).text), ['[Josh]: go', 'also this']);
+  assert.equal(r.code, 0);
+  const last = r.events.at(-1);
+  assert.deepEqual([last.type, last.is_error, last.result], ['result', false, 'Done 2.']);
+});
 
 test("stopping a Codex turn interrupts it; Codex's usage limit ends it in Claude's words", async () => {
   const stopped = await run([], { fake: 'hang', sigterm: true });

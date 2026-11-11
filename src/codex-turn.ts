@@ -261,6 +261,8 @@ export async function main(argv: string[], env: Record<string, string | undefine
       log(`[Message] ${typeof q.content === 'string' ? q.content : codexInput(q.content).map((i) => i.text ?? '[image]').join('\n')}`);
       taken(q);
     } catch {
+      // The turn ended while the steer was on its way: nothing else would start the next turn.
+      if (!busy) return void startTurn(q).catch(fail);
       queue.push(q); // not steerable now: it starts the next turn
     }
   };

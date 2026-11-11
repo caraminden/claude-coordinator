@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, turnMoved } from '../public/schemecounts.js';
+import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, turnMoved } from '../public/schemecounts.js';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -89,4 +89,20 @@ test('schemePill: violet only when something new waits, not when the count moved
   assert.deepEqual(schemePill({ inbox: 3, fresh: true }), { need: 3, busy: false, working: 0, fresh: true, label: '3 waiting on you (something new since you last opened it)' }, 'new');
   assert.deepEqual(schemePill({ inbox: 0, fresh: true }), { need: 0, busy: false, working: 0, fresh: false, label: '' }, 'at zero: hidden, never a violet 0');
   assert.equal(schemePill({ inbox: 2, fresh: true, running: true, working: 1 }).label, '2 waiting on you (something new since you last opened it) · 1 minion working');
+});
+
+test('the scheme you\'re in: a new ask is new unless the chat you\'re on asks it, until you open another chat (#548)', () => {
+  const item = (key, ticketId) => ({ key, ticketId });
+  const a = item('question:1', 7), b = item('state:8', 8), c = item('plan:3', 9);
+  let seen = seenInScheme(new Set(), [a], 7, true);
+  assert.deepEqual([...seen], ['question:1'], 'opening a chat sees everything waiting');
+  seen = seenInScheme(seen, [a, b], 7, false);
+  assert.equal(seen.has('state:8'), false, 'another minion asks while you stay put: new to you');
+  seen = seenInScheme(seen, [a, b, item('approval:x', 7)], 7, false);
+  assert.equal(seen.has('approval:x'), true, 'the minion you have open asks: not new');
+  assert.equal(seen.has('state:8'), false, 'and the other one is still new');
+  seen = seenInScheme(seen, [b, c], 9, true);
+  assert.deepEqual([...seen].sort(), ['plan:3', 'state:8'], 'moving to any chat sees all of it, and what stopped waiting drops out');
+  const gone = seenInScheme(seen, [b], 7, false);
+  assert.equal(seenInScheme(gone, [b, c], 7, false).has('plan:3'), false, 'an item that stops waiting and waits again later is new again');
 });

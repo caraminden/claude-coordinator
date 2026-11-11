@@ -44,6 +44,15 @@ export function schemePill(p) {
 }
 
 /**
+ * Which of the open scheme's waiting items (`{ key, ticketId }`) you've seen, given what you'd seen at the last
+ * redraw and the chat open now (#548; Josh, 2026-11-11: "put the purple up on the scheme you are viewing unless you
+ * are actively looking at the minion that is now asking for something and until you move minions"). Opening a chat
+ * (`moved`) sees all of it; staying put, you see only what the chat you're on asks, and the rest is new to you.
+ */
+export const seenInScheme = (seen, waiting, chatId, moved) =>
+  new Set(waiting.filter((i) => moved || seen.has(i.key) || i.ticketId === chatId).map((i) => i.key));
+
+/**
  * Other schemes' minions as the stream last showed them: `ticket` and `event` call `refetch` when
  * news may have moved those schemes' counts, so a scheme you aren't in still lights up. `forget`
  * when the counts are fetched afresh: what was last seen before then may be out of date.

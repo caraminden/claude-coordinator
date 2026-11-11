@@ -1,7 +1,7 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
-import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, turnMoved } from './schemecounts.js';
+import { cardEvent, countMoved, isWorking, otherSchemes, rowTarget, schemePill, seenInScheme, turnMoved } from './schemecounts.js';
 import { iconSrc } from './schemes.js';
 
 // The scheme's items as the server last sent them (src/inbox.ts), and the scheme they belong to.
@@ -82,8 +82,8 @@ export function inboxStrip() {
 
 /** A scheme's pill for the scheme lists: the spinner while a turn runs, then the Needs-you count (schemePill says what shows); hidden when neither. */
 export function schemeCount(p) {
-  // The scheme you're in is never marked: you're looking at its count (#498).
-  const { need, busy, working, fresh, label } = schemePill(p.id === view?.projectId ? { ...p, fresh: false } : p);
+  // The scheme you're in is marked by what this page saw of it (#548), not the server's word, which another tab writes too.
+  const { need, busy, working, fresh, label } = schemePill(p.id === view?.projectId && seenHere.projectId === p.id ? { ...p, fresh: seenHere.fresh } : p);
   return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy, role: label ? 'img' : null, title: label || null, 'aria-label': label || null },
     busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working) : null) : null,
     need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null);
@@ -91,14 +91,16 @@ export function schemeCount(p) {
 
 // The items each scheme last told the server you saw (sorted keys, joined), so a redraw with nothing new writes nothing.
 const seenSent = new Map();
+// The open scheme's waiting items you've seen (seenInScheme), the chat you were on at the last redraw, and whether anything's new.
+const seenHere = { projectId: null, chatId: null, keys: new Set(), fresh: false };
 
-/** You're in the scheme, so what waits in it is what you've seen (#539): record its items on the server when they change, behind the page. */
+/** Record the items you've seen waiting in the scheme you're in on the server when they change (#539), behind the page. */
 function markItemsSeen(projectId, keys) {
   const p = view.projects?.find((q) => q.id === projectId);
+  if (p) p.fresh = seenHere.fresh;
   const sig = [...keys].sort().join('\n');
   if (!p || seenSent.get(projectId) === sig) return;
   seenSent.set(projectId, sig);
-  p.fresh = false;
   // A failed write tries again at the next redraw.
   api(`api/projects/${projectId}/seen-items`, { method: 'PUT', body: { keys } }).catch(() => { if (seenSent.get(projectId) === sig) seenSent.delete(projectId); });
 }
@@ -126,7 +128,10 @@ export function renderInbox() {
   const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
   const running = !hidden && [view.coordinator, ...view.tickets.values()].some(isWorking);
   const working = hidden ? 0 : [...view.tickets.values()].filter((t) => t.kind !== 'coordinator' && isWorking(t)).length;
-  if (!hidden) markItemsSeen(view.projectId, waiting.map((i) => i.key));
+  const moved = seenHere.projectId !== view.projectId || seenHere.chatId !== view.id;
+  const keys = seenInScheme(seenHere.keys, waiting, view.id, moved);
+  Object.assign(seenHere, { projectId: view.projectId, chatId: view.id, keys, fresh: waiting.some((i) => !keys.has(i.key)) });
+  if (!hidden) markItemsSeen(view.projectId, [...keys]);
   for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running, working }));
   strip.hidden = !items.length;
   if (!items.length) return strip.replaceChildren();

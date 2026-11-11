@@ -163,7 +163,7 @@ export function replyList(v: unknown): string | null {
 
 export function str(v: unknown, field: string, max = 200): string {
   if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `${field} is required`);
-  if (v.length > max) throw new HttpError(400, `${field} is too long`);
+  if (v.length > max) throw new HttpError(400, `${field} is too long: ${v.length.toLocaleString('en')} characters, at most ${max.toLocaleString('en')}`);
   return v.trim();
 }
 

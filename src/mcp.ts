@@ -33,9 +33,9 @@ const WAKE_DESCRIPTION =
   `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as merged: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it merges), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
 const WAKE_PROPS = {
   commit: { type: 'string', description: 'Optional: the commit to wait for (a hash, short or full)' },
-  reason: { type: 'string', description: 'What to do once it is live; it comes back in the wake message, e.g. "#63\'s approve cards are live: retry the tripwire test"' },
+  reason: { type: 'string', maxLength: 1000, description: 'What to do once it is live (at most 1,000 characters); it comes back in the wake message, e.g. "#63\'s approve cards are live: retry the tripwire test"' },
 };
-const TITLE = { type: 'string', description: 'The short ask, about 30 characters, e.g. "Usage bar in the top bar". No number, type, build or emoji.' };
+const TITLE = { type: 'string', maxLength: 120, description: 'The short ask, about 30 characters (at most 120), e.g. "Usage bar in the top bar". No number, type, build or emoji.' };
 /** A minion or ticket state; without `deploys`, pending-deploy is left out. */
 const stateSchema = (deploys: boolean) => ({
   type: ['string', 'null'],
@@ -43,11 +43,11 @@ const stateSchema = (deploys: boolean) => ({
   description: `Where the turn leaves things, for the minions list: ready (done; ready to merge or pick up), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person's answer), outside (work still running somewhere this minion cannot wait on, like CI)${deploys ? ', pending-deploy (deployed with tools/deploy.sh, waiting to go live, and nothing else left: a successful deploy dismisses the minion, so not while someone still needs you)' : ''}. null when it is simply people's turn to answer, which the list shows by itself. Cleared automatically when the next turn starts${deploys ? ', except pending-deploy, which stays until you set another state' : ''}.`,
 });
 const STATE = stateSchema(true);
-const NOTE = { type: ['string', 'null'], description: 'One terse line on where things stand, max 60 chars, e.g. "needs a pick: tabs or a list" or "merged, live after restart". No names or prefixes.' };
+const NOTE = { type: ['string', 'null'], maxLength: 60, description: 'One terse line on where things stand, at most 60 characters, e.g. "needs a pick: tabs or a list" or "merged, live after restart". No names or prefixes.' };
 
 const REPLIES = {
   type: ['array', 'null'],
-  items: { type: 'string' },
+  items: { type: 'string', maxLength: 40 },
   maxItems: 3,
   description:
     'Up to 3 one-tap replies, each at most 40 characters, e.g. ["Merge it", "Make it live"]: buttons people tap to send that text as their own message, for when the obvious next step only needs their go. Not for a choice between options: ask_question does that. They go away once anyone writes or the next turn starts; [] or null takes them away now.',
@@ -128,8 +128,8 @@ const ASK_QUESTION = {
         items: {
           type: 'object',
           properties: {
-            question: { type: 'string', description: 'The full question, ending in "?"' },
-            header: { type: 'string', description: 'A very short label for the card, max 24 chars, e.g. "Layout"' },
+            question: { type: 'string', maxLength: 500, description: 'The full question, ending in "?", at most 500 characters' },
+            header: { type: 'string', maxLength: 24, description: 'A very short label for the card, at most 24 characters, e.g. "Layout"' },
             multiSelect: { type: 'boolean', description: 'true if several options can be picked (default false)' },
             options: {
               type: 'array',
@@ -138,10 +138,11 @@ const ASK_QUESTION = {
               items: {
                 type: 'object',
                 properties: {
-                  label: { type: 'string', description: 'The choice, 1 to 5 words' },
-                  description: { type: 'string', description: 'What picking it means, or its trade-off' },
+                  label: { type: 'string', maxLength: 80, description: 'The choice, 1 to 5 words (at most 80 characters)' },
+                  description: { type: 'string', maxLength: 300, description: 'What picking it means, or its trade-off, at most 300 characters' },
                   image: {
                     type: 'string',
+                    maxLength: 1000,
                     description:
                       'Optional picture of this option: path to an image, GIF or video (png, jpg, gif, webp, avif, svg, mp4, webm, mov) you made in your working directory or shared folder, absolute or relative to your working directory. Shown as a thumbnail people can open full size.',
                   },
@@ -176,8 +177,8 @@ const PROPOSE_PLAN = {
   inputSchema: {
     type: 'object',
     properties: {
-      summary: { type: 'string', description: 'One line on what the plan builds, max 200 chars, e.g. "Usage bar in the top bar, fed by the turn stats"' },
-      plan: { type: 'string', description: 'The whole plan in markdown: what you will change and how, what you will not do, and how you will test it' },
+      summary: { type: 'string', maxLength: 200, description: 'One line on what the plan builds, at most 200 characters, e.g. "Usage bar in the top bar, fed by the turn stats"' },
+      plan: { type: 'string', maxLength: 20000, description: 'The whole plan in markdown: what you will change and how, what you will not do, and how you will test it. At most 20,000 characters' },
     },
     required: ['summary', 'plan'],
   },
@@ -190,8 +191,8 @@ const STRIKE_TEXT = {
   inputSchema: {
     type: 'object',
     properties: {
-      text: { type: 'string', description: 'The wrong words, verbatim from one of your messages (Markdown and all), as short as still pins down the claim' },
-      reason: { type: 'string', description: 'One sentence on what proved it wrong and what is right instead; the note shows it after the struck words, e.g. "git log shows abc123 is on main, so #12 is merged."' },
+      text: { type: 'string', maxLength: 10000, description: 'The wrong words, verbatim from one of your messages (Markdown and all), as short as still pins down the claim (at most 10,000 characters)' },
+      reason: { type: 'string', maxLength: 1000, description: 'One sentence (at most 1,000 characters) on what proved it wrong and what is right instead; the note shows it after the struck words, e.g. "git log shows abc123 is on main, so #12 is merged."' },
     },
     required: ['text', 'reason'],
   },
@@ -276,7 +277,7 @@ const TOOLS = [
       properties: {
         title: { ...TITLE, description: `${TITLE.description} Also used for the branch name.` },
         properties: { ...PROPERTIES, description: `${PROPERTIES.description} Must include type; if no type fits, use "other" and ask people where it belongs.` },
-        message: { type: 'string', description: 'First message to the new minion' },
+        message: { type: 'string', maxLength: 100000, description: 'First message to the new minion, at most 100,000 characters' },
         start_after: {
           type: 'integer',
           description: "Optional: a minion number (#N) to chain this one after. It is created now but parked, with its message held until #N's work is live (or merged, see start_when), then starts by itself on a branch caught up to main. If #N is dismissed without its work merged, it stays parked and you and people hear about it. A message to it gets an answer and it stays parked; message_ticket with start_now starts it early.",
@@ -303,7 +304,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ticket_id: TICKET_ID,
-        text: { type: 'string' },
+        text: { type: 'string', maxLength: 10000, description: 'The message, at most 10,000 characters (`message` is accepted too)' },
         urgent: URGENT,
         start_now: { type: 'boolean', description: 'For a minion parked on start_after: true starts it now, its held brief first, then this message. Without it, the message gets an answer and the minion stays parked.' },
       },
@@ -318,7 +319,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         scheme: { type: 'string', description: 'The other scheme, by name or id; a wrong one lists them' },
-        text: { type: 'string', description: 'Self-contained: it cannot see your scheme, so say which scheme\'s minion #N is. Short: anything longer than a paragraph goes in file' },
+        text: { type: 'string', maxLength: 10000, description: 'Self-contained: it cannot see your scheme, so say which scheme\'s minion #N is. Short: anything longer than a paragraph goes in file. At most 10,000 characters (`message` is accepted too)' },
         wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn (held mail if it is cold, unless urgent)' },
         urgent: URGENT,
         file: { type: 'string', description: 'A file in your scheme\'s shared folder (absolute, or relative to that folder), at most 2 MB. Copied into the other scheme\'s shared folder under inbox/, where its Taskmaster and minions can read it; the message tells it the path' },
@@ -343,7 +344,7 @@ const TOOLS = [
   {
     name: 'fresh_session',
     description: `Hand off to a fresh Claude session of yours: when this turn ends, your context resets and your next turn starts from \`summary\` (plus your system prompt and memory) instead of this whole conversation. People's chat history stays as it is. Use it when ${APP_NAME} asks for a handoff, or on your own when your context is long and mostly stale. First save to your memory files anything durable that lives only in this chat. Then pass every open ask and who made it, relays you still owe, cards waiting on people, who is parked on what, and what you promised next: facts, not history.`,
-    inputSchema: { type: 'object', properties: { summary: { type: 'string', description: 'The handoff your next session starts from, at most 20,000 characters' } }, required: ['summary'] },
+    inputSchema: { type: 'object', properties: { summary: { type: 'string', maxLength: 20000, description: 'The handoff your next session starts from, at most 20,000 characters' } }, required: ['summary'] },
   },
   {
     name: 'list_schedules',
@@ -490,7 +491,7 @@ const TOOLS = [
     name: 'set_project_instructions',
     description:
       'Replace the scheme instructions with new text (max 16,000 characters; empty clears them). They reach every minion, and you, from its next turn. Read the current text first and send the whole new version, not just the change.',
-    inputSchema: { type: 'object', properties: { instructions: { type: 'string' } }, required: ['instructions'] },
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 16000, description: 'The whole new text, at most 16,000 characters' } }, required: ['instructions'] },
   },
   {
     name: 'get_project_settings',
@@ -539,7 +540,7 @@ const APP_INSTRUCTION_TOOLS = [
     name: 'set_app_instructions',
     description:
       `Replace the ${APP_NAME}-wide instructions with new text (max 16,000 characters; empty clears them). They reach every minion and Taskmaster in every scheme from its next turn. Read the current text first and send the whole new version, not just the change. A scheme instruction overrides one of these only where it names the rule it replaces. Only on a turn a ${APP_NAME} admin asked for.`,
-    inputSchema: { type: 'object', properties: { instructions: { type: 'string' } }, required: ['instructions'] },
+    inputSchema: { type: 'object', properties: { instructions: { type: 'string', maxLength: 16000, description: 'The whole new text, at most 16,000 characters' } }, required: ['instructions'] },
   },
 ];
 
@@ -955,7 +956,7 @@ const THREAD_TOOLS = [
     name: 'message_coordinator',
     description:
       "Send a message to this scheme's Taskmaster, waking it: for what only it can do, such as passing information to another minion (#N), starting a new minion from a handoff, or reporting something it should track. Not for acknowledgements or progress; people read your replies directly. A Taskmaster idle over 55 minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within 3 hours), unless it is urgent. After 6 messages either way in 10 minutes, the next is held until a person continues.",
-    inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What you need, self-contained: name minions as #N and give file paths in full' }, urgent: URGENT }, required: ['text'] },
+    inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, urgent: URGENT }, required: ['text'] },
   },
   {
     name: 'wake_when_live',
@@ -984,7 +985,7 @@ const THREAD_TOOLS = [
       `Dismiss this minion when the current turn ends, e.g. once a small piece of work is merged${DEPLOYS ? ' and nothing needs deploying. After tools/deploy.sh, set state pending-deploy instead: the deploy dismisses the minion once it is live.' : '.'} It is dismissed only if the turn finishes cleanly and no new message arrived meanwhile; its worktree and branch are kept, and anyone can reopen it by sending a message. Call it near the end of your turn, before your final answer. Not for minions whose result is a report or doc for people to read: those stay open until someone has read it. It refuses while a question or plan card is open or the state is try; a state ready is cleared.`,
     inputSchema: {
       type: 'object',
-      properties: { reason: { type: 'string', description: 'Optional one-line summary shown in the minion with the dismissal, e.g. "Merged abc1234; live after the restart"' } },
+      properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Merged abc1234; live after the restart"' } },
     },
   },
   ...ARTIFACT_TOOLS,
@@ -1049,6 +1050,8 @@ function needOne(args: any, fields: string[], tool: string): void {
 async function runTool(name: string, args: any): Promise<string> {
   // Each role may only call its own tools.
   if (!toolList().some((t) => t.name === name)) throw new Error(`Unknown tool ${name}`);
+  // Models often send the string "null" for null (#481); no argument means the text "null".
+  for (const [k, v] of Object.entries(args)) if (v === 'null') args[k] = null;
   switch (name) {
     case 'list_tickets': {
       const { tickets } = await call('GET', `/api/projects/${PROJECT}/tickets${args.include_closed ? '?include_closed=1' : ''}`);
@@ -1214,11 +1217,11 @@ async function runTool(name: string, args: any): Promise<string> {
       const ticketId = await id(args);
       // Already started (its leader just shipped) or never parked: say so, and deliver the message anyway.
       const early = args.start_now === true ? await call('POST', `/api/tickets/${ticketId}/start`, {}).then(() => 'Started early, its brief first. ', (e) => `Not started early: ${e.message}. `) : '';
-      const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text, ...(args.urgent === true ? { urgent: true } : {}) });
+      const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(args.urgent === true ? { urgent: true } : {}) });
       return early + (t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `Held, not delivered: ${HELD}\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`);
     }
     case 'message_taskmaster': {
-      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, text: args.text, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
+      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.file ? { file: args.file } : {}) });
       const copied = r.file ? ` The file is at ${r.file} in its shared folder.` : '';
       const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
       if (r.held) return `Held, not delivered: you and the Taskmaster of ${r.scheme} have exchanged as many messages as the loop guard allows in 10 minutes, so it waits for a person to continue. Do not resend it.${copied} ${ask}`;
@@ -1278,7 +1281,7 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!args.tag) needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
       return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${TICKET}`, labelFields(args)))}${tagNote(args)}`;
     case 'message_coordinator': {
-      const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text, ...(args.urgent === true ? { urgent: true } : {}) });
+      const r = await call('POST', `/api/tickets/${TICKET}/coordinator`, { text: args.text ?? args.message, ...(args.urgent === true ? { urgent: true } : {}) });
       if (r.held) return `Held, not delivered: ${HELD}`;
       return r.cold ? COLD('the Taskmaster') : 'Sent. The Taskmaster runs it now, or after its current turn.';
     }

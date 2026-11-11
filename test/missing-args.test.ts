@@ -108,3 +108,84 @@ test('explicit empties still go through: replies [], note null', async () => {
   assert.ok(!(await tool(Minion, 'thread', 'set_thread_status', { replies: [] })).isError);
   assert.ok(!(await tool(TM, 'coordinator', 'update_ticket', { ticket_id: Minion.number, note: null })).isError);
 });
+
+// #481: the wrong arguments models send most often are accepted, and every limit is in the schema.
+async function listTools(role: 'coordinator' | 'thread', ticket: { id: number }): Promise<any[]> {
+  const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+    env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id), COORDINATOR_PROJECT: String(Citadel.id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: role, COORDINATOR_DEPLOYS: '1', COORDINATOR_APP_INSTRUCTIONS: '1' },
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
+  try {
+    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
+    return (await reply).result.tools;
+  } finally {
+    child.kill();
+  }
+}
+
+const saw = (ticketId: number, text: string) => store.listEvents(ticketId).some((e) => e.data.includes(text));
+
+test('"Message is required": message is accepted for text on the message tools', async () => {
+  const sent = await tool(TM, 'coordinator', 'message_ticket', { ticket_id: Minion.number, message: 'Alias from the Taskmaster.' });
+  assert.ok(!sent.isError, sent.text);
+  assert.ok(saw(Minion.id, 'Alias from the Taskmaster.'));
+  const up = await tool(Minion, 'thread', 'message_coordinator', { message: 'Alias from the minion.' });
+  assert.ok(!up.isError, up.text);
+  assert.ok(saw(TM.id, 'Alias from the minion.'));
+  // message_taskmaster gets past the text check to the scheme lookup.
+  const across = await tool(TM, 'coordinator', 'message_taskmaster', { scheme: 'No such scheme', message: 'Hi.' });
+  assert.doesNotMatch(across.text, /Message is required/);
+  refused(await tool(Minion, 'thread', 'message_coordinator', {}), /Message is required/);
+});
+
+test('state enum error: the string "null" is read as null', async () => {
+  store.updateTicket(Minion.id, { state: 'parked', note: 'old note' });
+  const r = await tool(Minion, 'thread', 'set_thread_status', { state: 'null', note: 'null' });
+  assert.ok(!r.isError, r.text);
+  const t = store.getTicket(Minion.id)!;
+  assert.equal(t.state, null);
+  assert.equal(t.note, null);
+  refused(await tool(Minion, 'thread', 'set_thread_status', { state: 'done' }), /State must be one of/);
+});
+
+test('"is too long": the limit is in the schema and the description, and the error names it', async () => {
+  const thread = await listTools('thread', Minion);
+  const status = thread.find((t) => t.name === 'set_thread_status').inputSchema.properties;
+  assert.equal(status.note.maxLength, 60);
+  assert.match(status.note.description, /at most 60 characters/);
+  assert.equal(status.title.maxLength, 120);
+  assert.equal(status.replies.items.maxLength, 40);
+  const option = thread.find((t) => t.name === 'ask_question').inputSchema.properties.questions.items.properties.options.items.properties;
+  assert.equal(option.description.maxLength, 300);
+  assert.match(option.description.description, /at most 300 characters/);
+  assert.equal(option.label.maxLength, 80);
+  // Every string the server caps carries its cap: none of these tools' text arguments is left without one.
+  const coord = await listTools('coordinator', TM);
+  for (const [list, name, field] of [
+    [coord, 'message_ticket', 'text'], [coord, 'message_taskmaster', 'text'], [coord, 'create_ticket', 'message'],
+    [thread, 'message_coordinator', 'text'], [thread, 'propose_plan', 'summary'], [thread, 'propose_plan', 'plan'],
+    [thread, 'strike_text', 'text'], [thread, 'strike_text', 'reason'], [coord, 'set_project_instructions', 'instructions'],
+  ] as const) {
+    const p = (list as any[]).find((t) => t.name === name).inputSchema.properties[field];
+    assert.ok(p.maxLength > 0, `${name}.${field} has no maxLength`);
+    assert.match(p.description, new RegExp(`at most ${p.maxLength.toLocaleString('en')} characters`, 'i'), `${name}.${field}`);
+  }
+  refused(await tool(Minion, 'thread', 'set_thread_status', { note: 'x'.repeat(61) }), /Note is too long: 61 characters, at most 60/);
+});
+
+test('"needs a recommended option": a recommendation written into the label or description counts', async () => {
+  const card = (options: object[]) => tool(Minion, 'thread', 'ask_question', { questions: [{ question: 'Which?', options }] });
+  for (const options of [
+    [{ label: 'Stitched (rec.)', description: 'Free.' }, { label: 'Written', description: 'Costs.' }],
+    [{ label: 'Exe', description: 'Recommended. Built here.' }, { label: 'CI', description: 'Slower.' }],
+    [{ label: 'Exe', recommended: 'true' }, { label: 'CI' }],
+  ]) {
+    const r = await card(options);
+    assert.ok(!r.isError, `${JSON.stringify(options)}: ${r.text}`);
+  }
+  const q = JSON.parse(store.listEvents(Minion.id).filter((e) => e.kind === 'question').at(-2)!.data);
+  assert.deepEqual(q.questions[0].options[0], { label: 'Exe', description: 'Built here.', recommended: true });
+  // An explicit flag wins over the words; with neither, it is still refused.
+  refused(await card([{ label: 'A' }, { label: 'B', description: 'Recommended for big ones' }]), /needs a recommended option/);
+});

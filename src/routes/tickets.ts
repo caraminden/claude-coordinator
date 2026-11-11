@@ -41,8 +41,10 @@ const APPROVAL_POLL_MS = 25_000;
 /** The setting holding the last deploy report that failed (server.ts shows it in the ship line). */
 export const DEPLOY_FAILURE = 'deploy-failure';
 
-// A label Claude ended with "(Recommended)" itself; the card adds those words to the flagged option.
-const SAYS_RECOMMENDED = /\s*\(recommended\)\s*$/i;
+// A label Claude ended with "(Recommended)" (or "(rec.)") itself; the card adds those words to the flagged option.
+const SAYS_RECOMMENDED = /\s*\((recommended|rec\.?)\)\s*$/i;
+// A description that opens with "Recommended." flags its option when none is flagged (#481); the words go, the card shows them.
+const DESCRIBED_RECOMMENDED = /^\s*recommended(?:\s*[.:;,!\u2013\u2014-]+\s*|\s*$)/i;
 
 /**
  * A question card from Claude: 1 to 4 questions, each with 2 to 6 options, one of them recommended
@@ -55,13 +57,16 @@ async function cleanQuestions(app: App, ticket: Ticket, raw: unknown) {
     const n = `Question ${i + 1}`;
     if (!q || typeof q !== 'object') throw new HttpError(400, `${n} must be an object`);
     if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 6) throw new HttpError(400, `${n} needs 2 to 6 options`);
+    const flagged = q.options.some((o: any) => o?.recommended === true || o?.recommended === 'true');
     const options = q.options.map((o: any, j: number) => {
       const says = typeof o?.label === 'string' && SAYS_RECOMMENDED.test(o.label);
+      const described = !flagged && typeof o?.description === 'string' && DESCRIBED_RECOMMENDED.test(o.description);
+      const description = described ? o.description.replace(DESCRIBED_RECOMMENDED, '') : o?.description;
       return {
         label: str(says ? o.label.replace(SAYS_RECOMMENDED, '') : o?.label, `${n} option ${j + 1} label`, 80),
-        ...(o?.description ? { description: str(o.description, `${n} option ${j + 1} description`, 300) } : {}),
+        ...(description ? { description: str(description, `${n} option ${j + 1} description`, 300) } : {}),
         ...(o?.image ? { image: str(o.image, `${n} option ${j + 1} image`, 1000) } : {}),
-        ...(o?.recommended === true || says ? { recommended: true } : {}),
+        ...(o?.recommended === true || o?.recommended === 'true' || says || described ? { recommended: true } : {}),
       };
     });
     if (new Set(options.map((o: any) => o.label)).size !== options.length) throw new HttpError(400, `${n} has duplicate option labels`);

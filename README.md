@@ -38,7 +38,7 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` so Claude can plan with
   TaskCreate/TaskUpdate, and `public/progress.js` (shared by the server and the
   browser) replays the events into a readout in the minion bar:
-  "Running tests… 3/7", expandable to each step and the tool calls made while
+  "Running tests… · 3 of 7 done", expandable to each step and the tool calls made while
   it was in progress. Each turn leaves one collapsed "Turn finished · N
   actions" line in the chat, and board cards show the same summary line.
 - Images pasted, dropped or attached in the composer are shrunk in the browser

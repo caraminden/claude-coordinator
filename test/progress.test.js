@@ -11,13 +11,22 @@ const plan = (statuses) => ({
   })),
 });
 
-test('the step underway is worded as "Step N of M", not a bare fraction', () => {
-  assert.equal(progressLine(plan('ippppp'), true), 'Step 1 of 6: Moving turns 1…');
-  assert.equal(progressLine(plan('ccippp'), true), 'Step 3 of 6: Moving turns 3…');
+test('every readout counts steps done, the number the list badge shows (#518)', () => {
+  // The badge reads done/total; a line naming the step's place ("Step 3 of 6") beside "2/6" reads as out of sync.
+  for (const statuses of ['ippppp', 'ccippp', 'ccpcip']) {
+    const p = plan(statuses);
+    const done = [...statuses].filter((s) => s === 'c').length;
+    for (const running of [true, false]) {
+      const line = progressLine(p, running);
+      assert.match(line, new RegExp(`\\b${done} of 6 done$`), line);
+      assert.doesNotMatch(line, /Step|step \d/, line);
+    }
+  }
+  assert.equal(progressLine(plan('ccippp'), true), 'Moving turns 3… · 2 of 6 done');
 });
 
 test('paused, done and between-steps lines read sensibly', () => {
-  assert.equal(progressLine(plan('cipppp'), false), 'Paused at step 2 of 6: Move turns 2');
+  assert.equal(progressLine(plan('cipppp'), false), 'Paused at: Move turns 2 · 1 of 6 done');
   assert.equal(progressLine(plan('cccccc'), false), 'Done · 6/6 steps');
   assert.equal(progressLine(plan('ccpppp'), true), 'Working… 2 of 6 done');
   assert.equal(progressLine(plan('pppppp'), true), 'Planning… 0 of 6 done');
@@ -28,13 +37,39 @@ test('a finished plan says nothing about a new running turn', () => {
   assert.equal(progressLine({ ...plan('cccccc'), lastAction: 'Read app.js' }, true), 'Working… Read app.js');
 });
 
+test("a step an earlier turn left underway isn't shown as underway in the next turn until the plan moves (#518)", () => {
+  const p = createProgress();
+  const claude = (data) => applyEvent(p, 'claude', data);
+  const call = (name, input, id = name + Math.random()) => claude({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
+  call('TaskCreate', { subject: 'Land it', activeForm: 'Landing it' }, 'c1');
+  claude({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'Task #1 created successfully' }] } });
+  call('TaskCreate', { subject: 'Wait on the Allow', activeForm: 'Waiting on the Allow' }, 'c2');
+  claude({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'c2', content: 'Task #2 created successfully' }] } });
+  call('TaskUpdate', { taskId: '1', status: 'completed' });
+  call('TaskUpdate', { taskId: '2', status: 'in_progress' });
+  claude({ type: 'result', subtype: 'success', is_error: false });
+  // Between turns it is still waiting there.
+  assert.equal(progressLine(p, false), 'Paused at: Wait on the Allow · 1 of 2 done');
+  // A card's answer starts a turn: the runner marks it running before the turn's init arrives.
+  assert.equal(progressLine(p, true), 'Working… 1 of 2 done');
+  claude({ type: 'system', subtype: 'init' });
+  call('Bash', { command: 'tools/land.sh', description: 'Land the PR' });
+  assert.equal(progressLine(p, true), 'Working… Running commands · 1 of 2 done');
+  // Once the minion moves its plan in this turn, its step is current again.
+  call('TaskUpdate', { taskId: '2', activeForm: 'Landing through the old land.sh' });
+  assert.equal(progressLine(p, true), 'Landing through the old land.sh… · 1 of 2 done');
+});
+
 test('withoutCount drops the count from every form, old and new', () => {
   const cases = {
-    'Step 1 of 6: Moving turns into units…': 'Moving turns into units…',
-    'Paused at step 2 of 6: Move turns': 'Paused at: Move turns',
+    'Moving turns into units… · 2 of 6 done': 'Moving turns into units…',
+    'Paused at: Move turns · 1 of 6 done': 'Paused at: Move turns',
+    'Working… Read app.js · 2 of 6 done': 'Working… Read app.js',
     'Working… 2 of 6 done': 'Working…',
     'Done · 6/6 steps': 'Done',
-    // The pre-#72 form, still in stored last_activity until the server restarts.
+    // Older forms, still in stored last_activity until the minion's next event.
+    'Step 1 of 6: Moving turns into units…': 'Moving turns into units…',
+    'Paused at step 2 of 6: Move turns': 'Paused at: Move turns',
     'Moving turns into units… 1/6': 'Moving turns into units…',
     'Paused at: Move turns 1/6': 'Paused at: Move turns',
     'Working… Read app.js': 'Working… Read app.js',

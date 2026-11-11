@@ -73,7 +73,7 @@ test('GET /api/contraptions/home and /minions (#421): membership, progress, erro
   assert.equal(typeof card, 'number');
   assert.deepEqual(r.body, {
     number: 1, title: 'Rune tooltips', status: 'idle', state: 'try', note: 'ready to try',
-    line: 'Paused at step 2 of 2: Show the rune cost', step: { n: 2, of: 2, done: 1, label: 'Showing the rune cost' },
+    line: 'Paused at: Show the rune cost · 1 of 2 done', step: { n: 2, of: 2, done: 1, label: 'Showing the rune cost' },
     activity_at: store.getTicket(acolyte.id)!.updated_at, card_waiting: true, card_since: card, link: `/c/#/p/${ToC.id}/t/1`,
   });
   assert.doesNotMatch(JSON.stringify(r.body), /Secret words/);
@@ -86,7 +86,7 @@ test('GET /api/contraptions/home and /minions (#421): membership, progress, erro
   r = await get(`minions/1?person=${Rachel.id}`, { 'If-None-Match': tag });
   assert.equal(r.status, 200);
   assert.notEqual(r.etag, tag);
-  assert.equal(r.body.line, 'Step 2 of 2: Showing the rune cost…');
+  assert.equal(r.body.line, 'Showing the rune cost… · 1 of 2 done');
   assert.equal(r.body.status, 'running');
 
   // A dismissed minion still reads, with no card and no steps.

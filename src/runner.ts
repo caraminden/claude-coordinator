@@ -2394,7 +2394,7 @@ export class Runner {
   }
 
   /**
-   * A minion's progress as a contraption may see it (#421): the readout's line ("Step 2 of 6: …") and step,
+   * A minion's progress as a contraption may see it (#421): the readout's line ("Showing the rune cost… · 1 of 6 done") and step,
    * built from its task list and tool calls. Never last_activity, which can be the first line of its reply.
    */
   progressOf(ticket: Ticket) {

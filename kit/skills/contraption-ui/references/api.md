@@ -371,7 +371,7 @@ has no home scheme.
 ```json
 {
   "number": 12, "title": "Rune tooltips", "status": "running", "state": null, "note": null,
-  "line": "Step 2 of 6: Showing the rune cost…",
+  "line": "Showing the rune cost… · 1 of 6 done",
   "step": { "n": 2, "of": 6, "done": 1, "label": "Showing the rune cost" },
   "activity_at": 1762700000000, "card_waiting": false, "card_since": null,
   "link": "/c/#/p/5/t/12"
@@ -383,7 +383,7 @@ has no home scheme.
 | `status` | `new` (no turn yet), `running` (a turn is under way), `idle`, `error` (its last turn failed) or `closed` (dismissed) |
 | `state` | Where its last turn left things, as the minions list shows it: `ready`, `try`, `parked`, `blocked`, `outside`, `pending-deploy`, `limited` (waiting out a usage limit) or `null`. Cleared when the next turn starts, except `pending-deploy` |
 | `note` | Its own one-line status (at most 60 characters), or `null` |
-| `line` | The minions list's progress line: `Step 2 of 6: …` while running, `Paused at step 2 of 6: …`, `Done · 6/6 steps`, `Working… Ran the tests`, `Finished · 14 actions`; `null` before any work |
+| `line` | The minions list's progress line: `Showing the rune cost… · 1 of 6 done` while running, `Paused at: … · 1 of 6 done`, `Done · 6/6 steps`, `Working… Running commands · 1 of 6 done` (a new turn that hasn't moved its plan yet), `Working… Ran the tests`, `Finished · 14 actions`; `null` before any work |
 | `step` | Its task list: the step under way (`n`, or the count done when none is), the total (`of`), how many are `done`, and the step's `label` (`null` between steps); `null` with no task list |
 | `activity_at` | When its row last changed (a new progress line, a status or state), in milliseconds since 1970 |
 | `card_waiting`, `card_since` | Whether a question or plan card is waiting on a person, and when the oldest was posted (milliseconds), else `false` and `null` |

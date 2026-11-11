@@ -18,6 +18,7 @@ export function createProgress() {
     turnFailed: false, // the last turn ended in an error event (no init since)
     turnOk: false, // the last turn sent a successful result, so a later error (a deploy report) isn't its failure
     lastAction: null,
+    planMoved: true, // the task list changed since the last turn ended; until it does, a step left underway isn't this turn's
   };
 }
 
@@ -298,13 +299,14 @@ export function applyEvent(p, kind, data) {
   if (kind === 'error' && !p.turnOk) p.turnFailed = true;
   if (kind !== 'claude' || !data) return actions;
   // A turn that finished well wasn't failed by an error on the way (its MCP server not connecting).
-  if (data.type === 'result') { p.turnOk = !data.is_error; if (p.turnOk) p.turnFailed = false; }
+  if (data.type === 'result') { p.turnOk = !data.is_error; if (p.turnOk) p.turnFailed = false; p.planMoved = false; }
 
   if (data.type === 'system' && data.subtype === 'init') {
     p.turnFailed = false;
     p.turnOk = false;
     p.turnActions = 0;
     p.lastAction = null;
+    p.planMoved = false;
     // A plan finished in an earlier turn belongs to that chunk of work, not this one.
     if (p.tasks.length && allDone(p)) p.tasks = [];
   } else if (data.type === 'assistant') {
@@ -318,6 +320,7 @@ export function applyEvent(p, kind, data) {
       }
       if (block.type !== 'tool_use') continue;
       const input = block.input || {};
+      if (block.name === 'TaskCreate' || block.name === 'TaskUpdate' || block.name === 'TodoWrite') p.planMoved = true;
       if (block.name === 'TaskCreate') {
         p.pendingCreates.set(block.id, input);
       } else if (block.name === 'TaskUpdate') {
@@ -373,17 +376,20 @@ export function stepInfo(p) {
 }
 
 /**
- * Summary line, e.g. "Step 3 of 7: Running the test suite…". Every count is worded ("step 3 of 7",
- * "2 of 7 done"), so it can't be read as the steps-done badge some views show beside it.
+ * Summary line, e.g. "Running the test suite… · 2 of 7 done". Its one count is steps done, the number
+ * the list's badge and the readout's meter show, so no two views read differently (#72, #518).
  */
 export function progressLine(p, running) {
-  const { total, done, current, step } = stepInfo(p);
+  const { total, done, current: underway } = stepInfo(p);
+  // A step an earlier turn left underway (a card it waited on) isn't what this turn is doing until the plan moves (#518).
+  const current = running && !p.planMoved ? null : underway;
   // A finished plan from an earlier turn says nothing about a turn that is running now.
   if (!running && p.turnFailed) return 'Last turn failed: see the error below';
   if (total && !(running && !current && done === total)) {
-    if (current) return running ? `Step ${step} of ${total}: ${current.activeForm || current.subject}…` : `Paused at step ${step} of ${total}: ${current.subject}`;
+    const count = `${done} of ${total} done`;
+    if (current) return running ? `${current.activeForm || current.subject}… · ${count}` : `Paused at: ${current.subject} · ${count}`;
     if (done === total) return `Done · ${total}/${total} steps`;
-    return `${!running ? 'Paused' : done ? 'Working' : 'Planning'}… ${done} of ${total} done`;
+    return `${!running ? 'Paused' : done ? 'Working' : 'Planning'}…${running && p.lastAction ? ` ${p.lastAction} ·` : ''} ${count}`;
   }
   if (!running) return p.turnActions ? `Finished · ${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
   return p.lastAction ? `Working… ${p.lastAction}` : 'Working…';

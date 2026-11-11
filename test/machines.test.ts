@@ -202,9 +202,11 @@ test('a machine lends what is ticked of what its agent found, and nothing else (
   const opened = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${(await turnNow('by hand')).token}` } });
   assert.equal(opened.status, 503);
 
+  // The agent that starts these dies with the test and leaves them running. Their command line names root, so stopTurns ends them and leak-guard sees any that escape (#515).
+  const stuckMarker = join(root, 'stuck-stand-in');
   // A server its owner adds to the file shows up to tick without restarting anything.
   writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] }, second: { run: [process.execPath, mcpServer] } } }));
-  writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] }, stuck: { run: [process.execPath, '-e', 'setInterval(() => {}, 1000)'] } }, workspaces: { w: { path: join(dir, 'w'), tasks: { wait: { run: [process.execPath, '-e', 'setTimeout(() => {}, 60000)'] } } }, x: { path: join(dir, 'x') } } }));
+  writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] }, stuck: { run: [process.execPath, '-e', 'setInterval(() => {}, 1000)', stuckMarker] } }, workspaces: { w: { path: join(dir, 'w'), tasks: { wait: { run: [process.execPath, '-e', 'setTimeout(() => {}, 60000)', stuckMarker] } } }, x: { path: join(dir, 'x') } } }));
   await until('the new server to show', async () => (await find()).found.some((f: any) => f.name === 'stuck'), 20_000);
   // Another server ticked while the first is still being checked: the check that counts is the new one's.
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'stuck', workspaces: [] } } });

@@ -7,6 +7,8 @@ import { Memory } from './memory.ts';
 
 /** Settings key: who asked for a ticket's turns, when that isn't whom they run as (Store.turnAsker). */
 export const askerKey = (ticketId: number) => `asker:${ticketId}`;
+/** A minion's task-list state as of its last finished turn, so a restart replays only what came since (#530; src/runner.ts progressFor). */
+export const planKey = (ticketId: number) => `plan:${ticketId}`;
 
 export type TicketStatus = 'new' | 'running' | 'idle' | 'error' | 'closed';
 /** Each project has one long-lived coordinator ticket that manages the others. */
@@ -1376,6 +1378,7 @@ export class Store {
 
   deleteTicket(id: number) {
     this.deleteSetting(askerKey(id));
+    this.deleteSetting(planKey(id));
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM artifacts WHERE ticket_id = ?').run(id);
     this.db.prepare('DELETE FROM claude_state WHERE ticket_id = ?').run(id);
@@ -1748,10 +1751,10 @@ export class Store {
    * starts, Claude's messages and tool calls, and the results that give a TaskCreate its id. Tool results
    * are most of the bytes, so they are left out by prefix, without parsing anyone's JSON (#497).
    */
-  planEvents(ticketId: number, before = Number.MAX_SAFE_INTEGER): EventRow[] {
+  planEvents(ticketId: number, before = Number.MAX_SAFE_INTEGER, after = 0): EventRow[] {
     return this.db.prepare(`
-      SELECT * FROM events WHERE ticket_id = ? AND id < ? AND kind = 'claude' AND (data NOT LIKE '{"type":"user"%' OR instr(data, 'Task #') > 0)
-      ORDER BY id`).all(ticketId, before) as unknown as EventRow[];
+      SELECT * FROM events WHERE ticket_id = ? AND id < ? AND id > ? AND kind = 'claude' AND (data NOT LIKE '{"type":"user"%' OR instr(data, 'Task #') > 0)
+      ORDER BY id`).all(ticketId, before, after) as unknown as EventRow[];
   }
 
   /**
@@ -1862,6 +1865,8 @@ export class Store {
     this.db.exec('BEGIN');
     try {
       for (const c of changes) c.data == null ? remove.run(c.id) : update.run(c.data, c.id);
+      // Task-list states saved from the old events (planKey) no longer match them.
+      if (changes.length) this.db.prepare("DELETE FROM settings WHERE key LIKE 'plan:%'").run();
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');

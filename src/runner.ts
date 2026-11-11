@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
-import { askerKey, onboardingOpen, type EventRow, type Project, type Store, type Ticket } from './db.ts';
+import { askerKey, onboardingOpen, planKey, type EventRow, type Project, type Store, type Ticket } from './db.ts';
 import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
 import { KEEP, SENT_BACK } from './link-check.ts';
@@ -177,6 +177,8 @@ interface LiveTurn {
 
 /** A minion's context size at its last turn's last API call (tokens), for what switching its payer costs. */
 const contextKey = (ticketId: number) => `context:${ticketId}`;
+/** The task-list rules a saved state (planKey) was built by: one from another public/progress.js is rebuilt in full, so no deploy leaves old counts (#530). */
+const PLAN_RULES = createHash('sha256').update(readFileSync(new URL('../public/progress.js', import.meta.url))).digest('hex').slice(0, 16);
 
 /**
  * A Taskmaster's fresh start (#406): asked for (why), its handoff once the old session wrote it with
@@ -2303,6 +2305,7 @@ export class Runner {
       this.broadcastTicket(ticketId);
     }
     const row = this.emit(ticketId, 'claude', slim);
+    if (ev.type === 'result') this.savePlan(ticketId, progress, row.id);
     if (ev.type === 'user' && (ev.message?.content ?? []).some?.((b: any) => typeof b?.text === 'string' && b.text.includes(SENT_BACK))) this.sentBack.add(ticketId);
     // shortcut: a turn stopped, or the server restarted, before the result keeps both versions; rare, so left.
     if (ev.type === 'result' && this.sentBack.delete(ticketId)) this.replaceSentBack(ticketId, row.id);
@@ -2412,15 +2415,29 @@ export class Runner {
     };
   }
 
-  /** Task-list state for a ticket, rebuilt from its stored events the first time it is needed. */
+  /**
+   * Task-list state for a ticket, built the first time it is needed: from the state saved when its last
+   * turn ended plus the events since, or from all its events when nothing usable is saved (#530: a
+   * Taskmaster's 6,000 events took 0.6 s to read cold, on the first scheme open after every restart).
+   */
   private progressFor(ticketId: number) {
     let p = this.progress.get(ticketId);
     if (!p) {
-      p = createProgress();
-      for (const row of this.store.planEvents(ticketId)) applyEvent(p, row.kind, JSON.parse(row.data));
+      const saved = this.store.getSetting<any>(planKey(ticketId));
+      const usable = saved?.rules === PLAN_RULES && Number.isInteger(saved.upTo) && Array.isArray(saved.p?.tasks) && Array.isArray(saved.p.pendingCreates);
+      p = usable ? { ...saved.p, pendingCreates: new Map(saved.p.pendingCreates) } as ReturnType<typeof createProgress> : createProgress();
+      const rows = this.store.planEvents(ticketId, undefined, usable ? saved.upTo : 0);
+      for (const row of rows) applyEvent(p, row.kind, JSON.parse(row.data));
       this.progress.set(ticketId, p);
+      // The full replay is paid once: an idle minion would otherwise pay it after every restart.
+      if (!usable) this.savePlan(ticketId, p, rows.at(-1)?.id ?? 0);
     }
     return p;
+  }
+
+  /** Save a ticket's task-list state, which holds every event up to `upTo`. */
+  private savePlan(ticketId: number, p: ReturnType<typeof createProgress>, upTo: number) {
+    this.store.setSetting(planKey(ticketId), { rules: PLAN_RULES, upTo, p: { ...p, pendingCreates: [...p.pendingCreates] } });
   }
 
   get usage(): Usage | null {

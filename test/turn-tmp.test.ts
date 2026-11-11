@@ -50,7 +50,7 @@ test('the sweep removes only ticket folders it is told to, and leaves anything e
   assert.deepEqual(sweepTmpDirs(join(root, 'missing'), () => false), []);
 });
 
-test("dismissing a minion clears its temp folder, and a restart sweeps those of dismissed minions (#218), not of minions it can't find (#259)", () => {
+test("dismissing a minion clears its temp folder, and a restart sweeps those of dismissed minions (#218), not of minions it can't find (#259)", async () => {
   const data = join(root, 'data');
   mkdirSync(data);
   const store = new Store(join(data, 'test.db'));
@@ -62,7 +62,7 @@ test("dismissing a minion clears its temp folder, and a restart sweeps those of 
 
   const dismissed = ticket();
   writeFileSync(join(makeTmpDir(tmpRoot, dismissed), 'leftover'), 'x');
-  runner.close(dismissed, 'Dismissed.');
+  await runner.close(dismissed, 'Dismissed.'); // resolves once the folder is gone: the delete doesn't hold up the server (#526)
   assert.ok(!existsSync(join(tmpRoot, String(dismissed))));
   assert.equal(store.getTicket(dismissed)!.status, 'closed');
 

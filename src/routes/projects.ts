@@ -627,7 +627,7 @@ export const projectRoutes: Route[] = [
         const when = (oneOf(body.start_when ?? null, ['live', 'merged'], 'start_when') ?? 'live') as Chain['when'];
         leader = store.listTickets(project.id).find((t) => t.kind !== 'coordinator' && t.number === Number(body.start_after));
         if (!leader) throw new HttpError(400, `No minion #${String(body.start_after).slice(0, 20)} in this scheme to start after`);
-        const f = waiters.follow(leader.id, when);
+        const f = await waiters.follow(leader.id, when);
         if (f.state === 'unshipped') throw new HttpError(400, `#${leader.number} was dismissed without its work being merged, so nothing can start after it`);
         if (f.state === 'wait') follow = { leader, when, base: f.base, since: f.since };
       }

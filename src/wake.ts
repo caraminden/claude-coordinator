@@ -11,12 +11,17 @@
 // And a commit counts by its change (#261): one landed from another branch, cherry-picked or rebased
 // with a new hash, the way one minion lands another's work. A branch with no commits of its own never
 // counts as work in: it is on main trivially.
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { Store } from './db.ts';
 import { githubRepo } from './github.ts';
 import type { Runner } from './runner.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
 import { catchUpTicketDir } from './workspace.ts';
+
+const run = promisify(execFile);
+/** A PR lookup's answer: tests' stand-ins answer at once. */
+type Maybe<T> = T | Promise<T>;
 
 /** A minion waiting for a commit to be live, or (commit null) for the next deploy after `since`. */
 export interface Waiter {
@@ -54,9 +59,9 @@ export interface PrMerge {
 /** Asks GitHub about merged pull requests in a scheme's repo; tests swap in their own. */
 export interface PrLookup {
   /** The newest PR opened from `branch` (whose tip is `tip`), if it is merged. */
-  branch(repo: string, branch: string, tip: string): PrMerge | null;
+  branch(repo: string, branch: string, tip: string): Maybe<PrMerge | null>;
   /** A merged PR that contains `commit`. */
-  commit(repo: string, commit: string): PrMerge | null;
+  commit(repo: string, commit: string): Maybe<PrMerge | null>;
   /** Drop the remembered "not merged" answers: a PR was just seen merged. */
   forget?(): void;
 }
@@ -77,20 +82,20 @@ export function mergedPrOf(list: { number: number; merged_at: string | null; hea
 const UNMERGED_MS = 60_000;
 
 /**
- * PR lookups through the gh CLI, for repos whose origin is on GitHub. Synchronous like the git calls
- * here, so each is cached: checks run at restarts, reloads and dismissals, not on a timer. `as` gives
+ * PR lookups through the gh CLI, for repos whose origin is on GitHub. Each is cached: a call takes
+ * about half a second, and checks run at restarts, reloads and dismissals. `as` gives
  * a repo's GitHub login (#321: its scheme owner's, since a private repo may let no one else read it).
  */
 export function githubPrs(as: (repo: string) => GithubEnv = () => undefined): PrLookup {
   const merged = new Map<string, PrMerge>();
   const unmerged = new Map<string, number>();
-  const ask = (repo: string, key: string, args: string[], parse: (json: any) => PrMerge | null): PrMerge | null => {
+  const ask = async (repo: string, key: string, args: string[], parse: (json: any) => PrMerge | null): Promise<PrMerge | null> => {
     const hit = merged.get(key);
     if (hit) return hit;
-    if ((unmerged.get(key) ?? 0) > Date.now() || !githubRepo(git(repo, ['remote', 'get-url', 'origin']) ?? '')) return null;
+    if ((unmerged.get(key) ?? 0) > Date.now() || !githubRepo((await git(repo, ['remote', 'get-url', 'origin'])) ?? '')) return null;
     let pr: PrMerge | null = null;
     try {
-      pr = parse(JSON.parse(execFileSync('gh', args, { cwd: repo, env: asEnv(as(repo)), encoding: 'utf8', timeout: 8_000, stdio: ['ignore', 'pipe', 'pipe'] })));
+      pr = parse(JSON.parse((await run('gh', args, { cwd: repo, env: asEnv(as(repo)), encoding: 'utf8', timeout: 8_000 })).stdout));
     } catch (err: any) {
       console.error(`Asking GitHub about ${key.split('\0').slice(1).join(' ')} failed:`, err.stderr?.trim() || err.message);
     }
@@ -111,10 +116,11 @@ export function githubPrs(as: (repo: string) => GithubEnv = () => undefined): Pr
 const KEY = 'wake-when-live';
 const CHAINS = 'chained-minions';
 
-function git(dir: string, args: string[]): string | null {
+// Never execFileSync here (#526): a check runs dozens of these, and the server answered nobody until they ended.
+async function git(dir: string, args: string[]): Promise<string | null> {
   try {
     // A patch-id log over a long-lived branch's span can pass the 1 MB default.
-    return execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).trim();
+    return (await run('git', args, { cwd: dir, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })).stdout.trim();
   } catch {
     return null;
   }
@@ -126,19 +132,30 @@ function git(dir: string, args: string[]): string | null {
  * has its twin there (landed from another branch with new hashes). Merge commits aren't work.
  * shortcut: a squash outside a PR, or a pick that resolved a conflict, changes the patch and isn't seen; the dependency's merged PR or its dismissal covers most of those.
  */
-export function within(repo: string, ref: string, tip: string): string | null {
-  if (git(repo, ['merge-base', '--is-ancestor', tip, ref]) !== null) return tip;
+export async function within(repo: string, ref: string, tip: string): Promise<string | null> {
+  if ((await git(repo, ['merge-base', '--is-ancestor', tip, ref])) !== null) return tip;
   // Each side's commits that change something, as '=' (has a twin) or '+' and the hash: empty commits all share one patch id.
-  const marks = (side: string) => (git(repo, ['log', '--cherry-mark', side, '--no-merges', '--topo-order', '--raw', '--format=%x00%m%H', `${ref}...${tip}`]) ?? '')
+  const marks = async (side: string) => ((await git(repo, ['log', '--cherry-mark', side, '--no-merges', '--topo-order', '--raw', '--format=%x00%m%H', `${ref}...${tip}`])) ?? '')
     .split('\0').filter((c) => c.includes('\n:')).map((c) => c.slice(0, c.indexOf('\n')));
-  const own = marks('--right-only');
+  const own = await marks('--right-only');
   if (!own.length || own.some((m) => !m.startsWith('='))) return null;
-  return marks('--left-only').find((m) => m.startsWith('='))?.slice(1) ?? null;
+  return (await marks('--left-only')).find((m) => m.startsWith('='))?.slice(1) ?? null;
 }
 
 /** Whether the server running `head` runs this scheme's code: that commit is in the scheme's repo. */
+async function runs(repo: string | null, head: string | null): Promise<boolean> {
+  return !!repo && !!head && (await git(repo, ['cat-file', '-e', `${head}^{commit}`])) !== null;
+}
+
+/** The same, at once, for callers that can't wait (a turn's start): one git call of a few ms. */
 export function runsRepo(repo: string | null, head: string | null): boolean {
-  return !!repo && !!head && git(repo, ['cat-file', '-e', `${head}^{commit}`]) !== null;
+  if (!repo || !head) return false;
+  try {
+    execFileSync('git', ['cat-file', '-e', `${head}^{commit}`], { cwd: repo, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export class LiveWaiters {
@@ -158,6 +175,9 @@ export class LiveWaiters {
   hold: (c: Chain, why: string) => void = () => {};
   /** The commit the server runs now: what it booted from, then what its front end last reloaded to. */
   head: string | null;
+  /** The check waiting for its turn, if any, and the end of the newest one: checks run one at a time. */
+  private queued: Promise<number> | null = null;
+  private last: Promise<unknown> = Promise.resolve();
   prs: PrLookup = githubPrs();
 
   constructor(store: Store, repo: string, head: string | null, send: (ticketId: number, text: string) => void) {
@@ -172,24 +192,26 @@ export class LiveWaiters {
   }
 
   /** The repo of `ticket`'s scheme, when this server doesn't run its code: there live means merged. */
-  elsewhere(ticket: number): string | null {
+  async elsewhere(ticket: number): Promise<string | null> {
     const t = this.store.getTicket(ticket);
     const repo = t && this.store.getProject(t.project_id)?.repo_dir;
-    return repo && this.head && !runsRepo(repo, this.head) ? repo : null;
+    return repo && this.head && !(await runs(repo, this.head)) ? repo : null;
   }
 
   /** The commit by which `commit` is on the scheme's main, locally or on origin, or null. */
-  private merged(repo: string, commit: string): string | null {
-    for (const ref of this.mains(repo)) {
-      const c = within(repo, ref, commit);
+  private async merged(repo: string, commit: string): Promise<string | null> {
+    for (const ref of await this.mains(repo)) {
+      const c = await within(repo, ref, commit);
       if (c) return c;
     }
     return null;
   }
 
   /** The refs that are a repo's main: local, and origin's if it has one. */
-  private mains(repo: string): string[] {
-    return ['HEAD', 'refs/remotes/origin/HEAD'].filter((ref) => git(repo, ['rev-parse', '-q', '--verify', ref]) !== null);
+  private async mains(repo: string): Promise<string[]> {
+    const refs: string[] = [];
+    for (const ref of ['HEAD', 'refs/remotes/origin/HEAD']) if ((await git(repo, ['rev-parse', '-q', '--verify', ref])) !== null) refs.push(ref);
+    return refs;
   }
 
   /**
@@ -198,20 +220,20 @@ export class LiveWaiters {
    * branch's newest PR, if that is merged and the branch has no commits of its own since the PR's head
    * (merging main in doesn't count).
    */
-  private landed(b: { repo: string; branch: string; tip: string }): string | null {
-    const merged = this.merged(b.repo, b.tip);
+  private async landed(b: { repo: string; branch: string; tip: string }): Promise<string | null> {
+    const merged = await this.merged(b.repo, b.tip);
     if (merged) return merged;
-    const pr = this.prs.branch(b.repo, b.branch, b.tip);
+    const pr = await this.prs.branch(b.repo, b.branch, b.tip);
     if (!pr?.commit) return null;
-    const since = pr.head === b.tip ? '0' : git(b.repo, ['rev-list', '--count', '--no-merges', b.tip, `^${pr.head}`, ...this.mains(b.repo).map((r) => `^${r}`)]);
+    const since = pr.head === b.tip ? '0' : await git(b.repo, ['rev-list', '--count', '--no-merges', b.tip, `^${pr.head}`, ...(await this.mains(b.repo)).map((r) => `^${r}`)]);
     return since === '0' ? pr.commit : null;
   }
 
   /** The followed minion's scheme repo, branch and its tip, or null when it has neither. */
-  private tip(after: number): { repo: string; branch: string; tip: string } | null {
+  private async tip(after: number): Promise<{ repo: string; branch: string; tip: string } | null> {
     const t = this.store.getTicket(after);
     const repo = t && this.store.getProject(t.project_id)?.repo_dir;
-    const tip = repo && t.branch ? git(repo, ['rev-parse', '-q', '--verify', `refs/heads/${t.branch}^{commit}`]) : null;
+    const tip = repo && t.branch ? await git(repo, ['rev-parse', '-q', '--verify', `refs/heads/${t.branch}^{commit}`]) : null;
     return repo && tip ? { repo, branch: t.branch!, tip } : null;
   }
 
@@ -220,8 +242,8 @@ export class LiveWaiters {
    * its tip alone can't tell: a branch caught up to a newer main (a fast-forward) has a new tip that is
    * on main, but none of its own work. Merge commits don't count; work land.sh rebased still has its commit lines.
    */
-  private committed(repo: string, branch: string, since: number): boolean {
-    const log = git(repo, ['reflog', 'show', '--date=unix', '--format=%gd %gs', `refs/heads/${branch}`]) ?? '';
+  private async committed(repo: string, branch: string, since: number): Promise<boolean> {
+    const log = (await git(repo, ['reflog', 'show', '--date=unix', '--format=%gd %gs', `refs/heads/${branch}`])) ?? '';
     return log.split('\n').some((line) => {
       const m = line.match(/@\{(\d+)\}\s+(.*)$/);
       return !!m && Number(m[1]) >= since && /^(commit(?! \(merge\))|cherry-pick|revert)\b/.test(m[2]);
@@ -235,28 +257,28 @@ export class LiveWaiters {
    * it is dismissed: a dismissed minion that never committed counts as done. A scheme whose
    * code this server doesn't run can't be live, so there live means merged.
    */
-  private chainState(c: Chain): 'go' | 'wait' | 'unshipped' {
+  private async chainState(c: Chain): Promise<'go' | 'wait' | 'unshipped'> {
     const leader = this.store.getTicket(c.after);
     if (!leader) return 'unshipped';
     const closed = leader.status === 'closed';
-    const b = this.tip(c.after);
+    const b = await this.tip(c.after);
     if (!b) return closed ? 'go' : 'wait'; // no repo: dismissed is all there is to wait for
-    if (!closed && !this.committed(b.repo, b.branch, c.base ? (c.since ?? Infinity) : 0)) return 'wait';
-    const landed = this.landed(b);
+    if (!closed && !(await this.committed(b.repo, b.branch, c.base ? (c.since ?? Infinity) : 0))) return 'wait';
+    const landed = await this.landed(b);
     if (!landed) return closed ? 'unshipped' : 'wait';
-    if (c.when === 'merged' || !runsRepo(b.repo, this.head)) return 'go';
-    return this.live({ ticket: c.ticket, commit: landed, reason: '', since: null }) ? 'go' : 'wait';
+    if (c.when === 'merged' || !(await runs(b.repo, this.head))) return 'go';
+    return (await this.live({ ticket: c.ticket, commit: landed, reason: '', since: null })) ? 'go' : 'wait';
   }
 
   /**
    * Where following minion `after` stands right now, checked before a chained minion is created:
    * 'go' (start it at once), 'wait' (hold it, with `base` and `since` for chain), or 'unshipped' (refuse).
    */
-  follow(after: number, when: Chain['when']): { state: 'go' | 'wait' | 'unshipped'; base: string | null; since: number } {
-    const b = this.tip(after);
-    const base = b && this.landed(b) ? b.tip : null;
+  async follow(after: number, when: Chain['when']): Promise<{ state: 'go' | 'wait' | 'unshipped'; base: string | null; since: number }> {
+    const b = await this.tip(after);
+    const base = b && (await this.landed(b)) ? b.tip : null;
     const since = Math.floor(Date.now() / 1000);
-    return { state: this.chainState({ ticket: 0, after, when, message: '', from: '', base, since }), base, since };
+    return { state: await this.chainState({ ticket: 0, after, when, message: '', from: '', base, since }), base, since };
   }
 
   /** Hold a chained minion's brief (after follow said 'wait'). */
@@ -295,14 +317,20 @@ export class LiveWaiters {
   }
 
   /** Start each chained minion whose leader's work is in; tell people about leaders dismissed unshipped. */
-  private checkChains(): number {
+  private async checkChains(): Promise<number> {
+    const states = new Map<number, 'go' | 'wait' | 'unshipped'>();
+    for (const c of this.chains()) {
+      const t = this.store.getTicket(c.ticket);
+      if (t && t.status !== 'closed') states.set(c.ticket, await this.chainState(c));
+    }
     const keep: Chain[] = [];
     const go: Chain[] = [];
     const hold: Chain[] = [];
+    // Read again, and nothing below waits: a chain set or released while git and gh ran stays as it is now.
     for (const c of this.chains()) {
       const t = this.store.getTicket(c.ticket);
       if (!t || t.status === 'closed') continue;
-      const state = this.chainState(c);
+      const state = states.get(c.ticket);
       // Kept until its start sends the brief (release), so a start the server dies in runs again.
       if (state === 'go') {
         keep.push(c);
@@ -322,10 +350,10 @@ export class LiveWaiters {
   }
 
   /** The full hash of a commit the live checkout (unless `only`) or `otherRepo` (the scheme's repo) knows, or null. */
-  resolve(commit: string, otherRepo: string | null, only = false): string | null {
+  async resolve(commit: string, otherRepo: string | null, only = false): Promise<string | null> {
     if (!/^[0-9a-f]{4,40}$/i.test(commit)) return null;
     for (const dir of only ? [otherRepo] : [this.repo, otherRepo]) {
-      const full = dir && git(dir, ['rev-parse', '-q', '--verify', `${commit}^{commit}`]);
+      const full = dir && (await git(dir, ['rev-parse', '-q', '--verify', `${commit}^{commit}`]));
       if (full) return full;
     }
     return null;
@@ -335,28 +363,29 @@ export class LiveWaiters {
    * Is this waiter's deploy live (in a scheme this server doesn't run: its commit merged)? A commit
    * in a merged PR counts by the PR's merge commit, which a squash or rebase merge needs.
    */
-  private live(w: Waiter): boolean {
-    if (!this.head) return false;
-    const other = this.elsewhere(w.ticket);
-    if (other) return !!w.commit && (!!this.merged(other, w.commit) || !!this.prs.commit(other, w.commit)?.commit);
-    if (!w.commit) return this.head !== w.since;
+  private async live(w: Waiter): Promise<boolean> {
+    const head = this.head;
+    if (!head) return false;
+    const other = await this.elsewhere(w.ticket);
+    if (other) return !!w.commit && (!!(await this.merged(other, w.commit)) || !!(await this.prs.commit(other, w.commit))?.commit);
+    if (!w.commit) return head !== w.since;
     // The live checkout pulls only main, so a branch commit that landed rebased is known only to the
     // scheme's repo, which also has the live commit here (else it would be elsewhere()): look there too.
     const t = this.store.getTicket(w.ticket);
     const scheme = t && this.store.getProject(t.project_id)?.repo_dir;
-    const runs = (c: string) => within(this.repo, this.head!, c) !== null || (!!scheme && scheme !== this.repo && runsRepo(scheme, this.head) && within(scheme, this.head!, c) !== null);
-    if (runs(w.commit)) return true;
-    const pr = this.prs.commit(this.repo, w.commit);
-    return !!pr?.commit && runs(pr.commit);
+    const has = async (c: string) => (await within(this.repo, head, c)) !== null || (!!scheme && scheme !== this.repo && (await runs(scheme, head)) && (await within(scheme, head, c)) !== null);
+    if (await has(w.commit)) return true;
+    const pr = await this.prs.commit(this.repo, w.commit);
+    return !!pr?.commit && (await has(pr.commit));
   }
 
   /**
    * Wait for `commit` (a full hash, or null for the next deploy). Returns false, storing nothing, when
    * it is live already. A second call for the same ticket and commit replaces the first.
    */
-  add(ticket: number, commit: string | null, reason: string): boolean {
+  async add(ticket: number, commit: string | null, reason: string): Promise<boolean> {
     const w: Waiter = { ticket, commit, reason, since: this.head };
-    if (commit && this.live(w)) return false;
+    if (commit && (await this.live(w))) return false;
     this.store.setSetting(KEY, [...this.list().filter((o) => o.ticket !== ticket || o.commit !== commit), w]);
     return true;
   }
@@ -365,28 +394,49 @@ export class LiveWaiters {
    * The server now runs `head`, or a minion was dismissed: message each waiter whose deploy is live,
    * once, and drop it, and start the chained minions whose leader's work is in. A waiter whose minion
    * was dismissed is dropped without a message. Returns how many were woken or started.
+   * Checks run one at a time, off the event loop (#526), and a call while one already waits its turn
+   * shares that one: it starts after the call, so it sees all the call would.
    */
-  check(head: string | null = this.head): number {
+  check(head: string | null = this.head): Promise<number> {
     this.head = head;
+    if (!this.queued) {
+      const next = this.last.then(() => {
+        this.queued = null;
+        return this.checkNow();
+      });
+      this.queued = next;
+      this.last = next.catch(() => {});
+    }
+    return this.queued;
+  }
+
+  private async checkNow(): Promise<number> {
+    const head = this.head;
+    const live: Waiter[] = [];
+    for (const w of this.list()) {
+      const t = this.store.getTicket(w.ticket);
+      if (t && t.status !== 'closed' && (await this.live(w))) live.push(w);
+    }
     const waiting: Waiter[] = [];
     const woken: Waiter[] = [];
+    // Read again, and nothing waits until they are stored: a waiter added while git and gh ran stays.
     for (const w of this.list()) {
       const t = this.store.getTicket(w.ticket);
       if (!t || t.status === 'closed') continue;
-      (this.live(w) ? woken : waiting).push(w);
+      (live.some((o) => o.ticket === w.ticket && o.commit === w.commit && o.since === w.since) ? woken : waiting).push(w);
     }
     // Dropped before sending, so a send that throws can't wake anyone twice.
     this.store.setSetting(KEY, waiting);
     const short = (c: string) => c.slice(0, 7);
     for (const w of woken) {
       try {
-        if (w.commit && this.elsewhere(w.ticket)) this.send(w.ticket, `\`${short(w.commit)}\` is on the scheme's main now: ${w.reason}`);
+        if (w.commit && (await this.elsewhere(w.ticket))) this.send(w.ticket, `\`${short(w.commit)}\` is on the scheme's main now: ${w.reason}`);
         else this.send(w.ticket, `${w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now'} (the server runs \`${short(head!)}\`): ${w.reason}`);
       } catch (err) {
         console.error(`Waking #${w.ticket} failed:`, err); // the others still get theirs
       }
     }
-    return woken.length + this.checkChains();
+    return woken.length + (await this.checkChains());
   }
 
   /**
@@ -394,7 +444,7 @@ export class LiveWaiters {
    * only to the minions that ran it, so this also catches one whose commit went live in someone else's
    * restart. A branch the minion never committed on is no evidence: any live commit contains it.
    */
-  pendingLive(): number[] {
+  async pendingLive(): Promise<number[]> {
     if (!this.head) return [];
     const ids: number[] = [];
     for (const p of this.store.listProjects()) {
@@ -402,7 +452,7 @@ export class LiveWaiters {
       for (const t of this.store.listTickets(p.id)) {
         if (t.state !== 'pending-deploy' || t.status === 'closed' || !t.branch) continue;
         // A scheme whose repo doesn't have the live commit (another app's) fails here, as it should.
-        if (this.committed(p.repo_dir, t.branch, 0) && within(p.repo_dir, this.head, `refs/heads/${t.branch}`)) ids.push(t.id);
+        if ((await this.committed(p.repo_dir, t.branch, 0)) && (await within(p.repo_dir, this.head, `refs/heads/${t.branch}`))) ids.push(t.id);
       }
     }
     return ids;

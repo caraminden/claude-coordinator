@@ -90,8 +90,8 @@ function waiters(head: string) {
   return w;
 }
 /** Chain a new minion after `leader`, as the create endpoint does. */
-function chain(w: LiveWaiters, leader: number, when: Chain['when'], project = citadel.id, repo = live) {
-  const f = w.follow(leader, when);
+async function chain(w: LiveWaiters, leader: number, when: Chain['when'], project = citadel.id, repo = live) {
+  const f = await w.follow(leader, when);
   assert.equal(f.state, 'wait');
   const follower = minion(project, repo).id;
   w.chain({ ticket: follower, after: leader, when, message: 'build part two', from: 'Taskmaster', base: f.base, since: f.since });
@@ -102,68 +102,68 @@ const reset = () => {
   held.length = 0;
 };
 
-test('a live chain waits through the merge and starts once the server runs the leader\'s work', () => {
+test('a live chain waits through the merge and starts once the server runs the leader\'s work', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
-  const follower = chain(w, leader.id, 'live');
-  assert.equal(w.check(), 0, 'no work of its own yet');
+  const follower = await chain(w, leader.id, 'live');
+  assert.equal(await w.check(), 0, 'no work of its own yet');
 
   live.work(leader.branch);
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
-  assert.equal(w.check(), 0, 'merged, but the server still runs the old commit');
+  assert.equal(await w.check(), 0, 'merged, but the server still runs the old commit');
   assert.equal(w.chains().length, 1);
 
-  assert.equal(w.check(live.git('rev-parse', 'HEAD')), 1, 'the restart onto it');
+  assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1, 'the restart onto it');
   assert.equal(started.length, 1);
   assert.equal(started[0].c.ticket, follower);
   assert.equal(started[0].c.message, 'build part two');
   assert.match(started[0].why, /^#\d+'s work is live$/);
   assert.equal(w.chains().length, 0);
-  assert.equal(w.check(), 0, 'started once');
+  assert.equal(await w.check(), 0, 'started once');
 });
 
-test('a merged chain starts once the leader\'s work is on main, live or not', () => {
+test('a merged chain starts once the leader\'s work is on main, live or not', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
-  chain(w, leader.id, 'merged');
+  await chain(w, leader.id, 'merged');
   live.work(leader.branch);
-  assert.equal(w.check(), 0, 'committed on its branch only');
+  assert.equal(await w.check(), 0, 'committed on its branch only');
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
-  assert.equal(w.check(), 1);
+  assert.equal(await w.check(), 1);
   assert.match(started[0].why, /work is merged$/);
 });
 
 // #126: a leader whose branch had no commits of its own started its follower once the branch was
 // caught up to a newer main, since that tip was on main and wasn't the one the chain recorded.
 for (const when of ['merged', 'live'] as const) {
-  test(`a ${when} chain ignores a leader branch caught up to main, and starts on the leader's own landed commit`, () => {
+  test(`a ${when} chain ignores a leader branch caught up to main, and starts on the leader's own landed commit`, async () => {
     reset();
     const w = waiters(live.git('rev-parse', 'HEAD'));
     const leader = minion();
     const dir = join(root, `wt-${leader.branch.replace('/', '-')}`);
     live.git('worktree', 'add', '-q', dir, leader.branch);
     const inTree = (...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
-    chain(w, leader.id, when);
+    await chain(w, leader.id, when);
 
     live.commit(); // another minion lands, and the server restarts onto it
     inTree('merge', '-q', '--ff-only', 'main'); // the leader catches up: a new tip, on main, none of its own
-    assert.equal(w.check(live.git('rev-parse', 'HEAD')), 0, 'an empty branch caught up to main is not work');
+    assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 0, 'an empty branch caught up to main is not work');
     assert.equal(w.chains().length, 1);
 
     writeFileSync(join(dir, 'g'), when);
     inTree('add', '-A');
     inTree('commit', '-q', '-m', 'own work');
-    assert.equal(w.check(), 0, 'committed but not merged');
+    assert.equal(await w.check(), 0, 'committed but not merged');
     live.git('merge', '-q', '--ff-only', leader.branch); // as land.sh fast-forwards main
-    if (when === 'live') assert.equal(w.check(), 0, 'merged, but the server still runs the old commit');
-    assert.equal(w.check(live.git('rev-parse', 'HEAD')), 1);
+    if (when === 'live') assert.equal(await w.check(), 0, 'merged, but the server still runs the old commit');
+    assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
     assert.match(started[0].why, new RegExp(`work is ${when}$`));
   });
 }
 
-test('a leader that shipped before the chain was set only counts once it commits again', () => {
+test('a leader that shipped before the chain was set only counts once it commits again', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
@@ -172,48 +172,48 @@ test('a leader that shipped before the chain was set only counts once it commits
   const shipped = execFileSync('git', ['commit-tree', '-p', 'main', '-m', 'old work', 'main^{tree}'], { cwd: live.dir, encoding: 'utf8', env: old }).trim();
   execFileSync('git', ['update-ref', '-m', 'commit: old work', `refs/heads/${leader.branch}`, shipped], { cwd: live.dir, env: old });
   live.git('merge', '-q', '--ff-only', leader.branch);
-  chain(w, leader.id, 'merged');
+  await chain(w, leader.id, 'merged');
   live.commit();
   live.git('update-ref', '-m', 'merge main: Fast-forward', `refs/heads/${leader.branch}`, 'main');
-  assert.equal(w.check(), 0, 'its old work is not new work');
+  assert.equal(await w.check(), 0, 'its old work is not new work');
   live.work(leader.branch);
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
-  assert.equal(w.check(), 1);
+  assert.equal(await w.check(), 1);
 });
 
-test('a leader dismissed without its work merged holds the chain and tells people once; it starts if the work lands after all', () => {
+test('a leader dismissed without its work merged holds the chain and tells people once; it starts if the work lands after all', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
-  const follower = chain(w, leader.id, 'merged');
+  const follower = await chain(w, leader.id, 'merged');
   live.work(leader.branch);
   store.updateTicket(leader.id, { status: 'closed' });
-  assert.equal(w.check(), 0);
+  assert.equal(await w.check(), 0);
   assert.equal(held.length, 1);
   assert.equal(held[0].c.ticket, follower);
   assert.match(held[0].why, /^#\d+ was dismissed without its work being merged$/);
-  assert.equal(w.check(), 0);
+  assert.equal(await w.check(), 0);
   assert.equal(held.length, 1, 'told once');
-  assert.equal(w.follow(leader.id, 'merged').state, 'unshipped', 'nothing new can chain on it');
+  assert.equal((await w.follow(leader.id, 'merged')).state, 'unshipped', 'nothing new can chain on it');
   assert.match(w.heldFor(follower)!, /^#\d+ T's work is merged, and #\d+ T was dismissed without it, so only Start now starts you$/);
 
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
-  assert.equal(w.check(), 1);
+  assert.equal(await w.check(), 1);
   assert.equal(started[0].c.ticket, follower);
 });
 
 // #229: a squash (or rebase) merge on GitHub leaves none of the branch's commits on main, so a leader
 // whose PR was merged that way read as dismissed without its work merged.
-test('a leader whose PR was squash-merged counts as merged, and a held chain starts once its PR shows merged', () => {
+test('a leader whose PR was squash-merged counts as merged, and a held chain starts once its PR shows merged', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
-  const follower = chain(w, leader.id, 'merged');
+  const follower = await chain(w, leader.id, 'merged');
   live.work(leader.branch);
   squash(live, leader.branch);
   assert.throws(() => live.git('merge-base', '--is-ancestor', leader.branch, 'main'), 'none of its commits are on main');
   store.updateTicket(leader.id, { status: 'closed' });
-  assert.equal(w.check(), 1);
+  assert.equal(await w.check(), 1);
   assert.equal(held.length, 0, 'no false alarm');
   assert.equal(started[0].c.ticket, follower);
   assert.match(started[0].why, /work is merged$/);
@@ -221,19 +221,19 @@ test('a leader whose PR was squash-merged counts as merged, and a held chain sta
   // A chain held before its leader's PR showed as merged (#87's) starts at the next check.
   reset();
   const late = minion();
-  chain(w, late.id, 'merged');
+  await chain(w, late.id, 'merged');
   live.work(late.branch);
   store.updateTicket(late.id, { status: 'closed' });
-  assert.equal(w.check(), 0);
+  assert.equal(await w.check(), 0);
   assert.equal(held.length, 1);
   squash(live, late.branch);
-  assert.equal(w.check(), 1);
+  assert.equal(await w.check(), 1);
 });
 
 // #321: Threadspace merges PRs on GitHub, in a private repo only its owner's login can read, and the
 // server's own fetch can't reach it either, so its local main and origin/main both lag. Asking GitHub
 // as the box's login found nothing, and the leader read as dismissed without its work merged.
-test('a leader squash-merged into origin/main only, in a repo only the scheme owner\'s login can read, counts as merged', () => {
+test('a leader squash-merged into origin/main only, in a repo only the scheme owner\'s login can read, counts as merged', async () => {
   reset();
   const remote = join(root, 'obsidian.git');
   execFileSync('git', ['clone', '-q', '--bare', other.dir, remote]);
@@ -247,7 +247,7 @@ test('a leader squash-merged into origin/main only, in a repo only the scheme ow
   const repo = { dir: scheme, git: sg, commit: () => '', work: other.work };
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion(threadspace.id, repo);
-  const follower = chain(w, leader.id, 'merged', threadspace.id, repo);
+  const follower = await chain(w, leader.id, 'merged', threadspace.id, repo);
   sg('switch', '-q', leader.branch);
   writeFileSync(join(scheme, 'docs'), 'one');
   sg('add', '-A');
@@ -279,7 +279,7 @@ test('a leader squash-merged into origin/main only, in a repo only the scheme ow
   try {
     w.prs = githubPrs((dir) => (dir === scheme ? { GH_TOKEN: 'owner-token' } : undefined));
     store.updateTicket(leader.id, { status: 'closed' });
-    assert.equal(w.check(), 1);
+    assert.equal(await w.check(), 1);
     assert.equal(held.length, 0, 'no "dismissed without its work being merged"');
     assert.equal(started[0].c.ticket, follower);
   } finally {
@@ -287,7 +287,7 @@ test('a leader squash-merged into origin/main only, in a repo only the scheme ow
   }
 });
 
-test('GitHub\'s answers read as a merged PR or none', () => {
+test('GitHub\'s answers read as a merged PR or none', async () => {
   const head = 'bd6f4c67cf2aac6092ffcb39fea1df1d43e024bd';
   const merge = '28f4915f1bdea4505501ed04412272a36941d760';
   assert.deepEqual(mergedPr([{ number: 204, state: 'MERGED', headRefOid: head, mergeCommit: { oid: merge } }]), { number: 204, head, commit: merge });
@@ -301,19 +301,19 @@ test('GitHub\'s answers read as a merged PR or none', () => {
   assert.equal(mergedPrOf(pulls.slice(0, 1)), null);
 });
 
-test('a live chain on a squash-merged leader waits for the server to run the merge commit', () => {
+test('a live chain on a squash-merged leader waits for the server to run the merge commit', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
-  chain(w, leader.id, 'live');
+  await chain(w, leader.id, 'live');
   live.work(leader.branch);
   squash(live, leader.branch);
-  assert.equal(w.check(), 0, 'merged, but the server still runs the old commit');
-  assert.equal(w.check(live.git('rev-parse', 'HEAD')), 1);
+  assert.equal(await w.check(), 0, 'merged, but the server still runs the old commit');
+  assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
   assert.match(started[0].why, /work is live$/);
 });
 
-test('a leader that commits after its PR was squash-merged waits for that work; catching up to main is not work', () => {
+test('a leader that commits after its PR was squash-merged waits for that work; catching up to main is not work', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
@@ -322,47 +322,47 @@ test('a leader that commits after its PR was squash-merged waits for that work; 
   const shipped = execFileSync('git', ['commit-tree', '-p', leader.branch, '-m', 'old work', 'main^{tree}'], { cwd: live.dir, encoding: 'utf8', env: old }).trim();
   execFileSync('git', ['update-ref', '-m', 'commit: old work', `refs/heads/${leader.branch}`, shipped], { cwd: live.dir, env: old });
   squash(live, leader.branch);
-  chain(w, leader.id, 'merged');
-  assert.equal(w.check(), 0, 'its merged PR is not new work');
+  await chain(w, leader.id, 'merged');
+  assert.equal(await w.check(), 0, 'its merged PR is not new work');
   live.work(leader.branch);
-  assert.equal(w.check(), 0, 'its newest commit is in no merged PR');
+  assert.equal(await w.check(), 0, 'its newest commit is in no merged PR');
   squash(live, leader.branch);
   // Main moves on and the leader merges it in: a merge commit and main's commits, none of its own.
   live.commit();
   live.git('update-ref', '-m', 'merge main', `refs/heads/${leader.branch}`,
     live.git('commit-tree', '-p', `refs/heads/${leader.branch}`, '-p', 'main', '-m', 'merge main', 'main^{tree}'));
-  assert.equal(w.check(), 1);
+  assert.equal(await w.check(), 1);
 });
 
-test('a leader with no commits of its own counts as done once dismissed', () => {
+test('a leader with no commits of its own counts as done once dismissed', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
-  chain(w, leader.id, 'live');
+  await chain(w, leader.id, 'live');
   store.updateTicket(leader.id, { status: 'closed' });
-  assert.equal(w.check(), 1);
+  assert.equal(await w.check(), 1);
   assert.equal(held.length, 0);
 });
 
-test("a chained minion's brief stays held until its start sends it: a start that never gets there isn't repeated, and runs again after a restart (#468 S04-5)", () => {
+test("a chained minion's brief stays held until its start sends it: a start that never gets there isn't repeated, and runs again after a restart (#468 S04-5)", async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   w.start = (c, why) => started.push({ c, why }); // still catching up its branch when the server dies
   const leader = minion();
-  const follower = chain(w, leader.id, 'live');
+  const follower = await chain(w, leader.id, 'live');
   store.updateTicket(leader.id, { status: 'closed' });
-  assert.equal(w.check(), 1);
+  assert.equal(await w.check(), 1);
   assert.deepEqual(w.chains().map((c) => c.message), ['build part two'], 'the brief is still stored');
-  assert.equal(w.check(), 0, 'not started twice while its start runs');
+  assert.equal(await w.check(), 0, 'not started twice while its start runs');
 
   const restarted = waiters(live.git('rev-parse', 'HEAD'));
-  assert.equal(restarted.check(), 1, 'a restart starts it again');
+  assert.equal(await restarted.check(), 1, 'a restart starts it again');
   assert.equal(started.at(-1)!.c.ticket, follower);
   assert.equal(restarted.chains().length, 0, 'gone once sent');
-  assert.equal(restarted.check(), 0);
+  assert.equal(await restarted.check(), 0);
 });
 
-test('a deploy wakes every waiter whose commit is live even when one send throws, and wakes none twice (#468 S04-5)', () => {
+test('a deploy wakes every waiter whose commit is live even when one send throws, and wakes none twice (#468 S04-5)', async () => {
   const head = live.git('rev-parse', 'HEAD');
   const got: number[] = [];
   const w = new LiveWaiters(store, live.dir, head, (id) => {
@@ -371,32 +371,32 @@ test('a deploy wakes every waiter whose commit is live even when one send throws
   });
   const a = minion().id;
   const b = minion().id;
-  w.add(a, null, 'first');
-  w.add(b, null, 'second');
+  await w.add(a, null, 'first');
+  await w.add(b, null, 'second');
   live.commit();
-  assert.doesNotThrow(() => w.check(live.git('rev-parse', 'HEAD')));
+  await assert.doesNotReject(w.check(live.git('rev-parse', 'HEAD')));
   assert.deepEqual(got, [b]);
   assert.deepEqual(w.list().filter((x) => x.ticket === a || x.ticket === b), [], 'dropped before sending: none woken twice');
 });
 
-test('a leader already live when the chain is set starts it at once', () => {
+test('a leader already live when the chain is set starts it at once', async () => {
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
   live.work(leader.branch);
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
   w.head = live.git('rev-parse', 'HEAD');
   store.updateTicket(leader.id, { status: 'closed' });
-  assert.equal(w.follow(leader.id, 'live').state, 'go');
+  assert.equal((await w.follow(leader.id, 'live')).state, 'go');
 });
 
-test('in a scheme whose code the server does not run, live means merged', () => {
+test('in a scheme whose code the server does not run, live means merged', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion(delve.id, other);
-  chain(w, leader.id, 'live', delve.id, other);
+  await chain(w, leader.id, 'live', delve.id, other);
   other.work(leader.branch);
   other.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
-  assert.equal(w.check(), 1);
+  assert.equal(await w.check(), 1);
 });
 
 /** A commit with a real change on `branch`, made in its own worktree, as a minion commits. */
@@ -422,53 +422,53 @@ function landElsewhere(repo: typeof live, commits: string[]) {
 // hashes, so neither its tip nor a PR of its branch is on main: it read as still waiting, or as
 // dismissed unshipped, until it happened to rebase.
 for (const when of ['merged', 'live'] as const) {
-  test(`a ${when} chain starts once all of the leader's commits are on main by their changes, landed from another branch`, () => {
+  test(`a ${when} chain starts once all of the leader's commits are on main by their changes, landed from another branch`, async () => {
     reset();
     const w = waiters(live.git('rev-parse', 'HEAD'));
     const leader = minion();
-    chain(w, leader.id, when);
+    await chain(w, leader.id, when);
     const first = own(live, leader.branch, `${when}-a`);
     const second = own(live, leader.branch, `${when}-b`);
     landElsewhere(live, [first]);
-    assert.equal(w.check(live.git('rev-parse', 'HEAD')), 0, 'only one of its two commits is in');
+    assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 0, 'only one of its two commits is in');
     landElsewhere(live, [second]);
     assert.throws(() => live.git('merge-base', '--is-ancestor', leader.branch, 'main'), 'its tip is not on main');
     store.updateTicket(leader.id, { status: 'closed' });
     if (when === 'live') {
-      assert.equal(w.check(), 0, 'on main, but the server still runs the old commit');
+      assert.equal(await w.check(), 0, 'on main, but the server still runs the old commit');
       assert.equal(held.length, 0, 'not dismissed unshipped: its work is merged');
     }
-    assert.equal(w.check(live.git('rev-parse', 'HEAD')), 1);
+    assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
     assert.equal(held.length, 0);
     assert.match(started[0].why, new RegExp(`work is ${when}$`));
   });
 }
 
-test('a running leader whose branch has no commits of its own never counts, even on a stale base main has moved past', () => {
+test('a running leader whose branch has no commits of its own never counts, even on a stale base main has moved past', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
   live.commit(); // main moves on after the leader's branch was cut, as origin/main lags local main
-  const follower = chain(w, leader.id, 'merged');
+  const follower = await chain(w, leader.id, 'merged');
   live.commit();
-  assert.equal(w.check(live.git('rev-parse', 'HEAD')), 0);
+  assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 0);
   live.git('update-ref', '-m', 'merge main: Fast-forward', `refs/heads/${leader.branch}`, 'main');
-  assert.equal(w.check(live.git('rev-parse', 'HEAD')), 0, 'caught up to main: still nothing of its own');
+  assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 0, 'caught up to main: still nothing of its own');
   assert.equal(w.chains().length, 1);
   store.updateTicket(follower, { status: 'closed' });
-  w.check();
+  await w.check();
 });
 
-test('a dismissed follower is dropped; release hands back the held brief once', () => {
+test('a dismissed follower is dropped; release hands back the held brief once', async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
-  const dropped = chain(w, leader.id, 'live');
+  const dropped = await chain(w, leader.id, 'live');
   store.updateTicket(dropped, { status: 'closed' });
-  w.check();
+  await w.check();
   assert.equal(w.chains().length, 0);
 
-  const follower = chain(w, leader.id, 'live');
+  const follower = await chain(w, leader.id, 'live');
   assert.equal(w.release(follower)?.message, 'build part two');
   assert.equal(w.release(follower), null);
   assert.equal(w.chains().length, 0);

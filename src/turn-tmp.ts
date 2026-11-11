@@ -4,6 +4,7 @@
  * A folder is named by its ticket id; nothing but such a folder, directly under the root, is ever removed.
  */
 import { chmodSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 
 const TICKET_NAME = /^[1-9]\d*$/;
@@ -27,6 +28,11 @@ export function makeTmpDir(root: string, ticketId: number): string {
 /** Remove the ticket's folder and all in it (symlinks inside are removed, never followed). */
 export function clearTmpDir(root: string, ticketId: number) {
   rmSync(tmpDirFor(root, ticketId), { recursive: true, force: true });
+}
+
+/** The same without holding up the server (#526): a minion's folder can hold 20,000 files, over a second of deleting. */
+export function clearTmpDirLater(root: string, ticketId: number): Promise<void> {
+  return rm(tmpDirFor(root, ticketId), { recursive: true, force: true });
 }
 
 /** Remove every ticket's folder that `keep` refuses; anything else in the root stays. Returns the ids removed. */

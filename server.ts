@@ -14,6 +14,7 @@ import { claudeRefusal, lendsMachine, machinesFor, mayReceive, ownerAsked, messa
 import { ClaudeLink } from './src/claude-link.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { Landings } from './src/land.ts';
+import { watchLoopLag } from './src/loop-lag.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher } from './src/github.ts';
@@ -122,6 +123,8 @@ const SHOWN_NAME = PREVIEW ? `${APP_NAME} preview` : APP_NAME;
 // A preview goes with the server that started it, however that one goes (it is reparented then).
 const PARENT = process.ppid;
 if (PREVIEW) setInterval(() => process.ppid !== PARENT && process.exit(0), 2000).unref();
+// Stalls of the event loop are named in the journal (#526), the start's own synchronous work included.
+if (!BOOT_CHECK) watchLoopLag();
 await loadAssets();
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
 // A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.
@@ -230,14 +233,17 @@ function catchUp(repoDir: string) {
     .catch((err) => console.error(`Catching up main in ${repoDir} failed:`, err))
     .then(() => {
       waiters.prs.forget?.();
-      waiters.check();
+      return waiters.check();
     })
     .catch((err) => console.error('Checking waiters after a merge failed:', err));
 }
 /** The server now runs `head`: wake its waiters, and dismiss pending-deploy minions it ships. */
 function liveOn(head: string | null) {
-  waiters.check(head);
-  for (const id of waiters.pendingLive()) runner.deployLive(id);
+  // Not waited for (#526): its git and gh calls take seconds, and the server answers meanwhile.
+  void (async () => {
+    await waiters.check(head);
+    for (const id of await waiters.pendingLive()) runner.deployLive(id);
+  })().catch((err) => console.error('Checking waiters after a deploy failed:', err));
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 const runnerJobs = new RunnerJobs(store, runnerTokens, machines);
@@ -326,7 +332,7 @@ if (!BOOT_CHECK) {
     const stopped = stopPreview(ticketId);
     // Asked afresh (#321): a minion that merged its PR and dismissed itself may have read "not merged" a moment ago.
     waiters.prs.forget?.();
-    waiters.check();
+    void waiters.check().catch((err) => console.error('Checking waiters after a dismissal failed:', err));
     // Its PR may have merged on GitHub with the watcher never seeing it (it watches open minions only).
     const repoDir = store.getProject(store.getTicket(ticketId)?.project_id ?? -1)?.repo_dir;
     if (repoDir) catchUp(repoDir);

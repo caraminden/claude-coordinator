@@ -20,7 +20,7 @@ import { previewKey } from './previews.ts';
 import { isAuthFailure, type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
 import { runsRepo } from './wake.ts';
-import { clearTmpDir, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
+import { clearTmpDirLater, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
@@ -696,7 +696,7 @@ export class Runner {
       // Reopened while this waited (the status route): its temp folder is in use again.
       if (ticket?.status === 'closed') {
         try {
-          clearTmpDir(this.tmpRoot(ticket.project_id), ticketId);
+          await clearTmpDirLater(this.tmpRoot(ticket.project_id), ticketId);
         } catch (err: any) {
           console.error(`Ticket ${ticketId}: could not clear its temp folder: ${err.message}`);
         }

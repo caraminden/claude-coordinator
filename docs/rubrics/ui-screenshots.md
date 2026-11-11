@@ -15,7 +15,8 @@ with `BOOT_CHECK=1`, so it starts no turns and leaves the live turns alone (with
 re-attaches to every running turn), on a free random port:
 
 ```
-sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db "VACUUM INTO '$TMPDIR/dev/coordinator.db'"
+rm -f "$TMPDIR"/dev/coordinator.db* && mkdir -p "$TMPDIR/dev" && \
+  sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db "VACUUM INTO '$TMPDIR/dev/coordinator.db'" && \
 BOOT_CHECK=1 HOST=127.0.0.1 PORT=<free port> DATA_DIR=$TMPDIR/dev TURN_UNITS=0 CLAUDE_BIN=/bin/false \
   COORDINATOR_PASSWORD=<random> SESSION_SECRET=<random 32+> node server.ts
 ```

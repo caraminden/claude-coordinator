@@ -135,7 +135,7 @@ async function start(args: string[]): Promise<void> {
   for (const deadline = Date.now() + BOOT_TIMEOUT_MS; ; await new Promise((r) => setTimeout(r, 200))) {
     if (!started(holder.pid!)) await fail('the server exited during boot');
     if (Date.now() > deadline) await fail(`the server did not answer within ${BOOT_TIMEOUT_MS / 1000} s`);
-    const health = await fetch(`${url}api/health`).then((r) => (r.ok ? r.json() : null), () => null);
+    const health = await fetch(`${url}api/health`, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.json() : null), () => null);
     if (!health) continue;
     if (health.preview !== true) await fail('this branch\'s server has no preview mode; rebase it onto main first');
     break;
@@ -146,7 +146,7 @@ async function start(args: string[]): Promise<void> {
   const admin = db.prepare('SELECT login FROM users WHERE admin = 1 AND disabled_at IS NULL ORDER BY id LIMIT 1').get() as { login: string } | undefined;
   db.close();
   const login = admin?.login ?? '';
-  const res = await fetch(`${url}api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login, password }) });
+  const res = await fetch(`${url}api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login, password }), signal: AbortSignal.timeout(10_000) }).catch(() => fail('the copy did not answer the sign-in'));
   const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
   if (!res.ok || !cookie) await fail(`signing in as ${login || '(no admin)'} on the copy failed (${res.status})`);
 

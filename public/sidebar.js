@@ -285,7 +285,8 @@ export function threadSearchBox(projectId) {
 
 /** Search the scheme's chats by meaning for the box's text; the answer shows under the title results. */
 async function searchByMeaning() {
-  const { projectId, q } = threadSearch;
+  const { projectId, q, meaning } = threadSearch;
+  if (meaning?.busy && meaning.q === q) return; // a held Enter repeats: one search at a time
   const run = (threadSearch.meaning = { q, busy: true });
   renderSidebar();
   try {

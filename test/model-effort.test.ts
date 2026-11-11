@@ -157,7 +157,8 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
   await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
   const mcp = spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,
+      // No COORDINATOR_MEMORY from a turn running the tests: create_ticket's duplicate check would call first.
+      ...process.env, MACHINES_URL: undefined, COORDINATOR_MEMORY: undefined, COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,
       COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1',
     },
     stdio: ['pipe', 'pipe', 'inherit'],

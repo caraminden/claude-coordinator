@@ -425,11 +425,23 @@ async function indexMemory() {
   if (indexing) return;
   indexing = true;
   try {
-    // A batch per scheme in turn, so one scheme's backfill never holds up another's new turns.
+    // A batch per scheme in turn, so one scheme's backfill never holds up another's new turns, and
+    // one scheme that fails (a chunk the model refuses) sits out this pass without stopping the rest.
+    let failed: any = null;
+    const out = new Set<number>();
     for (let more = true; more; ) {
       more = false;
-      for (const p of store.listProjects()) if (memoryScheme(p.id) && (await store.memory.index(p.id, embed, EMBED_MODEL, 8)) > 0) more = true;
+      for (const p of store.listProjects()) {
+        if (!memoryScheme(p.id) || out.has(p.id)) continue;
+        try {
+          if ((await store.memory.index(p.id, embed, EMBED_MODEL, 8)) > 0) more = true;
+        } catch (err) {
+          failed = err;
+          out.add(p.id);
+        }
+      }
     }
+    if (failed) throw failed;
     if (embedDown) console.log('Semantic memory: the embedding service is back');
     embedDown = false;
   } catch (err: any) {

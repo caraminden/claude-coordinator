@@ -188,7 +188,7 @@ test("a test run's counts (#545): the landing's run and a heavy Node suite show 
   progress(join(state, 'land-test.progress'), '96\n212\ntest/runner.test.ts\n', 1);
   waits.poll();
   assert.deepEqual(waits.wait(a.id), {
-    kind: 'land', stage: 'test', chip: 'land · 96/212', text: 'running the tests on the rebased code: 96 of 212 files · test/runner.test.ts',
+    kind: 'land', stage: 'test', chip: 'land · 96/212', text: 'CI fell back: running the full suite on perigee: 96 of 212 files · test/runner.test.ts',
     since: now - 30_000, usual: null, done: 96, total: 212,
   });
   // deploy.sh's own run logs to test.log, so its counts are in test.progress.

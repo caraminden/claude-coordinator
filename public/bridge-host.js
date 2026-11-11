@@ -67,6 +67,9 @@ export function openWithBridge(src, bridge, api) {
   return true;
 }
 
+/** Whether a tab opened with Open is still open: reloading this page would cut its bridge (it can't be found again). */
+export const tabBridgeOpen = () => [...frames].some((f) => f.tab && alive(f));
+
 async function onMessage(e) {
   const hit = readRequest(e);
   if (!hit) return;

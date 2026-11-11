@@ -6,7 +6,7 @@ import { costChip, renderCost } from './cost.js';
 import { openStartScheme, renderSidebar } from './sidebar.js';
 import { showProject, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
-import { onArtifactData } from './bridge-host.js';
+import { onArtifactData, tabBridgeOpen } from './bridge-host.js';
 import { appendEvent, jumpToEvent, refreshBranch, renderBranch, renderCardJump, renderTicketHead } from './thread.js';
 import { replaceHash } from './navstack.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
@@ -330,6 +330,8 @@ function hasUnsentWork() {
   if (sending || Date.now() - lastInputAt < QUIET_MS) return true;
   // A contraption's typing never reaches this document, and a reload would rebuild its frame at its start.
   if (framed()) return true;
+  // A page opened with Open saves through this tab, which a reload would forget.
+  if (tabBridgeOpen()) return true;
   if (document.querySelector('.attachments:not([hidden])') || uploadsRunning()) return true;
   return [...app.querySelectorAll('[data-draft]')].some((el) => el.value.trim());
 }

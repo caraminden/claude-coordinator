@@ -24,11 +24,25 @@
       const id = ++seq;
       const timer = setTimeout(() => {
         pending.delete(id);
+        if (op !== 'hello') cutOff();
         reject(new Error(op === 'hello' ? NO_VIEWER : 'Citadel did not answer'));
       }, ms);
       pending.set(id, { resolve, reject, timer });
       host.postMessage({ bridge: TAG, id, op, page: cfg.page, ...extra }, '*');
     });
+  }
+
+  // The viewer answered once and now doesn't (its Citadel tab reloaded or closed): what the page shows
+  // as kept isn't saved, so say so on the page, once.
+  let cutOffShown = false;
+  function cutOff() {
+    if (cutOffShown || !document.body) return;
+    cutOffShown = true;
+    const bar = document.createElement('div');
+    bar.setAttribute('role', 'alert');
+    bar.textContent = 'Not connected to Citadel any more, so changes here are not saved: reopen this page from Citadel.';
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;padding:0.4rem 1rem;background:Canvas;color:CanvasText;border-bottom:1px solid GrayText;font:0.9em system-ui,sans-serif;text-align:center';
+    document.body.append(bar);
   }
 
   // Who is looking and who made the page, once the viewer answers; false when there is no viewer.

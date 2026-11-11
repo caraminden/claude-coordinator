@@ -762,3 +762,89 @@ test('the head of the line waits for a lock held outside it (the queued restart)
     restart.kill('SIGKILL');
   }
 });
+
+// The pipeline failure drill's F3 (#553): a frozen unit or container stops a waiter (state T). It holds nothing, yet
+// everyone behind it waited on it with the lock free, and gave up.
+test('a waiter that is frozen is passed over: the one behind it takes the lock, and it goes when it wakes', { timeout: 60_000 }, async () => {
+  const state = queueState();
+  const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
+  const b = waiter(state, 'b', 'true');
+  let c: ReturnType<typeof waiter> | undefined;
+  try {
+    await until('b to say its place', () => /2nd in line/.test(b.stderr()));
+    process.kill(b.child.pid!, 'SIGSTOP');
+    c = waiter(state, 'c', 'true', { DEPLOY_QUEUE_STALL: '3' });
+    const cs = c.stderr;
+    await until('c to say its place', () => /in line/.test(cs()));
+    writeFileSync(join(state, 'go'), '');
+    assert.equal(await c.exit, 0, cs());
+    assert.deepEqual(order(state), ['a', 'c']);
+    process.kill(b.child.pid!, 'SIGCONT');
+    assert.equal(await b.exit, 0, b.stderr());
+    assert.deepEqual(order(state), ['a', 'c', 'b']);
+  } finally {
+    for (const w of [a, b, c]) w?.child.kill('SIGKILL');
+  }
+});
+
+test('giving up names the process at the head of the line, its state and whether the lock is held', { timeout: 60_000 }, async () => {
+  const state = queueState();
+  const a = waiter(state, 'a', 'sleep 60');
+  let b: ReturnType<typeof waiter> | undefined;
+  try {
+    await until('a to hold the lock', () => order(state).length === 1);
+    process.kill(a.child.pid!, 'SIGSTOP'); // the holder itself is frozen: nobody can pass it
+    b = waiter(state, 'b', 'true', { DEPLOY_QUEUE_STALL: '2' });
+    assert.equal(await b.exit, 1, b.stderr());
+    assert.match(b.stderr(), new RegExp(`nothing has moved for 0 min \\(ahead: a, starting; pid ${a.child.pid}, stopped; the lock is held\\), so this gave up`));
+  } finally {
+    for (const w of [a, b]) w?.child.kill('SIGKILL');
+  }
+});
+
+// F8: an orphan of a killed landing (its test run, its boot check) keeps the lock with no ticket, and the waiters
+// were told "a queued restart, or a landing started from a branch older than the line", which it never was.
+test('a waiter behind a lock held from outside the line names the processes that have the lock file open', { timeout: 60_000 }, async () => {
+  const state = queueState();
+  const outside = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 41', join(state, 'lock')], { stdio: 'ignore' }); // one process, the lock on its fd 9
+  let b: ReturnType<typeof waiter> | undefined;
+  try {
+    await until('the lock to be held', () => spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status !== 0);
+    b = waiter(state, 'b', 'true');
+    const bs = b.stderr;
+    await until('b to say what it waits for', () => /next in line/.test(bs()));
+    assert.match(bs(), /next in line for the deploy lock \(ahead: outside the line, the lock is open in pid \d+ \([^)]*sleep 41\)/);
+    assert.doesNotMatch(bs(), new RegExp(`pid ${b.child.pid} `), 'not itself');
+    outside.kill('SIGKILL');
+    assert.equal(await b.exit, 0, bs());
+  } finally {
+    outside.kill('SIGKILL');
+    b?.child.kill('SIGKILL');
+  }
+});
+
+// F4: the queued restart takes no ticket, so the waiters saw nothing move through it and gave up. It now says what
+// it is doing in <state>/restart ("<pid>" and its phase), and each new phase is progress.
+test("the queued restart's phases show to the waiters and count as progress", { timeout: 60_000 }, async () => {
+  const state = queueState();
+  const restart = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 42', join(state, 'lock')], { stdio: 'ignore' }); // one process, the lock on its fd 9
+  const phase = (text: string) => writeFileSync(join(state, 'restart'), `${restart.pid}\n${text}\n`);
+  let b: ReturnType<typeof waiter> | undefined;
+  try {
+    await until('the lock to be held', () => spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status !== 0);
+    phase('restarting citadel on abc1234 since 10:00');
+    b = waiter(state, 'b', 'true', { DEPLOY_QUEUE_STALL: '3' });
+    const bs = b.stderr;
+    await until('b to see the restart', () => /ahead: the queued restart, restarting citadel on abc1234 since 10:00\)/.test(bs()));
+    await new Promise((ok) => setTimeout(ok, 2000));
+    phase('rolling back to def5678 since 10:01');
+    await until('b to see the next phase', () => /ahead: the queued restart, rolling back to def5678 since 10:01\)/.test(bs()));
+    await new Promise((ok) => setTimeout(ok, 2000));
+    assert.doesNotMatch(bs(), /gave up/, 'past the stall since it arrived, but the restart moved');
+    restart.kill('SIGKILL');
+    assert.equal(await b.exit, 0, bs());
+  } finally {
+    restart.kill('SIGKILL');
+    b?.child.kill('SIGKILL');
+  }
+});

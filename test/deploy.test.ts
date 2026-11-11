@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawnSync, type ChildProcess } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -463,8 +463,15 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "$*" >>'${log}'\n[ "$2" = show ] && cat '${pidFile}'\nexit 0\n`, { mode: 0o755 });
   const restarts = () => (existsSync(log) ? execFileSync('grep', ['-c', ' restart ', log], { encoding: 'utf8' }).trim() : '0');
   let n = 0;
-  const srv = await standIn((req) => (req.url === '/api/health' ? health(Number(restarts()), ++n, { good, target, pidFile }) : 201));
   const state = join(live, '.git', 'cc-deploy');
+  // What a waiting landing would see: the restart's phase at each health check, and whether the lock was free when a report came.
+  const phases = new Set<string>();
+  const lockAtReport: boolean[] = [];
+  const srv = await standIn((req) => {
+    if (req.url !== '/api/health') return lockAtReport.push(spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status === 0), 201;
+    try { phases.add(readFileSync(join(state, 'restart'), 'utf8').split('\n')[1]); } catch {}
+    return health(Number(restarts()), ++n, { good, target, pidFile });
+  });
   mkdirSync(state);
   writeFileSync(join(state, 'reporters'), `${srv.url} tok 9\n`);
   const copy = join(root, `${name}-deploy.sh`);
@@ -476,7 +483,7 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
     }).then((o) => ({ status: 0, stderr: o.stderr }), (e) => ({ status: e.code as number, stderr: e.stderr as string }));
     const reports = srv.seen.filter((s) => s.url === '/api/tickets/9/deploy').map((s) => ({ ...JSON.parse(s.body), at: s.at }));
     const healthAt = srv.seen.filter((s) => s.url === '/api/health').map((s) => s.at);
-    return { ...r, good, target, reports, healthAt, head: git('rev-parse', 'HEAD'), lastGood: git('rev-parse', 'last-good'), restarts: Number(restarts()) };
+    return { ...r, good, target, reports, healthAt, phases: [...phases], lockAtReport, noteLeft: existsSync(join(state, 'restart')), head: git('rev-parse', 'HEAD'), lastGood: git('rev-parse', 'last-good'), restarts: Number(restarts()) };
   } finally {
     srv.close();
   }
@@ -494,6 +501,12 @@ test('the restart checks health again a little after the first OK, and rolls bac
   assert.equal(r.reports.length, 1);
   assert.equal(r.reports[0].ok, false);
   assert.match(r.reports[0].text, /answered healthy on it, then stopped answering or was restarted within 2 s\. Rolled back to last-good/);
+  // The drill's F4 (#553): waiting landings see the restart move, and the reports no longer hold the lock.
+  assert.equal(r.phases.length, 2, r.phases.join(' | '));
+  assert.match(r.phases[0], /^restarting citadel-test on [0-9a-f]{7} since \d\d:\d\d$/);
+  assert.match(r.phases[1], /^rolling back to [0-9a-f]{7} since \d\d:\d\d$/);
+  assert.deepEqual(r.lockAtReport, [true], 'the lock was free when the report was posted');
+  assert.equal(r.noteLeft, false);
   // Healthy at both checks, but systemd brought it back in between (Restart=always): it died, so it rolls back too.
   const back = await restartWith('respawned', (restarts, n, { good, target, pidFile }) => {
     if (restarts === 1 && n === 2) writeFileSync(pidFile, '200');
@@ -515,4 +528,6 @@ test('a server that is only slow at the second check is not rolled back, and the
   assert.equal(r.reports[0].ok, true);
   assert.ok(r.healthAt.length >= 3 && r.healthAt[1] - r.healthAt[0] >= 2000, 'checked again DEPLOY_SETTLE s after the first OK');
   assert.ok(r.reports[0].at > r.healthAt.at(-1)!, 'reported only after the second check');
+  assert.deepEqual(r.lockAtReport, [true], 'the lock was free when the report was posted');
+  assert.equal(r.noteLeft, false);
 });

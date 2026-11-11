@@ -59,7 +59,7 @@ async function run(files: string[], extra: Record<string, string> = {}, prep?: (
   const dir = join(root, String(++n));
   mkdirSync(join(dir, 'tools'), { recursive: true });
   mkdirSync(join(dir, 'test'));
-  for (const f of ['run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(dir, 'tools', f));
+  for (const f of ['run-tests.sh', 'deploy-queue.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(dir, 'tools', f));
   // A name with no fixture of its own always fails.
   for (const f of files) writeFileSync(join(dir, 'test', f), FIXTURES[f] ?? FIXTURES['always.test.mjs']);
   prep?.(dir);
@@ -95,6 +95,17 @@ test('a file that fails in the full run and passes alone is labelled a likely fl
   assert.equal(lines.length, 1, r.retro);
   assert.match(lines[0], /^- \d\d:\d\d:\d\dZ · flake · test\/once\.test\.mjs · load \d+(\.\d+)?( · |$)/);
   assert.match(r.retro, /^# Retro log: land\.sh/);
+});
+
+// The drill's F7 (#553): the full run and its reruns were one phase, about 930 s at worst against the waiters' 900 s stall.
+test('the reruns are a phase of their own in the landing\'s place in line, so the waiters see the line move', async () => {
+  const ticket = join(root, 'ticket');
+  writeFileSync(ticket, `${process.pid} 1\n1700000000\nticket/1-x\nrunning the tests since 10:00\n`);
+  const r = await run(['ok.test.mjs', 'once.test.mjs'], { DEPLOY_QUEUE_TICKET: ticket });
+  assert.equal(r.code, 1, r.log);
+  const lines = readFileSync(ticket, 'utf8').split('\n');
+  assert.deepEqual(lines.slice(0, 3), [`${process.pid} 1`, '1700000000', 'ticket/1-x'], 'the rest of the ticket is as it was');
+  assert.match(lines[3], /^rerunning 1 failed test file since \d\d:\d\d$/);
 });
 
 test('a file that fails again alone is a real failure: no flake line, the run fails', async () => {

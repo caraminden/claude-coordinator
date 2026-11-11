@@ -146,6 +146,10 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     }
     assert.match(await (await fetch(`${srv.base}/runner-agent.mjs`)).text(), /Citadel's CI runner agent/);
     assert.equal((await fetch(`${srv.base}/ci-runner/README.md`)).status, 404);
+    // The Android emulator's distro on the same desktop downloads its setup the same way (#533).
+    for (const name of ['setup.sh', 'citadel-android', 'install-sdk.sh']) assert.equal((await fetch(`${srv.base}/android-desktop/${name}`)).status, 200, name);
+    assert.equal((await fetch(`${srv.base}/android-desktop/perigee-key.sh`)).status, 404);
+    assert.equal((await fetch(`${srv.base}/android-desktop/constructor`)).status, 404);
   } finally {
     if (agent) await stopProcs([agent]);
     await srv.stop();

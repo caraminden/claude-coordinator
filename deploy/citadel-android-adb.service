@@ -1,0 +1,16 @@
+# perigee's side of the shared Android emulator on Cara's desktop (#533): the adb server every turn talks to on
+# 127.0.0.1:5037, and the console steps (`sms`). The emulator itself runs in WSL on the desktop
+# (deploy/desktop/android/), whose tunnel puts its ports on this box's loopback. Always on: it is a few MB.
+[Unit]
+Description=Citadel's adb server for the shared Android emulator on the desktop
+
+[Service]
+Type=simple
+Environment=ANDROID_HOME=%h/.local/share/android-sdk
+Environment=CITADEL_HEAVY_DIR=%h/.local/share/claude-coordinator/projects/.heavy
+ExecStart=%h/claude-coordinator/tools/citadel-android adb-serve
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

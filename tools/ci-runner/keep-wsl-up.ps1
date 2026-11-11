@@ -31,7 +31,8 @@ function Stop-With([string]$Why) {
   exit 1
 }
 
-$task = 'Citadel WSL runners'
+# One task per distro: the emulator's (#533, -Distro citadel-android) must not replace the runners'.
+$task = if ($Distro -eq 'citadel-ci') { 'Citadel WSL runners' } else { "Citadel WSL $Distro" }
 $wsl = Join-Path $env:SystemRoot 'System32\wsl.exe'
 if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18') { Stop-With 'Run this as the person whose WSL holds the distro, not as SYSTEM.' }
 if (-not (Test-Path $wsl)) { Stop-With 'No wsl.exe: install WSL first (README, "Linux runners in WSL").' }

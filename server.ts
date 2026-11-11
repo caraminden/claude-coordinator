@@ -564,10 +564,14 @@ function darkManifest(assets: Map<string, Buffer>) {
 const RUNNER_FILES = new Set(['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'sample-load.ps1',
   // The Linux agent in WSL (#510).
   'install-runner-agent.sh', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh', 'keep-wsl-up.ps1']);
+// The same for the Android emulator's distro on that desktop (#533): deploy/desktop/android/setup.sh and what it downloads.
+const ANDROID_FILES: Record<string, string> = { 'setup.sh': 'deploy/desktop/android/setup.sh', 'citadel-android': 'tools/citadel-android', 'install-sdk.sh': 'tools/android/install-sdk.sh' };
+const SETUP_PATH = /^\/(ci-runner|android-desktop)\//;
 async function serveRunnerFile(res: ServerResponse, path: string) {
-  const name = path.slice('/ci-runner/'.length);
-  if (!RUNNER_FILES.has(name)) throw new HttpError(404, 'Not found');
-  const body = await readFile(join(import.meta.dirname, 'tools', 'ci-runner', name));
+  const name = path.replace(SETUP_PATH, '');
+  const file = path.startsWith('/ci-runner/') ? RUNNER_FILES.has(name) && join('tools', 'ci-runner', name) : Object.hasOwn(ANDROID_FILES, name) && ANDROID_FILES[name];
+  if (!file) throw new HttpError(404, 'Not found');
+  const body = await readFile(join(import.meta.dirname, file));
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': body.length });
   res.end(body);
 }
@@ -647,7 +651,7 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
       // The front end's URLs are relative, so the page itself needs the trailing slash.
       if (!preview[2]) return void res.writeHead(302, { Location: `/${previewPath(Number(preview[1]))}${url.search}` }).end();
       await previews.proxy(req, res, Number(preview[1]), preview[2] + url.search, session?.agent === undefined ? session : null);
-    } else if (url.pathname.startsWith('/ci-runner/')) {
+    } else if (SETUP_PATH.test(url.pathname)) {
       await serveRunnerFile(res, url.pathname);
     } else {
       await serveStatic(req, res, url.pathname);
@@ -738,7 +742,7 @@ if (MACHINES_URL) {
       const url = requestUrl(req);
       if (agentApi.knows(url.pathname)) await agentApi(app, req, res, url, null);
       else if ((url.pathname === '/machine-agent.mjs' || url.pathname === '/runner-agent.mjs') && req.method === 'GET') await serveStatic(req, res, url.pathname);
-      else if (url.pathname.startsWith('/ci-runner/') && req.method === 'GET') await serveRunnerFile(res, url.pathname);
+      else if (SETUP_PATH.test(url.pathname) && req.method === 'GET') await serveRunnerFile(res, url.pathname);
       else throw new HttpError(404, 'Not found');
     } catch (err: any) {
       const status = err instanceof HttpError ? err.status : 500;

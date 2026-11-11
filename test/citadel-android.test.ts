@@ -358,3 +358,20 @@ test('adb-serve keeps the adb server here and answers console steps with the tok
     consoleServer.close();
   }
 });
+
+test("the desktop key's script on perigee answers its two questions and nothing else", () => {
+  const home = join(root, 'home-key');
+  mkdirSync(join(home, '.android'), { recursive: true });
+  writeFileSync(join(home, '.android', 'adbkey.pub'), 'QAAAAKEY cara@perigee\n');
+  writeFileSync(join(home, '.emulator_console_auth_token'), 'sekrit\n');
+  const script = join(import.meta.dirname, '..', 'deploy', 'desktop', 'android', 'perigee-key.sh');
+  const ask = (cmd?: string) => spawnSync(script, [], { env: { PATH: process.env.PATH, HOME: home, CITADEL_ANDROID_PORT: '1', ...(cmd === undefined ? {} : { SSH_ORIGINAL_COMMAND: cmd }) }, encoding: 'utf8' });
+  assert.equal(ask('facts').stdout, 'adbkey QAAAAKEY cara@perigee\ntoken sekrit\n');
+  for (const cmd of [undefined, 'cat /etc/passwd', 'facts; id']) {
+    const r = ask(cmd);
+    assert.equal(r.status, 2);
+    assert.equal(r.stdout, 'Usage: facts | takeover\n');
+  }
+  // Port 2, never the real emulator's: on perigee the live tunnel holds that one, and takeover would end it.
+  assert.deepEqual([ask('takeover').status, ask('takeover').stdout], [0, '']);
+});

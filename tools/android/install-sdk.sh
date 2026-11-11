@@ -27,9 +27,15 @@ BOOT_SHA1='e025545c62a8e64c7559119566a569fb1dec5f60'
 [ "$(id -u)" != 0 ] || { echo 'Run as cara, not root.' >&2; exit 1; }
 [ ! -e /run/.containerenv ] || { echo 'Run on the host: in a container the SDK folder is read-only.' >&2; exit 1; }
 
-echo "== JDK 21 ($JDK, through mise)"
-mise use -g "$JDK" >/dev/null
-JAVA_HOME="$(mise where "$JDK")"
+if [ -n "${CITADEL_ANDROID_JAVA_HOME:-}" ]; then
+  # The emulator's distro on Cara's desktop (#533, deploy/desktop/android/setup.sh): Ubuntu's own JRE, no mise.
+  echo "== JDK ($CITADEL_ANDROID_JAVA_HOME)"
+  JAVA_HOME=$CITADEL_ANDROID_JAVA_HOME
+else
+  echo "== JDK 21 ($JDK, through mise)"
+  mise use -g "$JDK" >/dev/null
+  JAVA_HOME="$(mise where "$JDK")"
+fi
 export JAVA_HOME
 "$JAVA_HOME/bin/java" -version 2>&1 | head -1
 

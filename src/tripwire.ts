@@ -723,8 +723,11 @@ function sqliteReason(args: Word[], st: State, cfg: TripwireConfig): string | nu
   const [db, ...sql] = sqliteOperands(args);
   if (!db) return null;
   const file = db.text.startsWith('file:') ? { ...db, text: db.text.slice(5).replace(/\?.*$/, '') } : db;
-  const p = pathsOf(file, st, cfg)[0];
-  if (!p || !under(p, cfg.data)) return null;
+  // The turn's own scheme folder (its worktrees, TMPDIRs) holds the scheme's own databases, not the live
+  // ones (#468 S01-5); where a symlink or glob there leads still counts.
+  const own = join(cfg.data, 'projects', String(cfg.project));
+  const p = pathsOf(file, st, cfg).find((x) => under(x, cfg.data) && !under(x, own));
+  if (!p) return null;
   const readonly = a.some((t) => t === '-readonly' || t === '--readonly' || t.includes('mode=ro'));
   if (/^state\b/.test(basename(p)) && !readonly) return `${basename(p)} holds every minion's Claude session. Open it with \`sqlite3 -readonly\`.`;
   if (!sqlShown(args)) return "SQL piped in or read from a file can't be checked for the credentials table. Put it in the command: `sqlite3 -readonly <db> 'select …'`.";

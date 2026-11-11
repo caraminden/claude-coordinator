@@ -304,6 +304,14 @@ const BLOCKED: [string, string?][] = [
   ['for p in $(pgrep node); do readlink /proc/$q/cwd && kill $p; done'],
   // a per-pid check doesn't excuse a kill fed by the socket table
   ['for p in $(ss -ltnp | grep node | grep -o "[0-9]\\{4,\\}"); do [ "$(readlink /proc/$p/cwd)" = "$PWD" ] && kill $p; done'],
+  // #468 S01-5: the sqlite3 rules still cover the live data dir's own databases and other schemes' folders
+  [`sqlite3 ${data}/state.db 'create table t(x)'`],
+  [`sqlite3 ${data}/coordinator.db < q.sql`],
+  [`cd ${data} && sqlite3 -readonly coordinator.db .dump`],
+  [`sqlite3 ${data}/backups/coordinator-2026-11-01.db "select * from credentials"`],
+  [`sqlite3 ${data}/projects/1/tickets/3/state.db "select 1"`],
+  [`sqlite3 -readonly ${data}/projects/1/repo/app.db < q.sql`],
+  ["sqlite3 ~/.local/share/claude-*/state.db 'select 1'"],
 ];
 
 const ALLOWED = [
@@ -482,6 +490,13 @@ const ALLOWED = [
   'pgrep -f dev.ts | while read p; do [ "$(readlink /proc/$p/cwd)" = "$PWD" ] && kill $p; done',
   'ps -p $PID -o pid= && kill $PID',
   'kill $(ps -o pid= -p $(cat $TMPDIR/dev.pid))',
+  // #468 S01-5: a minion's own databases, in its worktree or TMPDIR (under the scheme's own folder)
+  'sqlite3 app.db < schema.sql',
+  'cat schema.sql | sqlite3 "$TMPDIR/test.db"',
+  'sqlite3 app.db .dump',
+  "sqlite3 dev.db 'select * from credentials'",
+  "sqlite3 state.db 'create table t(x)'",
+  "sqlite3 \"$TMPDIR/state.db\" 'select 1'",
 ];
 
 // Things a person may reasonably allow once: a card for that exact call.

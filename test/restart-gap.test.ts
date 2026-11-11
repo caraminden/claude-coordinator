@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { createServer as createHttpServer, type Server } from 'node:http';
+import { Agent, createServer as createHttpServer, request, type Server } from 'node:http';
+import type { Duplex } from 'node:stream';
 import type { AddressInfo } from 'node:net';
 import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
@@ -94,4 +95,51 @@ test('on SIGTERM the server ends its event streams and exits within the grace pe
   await reading; // the stream ends rather than hanging on
   assert.equal(await exited, 0);
   assert.ok(Date.now() - started < 6000, `took ${Date.now() - started} ms`);
+});
+
+// Requests made while the server restarts wait in systemd's socket for the next one, so every second the old
+// one lingers is a second every click and page load stalls. It used to sit out its whole grace: a keep-alive
+// connection (Caddy keeps its connections open) whose request was still running stayed open once answered,
+// and a contraption's websocket never closes by itself (#493).
+test('on SIGTERM the server exits at once despite keep-alive connections and open websockets', async () => {
+  const contraption = createHttpServer((_req, res) => res.end('ok'));
+  contraption.on('upgrade', (_req, socket: Duplex) => {
+    socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n');
+    socket.pipe(socket);
+  });
+  const contraptionPort = await freePort();
+  await new Promise<void>((r) => contraption.listen(contraptionPort, '127.0.0.1', r));
+  after(() => {
+    contraption.closeAllConnections();
+    contraption.close();
+  });
+  const { base, cookie, call, proc: server } = await bootServer({ root: mkdtempSync(join(root, 'ws-')), env: { TURN_UNITS: '0' } });
+  procs.push(server);
+  const made = await call('/api/contraptions', { name: 'stub', title: 'Stub', port: contraptionPort, open_paths: ['/ws'] });
+  assert.equal(made.status, 201, JSON.stringify(made.data));
+
+  const ws = await new Promise<Duplex>((resolve, reject) => {
+    const req = request(`${base}/apps/stub/ws`, { headers: { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==' } });
+    req.on('upgrade', (_res, socket) => resolve(socket));
+    req.on('response', (res) => reject(new Error(`no upgrade: ${res.statusCode}`)));
+    req.on('error', reject);
+    req.end();
+  });
+  const wsClosed = new Promise((r) => ws.on('close', r).on('error', () => {}));
+  // Caddy's way: one kept-alive connection, here holding the event stream.
+  const agent = new Agent({ keepAlive: true });
+  const streamEnded = new Promise<void>((resolve, reject) => {
+    const req = request(`${base}/api/stream`, { agent, headers: { Cookie: cookie } }, (res) => res.resume().on('end', resolve));
+    req.on('error', reject);
+    req.end();
+  });
+  await new Promise((r) => setTimeout(r, 200));
+
+  const started = Date.now();
+  const exited = new Promise<number | null>((r) => server.once('exit', r));
+  server.kill('SIGTERM');
+  await Promise.all([streamEnded, wsClosed]);
+  assert.equal(await exited, 0);
+  agent.destroy();
+  assert.ok(Date.now() - started < 1500, `took ${Date.now() - started} ms`);
 });

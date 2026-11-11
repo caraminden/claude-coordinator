@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import type { Duplex } from 'node:stream';
 import { extname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { isArtifact } from './src/artifacts.ts';
@@ -632,7 +633,11 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
   }
 });
 
+// Contraptions' websockets, which a restart ends (their pages reconnect): open ones never let server.close finish.
+const upgraded = new Set<Duplex>();
 server.on('upgrade', (req, socket, head) => {
+  upgraded.add(socket);
+  socket.once('close', () => upgraded.delete(socket));
   try {
     apps.upgrade(req, socket, head);
   } catch (err) {
@@ -658,8 +663,9 @@ if (process.env.LISTEN_FDS === '1' && process.env.LISTEN_PID === String(process.
 }
 
 // A restart: running turns carry on in their units, and the next server re-attaches. Stop taking
-// requests, end the ones that never finish (event streams, approval long-polls; their callers come
-// back), and give the rest a few seconds.
+// requests, end the ones that never finish (event streams, approval long-polls, websockets; their
+// callers come back), and exit once the rest are answered, a few seconds at most. Requests made
+// meanwhile wait in systemd's socket for the next server, so every second spent here is a stall (#493).
 const SHUTDOWN_GRACE_MS = 5000;
 process.on('SIGTERM', () => {
   console.log('SIGTERM: finishing requests, then exiting; running turns carry on.');
@@ -667,9 +673,18 @@ process.on('SIGTERM', () => {
   runner.detachAll();
   server.close(() => process.exit(0));
   for (const c of clients.keys()) c.end();
+  for (const s of upgraded) s.destroy();
   runner.approvals.wakeAll();
+  // A kept-alive connection (Caddy's) stays open after answering a request that was running at close(),
+  // until its keep-alive timeout: close each one as soon as it goes idle.
   server.closeIdleConnections();
-  setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
+  setInterval(() => server.closeIdleConnections(), 50).unref();
+  setTimeout(() => {
+    server.getConnections((_err, n) => {
+      console.log(`SIGTERM: exiting with ${n} connection(s) still open after ${SHUTDOWN_GRACE_MS / 1000} s`);
+      process.exit(0);
+    });
+  }, SHUTDOWN_GRACE_MS).unref();
 });
 
 // A front-end-only deploy: re-read public/ and tell open tabs, which reload once nobody is typing.

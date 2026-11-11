@@ -483,8 +483,8 @@ test('a waiter that is killed leaves the line, and the one behind it goes next',
     c = waiter(state, 'c', 'true');
     const cs = c.stderr;
     await until('c to see its place', () => /3rd in line/.test(cs()));
-    const [ta, tb, tc] = tickets(state);
-    assert.ok(tb, 'three tickets in line');
+    const [ta, , tc] = tickets(state);
+    assert.ok(tc, 'three tickets in line');
     b.child.kill('SIGKILL');
     await b.exit;
     // Not counted right after the kill: c may already have removed it by then.
@@ -507,19 +507,21 @@ const isZombie = (pid: number) => { try { return /\) Z /.test(readFileSync(`/pro
 test('a killed waiter whose parent never reaps it leaves the line too', async () => {
   const state = queueState();
   const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
-  const parent = spawn('bash', ['-c', 'bash -c \'. "$0"; queue_lock "$1" b\' "$0" "$1" & echo $! >"$1/b.pid"; exec sleep 600', queueLib, state], { stdio: 'ignore', env: { ...env, DEPLOY_QUEUE_POLL: '0.05' } });
   let c: ReturnType<typeof waiter> | undefined;
+  let parent: ReturnType<typeof spawn> | undefined;
   try {
     await until('a to hold the lock', () => order(state).length === 1);
+    parent = spawn('bash', ['-c', 'bash -c \'. "$0"; queue_lock "$1" b\' "$0" "$1" & echo $! >"$1/b.pid"; exec sleep 600', queueLib, state], { stdio: 'ignore', env: { ...env, DEPLOY_QUEUE_POLL: '0.05' } });
     await until("b's ticket", () => issued(state) === 2);
     c = waiter(state, 'c', 'true');
     const cs = c.stderr;
     await until('c to see its place', () => /3rd in line/.test(cs()));
     const [ta, , tc] = tickets(state);
+    assert.ok(tc, 'three tickets in line');
     const b = Number(readFileSync(join(state, 'b.pid'), 'utf8'));
     process.kill(b, 'SIGKILL');
     await until('b to be a zombie', () => isZombie(b));
-    await until('c to move up past the zombie', () => /2nd in line/.test(cs()), 5_000);
+    await until('c to move up past the zombie', () => /2nd in line/.test(cs()));
     assert.deepEqual(tickets(state), [ta, tc], "the zombie's ticket was removed");
     assert.ok(isZombie(b), 'b was still a zombie when c moved up');
     writeFileSync(join(state, 'go'), '');
@@ -529,7 +531,7 @@ test('a killed waiter whose parent never reaps it leaves the line too', async ()
   } finally {
     writeFileSync(join(state, 'go'), '');
     c?.child.kill('SIGKILL');
-    parent.kill('SIGKILL');
+    parent?.kill('SIGKILL');
   }
 });
 

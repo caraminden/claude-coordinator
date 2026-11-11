@@ -318,19 +318,21 @@ test('a killed waiter whose parent never reaps it leaves the line too', async ()
   const q = queueSetup(3);
   const a = q.land(1);
   const pidFile = join(q.dir, 'b.pid');
-  const parent = spawn('bash', ['-c', 'bash "$0" & echo $! >"$1"; exec sleep 600', join(q.wts[1], 'tools', 'land.sh'), pidFile], { cwd: q.wts[1], stdio: 'ignore', env: { ...env, GATE: join(q.dir, 'gate'), LAND_QUEUE_POLL: '0.05' } });
   let c: ReturnType<typeof q.land> | undefined;
+  let parent: ReturnType<typeof spawn> | undefined;
   try {
     await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
+    parent = spawn('bash', ['-c', 'bash "$0" & echo $! >"$1"; exec sleep 600', join(q.wts[1], 'tools', 'land.sh'), pidFile], { cwd: q.wts[1], stdio: 'ignore', env: { ...env, GATE: join(q.dir, 'gate'), LAND_QUEUE_POLL: '0.05' } });
     await until("b's ticket", () => q.issued() === 2);
     c = q.land(3);
     const cs = c.stderr;
     await until('c to see its place', () => /3rd in line/.test(cs()));
     const [ta, , tc] = q.tickets();
+    assert.ok(tc, 'three tickets in line');
     const b = Number(readFileSync(pidFile, 'utf8'));
     process.kill(b, 'SIGKILL');
     await until('b to be a zombie', () => isZombie(b));
-    await until('c to move up past the zombie', () => /2nd in line/.test(cs()), 5_000);
+    await until('c to move up past the zombie', () => /2nd in line/.test(cs()));
     assert.deepEqual(q.tickets(), [ta, tc], "the zombie's ticket was removed");
     assert.ok(isZombie(b), 'b was still a zombie when c moved up');
     q.open();
@@ -340,7 +342,7 @@ test('a killed waiter whose parent never reaps it leaves the line too', async ()
   } finally {
     q.open();
     c?.child.kill('SIGKILL'); // with nothing ahead it would wait out the stall limit
-    parent.kill('SIGKILL');
+    parent?.kill('SIGKILL');
   }
 });
 

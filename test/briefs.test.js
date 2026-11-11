@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { briefMessage, findBriefs, matchType } from '../public/briefs.js';
+import { renderMarkdown } from '../public/ui/markdown.js';
 
 const retro = `# Citadel retrospective
 
@@ -98,4 +99,10 @@ test('a fence closes only on its own kind and length, as markdownDoc reads it (#
   assert.deepEqual(findBriefs(nested, 'x.md').map((b) => [b.index, b.heading, b.body.split('\n').length]), [[0, 'Brief 1: Nested', 7], [1, 'Brief 2: Next', 2]]);
   const tilde = '## Brief 1: Tilde\n~~~sh\n# a comment\n~~~\n## Brief 2: Next\nx';
   assert.deepEqual(findBriefs(tilde, 'x.md').map((b) => [b.index, b.body]), [[0, '## Brief 1: Tilde\n~~~sh\n# a comment\n~~~'], [1, '## Brief 2: Next\nx']]);
+});
+
+test('a one-line ```code``` is inline code, as markdownDoc reads it, and opens no fence (#468 S11-4 review)', () => {
+  const src = '## Brief 1: A\n```npm test```\ntext\n## Brief 2: B\nx';
+  assert.deepEqual(findBriefs(src, 'x.md').map((b) => [b.index, b.body]), [[0, '## Brief 1: A\n```npm test```\ntext'], [1, '## Brief 2: B\nx']]);
+  assert.match(renderMarkdown(src), /Brief 2: B<\/h\d>/, 'the renderer shows both headings');
 });

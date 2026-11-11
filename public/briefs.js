@@ -2,8 +2,8 @@
 // heading that starts with "Brief", up to the next heading as high or higher, or a whole handoff-*.md
 // file. No DOM here, so test/briefs.test.js can run it.
 
-// public/ui/markdown.js's FENCE (not exported there).
-const FENCE = /^ {0,3}(`{3,}|~{3,})\s*([^`\s]*)/;
+// public/ui/markdown.js's FENCE (not exported there): keep the two the same. A ```code``` line is inline code, not a fence.
+const FENCE = /^ {0,3}(`{3,}(?!.*`)|~{3,})\s*([^`\s]*)/;
 
 /** The headings markdownDoc renders at the top level, in order, with the line each is on. */
 function headings(lines) {

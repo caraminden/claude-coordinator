@@ -499,6 +499,8 @@ const METADATA = new Set(['ls', 'stat', 'test', '[', '[[', 'du', 'find', 'namei'
 const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'time', 'timeout', 'stdbuf', 'xargs', 'ionice', 'chrt', 'flock']);
 const KEYWORDS = new Set(['!', '{', '}', 'then', 'do', 'else', 'if', 'while', 'until', 'elif', 'fi', 'done', 'esac']);
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
+// node, tsx, bun and deno options whose value is the next word (#468 S01-11).
+const RUNNER_VALUE = /^(-r|--require|--import|--loader|--experimental-loader|-C|--conditions|--env-file|--env-file-if-exists|--input-type|--test-reporter|--test-reporter-destination|--watch-path|--inspect-port|--title|--disable-warning|--redirect-warnings|--preload|--config|--tsconfig|--cwd)$/;
 // ssh and friends take key paths and remote paths; their arguments are not local reads or writes.
 const REMOTE = new Set(['ssh', 'scp', 'sftp', 'ssh-add', 'ssh-keygen', 'ssh-copy-id', 'mosh']);
 const APP_UNITS = /^(claude-coordinator|perigee-godot[\w-]*|citadel-claude[\w-]*)(\.service)?$/;
@@ -1033,7 +1035,8 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
       const text = (w: Word) => (w.unknown ? w.tmpl!.replace(/\0([A-Za-z_]\w*)\0/g, '${$1}').replace(/\0\0/g, '${__unknown}') : w.text);
       const scripts = script.length === 1 ? expand(script[0], st, cfg).map(text) : [script.map((w) => text(expand(w, st, cfg)[0])).join(' ')];
       for (const inner of scripts) {
-        const why = commandReason(inner, { cwd: st.cwd, vars: new Set([...st.vars, '__unknown']), values: st.values }, cfg);
+        // `DATA_DIR=… PORT=… bash -c '…'`: the shell starts with the variables set before it (#468 S01-11).
+        const why = commandReason(inner, { cwd: st.cwd, vars: new Set([...vars, '__unknown']), values: st.values }, cfg);
         if (why) return why;
       }
       return null;
@@ -1116,8 +1119,16 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
 
   const runner = words.findIndex((w, k) => k >= i && /^(node|tsx|bun|deno|ts-node)$/.test(basename(w.text)));
   const npmStart = /^(npm|pnpm|yarn)$/.test(name) && (args[0]?.text === 'start' || (args[0]?.text === 'run' && args[1]?.text === 'start'));
+  // The runner's own words: its options, their values (--import ./x.ts) and its script, not the script's arguments
+  // (`node tools/count.ts src/server.ts`, #468 S01-11). With -e or -p there's no script file, so every word counts.
+  const runnerWords = (ws: Word[]): Word[] => {
+    if (ws.some((w) => /^(-e|--eval|-p|--print)$/.test(w.text))) return ws;
+    const script = ws.findIndex((w, k) => !w.text.startsWith('-') && /[./]/.test(w.text) && !RUNNER_VALUE.test(ws[k - 1]?.text ?? ''));
+    return script < 0 ? ws : ws.slice(0, script + 1);
+  };
+  const own = runner >= 0 ? runnerWords(words.slice(runner + 1)) : [];
   const runsServer =
-    (runner >= 0 && !words.slice(runner + 1).some((w) => w.text === '--check' || w.text === '-c') && words.slice(runner + 1).some((w) => basename(w.text) === 'server.ts' || /\b(import|require)\s*\(\s*['"`][^'"`]*server\.ts['"`]/.test(w.text))) ||
+    (runner >= 0 && !own.some((w) => w.text === '--check' || w.text === '-c') && own.some((w) => basename(w.text) === 'server.ts' || /\b(import|require)\s*\(\s*['"`][^'"`]*server\.ts['"`]/.test(w.text))) ||
     (npmStart && !!st.cwd && existsSync(join(st.cwd, 'package.json')) && readFileSync(join(st.cwd, 'package.json'), 'utf8').includes('server.ts'));
   if (runsServer && !(vars.has('DATA_DIR') && vars.has('PORT'))) {
     return hard('Running server.ts without both DATA_DIR and PORT set points it at the live database and port (its schema changes would run on live data). Use `DATA_DIR=$(mktemp -d) PORT=<free port> node server.ts` (copy the DB in if you need data), or `node --check server.ts` for a syntax check.');

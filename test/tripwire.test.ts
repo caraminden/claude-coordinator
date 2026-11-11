@@ -325,6 +325,13 @@ const BLOCKED: [string, string?][] = [
   [`[[ $(echo x > ${data}/state.db) ]]`],
   ['echo $(( $(pkill -f node) + 1 ))'],
   [`echo "$(( n > 1 ))" > ${data}/state.db`],
+  // #468 S01-11: server.ts as the script, an option's value, or the argument of an eval still runs it
+  ['node --import ./x.ts server.ts'],
+  ['node -r ./x.cjs --env-file .env server.ts'],
+  ['node -e "import(process.argv[1])" server.ts'],
+  ['deno run -A server.ts'],
+  ["PORT=8700 bash -c 'node server.ts'"],
+  ["DATA_DIR=/tmp/d bash -c 'node tools/x.ts && node server.ts'"],
 ];
 
 const ALLOWED = [
@@ -520,6 +527,10 @@ const ALLOWED = [
   '[[ $a < $b && $c > $d ]] && echo ok',
   'echo $(( n > $m )) "$(( n << $k ))"',
   'while (( i < $N )); do i=$((i + 1)); done',
+  // #468 S01-11: server.ts as another script's argument, and a shell started with both variables set
+  'node tools/count.ts src/server.ts',
+  'node --test-reporter spec tools/count.ts ~/claude-coordinator/server.ts',
+  "DATA_DIR=/tmp/d PORT=8700 bash -c 'node server.ts'",
 ];
 
 // Things a person may reasonably allow once: a card for that exact call.

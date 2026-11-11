@@ -72,3 +72,22 @@ test('a run whose reporters node would pair differently, or that is not a test r
   assert.equal(script.out, '1 unset\n');
   assert.equal(existsSync(progress), false);
 });
+
+test('events it cannot make sense of are passed over, and it reads the stream to its end', async () => {
+  const { default: progress } = await import('../tools/progress-reporter.ts');
+  const dir = suite({});
+  const file = join(dir, 't', 'a.test.mjs');
+  const events: any[] = [null, {}, { type: 'test:enqueue' }, { type: 'test:enqueue', data: null }, { type: 'test:enqueue', data: { name: 42, file } },
+    { type: 'test:enqueue', data: { name: file, file } }, { type: 'test:complete', data: { name: file, file } }];
+  let read = 0;
+  async function* source() { for (const e of events) { read++; yield e; } }
+  const before = process.env.CITADEL_TEST_PROGRESS_TO;
+  process.env.CITADEL_TEST_PROGRESS_TO = join(dir, 'progress');
+  try {
+    for await (const _ of progress(source())) assert.fail('it says nothing');
+  } finally {
+    if (before === undefined) delete process.env.CITADEL_TEST_PROGRESS_TO; else process.env.CITADEL_TEST_PROGRESS_TO = before;
+  }
+  assert.equal(read, events.length);
+  assert.equal(readFileSync(join(dir, 'progress'), 'utf8'), '1\n1\n\n');
+});

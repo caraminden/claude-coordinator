@@ -42,7 +42,7 @@ scope+=(--)
 failed=$(mktemp)
 progress=${log%.log}.progress
 unset CITADEL_TEST_PROGRESS # the reruns below count nothing
-rm -f "$progress"
+rm -f "$progress" "$progress.tmp"
 trap 'rm -f "$failed" "$progress" "$progress.tmp"' EXIT
 CITADEL_TEST_PROGRESS=$progress timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-concurrency="$concurrency" --test-force-exit --test-reporter=spec --test-reporter-destination=stdout \
   --test-reporter="$tools/failed-files-reporter.ts" --test-reporter-destination="$failed" test/ >"$log" 2>&1

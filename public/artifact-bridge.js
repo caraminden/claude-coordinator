@@ -75,7 +75,8 @@
   // Flushed but not yet answered: a refresh meanwhile keeps them on top, as it does the queue.
   const inFlight = new Map();
   function write(key, value) {
-    const v = value === undefined ? undefined : clone(value);
+    // null (NaN and the like clone to it) is the wire's delete, so it deletes here too.
+    const v = value === undefined ? undefined : clone(value) ?? undefined;
     if (v === undefined) data.delete(key);
     else data.set(key, v);
     notify([key]);

@@ -77,6 +77,19 @@ test('one write request is out at a time, so a later flush cannot overtake an ea
   await second;
 });
 
+test('storing null (or NaN, which JSON makes null) deletes the key here too, as the server does (#468 S13-10)', async () => {
+  const p = page([['answer', 1], ['storage/n', 2]]);
+  p.answer('hello', { person: 'Cara', entries: [{ key: 'answer', value: 1 }, { key: 'storage/n', value: 2 }] });
+  await p.ctx.citadel.ready;
+  const a = p.ctx.citadel.storage.set('answer', null);
+  const n = p.ctx.window.storage.set('n', NaN);
+  assert.equal(JSON.stringify(await p.ctx.citadel.storage.list()), '[]');
+  assert.equal(await p.ctx.window.storage.get('n'), null);
+  await wait(10);
+  p.answer('write', { entries: [] });
+  await Promise.all([a, n]);
+});
+
 test('a store refresh keeps writes that are on their way on top (#468 S13-7)', async () => {
   const p = page([['k', 'a']]);
   const set = p.ctx.citadel.storage.set('k', 'b');

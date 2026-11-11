@@ -68,6 +68,8 @@ try {
   // held for the usage limit in the copy.
   begin('migrating the copy');
   const turnStore = new Store(copy);
+  // A running ultra review's record names its live working folder, which a server recovering it would delete.
+  turnStore.deleteSetting('ultrareview_running');
   const busiest = turnStore.db.prepare(`select c.id, c.project_id, c.permission_mode, c.branch from tickets c where c.kind = 'coordinator'
     order by (select count(*) from tickets t where t.project_id = c.project_id) desc limit 1`).get() as any;
   const turnChecks: { what: string; id: number; dir: string }[] = [];

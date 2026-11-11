@@ -3,7 +3,7 @@
 // doesn't open there either, and Citadel's page must still boot without a console error.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,4 +40,30 @@ test('a contraption whose service is down and whose keys don\'t open in the copy
   const run = await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), repo, db], { timeout: 190_000 })
     .then(({ stdout }) => ({ ok: true, out: stdout }), (err) => ({ ok: false, out: `${err.stderr}` }));
   assert.ok(run.ok, run.out.slice(0, 2000));
+});
+
+// The live ultra review's record names its live working folder, which a server that recovers it would
+// delete; the copy must not carry it, whatever the checked server.ts does with it (#468 S08-1).
+test("the copy the checked server boots on has no running ultra review's record", { timeout: 60_000 }, async () => {
+  const dir = join(root, 'ultrareview');
+  const db = join(dir, 'coordinator.db');
+  mkdirSync(dir);
+  const store = new Store(db);
+  store.setSetting('ultrareview_running', { dir: join(dir, 'live-review'), pid: 1 });
+  store.db.close();
+  // A checkout whose server.ts only notes what the copy holds, then exits.
+  const checkout = join(dir, 'checkout');
+  mkdirSync(join(checkout, 'public'), { recursive: true });
+  mkdirSync(join(checkout, 'src'));
+  writeFileSync(join(checkout, 'src', 'db.ts'), `export * from ${JSON.stringify(join(repo, 'src', 'db.ts'))};\n`);
+  const seen = join(checkout, 'seen.txt');
+  writeFileSync(join(checkout, 'server.ts'), `import { DatabaseSync } from 'node:sqlite';
+import { writeFileSync } from 'node:fs';
+const db = new DatabaseSync(process.env.DATA_DIR + '/coordinator.db', { readOnly: true });
+const row = db.prepare("SELECT value FROM settings WHERE key = 'ultrareview_running'").get();
+writeFileSync(${JSON.stringify(seen)}, row ? String(row.value) : 'none');
+process.exit(1);
+`);
+  await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), checkout, db], { timeout: 50_000 }).catch(() => {});
+  assert.equal(readFileSync(seen, 'utf8'), 'none');
 });

@@ -75,7 +75,9 @@ The restart after that (the next deploy) starts it clean. Check 1 below should t
   every 15 s to whatever matches.
 - Still `node`, so still idle: the short-lived tripwire, link-check, wording and scheme-refs hooks;
   a minion's own `node` commands (`node --test test/x.ts` typed by hand, other schemes' mise node,
-  vitest and npm); previews and dev copies; contraptions started as `node server.ts`. For another
+  vitest and npm); previews and dev copies; contraptions started as `node server.ts`; a contraption
+  turn's machine MCP servers and Codex shim (`src/contraption-turns.ts`); the Codex review driver
+  (`tools/citadel-codex-review`, `src/codex-review.ts`). For another
   scheme, the same pattern applies: run its node from a link not named `node`, and preload the
   `process.execPath` change for test runners that spawn children.
 

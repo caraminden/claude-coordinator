@@ -80,7 +80,7 @@ export function failedTests(text: string, runners: Runner[] = ['any']): number {
 
 /** What a simple command starts with when it runs tests, after env assignments and wrappers like `timeout 300`. */
 const RUNNERS: [RegExp, Runner][] = [
-  [/^node\b[^|]*\s--test\b/, 'node'],
+  [/^(?:\S*\/)?(?:citadel-)?node\b[^|]*\s--test\b/, 'node'],
   [/^dotnet\s+test\b/, 'dotnet'],
   [/^(?:(?:python3?|py)\s+-m\s+|(?:uv|poetry|pipenv)\s+run\s+)?(?:pytest|py\.test)\b/, 'pytest'],
   [/^(?:(?:npx|pnpm\s+exec|yarn|bunx)\s+)?(?:\S*\/)?(?:jest|vitest)\b/, 'jest'],

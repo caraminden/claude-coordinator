@@ -362,6 +362,7 @@ export function threadRow(t, href = threadHref(t)) {
     threadFullName(t),
     [st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, !coord && t.parent ? `from #${t.parent}` : '', `updated ${ago(t.updated_at)}`, t.cost ? `${share ? `${share} of the server login's weekly limit, ` : ''}${costText(t.cost)} at API prices` : ''].filter(Boolean).join(' · '),
     note,
+    !coord && t.status !== 'closed' && t.wait ? t.wait.text : '',
     !coord && t.ship ? `${t.ship.text} · ${t.ship.commit}` : '',
     pnote ? `✎ ${pnote.text} (${pnote.by})` : '',
   ].filter(Boolean).join('\n');

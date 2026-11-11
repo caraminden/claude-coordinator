@@ -3,7 +3,7 @@
 import { h } from './base.js';
 
 /** A landing's stages in order (src/waits.ts TRACK): a wait at one of these shows the track. */
-export const TRACK = [['line', 'Land line'], ['rebase', 'Rebase'], ['test', 'Test'], ['deploy', 'Deploy'], ['restart', 'Restart'], ['live', 'Live']];
+export const TRACK = [['line', 'Land line', 'Line'], ['rebase', 'Rebase'], ['test', 'Test'], ['deploy', 'Deploy'], ['restart', 'Restart'], ['live', 'Live']];
 const OWN = { slot: 'Heavy slot', run: 'Heavy run' };
 /** Running over the usual by more than this turns the bar amber. */
 const LATE = 1.15;
@@ -39,8 +39,8 @@ export function waitBar(w, cls = 'wait-bar') {
 export function waitBlock(w, open, toggle) {
   const at = TRACK.findIndex(([key]) => key === w.stage);
   const label = at >= 0 ? TRACK[at][1] : OWN[w.stage] ?? w.stage;
-  const track = open && at >= 0 ? h('ol', { class: 'wait-track' }, TRACK.map(([, name], i) =>
-    h('li', { class: i < at ? 'done' : i === at ? 'now' : '' }, h('i'), h('span', {}, name)))) : '';
+  const track = open && at >= 0 ? h('ol', { class: 'wait-track' }, TRACK.map(([, name, short = name], i) =>
+    h('li', { class: i < at ? 'done' : i === at ? 'now' : '' }, h('i'), h('span', {}, short)))) : '';
   const head = h(at >= 0 ? 'button' : 'div', { class: `wait-head f-${waitFam(w)}`, ...(at >= 0 ? { type: 'button', 'aria-expanded': String(open), onclick: toggle } : {}) },
     h('span', { class: 'text' }, h('b', {}, label), at >= 0 ? ` ${at + 1} of ${TRACK.length}` : '', ` · ${w.text}`),
     h('span', { class: 'wait-time', 'data-since': w.since, 'data-usual': w.usual ?? '' }, waitTime(w)),

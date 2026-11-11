@@ -106,7 +106,6 @@ test('rowState: a wait shows its chip while working or outside, never over a nee
     [{ status: 'closed', wait: line }, [5, 'idle', 'dismissed']],
   ];
   for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
-  assert.equal(rowState(t({ status: 'running', wait: line }), null, NOW).label, 'Claude is working · 2nd in line, behind #513 (testing)');
 });
 
 test('a wait reads elapsed against its usual, and runs late past 15% over', async () => {

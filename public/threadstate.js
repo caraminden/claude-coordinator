@@ -21,7 +21,7 @@ export function rowState(t, usage, now = Date.now()) {
   // While it works or waits elsewhere, what it waits on (#544) says more than a step count: "line · 2nd".
   if (!t.wait || t.status === 'closed' || (st.rank !== 1 && st.rank !== 2) || st.fam === 'broken') return st;
   const fam = waitFam(t.wait);
-  return { ...st, fam, cell: t.wait.chip, pulse: fam === 'work', counted: false, label: `${st.label} · ${t.wait.text}` };
+  return { ...st, fam, cell: t.wait.chip, pulse: fam === 'work', counted: false };
 }
 
 function baseState(t, usage, now) {

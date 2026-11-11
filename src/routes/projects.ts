@@ -760,7 +760,7 @@ export const projectRoutes: Route[] = [
     },
   },
 
-  // Everything in the scheme waiting on a person: open cards, and minions in state ready or try.
+  // Everything in the scheme waiting on a person: open cards, and minions in state ready, complete or try.
   { method: 'GET', path: '/api/projects/:project/inbox', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, { items: inboxItems(app.store, app.runner.approvals, project.id, session.name) }) },
   // What happened in the scheme since this person last did something there, for the Taskmaster chat.
   { method: 'GET', path: '/api/projects/:project/recap', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, app.store.recap(session.name, project.id)) },

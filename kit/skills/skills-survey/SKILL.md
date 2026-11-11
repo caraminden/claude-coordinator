@@ -112,8 +112,8 @@ NOASSERTION are ideas only, paraphrased; proprietary is skipped.
    Log the answer in the report's decisions section, quoting the person, with the date.
 4. Delete `$TMPDIR/survey/` once the report is written: clones are never shared.
 
-The report is for people to read, so the minion stays open in state ready until someone says it
-can close.
+The report is for people to read, so the minion stays open in state complete (its note naming the
+report) until someone says it can close.
 
 *Done when* the report, every handoff it lists and the card exist, and the decisions section
 holds the pick.

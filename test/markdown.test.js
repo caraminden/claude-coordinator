@@ -176,6 +176,13 @@ test('an HTML comment in code is code: in a fence or a code span it shows, and i
   assert.equal(markdownLine('Write `<!-- TODO -->` above it'), 'Write <code>&lt;!-- TODO --&gt;</code> above it');
 });
 
+test('a comment that opens a line hides all to its end, a fenced block too, as GitHub does (#468 S14-3 review)', () => {
+  assert.equal(md('before\n\n<!--\n```js\nold()\n```\n-->\n\nafter'), '<p>before</p><p>after</p>');
+  assert.equal(md('before\n\n<!-- old:\n```\nx\n``` --> after'), '<p>before</p><p>after</p>');
+  // Never closed: no comment, so nothing is hidden.
+  assert.match(md('<!-- open\n```\nx\n```'), /<pre><code>x<\/code><\/pre>/);
+});
+
 test('chat: #N refs link outside code, and #127\'s strikes render', () => {
   assert.equal(chat('see #12, not `#13`'), '<p>see <a class="thread-ref" href="#/p/2/t/12">#12</a>, not <code>#13</code></p>');
   const struck = struckSource('- the build is green\n- next', [{ text: 'the build is green' }]);

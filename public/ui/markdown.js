@@ -46,20 +46,34 @@ const CODE_OR_COMMENT = /(?<!\\)(`+)(?!`)(?:(?!\n[ \t>]*\n)[\s\S])*?[^`]\1(?!`)|
 
 /**
  * `src` without its HTML comments, except where they are code: inside a fenced block (tracked by
- * character and length, as blocks() does) or a code span. A comment never reaches across a fence.
+ * character and length, as blocks() does) or a code span. A comment reaches across a fence only when it
+ * opens a line (GitHub's HTML block); one opened mid-paragraph never does.
  */
 function stripComments(src) {
   const out = [];
   let run = [];
   let close = null;
+  let comment = false; // in a comment that opened a line: it runs to its -->, past fences, as an HTML block does
   const flush = () => {
     if (run.length) out.push(run.join('\n').replace(CODE_OR_COMMENT, (m) => (m.startsWith('<') ? '' : m)));
     run = [];
   };
-  for (const line of src.split('\n')) {
+  const lines = src.split('\n');
+  const lastClose = lines.findLastIndex((l) => l.includes('-->'));
+  for (let [i, line] of lines.entries()) {
     if (close) {
       out.push(line);
       if (close.test(line)) close = null;
+      continue;
+    }
+    if (comment) {
+      const end = line.indexOf('-->');
+      if (end < 0) continue;
+      comment = false;
+      line = line.slice(end + 3);
+    } else if (/^ {0,3}<!--/.test(line) && !line.slice(line.indexOf('<!--') + 4).includes('-->') && i < lastClose) {
+      flush();
+      comment = true;
       continue;
     }
     const m = FENCE.exec(line.replace(/^[\s>]*/, ''));

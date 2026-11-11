@@ -480,6 +480,8 @@ export class AppServices {
   /** start, stop or restart its service (an installed one). Its timers stay as they are. */
   async act(row: ContraptionRow, action: 'start' | 'stop' | 'restart'): Promise<UnitState & { waited: string | null }> {
     this.guard();
+    // A stop during a deploy's health check would fail it and roll it back.
+    if (this.busy.has(row.name)) throw new ServiceError(409, `${row.name} is being installed or deployed already: wait for that to finish.`);
     const main = `${unitName(row.name)}.service`;
     if (!(await this.owned(row.name)).includes(main)) throw new ServiceError(409, `${row.title} has no service yet: install it first.`);
     const quiet = action === 'start' ? null : await this.drain(row);

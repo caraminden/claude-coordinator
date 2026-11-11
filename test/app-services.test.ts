@@ -191,6 +191,18 @@ test('a second install of the same app while one runs is refused', async () => {
   assert.match(String((b as PromiseRejectedResult).reason), /being installed or deployed already/);
 });
 
+test('start, stop and restart are refused while an install (or deploy) of the same app runs', async () => {
+  appFolder('mandate');
+  const m = row('mandate', 7341);
+  await services.install(m);
+  const calls = fake.calls().length;
+  const [installed, stopped] = await Promise.allSettled([services.install(m), services.act(m, 'stop')]);
+  assert.equal(installed.status, 'fulfilled');
+  assert.match(String((stopped as PromiseRejectedResult).reason), /being installed or deployed already/);
+  assert.ok(!fake.calls().slice(calls).some((c) => / stop /.test(c)), 'nothing stopped');
+  assert.equal((await services.act(m, 'stop')).active, 'inactive', 'and once it is done, it goes');
+});
+
 test('a timer whose unit name is another contraption\'s is refused', async () => {
   appFolder('mandate');
   await assert.rejects(services.install(row('mandate', 7341), { all: [row('mandate-backup', 7400)] }), /share its unit name/);

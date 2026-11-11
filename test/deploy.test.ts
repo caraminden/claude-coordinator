@@ -404,7 +404,9 @@ test('deploy.sh retries a report the server never got, but not one it may alread
   const leaked = join(root, 'curl-leaked');
   mkdirSync(bin);
   const curl = execFileSync('sh', ['-c', 'command -v curl'], { encoding: 'utf8' }).trim();
-  writeFileSync(join(bin, 'curl'), `#!/bin/sh\ncase "$*" in *tok-secret*) echo "$*" >>'${leaked}' ;; esac\nexec '${curl}' "$@"\n`, { mode: 0o755 });
+  const tries = join(root, 'curl-tries');
+  writeFileSync(join(bin, 'curl'), `#!/bin/sh\necho >>'${tries}'\ncase "$*" in *tok-secret*) echo "$*" >>'${leaked}' ;; esac\nexec '${curl}' "$@"\n`, { mode: 0o755 });
+  const tried = () => (existsSync(tries) ? readFileSync(tries, 'utf8').length : 0);
   const post = (url: string, env: object = {}) => promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'post-report', url, 'tok-secret', '7', 'ok', 'Deployed abc1234'], { encoding: 'utf8', env: { ...hostEnv, PATH: `${bin}:${process.env.PATH}`, ...env } });
   // Dropped unanswered, then a 503: neither got the report in, so it goes again, with the same body.
   const auth: (string | undefined)[] = [];
@@ -430,12 +432,14 @@ test('deploy.sh retries a report the server never got, but not one it may alread
   }
   // A connection never made in time is a report the server never got: it goes again.
   const t0 = performance.now();
+  const triedBefore = tried();
   const r = await post('http://10.255.255.1:9', { DEPLOY_REPORT_WAIT: '1', DEPLOY_REPORT_RETRY: '3' });
   assert.match(r.stderr, /could not post the report to minion 7's chat \(curl exit (28|7)\)/);
   assert.doesNotMatch(r.stderr, /no answer from the server/);
   // bash's SECONDS counts whole wall-clock seconds, so 3 s of retries end after 2 to 3 s (#564: 2.05 s when started just
   // before a second ticks over). One try with no retry takes about 0 s (refused) or 1 s (timed out).
   assert.ok(performance.now() - t0 >= 2000, 'retried until DEPLOY_REPORT_RETRY ran out');
+  assert.ok(tried() - triedBefore >= 2, 'more than one try');
   // A refusal won't change on a retry.
   const refused = await standIn(() => 403);
   try {

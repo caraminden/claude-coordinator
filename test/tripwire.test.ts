@@ -343,6 +343,13 @@ const BLOCKED: [string, string?][] = [
   ['node --diagnostic-dir /tmp server.ts'],
   ['node --cpu-prof-dir ./p --report-dir ./r server.ts'],
   ['node --some-future-option ./x.ts server.ts'],
+  // #468 S01-1 review: variables set inside a $( … ), backticks or a ( … ) subshell end with it
+  ['echo "$(DATA_DIR=/tmp PORT=9999)"; node server.ts'],
+  ['echo $(DATA_DIR=/tmp PORT=9999); node server.ts'],
+  ['echo `DATA_DIR=/tmp PORT=9999`; node server.ts'],
+  ['x="$(export DATA_DIR=/tmp PORT=9999)" && node server.ts'],
+  ['(DATA_DIR=/tmp PORT=9999); node server.ts'],
+  ['(export DATA_DIR=/tmp; PORT=9999) && node server.ts'],
   // #468 S01-12: a search pattern or a message isn't read, but the files a command reads still are
   ['grep -e token ~/.ssh/id_rsa'],
   ['grep -f ~/.ssh/id_rsa src/x.ts'],
@@ -578,6 +585,11 @@ const ALLOWED = [
   'node --diagnostic-dir ./diag tools/count.ts src/server.ts',
   'node --experimental-strip-types tools/count.ts src/server.ts',
   'node --no-warnings --test-reporter=spec tools/count.ts src/server.ts',
+  // #468 S01-1 review: variables set inside a subshell or capture hold inside it, and one set from a capture holds after
+  '(DATA_DIR=/tmp/d PORT=8700; node server.ts)',
+  'echo "$(DATA_DIR=/tmp/d PORT=8700 node --check server.ts; export DATA_DIR=/tmp/d PORT=8700; node server.ts)"',
+  'DATA_DIR="$(mktemp -d)" PORT=8700; node server.ts',
+  'D=/tmp/x; (D=~/.local/share/claude-coordinator); rm -rf $D/build',
   // #468 S01-12: words that only look like paths: a search pattern, a commit message or PR text, an echoed systemctl
   "grep -rn '/home/cody' src",
   "grep -n '~/.ssh' README.md",
@@ -626,6 +638,9 @@ const ASKS = [
   'rm -rf ~u/.local/share/claude-coordinator/backups',
   // #468 S01-15: the change of D may not run
   'D=~/.local/share/claude-coordinator; [ -n "$X" ] && D=/tmp/x; rm -rf $D/backups',
+  // #468 S01-1 review: a subshell's D=… doesn't change D after it
+  'D=~/.local/share/claude-coordinator; (D=/tmp/x); rm -rf $D/backups',
+  'D=~/.local/share/claude-coordinator; echo "$(D=/tmp/x)"; rm -rf $D/backups',
   // SQL on the live database, when the card can show all of it
   `sqlite3 ${data}/coordinator.db "delete from tickets where id = 3"`,
   'sqlite3 ~/.local/share/claude-coordinator/coordinator.db "update tickets set state=null"',

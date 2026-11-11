@@ -1274,8 +1274,8 @@ const PROCESS_KILL_WHY = "That `kill` takes its pids from a process listing (ps 
 
 /** Why this Bash command is blocked, or null. One hard-blocked part makes the whole command a hard block. */
 export function commandReason(command: string, st: State, cfg: TripwireConfig): Verdict | null {
-  // Open parens: the folder before each, and for a $( … ), the command it sits in, to pick up after it.
-  const stack: { cwd: string | null; outer?: Segment; redir: string | null; listed: number; anyListed: number }[] = [];
+  // Open parens: the folder and variables before each, and for a $( … ), the command it sits in, to pick up after it.
+  const stack: { cwd: string | null; vars: Set<string>; values: Map<string, string[]>; outer?: Segment; redir: string | null; listed: number; anyListed: number }[] = [];
   let seg: Segment = { words: [], redirects: [] };
   let redir: string | null = null;
   let asked: Verdict | null = null;
@@ -1318,7 +1318,7 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
       redir = null;
     } else if (tok.kind === 'redir') redir = tok.op;
     else if (tok.text === '$(') {
-      stack.push({ cwd: st.cwd, outer: seg, redir, listed, anyListed });
+      stack.push({ cwd: st.cwd, vars: new Set(st.vars), values: new Map(st.values), outer: seg, redir, listed, anyListed });
       seg = { words: [], redirects: [] };
       redir = null;
       prevOp = '';
@@ -1333,16 +1333,16 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
       if (why && !why.ask) return why;
       asked ??= why;
       if (tok.text !== '|' && tok.text !== '|&' && tok.text !== '(') listed = 0;
-      // A cd inside ( … ) or $( … ) doesn't outlive it.
+      // A cd or a variable set inside ( … ) or $( … ) doesn't outlive it (#468 S01-1 review).
       // `ss -ltnp | ( grep x | xargs kill )`: the pipe carries on into the subshell.
       if (tok.text === '(') {
-        stack.push({ cwd: st.cwd, redir: null, listed, anyListed });
+        stack.push({ cwd: st.cwd, vars: new Set(st.vars), values: new Map(st.values), redir: null, listed, anyListed });
         anyListed = 0;
       }
       if (tok.text === ')' && stack.length) {
         const open = stack.pop()!;
         const inner = anyListed;
-        st.cwd = open.cwd;
+        ({ cwd: st.cwd, vars: st.vars, values: st.values } = open);
         ({ listed, anyListed } = open);
         if (open.outer) {
           (seg = open.outer), (redir = open.redir);

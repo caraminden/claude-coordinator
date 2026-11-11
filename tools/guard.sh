@@ -67,6 +67,9 @@ json_field() {
 # \036 word (newlines as \037) between \034 lines, for check_command to check on its own: the
 # whole body when its line runs a shell (bash <<EOF, cat <<EOF | sh), else only the $(...) and
 # backtick substitutions of an unquoted <<EOF. The rest is data (gh pr create --body-file -).
+# A $(...) inside double quotes is stepped over to its matching paren, heredoc bodies and quoted
+# strings in it included, so a quote in a "$(cat <<'EOF' ... EOF)" message can't flip the quoting;
+# what it runs comes out as a \036 word once its command ends, like a heredoc's.
 # shortcut: a body written to a file and run later (cat > x.sh <<EOF, then bash x.sh) is data
 # here, like any script file; .githooks/pre-push still refuses the push it makes.
 # ps=1 switches to PowerShell rules: backtick escapes, backslash is literal, <# #> comments.
@@ -103,15 +106,75 @@ tokenize() {
         }
       }
     }
+    # Where the $( whose "$" is at k closes: the index of its ")", stepping over escapes, quoted
+    # strings and heredoc bodies (their lines read once the line that opens them ends); 0 when it
+    # never closes, and the caller falls back to reading it character by character.
+    function subst_end(k,   depth, c2, e2, j2, d2, st, dq2, ch2, hn, h2, ln, cmp, hdl, hst) {
+      depth = 0; hn = 0
+      for (k = k + 1; k <= n; k++) {
+        c2 = substr(s, k, 1)
+        if (c2 == "\\") { k++; continue }
+        if (c2 == "\047") { e2 = index(substr(s, k + 1), "\047"); if (!e2) return 0; k += e2; continue }
+        if (c2 == "\"") { # to its closing quote, stepping over the $(...) in it the same way
+          for (k++; k <= n && substr(s, k, 1) != "\""; k++) {
+            if (substr(s, k, 1) == "\\") k++
+            else if (substr(s, k, 2) == "$(" && !(k = subst_end(k))) return 0
+          }
+          if (k > n) return 0
+          continue
+        }
+        if (c2 == "<" && substr(s, k + 1, 1) == "<" && substr(s, k + 2, 1) != "<") {
+          j2 = k + 2; st = 0; d2 = ""; dq2 = ""
+          if (substr(s, j2, 1) == "-") { st = 1; j2++ }
+          while (substr(s, j2, 1) == " " || substr(s, j2, 1) == "\t") j2++
+          for (; j2 <= n; j2++) {
+            ch2 = substr(s, j2, 1)
+            if (dq2 != "") { if (ch2 == dq2) dq2 = ""; else d2 = d2 ch2; continue }
+            if (ch2 == "\047" || ch2 == "\"") { dq2 = ch2; continue }
+            if (ch2 == "$" && index("\047\"", substr(s, j2 + 1, 1))) continue
+            if (ch2 == "\\") { j2++; d2 = d2 substr(s, j2, 1); continue }
+            if (index(" \t\r\n;&|()<>", ch2)) break
+            d2 = d2 ch2
+          }
+          if (d2 != "") { hn++; hdl[hn] = d2; hst[hn] = st }
+          k = j2 - 1
+          continue
+        }
+        if (c2 == "\n" && hn) {
+          for (h2 = 1; h2 <= hn; h2++) {
+            for (;;) {
+              if (k >= n) return 0
+              e2 = index(substr(s, k + 1), "\n")
+              ln = e2 ? substr(s, k + 1, e2 - 1) : substr(s, k + 1)
+              k = e2 ? k + e2 : n
+              cmp = ln; sub(/\r$/, "", cmp); if (hst[h2]) sub(/^\t+/, "", cmp)
+              if (cmp == hdl[h2]) break
+            }
+          }
+          hn = 0
+          continue
+        }
+        if (c2 == "(") depth++
+        else if (c2 == ")" && --depth == 0) return k
+      }
+      return 0
+    }
+    # The quoted substitutions met in the command so far, checked once it ends.
+    function emitpend(   p) { for (p = 1; p <= npend; p++) emit(pend[p]); npend = 0 }
     { s = s (NR > 1 ? "\n" : "") $0 }
     END {
-      n = length(s); q = ""; tok = ""; intok = 0; nh = 0
+      n = length(s); q = ""; tok = ""; intok = 0; nh = 0; npend = 0
       esc = (ps == "1") ? "`" : (ps == "2") ? "^" : "\\"
       for (i = 1; i <= n; i++) {
         c = substr(s, i, 1)
         if (q == "\047") { if (c == "\047") q = ""; else tok = tok c; continue }
         if (q == "\"") {
           if (c == esc && i < n) { i++; tok = tok substr(s, i, 1); continue }
+          if (c == "$" && ps == "0" && substr(s, i + 1, 1) == "(" && substr(s, i + 2, 1) != "(" && (j = subst_end(i))) {
+            npend++; pend[npend] = substr(s, i + 2, j - i - 2)
+            tok = tok "\035" substr(s, i, j - i + 1); i = j
+            continue
+          }
           if (c == "$" || (c == "`" && ps == "0")) tok = tok "\035"
           if (c == "\"") q = ""; else tok = tok c
           continue
@@ -142,7 +205,7 @@ tokenize() {
         }
         if (c == "(" || (c == "`" && ps == "0")) { tok = tok "\035"; intok = 1 }
         if (c == "\n" || c == ";" || c == "&" || c == "|" || c == "(" || c == ")" || (c == "`" && ps == "0")) {
-          flush(); print "\034"; nw = 0; prevw = ""
+          flush(); print "\034"; nw = 0; prevw = ""; emitpend()
           if (c != "\n") tail = c
           else {
             # A line ending in | or && goes on after the bodies: its next command may run them.
@@ -169,6 +232,7 @@ tokenize() {
         tok = tok c; intok = 1
       }
       flush()
+      if (npend) { print "\034"; emitpend() }
     }'
 }
 
@@ -352,6 +416,14 @@ self_test() {
   t 0 Bash topic 'echo "git push origin main"'
   t 0 Bash topic 'git commit -m "push to main later" && git push origin topic'
   t 0 Bash topic $'git commit -m "$(cat <<\'EOF\'\nDon\'t push to main\nEOF\n)" && git push -u origin topic'
+  # A "$(...)" steps over its heredoc: a double quote in the message can't flip the quoting (#468 S01-6).
+  t 0 Bash topic $'git commit -m "$(cat <<\'EOF\'\nGuard: say "run git push origin main yourself" in the hint\nEOF\n)" && git push origin topic'
+  t 0 Bash topic $'git commit -m "$(cat <<\'EOF\'\nFix the 5" display width (and a paren\nEOF\n)" && git push origin topic'
+  t 2 Bash topic $'git commit -m "$(cat <<\'EOF\'\nFix the 5" display width\nEOF\n)" && git push origin main'
+  t 2 Bash topic $'git commit -m "$(cat <<\'EOF\'\nFix the 5" display width\nEOF\n)" && git push --force origin topic'
+  t 2 Bash topic 'echo "$(git push origin main)"'
+  t 2 Bash topic 'echo "$(echo ")"; git push origin main)"'
+  t 2 Bash topic $'git commit -m "$(cat <<EOF\nsee `git push origin main`\nEOF\n)"'
   t 0 Bash topic 'git push origin topic # then main'
   t 0 Bash topic 'git push origin topic;# main'
   t 0 Bash topic 'git push origin main#x'

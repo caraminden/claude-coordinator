@@ -18,7 +18,7 @@ import { askHeader } from './askcard.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerChip, payerLine } from './payer.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
-import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, workPhases } from './progress.js';
+import { actionLabel, applyEvent, createProgress, progressLine, stepInfo, withoutCount, workPhases } from './progress.js';
 import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, speaker } from './cards.js';
 
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
@@ -722,16 +722,18 @@ function renderProgress() {
     return;
   }
   const { total, done, current } = stepInfo(p, running);
-  // The line carries its own worded step count; the turn's action count shows only when no plan is underway.
+  // The line's step count sits in its own chip, so a phone's cut-off text never hides it; the turn's
+  // action count shows only when no plan is underway.
   const planned = total && (current || done < total);
-  const count = !planned && running && initSeen() && p.turnActions ? `${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
+  const text = withoutCount(line);
+  const count = text !== line ? `${done} of ${total} done` : !planned && running && initSeen() && p.turnActions ? `${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
 
   const bar = h('button', { class: 'progress-line', 'aria-expanded': String(view.ui.open), onclick: () => {
     view.ui.open = !view.ui.open;
     renderProgress();
   } },
     h('span', { class: `dot ${running ? 'running' : view.ticket.status}` }),
-    h('span', { class: 'text' }, line),
+    h('span', { class: 'text' }, text),
     count ? h('span', { class: 'count' }, count) : '',
     h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'));
   // With no plan the meter keeps its room, hidden, so a plan arriving doesn't push the chat (rule 13).

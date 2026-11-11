@@ -235,7 +235,7 @@ mark.find.current { background: var(--waiting); color: #fff; }
 }
 .progress-line:hover { border-color: var(--accent); }
 .progress-line .text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.progress-line .count { font-variant-numeric: tabular-nums; font-weight: 600; }
+.progress-line .count { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 .progress-line .chev { color: var(--muted); }
 .progress .meter { display: block; appearance: none; width: calc(100% - 0.4rem); height: 3px; border: 0; border-radius: 2px; margin: 0.25rem 0.2rem 0; background: var(--line); overflow: hidden; }
 .progress .meter.blank { visibility: hidden; }

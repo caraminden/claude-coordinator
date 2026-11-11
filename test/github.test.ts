@@ -177,6 +177,26 @@ test('CI that never starts: no checks after the window says so once per commit, 
   assert.deepEqual(decide(pr({ ...ci, headSha: 'fff0000', checks: [check('build', 'passed')] }), seen, opts({ headFor: NO_CHECKS_MS })).messages, ['CI passed on fff0000 in PR #12 (1 check).']);
 });
 
+test('a draft PR with no checks is not nudged, but a draft that conflicts still is (#554)', () => {
+  const seen = new Set(['baseline']);
+  const ci = { hasCi: true, baseRef: 'main' };
+  // Peek's PR CI skips drafts, so no checks on a clean draft is expected, not a missing run.
+  assert.deepEqual(decide(pr({ ...ci, draft: true, mergeable: 'MERGEABLE' }), seen, opts({ headFor: 3 * NO_CHECKS_MS })).messages, []);
+  assert.equal(seen.has('nochecks:abc1234'), false, 'the commit can still be nudged once it leaves draft');
+  const conflict = decide(pr({ ...ci, draft: true, mergeable: 'CONFLICTING' }), seen, opts({ headFor: NO_CHECKS_MS })).messages;
+  assert.equal(conflict.length, 1);
+  assert.match(conflict[0], /because the PR conflicts with main/);
+  // Marked ready for review: a non-draft with no checks is nudged as before.
+  const ready = decide(pr({ ...ci, headSha: 'fff0000', draft: false, mergeable: 'MERGEABLE' }), seen, opts({ headFor: NO_CHECKS_MS })).messages;
+  assert.match(ready[0] ?? '', /^CI hasn't started on fff0000 in PR #12: no checks after 10 minutes\. /);
+});
+
+test('the snapshot carries whether the PR is a draft (#554)', () => {
+  const data = (isDraft: unknown) => ({ viewer: { login: 'cara' }, repository: { workflows: null, pullRequests: { nodes: [{ number: 67, url: 'u', state: 'OPEN', headRefOid: SHA, isDraft }] } } });
+  assert.equal(parseSnapshot(data(true)).pr!.draft, true);
+  assert.equal(parseSnapshot(data(false)).pr!.draft, false);
+});
+
 test('CI stuck waiting for a runner says so once, and the verdict still comes after', () => {
   const seen = new Set(['baseline']);
   assert.equal(checkOf({ __typename: 'CheckRun', name: 'desktop', status: 'QUEUED', conclusion: null, detailsUrl: null }).queued, true);
@@ -231,6 +251,32 @@ test('the watcher times a head commit with no checks and a queued check from whe
   await w.poll(tk, root, 'o/r');
   assert.equal(sent.length, 3);
   assert.match(sent[2], /^CI failed on fff0000/);
+});
+
+test('a draft marked ready for review gets the full window before a no-checks nudge (#554)', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: T });
+  const store = new Store(join(root, 'draft.db'));
+  const project = store.createProject('P', null);
+  const ticket = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(ticket.id, root, 'ticket/1-t');
+  const tk = store.getTicket(ticket.id)!;
+  let snapshot = pr({ hasCi: true, mergeable: 'MERGEABLE', draft: true });
+  const sent: string[] = [];
+  const w = new GithubWatcher(store, (_id, text) => sent.push(text), async () => ({ pr: snapshot, self: 'cara' }));
+  await w.poll(tk, root, 'o/r'); // first look
+  t.mock.timers.tick(2 * NO_CHECKS_MS);
+  await w.poll(tk, root, 'o/r');
+  assert.deepEqual(sent, [], 'a draft is expected to have no checks');
+  // Same commit, marked ready: its pull_request runs only start now, so the clock starts now.
+  snapshot = pr({ hasCi: true, mergeable: 'MERGEABLE', draft: false });
+  await w.poll(tk, root, 'o/r');
+  t.mock.timers.tick(NO_CHECKS_MS - 1000);
+  await w.poll(tk, root, 'o/r');
+  assert.deepEqual(sent, []);
+  t.mock.timers.tick(1000);
+  await w.poll(tk, root, 'o/r');
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /^CI hasn't started on abc1234 in PR #12: no checks after 10 minutes\. /);
 });
 
 test('merged or closed by someone is sent once; by the ticket\'s own turn it is not', () => {

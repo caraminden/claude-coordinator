@@ -73,6 +73,8 @@ export interface PrSnapshot {
   baseRef?: string;
   /** The repo has Actions workflows on its default branch, so a PR with no checks is missing some. */
   hasCi?: boolean;
+  /** A draft PR: a repo may run no PR CI on drafts, so no checks there is expected. */
+  draft?: boolean;
 }
 
 /** The ticket's turns as time spans; `end` is Infinity for a turn still going. */
@@ -149,7 +151,9 @@ export function decide(
     });
   }
   // GitHub works out `mergeable` when first asked, so an UNKNOWN waits for the next look rather than leave out the cause.
-  if (pr.state === 'OPEN' && !pr.checks.length && pr.hasCi && pr.mergeable !== 'UNKNOWN' && (opts.headFor ?? 0) >= NO_CHECKS_MS) {
+  // A clean draft is left alone (its key unspent, for when it's marked ready); a conflicting one still hears why (#554).
+  const expectNone = pr.draft && pr.mergeable !== 'CONFLICTING';
+  if (pr.state === 'OPEN' && !pr.checks.length && pr.hasCi && pr.mergeable !== 'UNKNOWN' && !expectNone && (opts.headFor ?? 0) >= NO_CHECKS_MS) {
     consider(`nochecks:${pr.headSha}`, () => {
       const head = `CI hasn't started on ${short(pr.headSha)} in PR #${pr.number}: no checks after ${NO_CHECKS_MS / 60_000} minutes`;
       if (pr.mergeable === 'CONFLICTING') return `${head}, because the PR conflicts with ${pr.baseRef ?? 'its base'} and GitHub runs no pull_request workflows on a conflicting PR. Rebase onto ${pr.baseRef ?? 'its base'} and push to get CI.`;
@@ -220,7 +224,7 @@ const QUERY = `query($owner: String!, $name: String!, $branch: String!) {
     workflows: object(expression: "HEAD:.github/workflows") { __typename }
     pullRequests(headRefName: $branch, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) {
       nodes {
-        number url state headRefOid mergedAt closedAt mergeable baseRefName
+        number url state isDraft headRefOid mergedAt closedAt mergeable baseRefName
         mergedBy { login }
         timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) { nodes { ... on ClosedEvent { actor { login } } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { contexts(first: 100) { nodes {
@@ -296,6 +300,7 @@ export function parseSnapshot(data: any): { pr: PrSnapshot | null; self: string 
       mergeable: n.mergeable,
       baseRef: n.baseRefName,
       hasCi: !!data.repository.workflows,
+      draft: !!n.isDraft,
     },
   };
 }
@@ -325,7 +330,7 @@ interface Schedule {
   /** What the last poll saw, to tell whether anything changed. */
   last: string;
   /** The head commit, when this server first saw it, and when each of its checks was first seen queued. */
-  head?: { sha: string; at: number; queued: Record<string, number> };
+  head?: { sha: string; at: number; queued: Record<string, number>; draft?: boolean };
 }
 
 /** Polls the open PRs of a project's tickets, one gh call at a time, and sends what's new into each ticket. */
@@ -447,6 +452,9 @@ export class GithubWatcher {
     // shortcut: these clocks live in memory, so a restart starts them again; fine for a once-per-commit nudge.
     const now = Date.now();
     const head = prev?.head?.sha === pr.headSha ? prev.head : { sha: pr.headSha, at: now, queued: {} };
+    // Marked ready for review: PR CI that skips drafts only starts now, so the no-checks clock does too.
+    if (head.draft && !pr.draft) head.at = now;
+    head.draft = pr.draft;
     const queued: Record<string, number> = {};
     for (const c of pr.checks) if (c.queued) queued[c.name] = head.queued[c.name] ?? now;
     head.queued = queued;
@@ -458,7 +466,7 @@ export class GithubWatcher {
     if (pr.state === 'MERGED' && handled.some((k) => k.startsWith('state:'))) this.onMerged(repoDir);
 
     const open = pr.state === 'OPEN';
-    const last = JSON.stringify([pr.state, pr.headSha, pr.checks.map((c) => c.status), pr.remarks.length]);
+    const last = JSON.stringify([pr.state, pr.draft, pr.headSha, pr.checks.map((c) => c.status), pr.remarks.length]);
     const changed = !prev || prev.last !== last;
     const pending = verdict(pr.checks) === 'pending';
     const wait = !open ? NO_PR_MS : changed || pending ? OPEN_MS : Math.min((prev?.wait ?? OPEN_MS) * 2, MAX_OPEN_MS);

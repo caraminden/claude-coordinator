@@ -103,13 +103,15 @@ function markItemsSeen(projectId, keys) {
   api(`api/projects/${projectId}/seen-items`, { method: 'PUT', body: { keys } }).catch(() => { if (seenSent.get(projectId) === sig) seenSent.delete(projectId); });
 }
 
-/** Another tab or device of yours saw what waits in a scheme (#539): redraw its pills, with no fetch or write, so two tabs can't set each other off. */
+/**
+ * Another tab or device of yours saw what waits in a scheme (#539): fetch the counts again so the server says
+ * whether anything is still new, since the other tab may have seen less than this one shows.
+ */
 export function onSeenItems(projectId) {
-  const p = view?.projects?.find((q) => q.id === projectId);
-  if (!p || projectId === view.projectId) return;
-  p.fresh = false;
+  if (projectId === view?.projectId) return;
   seenSent.delete(projectId); // what the server holds is theirs now: write ours again when you're back in it
-  for (const el of document.querySelectorAll(`[data-scheme-inbox="${projectId}"]`)) el.replaceWith(schemeCount(p));
+  clearTimeout(inbox.countsTimer);
+  inbox.countsTimer = setTimeout(refreshSchemeCounts, 1000);
 }
 
 /** Redraw the strip: the count while minimized; opened, one row per waiting minion, linking to its chat. */

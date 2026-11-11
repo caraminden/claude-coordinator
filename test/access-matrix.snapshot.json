@@ -1183,10 +1183,10 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
- "PUT /api/projects/:p/seen-count": {
+ "PUT /api/projects/:p/seen-items": {
   "anon": "401 Not logged in",
-  "person": "400 count must be a whole number, 0 or more",
-  "member": "400 count must be a whole number, 0 or more",
+  "person": "400 keys must be a list of item keys",
+  "member": "400 keys must be a list of item keys",
   "outsider": "404 No such scheme",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",

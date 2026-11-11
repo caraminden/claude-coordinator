@@ -21,17 +21,29 @@ export function setHidden(p, hidden) {
     send: () => api(`api/projects/${p.id}/hidden`, { method: 'PUT', body: { hidden } }),
     undo: () => !!p.hidden === hidden && show(!hidden), // unless something else changed it since
     label: `${hidden ? 'hide' : 'unhide'} ${p.name}`,
-  }).then(() => refreshHidden(), () => {}); // a failure already said so in its toast
+  }).then(() => refreshSchemes(), () => {}); // a failure already said so in its toast
 }
 
 /** A hide changed for someone (this tab or another of theirs): only theirs redraws. */
 export function onHiddenChanged(name) {
-  if (name === me) refreshHidden();
+  if (name === me) refreshSchemes();
 }
 
-async function refreshHidden() {
-  if (view?.kind !== 'project') return;
-  view.projects = await api('api/projects').catch(() => view.projects);
+let retryTimer = 0;
+let retries = 0;
+
+/** Fetch the schemes again and redraw them. A failed fetch (a restart's gap) keeps the list shown and tries again, backing off to 30 s (#491). */
+export async function refreshSchemes() {
+  clearTimeout(retryTimer);
+  if (view?.kind !== 'project' || !me) return;
+  const projects = await api('api/projects').catch(() => null);
+  if (view?.kind !== 'project' || !me) return;
+  if (!projects) {
+    retryTimer = setTimeout(refreshSchemes, Math.min(30_000, 1000 * 2 ** retries++));
+    return;
+  }
+  retries = 0;
+  view.projects = projects;
   redrawHidden();
 }
 

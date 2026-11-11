@@ -8,7 +8,7 @@ import { chatSection, chatView, mountChat } from './thread.js';
 import { propertiesPage, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
 import { forgetOtherSchemes, inboxStrip, refreshInbox } from './inbox.js';
-import { renderHiddenNote, renderSchemesShelf } from './hidden.js';
+import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { schedulesButton, showSchedules } from './schedules.js';
 import { replaceHash } from './navstack.js';
 import { accountPage, membersPage, peoplePage } from './people.js';
@@ -63,7 +63,8 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     // An empty shelf beats a broken page if the server is older than this front end.
     api(`api/projects/${projectId}/artifacts`).catch(() => []),
     api(`api/projects/${projectId}/shared`).catch(() => []),
-    api('api/projects').catch(() => []),
+    // A failed fetch keeps the list already shown and tries again below, rather than blanking it (#491).
+    api('api/projects').catch(() => null),
     // Each person's own machines; an admin's list has every machine (#306).
     api('api/machines').catch(() => []),
   ]);
@@ -82,7 +83,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     seen: seen ?? {}, // ticket id -> when you last looked at it (server time)
     personNotes: person_notes ?? {}, // ticket id -> people's note on it { text, by, at } (#146)
     pins: pins ?? [], // ticket ids you pinned, oldest pin first (#179)
-    artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects,
+    artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects: projects ?? view?.projects ?? [],
     file: main.file ?? null,
     ...chatView(chatId, ticket),
   });
@@ -159,6 +160,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderSidebar();
   renderGithubStrip();
   renderSchemesShelf();
+  if (!projects) refreshSchemes();
   renderMachineWarning();
   renderHiddenNote();
   refreshInbox();

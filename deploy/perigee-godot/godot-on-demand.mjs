@@ -9,18 +9,19 @@
 // Every line either way stamps the activity file, and so does a tool call still waiting on its answer
 // (once a minute), so a session in progress never looks idle. A request that needs the editor (anything
 // but the handshake and the listings) first starts the unit if it is down and holds until the editor
-// has dialled in to godot-ai's WebSocket port (READY seconds at most), so the minion's call waits
+// has dialled in to godot-ai's WebSocket port (READY seconds at most, then SETTLE), so the minion's call waits
 // rather than fails. The godot-ai backend runs here on the host, owned by the attach bridges, not in
 // the editor's container: stopping the editor leaves every session open, and the editor reconnects to
 // the same backend when it starts again.
 //
-// idle-check stops the unit once neither a call nor its own start is IDLE old. It never touches a unit
-// a person froze (systemctl freeze), and never starts anything.
+// idle-check stops the unit once both the last call and the unit's start are IDLE old. It never touches a
+// unit a person froze (systemctl freeze), and never starts anything. It decides and stops under an
+// exclusive lock, and a call waits on that lock before it looks at the editor, so a call that lands while
+// the editor is being stopped starts it again rather than going to an editor about to go.
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 export function settings(env = process.env) {
@@ -31,9 +32,13 @@ export function settings(env = process.env) {
     readyS: num('GODOT_READY_S', 180),
     wsPort: num('GODOT_WS_PORT', 9500),
     activity: env.GODOT_ACTIVITY || join(homedir(), '.local', 'state', 'perigee-godot', 'last-call'),
+    settleS: num('GODOT_SETTLE_S', 5),
     systemctl: env.GODOT_SYSTEMCTL || 'systemctl',
+    flock: env.GODOT_FLOCK || 'flock',
   };
 }
+
+const lockFile = (cfg) => join(dirname(cfg.activity), 'stop.lock');
 
 // Methods a session sends before it uses the editor: answered by the backend alone.
 const HANDSHAKE = new Set(['initialize', 'ping', 'tools/list', 'resources/list', 'resources/templates/list', 'prompts/list', 'logging/setLevel']);
@@ -78,10 +83,13 @@ export function idleVerdict({ now, unit, last, idleS }) {
   return { stop: true, why: `unused for ${Math.floor(idle / 60)} min: stopping` };
 }
 
+/** Run under the stop lock (main() takes it): the bridge waits on it before trusting a running editor. */
 export function idleCheck(cfg = settings(), now = Date.now()) {
   const unit = unitState(cfg);
-  // Read the activity last, just before deciding, so a call that lands meanwhile still counts.
-  const v = idleVerdict({ now, unit, last: lastActivity(cfg), idleS: cfg.idleS });
+  let last = lastActivity(cfg);
+  // No stamp yet (just installed): start the clock now rather than stop an editor someone may be on.
+  if (!last && unit.state === 'active' && !unit.frozen) touch(cfg, (last = now));
+  const v = idleVerdict({ now, unit, last, idleS: cfg.idleS });
   console.log(`${cfg.unit} ${v.why}`);
   if (!v.stop) return v;
   const r = spawnSync(cfg.systemctl, ['--user', 'stop', cfg.unit], { encoding: 'utf8' });
@@ -110,12 +118,22 @@ export function editorConnected(port, files = ['/proc/net/tcp', '/proc/net/tcp6'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Waits until no idle-check holds the stop lock: one stopping the editor right now finishes first. */
+export function waitForStop(cfg) {
+  mkdirSync(dirname(cfg.activity), { recursive: true });
+  return new Promise((done) => {
+    const p = spawn(cfg.flock, ['-s', '-w', '300', lockFile(cfg), 'true'], { stdio: 'ignore' });
+    p.on('exit', done).on('error', done);
+  });
+}
+
 /**
  * Starts the unit if it is down and waits until the editor has dialled in, for a call that needs it.
  * Waits only while the unit is in its first READY seconds: an editor up for longer that never connected
  * won't, and holding every call for it would only make each one slow.
  */
-export async function ensureEditor(cfg, log, { now = Date.now, connected = () => editorConnected(cfg.wsPort), poll = 500 } = {}) {
+export async function ensureEditor(cfg, log, { now = Date.now, connected = () => editorConnected(cfg.wsPort), poll = 500, settle = cfg.settleS * 1000 } = {}) {
+  await waitForStop(cfg);
   if (connected()) return 'ready';
   let unit;
   try {
@@ -144,11 +162,32 @@ export async function ensureEditor(cfg, log, { now = Date.now, connected = () =>
     await sleep(poll);
     if (connected()) {
       log(`the editor connected ${Math.round((now() - since) / 1000)} s after ${cfg.unit} started`);
+      // shortcut: the TCP connection comes a moment before the plugin's handshake registers it, and a call in that gap fails; a fixed wait covers it. Ask the backend's status instead if it ever doesn't.
+      await sleep(settle);
       return 'ready';
     }
   }
   log(`the editor had not connected ${cfg.readyS} s after ${cfg.unit} started; passing the call on anyway`);
   return 'timeout';
+}
+
+/** Calls onLine for each \n-ended line. Not readline: that also splits on U+2028, which JSON leaves raw. */
+export function lines(stream, onLine, onEnd = () => {}) {
+  let buf = '';
+  stream.setEncoding('utf8');
+  stream.on('data', (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      if (line) onLine(line);
+    }
+  });
+  stream.on('end', () => {
+    if (buf) onLine(buf);
+    onEnd();
+  });
 }
 
 /** The bridge: the machine agent's stdio on one side, the MCP server's on the other. */
@@ -172,7 +211,7 @@ export function bridge(command, cfg = settings(), { input = process.stdin, outpu
   keep.unref();
   // Lines go to the server in order: one held for the editor holds the ones behind it.
   let chain = Promise.resolve();
-  createInterface({ input }).on('line', (line) => {
+  lines(input, (line) => {
     stamp();
     let msg = null;
     try {
@@ -180,12 +219,14 @@ export function bridge(command, cfg = settings(), { input = process.stdin, outpu
     } catch {}
     const needs = needsEditor(msg);
     if (needs) pending.add(msg.id);
+    // A call the client gave up on gets no answer: stop counting it as in flight.
+    if (msg?.method === 'notifications/cancelled') pending.delete(msg.params?.requestId);
     chain = chain.then(async () => {
       if (needs) await ensure().catch((err) => log(`could not get the editor up: ${err.message}`));
       child.stdin.write(`${line}\n`);
     });
-  }).on('close', () => chain.then(() => child.stdin.end()));
-  createInterface({ input: child.stdout }).on('line', (line) => {
+  }, () => chain.then(() => child.stdin.end()));
+  lines(child.stdout, (line) => {
     stamp();
     try {
       const msg = JSON.parse(line);
@@ -199,8 +240,14 @@ export function bridge(command, cfg = settings(), { input = process.stdin, outpu
 function main() {
   const argv = process.argv.slice(2);
   if (argv[0] === 'idle-check') {
+    const cfg = settings();
+    if (!process.env.GODOT_STOP_LOCKED) {
+      mkdirSync(dirname(cfg.activity), { recursive: true });
+      const r = spawnSync(cfg.flock, ['-x', lockFile(cfg), process.execPath, fileURLToPath(import.meta.url), 'idle-check'], { stdio: 'inherit', env: { ...process.env, GODOT_STOP_LOCKED: '1' } });
+      process.exit(r.status ?? 1);
+    }
     try {
-      idleCheck();
+      idleCheck(cfg);
     } catch (err) {
       console.error(err.message);
       process.exit(1);

@@ -7,11 +7,18 @@ The `perigee-godot` machine is the Godot 4.7.2 .NET editor on `~/delve-godot` (a
 - **Start on demand.** The agent's MCP command goes through `godot-on-demand.mjs`, which passes the
   MCP lines through untouched. A request that needs the editor (a tool call; not the handshake or
   the tool list) starts the unit if it is down and holds until the editor has dialled in to
-  godot-ai's WebSocket port 9500, at most 180 s, so the minion's call waits instead of failing.
+  godot-ai's WebSocket port 9500 (at most 180 s, then 5 s more for the plugin's handshake), so the
+  minion's call waits instead of failing.
 - **Stop when idle.** Every MCP line either way stamps `~/.local/state/perigee-godot/last-call`, and a
   tool call still waiting on its answer re-stamps it each minute. `perigee-godot-idle.timer` runs
-  `godot-on-demand.mjs idle-check` every 10 minutes, which stops the unit once neither the last call
-  nor its start is 2 hours old. It never touches a frozen unit and never starts anything.
+  `godot-on-demand.mjs idle-check` every 10 minutes, which stops the unit once both the last call and
+  the unit's start are 2 hours old. It never touches a frozen unit and never starts anything. Its
+  first run after install finds no stamp and starts the 2-hour clock instead of stopping.
+- **No call lands on a dying editor.** The check decides and stops under an exclusive lock
+  (`~/.local/state/perigee-godot/stop.lock`), and a tool call waits on that lock before it looks at the
+  editor, so a call arriving mid-stop starts it again.
+- **The stop is a plain stop.** Scene edits a minion left unsaved in the editor are lost when it
+  stops: save before you leave it.
 - **Sessions survive the stop.** The godot-ai backend (MCP on 127.0.0.1:8000) runs on the host, owned
   by the attach bridges, not inside the editor's container. Stopping the editor leaves every session
   open; the editor reconnects to the same backend when it starts again.
@@ -20,7 +27,7 @@ Socket activation doesn't fit: the port the minions reach (8000) is the host bac
 already up, and the editor is a *client* of port 9500, not a server.
 
 Settings, as environment variables on either unit: `GODOT_IDLE_S` (7200), `GODOT_READY_S` (180),
-`GODOT_UNIT`, `GODOT_WS_PORT`, `GODOT_ACTIVITY`.
+`GODOT_SETTLE_S` (5), `GODOT_UNIT`, `GODOT_WS_PORT`, `GODOT_ACTIVITY`.
 
 ## Install (by hand, once this is in the live checkout)
 

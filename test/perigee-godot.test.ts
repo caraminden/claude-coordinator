@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { createConnection, createServer, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +25,7 @@ function stub(name: string, unit: { ActiveState: string; FreezerState?: string; 
   const cfg = settings({ GODOT_SYSTEMCTL: join(dir, 'systemctl'), GODOT_ACTIVITY: join(dir, 'last-call') });
   const used = (at: number) => (writeFileSync(cfg.activity, ''), utimesSync(cfg.activity, new Date(at), new Date(at)));
   const log = () => { try { return readFileSync(calls, 'utf8').trim().split('\n').map((l) => l.replace(/^--user /, '')); } catch { return []; } };
-  return { cfg, used, log };
+  return { cfg, used, log, dir };
 }
 
 test('defaults: the perigee-godot unit, 2 hours idle, ws port 9500', () => {
@@ -59,6 +60,12 @@ test('idle-check stops the unit after 2 hours unused, and leaves a used or froze
   const frozen = stub('frozen', { ActiveState: 'active', FreezerState: 'frozen', since: NOW - 14 * 24 * H });
   assert.equal(idleCheck(frozen.cfg, NOW).stop, false);
   assert.deepEqual(frozen.log().filter((l) => !l.startsWith('show')), []);
+
+  // Just installed, up for two weeks, never stamped: the first check starts the clock instead.
+  const fresh = stub('fresh', { ActiveState: 'active', since: NOW - 14 * 24 * H });
+  assert.equal(idleCheck(fresh.cfg, NOW).stop, false);
+  assert.equal(statSync(fresh.cfg.activity).mtimeMs, NOW);
+  assert.equal(idleCheck(fresh.cfg, NOW + 2 * H + 60_000).stop, true, 'and stops it 2 hours on');
 });
 
 test('needsEditor: tool calls wait for the editor, the handshake and listings do not', () => {
@@ -103,7 +110,7 @@ test('ensureEditor starts a stopped unit and waits until the editor connects', a
   let polls = 0;
   const lines: string[] = [];
   // Connects on the 40th poll: 20 s in at 500 ms a poll.
-  const got = await ensureEditor(s.cfg, (l: string) => lines.push(l), { now: c.now, poll: 0, connected: () => (c.tick(500), ++polls > 41) });
+  const got = await ensureEditor(s.cfg, (l: string) => lines.push(l), { now: c.now, poll: 0, settle: 0, connected: () => (c.tick(500), ++polls > 41) });
   assert.equal(got, 'ready');
   assert.deepEqual(s.log().filter((l) => !l.startsWith('show')), ['start --no-block perigee-godot.service']);
   assert.match(lines.at(-1)!, /connected 2\d s after/);
@@ -130,46 +137,114 @@ test('ensureEditor neither starts nor waits on a frozen unit, or on one up long 
   assert.deepEqual(up.log(), []);
 });
 
-// A stand-in for `godot-ai attach`: answers each request, a tools/call after 300 ms.
+test('a call that lands while idle-check is stopping the editor waits for the stop, then starts it again', async () => {
+  const s = stub('race', { ActiveState: 'active', since: NOW - 3 * H });
+  const held = join(s.dir, 'held');
+  const stopped = join(s.dir, 'stopped');
+  // Stands in for idle-check under its lock: it has decided, and the stop takes a moment.
+  const idle = spawn('flock', ['-x', join(s.dir, 'stop.lock'), 'sh', '-c', `touch '${held}'; sleep 0.3; printf 'ActiveState=inactive\\nFreezerState=running\\n' >'${s.dir}/show'; touch '${stopped}'`], { stdio: 'ignore' });
+  for (let i = 0; i < 100 && !existsSync(held); i++) await new Promise((r) => setTimeout(r, 10));
+  assert.ok(existsSync(held));
+  const c = clock(NOW);
+  // Connected until the stop lands; after that, only once something has started the unit again.
+  const connected = () => (existsSync(stopped) ? (c.tick(500), s.log().includes('start --no-block perigee-godot.service')) : true);
+  assert.equal(await ensureEditor(s.cfg, () => {}, { now: c.now, poll: 0, settle: 0, connected }), 'ready');
+  assert.ok(s.log().includes('start --no-block perigee-godot.service'), 'it started the editor the stop took away');
+  await new Promise((r) => idle.exitCode === null ? idle.on('exit', r) : r(null));
+});
+
+// A stand-in for `godot-ai attach`: answers each request at once, a tools/call only once it hears test/release.
 const fakeMcp = [process.execPath, '-e', `
-require('node:readline').createInterface({ input: process.stdin }).on('line', (l) => {
-  const m = JSON.parse(l);
-  if (m.id === undefined) return;
-  setTimeout(() => console.log(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { method: m.method } })), m.method === 'tools/call' ? 300 : 0);
+const held = [];
+const reply = (m) => console.log(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { method: m.method, params: m.params } }));
+let buf = '';
+process.stdin.setEncoding('utf8').on('data', (d) => {
+  buf += d;
+  let i;
+  while ((i = buf.indexOf('\\n')) >= 0) {
+    const m = JSON.parse(buf.slice(0, i));
+    buf = buf.slice(i + 1);
+    if (m.method === 'test/release') held.splice(0).forEach(reply);
+    else if (m.method === 'tools/call') held.push(m);
+    else if (m.id !== undefined) reply(m);
+  }
 });`];
+
+/** A bridge over fakeMcp, with the editor's readiness held until ready() is called. */
+function fakeBridge(s: ReturnType<typeof stub>) {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const replies: any[] = [];
+  let pendingOut = '';
+  output.setEncoding('utf8').on('data', (d) => {
+    pendingOut += d;
+    let i;
+    while ((i = pendingOut.indexOf('\n')) >= 0) {
+      replies.push(JSON.parse(pendingOut.slice(0, i)));
+      pendingOut = pendingOut.slice(i + 1);
+    }
+  });
+  let ready!: () => void;
+  const editorUp = new Promise<void>((r) => (ready = r));
+  const child = bridge(fakeMcp, s.cfg, { input, output, log: () => {}, ensure: () => editorUp, keepEveryMs: 20 });
+  // A failed assertion mustn't leave the fake running and the run hanging.
+  after(() => child.exitCode === null && child.kill());
+  const send = (m: object) => input.write(`${JSON.stringify(m)}\n`);
+  const seen = (id: number) => replies.some((r) => r.id === id);
+  const fresh = () => statSync(s.cfg.activity).mtimeMs > Date.now() - 10_000;
+  const close = async () => {
+    input.end();
+    return new Promise((r) => child.on('exit', r));
+  };
+  return { send, seen, replies, ready, fresh, close };
+}
+const until = async (ok: () => boolean) => {
+  for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 10));
+  assert.ok(ok());
+};
 
 test('bridge: the handshake goes straight through, a tool call waits for the editor, and order holds', async () => {
   const s = stub('bridge', { ActiveState: 'inactive' });
-  const input = new PassThrough();
-  const output = new PassThrough();
-  const replies: string[] = [];
-  output.on('data', (d) => replies.push(...String(d).trim().split('\n')));
-  let release!: () => void;
-  const editorUp = new Promise<void>((r) => (release = r));
-  const child = bridge(fakeMcp, s.cfg, { input, output, log: () => {}, ensure: () => editorUp, keepEveryMs: 50 });
-  const send = (m: object) => input.write(`${JSON.stringify(m)}\n`);
-  const seen = (id: number) => replies.some((r) => JSON.parse(r).id === id);
-  const until = async (ok: () => boolean) => { for (let i = 0; i < 100 && !ok(); i++) await new Promise((r) => setTimeout(r, 20)); assert.ok(ok()); };
-
+  const b = fakeBridge(s);
   s.used(NOW - 3 * H);
-  send({ jsonrpc: '2.0', id: 1, method: 'initialize' });
-  await until(() => seen(1));
-  assert.ok(statSync(s.cfg.activity).mtimeMs > Date.now() - 10_000, 'the handshake counts as use');
+  b.send({ jsonrpc: '2.0', id: 1, method: 'initialize' });
+  await until(() => b.seen(1));
+  assert.ok(b.fresh(), 'the handshake counts as use');
 
-  send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'scene_get' } });
-  send({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
-  await new Promise((r) => setTimeout(r, 150));
-  assert.equal(seen(2) || seen(3), false, 'held behind the editor, the listing too, to keep the order');
-  release();
-  // While the tool call runs (300 ms), the keep-alive stamps the file again even after it is set back.
-  await new Promise((r) => setTimeout(r, 60));
+  // U+2028 in the arguments, as script text can hold: JSON leaves it raw, and the line must stay whole.
+  b.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'script_patch', arguments: { text: 'a\u2028b\u2029c' } } });
+  b.send({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(b.seen(3), false, 'the listing waits behind the held call, to keep the order');
+  b.ready();
+  await until(() => b.seen(3));
+  assert.equal(b.seen(2), false);
+
+  // The call is in flight (the fake holds it): the keep-alive stamps the file again after it is set back.
   s.used(NOW - 3 * H);
-  await new Promise((r) => setTimeout(r, 120));
-  assert.ok(statSync(s.cfg.activity).mtimeMs > Date.now() - 10_000, 'a call in flight is use');
-  await until(() => seen(2) && seen(3));
-  assert.deepEqual(replies.map((r) => JSON.parse(r).id), [1, 3, 2], 'the listing answered first only because the server is quicker at it');
+  await until(b.fresh);
+  b.send({ jsonrpc: '2.0', method: 'test/release' });
+  await until(() => b.seen(2));
+  assert.equal(b.replies.find((r) => r.id === 2).result.params.arguments.text, 'a\u2028b\u2029c');
+  // Answered: nothing in flight, so nothing stamps it any more.
+  await new Promise((r) => setTimeout(r, 30));
+  s.used(NOW - 3 * H);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(b.fresh(), false);
+  assert.equal(await b.close(), 0, 'closing stdin ends the MCP server too');
+});
 
-  input.end();
-  const code = await new Promise((r) => child.on('exit', r));
-  assert.equal(code, 0, 'closing stdin ends the MCP server too');
+test('bridge: a call the client cancelled stops keeping the editor up', async () => {
+  const s = stub('cancel', { ActiveState: 'active' });
+  const b = fakeBridge(s);
+  b.ready();
+  b.send({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'project_run' } });
+  s.used(NOW - 3 * H);
+  await until(b.fresh);
+  b.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 7 } });
+  await new Promise((r) => setTimeout(r, 30));
+  s.used(NOW - 3 * H);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(b.fresh(), false);
+  assert.equal(await b.close(), 0);
 });

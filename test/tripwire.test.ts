@@ -302,6 +302,9 @@ const BLOCKED: [string, string?][] = [
   ['PIDS="$(pgrep -f dev.ts)"; kill $PIDS'],
   ['for p in $(pgrep node); do kill $p; done'],
   ['for p in $(pgrep node); do readlink /proc/$q/cwd && kill $p; done'],
+  // #454 killed its own shell with the first (#485)
+  ['kill $(pgrep -f "PORT=19860")'],
+  ['pgrep -f dotnet | xargs kill'],
   // a per-pid check doesn't excuse a kill fed by the socket table
   ['for p in $(ss -ltnp | grep node | grep -o "[0-9]\\{4,\\}"); do [ "$(readlink /proc/$p/cwd)" = "$PWD" ] && kill $p; done'],
   // #468 S01-5: the sqlite3 rules still cover the live data dir's own databases and other schemes' folders
@@ -881,4 +884,102 @@ test('no turn launches an ultra review: it is billed to a person, so only their 
   assert.match(skill('ultrareview')!.reason, /billed/);
   assert.equal(skill('code-review', 'high'), null);
   assert.equal(skill('citadel:self-review'), null);
+});
+
+// ---------- #485: rules narrowed where they stopped real work, each with its twin that stays refused ----------
+
+test('a target the tripwire can now pin down: a function argument bound at its call, and $(basename …) in a known folder (#485)', () => {
+  const tmp = `${data}/projects/2/tmp/9`;
+  const allowed: [string, string?][] = [
+    // #709 and #717: a function writing to its argument, called with literal names
+    ['cd "$TMPDIR" && mkdir -p src && cd src\nf(){ gh api "repos/$1/contents/$2?ref=$3" -H "Accept: application/vnd.github.raw" > "$4" 2>"$4.err" || { echo "FAIL $1 $2"; cat "$4.err"; }; }\nf obra/superpowers skills/writing-skills/SKILL.md 22f0b46 sp-writing.md\nf obra/superpowers skills/x/SKILL.md 22f0b46 sp-x.md'],
+    ["get(){ gh api \"repos/$1/contents/$2?ref=$3\" -H 'Accept: application/vnd.github.raw' > \"$4\"; }; get jame581/GodotPrompter skills/csharp-godot/SKILL.md d7b26cd cg.md"],
+    ['function save() { rm -f "${1}.old"; mv "$1" "$1.old"; }; save notes.md'],
+    ['f() { rm -f "$1"; }; for x in a.txt b.txt; do f "$x"; done', tmp],
+    // #1034: a single name from basename, in a folder it knows
+    ['cd $TMPDIR && for f in apps/_citadel/rail.js apps/_citadel/theme.css; do curl -s http://127.0.0.1:8573/$f > "$(basename $f)"; done'],
+    ['curl -s "$URL" > "$(basename "$URL").json"', tmp],
+    ['cp "$SRC" "$(basename "$SRC")"', tmp],
+  ];
+  for (const [command, cwd] of allowed) assert.equal(bash(command, cwd), null, command);
+  const refused: [string, string?][] = [
+    // the arguments decide: a live-data path, or one it can't read
+    [`f(){ rm -f "$1"; }; f ${data}/state.db`],
+    ['f(){ rm -f "$1"; }; f "$D"'],
+    ['f(){ echo x > "$2"; }; f a "$out"', tmp],
+    ['f(){ cd "$1" && rm -f state.db; }; f ~/.local/share/claude-coordinator'],
+    // a function the tripwire can't see every call of is checked as before, with its arguments unknown
+    ['f(){ rm -f "$1"; }; export -f f; bash -c "f /x"'],
+    ['f(){ rm -f "$1"; }; g=f; $g x'],
+    ['f(){ rm -f "$1"; }'],
+    ['f(){ rm -f "$1"; }; f a.txt; $CMD b'],
+    // basename names a file in the current folder: the folder must be known, and not the live data
+    ['cd "$(cat where)" && curl -s "$u" > "$(basename "$u")"'],
+    [`cd ${data} && curl -s "$u" > "$(basename "$u")"`],
+    // only basename: other commands' output may hold a slash
+    ['curl -s "$u" > "$(dirname "$u")"', tmp],
+    ['curl -s "$u" > "$(basename "$u")/x"', tmp],
+    ['curl -s "$u" > "$(echo "$u")"', tmp],
+  ];
+  for (const [command, cwd] of refused) assert.ok(verdict(command, cwd), command);
+});
+
+test('env: names only pass, values stay refused, and the message says how to check one (#485)', () => {
+  for (const command of ['env | cut -d= -f1', "env | cut -d '=' -f 1 | sort", "env | awk -F= '{print $1}' | grep -i node", "env | sed 's/=.*//'", 'env | cut -f1 -d='])
+    assert.equal(bash(command), null, command);
+  for (const command of ['env', 'env | grep NAME', 'env | cut -d= -f2', 'env | cut -d= -f1-', 'env | cut -d= -f1,2', 'env | sort', 'env | sort | cut -d= -f1', "env | awk '{print}'", 'env > e.txt | cut -d= -f1', 'env; cut -d= -f1 x'])
+    assert.ok(verdict(command), command);
+  assert.match(bash('env | grep NAME')!, /^`env`[^.]*\. Check one variable with `\[ -n "\$NAME" \]/);
+  assert.match(bash('env | grep NAME')!, /env \| cut -d= -f1/);
+});
+
+test('git: --ours and --theirs mid-merge, and any checkout in a clone under the turn\'s TMPDIR (#485)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'tripwire-485-'));
+  const c = { ...cfg, home: homedir(), data: tmp, env: { TMPDIR: join(tmp, 'projects/2/tmp/9') } };
+  const wt = join(tmp, 'projects/2/tickets/9');
+  const clone = join(tmp, 'projects/2/tmp/9/clone');
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  const sh = (cmd: string, cwd = wt) => execSync(cmd, { cwd, stdio: 'pipe', env });
+  const at = (command: string, cwd = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c)?.reason ?? null;
+  try {
+    mkdirSync(wt, { recursive: true });
+    sh('git init -q -b ticket/9 && echo a > a.txt && git add a.txt && git commit -qm a');
+    sh('git checkout -qb other && echo b > a.txt && git commit -qam b && git checkout -q ticket/9 && echo c > a.txt && git commit -qam c');
+    // Not mid-merge: --ours names a path as any path checkout does.
+    assert.match(at('git checkout --ours a.txt') ?? '', /names a path/);
+    sh('git merge other || true');
+    for (const ok of ['git checkout --ours a.txt', 'git checkout --theirs -- a.txt', 'git checkout --ours -- .']) assert.equal(at(ok), null, ok);
+    // Without --ours or --theirs, mid-merge or not, it stays refused.
+    for (const no of ['git checkout -- a.txt', 'git checkout HEAD a.txt', 'git restore a.txt']) assert.ok(at(no), no);
+    sh('git merge --abort');
+
+    // A clone under the turn's TMPDIR is scratch: its checkouts can't lose anyone's work.
+    mkdirSync(join(tmp, 'projects/2/tmp/9'), { recursive: true });
+    sh(`git clone -q ${wt} ${clone}`);
+    writeFileSync(join(clone, 'a.txt'), 'changed');
+    for (const ok of [`git -C ${clone} checkout -- a.txt`, `cd ${clone} && git checkout -- a.txt`, 'cd "$TMPDIR/clone" && git checkout HEAD~1 a.txt', `git -C ${clone} checkout other`, `git -C ${clone} restore a.txt`]) assert.equal(at(ok), null, ok);
+    // The worktree itself stays refused, from inside or by -C from the clone, and so does a clone outside the turn's TMPDIR.
+    writeFileSync(join(wt, 'a.txt'), 'changed');
+    for (const no of ['git checkout -- a.txt', 'git restore a.txt', 'git checkout other']) assert.ok(at(no), no);
+    assert.ok(at(`git -C ${wt} checkout -- a.txt`, clone));
+    const other = join(tmp, 'elsewhere');
+    sh(`git clone -q ${wt} ${other}`);
+    assert.ok(at('git checkout -- a.txt', other));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('systemd-run --setenv counts for server.ts, a grep pattern is not a path, and the refusals name citadel-dev-copy (#485)', () => {
+  for (const command of ['systemd-run --user --setenv=DATA_DIR=/tmp/d --setenv=PORT=19999 node server.ts', 'systemd-run --user -E DATA_DIR=/tmp/d -E PORT=19999 --unit=dev node server.ts', 'systemd-run --user --setenv DATA_DIR=/tmp/d --setenv PORT=19999 node server.ts'])
+    assert.equal(bash(command), null, command);
+  for (const command of ['systemd-run --user --setenv=PORT=19999 node server.ts', 'systemd-run --user node server.ts', 'systemd-run --user --setenv=DATA_DIR=/tmp/d -- node server.ts --setenv=PORT=1'])
+    assert.ok(verdict(command), command);
+  // #827, #825, #366: a pattern grep searches for, never a file it reads
+  for (const command of ["podman images --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep citadel-claude | head -3", "podman ps -a --format '{{.Names}} {{.Status}}' 2>&1 | grep citadel-claude", 'grep -rn citadel-claude src/'])
+    assert.equal(bash(command), null, command);
+  for (const command of ['podman inspect citadel-claude-1', 'cat ~/.config/citadel-claude/settings.json', 'grep -f ~/.config/citadel-claude/x src'])
+    assert.ok(verdict(command), command);
+  assert.match(bash('node server.ts')!, /citadel-dev-copy start/);
+  assert.match(bash('pkill -f server.ts')!, /citadel-dev-copy/);
 });

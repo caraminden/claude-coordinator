@@ -5,7 +5,8 @@
 // process's environment, or printing the turn's own; state.db opened writable and the credentials
 // table; other people's homes and Claude runners; signing Claude in; running server.ts against the
 // live data) and the git habits every scheme shares (no path checkout, restore or stash; no checkout,
-// merge or reset over uncommitted changes; no push to main or plain force push from a minion's
+// merge or reset over uncommitted changes, outside a scratch clone in $TMPDIR and --ours/--theirs mid-merge;
+// no push to main or plain force push from a minion's
 // worktree), and says why and what to do instead.
 //
 // Two tiers. Real dangers are hard blocks. Things a person may reasonably want once (deleting or
@@ -15,7 +16,8 @@
 // switches a tier off; only a person's click lets one call through.
 //
 // It is a tripwire, NOT a security boundary. It reads the command text: it follows variables the
-// command sets and the turn's environment ($TMPDIR), loop variables, `$(mktemp)`, globs and braces
+// command sets and the turn's environment ($TMPDIR), loop variables, a function's $1…$9 at each call it can
+// see, `$(mktemp)`, `$(basename …)` as one name in the current folder, globs and braces
 // in folder names and symlinked folders, and a destructive write (rm, mv, cp onto, >, truncate,
 // find -delete, sqlite3 SQL that writes) whose path it still can't pin down is blocked if it could
 // land in the live data dir (#251: `D=<data dir>; rm -f $D/state.db` got through). Reads and other
@@ -231,8 +233,9 @@ function containsProtected(p: string, cfg: TripwireConfig): boolean {
 
 /**
  * A word of the command. `unknown` when it holds an expansion the lexer can't see through; then `tmpl`
- * is its text with each expansion marked: \0NAME\0 for a variable, \0\0 for anything else ($(…),
- * $1, ${x%/*}), so a variable the command sets, or the turn's environment, can fill it in later.
+ * is its text with each expansion marked: \0NAME\0 for a variable (\0__1\0 for $1, which a call of a
+ * function binds), \0__name\0 for a $(basename …), \0\0 for anything else ($(…), $@, ${x%/*}), so a
+ * variable the command sets, or the turn's environment, can fill it in later.
  */
 interface Word { text: string; unknown: boolean; tmpl?: string }
 type Tok = { kind: 'word'; word: Word } | { kind: 'op'; text: string } | { kind: 'redir'; op: string };
@@ -313,8 +316,8 @@ export function lex(s: string, home: string): Tok[] {
       const end = s.indexOf('}', j);
       if (end < 0) return n;
       // ${NAME:?…}, ${NAME:-…} and the like are NAME when it's set; other forms can't be followed.
-      const m = /^([A-Za-z_]\w*)(:?[-=?].*)?$/.exec(s.slice(j + 1, end));
-      name = m ? m[1] : '';
+      const m = /^([A-Za-z_]\w*|[1-9])(:?[-=?].*)?$/.exec(s.slice(j + 1, end));
+      name = m ? positional(m[1]) : '';
       j = end + 1;
     } else {
       const m = /^([A-Za-z_]\w*|[0-9@*#?$!-])/.exec(s.slice(j));
@@ -323,7 +326,7 @@ export function lex(s: string, home: string): Tok[] {
         inWord = true;
         return i + 1;
       }
-      name = /^[A-Za-z_]/.test(m[1]) ? m[1] : '';
+      name = /^[A-Za-z_1-9]/.test(m[1]) ? positional(m[1]) : '';
       j += m[1].length;
     }
     if (name === 'HOME') put(home);
@@ -503,17 +506,25 @@ export function lex(s: string, home: string): Tok[] {
 }
 
 const MKTEMP_DIR = '__mktemp_dir';
+/** What a $(basename …) prints: one name, never a slash, so a word of it alone is a file in the current folder. */
+const ONE_NAME = '__name';
+/** $1 to $9 as the variables a function call binds (__1); a name stays itself. */
+const positional = (n: string) => (/^[1-9]$/.test(n) ? `__${n}` : n);
+/** A variable as the command wrote it: $1 for __1, $(…) for a basename. */
+const varShown = (n: string) => (n === ONE_NAME ? '$(…)' : `$${n.replace(/^__(?=[1-9]$)/, '')}`);
 
 /**
- * What `$(pwd)` or `$(mktemp …)` prints, as a word template: for mktemp, the folder it makes the file
- * in (its -p or --tmpdir, the template's own folder, or $TMPDIR) and the template. Null for any other command.
+ * What `$(pwd)`, `$(basename …)` or `$(mktemp …)` prints, as a word template: for mktemp, the folder it
+ * makes the file in (its -p or --tmpdir, the template's own folder, or $TMPDIR) and the template. Null
+ * for any other command.
  */
 function mktempPath(src: string, home: string): string | null {
   if (src.trim() === 'pwd') return '\0PWD\0';
-  if (!/^\s*mktemp\b/.test(src)) return null;
+  if (!/^\s*(mktemp|basename)\b/.test(src)) return null;
   const toks = lex(src, home);
   if (toks.some((t) => t.kind !== 'word')) return null;
   const words = toks.map((t) => (t as { word: Word }).word);
+  if (words[0]?.text === 'basename') return `\0${ONE_NAME}\0`;
   if (words[0]?.text !== 'mktemp') return null;
   const tm = (w: Word) => w.tmpl ?? w.text;
   let dir: string | null = null;
@@ -563,7 +574,7 @@ const SECRET_VAR = /TOKEN|SECRET|PASSW|KEY|COOKIE|CREDENTIAL/i;
 /** A variable's values: set earlier in the command, else (unless the command set it to something unknown) the turn's environment. */
 function valueOf(name: string, st: State, cfg: TripwireConfig): string[] | undefined {
   if (st.values.has(name)) return st.values.get(name);
-  if (st.vars.has(name)) return undefined;
+  if (st.vars.has(name) || name === ONE_NAME) return undefined;
   const env = cfg.env ?? process.env;
   if (name === 'PWD') return st.cwd ? [st.cwd] : undefined;
   // Where a bare mktemp puts its file (see mktempPath).
@@ -585,7 +596,7 @@ function expand(w: Word, st: State, cfg: TripwireConfig): Word[] {
 }
 
 /** An unknown word as the command wrote it, for a reason: `$D/state.db`. */
-const shown = (w: Word) => (w.tmpl ?? w.text).replace(/\0([A-Za-z_]\w*)\0/g, '$$$1').replace(/\0\0/g, '$(…)');
+const shown = (w: Word) => (w.tmpl ?? w.text).replace(/\0([A-Za-z_]\w*)\0/g, (_, n) => varShown(n)).replace(/\0\0/g, '$(…)');
 
 /** Paths a word may name: the word itself, an option's or dd operand's value after `=`, brace and glob expansions, and where symlinks lead. */
 function pathsOf(word: Word, st: State, cfg: TripwireConfig): string[] {
@@ -782,9 +793,10 @@ function blindReason(w: Word, st: State, cfg: TripwireConfig, name: string): Ver
   const tmpl = w.tmpl!;
   const lit = tmpl.slice(0, tmpl.indexOf('\0'));
   const cut = lit.lastIndexOf('/');
-  // `$x/…` could be anywhere; `out-$x` is in the current folder; `/a/b/$x` is in /a/b.
-  const dirs = cut >= 0 ? pathsOf({ text: lit.slice(0, cut) || '/', unknown: false }, st, cfg) : lit && st.cwd ? [st.cwd] : [];
-  const unknowns = [...new Set([...tmpl.matchAll(/\0([A-Za-z_]\w*)?\0/g)].map((m) => (m[1] ? `$${m[1]}` : '$(…)')))].join(' and ');
+  // `$x/…` could be anywhere; `out-$x` and `$(basename $u).json` are in the current folder; `/a/b/$x` is in /a/b.
+  const oneName = !tmpl.includes('/') && !tmpl.replaceAll(`\0${ONE_NAME}\0`, '').includes('\0');
+  const dirs = cut >= 0 ? pathsOf({ text: lit.slice(0, cut) || '/', unknown: false }, st, cfg) : (lit || oneName) && st.cwd ? [st.cwd] : [];
+  const unknowns = [...new Set([...tmpl.matchAll(/\0([A-Za-z_]\w*)?\0/g)].map((m) => (m[1] ? varShown(m[1]) : '$(…)')))].join(' and ');
   if (!dirs.length || dirs.some((d) => under(cfg.data, d))) {
     return hard(`${shown(w)}: the tripwire can't tell what ${unknowns} holds, so this could reach ${cfg.data}, the live data dir (the database, its backups and every scheme's folders). Spell the path out in the command, or keep scratch files under $TMPDIR. ${SCRATCH}`);
   }
@@ -804,7 +816,18 @@ function schemeFolder(p: string, cfg: TripwireConfig): boolean {
   return p === own || (under(p, own) && !p.slice(own.length + 1).includes('/'));
 }
 
-const ENV_WHY = "A turn's environment can hold its tokens. Check one variable with `[ -n \"$NAME\" ] && echo set`, or print a harmless one with `echo \"$PATH\"`.";
+const ENV_WHY = "Check one variable with `[ -n \"$NAME\" ] && echo set`, list the names alone with `env | cut -d= -f1`, or print a harmless one with `echo \"$PATH\"`: a turn's environment can hold its tokens.";
+const ENV_ALL = `\`env\` with no command prints the whole environment, values and all. ${ENV_WHY}`;
+
+/** A filter that keeps only the names of `env`'s NAME=value lines: `cut -d= -f1`, `awk -F= '{print $1}'`, `sed 's/=.*//'` (#485). */
+function namesOnly(ws: string[]): boolean {
+  const [name, ...a] = ws;
+  const opts = a.join(' ').replace(/\s+/g, ' ');
+  if (name === 'cut') return /^(-d ?=|--delimiter==) (-f ?1|--fields=1)$|^(-f ?1|--fields=1) (-d ?=|--delimiter==)$/.test(opts);
+  if (name === 'awk') return /^-F ?= \{ ?print \$1;? ?\}$/.test(opts);
+  if (name === 'sed') return /^(-e )?s\/=\.\*\/\/$/.test(opts);
+  return false;
+}
 
 /**
  * Why a sqlite3 call on the live data is blocked, or null: state.db (every minion's session) opened
@@ -900,6 +923,20 @@ function inWorktree(dir: string, cfg: TripwireConfig): boolean {
   return under(dir, projects) && /^\d+\/tickets\/[^/]+/.test(dir.slice(projects.length + 1));
 }
 
+/** A repo whose whole working tree is under the turn's TMPDIR: a scratch clone, whose changes nobody else has. */
+function scratchClone(dir: string, cfg: TripwireConfig): boolean {
+  const tmp = (cfg.env ?? process.env).TMPDIR;
+  const top = tmp && under(dir, tmp) ? git(dir, 'rev-parse', '--show-toplevel') : null;
+  return !!top && top.status === 0 && under(top.out.trim(), tmp!) && top.out.trim() !== tmp;
+}
+
+/** Whether a merge, rebase, cherry-pick or revert is stopped mid-way in this repo. */
+function midMerge(dir: string): boolean {
+  const states = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply'];
+  const r = git(dir, 'rev-parse', ...states.flatMap((s) => ['--git-path', s]));
+  return r?.status === 0 && r.out.split('\n').some((p) => p && existsSync(resolve(dir, p)));
+}
+
 /**
  * The git habits every scheme shares: no path checkout, restore or stash; no checkout, merge, rebase or
  * reset over uncommitted tracked changes; from a minion's worktree, no push to main and no plain force.
@@ -914,8 +951,11 @@ function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: Trip
     case 'stash':
       return ['list', 'show'].includes(words[0]) ? null : hard(`\`git stash\` is blocked. ${STASH_WHY}`);
     case 'restore':
+      if (dir && scratchClone(dir, cfg)) return null;
       return has('--staged', '-S') && !has('--worktree', '-W') ? null : hard(`\`git restore\` is blocked. ${NEVER_PATH}`);
     case 'checkout': {
+      // A clone under the turn's TMPDIR is scratch; --ours and --theirs pick a side of a conflict (#485).
+      if (dir && (scratchClone(dir, cfg) || (has('--ours', '--theirs') && midMerge(dir)))) return null;
       if (has('--')) return hard(`\`git checkout -- <path>\` is blocked. ${NEVER_PATH}`);
       // A new branch keeps the working tree as it is.
       if (has('-b', '-B', '--orphan') && !has('-f', '--force')) return null;
@@ -1051,7 +1091,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
       }
       takeAssignments(name === 'env');
       if (ghSet()) return hard(`Setting ${ghSet()} is blocked. ${GH_ENV_WHY}`);
-      if (name === 'env' && i >= words.length) return hard(`\`env\` with no command prints the whole environment. ${ENV_WHY}`);
+      if (name === 'env' && i >= words.length) return hard(ENV_ALL);
       if (/^(timeout|nice|ionice|chrt)$/.test(name) && /^[\d.]+[smhd]?$/.test(words[i]?.text ?? '')) i++;
     } else break;
     if (i >= words.length) return null;
@@ -1061,6 +1101,15 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   const name = flockShell ? 'sh' : basename(cmd.text);
   const args = words.slice(flockShell ? i : i + 1);
   const vars = new Set([...st.vars, ...assigned.keys()]);
+  // systemd-run's --setenv=NAME=value (or -E) sets NAME for the command it runs (#485).
+  if (name === 'systemd-run') {
+    for (let k = 0; k < args.length && args[k].text.startsWith('-') && args[k].text !== '--'; k++) {
+      const opt = args[k].text;
+      const t = /^(--setenv|-E)$/.test(opt) ? args[++k]?.text ?? '' : /^(--setenv=|-E)/.test(opt) ? opt.replace(/^(--setenv=|-E)/, '') : '';
+      const m = /^([A-Za-z_]\w*)=/.exec(t);
+      if (m) vars.add(m[1]);
+    }
+  }
 
   if (name === 'claude') {
     // Through known variables too (`a=ultrareview; claude "$a"`); a word it can't know might be the subcommand.
@@ -1125,7 +1174,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   // Every turn, Citadel, its contraptions and other people's dev servers run as the one account, so a
   // pattern kill reaches them all: on 2026-11-03 a turn's `pkill -f app/dev/dev.ts` killed two minions'
   // shells (#299; what took Citadel down was a kill fed by grep, see listingKill).
-  if (name === 'pkill' || name === 'killall') return hard(`\`${name}\` kills by name across the whole account: other minions' shells and dev servers, Citadel and its contraptions. Stop your own process by pid: \`$!\` when you start it, or the pid from \`ss -ltnp 'sport = :<your port>'\`, checked with \`readlink /proc/<pid>/cwd\`.`);
+  if (name === 'pkill' || name === 'killall') return hard(`\`${name}\` kills by name across the whole account: other minions' shells and dev servers, Citadel and its contraptions. Stop your own process by pid: \`$!\` when you start it, or the pid from \`ss -ltnp 'sport = :<your port>'\`, checked with \`readlink /proc/<pid>/cwd\`. A dev copy of Citadel started with \`citadel-dev-copy start\` stops with \`citadel-dev-copy stop\`.`);
   if (name === 'printenv') return hard(`\`printenv\` prints the environment. ${ENV_WHY}`);
   // Anywhere among the plain words: an option's value (`--model haiku`) comes before the subcommand.
   const print = args.some((w) => w.text === '-p' || w.text === '--print');
@@ -1215,7 +1264,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     (runner >= 0 && !own.some((w) => w.text === '--check' || w.text === '-c') && own.some((w) => basename(w.text) === 'server.ts' || /\b(import|require)\s*\(\s*['"`][^'"`]*server\.ts['"`]/.test(w.text))) ||
     (npmStart && !!st.cwd && existsSync(join(st.cwd, 'package.json')) && readFileSync(join(st.cwd, 'package.json'), 'utf8').includes('server.ts'));
   if (runsServer && !(vars.has('DATA_DIR') && vars.has('PORT'))) {
-    return hard('Running server.ts without both DATA_DIR and PORT set points it at the live database and port (its schema changes would run on live data). Use `DATA_DIR=$(mktemp -d) PORT=<free port> node server.ts` (copy the DB in if you need data), or `node --check server.ts` for a syntax check.');
+    return hard('Running server.ts without both DATA_DIR and PORT set points it at the live database and port (its schema changes would run on live data). For a dev copy of Citadel, run `citadel-dev-copy start` (a copy of the live data, `--data empty` for none) and `citadel-dev-copy stop`. Otherwise use `DATA_DIR=$(mktemp -d) PORT=<free port> node server.ts` (copy the DB in if you need data), or `node --check server.ts` for a syntax check.');
   }
 
   if (name === 'git') return gitReason(args, st, cfg);
@@ -1272,6 +1321,51 @@ function wholeListing({ name, args }: { name: string; args: Word[] }): number {
 const LISTING_KILL_WHY = "That `kill` takes its pids from the whole socket table narrowed by grep or awk, so a pattern that comes out empty or loose kills every server on the account: on 2026-11-03 `kill $(ss -ltnp | grep \":$P \" …)` with an empty $P took Citadel and every contraption down for 7½ hours (#299). Let ss pick the port, `ss -ltnp 'sport = :<port>'`, or use `$!` from when you started it.";
 const PROCESS_KILL_WHY = "That `kill` takes its pids from a process listing (ps or pgrep) picked by a pattern, which is `pkill -f` spelled out: every turn, Citadel, its contraptions and other people's dev servers run as the one account, so it reaches them all (on 2026-11-03 `pkill -f app/dev/dev.ts` killed two minions' shells, #299). Stop your own process by pid: `$!` when you start it, or the pid from `ss -ltnp 'sport = :<your port>'`; to go through matches, check each one first: `[ \"$(readlink /proc/$p/cwd)\" = \"$PWD\" ] && kill $p`.";
 
+/**
+ * The functions a command defines (`f() { … }`, `function f() { … }`) whose every call it can see: run
+ * by name as a command, and never named anywhere else (`export -f f`, `trap 'f' EXIT`, `eval "f x"`),
+ * in a command whose every command word it can read (not `$g x`). Their bodies are checked at each call,
+ * with the call's words as $1…$9 (#485); any other function's body is checked where it stands, with
+ * $1…$9 unknown.
+ */
+function traceableFunctions(toks: Tok[]): Set<string> {
+  const defined = new Set<string>();
+  const called = new Set<string>();
+  const named: string[] = [];
+  let blind = false;
+  let words: Word[] = [];
+  toks.forEach((t, k) => {
+    if (t.kind === 'word') return void words.push(t.word);
+    if (t.kind === 'redir') return;
+    const head = words.map((w) => w.text);
+    const next = toks[k + 1];
+    if (t.text === '(' && next?.kind === 'op' && next.text === ')' && (head.length === 1 || (head.length === 2 && head[0] === 'function'))) defined.add(head.at(-1)!);
+    else if (words.length) {
+      const c = commandOf({ words, redirects: [] });
+      const at = words.length - c.args.length - 1;
+      if (words[at]?.unknown) blind = true;
+      else if (c.name) called.add(c.name);
+      named.push(...words.filter((w, j) => j !== at && !w.text.startsWith('-')).map((w) => w.tmpl ?? w.text));
+    }
+    words = [];
+  });
+  if (words.length) named.push(...words.map((w) => w.tmpl ?? w.text));
+  const edge = '[\\s;&|(){}`\'"]';
+  return new Set(blind ? [] : [...defined].filter((f) => called.has(f) && /^[A-Za-z_][\w-]*$/.test(f) && !named.some((t) => new RegExp(`(^|${edge})${f}($|${edge})`).test(t))));
+}
+
+/** Where the `}` that closes the body opened at toks[from - 1] is, or -1. */
+function closingBrace(toks: Tok[], from: number): number {
+  let depth = 1;
+  for (let k = from; k < toks.length; k++) {
+    const t = toks[k];
+    if (t.kind !== 'word' || t.word.unknown) continue;
+    if (t.word.text === '{') depth++;
+    else if (t.word.text === '}' && --depth === 0) return k;
+  }
+  return -1;
+}
+
 /** Why this Bash command is blocked, or null. One hard-blocked part makes the whole command a hard block. */
 export function commandReason(command: string, st: State, cfg: TripwireConfig): Verdict | null {
   // Open parens: the folder and variables before each, and for a $( … ), the command it sits in, to pick up after it.
@@ -1311,7 +1405,61 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
     anyListed |= kind;
     return null;
   };
-  for (const tok of [...lex(command, cfg.home), { kind: 'op', text: ';' } as Tok]) {
+  // A function every call of which shows is checked at each call: its body is spliced in after the
+  // call, between a bind of $1…$9 to the call's words and an unbind (#485).
+  type Step = Tok | { kind: 'bind'; name: string; args: Word[] | null } | { kind: 'unbind' };
+  const toks: Step[] = [...lex(command, cfg.home), { kind: 'op', text: ';' }];
+  const traceable = traceableFunctions(toks as Tok[]);
+  const funcs = new Map<string, Step[]>();
+  const calls = new WeakSet<Step>();
+  const binds: { name: string; saved: [string, boolean, string[] | undefined][] }[] = [];
+  let spliced = 0;
+  for (let k = 0; k < toks.length; k++) {
+    const tok = toks[k];
+    if (tok.kind === 'bind') {
+      const saved: [string, boolean, string[] | undefined][] = [];
+      for (let n = 1; n <= 9; n++) {
+        const v = `__${n}`;
+        saved.push([v, st.vars.has(v), st.values.get(v)]);
+        const a = tok.args?.[n - 1];
+        setVar(st, v, tok.args ? (a ? known(expand(a, st, cfg), cfg) : ['']) : undefined);
+      }
+      binds.push({ name: tok.name, saved });
+      continue;
+    }
+    if (tok.kind === 'unbind') {
+      for (const [v, had, values] of binds.pop()?.saved ?? []) {
+        if (values) st.values.set(v, values);
+        else st.values.delete(v);
+        if (!had) st.vars.delete(v);
+      }
+      continue;
+    }
+    const head = seg.words.map((w) => w.text);
+    if (tok.kind === 'op' && tok.text === '(' && (head.length === 1 || (head.length === 2 && head[0] === 'function')) && traceable.has(head.at(-1)!) && !seg.redirects.length && !redir) {
+      const next = toks[k + 1];
+      const brace = toks[k + 2];
+      const end = next?.kind === 'op' && next.text === ')' && brace?.kind === 'word' && brace.word.text === '{' ? closingBrace(toks as Tok[], k + 3) : -1;
+      if (end > 0) {
+        funcs.set(seg.words.at(-1)!.text, toks.slice(k + 3, end));
+        seg = { words: [], redirects: [] };
+        k = end;
+        continue;
+      }
+    }
+    if (tok.kind === 'op' && tok.text !== '(' && !calls.has(tok) && seg.words.length) {
+      const c = commandOf(seg);
+      const body = funcs.get(c.name);
+      // A call from inside its own body is checked once more with its words unknown, then no deeper.
+      const depth = binds.filter((b) => b.name === c.name).length;
+      if (body && depth < 2 && spliced++ < 64) {
+        const end: Step = { kind: 'op', text: ';' };
+        calls.add(end);
+        toks.splice(k, 1, end, { kind: 'bind', name: c.name, args: depth ? null : c.args }, ...body, { kind: 'op', text: ';' }, { kind: 'unbind' }, tok);
+        k--;
+        continue;
+      }
+    }
     if (tok.kind === 'word') {
       if (redir) seg.redirects.push({ op: redir, target: tok.word });
       else seg.words.push(tok.word);
@@ -1326,7 +1474,13 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
     } else {
       redir = null;
       st.maybe = prevOp === '&&' || prevOp === '||';
-      const why = segmentReason(seg, st, cfg) ?? listingKill(seg);
+      let why = segmentReason(seg, st, cfg) ?? listingKill(seg);
+      // `env | cut -d= -f1`: the names alone, to see whether a variable is set (#485).
+      if (why?.reason === ENV_ALL && tok.text === '|' && !seg.redirects.length) {
+        const next: string[] = [];
+        for (let j = k + 1; toks[j]?.kind === 'word'; j++) next.push((toks[j] as { word: Word }).word.text);
+        if (namesOnly(next)) why = null;
+      }
       st.maybe = false;
       prevOp = tok.text;
       seg = { words: [], redirects: [] };

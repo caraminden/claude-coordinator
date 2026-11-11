@@ -294,6 +294,16 @@ const BLOCKED: [string, string?][] = [
   ['cd ~/claude-coordinator && git commit -am x tools/deploy.sh', 'deploy'],
   ['cp ~/claude-coordinator/tools/deploy.sh ~/claude-coordinator/tools/land.sh', 'deploy'],
   ['echo ~/claude-coordinator/tools/deploy.sh; systemctl --user restart claude-coordinator', 'deploy'],
+  // #468 S01-4: a kill fed by a process listing is pkill spelled out
+  ["ps -ef | grep dev.ts | awk '{print $2}' | xargs kill -9"],
+  ["kill -9 $(ps aux | grep '[n]ode' | awk '{print $2}')"],
+  ['kill $(pgrep -f node)'],
+  ['pgrep -f dev.ts | xargs kill'],
+  ['PIDS="$(pgrep -f dev.ts)"; kill $PIDS'],
+  ['for p in $(pgrep node); do kill $p; done'],
+  ['for p in $(pgrep node); do readlink /proc/$q/cwd && kill $p; done'],
+  // a per-pid check doesn't excuse a kill fed by the socket table
+  ['for p in $(ss -ltnp | grep node | grep -o "[0-9]\\{4,\\}"); do [ "$(readlink /proc/$p/cwd)" = "$PWD" ] && kill $p; done'],
 ];
 
 const ALLOWED = [
@@ -468,6 +478,10 @@ const ALLOWED = [
   `git commit -m "$(cat <<'EOF'\nSay "run git push origin main" and fix the 5" width (and pkill -f node\nrm -rf ${data}/state.db\nEOF\n)" && git log -1`,
   // #468 S01-8: the body of a <<\EOF heredoc is still skipped
   'cat <<\\EOF > /tmp/x\npkill -f node and rm -rf ~/claude-coordinator\nEOF\nls',
+  // #468 S01-4: a process listing whose pids are each checked first, or a ps of one pid
+  'pgrep -f dev.ts | while read p; do [ "$(readlink /proc/$p/cwd)" = "$PWD" ] && kill $p; done',
+  'ps -p $PID -o pid= && kill $PID',
+  'kill $(ps -o pid= -p $(cat $TMPDIR/dev.pid))',
 ];
 
 // Things a person may reasonably allow once: a card for that exact call.

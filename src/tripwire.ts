@@ -1118,41 +1118,63 @@ function commandOf(seg: Segment): { name: string; args: Word[] } {
   return { name: basename(w[i]?.text ?? ''), args: w.slice(i + 1) };
 }
 
-/** Every socket on the account, left for grep or awk to narrow down: ss with no port filter, netstat, lsof -i with no port. */
-function wholeListing({ name, args }: { name: string; args: Word[] }): boolean {
-  if (name === 'netstat') return true;
-  if (name === 'ss') return !args.some((w) => /\b([sd]port|src|dst)\b/.test(w.text));
+// What a whole listing lists (bits, so a pipe or variable can carry both).
+const SOCKETS = 1;
+const PROCESSES = 2;
+
+/**
+ * Every socket on the account, left for grep or awk to narrow down (ss with no port filter, netstat,
+ * lsof -i with no port), or every process picked by a pattern (pgrep, ps without -p): which, or 0.
+ */
+function wholeListing({ name, args }: { name: string; args: Word[] }): number {
+  if (name === 'netstat') return SOCKETS;
+  if (name === 'ss') return args.some((w) => /\b([sd]port|src|dst)\b/.test(w.text)) ? 0 : SOCKETS;
   const inet = (t: string) => /^-[a-zA-Z]*i/.test(t);
-  if (name === 'lsof') return args.some((w) => inet(w.text)) && !args.some((w, k) => w.text.includes(':') && (inet(w.text) || /^-[a-zA-Z]*i$/.test(args[k - 1]?.text ?? '')));
-  return false;
+  if (name === 'lsof') return args.some((w) => inet(w.text)) && !args.some((w, k) => w.text.includes(':') && (inet(w.text) || /^-[a-zA-Z]*i$/.test(args[k - 1]?.text ?? ''))) ? SOCKETS : 0;
+  if (name === 'pgrep') return PROCESSES;
+  if (name === 'ps') return args.some((w) => /^-[a-zA-Z]*[pq]$|^--(pid|quick-pid)\b/.test(w.text)) ? 0 : PROCESSES;
+  return 0;
 }
 
 const LISTING_KILL_WHY = "That `kill` takes its pids from the whole socket table narrowed by grep or awk, so a pattern that comes out empty or loose kills every server on the account: on 2026-11-03 `kill $(ss -ltnp | grep \":$P \" …)` with an empty $P took Citadel and every contraption down for 7½ hours (#299). Let ss pick the port, `ss -ltnp 'sport = :<port>'`, or use `$!` from when you started it.";
+const PROCESS_KILL_WHY = "That `kill` takes its pids from a process listing (ps or pgrep) picked by a pattern, which is `pkill -f` spelled out: every turn, Citadel, its contraptions and other people's dev servers run as the one account, so it reaches them all (on 2026-11-03 `pkill -f app/dev/dev.ts` killed two minions' shells, #299). Stop your own process by pid: `$!` when you start it, or the pid from `ss -ltnp 'sport = :<your port>'`; to go through matches, check each one first: `[ \"$(readlink /proc/$p/cwd)\" = \"$PWD\" ] && kill $p`.";
 
 /** Why this Bash command is blocked, or null. One hard-blocked part makes the whole command a hard block. */
 export function commandReason(command: string, st: State, cfg: TripwireConfig): Verdict | null {
   // Open parens: the folder before each, and for a $( … ), the command it sits in, to pick up after it.
-  const stack: { cwd: string | null; outer?: Segment; redir: string | null; listed: boolean; anyListed: boolean }[] = [];
+  const stack: { cwd: string | null; outer?: Segment; redir: string | null; listed: number; anyListed: number }[] = [];
   let seg: Segment = { words: [], redirects: [] };
   let redir: string | null = null;
   let asked: Verdict | null = null;
-  // A kill whose pids come from a whole listing: through a pipe (`| xargs kill`, `| while read p`), a
-  // $( … ) it sits in, or a variable set from one. `listed`: this pipeline so far; `anyListed`: this paren level.
+  // A kill whose pids come from a whole listing (SOCKETS, PROCESSES): through a pipe (`| xargs kill`,
+  // `| while read p`), a $( … ) it sits in, or a variable set from one. `listed`: this pipeline so far;
+  // `anyListed`: this paren level. A variable from a process listing may be killed once the command has
+  // checked that pid on its own (a word with /proc/$p/ in it, `[ "$(readlink /proc/$p/cwd)" = "$PWD" ]`).
   // shortcut: misses a kill inside `xargs sh -c '…'`, a listing saved to a file or read through <( … ), and
-  // a tainted variable echoed into xargs; widen it if a turn trips over one of those.
-  const fed = new Set<Segment>();
-  const tainted = new Set<string>();
-  let listed = false;
-  let anyListed = false;
+  // a tainted variable echoed into xargs; takes any /proc/$p/ word before the kill as its check, whether
+  // or not the kill depends on it. Widen or tighten it if a turn trips over one of those.
+  const fed = new Map<Segment, number>();
+  const tainted = new Map<string, number>();
+  const checked = new Set<string>();
+  let listed = 0;
+  let anyListed = 0;
   const listingKill = (s: Segment): Verdict | null => {
     const c = commandOf(s);
-    const from = listed || fed.has(s);
-    if (c.name === 'kill' && (from || c.args.some((w) => w.unknown && [...tainted].some((v) => w.tmpl!.includes(`\0${v}\0`))))) return hard(LISTING_KILL_WHY);
+    const from = listed | (fed.get(s) ?? 0);
+    for (const v of tainted.keys()) if (s.words.some((w) => w.tmpl?.includes(`/proc/\0${v}\0/`))) checked.add(v);
+    if (c.name === 'kill') {
+      let kinds = from;
+      for (const w of c.args) if (w.unknown) for (const [v, k] of tainted) if (w.tmpl!.includes(`\0${v}\0`)) kinds |= checked.has(v) ? k & SOCKETS : k;
+      if (kinds & SOCKETS) return hard(LISTING_KILL_WHY);
+      if (kinds & PROCESSES) return hard(PROCESS_KILL_WHY);
+    }
     if (from) {
       const names = !c.name ? s.words.map((w) => w.text.split('=')[0]) : c.name === 'for' ? c.args.slice(0, 1).map((w) => w.text) : c.name === 'read' ? c.args.filter((w) => !w.text.startsWith('-')).map((w) => w.text) : [];
-      for (const n of names) tainted.add(n);
+      for (const n of names) tainted.set(n, (tainted.get(n) ?? 0) | from), checked.delete(n);
     } else if (!c.name) for (const w of s.words) tainted.delete(w.text.split('=')[0]);
-    if (wholeListing(c) || fed.has(s)) listed = anyListed = true;
+    const kind = wholeListing(c) | (fed.get(s) ?? 0);
+    listed |= kind;
+    anyListed |= kind;
     return null;
   };
   for (const tok of [...lex(command, cfg.home), { kind: 'op', text: ';' } as Tok]) {
@@ -1165,19 +1187,19 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
       stack.push({ cwd: st.cwd, outer: seg, redir, listed, anyListed });
       seg = { words: [], redirects: [] };
       redir = null;
-      listed = anyListed = false;
+      listed = anyListed = 0;
     } else {
       redir = null;
       const why = segmentReason(seg, st, cfg) ?? listingKill(seg);
       seg = { words: [], redirects: [] };
       if (why && !why.ask) return why;
       asked ??= why;
-      if (tok.text !== '|' && tok.text !== '|&' && tok.text !== '(') listed = false;
+      if (tok.text !== '|' && tok.text !== '|&' && tok.text !== '(') listed = 0;
       // A cd inside ( … ) or $( … ) doesn't outlive it.
       // `ss -ltnp | ( grep x | xargs kill )`: the pipe carries on into the subshell.
       if (tok.text === '(') {
         stack.push({ cwd: st.cwd, redir: null, listed, anyListed });
-        anyListed = false;
+        anyListed = 0;
       }
       if (tok.text === ')' && stack.length) {
         const open = stack.pop()!;
@@ -1186,8 +1208,11 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
         ({ listed, anyListed } = open);
         if (open.outer) {
           (seg = open.outer), (redir = open.redir);
-          if (inner) fed.add(seg);
-        } else if (inner) listed = anyListed = true;
+          if (inner) fed.set(seg, (fed.get(seg) ?? 0) | inner);
+        } else {
+          listed |= inner;
+          anyListed |= inner;
+        }
       }
     }
   }

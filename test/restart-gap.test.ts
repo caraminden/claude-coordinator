@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { Agent, createServer as createHttpServer, request, type Server } from 'node:http';
+import { Agent, createServer as createHttpServer, request, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { AddressInfo } from 'node:net';
 import { createInterface } from 'node:readline';
@@ -128,12 +128,12 @@ test('on SIGTERM the server exits at once despite keep-alive connections and ope
   const wsClosed = new Promise((r) => ws.on('close', r).on('error', () => {}));
   // Caddy's way: one kept-alive connection, here holding the event stream.
   const agent = new Agent({ keepAlive: true });
-  const streamEnded = new Promise<void>((resolve, reject) => {
-    const req = request(`${base}/api/stream`, { agent, headers: { Cookie: cookie } }, (res) => res.resume().on('end', resolve));
+  const stream = await new Promise<IncomingMessage>((open, reject) => {
+    const req = request(`${base}/api/stream`, { agent, headers: { Cookie: cookie } }, open);
     req.on('error', reject);
     req.end();
   });
-  await new Promise((r) => setTimeout(r, 200));
+  const streamEnded = new Promise((r) => stream.resume().on('end', r));
 
   const started = Date.now();
   const exited = new Promise<number | null>((r) => server.once('exit', r));

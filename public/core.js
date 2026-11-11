@@ -874,6 +874,7 @@ for (const type of ['pointerover', 'focusin']) {
 setShowLogin(renderLogin);
 
 function renderLogin() {
+  reconnecting(false); // signed out: the stream's 401s aren't a restart
   setView(null);
   hideRail();
   dropFrames();

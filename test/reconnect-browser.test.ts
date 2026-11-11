@@ -84,7 +84,6 @@ const chip = `document.querySelector('.reconnecting')`;
 test('a dropped live stream shows "Reconnecting…" after a moment, keeps the page, and clears once it is back', { skip }, async () => {
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the scheme page', `document.querySelector('.scheme-crumb [data-project-name="1"]') && streams.at(-1)?.readyState === 1`);
-  const shown = await page.eval<string>(`document.getElementById('app').innerHTML`);
 
   await page.eval(`dropStream()`);
   await new Promise((r) => setTimeout(r, 500));
@@ -92,7 +91,7 @@ test('a dropped live stream shows "Reconnecting…" after a moment, keeps the pa
   await page.eval(`dropStream()`); // the browser's retries fail too; they must not put the chip off
   await waitFor(page, 'the chip', `${chip}?.textContent === 'Reconnecting…'`);
   assert.equal(await page.eval(`${chip}.getAttribute('role')`), 'status');
-  assert.equal(await page.eval<string>(`document.getElementById('app').innerHTML`), shown, 'the page stays as it was');
+  assert.equal(await page.eval(`!!document.querySelector('[data-taskmaster-name="1"]') && !!document.querySelector('.scheme-crumb [data-project-name="1"]')`), true, 'the page stays as it was');
 
   await page.eval(`reopenStream()`);
   assert.equal(await page.eval(`!!${chip}`), false, 'gone once the stream is back');

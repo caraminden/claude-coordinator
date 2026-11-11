@@ -40,7 +40,7 @@ const token = agentToken(data, ticket.id);
 let base = '';
 let cookie = '';
 let server: ChildProcess;
-const health = async () => (await fetch(`${base}/api/health`)).json() as Promise<{ ok: boolean; commit: string | null; version: string; reload: string }>;
+const health = async () => (await fetch(`${base}/api/health`)).json() as Promise<{ ok: boolean; commit: string | null; version: string; reload: string; fallbacks: number }>;
 
 before(async () => {
   const srv = await bootServer({ root, script: join(app, 'server.ts'), stdout: true });
@@ -56,6 +56,7 @@ test('/api/health answers without a login and says the server reloads on SIGHUP'
   assert.equal(h.reload, 'sighup');
   assert.match(h.version, /^[0-9a-f]{12}$/);
   assert.equal(h.commit, null, 'the copy is not a git checkout');
+  assert.equal(h.fallbacks, 0, 'no job has fallen back to running in the server since it started (#519)');
 });
 
 test('SIGHUP swaps the served front end and its fingerprint, and tells open tabs', async () => {

@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { fallbacks } from '../src/fallbacks.ts';
 import { Landings, NO_CODE } from '../src/land.ts';
 import { until } from './helpers.ts';
 
@@ -72,6 +73,9 @@ test("a landing in a unit doesn't count as interruptible, outlives the Landings 
 test('when systemd-run fails, the landing runs as the server\'s child and counts until it ends', async () => {
   const s = setup();
   writeFileSync(join(root, 'fail'), '');
+  const alerts: { job: string; error: string; ticketId: number }[] = [];
+  fallbacks.alert = async (_cause, job, error, ticketId) => (alerts.push({ job, error, ticketId }), true);
+  const count = fallbacks.count;
   try {
     const l = new Landings(s.data, () => true);
     l.start(2, s.cwd, s.env);
@@ -79,6 +83,17 @@ test('when systemd-run fails, the landing runs as the server\'s child and counts
     s.go();
     await until('it ends', () => l.running() === 0);
     assert.equal(l.get(2)!.code, 3);
+    // Loud, not just a log line (#519): counted for /api/health, and an alert naming the job and the error.
+    assert.equal(fallbacks.count, count + 1);
+    assert.deepEqual(alerts, [{ job: 'tools/land.sh for minion 2', error: 'Failed to connect to bus', ticketId: 2 }]);
+    // Another landing with the same cause counts, but raises no second alert.
+    const t = setup();
+    l.start(5, t.cwd, t.env);
+    await until('it falls back too', () => l.running() === 1);
+    t.go();
+    await until('it ends', () => l.running() === 0);
+    assert.equal(fallbacks.count, count + 2);
+    assert.equal(alerts.length, 1);
   } finally {
     rmSync(join(root, 'fail'));
   }

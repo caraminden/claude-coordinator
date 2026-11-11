@@ -24,6 +24,7 @@ import { clearTmpDir, makeTmpDir, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, promptMessage, RESUME_CODEX_PROMPT, RESUME_PROMPT, systemPrompt, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type TurnMachine } from './prompts.ts';
+import { fallbacks } from './fallbacks.ts';
 import { alive, launchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT } from './turn-launch.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, progressLine, stepInfo } from '../public/progress.js';
 
@@ -1922,7 +1923,7 @@ export class Runner {
     this.setStatus(ticket.id, 'running');
     // Its step on the lane lasts until it has ended and its session is saved (finish).
     if (plan.spawn.how === 'container') {
-      this.spawnInContainer(place as Exclude<TurnPlace, { host: true }>, dir, plan.spawn.wrapper);
+      this.spawnInContainer(place as Exclude<TurnPlace, { host: true }>, dir, plan.spawn.wrapper, ticket.id);
       return live.ended;
     }
     const { wrapper } = plan.spawn;
@@ -1932,7 +1933,7 @@ export class Runner {
     }
     execFile('systemd-run', plan.spawn.systemdRun, (err, _out, stderr) => {
       if (!err) return;
-      console.error(`Ticket ${ticket.id}: systemd-run failed (${String(stderr).trim() || err.message}), so this turn runs as a child of the server.`);
+      fallbacks.record(ticket.id, 'A turn', String(stderr).trim() || err.message);
       live.unit = null;
       this.saveTurn(ticket.id, { unit: null });
       this.spawnWrapper(wrapper, dir);
@@ -1948,7 +1949,7 @@ export class Runner {
    * which goes once the turn ends. The wrapper's pids are the container's, so the `container` file
    * tells wrapperAlive to go by its heartbeat instead.
    */
-  private spawnInContainer(place: Extract<TurnPlace, { host: false }>, dir: string, wrapper: string[]) {
+  private spawnInContainer(place: Extract<TurnPlace, { host: false }>, dir: string, wrapper: string[], ticketId: number) {
     writeFileSync(join(dir, 'container'), place.container);
     const beat = () => writeFileSync(join(dir, 'beat'), '');
     beat();
@@ -1961,7 +1962,8 @@ export class Runner {
     const scoped = ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${TURN_SLICE}`, ...exec];
     place.ensure()
       // As with host turns, a failed systemd-run still runs the turn, though a restart then SIGKILLs its conmon.
-      .then(() => (this.units ? run(scoped).catch((err) => (console.error(`${place.container}: systemd-run failed (${err.message}), so this turn's exec runs in the server's cgroup.`), run(exec))) : run(exec)))
+      // Only an exec that then starts counts as a fallback: one that fails both ways was podman's trouble.
+      .then(() => (this.units ? run(scoped).catch((err) => run(exec).then(() => fallbacks.record(ticketId, `A turn in ${place.container}`, err.message))) : run(exec)))
       .catch((err) => writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${place.container}: ${err.message}` })))
       .finally(() => clearInterval(starting));
   }

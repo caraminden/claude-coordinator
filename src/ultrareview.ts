@@ -235,7 +235,7 @@ export class UltraReviews {
         // podman itself gets the server's environment, as it did as the server's child.
         env = Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined));
       }
-      this.jobs.start({ dir: this.jobDir(r.id), cwd: repo, argv, env, unit: `citadel-ultrareview-${r.id}`, description: `Ultra review ${r.id} for minion ${r.ticketId}`, onChildEnd: () => this.check(r) });
+      this.jobs.start({ dir: this.jobDir(r.id), cwd: repo, argv, env, unit: `citadel-ultrareview-${r.id}`, description: `Ultra review ${r.id} for minion ${r.ticketId}`, ticketId: r.ticketId, onChildEnd: () => this.check(r) });
       r.job = true;
       this.save();
       this.follow(r);

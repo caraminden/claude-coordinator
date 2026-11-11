@@ -18,7 +18,10 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   `citadel-turns.slice`) through `src/turn-wrapper.ts`, which writes claude's
   output to a file in `$DATA_DIR/run/turns/` that the server tails. A restart
   leaves running turns alone: the next server re-attaches and catches up, and the
-  turns' MCP calls wait for it (up to 2 min).
+  turns' MCP calls wait for it (up to 2 min). If `systemd-run` fails, the turn
+  (or landing, or ultra review) still runs, inside the server: `/api/health`'s
+  `fallbacks` counts those since start, and the first of each cause is a Mandate
+  alert for every admin (`src/fallbacks.ts`).
 - Each minion and Taskmaster gets its own temp folder, `$DATA_DIR/projects/<scheme id>/tmp/<ticket id>`
   (`TMPDIR`, `TMP`, `TEMP` and `CLAUDE_CODE_TMPDIR`), on disk rather than in the
   shared `/tmp` tmpfs. Dismissing a minion clears it, and server start sweeps the

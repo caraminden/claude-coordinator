@@ -7,6 +7,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fallbacks } from './fallbacks.ts';
 import { TURN_SLICE } from './turn-launch.ts';
 
 export interface JobState {
@@ -49,9 +50,10 @@ export class HostJobs {
 
   /**
    * Run `argv` in `cwd` with exactly `env`, keeping its state in `dir` (made afresh, private). `unit` names
-   * its unit; `onChildEnd` is called when a job that fell back to the server's child ends.
+   * its unit; `onChildEnd` is called when a job that fell back to the server's child ends. `ticketId` is the
+   * minion it runs for.
    */
-  start(job: { dir: string; cwd: string; argv: string[]; env: Record<string, string>; unit: string; description: string; onChildEnd?: () => void }) {
+  start(job: { dir: string; cwd: string; argv: string[]; env: Record<string, string>; unit: string; description: string; ticketId: number; onChildEnd?: () => void }) {
     const { dir } = job;
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -66,7 +68,7 @@ export class HostJobs {
     execFile('systemd-run', ['--user', '--collect', '--quiet', `--unit=${job.unit}`, `--slice=${TURN_SLICE}`, '-p', 'UMask=0077', `--description=${job.description}`, ...wrapper], (err, _out, stderr) => {
       this.starting.delete(dir);
       if (!err) return;
-      console.error(`${job.description}: systemd-run failed (${String(stderr).trim() || err.message}), so it runs as a child of the server.`);
+      fallbacks.record(job.ticketId, job.description, String(stderr).trim() || err.message);
       this.child(wrapper, dir, job.onChildEnd);
     });
   }

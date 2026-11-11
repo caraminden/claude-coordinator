@@ -8,6 +8,7 @@ import { Containers, runArgs, specHash, type RunCmd } from '../src/containers.ts
 import { Credentials } from '../src/credentials.ts';
 import { CodexLink } from '../src/codex-link.ts';
 import { Store } from '../src/db.ts';
+import { fallbacks } from '../src/fallbacks.ts';
 import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
 import { TURN_SLICE } from '../src/turn-launch.ts';
 import { jsonLines, lines, stopTurns, testPins } from './helpers.ts';
@@ -49,7 +50,11 @@ writeFileSync(
   `#!${process.execPath}
 const args = process.argv.slice(2);
 require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(['systemd-run', ...args]) + '\\n');
-if (process.env.FAKE_SYSTEMD_RUN_FAILS) process.exit(1);
+// It fails saying what FAKE_SYSTEMD_RUN_FAILS holds.
+if (process.env.FAKE_SYSTEMD_RUN_FAILS) {
+  process.stderr.write(process.env.FAKE_SYSTEMD_RUN_FAILS + '\\n');
+  process.exit(1);
+}
 const [cmd, ...rest] = args.slice(args.findIndex((a) => !a.startsWith('-')));
 process.exit(require('node:child_process').spawnSync(cmd, rest, { stdio: 'inherit' }).status ?? 1);
 `,
@@ -197,6 +202,35 @@ test("a container turn still runs when systemd-run fails, with a plain podman ex
     assert.ok(failed >= 0, 'it tried the scope first');
     assert.ok(execs.slice(failed + 1).some((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === 'citadel-claude-test-2'), 'then ran podman exec itself');
     assert.ok(notes(id).every((n) => !/citadel-claude-test-2:/.test(n)));
+  } finally {
+    delete process.env.FAKE_SYSTEMD_RUN_FAILS;
+  }
+});
+
+test('turns that fall back to the server, on the host or in a container, are counted and raise one alert per cause (#519)', async () => {
+  const alerts: { job: string; error: string; ticketId: number }[] = [];
+  fallbacks.alert = async (_cause, job, error, ticketId) => (alerts.push({ job, error, ticketId }), true);
+  const count = fallbacks.count;
+  // A cause no earlier test met, as alerts go once per cause for the life of the server.
+  process.env.FAKE_SYSTEMD_RUN_FAILS = 'Failed to start transient scope unit: Unit citadel-turns.slice not found.';
+  try {
+    const host = newTicket();
+    const onHost = runner(() => ({ host: true }));
+    onHost.units = true;
+    onHost.send(host, 'Josh', 'build it');
+    await until(() => status(host) === 'idle');
+    assert.equal(fallbacks.count, count + 1, 'the host turn ran as the server\'s child, and counts');
+    assert.equal(alerts.length, 1);
+    assert.equal(alerts[0].ticketId, host);
+    assert.match(alerts[0].error, /Unit citadel-turns\.slice not found/);
+
+    const inBox = newTicket();
+    const r = runner(inContainer);
+    r.units = true;
+    r.send(inBox, 'Josh', 'build it');
+    await until(() => status(inBox) === 'idle');
+    assert.equal(fallbacks.count, count + 2, "the container turn's exec ran in the server's cgroup, and counts");
+    assert.equal(alerts.length, 1, 'the same cause raises no second alert');
   } finally {
     delete process.env.FAKE_SYSTEMD_RUN_FAILS;
   }

@@ -2,6 +2,7 @@
 // costs and which minion owns each PR.
 import { hashPassword, looksLikeUrl, NOT_PEOPLE } from '../auth.ts';
 import { costDays, dayBudget } from '../costs.ts';
+import { fallbacks } from '../fallbacks.ts';
 import { prOwners } from '../prlinks.ts';
 import { clientIp, HttpError, isSecure, json, readJson, type Ctx, type Route } from '../http.ts';
 
@@ -68,8 +69,9 @@ export const appRoutes: Route[] = [
     // For tools/deploy.sh, so no login: is this server up, which code it booted from, which front end
     // it serves, and that it reloads public/ on SIGHUP (an older server would exit on one).
     method: 'GET', path: '/api/health', who: 'anyone',
-    // interruptible: running turns a restart would stop (they don't run in a unit of their own).
-    handler: ({ res, app }) => json(res, 200, { ok: true, commit: app.liveCommit, version: app.assetVersion, reload: 'sighup', interruptible: app.runner.interruptible(), preview: app.preview }),
+    // interruptible: running turns a restart would stop (they don't run in a unit of their own). fallbacks: jobs
+    // systemd-run couldn't put in a unit of their own since the server started, which ran in it instead (#519).
+    handler: ({ res, app }) => json(res, 200, { ok: true, commit: app.liveCommit, version: app.assetVersion, reload: 'sighup', interruptible: app.runner.interruptible(), fallbacks: fallbacks.count, preview: app.preview }),
   },
   {
     method: 'GET', path: '/api/me', who: ['person', 'taskmaster', 'minion'],

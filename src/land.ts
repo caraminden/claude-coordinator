@@ -48,7 +48,7 @@ export class Landings {
   start(ticketId: number, cwd: string, env: Record<string, string>): Landing {
     const now = this.get(ticketId);
     if (now && now.code === null) return now;
-    this.jobs.start({ dir: this.dir(ticketId), cwd, argv: ['bash', 'tools/land.sh'], env, unit: `citadel-land-${this.unitTag}-${ticketId}-${Date.now()}`, description: `tools/land.sh for minion ${ticketId}` });
+    this.jobs.start({ dir: this.dir(ticketId), cwd, argv: ['bash', 'tools/land.sh'], env, unit: `citadel-land-${this.unitTag}-${ticketId}-${Date.now()}`, description: `tools/land.sh for minion ${ticketId}`, ticketId });
     return { output: '', code: null };
   }
 

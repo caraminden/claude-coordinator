@@ -320,12 +320,25 @@ their units with `systemd-run --user` as they do on perigee. As root in the dist
 `loginctl enable-linger ci-claude-coordinator-4590fb` (the user `ci_runners` made; the workflow's step names it
 when it's missing).
 
-The workflow's step "the runner's clock" fails when the distro's kernel clock is skewed. On 2026-11-11 its tick
-was 10721 instead of 10000 (who set it is not known): every clock but the raw one ran 7% fast, NTP stepped the
-wall clock back 2.2 s every 32 s, and tests that time things failed at random. As root in the distro, this sets
-it back and prints 0:
-`python3 -c "import ctypes;b=(ctypes.c_long*26)();ctypes.cast(b,ctypes.POINTER(ctypes.c_uint))[0]=0x4000;b[11]=10000;print(ctypes.CDLL(None).adjtimex(b))"`
-(`wsl --shutdown` from Windows resets it too, and stops every runner in the distro while it restarts.)
+The workflow's step "the runner's clock" fails when the distro's kernel clock runs more than 1% off its raw clock.
+That happens when two programs keep the same clock (#542). WSL's own init (3.x) runs a chrony outside the distro,
+where `ps` in the distro doesn't show it, that steers the distro's clock to the Windows clock every 8 s. Ubuntu
+also turns `systemd-timesyncd` on in WSL, which steers it to NTP. Each timesyncd step looks to chrony like a clock
+running fast or slow, so it retunes the kernel tick to make up for it; the clock then really runs off, and
+timesyncd steps it again every 32 s, for as long as the distro is up. Whichever way the first step went sets the
+sign: on 2026-11-11 the clocks ran 7% fast (tick 10721), and after a reboot 2% slow (tick about 9784), and tests
+that time things failed at random. The Windows clock and the raw clock were both right throughout (within 0.02 s
+and 0.005% of NTP), so setting the tick back by hand only lasts until chrony's next update, seconds later.
+
+The fix is one keeper: `install-runner-agent.sh` masks `systemd-timesyncd` when WSL has its own. A distro set up
+before that needs it once, from PowerShell on the desktop; it survives reboots and `wsl --shutdown`:
+
+```powershell
+wsl -d citadel-ci -u root -- systemctl mask --now systemd-timesyncd
+```
+
+The clock settles within a few minutes. To look at it from a CI job without root: the tick is `adjtimex`'s `tick`
+field (10000 when nothing is wrong), and `timedatectl timesync-status` shows timesyncd stuck at its 32 s poll.
 
 When the runner can't answer (Cara is logged off, GitHub is down, no runner takes the job within 90 s, the run
 takes more than 6 minutes), `land.sh` prints `CI FALLBACK` with the reason, runs the suite on perigee as it used

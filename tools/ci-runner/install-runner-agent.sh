@@ -10,6 +10,7 @@
 #   1. writes /etc/wsl.conf: systemd on, and the distro cut off from Windows (no C: drive, no running Windows
 #      programs), so a CI job here can't reach Cara's files or act as her on Windows. If that changed anything, it
 #      stops there and says to restart the distro, then run it again;
+#      and turns systemd-timesyncd off where WSL itself keeps the clock, because two keepers skew it (#542);
 #   2. installs what the agent and the runners need from Ubuntu's archive (Node, git, curl, the runner's libicu);
 #   3. downloads runner-agent.mjs, add-runner.sh, list-runners.sh and remove-runner.sh from Citadel into
 #      /opt/citadel-runner-agent, root's alone (the agent never downloads code itself), and prints their SHA-256;
@@ -56,6 +57,16 @@ if [[ $(cat /etc/wsl.conf 2>/dev/null) != "$want" ]]; then
 fi
 [[ -d /run/systemd/system ]] || die 'systemd is not running although /etc/wsl.conf turns it on: in PowerShell, wsl --terminate citadel-ci, then run this again.'
 [[ ! -d /mnt/c/Windows ]] || die 'C: is still mounted although /etc/wsl.conf turns that off: in PowerShell, wsl --terminate citadel-ci, then run this again.'
+
+# One clock keeper, not two (#542). WSL's own init (3.x) runs a chrony outside the distro that steers this kernel's
+# clock to the Windows clock (/dev/ptp0, every 8 s), and Ubuntu turns systemd-timesyncd on in WSL to steer the same
+# clock to NTP. Neither sees the other: each timesyncd step reads to chrony as a clock running fast or slow, it
+# retunes the kernel tick to make up for it, the clock then really runs off (+7% and -2% on 2026-11-11), and
+# timesyncd steps it again every 32 s for as long as the distro is up. So where WSL keeps the clock, timesyncd is off.
+if grep -qa 'refclock PHC' /init 2>/dev/null && [[ $(systemctl is-enabled systemd-timesyncd 2>/dev/null) != masked ]]; then
+  systemctl mask --now systemd-timesyncd
+  echo 'Turned systemd-timesyncd off: WSL keeps this clock by the Windows clock, and the two fought over it (#542).'
+fi
 
 # 2. What it needs. libicu: the runner's .NET refuses to start without it.
 if ! command -v node >/dev/null || ! command -v git >/dev/null || ! command -v curl >/dev/null || ! ldconfig -p | grep -q libicuuc; then

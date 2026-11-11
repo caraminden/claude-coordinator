@@ -18,7 +18,8 @@
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const unescapeHtml = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
 
-const FENCE = /^ {0,3}(`{3,}|~{3,})\s*([^`\s]*)/;
+/** A fence's opening line; a backtick one with a backtick later on its line is inline code, not a fence (CommonMark). */
+const FENCE = /^ {0,3}(`{3,}(?!.*`)|~{3,})\s*([^`\s]*)/;
 const HEADING = /^(#{1,6})\s+(.*?)\s*#*$/;
 const HR = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const QUOTE = /^ {0,3}>/;

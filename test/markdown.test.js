@@ -79,6 +79,11 @@ test('fenced code keeps its language, and nothing inside is Markdown', () => {
   assert.equal(md('- step:\n  ```\n  run it\n  ```'), '<ul><li>step:<pre><code>run it</code></pre></li></ul>');
 });
 
+test('a line that opens and closes its backticks at once is code, not a fence', () => {
+  assert.equal(md('```npm test```\n\nThen deploy.'), '<p><code>npm test</code></p><p>Then deploy.</p>');
+  assert.equal(chat('```npm test```\nThen deploy.'), '<p><code>npm test</code><br>Then deploy.</p>');
+});
+
 test('blockquotes, with lists inside and lazy lines', () => {
   assert.equal(md('> quoted\nlazy\n\n> 1) one\n> 2) two'),
     '<blockquote><p>quoted lazy</p></blockquote><blockquote><ol><li>one</li><li>two</li></ol></blockquote>');

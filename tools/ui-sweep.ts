@@ -181,7 +181,8 @@ async function main() {
     if (scheme && !s.anon) await fetch(`${base}api/projects/${scheme}`, { headers: { cookie } }).catch(() => {});
     const run = () => measure({
       urls: [base + hash], widths: s.widths ?? [1440, 390], settle: 700, cookies: s.anon ? [] : [cookie], headers: [], ignore: [], dark: false,
-      shots, before: `${helpers}\n${s.before ?? 'await sleep(300);'}`, click: s.click,
+      // #app fills before a slow route finishes: wait it out, or the shot catches the page spinner.
+      shots, before: `${helpers}\nawait until(() => (document.body.classList.contains('navigating') ? null : document.body), 20000);\n${s.before ?? 'await sleep(300);'}`, click: s.click,
       wait: s.anon ? 'form' : '#app > *',
     });
     // One retry: a busy box sometimes misses the 15 s load wait.
@@ -209,6 +210,8 @@ async function main() {
   }
   stop();
   rmSync(dir, { recursive: true, force: true });
+  // Findings are the point of a sweep; a screen that couldn't be shot is a failure.
+  if (index.some((e: any) => e.error)) process.exitCode = 1;
 }
 
 if (import.meta.main) await main();

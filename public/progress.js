@@ -16,6 +16,7 @@ export function createProgress() {
     pendingCreates: new Map(), // tool_use_id -> TaskCreate input, until its result tells us the task id
     turnActions: 0,
     turnFailed: false, // the last turn ended in an error event (no init since)
+    turnOk: false, // the last turn sent a successful result, so a later error (a deploy report) isn't its failure
     lastAction: null,
   };
 }
@@ -294,11 +295,14 @@ function allDone(p) {
 export function applyEvent(p, kind, data) {
   const actions = [];
   // A turn that died says so, rather than the "Done" of a plan an earlier turn finished.
-  if (kind === 'error') p.turnFailed = true;
+  if (kind === 'error' && !p.turnOk) p.turnFailed = true;
   if (kind !== 'claude' || !data) return actions;
+  // A turn that finished well wasn't failed by an error on the way (its MCP server not connecting).
+  if (data.type === 'result') { p.turnOk = !data.is_error; if (p.turnOk) p.turnFailed = false; }
 
   if (data.type === 'system' && data.subtype === 'init') {
     p.turnFailed = false;
+    p.turnOk = false;
     p.turnActions = 0;
     p.lastAction = null;
     // A plan finished in an earlier turn belongs to that chunk of work, not this one.

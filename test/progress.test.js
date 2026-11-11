@@ -85,3 +85,18 @@ test('a turn that died says so, not the Done of a plan an earlier turn finished'
   applyEvent(p, 'claude', { type: 'system', subtype: 'init' });
   assert.equal(progressLine(p, false), '');
 });
+
+test('an error after a turn finished well (a deploy warning) or during one that then finished is not a failed turn', () => {
+  const p = plan('cccccc');
+  applyEvent(p, 'claude', { type: 'system', subtype: 'init' });
+  applyEvent(p, 'error', { text: 'The thread MCP server is failed in this turn' });
+  applyEvent(p, 'claude', { type: 'result', subtype: 'success', is_error: false });
+  assert.notEqual(progressLine(p, false), 'Last turn failed: see the error below');
+  applyEvent(p, 'error', { text: 'Live, but the push to GitHub failed' });
+  assert.notEqual(progressLine(p, false), 'Last turn failed: see the error below');
+  // A turn whose result was an error, then the runner's error event, did fail.
+  applyEvent(p, 'claude', { type: 'system', subtype: 'init' });
+  applyEvent(p, 'claude', { type: 'result', subtype: 'error_during_execution', is_error: true });
+  applyEvent(p, 'error', { text: 'API Error' });
+  assert.equal(progressLine(p, false), 'Last turn failed: see the error below');
+});

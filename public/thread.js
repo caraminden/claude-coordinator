@@ -1278,8 +1278,9 @@ export function userBubble(author, text, imageSrcs, about = null, event = null, 
 function previewNodes(text, strikes) {
   const flat = (t) => t.replace(/[#*_`>\[\]~]/g, '').replace(/\s+/g, ' ');
   // A URL in the one-line preview is still a link (Citadel-wide: links are clickable); it opens without toggling the message.
-  const links = (t) => flat(t).split(/(https?:\/\/[^\s()<>]+[^\s()<>.,;:!?'"])/).map((bit, i) => (i % 2
-    ? h('a', { href: bit, target: '_blank', rel: 'noopener', onclick: (e) => e.stopPropagation() }, bit) : bit));
+  // URLs are found before the marks go, so a link with _ or # in it keeps them.
+  const links = (t) => t.split(/(https?:\/\/[^\s()<>\[\]`]+[^\s()<>\[\]`.,;:!?'"*_~])/).map((bit, i) => (i % 2
+    ? h('a', { href: bit, target: '_blank', rel: 'noopener', onclick: (e) => e.stopPropagation() }, bit) : flat(bit)));
   return struckSource((text ?? '').trim(), strikes).split(/~~(.+?)~~/).flatMap((part, i) => (i % 2 ? h('del', {}, flat(part)) : links(part)));
 }
 

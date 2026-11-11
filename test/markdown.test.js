@@ -107,6 +107,11 @@ test('links go through the hook with their target unescaped and their text rende
     '<p><a href="https://a.b" target="_blank" rel="noopener noreferrer">w</a> <span class="cui-link" title="f.md">f</span></p>');
 });
 
+test('a link target may hold balanced parentheses', () => {
+  assert.equal(md('[wiki](https://en.wikipedia.org/wiki/Foo_(bar)) and [f](fn(a).md).'),
+    '<p><a href="https://en.wikipedia.org/wiki/Foo_(bar)" target="_blank" rel="noopener noreferrer">wiki</a> and <span class="cui-link" title="fn(a).md">f</span>.</p>');
+});
+
 test('headings carry GitHub\'s slug, deduplicated', () => {
   assert.equal(md('## Open questions\n## Open questions\n### 1. A this-moment key: for `playtests`'),
     '<h2 data-slug="open-questions">Open questions</h2><h2 data-slug="open-questions-1">Open questions</h2>'

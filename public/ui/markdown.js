@@ -24,7 +24,7 @@ const HR = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const QUOTE = /^ {0,3}>/;
 const ITEM = /^( *)([-*+]|\d{1,9}[.)])(?:[ \t]+(.*)|$)/;
 /** `[label](target "title")`, on escaped text. */
-const LINK = /\[((?:[^[\]]|\[[^\]]*\])*)\]\(\s*(?:&lt;)?([^\s()]*?)(?:&gt;)?(?:\s+&quot;(.*?)&quot;)?\s*\)/g;
+const LINK = /\[((?:[^[\]]|\[[^\]]*\])*)\]\(\s*(?:&lt;)?((?:[^\s()]|\([^\s()]*\))*?)(?:&gt;)?(?:\s+&quot;(.*?)&quot;)?\s*\)/g;
 const DELIM = /^\s*\|?(?:\s*:?-+:?\s*\|)*\s*:?-+:?\s*\|?\s*$/;
 
 const indentOf = (l) => /^ */.exec(l)[0].length;

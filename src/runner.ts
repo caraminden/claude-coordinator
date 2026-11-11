@@ -568,7 +568,7 @@ export class Runner {
   inContainer(container: string): number {
     return [...this.turns.values()].filter((t) => t.container === container).length;
   }
-  /** Other children of this server a restart would kill: landings (src/land.ts). */
+  /** Other children of this server a restart would kill: landings that fell back to a child (src/land.ts), contraption turns, app deploys, ultra reviews. */
   hostJobs?: () => number;
   /** Why a message can't start or steer a turn (src/access.ts turnRefusal), or null when it can. */
   refuseTurn?: (ticket: Ticket, author: string, from?: number) => string | null;
@@ -621,7 +621,7 @@ export class Runner {
     return { ...turnEnv(process.env), ...this.githubFor?.(person, live.dir)?.env };
   }
 
-  /** Running work a restart of this server would kill: turns not in a unit or a container of their own, and landings. */
+  /** Running work a restart of this server would kill: turns not in a unit or a container of their own, and other server children (hostJobs). */
   interruptible(): number {
     return [...this.turns.values()].filter((t) => !t.unit && !t.container).length + (this.hostJobs?.() ?? 0);
   }

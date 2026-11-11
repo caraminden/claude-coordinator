@@ -276,8 +276,9 @@ const ultrareviews = new UltraReviews({
 // A boot check's or preview's copy names the live reviews' folders: only the live server may clear them.
 if (!BOOT_CHECK) ultrareviews.recover();
 claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container);
-const landings = new Landings();
-// Contraption turns, app deploys and ultra reviews run as the server's children: a restart waits for them like landings.
+// Landings run in units of their own when turns do (src/land.ts); only ones that fell back to the server's child count here.
+const landings = new Landings(DATA_DIR, () => runner.units);
+// Contraption turns, app deploys and ultra reviews run as the server's children: a restart waits for them.
 runner.hostJobs = () => landings.running() + contraptionTurns.running() + services.jobs() + ultrareviews.running();
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = messagePerson(store);

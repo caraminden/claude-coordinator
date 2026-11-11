@@ -33,7 +33,7 @@ test("landing keeps the calling turn's token: land.sh gets it, and the turn's to
     const body = await res.json();
     return body.code === null ? null : body;
   });
-  assert.equal(run.code, 0);
+  assert.equal(run.code, 0, run.output);
   assert.equal(run.output.trim(), `token:${token}`);
 });
 

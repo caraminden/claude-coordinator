@@ -1342,7 +1342,7 @@ async function runTool(name: string, args: any): Promise<string> {
         try {
           r = await call('GET', `/api/tickets/${TICKET}/land`);
         } catch (err: any) {
-          // The server keeps a landing in memory; the restart a landing's deploy queues forgets it.
+          // A landing's folder outlives restarts (src/land.ts); this is a server from before that, or one whose folder went.
           if (!/No landing has started/.test(err.message)) throw err;
           return "tools/land.sh ended, then Citadel restarted (most likely the deploy it ran) before its result was read, so its exit code and output are lost. Check `git log main` for your commits.";
         }

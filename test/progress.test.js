@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyEvent, createProgress, describeAction, liveSteps, nowDoing, progressLine, THINKING_AFTER, withoutCount } from '../public/progress.js';
+import { applyEvent, createProgress, describeAction, nowDoing, stepName, progressLine, THINKING_AFTER, withoutCount } from '../public/progress.js';
 
 // A plan of six steps with the given statuses: c(ompleted), i(n progress), p(ending).
 const plan = (statuses) => ({
@@ -144,7 +144,7 @@ test('an error after a turn finished well (a deploy warning) or during one that 
   assert.equal(progressLine(p, false), 'Last turn failed: see the error below');
 });
 
-test('the live card keeps a finished call\'s label for a few seconds, then says Thinking (#543)', () => {
+test('the readout keeps a finished call\'s label for a few seconds, then says Thinking (#543)', () => {
   const read = { block: { type: 'tool_use', name: 'Read', input: { file_path: '/x/runner.ts' } } };
   const label = describeAction(read.block).text;
   assert.equal(nowDoing([], 0), 'Thinking…');
@@ -157,15 +157,12 @@ test('the live card keeps a finished call\'s label for a few seconds, then says 
   assert.equal(nowDoing([bash, done], 10_000 + THINKING_AFTER), describeAction(bash.block).text);
 });
 
-test('the live card counts steps done like every readout, and shows the last two steps done (#518, #543)', () => {
-  const p = plan('cccipp');
-  p.tasks[1].outcome = 'Found it';
-  const card = liveSteps(p, true);
-  assert.equal(card.title, 'Moving turns 4');
-  assert.equal(card.count, '3 of 6 done');
-  assert.deepEqual(card.finished.map((t) => t.subject), ['Move turns 2', 'Move turns 3']);
-  assert.deepEqual(liveSteps(createProgress(), true), { title: 'Working', count: '', finished: [] });
+test('the readout\'s step side names the step underway, not the last action (#551)', () => {
+  assert.equal(stepName(plan('cccipp'), true), 'Moving turns 4');
+  assert.equal(stepName(createProgress(), true), 'Working');
+  assert.equal(stepName(plan('pppp'), true), 'Planning', 'a plan with nothing started yet');
+  assert.equal(stepName(plan('ccpp'), true), 'Working', 'between two steps');
   // A step an earlier turn left underway isn't this turn's until the plan moves.
   const stale = { ...plan('cipppp'), planMoved: false };
-  assert.equal(liveSteps(stale, true).title, 'Working');
+  assert.equal(stepName(stale, true), 'Working');
 });

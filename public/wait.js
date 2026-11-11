@@ -1,5 +1,5 @@
 // What a minion waits on (t.wait, src/waits.ts, #544): the land line, a heavy slot, a CI run (#546), the restart. The list
-// row's badge and thin bar, and the chat readout's line that opens to a landing's whole track.
+// row's badge and thin bar, and the chat readout's line, whose opened view shows a landing's whole track.
 import { h } from './base.js';
 
 /** A landing's stages in order (src/waits.ts TRACK): a wait at one of these shows the track. */
@@ -35,20 +35,28 @@ export function waitBar(w, cls = 'wait-bar') {
     h('i', { style: `width: ${pct(w, now)}%` }));
 }
 
-/**
- * The readout's line: the stage, "3 of 6" on a landing, the detail and elapsed against usual. It starts
- * closed (Cara, 2026-11-11); `open` shows a landing's whole track above it, and `toggle` flips that.
- */
-export function waitBlock(w, open, toggle) {
+/** The wait's stage name and where it is on a landing's track. */
+function stageOf(w) {
   const at = TRACK.findIndex(([key]) => key === w.stage);
-  const label = at >= 0 ? TRACK[at][1] : w.kind === 'ci' ? 'CI' : OWN[w.stage] ?? w.stage;
-  const track = open && at >= 0 ? h('ol', { class: 'wait-track' }, TRACK.map(([, name, short = name], i) =>
-    h('li', { class: i < at ? 'done' : i === at ? 'now' : '' }, h('i'), h('span', {}, short)))) : '';
-  const head = h(at >= 0 ? 'button' : 'div', { class: `wait-head f-${waitFam(w)}`, ...(at >= 0 ? { type: 'button', 'aria-expanded': String(open), onclick: toggle } : {}) },
-    h('span', { class: 'text' }, h('b', {}, label), at >= 0 ? ` ${at + 1} of ${TRACK.length}` : '', ` · ${w.text}`),
-    h('span', { class: 'wait-time', 'data-since': w.since, 'data-usual': w.usual ?? '', 'data-ended': w.ended ?? '' }, waitTime(w)),
-    at >= 0 ? h('span', { class: 'chev' }, open ? '▴' : '▾') : '');
-  return h('div', { class: 'wait-line' }, track, head, waitBar(w, 'wait-bar big'));
+  return { at, label: at >= 0 ? TRACK[at][1] : w.kind === 'ci' ? 'CI' : OWN[w.stage] ?? w.stage };
+}
+
+/** The readout line's "now" part while it waits (#551): the stage, "3/6" on a landing, and the detail. */
+export function waitNow(w) {
+  const { at, label } = stageOf(w);
+  return [h('b', { class: `f-${waitFam(w)}` }, label), at >= 0 ? ` ${at + 1}/${TRACK.length}` : '', ` · ${w.text}`];
+}
+
+/** Elapsed (against usual, when known) that the ticker below moves on: a wait's, or a turn's ({ since }) with no usual. */
+export function waitClock(w, cls = 'wait-time') {
+  return h('span', { class: cls, 'data-since': w.since, 'data-usual': w.usual ?? '', 'data-ended': w.ended ?? '' }, waitTime({ usual: null, ...w }));
+}
+
+/** A landing's whole track, for the opened readout; none for a wait that isn't a landing. */
+export function waitTrack(w) {
+  const { at } = stageOf(w);
+  return at < 0 ? '' : h('ol', { class: 'wait-track' }, TRACK.map(([, name, short = name], i) =>
+    h('li', { class: i < at ? 'done' : i === at ? 'now' : '' }, h('i'), h('span', {}, short))));
 }
 
 /** Moves every wait's bar and elapsed time on, without rebuilding rows. */

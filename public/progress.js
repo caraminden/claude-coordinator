@@ -406,11 +406,11 @@ export function withoutCount(line) {
     .replace(/(?: · | )\d+(?:\/| of )\d+(?: steps| done)?$/, '');
 }
 
-/** How long the live card keeps a finished call's label before saying "Thinking…", so the line doesn't blink between two calls (#543). */
+/** How long the readout keeps a finished call's label before saying "Thinking…", so the line doesn't blink between two calls (#543). */
 export const THINKING_AFTER = 5000;
 
 /**
- * The live card's running line: the newest call still underway (calls can run side by side), or the
+ * The readout's running call (#551): the newest call still underway (calls can run side by side), or the
  * last one for a few seconds after it finished, then "Thinking…". `actions` are the turn's
  * { block, result, doneAt } in order.
  */
@@ -420,14 +420,10 @@ export function nowDoing(actions, now) {
 }
 
 /**
- * The live card's top line ("Fixing the double alert", or "Working"), its count in steps done like
- * every readout (#518), and the last two steps done.
+ * The step side of a running turn's readout line ("Fixing the double alert"), beside the running call,
+ * so it leaves out the last action progressLine adds: "Planning" before a step starts, else "Working".
  */
-export function liveSteps(p, running) {
+export function stepName(p, running) {
   const { total, done, current } = stepInfo(p, running);
-  return {
-    title: current ? (current.activeForm || current.subject).replace(/…$/, '') : 'Working',
-    count: total && done < total ? `${done} of ${total} done` : '',
-    finished: p.tasks.filter((t) => t.status === 'completed').slice(-2),
-  };
+  return current ? (current.activeForm || current.subject).replace(/…$/, '') : total && !done ? 'Planning' : 'Working';
 }

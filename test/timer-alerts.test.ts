@@ -83,6 +83,10 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   assert.deepEqual(calls.map((x) => [x.key, x.title]).sort(), [['timer.citadel-app-mandate-prune', null], ['timer.citadel-app-mandate-prune', null]], 'a job that is gone is cleared');
 
   calls.length = 0;
+  runs = [run('unknown')];
+  await alerts.tick(AT + 2_550_000);
+  assert.deepEqual(calls, [], "a job whose state couldn't be read is neither raised nor cleared");
+  calls.length = 0;
   alerts['deps'].runs = async () => { throw new Error('systemd is not answering'); };
   await assert.rejects(alerts.tick(AT + 2_700_000));
   assert.deepEqual(calls, [], 'a round that cannot read the runs clears nothing');
@@ -91,6 +95,8 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
 test('redact hides secret-looking values and the title keeps within 500 characters', () => {
   assert.equal(redact('PASSWORD=hunter2 api_key: "xyz" ok'), 'PASSWORD=[hidden] api_key: "[hidden]" ok');
   assert.equal(redact('Authorization: Bearer eyJhbGciOi.abc'), 'Authorization: [hidden] [hidden]');
+  assert.equal(redact(`PASSWORD="correct horse battery staple" next`), 'PASSWORD="[hidden]" next', 'a quoted secret goes whole');
+  assert.equal(redact(`{"session_id": 'a b c', "x": 1}`), `{"session_id": '[hidden]', "x": 1}`);
   assert.equal(redact('sent with Bearer eyJhbGciOi.abc'), 'sent with Bearer [hidden]');
   assert.equal(redact('fetch https://bob:pa55@host/x failed'), 'fetch https://[hidden]@host/x failed');
   assert.equal(redact(`key ${'a1'.repeat(20)} end`), 'key [hidden] end');

@@ -27,7 +27,8 @@ export interface TimerAlertDeps {
 export function redact(line: string): string {
   return line
     .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 [hidden]')
-    .replace(/\b([\w-]*(?:token|secret|passw(?:or)?d|api[_-]?key|auth\w*|cookie|session|credential)[\w-]*)(["']?\s*[:=]\s*["']?)[^\s"',;&]+/gi, '$1$2[hidden]')
+    .replace(/\b([\w-]*(?:token|secret|passw(?:or)?d|api[_-]?key|auth\w*|cookie|session|credential)[\w-]*)(["']?\s*[:=]\s*)("[^"]*"?|'[^']*'?|[^\s"',;&]+)/gi,
+      (_, key, sep, value) => `${key}${sep}${/^["']/.test(value) ? `${value[0]}[hidden]${value[0]}` : '[hidden]'}`)
     // Long runs of letters and digits both, like keys and hashes; not paths (no slash) or plain words.
     .replace(/\b(?=[\w+=-]*\d)(?=[\w+=-]*[A-Za-z])[\w+=-]{32,}\b/g, '[hidden]')
     .replace(/:\/\/[^\s/:@]+:[^\s/@]+@/g, '://[hidden]@');

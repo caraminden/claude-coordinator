@@ -728,8 +728,8 @@ export class AppServices {
       for (const timer of (await this.owned(row.name)).filter((f) => f.endsWith('.timer')).sort()) {
         const unit = timer.replace(/\.timer$/, '.service');
         const r = await this.systemctl('show', unit, '--timestamp=unix', '-p', 'ActiveState', '-p', 'Result', '-p', 'ExecMainStatus', '-p', 'ExecMainExitTimestamp');
-        if (r.code) continue;
-        const v = Object.fromEntries(r.out.split('\n').map((l) => l.split(/=(.*)/s).slice(0, 2)));
+        // An unreadable one is still there (`unknown`): leaving it out would read as the job gone and clear its alert.
+        const v = r.code ? {} : Object.fromEntries(r.out.split('\n').map((l) => l.split(/=(.*)/s).slice(0, 2)));
         const at = /^@(\d+)/.exec(v.ExecMainExitTimestamp ?? '');
         out.push({ app: row, job: unit.slice(unitName(row.name).length + 1, -'.service'.length), unit, active: v.ActiveState ?? 'unknown', result: v.Result ?? '', status: v.ExecMainStatus ?? '', exitAt: at ? Number(at[1]) * 1000 : null });
       }

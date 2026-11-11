@@ -626,6 +626,8 @@ export const ticketRoutes: Route[] = [
       if (body.status !== 'closed' && body.status !== 'idle') throw new HttpError(400, 'Status must be closed or idle');
       if (ticket.kind === 'coordinator') throw new HttpError(400, 'The Taskmaster cannot be dismissed');
       if (runner.isRunning(id)) throw new HttpError(409, 'Stop the minion before dismissing it');
+      // Already as asked: a second dismissal, or a reopen of a minion that isn't dismissed, changes nothing.
+      if ((body.status === 'closed') === (ticket.status === 'closed')) return json(res, 200, ticketView(app, id));
       if (body.status === 'closed') {
         await runner.close(id, `${session.name} dismissed this minion.`);
       } else {

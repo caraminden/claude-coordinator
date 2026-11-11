@@ -124,3 +124,14 @@ test('a dismissed minion\'s token stops working, except for its deploy report', 
   // It can still report the deploy it queued before it was dismissed.
   await call(`/api/tickets/${ticket.id}/deploy`, { method: 'POST', token, body: { ok: true, text: 'Live.' } });
 });
+
+test('dismissing a dismissed minion, or reopening one that isn\'t, changes nothing (#468 S07-3)', async () => {
+  const notes = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'note').map((e: any) => JSON.parse(e.data).text);
+  const count = async (re: RegExp) => (await notes()).filter((t: string) => re.test(t)).length;
+  assert.equal(await count(/dismissed this minion/), 1);
+  assert.equal((await call(`/api/tickets/${ticket.id}/status`, { method: 'POST', body: { status: 'closed' } })).status, 'closed');
+  assert.equal(await count(/dismissed this minion/), 1, 'no second dismissal');
+  await call(`/api/tickets/${ticket.id}/status`, { method: 'POST', body: { status: 'idle' } });
+  assert.equal((await call(`/api/tickets/${ticket.id}/status`, { method: 'POST', body: { status: 'idle' } })).status, 'idle');
+  assert.equal(await count(/reopened this minion/), 1, 'reopened once');
+});

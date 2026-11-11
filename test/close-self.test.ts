@@ -134,6 +134,17 @@ test('refuses while a question or plan card waits on people, or the state is try
   await endTurn(id, 'ok');
 });
 
+test('a pending approval card refuses close_self, even in state ready, with its link', async () => {
+  const id = newTicket();
+  runner.send(id, 'Cara', 'ship it');
+  store.updateTicket(id, { state: 'ready' });
+  runner.approvals.request(id, 'Bash', { command: 'ls', description: 'List' });
+  assert.match(runner.keptOpen(id, true)!, /^an approval card "Bash: List": \[open it\]\(#\/p\/\d+\/t\/\d+\?e=\d+\) is still waiting/);
+  assert.equal(runner.closeAfterTurn(id, null), false);
+  assert.equal(store.getTicket(id)!.state, 'ready');
+  await endTurn(id, 'ok');
+});
+
 test('state try refuses close_self mid-turn', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
@@ -165,7 +176,7 @@ test('a card posted or try/ready set after close_self keeps it open at the turn 
     else store.updateTicket(id, { state: after });
     await endTurn(id, 'ok');
     assert.equal(store.getTicket(id)!.status, 'idle', after);
-    const why = after === 'card' ? 'a question or plan card is still waiting on people' : `its state is ${after}, which tells people something is waiting for them`;
+    const why = after === 'card' ? 'a question, plan or approval card is still waiting on people' : `its state is ${after}, which tells people something is waiting for them`;
     assert.deepEqual(notes(id), [`Claude asked to dismiss this minion, but ${why}, so it stays open.`]);
   }
 });

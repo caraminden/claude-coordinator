@@ -796,7 +796,7 @@ export class Runner {
   }
 
   /**
-   * Why close_self must leave this minion open for people, or null: a question or plan card still
+   * Why close_self must leave this minion open for people, or null: a question, plan or approval card still
    * waiting on them, or a state (try, ready) that tells them something is theirs to do. The deploy's
    * own dismissal (deployLive) has its own checks. `atCall`, for close_self's own answer: the card
    * reason carries the card's link, and ready doesn't count, since a finished minion sets it by habit
@@ -804,9 +804,9 @@ export class Runner {
    * after close_self is the minion changing its mind.
    */
   keptOpen(ticketId: number, atCall = false): string | null {
-    if (this.store.openCardAt(ticketId) !== null) {
+    if (this.store.openCardAt(ticketId) !== null || this.approvals.waiting(ticketId)) {
       const card = atCall && this.cardLinks(this.store.getTicket(ticketId)!)[0];
-      return card ? `a ${cardText(card)} is still waiting on people` : 'a question or plan card is still waiting on people';
+      return card ? `${card.kind === 'approval' ? 'an' : 'a'} ${cardText(card)} is still waiting on people` : 'a question, plan or approval card is still waiting on people';
     }
     const state = this.store.getTicket(ticketId)?.state;
     if (state === 'try' || (state === 'ready' && !atCall)) return `its state is ${state}, which tells people something is waiting for them`;

@@ -79,11 +79,15 @@ export async function readJson(req: IncomingMessage, maxBytes = 1_000_000): Prom
     if (size > maxBytes) throw new HttpError(413, 'Request too large');
     chunks.push(chunk);
   }
+  let body: unknown;
   try {
-    return JSON.parse(Buffer.concat(chunks).toString() || '{}');
+    body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
   } catch {
     throw new HttpError(400, 'Invalid JSON');
   }
+  // Every route reads fields off it: `null` would be a TypeError there, answered as a 500.
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Expected a JSON object');
+  return body;
 }
 
 /**

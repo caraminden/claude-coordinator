@@ -401,10 +401,13 @@ export function lex(s: string, home: string): Tok[] {
       i++;
       continue;
     }
-    if (c === '~' && !inWord && (i + 1 >= n || /[\/\s;&|)]/.test(s[i + 1]))) {
+    // `~` and `~<own name>` (#468 S01-13) are the home folder.
+    const me = basename(home);
+    const tl = c === '~' && !inWord ? (s.startsWith(me, i + 1) && (i + 1 + me.length >= n || /[\/\s;&|)]/.test(s[i + 1 + me.length])) ? 1 + me.length : i + 1 >= n || /[\/\s;&|)]/.test(s[i + 1]) ? 1 : 0) : 0;
+    if (tl) {
       put(home);
       inWord = true;
-      i++;
+      i += tl;
       continue;
     }
     if (c === '#' && !inWord) {
@@ -586,12 +589,18 @@ function pathsOf(word: Word, st: State, cfg: TripwireConfig): string[] {
   return [...new Set(out)];
 }
 
+/** `~/x`, `~` and `~<own name>/x` as the home folder (#468 S01-13). */
+function tildeHome(t: string, cfg: TripwireConfig): string {
+  const m = /^~([^/]*)(\/|$)/.exec(t);
+  return m && (m[1] === '' || m[1] === basename(cfg.home)) ? cfg.home + t.slice(1 + m[1].length) : t;
+}
+
 function literalPaths(text: string, st: State, cfg: TripwireConfig): string[] {
   const eq = text.indexOf('=');
   const candidates = text.startsWith('-') ? (eq > 0 ? [text.slice(eq + 1)] : []) : eq > 0 ? [text, text.slice(eq + 1)] : [text];
   const out: string[] = [];
   for (let c of candidates.flatMap(braces)) {
-    if (c.startsWith('~/') || c === '~') c = cfg.home + c.slice(1);
+    c = tildeHome(c, cfg);
     // URLs, host:path and the like.
     if (/^[A-Za-z][\w+.@-]*:/.test(c)) continue;
     const p = isAbsolute(c) ? resolve(c) : st.cwd && c ? resolve(st.cwd, c) : null;
@@ -730,7 +739,7 @@ function assignment(w: Word, st: State, cfg: TripwireConfig): [string, string[] 
 /** The words' texts, when none is unknown; a ~ after the = of an assignment expands too. */
 function known(ws: Word[], cfg: TripwireConfig): string[] | undefined {
   if (ws.some((w) => w.unknown)) return undefined;
-  return ws.map((w) => (/^~(\/|$)/.test(w.text) ? cfg.home + w.text.slice(1) : w.text));
+  return ws.map((w) => tildeHome(w.text, cfg));
 }
 
 function setVar(st: State, name: string, values: string[] | undefined) {
@@ -781,6 +790,8 @@ function blindReason(w: Word, st: State, cfg: TripwireConfig, name: string): Ver
 /** Your scheme's folder, or a folder right in it (its repo, tickets, shared, tmp): rm takes every minion's work with it. */
 function schemeFolder(p: string, cfg: TripwireConfig): boolean {
   const own = join(cfg.data, 'projects', String(cfg.project));
+  // A glob as the last part (`tickets/*`, `tmp/9*`) takes that much of its folder (#468 S01-13).
+  if (/[*?[]/.test(basename(p)) && schemeFolder(dirname(p), cfg)) return true;
   return p === own || (under(p, own) && !p.slice(own.length + 1).includes('/'));
 }
 

@@ -45,6 +45,8 @@ Each passes whatever the code does. Fix any you write; flag any you review.
   async assertion without `await` (the test ends before it runs), a callback that never fires.
 - **A disabled or always-true assertion**: commented out, or `true` asserted true.
 - **A weaker check than the code allows**: the length checked but never the order.
+- **A fragment where the whole value is known**: assert the whole value (`toEqual`,
+  `toMatchInlineSnapshot`), not a fragment with `toContain`.
 
 ## Properties where the code has a shape
 

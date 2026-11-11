@@ -7,7 +7,8 @@
 #    slot: the deploy lock already lets only one landing test at a time, and waiting on a slot other schemes'
 #    builds can hold for an hour, while holding the lock, starved every other landing (#499).
 # 3. Fast-forwards main in the scheme repo to the branch.
-# 4. Runs tools/deploy.sh (it inherits the lock). If that deploys nothing because a check failed and
+# 4. Runs tools/deploy.sh (it inherits the lock, and skips its own test run when the live checkout
+#    lands on the commit just tested here). If that deploys nothing because a check failed and
 #    the live checkout went back, main goes back too, so main only ever holds what passed.
 # For a restart that cuts off running turns (only with a person's OK), land first, then run
 # tools/deploy.sh --now: it joins the restart this one queued.
@@ -59,6 +60,8 @@ if ! git rebase -q main; then
 fi
 
 say "running the tests"
+# A file the tests saw that isn't in the commit (never git-added, or ignored) means deploy.sh tests it again.
+[ -z "$(git status --porcelain --ignored)" ] && tested=$(git rev-parse HEAD) || tested=
 log="$state/land-test.log"
 if ! "$tools/run-tests.sh" "$log"; then
   tail -n 40 "$log" >&2
@@ -80,7 +83,7 @@ trap 'main_back; exit 129' HUP
 git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
 
-if ! DEPLOY_LOCKED=1 "$here/tools/deploy.sh"; then
+if ! DEPLOY_LOCKED=1 DEPLOY_TESTED="$tested" "$here/tools/deploy.sh"; then
   main_back
   refuse "the deploy failed after main moved; main keeps $(git log -1 --format=%h "$tip"). Read the deploy's output above"
 fi

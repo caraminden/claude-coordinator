@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Safe deploys for Citadel. Run it from a minion once its work is on main:
 #   tools/deploy.sh          (--now: restart even if that cuts off running turns; only with a person's OK)
-# 1. Fast-forwards the live checkout to main, runs the tests, and boots the new code on a spare port
+# 1. Fast-forwards the live checkout to main, runs the tests (unless tools/land.sh just ran them on that
+#    same commit, DEPLOY_TESTED), and boots the new code on a spare port
 #    against a copy of the database (tools/boot-check.ts). Any failure, or a kill, puts the checkout
 #    back; nothing restarts.
 # 2. A change to public/ only: SIGHUP, and the server reloads its front end. No restart, no killed turns.
@@ -272,11 +273,17 @@ deploy() {
 
   # Put the checkout back on any failure from here until the restart is queued.
   trap undo ERR
-  say "running the tests"
-  if ! (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log"); then
-    tail -n 40 "$STATE/test.log" >&2
-    say "tests failed (full log: $STATE/test.log); nothing deployed"
-    false
+  # DEPLOY_TESTED: the commit tools/land.sh just tested, so the same commit isn't tested twice under the lock;
+  # a stray file here (an untracked test) wasn't in that run, so then it tests again.
+  if [ "${DEPLOY_TESTED:-}" = "$new" ] && [ -z "$(git_live status --porcelain --ignored)" ]; then
+    say "skipping the tests: land.sh just ran them on $(short "$new")"
+  else
+    say "running the tests"
+    if ! (cd "$LIVE" && tools/run-tests.sh "$STATE/test.log"); then
+      tail -n 40 "$STATE/test.log" >&2
+      say "tests failed (full log: $STATE/test.log); nothing deployed"
+      false
+    fi
   fi
   say "boot check: the new code on a spare port with a copy of the database"
   if ! version=$(node "$LIVE/tools/boot-check.ts" "$LIVE" "$DB"); then

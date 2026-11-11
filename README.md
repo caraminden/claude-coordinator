@@ -413,8 +413,9 @@ or a red test stops it before `main` moves; a deploy whose checks fail puts
 `tools/deploy.sh` on its own deploys whatever is on `main`. Restarting doesn't
 interrupt turns:
 
-1. It fast-forwards `~/claude-coordinator` to `main`, runs `node --test`, and
-   boots the new code on a spare port against a copy of the database
+1. It fast-forwards `~/claude-coordinator` to `main`, runs `node --test` (unless
+   `land.sh` just ran it on that same commit, with no files outside the commit
+   in its worktree or here), and boots the new code on a spare port against a copy of the database
    (`tools/boot-check.ts`: `node --check` on `public/*.js`, `/api/health`, the
    app signed in and rendered in Playwright's headless Chromium with no console
    error, the file viewer's details of a linked and a shared file, and a minion

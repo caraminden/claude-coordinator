@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -24,7 +24,8 @@ function setup() {
   mkdirSync(join(source, 'tools'), { recursive: true });
   mkdirSync(join(source, 'test'));
   git(source, 'init', '-q', '-b', 'main');
-  writeFileSync(join(source, 'test', 'ok.test.mjs'), "if (process.env.FAIL_TESTS) throw new Error('red');\n");
+  // TEST_RUNS: a file that gets a line per test run, naming the checkout it ran in.
+  writeFileSync(join(source, 'test', 'ok.test.mjs'), "import { appendFileSync } from 'node:fs';\nif (process.env.TEST_RUNS) appendFileSync(process.env.TEST_RUNS, process.cwd() + '\\n');\nif (process.env.FAIL_TESTS) throw new Error('red');\n");
   writeFileSync(join(source, 'tools', 'deploy.sh'), `#!/usr/bin/env bash
 lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/lock
 flock -n "$lock" true && held=no || held=yes
@@ -238,10 +239,11 @@ test("refuses uncommitted work, main itself, arguments, running inside a citadel
   assert.match(onMain.stderr, /not main/);
 });
 
-test('the real deploy.sh takes the lock land.sh holds, and lets go of it once the restart is queued', async () => {
+// The real deploy.sh and run-tests.sh on main, a boot check that passes, and stand-ins for systemd: the
+// queued "restart" waits for the lock, then counts as live. run() runs a script with them; runs() lists
+// where the tests ran.
+async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>) => Promise<{ stderr: string }>, runs: () => string[]) => Promise<void>) {
   const r = setup();
-  // The real script, a boot check that passes, and stand-ins for systemd: the queued "restart" waits
-  // for the lock, then counts as live.
   for (const f of ['deploy.sh', 'run-tests.sh']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
   git(r.source, 'add', '-A');
@@ -249,9 +251,9 @@ test('the real deploy.sh takes the lock land.sh holds, and lets go of it once th
   git(r.live, 'pull', '-q', '--ff-only');
   git(r.wt, 'rebase', '-q', 'main');
   const base = git(r.source, 'rev-parse', 'main');
-  r.commit(r.wt, 'b.txt', 'mine\n');
   const bin = join(r.dir, 'bin');
   const restarted = join(r.dir, 'restarted');
+  const testRuns = join(r.dir, 'test-runs');
   mkdirSync(bin);
   writeFileSync(join(bin, 'systemctl'), '#!/bin/sh\nexit 1\n');
   writeFileSync(join(bin, 'systemd-run'), `#!/usr/bin/env bash
@@ -263,14 +265,54 @@ lock=$(git -C "$DEPLOY_LIVE" rev-parse --absolute-git-dir)/cc-deploy/lock
   await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
   try {
     const url = `http://127.0.0.1:${(server.address() as any).port}`;
-    const res = await promisify(execFile)('bash', [join(import.meta.dirname, '..', 'tools', 'land.sh')], {
-      cwd: r.wt, encoding: 'utf8',
-      env: { ...env, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_URL: url, DEPLOY_DB: join(r.dir, 'none.db'), DEPLOY_REMOTE: '' },
+    const run = (script: string, cwd: string, extra: Record<string, string> = {}) => promisify(execFile)('bash', [script], {
+      cwd, encoding: 'utf8',
+      env: { ...env, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_URL: url, DEPLOY_DB: join(r.dir, 'none.db'), DEPLOY_REMOTE: '', TEST_RUNS: testRuns, ...extra },
     });
-    assert.match(res.stderr, /live now: the server restarted on/);
-    assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.wt, 'rev-parse', 'HEAD'));
+    const runs = () => (existsSync(testRuns) ? readFileSync(testRuns, 'utf8').trim().split('\n') : []);
+    await body(r, run, runs);
   } finally {
     server.close();
+  }
+}
+
+test('the real deploy.sh takes the lock land.sh holds, lets go of it once the restart is queued, and skips the tests land.sh just ran', () =>
+  withRealDeploy(async (r, run, runs) => {
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const res = await run(land, r.wt);
+    assert.match(res.stderr, /live now: the server restarted on/);
+    assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.wt, 'rev-parse', 'HEAD'));
+    assert.match(res.stderr, /skipping the tests: land\.sh just ran them on/);
+    assert.deepEqual(runs(), [r.wt], 'the suite ran once, in the worktree');
+  }));
+
+test('deploy.sh tests again when a file outside the commit was in the worktree (untracked or ignored) or is in the live checkout', async () => {
+  for (const stray of ['wt/scratch.txt', 'wt/notes.ignored', 'live/test/stray.test.mjs']) {
+    await withRealDeploy(async (r, run, runs) => {
+      r.commit(r.wt, 'b.txt', 'mine\n');
+      appendFileSync(join(r.source, '.git', 'info', 'exclude'), '*.ignored\n'); // the worktree shares it
+      const [where, file] = stray.split(/\/(.*)/);
+      writeFileSync(join(where === 'wt' ? r.wt : r.live, file), '\n');
+      const res = await run(land, r.wt);
+      assert.match(res.stderr, /live now: the server restarted on/, stray);
+      assert.doesNotMatch(res.stderr, /skipping the tests/, stray);
+      assert.deepEqual(runs(), [r.wt, r.live], stray);
+    });
+  }
+});
+
+test('deploy.sh on its own, or told of a different tested commit, still runs the tests', async () => {
+  for (const tested of [undefined, 'stale']) {
+    await withRealDeploy(async (r, run, runs) => {
+      r.commit(r.source, 'b.txt', 'theirs\n');
+      // A commit land.sh tested that isn't the one the pull lands on (main moved on, or a hand-made deploy).
+      const extra = tested ? { DEPLOY_TESTED: git(r.source, 'rev-parse', 'main~1') } : {};
+      const res = await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source, extra);
+      assert.match(res.stderr, /running the tests/);
+      assert.doesNotMatch(res.stderr, /skipping the tests/);
+      assert.deepEqual(runs(), [r.live]);
+      assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.source, 'rev-parse', 'main'));
+    });
   }
 });
 

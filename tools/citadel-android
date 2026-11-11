@@ -138,6 +138,8 @@ relay() {
         { IFS= read -r verb; IFS= read -r from; IFS= read -r text; } <&5
         case $verb in
           sms) reply=$(check_sms "$from" "$text" && console "sms send $from $text") ;;
+          # The emulator may go before it answers, so the asker judges by whether the phone went.
+          kill) console kill >/dev/null 2>&1; reply=OK ;;
           *) reply="KO: unknown step" ;;
         esac
         [ "${reply:0:2}" = OK ] || [ "${reply:0:2}" = KO ] || reply="KO: ${reply:-no answer}"
@@ -243,11 +245,17 @@ serve() {
 down() {
   if ! port_open "$ADB_PORT" || ! ask get-state >/dev/null 2>&1; then say "not running"; return 0; fi
   say "stopping the emulator (saving its quick-boot snapshot)"
-  adb emu kill >/dev/null 2>&1
+  # A container turn can't read the console's token, so its `adb emu kill` is refused (KO, exit 0): then the
+  # service, which holds the token, does it.
+  case "$(adb emu kill 2>&1)" in *KO*) console_step kill >/dev/null 2>&1 ;; esac
   local t0=$SECONDS
   # Once the service ends its adb server goes too: asking again would start a stray one here.
   while port_open "$ADB_PORT" && ask get-state >/dev/null 2>&1 && [ $((SECONDS - t0)) -lt 100 ]; do sleep 1; done
   : >"$holder"
+  if port_open "$ADB_PORT" && ask get-state >/dev/null 2>&1; then
+    say "it is still up: the stop didn't reach it. It stops itself after 15 idle minutes; if this repeats, ask your Taskmaster (citadel-android-adb.service on perigee may need a restart)"
+    return 1
+  fi
 }
 
 cmd=${1:-}

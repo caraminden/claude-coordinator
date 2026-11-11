@@ -23,7 +23,7 @@ case "$*" in
   'shell getprop sys.boot_completed') echo 1 ;;
   get-state) [ -e '${sdk}/killed' ] && exit 1; echo device ;;
   # A real stop saves the quick-boot snapshot first, which takes seconds.
-  'emu kill') touch '${sdk}/killed'; [ -e '${sdk}/emu.pid' ] && { sleep 1; kill "$(cat '${sdk}/emu.pid')"; } ;;
+  'emu kill') [ -n "\${ADB_STUB_NO_TOKEN:-}" ] && { echo "KO: unknown command, try 'help'"; exit 0; }; touch '${sdk}/killed'; [ -e '${sdk}/emu.pid' ] && { sleep 1; kill "$(cat '${sdk}/emu.pid')"; } ;;
   'exec-out screencap -p') printf PNG ;;
   'install -r -t '*bad.apk) echo 'Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]'; exit 1 ;;
 esac
@@ -221,7 +221,7 @@ test('sms goes through serve to the console with the host token, and serve refus
     writeFileSync(join(locks, 'android.req.forged'), 'sms\n555\nhi\rkill\n');
     for (let i = 0; i < 200 && !existsSync(join(locks, 'android.out.forged')); i++) await new Promise((r) => setTimeout(r, 25));
     assert.match(readFileSync(join(locks, 'android.out.forged'), 'utf8'), /^KO: .*control character/);
-    writeFileSync(join(locks, 'android.req.other'), 'kill\n\n\n');
+    writeFileSync(join(locks, 'android.req.other'), 'avd name\n\n\n');
     for (let i = 0; i < 200 && !existsSync(join(locks, 'android.out.other')); i++) await new Promise((r) => setTimeout(r, 25));
     assert.equal(readFileSync(join(locks, 'android.out.other'), 'utf8'), 'KO: unknown step\n');
 
@@ -238,13 +238,22 @@ test('sms goes through serve to the console with the host token, and serve refus
     const victim = join(root, 'victim');
     writeFileSync(victim, 'keep me\n');
     symlinkSync(victim, join(locks, 'android.out.planted'));
-    writeFileSync(join(locks, 'android.req.planted'), 'kill\n\n\n');
+    writeFileSync(join(locks, 'android.req.planted'), 'avd name\n\n\n');
     assert.equal(await answer('link'), 'KO: refused: a request must be a plain file\n');
     assert.equal(await answer('hard'), 'KO: refused: a request must be a plain file\n');
     assert.equal(await answer('planted'), 'KO: unknown step\n');
     assert.equal(readFileSync(victim, 'utf8'), 'keep me\n');
     assert.equal(readFileSync(join(home, '.emulator_console_auth_token'), 'utf8'), 'sekrit\n');
     assert.deepEqual(got, []);
+
+    // down from a turn that can't read the token (its own adb emu kill is refused) goes through serve too.
+    got.length = 0;
+    const d = spawn(helper, ['down'], { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: 'a', ADB_STUB_NO_TOKEN: '1' }, stdio: 'ignore' });
+    for (let i = 0; i < 400 && !got.includes('kill'); i++) await new Promise((r) => setTimeout(r, 25));
+    assert.deepEqual(got.slice(0, 2), ['auth sekrit', 'kill']);
+    // The stub console stops nothing, so down would wait on; the stub emulator going ends it.
+    spawnSync(join(sdk, 'platform-tools', 'adb'), ['emu', 'kill'], { env });
+    assert.equal(await new Promise((res) => d.on('close', res)), 0);
   } finally {
     s.kill('SIGTERM');
     await done;

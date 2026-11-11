@@ -1,0 +1,17 @@
+# Lends perigee-godot's godot-ai to coordinator threads as the "perigee-godot" machine (#28).
+# Its MCP command goes through godot-on-demand.mjs (#505), which starts perigee-godot.service on the first
+# tool call and stamps every call for perigee-godot-idle.timer. So no Wants= on the editor: the agent
+# runs all the time, the editor only while it is used.
+[Unit]
+Description=Machine agent: godot-ai on perigee for coordinator threads
+After=claude-coordinator.service
+
+[Service]
+EnvironmentFile=%h/.config/perigee-godot/agent.env
+Environment=PATH=%h/.local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node %h/claude-coordinator/public/machine-agent.mjs http://perigee.tail59477f.ts.net:8574 -- /usr/bin/node %h/claude-coordinator/deploy/perigee-godot/godot-on-demand.mjs -- %h/.local/bin/uvx --from godot-ai==4.3.0 godot-ai attach --port 8000 --ws-port 9500
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

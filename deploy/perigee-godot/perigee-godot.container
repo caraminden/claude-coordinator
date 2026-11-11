@@ -1,0 +1,28 @@
+# Godot 4.7.2 .NET editor on ~/delve-godot, drawn on the Radeon 780M through a headless Wayland
+# screen; its Godot AI plugin dials in to the godot-ai backend on 127.0.0.1:9500, which the attach
+# bridges run on the host (MCP on 127.0.0.1:8000). See ~/.local/share/perigee-godot. Threads reach it as
+# the "perigee-godot" machine (#28).
+# Started on demand, not at boot (#505): godot-on-demand.mjs starts it on the first tool call, and
+# perigee-godot-idle.timer stops it after 2 hours with no godot-ai traffic. Install: deploy/perigee-godot/README.md.
+[Unit]
+Description=Godot editor + godot-ai for Delve threads (starts on demand, stops when idle)
+
+[Container]
+Image=localhost/perigee-godot
+ContainerName=perigee-godot
+AddDevice=/dev/dri
+UserNS=keep-id
+Network=host
+PodmanArgs=--init
+Volume=%h:%h
+WorkingDir=%h
+Exec=%h/.local/share/perigee-godot/start.sh
+Environment=HOME=%h XDG_RUNTIME_DIR=/tmp/xdg-godot DELVE_DIR=%h/delve-godot
+Environment=GODOT=%h/.local/godot/4.7.2/Godot_v4.7.2-stable_mono_linux_x86_64/Godot_v4.7.2-stable_mono_linux.x86_64
+Environment=DOTNET_ROOT=%h/.dotnet DOTNET_CLI_TELEMETRY_OPTOUT=1 GODOT_AI_DISABLE_TELEMETRY=1
+Environment=PATH=%h/.local/bin:%h/.dotnet:/usr/bin:/bin
+
+[Service]
+# A crash restarts it; a stop (the idle timer's, or a person's) doesn't.
+Restart=always
+RestartSec=10

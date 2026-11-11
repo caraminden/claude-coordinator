@@ -1,0 +1,10 @@
+# Checks every 10 minutes whether the perigee-godot editor has gone 2 hours unused (#505).
+[Unit]
+Description=Check every 10 minutes whether the perigee-godot editor is idle
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target

@@ -2,10 +2,12 @@
 // GitHub Actions and tells a person, never a minion, when CI is unwell in a way a red test doesn't show:
 //   - a runner offline (GitHub's own runner list, so session runners too);
 //   - jobs that never started (0 steps, no runner: a billing block) or sat queued with no runner to take them;
-//   - a green run on main that skipped jobs which ran the time before;
+//   - a green run on main that skipped jobs which ran the time before (a quiet item, not an alert: below);
 //   - no verdict on main for hours while runs keep coming.
 // Each open problem is one Mandate alert item for every admin (Cara, 2026-11-07: "Send a mandate alert to
-// admins"), put from the scheme so its chip names it, and cleared when the problem is. It polls with the scheme
+// admins"), put from the scheme so its chip names it, and cleared when the problem is. A green run never
+// alarms (Cara, 2026-11-11: "I also definitely don't need alerts when CI goes green"): alert items ring like
+// an alarm on her phone (Mandate #75), so only real trouble is one, and anything informational is quiet. It polls with the scheme
 // owner's linked GitHub (as the PR watcher and runner list do; the box's login without one), every 5 minutes,
 // with ETags so an unchanged answer (a 304) costs no rate limit.
 import { execFile } from 'node:child_process';
@@ -61,6 +63,8 @@ export interface Runner {
 export interface Problem {
   key: string;
   title: string;
+  /** Informational: a plain item, never an alarm. */
+  quiet?: boolean;
 }
 
 const at = (s: string) => Date.parse(s);
@@ -145,12 +149,16 @@ export function verdictPair(runs: Run[]): [Run, Run] | null {
   return v.length >= 2 && v[0].conclusion === 'success' ? [v[0], v[1]] : null;
 }
 
-/** A green run that skipped jobs which ran (passed or failed) in the verdict before it: green that proves less than it says. */
+/**
+ * A green run that skipped jobs which ran (passed or failed) in the verdict before it: green that proves less than it
+ * says. Quiet, since it is still a green run; its key changed from skipped: when it stopped alarming (#532), so the
+ * alarm items already out are cleared.
+ */
 export function skippedProblem(workflow: { id: number; name: string }, branch: string, latest: Run, latestJobs: Job[], beforeJobs: Job[]): Problem | null {
   const ran = new Set(beforeJobs.filter((j) => RAN.has(j.conclusion ?? '')).map((j) => j.name));
   const skipped = latestJobs.filter((j) => j.conclusion === 'skipped' && ran.has(j.name)).map((j) => j.name);
   if (!skipped.length) return null;
-  return { key: `skipped:${workflow.id}`, title: `CI: ${workflow.name} on ${branch} (${latest.head_sha.slice(0, 7)}) went green with ${plural(skipped.length, 'job')} skipped that ran the time before: ${skipped.join(', ')}` };
+  return { key: `green-skipped:${workflow.id}`, quiet: true, title: `CI: ${workflow.name} on ${branch} (${latest.head_sha.slice(0, 7)}) went green with ${plural(skipped.length, 'job')} skipped that ran the time before: ${skipped.join(', ')}` };
 }
 
 /** A Mandate item key for a problem (Mandate allows A-Z a-z 0-9 . _ : - and 128 characters). */
@@ -200,8 +208,8 @@ interface Saved {
 export interface CiHealthDeps {
   /** The GitHub login to read a scheme's repo as: its owner's linked one, or undefined for the box's. */
   as: (project: Project) => GithubEnv;
-  /** Put (with `title`) or clear (null) a person's Mandate alert item for a scheme; true once Mandate has it settled. */
-  mandate: (project: Project, person: User, key: string, title: string | null) => Promise<boolean>;
+  /** Put (with `title`) or clear (null) a person's Mandate item for a scheme, an alert unless `quiet`; true once Mandate has it settled. */
+  mandate: (project: Project, person: User, key: string, title: string | null, quiet?: boolean) => Promise<boolean>;
   get?: GhGet;
 }
 
@@ -308,12 +316,12 @@ export class CiHealth {
   /** Every admin with Mandate on gets each problem's item, updated when its words change, and cleared once it's gone. */
   async deliver(p: Project, problems: Problem[], saved: Saved) {
     const admins = this.store.listUsers().filter((u) => u.admin && !u.disabled_at && this.store.contraptionEnabled('mandate', u.id));
-    const open = new Map(problems.map((x) => [x.key, x.title]));
-    for (const [key, title] of open) {
+    const open = new Map(problems.map((x) => [x.key, x]));
+    for (const [key, { title, quiet }] of open) {
       const sent = (saved.sent[key] ??= {});
       for (const u of admins) {
         if (sent[u.id] === title) continue;
-        if (await this.deps.mandate(p, u, itemKey(key), title)) sent[u.id] = title;
+        if (await this.deps.mandate(p, u, itemKey(key), title, quiet)) sent[u.id] = title;
       }
     }
     for (const [key, sent] of Object.entries(saved.sent)) {

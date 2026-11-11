@@ -76,7 +76,8 @@ export function step(prev: WatchState, found: Map<string, { title: string; findi
     if (down.length) parts.push(`Down: ${down.map((e) => `${e.title} ${mins(now - e.since)} (${e.why})`).join(', ')}.`);
     if (newBack.length) parts.push(`${down.length ? 'Back' : 'All back'}: ${newBack.map(([, e]) => `${e.title} (${e.upWhy} after ${mins(e.upAt! - e.since)})`).join(', ')}.`);
     const title = newDown.length ? `${newDown.map(([, e]) => e.title).join(', ')} down` : `${newBack.map(([, e]) => e.title).join(', ')} back up`;
-    return { title, body: parts.join(' '), tag: 'citadel-watchdog', url: '/c/' };
+    // An all-clear replaces the down push without ringing: Web Push can't take a notification away without showing one.
+    return { title, body: parts.join(' '), tag: 'citadel-watchdog', url: '/c/', ...(newDown.length ? {} : { silent: true }) };
   };
   return { messageFor, sent, unsent };
 }

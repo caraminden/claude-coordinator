@@ -4,7 +4,9 @@
 // reaches a worktree:
 //   - only for the one person whose own typed message the turn answers (Runner.typedBy): never on a GitHub
 //     or system message, a relay, a wake, a resume or a contraption's ask; that person must be on the
-//     scheme and have Mandate enabled. The tool takes no person, so it can't aim at anyone else.
+//     scheme and have Mandate enabled. The tool takes no person, so it can't aim at anyone else. Clearing an
+//     item the chat put works on any turn, for the person it was put for (#532): a fix landing or a PR merging
+//     is news from GitHub or a wake, and an item left open after its cause is gone keeps nagging her.
 //   - straight to Mandate's own service (no relay hop), at /apps/mandate/app-api/items/<number>.<key>,
 //     with an identity signed by Mandate's key whose `from` is scheme-<id> and `fromTitle` the scheme's name;
 //     hook: true always, and link the minion's page. The number routes her ticks back (relay.ts schemeHook).
@@ -23,6 +25,8 @@ const FIELDS = ['title', 'day', 'time', 'at', 'alert'] as const;
 /** Settings key for an item's title, which a hook (carrying only the key) quotes back to the minion. */
 // shortcut: a ticked or deleted item's row stays until the minion clears its key; prune if settings ever grows from it.
 export const titleKey = (projectId: number, person: number, key: string) => `mandate-title:${projectId}:${person}:${key}`;
+/** Settings key for whom item `key` (with its minion number) was last put for, so any later turn can clear it. */
+const putForKey = (projectId: number, key: string) => `mandate-for:${projectId}:${key}`;
 
 /**
  * The person whose own typed message the caller's turn answers (Runner.typedBy), checked for a call into
@@ -30,8 +34,11 @@ export const titleKey = (projectId: number, person: number, key: string) => `man
  * identity for them signed with its key, `from` scheme-<id>. Shared by mandate_item and contraption_read (#295).
  */
 export function typedPersonFor(app: App, ticket: Ticket, name: string, doing: string) {
-  const { store, contraptions, runner } = app;
-  const uid = runner.typedBy(ticket.id);
+  return personFor(app, ticket, app.runner.typedBy(ticket.id), name, doing);
+}
+
+function personFor(app: App, ticket: Ticket, uid: number | null, name: string, doing: string) {
+  const { store, contraptions } = app;
   const user = uid === null ? undefined : store.getUser(uid);
   if (!user || user.disabled_at) throw new HttpError(403, `Only a turn answering a person's own typed message may ${doing}, and this one isn't (a GitHub or system message, a relay, a wake, or several people). Ask them to send the request in this chat.`);
   if (!store.canSee({ uid: user.id, admin: !!user.admin }, ticket.project_id)) throw new HttpError(403, `${user.name} isn't on this scheme`);
@@ -52,7 +59,10 @@ export async function mandateItem({ req, res, app, params, caller }: Ctx) {
   const key = prefix + params.key;
   if (!KEY.test(key) || !params.key) throw new HttpError(400, `key must be 1 to ${128 - prefix.length} letters, digits, dots, underscores, colons or dashes`);
 
-  const { user, project, contraption: mandate, identity } = typedPersonFor(app, ticket, 'mandate', 'put items in their Mandate');
+  const putFor = req.method === 'DELETE' ? store.getSetting<number>(putForKey(ticket.project_id, key)) : null;
+  const { user, project, contraption: mandate, identity } = putFor === null
+    ? typedPersonFor(app, ticket, 'mandate', 'put items in their Mandate')
+    : personFor(app, ticket, putFor, 'mandate', 'clear items in their Mandate');
 
   let body: Record<string, unknown> | undefined;
   if (req.method === 'PUT') {
@@ -63,7 +73,11 @@ export async function mandateItem({ req, res, app, params, caller }: Ctx) {
   const { status, answer } = await callMandate(mandate, identity, key, body);
   // A put on a ticked or deleted item changes nothing in Mandate, so neither does it here.
   if (status === 200 && body && typeof body.title === 'string' && (answer as any)?.state === 'open') store.setSetting(titleKey(project.id, user.id, key), body.title);
-  if (status === 200 && !body) store.deleteSetting(titleKey(project.id, user.id, key));
+  if (status === 200 && body) store.setSetting(putForKey(project.id, key), user.id);
+  if (status === 200 && !body) {
+    store.deleteSetting(titleKey(project.id, user.id, key));
+    store.deleteSetting(putForKey(project.id, key));
+  }
   json(res, 200, { status, answer });
 }
 

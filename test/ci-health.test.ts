@@ -108,12 +108,13 @@ test('runs skipped by a job-level if: (or neutral) wait for no verdict (#468 S08
   assert.ok(verdictProblem(wf, 'main', [skipped(1), runOf({ conclusion: 'cancelled', created_at: iso(5 * HOUR) }), runOf({ created_at: iso(30 * HOUR) })], NOW), 'a cancelled run still waits for one');
 });
 
-test('a green run that skipped jobs which ran the time before alerts; jobs skipped both times do not', () => {
+test('a green run that skipped jobs which ran the time before is a quiet item, never an alert; jobs skipped both times are nothing', () => {
   const wf = { id: 7, name: 'desktop' };
   const before = [job({ name: 'screen' }), job({ name: 'capture', conclusion: 'failure' }), job({ name: 'nightly', conclusion: 'skipped' })];
   const latest = runOf({ head_sha: 'a1b2c3d9999' });
   const p = skippedProblem(wf, 'main', latest, [job({ name: 'screen', conclusion: 'skipped' }), job({ name: 'capture', conclusion: 'skipped' }), job({ name: 'nightly', conclusion: 'skipped' }), job({ name: 'gate' })], before);
-  assert.equal(p?.key, 'skipped:7');
+  assert.equal(p?.key, 'green-skipped:7');
+  assert.equal(p!.quiet, true, 'a green run never alarms (Cara, 2026-11-11)');
   assert.equal(p!.title, 'CI: desktop on main (a1b2c3d) went green with 2 jobs skipped that ran the time before: screen, capture');
   assert.equal(skippedProblem(wf, 'main', latest, [job({ name: 'screen' }), job({ name: 'nightly', conclusion: 'skipped' })], before), null);
 
@@ -187,16 +188,18 @@ function world() {
     return etag === tag ? { status: 304, etag: tag, body: null } : { status: 200, etag: tag, body };
   };
   const puts: [string, string, string | null][] = [];
+  const quiet: string[] = [];
   const mandateUp = { ok: true };
   const deps = {
     as: () => undefined,
     get,
-    mandate: async (p: { name: string }, u: { name: string }, key: string, title: string | null) => {
+    mandate: async (p: { name: string }, u: { name: string }, key: string, title: string | null, q?: boolean) => {
       puts.push([u.name, key, title]);
+      if (q) quiet.push(key);
       return mandateUp.ok;
     },
   };
-  return { store, peek, gh, puts, mandateUp, deps, health: new CiHealth(store, deps) };
+  return { store, peek, gh, puts, quiet, mandateUp, deps, health: new CiHealth(store, deps) };
 }
 
 test('each problem is one Mandate alert per admin with Mandate, updated on change, cleared when fixed, and kept across a restart', async () => {
@@ -311,4 +314,21 @@ test('a GitHub error skips the round: open alerts stay, and a failed jobs read i
     await w.health.tick(t + 2 * MIN);
     assert.equal(w.puts.length, 1, `a 502 on ${down} clears nothing`);
   }
+});
+
+test('green with skipped jobs goes out quiet, and the alarm item an older build sent for it is cleared (#532)', async () => {
+  const w = world();
+  const t = NOW;
+  const at = (ago: number) => new Date(t - ago).toISOString();
+  // What the old build left behind: the same trouble, sent as an alarm under the old key.
+  w.store.setSetting(`ci-health:${w.peek.id}`, { offline: {}, sent: { 'skipped:7': { 1: 'CI: desktop on main went green with 1 job skipped' } } });
+  const [green, before] = [runOf({ id: 901, created_at: at(10 * MIN), head_sha: 'a1b2c3d4' }), runOf({ id: 900, created_at: at(HOUR), conclusion: 'failure' })];
+  w.gh.mainRuns = [green, before];
+  w.gh.jobs.set(901, [job({ run_id: 901, name: 'screen', conclusion: 'skipped' })]);
+  w.gh.jobs.set(900, [job({ run_id: 900, name: 'screen', conclusion: 'failure' })]);
+  await w.health.tick(t);
+  assert.deepEqual(w.puts.find(([, k]) => k === 'ci.skipped:7'), ['Cara', 'ci.skipped:7', null], 'the alarm already out is cleared');
+  const put = w.puts.find(([, k]) => k === 'ci.green-skipped:7');
+  assert.match(put?.[2] ?? '', /went green with 1 job skipped that ran the time before: screen$/);
+  assert.deepEqual(w.quiet, ['ci.green-skipped:7'], 'and comes back as a quiet item, not an alert');
 });

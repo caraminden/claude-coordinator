@@ -156,6 +156,24 @@ test('her tick comes back into the minion as a [Mandate] message quoting the tit
   await idle(minion.id);
 });
 
+test('an item the chat put can be cleared on any turn, for the person it was put for; a put still needs her typed message (#532)', async () => {
+  await typed([{ method: 'PUT', key: 'ci-red', body: { title: 'CI is red on main', alert: true } }]);
+  // The next turn is Mandate's own hook (no one typed it), as a GitHub message or a wake would be.
+  writeFileSync(join(root, `plan-${minion.id}.json`), JSON.stringify([{ method: 'DELETE', key: 'ci-red' }, { method: 'DELETE', key: 'never-put' }, { method: 'PUT', key: 'ci-red', body: { title: 'again' } }]));
+  const n = turns().length;
+  const res = await hook(`scheme-${project.id}`, { key: `${minion.number}.ci-red`, event: 'ticked', at: '2026-11-02T08:14:00Z' });
+  assert.equal(res.status, 200);
+  const t = await until('the turn', () => turns().slice(n).find((x: any) => x.ticket === minion.id));
+  writeFileSync(join(root, `plan-${minion.id}.json`), '[]');
+  await idle(minion.id);
+  assert.deepEqual(t.out[0], { status: 200, data: { status: 200, answer: { key: `${minion.number}.ci-red`, state: 'cleared' } } });
+  const s = seen.findLast((x) => x.method === 'DELETE')!;
+  assert.equal(s.path, `/apps/mandate/app-api/items/${minion.number}.ci-red`);
+  assert.equal(verifyIdentity(s.headers['x-citadel-identity'] as string, mandatePub, 'mandate')?.sub, cara, "cleared from Cara's Mandate");
+  assert.equal(t.out[1].status, 403, 'a key this chat never put is still the typed person\'s only');
+  assert.equal(t.out[2].status, 403, 'and so is every put');
+});
+
 test("only Mandate's hook, for a person on the scheme, reaches a minion; a closed one drops it with a 200", async () => {
   const body = { key: `${minion.number}.k`, event: 'ticked', at: '2026-11-02T08:14:00Z' };
   const status = async (r: Promise<Response>) => {

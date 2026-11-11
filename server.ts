@@ -47,7 +47,7 @@ import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens } from './src/ci-runner.ts';
 import { CiHealth } from './src/ci-health.ts';
 import { callMandate } from './src/mandate-items.ts';
-import { adminAlert, fallbacks } from './src/fallbacks.ts';
+import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
 import { projectRoutes } from './src/routes/projects.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { ticketRoutes } from './src/routes/tickets.ts';
@@ -454,13 +454,13 @@ if (!BOOT_CHECK || PREVIEW) {
 const github = new GithubWatcher(store, (ticketId, text) => runner.send(ticketId, GITHUB_NAME, text));
 github.as = githubOf;
 if (!BOOT_CHECK) github.start();
-/** Put (with `title`) or clear (null) a Mandate alert item for `person`, from `project`; true once Mandate has it settled. `what` names the sender in the log. */
-async function mandateAlert(what: string, project: Project, person: User, key: string, title: string | null, link = `/c/#/p/${project.id}`): Promise<boolean> {
+/** Put (with `title`) or clear (null) a Mandate item for `person`, from `project`, an alert unless `quiet`; true once Mandate has it settled. `what` names the sender in the log. */
+async function mandateAlert(what: string, project: Project, person: User, key: string, title: string | null, link = `/c/#/p/${project.id}`, quiet = false): Promise<boolean> {
   const c = store.getContraption('mandate');
   const identity = c && contraptions.signIdentity(c.name, person, { name: `scheme-${project.id}`, title: project.name });
   if (!c || !identity) return false;
   try {
-    const { status, answer } = await callMandate(c, identity, key, title === null ? undefined : { title, alert: true, link });
+    const { status, answer } = await callMandate(c, identity, key, title === null ? undefined : { title, alert: !quiet, link });
     // 403: she switched the scheme off in Mandate, which keeps it off; asking again won't change that.
     if (status === 200 || status === 403) return true;
     console.error(`${what}: Mandate answered ${status} for ${person.name}'s ${key}:`, JSON.stringify(answer).slice(0, 300));
@@ -469,16 +469,17 @@ async function mandateAlert(what: string, project: Project, person: User, key: s
   }
   return false;
 }
-// CI health (#368): a runner offline, jobs that never started, green that skipped jobs, or no verdict on main for
-// hours becomes a Mandate alert for every admin, from the scheme, and is cleared when it's over; no turn runs.
+// CI health (#368): a runner offline, jobs that never started, or no verdict on main for hours becomes a Mandate
+// alert for every admin, from the scheme (green that skipped jobs, a quiet item), and is cleared when it's over; no turn runs.
 const ciHealth = new CiHealth(store, {
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
-  mandate: (project, person, key, title) => mandateAlert('CI health', project, person, key, title),
+  mandate: (project, person, key, title, quiet) => mandateAlert('CI health', project, person, key, title, undefined, quiet),
 });
 if (!BOOT_CHECK) ciHealth.start();
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
-// alert for every admin, from the job's scheme, linking its minion. Admins tick it themselves; nothing clears it.
+// alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
 fallbacks.alert = adminAlert(store, (project, person, key, title, link) => mandateAlert('In-server fallback', project, person, key, title, link));
+fallbacks.clear = adminClear(store, (project, person, key) => mandateAlert('In-server fallback', project, person, key, null));
 // Members already in schemes get their invites, and leavers' are withdrawn (#310); it settles, so later boots only retry what failed.
 if (!BOOT_CHECK) void safely('repo access sweep', () => repoAccess.sweep());
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);

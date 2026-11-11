@@ -38,6 +38,7 @@ test('alerts once past the threshold, then once more when it is back', () => {
   const back = round(s, t0 + 30 * MIN, ['citadel', null]);
   assert.equal(back.message?.title, 'Citadel back up');
   assert.equal(back.message?.body, 'All back: Citadel (back up after 30 min).');
+  assert.equal(back.message?.silent, true, 'the all-clear replaces the down push without ringing (#532)');
   assert.deepEqual(back.sent, {});
   assert.equal(round(back.sent, t0 + 35 * MIN, ['citadel', null]).message, null);
 });
@@ -71,6 +72,7 @@ test('one push covers everything down; one going away unwatched gets an all-clea
   s = r.sent;
   const gone = round(s, T + 5 * MIN, ['citadel', 'inactive']); // mandate's unit was disabled
   assert.equal(gone.message?.title, 'mandate back up');
+  assert.equal(gone.message?.silent, true, 'nothing newly down: Citadel was already told, so it does not ring again');
   assert.equal(gone.message?.body, 'Down: Citadel 15 min (inactive). Back: mandate (no longer watched after 15 min).');
   assert.equal(gone.messageFor(owner)?.body, 'All back: mandate (no longer watched after 15 min).');
 });

@@ -87,3 +87,20 @@ test("a page load that meets Caddy's 502 gets a page that says Citadel is restar
   assert.deepEqual(await load('https://citadel.example/c/', 500), { status: 500, body: 'upstream 500' });
   assert.deepEqual(await load('https://citadel.example/preview/3/c/', 502), { status: 502, body: 'upstream 502' });
 });
+
+test('a push shows its notification under its tag; a silent one (an all-clear) replaces it without ringing again (#532)', async () => {
+  const listeners: Record<string, (e: any) => void> = {};
+  const shown: [string, any][] = [];
+  const self = {
+    addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn),
+    location: { origin: 'https://citadel.example' },
+    registration: { showNotification: async (title: string, opts: any) => void shown.push([title, opts]) },
+  };
+  new Function('self', 'fetch', readFileSync(join(import.meta.dirname, '..', 'public', 'sw.js'), 'utf8'))(self, () => new Promise(() => {}));
+  for (const msg of [{ title: 'Citadel down', tag: 'citadel-watchdog' }, { title: 'Citadel back up', tag: 'citadel-watchdog', silent: true }]) {
+    let done: Promise<unknown> = Promise.resolve();
+    listeners.push({ data: { json: () => msg }, waitUntil: (p: Promise<unknown>) => (done = p) });
+    await done;
+  }
+  assert.deepEqual(shown.map(([t, o]) => [t, o.tag, o.renotify, o.silent]), [['Citadel down', 'citadel-watchdog', true, false], ['Citadel back up', 'citadel-watchdog', false, true]]);
+});

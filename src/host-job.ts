@@ -67,7 +67,7 @@ export class HostJobs {
     this.starting.add(dir);
     execFile('systemd-run', ['--user', '--collect', '--quiet', `--unit=${job.unit}`, `--slice=${TURN_SLICE}`, '-p', 'UMask=0077', `--description=${job.description}`, ...wrapper], (err, _out, stderr) => {
       this.starting.delete(dir);
-      if (!err) return;
+      if (!err) return fallbacks.started();
       fallbacks.record(job.ticketId, job.description, String(stderr).trim() || err.message);
       this.child(wrapper, dir, job.onChildEnd);
     });

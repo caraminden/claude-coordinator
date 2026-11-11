@@ -34,7 +34,7 @@ const restarting = () => new Response(
 );
 
 // A question card, a failed turn, or a thread that is ready or blocked (src/push.ts). One
-// notification per thread: a newer one replaces the last, and still alerts.
+// notification per thread: a newer one replaces the last, and still alerts unless it's silent (an all-clear).
 self.addEventListener('push', (event) => {
   let msg = {};
   try {
@@ -43,7 +43,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(self.registration.showNotification(msg.title || '%APP_NAME%', {
     body: msg.body || '',
     tag: msg.tag,
-    renotify: !!msg.tag,
+    renotify: !!msg.tag && !msg.silent,
+    silent: !!msg.silent,
     icon: '/icon-192.png',
     data: { url: msg.url || '/c/' },
   }));

@@ -27,6 +27,8 @@ export interface PushMessage {
   tag: string;
   /** Where clicking it opens the app. */
   url: string;
+  /** Replace the last one without ringing again: news that something is over, not a new problem (#532). */
+  silent?: boolean;
 }
 
 /** `eventId`: the chat event the notification is about, which clicking it scrolls to (#236). */

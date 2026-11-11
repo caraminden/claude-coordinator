@@ -913,6 +913,17 @@ test('a target the tripwire can now pin down: a function argument bound at its c
     ['f(){ rm -f "$1"; }; g=f; $g x'],
     ['f(){ rm -f "$1"; }'],
     ['f(){ rm -f "$1"; }; f a.txt; $CMD b'],
+    // a word the call leaves out, or ${1:-…}, may take a default the tripwire doesn't follow
+    ['f(){ rm -rf "${1:-$HOME/.local/share/claude-coordinator}"/state.db; }; f'],
+    ['f(){ rm -rf "${1:-$HOME/.local/share/claude-coordinator}"/state.db; }; f ""'],
+    // each call's words are read before any is bound
+    [`g(){ rm -f "$2"; }; f(){ g "$2" "$1"; }; f ${data}/state.db a.txt`, tmp],
+    // a body that moves its arguments or scopes its variables is checked where it stands
+    [`f(){ shift; rm -f "$1"; }; f a.txt ${data}/state.db`, tmp],
+    [`f(){ set -- "$2"; rm -f "$1"; }; f a.txt b.txt`, tmp],
+    [`f(){ local x="$1"; rm -f "$x"; }; f a.txt`, tmp],
+    // more calls than it follows
+    [`f(){ rm -f "$1"; }; ${Array.from({ length: 65 }, (_, i) => `f a${i}`).join('; ')}`, tmp],
     // basename names a file in the current folder: the folder must be known, and not the live data
     ['cd "$(cat where)" && curl -s "$u" > "$(basename "$u")"'],
     [`cd ${data} && curl -s "$u" > "$(basename "$u")"`],
@@ -920,6 +931,10 @@ test('a target the tripwire can now pin down: a function argument bound at its c
     ['curl -s "$u" > "$(dirname "$u")"', tmp],
     ['curl -s "$u" > "$(basename "$u")/x"', tmp],
     ['curl -s "$u" > "$(echo "$u")"', tmp],
+    // a lone name may be . or ..: a remover or find would take the folder itself
+    ['rm -rf "$(basename "$d")"', tmp],
+    ['find "$(basename "$d")" -delete', tmp],
+    ['rm -rf ".$(basename "$d")"', tmp],
   ];
   for (const [command, cwd] of refused) assert.ok(verdict(command, cwd), command);
 });
@@ -929,6 +944,8 @@ test('env: names only pass, values stay refused, and the message says how to che
     assert.equal(bash(command), null, command);
   for (const command of ['env', 'env | grep NAME', 'env | cut -d= -f2', 'env | cut -d= -f1-', 'env | cut -d= -f1,2', 'env | sort', 'env | sort | cut -d= -f1', "env | awk '{print}'", 'env > e.txt | cut -d= -f1', 'env; cut -d= -f1 x'])
     assert.ok(verdict(command), command);
+  // a value with a line break would put its later lines through as names
+  assert.ok(tripwire({ tool_name: 'Bash', tool_input: { command: 'env | cut -d= -f1' }, cwd: '/tmp' }, { ...cfg, env: { X: 'a\nTOKEN=s' } }));
   assert.match(bash('env | grep NAME')!, /^`env`[^.]*\. Check one variable with `\[ -n "\$NAME" \]/);
   assert.match(bash('env | grep NAME')!, /env \| cut -d= -f1/);
 });
@@ -943,14 +960,17 @@ test('git: --ours and --theirs mid-merge, and any checkout in a clone under the 
   const at = (command: string, cwd = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c)?.reason ?? null;
   try {
     mkdirSync(wt, { recursive: true });
-    sh('git init -q -b ticket/9 && echo a > a.txt && git add a.txt && git commit -qm a');
+    sh('git init -q -b ticket/9 && echo a > a.txt && echo b > b.txt && git add a.txt b.txt && git commit -qm a');
     sh('git checkout -qb other && echo b > a.txt && git commit -qam b && git checkout -q ticket/9 && echo c > a.txt && git commit -qam c');
     // Not mid-merge: --ours names a path as any path checkout does.
     assert.match(at('git checkout --ours a.txt') ?? '', /names a path/);
     sh('git merge other || true');
-    for (const ok of ['git checkout --ours a.txt', 'git checkout --theirs -- a.txt', 'git checkout --ours -- .']) assert.equal(at(ok), null, ok);
-    // Without --ours or --theirs, mid-merge or not, it stays refused.
-    for (const no of ['git checkout -- a.txt', 'git checkout HEAD a.txt', 'git restore a.txt']) assert.ok(at(no), no);
+    for (const ok of ['git checkout --ours a.txt', 'git checkout --theirs -- a.txt', `git checkout --ours -- ${wt}/a.txt`]) assert.equal(at(ok), null, ok);
+    // Without --ours or --theirs, mid-merge or not, it stays refused; so does --ours on a file with no open conflict, or on a folder or glob.
+    writeFileSync(join(wt, 'b.txt'), 'changed');
+    for (const no of ['git checkout -- a.txt', 'git checkout HEAD a.txt', 'git restore a.txt', 'git checkout --ours b.txt', 'git checkout --ours -- a.txt b.txt', 'git checkout --ours -- .', "git checkout --theirs '*.txt'", 'git checkout --ours "$F"'])
+      assert.ok(at(no), no);
+    sh('git checkout -q -- b.txt');
     sh('git merge --abort');
 
     // A clone under the turn's TMPDIR is scratch: its checkouts can't lose anyone's work.

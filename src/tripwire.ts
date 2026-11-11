@@ -317,7 +317,8 @@ export function lex(s: string, home: string): Tok[] {
       if (end < 0) return n;
       // ${NAME:?…}, ${NAME:-…} and the like are NAME when it's set; other forms can't be followed.
       const m = /^([A-Za-z_]\w*|[1-9])(:?[-=?].*)?$/.exec(s.slice(j + 1, end));
-      name = m ? positional(m[1]) : '';
+      // A function's ${1:-…} takes its default for an empty word too: left unknown.
+      name = m && !(/^[1-9]$/.test(m[1]) && /^:?[-=]/.test(m[2] ?? '')) ? positional(m[1]) : '';
       j = end + 1;
     } else {
       const m = /^([A-Za-z_]\w*|[0-9@*#?$!-])/.exec(s.slice(j));
@@ -794,8 +795,12 @@ function blindReason(w: Word, st: State, cfg: TripwireConfig, name: string): Ver
   const lit = tmpl.slice(0, tmpl.indexOf('\0'));
   const cut = lit.lastIndexOf('/');
   // `$x/…` could be anywhere; `out-$x` and `$(basename $u).json` are in the current folder; `/a/b/$x` is in /a/b.
-  const oneName = !tmpl.includes('/') && !tmpl.replaceAll(`\0${ONE_NAME}\0`, '').includes('\0');
-  const dirs = cut >= 0 ? pathsOf({ text: lit.slice(0, cut) || '/', unknown: false }, st, cfg) : (lit || oneName) && st.cwd ? [st.cwd] : [];
+  const rest = tmpl.replaceAll(`\0${ONE_NAME}\0`, '');
+  // A lone name may be `.` or `..`: a writer then lands one folder up, and a remover or find takes the folder itself.
+  const oneName = !tmpl.includes('/') && !rest.includes('\0');
+  const dots = oneName && /^\.*$/.test(rest);
+  const here = !st.cwd || (dots && (REMOVERS.has(name) || name === 'find' || name === 'truncate')) ? [] : dots ? [st.cwd, dirname(st.cwd)] : [st.cwd];
+  const dirs = cut >= 0 ? pathsOf({ text: lit.slice(0, cut) || '/', unknown: false }, st, cfg) : lit || oneName ? here : [];
   const unknowns = [...new Set([...tmpl.matchAll(/\0([A-Za-z_]\w*)?\0/g)].map((m) => (m[1] ? varShown(m[1]) : '$(…)')))].join(' and ');
   if (!dirs.length || dirs.some((d) => under(cfg.data, d))) {
     return hard(`${shown(w)}: the tripwire can't tell what ${unknowns} holds, so this could reach ${cfg.data}, the live data dir (the database, its backups and every scheme's folders). Spell the path out in the command, or keep scratch files under $TMPDIR. ${SCRATCH}`);
@@ -937,6 +942,16 @@ function midMerge(dir: string): boolean {
   return r?.status === 0 && r.out.split('\n').some((p) => p && existsSync(resolve(dir, p)));
 }
 
+/** Whether every path names a file with a conflict still open: `--ours` on any other file throws away its changes. */
+function conflicted(dir: string, paths: Word[]): boolean {
+  if (!paths.length || paths.some((w) => w.unknown || /[*?[]/.test(w.text))) return false;
+  const top = git(dir, 'rev-parse', '--show-toplevel');
+  const u = git(dir, 'diff', '--name-only', '--diff-filter=U');
+  if (top?.status !== 0 || u?.status !== 0) return false;
+  const open = new Set(u.out.split('\n').filter(Boolean).map((f) => resolve(top.out.trim(), f)));
+  return paths.every((w) => open.has(resolve(dir, w.text)));
+}
+
 /**
  * The git habits every scheme shares: no path checkout, restore or stash; no checkout, merge, rebase or
  * reset over uncommitted tracked changes; from a minion's worktree, no push to main and no plain force.
@@ -954,8 +969,8 @@ function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: Trip
       if (dir && scratchClone(dir, cfg)) return null;
       return has('--staged', '-S') && !has('--worktree', '-W') ? null : hard(`\`git restore\` is blocked. ${NEVER_PATH}`);
     case 'checkout': {
-      // A clone under the turn's TMPDIR is scratch; --ours and --theirs pick a side of a conflict (#485).
-      if (dir && (scratchClone(dir, cfg) || (has('--ours', '--theirs') && midMerge(dir)))) return null;
+      // A clone under the turn's TMPDIR is scratch; --ours and --theirs pick a side of an open conflict (#485).
+      if (dir && (scratchClone(dir, cfg) || (has('--ours', '--theirs') && midMerge(dir) && conflicted(dir, plain)))) return null;
       if (has('--')) return hard(`\`git checkout -- <path>\` is blocked. ${NEVER_PATH}`);
       // A new branch keeps the working tree as it is.
       if (has('-b', '-B', '--orphan') && !has('-f', '--force')) return null;
@@ -1417,13 +1432,14 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
   for (let k = 0; k < toks.length; k++) {
     const tok = toks[k];
     if (tok.kind === 'bind') {
+      // Every word is read before any is bound: `g "$2" "$1"` inside f reads f's own.
+      const values = Array.from({ length: 9 }, (_, n) => (tok.args?.[n] ? known(expand(tok.args[n], st, cfg), cfg) : undefined));
       const saved: [string, boolean, string[] | undefined][] = [];
-      for (let n = 1; n <= 9; n++) {
-        const v = `__${n}`;
-        saved.push([v, st.vars.has(v), st.values.get(v)]);
-        const a = tok.args?.[n - 1];
-        setVar(st, v, tok.args ? (a ? known(expand(a, st, cfg), cfg) : ['']) : undefined);
-      }
+      values.forEach((v, n) => {
+        saved.push([`__${n + 1}`, st.vars.has(`__${n + 1}`), st.values.get(`__${n + 1}`)]);
+        // A missing word stays unknown: `${1:-<path>}` would take its default.
+        setVar(st, `__${n + 1}`, v);
+      });
       binds.push({ name: tok.name, saved });
       continue;
     }
@@ -1440,8 +1456,10 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
       const next = toks[k + 1];
       const brace = toks[k + 2];
       const end = next?.kind === 'op' && next.text === ')' && brace?.kind === 'word' && brace.word.text === '{' ? closingBrace(toks as Tok[], k + 3) : -1;
-      if (end > 0) {
-        funcs.set(seg.words.at(-1)!.text, toks.slice(k + 3, end));
+      const body = end > 0 ? toks.slice(k + 3, end) : [];
+      // A body that moves its arguments (shift, set --, getopts) or scopes variables (local) is checked where it stands.
+      if (end > 0 && !body.some((t) => t.kind === 'word' && /^(shift|set|getopts|local|declare|typeset|readonly)$/.test(t.word.text))) {
+        funcs.set(head.at(-1)!, body);
         seg = { words: [], redirects: [] };
         k = end;
         continue;
@@ -1452,7 +1470,8 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
       const body = funcs.get(c.name);
       // A call from inside its own body is checked once more with its words unknown, then no deeper.
       const depth = binds.filter((b) => b.name === c.name).length;
-      if (body && depth < 2 && spliced++ < 64) {
+      if (body && depth < 2) {
+        if (++spliced > 64) return hard(`This command calls \`${c.name}\` and its other functions more often than the tripwire follows (64 calls). Split it up, or write the calls out as plain commands.`);
         const end: Step = { kind: 'op', text: ';' };
         calls.add(end);
         toks.splice(k, 1, end, { kind: 'bind', name: c.name, args: depth ? null : c.args }, ...body, { kind: 'op', text: ';' }, { kind: 'unbind' }, tok);
@@ -1479,7 +1498,8 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
       if (why?.reason === ENV_ALL && tok.text === '|' && !seg.redirects.length) {
         const next: string[] = [];
         for (let j = k + 1; toks[j]?.kind === 'word'; j++) next.push((toks[j] as { word: Word }).word.text);
-        if (namesOnly(next)) why = null;
+        // A value with a line break would put its later lines through as names.
+        if (namesOnly(next) && !Object.values(cfg.env ?? process.env).some((v) => v?.includes('\n'))) why = null;
       }
       st.maybe = false;
       prevOp = tok.text;

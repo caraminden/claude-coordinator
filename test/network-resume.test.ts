@@ -349,3 +349,26 @@ test("the wait stays saved until the resume's turn starts, so a restart during t
   setRelease('ok');
   await until(() => !runner.isRunning(id) && runner.netWait(id) === null && events(id, 'note').includes('Resumed after a network outage'), 'the resume after the save');
 });
+
+test('a message held by the network wait shows as queued and can be taken back (#468 S03-9)', async () => {
+  up = false;
+  const id = minion();
+  rmSync(release, { force: true });
+  runner.send(id, 'Cara', 'go');
+  await until(() => runner.isRunning(id), 'the turn to start');
+  runner.send(id, 'Cara', 'never mind this');
+  const msg = store.listEvents(id).filter((e) => e.kind === 'user_message').at(-1)!;
+  writeFileSync(release, OUTAGE);
+  await until(() => !runner.isRunning(id), 'the turn to die');
+  assert.deepEqual(runner.netWait(id)?.queued?.map((m) => m.id), [msg.id]);
+  const shown = runner.view(store.getTicket(id)!);
+  assert.deepEqual([shown.queued, shown.queued_ids], [1, [msg.id]]);
+  assert.equal(runner.unqueue(id, msg.id, 'Cara'), true);
+  assert.equal(runner.netWait(id)?.queued, undefined, 'gone from the saved wait too');
+  assert.equal(runner.view(store.getTicket(id)!).queued, 0);
+  const before = turnsRun();
+  writeFileSync(release, 'ok');
+  up = true;
+  await until(() => turnsRun() === before + 1 && !runner.isRunning(id), 'the resume');
+  assert.doesNotMatch(lastPrompt(), /never mind this/);
+});

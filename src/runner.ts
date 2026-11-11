@@ -624,7 +624,8 @@ export class Runner {
   view(ticket: Ticket) {
     const { total, done } = stepInfo(this.progressFor(ticket.id));
     return {
-      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id), queued_ids: (this.queues.get(ticket.id) ?? []).flatMap((m) => m.id ?? []), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
+      // A network wait's held messages are queued too: they go first into its resume (takeQueue).
+      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (this.netWait(ticket.id)?.queued?.length ?? 0), queued_ids: [...(this.netWait(ticket.id)?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total } : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
       turnStartedAt: this.turns.get(ticket.id)?.startedAt ?? null,
       // When it resumes by itself after the usage limit, if it waits for that.
@@ -1212,12 +1213,28 @@ export class Runner {
   unqueue(ticketId: number, eventId: number, by: string): boolean {
     const q = this.queues.get(ticketId);
     const i = q?.findIndex((m) => m.id === eventId) ?? -1;
-    if (i < 0) return false;
+    if (i < 0) return this.unqueueHeld(ticketId, eventId, by);
     q!.splice(i, 1);
     const projectId = this.store.getTicket(ticketId)?.project_id;
     if (projectId !== undefined) this.approvals.unsaid(projectId, eventId);
     if (this.isRunning(ticketId)) this.saveTurn(ticketId, { queued: q });
     else if (!this.holdForLimit(ticketId) && this.store.getSetting(waitingKey(ticketId))) this.store.setSetting(waitingKey(ticketId), q);
+    this.emit(ticketId, 'unqueued', { id: eventId, by });
+    this.broadcastTicket(ticketId);
+    return true;
+  }
+
+  /** Take back a message a network wait holds for its resume (#468 S03-9). */
+  private unqueueHeld(ticketId: number, eventId: number, by: string): boolean {
+    const list = this.netResumes();
+    const w = list.find((x) => x.ticket === ticketId);
+    const i = w?.queued?.findIndex((m) => m.id === eventId) ?? -1;
+    if (i < 0) return false;
+    w!.queued!.splice(i, 1);
+    if (!w!.queued!.length) delete w!.queued;
+    this.store.setSetting(NET_RESUMES, list);
+    const projectId = this.store.getTicket(ticketId)?.project_id;
+    if (projectId !== undefined) this.approvals.unsaid(projectId, eventId);
     this.emit(ticketId, 'unqueued', { id: eventId, by });
     this.broadcastTicket(ticketId);
     return true;

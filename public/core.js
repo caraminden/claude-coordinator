@@ -504,12 +504,14 @@ document.addEventListener('visibilitychange', () => {
 async function resync() {
   if (view?.kind !== 'project') return route();
   // Refresh in place so a half-typed message in the composer survives.
+  const v = view;
   try {
     const [{ coordinator, tickets, seen, person_notes, pins }, artifacts, chat] = await Promise.all([
       api(`api/projects/${view.projectId}`),
       api(`api/projects/${view.projectId}/artifacts`),
       view.id ? api(`api/tickets/${view.id}`) : null,
     ]);
+    if (view !== v) return; // you went to another view meanwhile; its own load is fresh
     view.coordinator = coordinator;
     view.tickets = new Map(tickets.map((t) => [t.id, t]));
     view.seen = seen ?? view.seen;

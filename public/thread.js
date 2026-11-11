@@ -429,16 +429,17 @@ export function renderTicketHead() {
   // where the change is, the tools and the buttons.
   // Phones (#492): two rows. Title, ⋯ and ×; then the state or the progress line beside the one button
   // that matters now. Everything else waits behind ⋯.
+  // Find's box is put back in the redrawn bar, which drops the caret from it: keep it there.
+  const had = el.contains(document.activeElement) ? document.activeElement : null;
   const main = phone ? actions.findLast((a) => a && /\bact-(stop|dismiss|reopen|start)\b/.test(a.className)) : null;
-  const menuOpen = phone && menuFor === t.id;
+  // A search in progress keeps the menu open: its box is in there.
+  const menuOpen = phone && (menuFor === t.id || !!view.findEl?.querySelector('.chat-find')?.value);
   const more = h('button', { type: 'button', class: 'nav-btn head-more', title: 'More', 'aria-label': 'More', 'aria-expanded': String(menuOpen), onclick: () => {
     menuFor = menuOpen ? null : t.id;
     renderTicketHead();
   } }, '⋯');
   const sub = h('div', { class: 'head-sub', hidden: phone && !menuOpen }, phone ? payerChip(t) : '', phone ? '' : stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t),
     h('span', { class: 'spacer' }), ...actions.filter((a) => a !== main), view.findEl ?? '', phone ? nav : '');
-  // Find's box is put back in the redrawn bar, which drops the caret from it: keep it there.
-  const had = el.contains(document.activeElement) ? document.activeElement : null;
   el.replaceChildren(
     h('div', { class: phone ? 'row head-top' : 'row' },
       h('span', { class: `dot ${t.status}` }),

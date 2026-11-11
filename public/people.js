@@ -112,7 +112,7 @@ function linkBox(who, token, what) {
 export function peoplePage() {
   const name = h('input', { name: 'name', placeholder: 'Their name', required: true, maxlength: 40, autocomplete: 'off' });
   const login = h('input', { name: 'login', placeholder: 'lowercase, no spaces', maxlength: 32, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
-  name.oninput = () => { login.placeholder = name.value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '') || 'josh'; };
+  name.oninput = () => { login.placeholder = name.value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '') || 'lowercase, no spaces'; };
   const status = h('span', { class: 'muted', role: 'status' });
   const link = h('div');
   const list = h('div', { class: 'people-list' });

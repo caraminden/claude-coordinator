@@ -617,8 +617,11 @@ export class MachineRelay {
   fromAgent(machine: Machine, sessionId: string, body: { message?: unknown; closed?: boolean }): boolean {
     const s = this.sessions.get(sessionId);
     if (!s || s.machineId !== machine.id) return false;
-    if (body.closed) this.endSession(sessionId, false);
-    else s.res.write(`data: ${JSON.stringify({ message: body.message })}\n\n`);
+    if (body.closed) {
+      // Its proxy gives up rather than reconnecting, which would start the server again.
+      s.res.write(`data: ${JSON.stringify({ closed: true })}\n\n`);
+      this.endSession(sessionId, false);
+    } else s.res.write(`data: ${JSON.stringify({ message: body.message })}\n\n`);
     return true;
   }
 

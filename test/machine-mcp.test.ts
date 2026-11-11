@@ -112,3 +112,21 @@ test('a call in flight when the app restarts is answered with an error, and one 
   assert.deepEqual(p.out.map((m) => m.id), [1, 'call-7'], 'one reply each, none for the notification');
   assert.equal(p.code(), undefined);
 });
+
+test('when the machine\'s server exits, the proxy answers the call in flight and exits instead of starting it again', async () => {
+  const app = await fakeApp(['open', 'open', 'open']);
+  const p = startProxy(app.base);
+  p.send(init);
+  await until('initialize posted', () => app.posts.length === 1);
+  app.reply({ jsonrpc: '2.0', id: 1, result: {} });
+  p.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'whoami', arguments: {} } });
+  await until('the call posted', () => app.posts.length === 2);
+  app.state.stream!.write(`data: ${JSON.stringify({ closed: true })}\n\n`);
+  app.state.stream!.end();
+  await until('the proxy exits', () => p.code() !== undefined, 10_000);
+  assert.equal(p.code(), 1);
+  const answered = p.out.find((m) => m.id === 2);
+  assert.match(answered?.error?.message ?? '', /^box: .*exited/);
+  assert.equal(app.state.gets, 1, 'no new session, so no new copy of the server');
+  assert.match(p.err(), /exited/);
+});

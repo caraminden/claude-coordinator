@@ -107,7 +107,12 @@ for (let first = true; ; first = false) {
         const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
         if (!data) continue;
         const msg = JSON.parse(data);
-        if (msg.session) {
+        if (msg.closed) {
+          // The machine's MCP server exited: reconnecting would only start it again, so give up.
+          for (const m of [...pending.values()]) unreachable(m, 'its MCP server exited');
+          process.stderr.write(`${NAME}: its MCP server exited\n`, () => process.stdout.write('', () => process.exit(1)));
+          await new Promise(() => {});
+        } else if (msg.session) {
           session = msg.session;
           if (!first) for (const m of handshake) await post(m.id === undefined ? m : { ...m, id: REPLAY_ID }).catch(() => {});
           markReady!();

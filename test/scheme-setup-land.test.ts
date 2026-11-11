@@ -424,8 +424,8 @@ test('the head of the line waits for a lock held outside it (an older land.sh), 
 // the commit (its exit code; no file: not started; "<code> once": that answer one time, then not started), and for
 // the built-in reader a gh that prints what the test wrote (runs.once.tsv one time, then runs.tsv).
 // Either way a gh stands first in PATH, so no test reaches GitHub.
-function ciSetup(branches: number, { stack = '3', check = 'true', builtin = false, files = (i: number) => `f${i}.txt` } = {}) {
-  const config = builtin ? { CI_WORKFLOWS: 'ci.yml slow.yml', CI_STACK: stack } : { CI_STATUS: '"$CI_FAKE"', CI_STACK: stack };
+function ciSetup(branches: number, { stack = '', check = 'true', builtin = false, files = (i: number) => `f${i}.txt` } = {}) {
+  const config: Record<string, string> = { ...(builtin ? { CI_WORKFLOWS: 'ci.yml slow.yml' } : { CI_STATUS: '"$CI_FAKE"' }), ...(stack ? { CI_STACK: stack } : {}) }; // no stack: the template's own depth, 3
   const q = queueSetup(branches, check, config, files);
   const ci = join(q.dir, 'ci');
   const bin = join(q.dir, 'bin');
@@ -553,6 +553,7 @@ test('the stack: a red run in the middle is refused, and the one behind it build
     assert.match(d.stderr(), /sits on ticket\/2-x's, which hasn't landed: waiting to see whether it does/);
     c.verdict(tb, RED);
     await until('the 2nd to see red', () => /CI is red/.test(b.stderr()));
+    assert.equal(c.parent(await c.tip(d, 2)), ta, "the 3rd builds again on the 1st's commit at once, past the red 2nd");
     await sleep(300);
     assert.equal(b.child.exitCode, null, 'the 2nd waits too: the 1st may yet be why it is red');
     c.verdict(ta, GREEN);
@@ -835,6 +836,24 @@ test('the stack: a commit made on the detached HEAD a killed landing left is not
     assert.match(again.stderr(), /left .* on a detached commit \([0-9a-f]{12}\), and HEAD has moved since\. If you committed here, put those commits on ticket\/1-x/);
     assert.equal(git(c.wt, 'log', '-1', '--format=%s'), 'late.txt: made on the detached commit', 'the commit is still there');
     assert.deepEqual(c.landed(), []);
+  } finally {
+    c.stop();
+  }
+});
+
+test('CI gate: a commit put on the branch while its landing waited is not landed around, and the branch keeps it', async () => {
+  const c = ciSetup(1);
+  try {
+    const a = c.land(1, { LAND_STACK_DEPTH: '2' });
+    const sha = await c.tip(a);
+    git(c.main, 'branch', '-f', 'ticket/1-x', git(c.main, 'commit-tree', '-p', 'ticket/1-x', '-m', 'late', 'ticket/1-x^{tree}'));
+    const late = git(c.main, 'rev-parse', 'ticket/1-x');
+    c.verdict(sha, GREEN);
+    assert.equal(await a.exit, 1, a.stderr());
+    assert.match(a.stderr(), /moved while the landing waited, so what CI passed is not what is here now and nothing landed/);
+    assert.deepEqual(c.landed(), []);
+    assert.equal(git(c.wt, 'rev-parse', 'HEAD'), late, 'the worktree is back on the branch, late commit and all');
+    assert.equal(spawnSync('bash', [join(c.wt, 'tools', 'land.sh')], { cwd: c.wt, encoding: 'utf8', env: { ...env, LAND_STACK_DEPTH: '0' } }).stderr.trim(), 'land: CI_STACK is a number from 1 up, not "0"');
   } finally {
     c.stop();
   }

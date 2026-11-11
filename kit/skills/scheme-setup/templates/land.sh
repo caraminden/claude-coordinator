@@ -49,8 +49,8 @@ FACTS=CLAUDE.md
 CI_WORKFLOWS=''
 CI_STATUS=''
 # How many landings at the front of the line run CI at once, each on top of the ones ahead of it
-# (below, "The stack"). 1: only the head of the line.
-CI_STACK=3
+# (below, "The stack"). 1: only the head of the line. Runners that can't carry three runs at once: 2.
+CI_STACK=${LAND_STACK_DEPTH:-3}
 
 say() { echo "land: $*" >&2; }
 refuse() { say "$*"; exit 1; }
@@ -68,7 +68,8 @@ park() { say "$*"; exit 75; }
 #   queue_done [ok]                 leave the line; ok: it went all the way, so its time counts
 #                                   toward the waiters' estimate
 # A ticket is five lines: "<pid> <the pid's start time>", when it got the lock (0 while it waits),
-# its label, its phase, and the commit it built ("-" while it has none; see "The stack"). A ticket
+# its label, its phase, and the commit it built ("-" while it has none, "skip" when it can't land where
+# it sits; see "The stack"). A ticket
 # whose process is gone is deleted by whoever waits behind it.
 # A land.sh from a branch older than the line takes the flock directly; the head of the line waits
 # for it like for anyone else.
@@ -187,7 +188,9 @@ queue_look() {
     fi
     ahead=$((ahead + 1))
     [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}"; }
-    Q_PRED=${l[4]:-} Q_PREDNAME=${l[2]:-?} # the last one seen is the one directly ahead
+    # The last one seen is the one directly ahead. "skip": that one is red or in conflict where it sits, and
+    # lands only if what is ahead of it fails, so the ones behind build on the one ahead of it meanwhile.
+    [ "${l[4]:-}" = skip ] || { Q_PRED=${l[4]:-} Q_PREDNAME=${l[2]:-?}; }
   done
   Q_AHEAD=$ahead
   [[ $Q_PRED =~ ^[0-9a-f]{40,}$ ]] || Q_PRED='' # "-": it has built nothing yet; no line: older than the stack
@@ -434,7 +437,7 @@ ci_ask() {
       [ "$Q_AHEAD" = 0 ] || say "that commit sits on $Q_PREDNAME's, which hasn't landed: waiting to see whether it does before giving up"
       blocked="CI is red on ${tip:0:12} (above), so $BRANCH is untouched. Fix it, commit, then run this again"
       keep=$tip tip=''
-      queue_set 4 - # nobody builds on a red commit
+      queue_set 4 skip # nobody builds on a red commit
       queue_phase "CI is red"
       return 0 ;;
     4)
@@ -553,7 +556,10 @@ leave() {
     # The branch takes the rebased commit only when that landed or was built on main itself: never one stacked on
     # someone's unlanded work.
     main=$(git rev-parse "refs/heads/$BRANCH")
-    if [ -n "$keep" ] && { [ "$keep" = "$main" ] || [ "$base" = "$main" ]; }; then
+    if [ "$(git rev-parse "refs/heads/$branch")" != "$pre" ]; then
+      say "$branch moved while this ran, so it is left as it is now"
+      git checkout -q "$branch" 9>&-
+    elif [ -n "$keep" ] && { [ "$keep" = "$main" ] || [ "$base" = "$main" ]; }; then
       git checkout -q -B "$branch" "$keep" 9>&-
     else
       git checkout -q "$branch" 9>&-
@@ -598,6 +604,7 @@ while :; do
     fi
   elif [ "$want" != "$base" ]; then
     build "$want"
+    [ -z "$blocked" ] || [ "$Q_AHEAD" = 0 ] || queue_set 4 skip
     [ -z "$blocked" ] || [ "$Q_AHEAD" = 0 ] || say "that was on top of $Q_PREDNAME's commit, which hasn't landed: ${blocked%%, so *}. Not final: waiting to see whether that one lands"
   fi
 
@@ -613,6 +620,8 @@ done
 # The head of the line, holding the lock, with $tip checked (and green in CI) on exactly today's main.
 # The merge keeps the lock, so nobody sees main half moved if this script is killed; gc.auto=0, so no git gc
 # detaches from it holding the lock.
+# A commit made here or on the branch while this waited is not in $tip: CI never saw it.
+{ [ "$(git rev-parse HEAD)" = "$tip" ] && [ "$(git rev-parse "refs/heads/$branch")" = "$pre" ]; } || refuse "$branch or this worktree's HEAD moved while the landing waited, so what CI passed is not what is here now and nothing landed. Put any commit made meanwhile on $branch, then run this again"
 git -C "$MAIN" -c gc.auto=0 merge -q --ff-only "$tip" || refuse "could not fast-forward $BRANCH to $branch; nothing landed"
 keep=$tip landed=ok # it landed, so its time counts toward the estimate, whatever the push does
 say "$BRANCH is now at $(git log -1 --format='%h "%s"' "$tip")"

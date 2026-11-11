@@ -1,5 +1,6 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
 import { account, ago, api, h, icon, listGroupsOf, me, schemeIcon, view } from './base.js';
+import { ciDesktopPanel } from './ci-desktop.js';
 import { openHash } from './core.js';
 import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from './machine-setup.js';
 import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
@@ -766,6 +767,7 @@ export function machinesPage() {
     add.form,
     h('div', { id: 'machine-setup' }),
     h('div', { id: 'machine-list', class: 'machine-list' }),
+    ciDesktopPanel(),
     runners ? h('div', { class: 'row machines-bar runners-bar' }, h('span', { class: 'muted small' }, 'A CI runner host adds and removes schemes\' CI runners on its PC (tools/ci-runner/README.md).'), h('span', { class: 'spacer' }), runners.toggle) : '',
     runners ? runners.form : '',
     h('p', { class: 'muted small' },

@@ -641,6 +641,8 @@ const ASKS = [
   // #468 S01-1 review: a subshell's D=… doesn't change D after it
   'D=~/.local/share/claude-coordinator; (D=/tmp/x); rm -rf $D/backups',
   'D=~/.local/share/claude-coordinator; echo "$(D=/tmp/x)"; rm -rf $D/backups',
+  // nor does one in a bash -c string, which runs in a shell of its own
+  "D=~/.local/share/claude-coordinator; bash -c 'D=/tmp/x'; rm -rf $D/backups",
   // SQL on the live database, when the card can show all of it
   `sqlite3 ${data}/coordinator.db "delete from tickets where id = 3"`,
   'sqlite3 ~/.local/share/claude-coordinator/coordinator.db "update tickets set state=null"',

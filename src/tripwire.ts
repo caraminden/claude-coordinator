@@ -1109,7 +1109,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
       const scripts = script.length === 1 ? expand(script[0], st, cfg).map(text) : [script.map((w) => text(expand(w, st, cfg)[0])).join(' ')];
       for (const inner of scripts) {
         // `DATA_DIR=… PORT=… bash -c '…'`: the shell starts with the variables set before it (#468 S01-11).
-        const why = commandReason(inner, { cwd: st.cwd, vars: new Set([...vars, '__unknown']), values: st.values }, cfg);
+        const why = commandReason(inner, { cwd: st.cwd, vars: new Set([...vars, '__unknown']), values: new Map(st.values) }, cfg);
         if (why) return why;
       }
       return null;

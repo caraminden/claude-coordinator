@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
@@ -62,5 +63,57 @@ test('the land tool says the server restarted when the landing it started is no 
   } finally {
     child.kill();
     api.close();
+  }
+});
+
+// #508: the server runs the landing in a unit of its own. A restart (the deploy of another land, say)
+// neither waits for it nor kills it, and when its deploy reports, the new server takes the report from
+// the turn's token and the land tool still gets land.sh's result.
+test("a landing outlives the server that started it: its deploy report reaches the next server, which reports land.sh's result", async () => {
+  const root = mkdtempSync(join(tmpdir(), 'land-restart-'));
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  // A fake systemd-run: starts the command after its options in a session of its own, as a unit outlives the server.
+  writeFileSync(join(bin, 'systemd-run'), '#!/usr/bin/env bash\nwhile [ "${1#-}" != "$1" ]; do [ "$1" = -p ] && shift; shift; done\nsetsid "$@" </dev/null >/dev/null 2>&1 &\n', { mode: 0o755 });
+  const env = { TURN_UNITS: '1', PATH: `${bin}:${process.env.PATH}` };
+  let first: Awaited<ReturnType<typeof bootServer>> | null = await bootServer({ root, env });
+  let next: Awaited<ReturnType<typeof bootServer>> | null = null;
+  const go = join(root, 'go');
+  try {
+    const store = new Store(join(first.data, 'coordinator.db'));
+    const project = store.createProject('P', null);
+    store.setProjectRepoDir(project.id, REPO);
+    const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+    const cwd = join(root, 'worktree');
+    mkdirSync(join(cwd, 'tools'), { recursive: true });
+    // As deploy.sh's report_me does, once the server has restarted under it.
+    writeFileSync(join(cwd, 'tools', 'land.sh'), `echo started
+for i in $(seq 600); do [ -e ${JSON.stringify(go)} ] && break; sleep 0.05; done
+curl -sS -o /dev/null -w 'report: %{http_code}\\n' -X POST "$COORDINATOR_API/api/tickets/$COORDINATOR_TICKET/deploy" -H "Authorization: Bearer $COORDINATOR_TOKEN" -H 'Content-Type: application/json' -d '{"ok":true,"text":"Deployed abc1234: live now"}'
+`);
+    store.setTicketDir(minion.id, cwd, null);
+    const token = agentToken(first.data, minion.id);
+    const call = (base: string, method: string) => fetch(`${base}/api/tickets/${minion.id}/land`, { method, headers: { Authorization: `Bearer ${token}` } });
+
+    assert.equal((await call(first.base, 'POST')).status, 202);
+    await until('land.sh starts', async () => ((await (await call(first.base, 'GET')).json()).output as string).includes('started'));
+    assert.equal((await (await fetch(`${first.base}/api/health`)).json()).interruptible, 0, "a restart doesn't wait for the landing");
+    // The restart: a new server on the same port and data.
+    const port = first.port;
+    await first.stop({ keepTurns: true });
+    first = null;
+    next = await bootServer({ root, env: { ...env, PORT: String(port) } });
+    const running = await (await call(next.base, 'GET')).json();
+    assert.equal(running.code, null, 'the new server finds it still running');
+    writeFileSync(go, '');
+    const done = await until('land.sh ends', async () => { const r = await (await call(next!.base, 'GET')).json(); return r.code === null ? null : r; });
+    assert.equal(done.code, 0, done.output);
+    assert.match(done.output, /report: 201/, 'the new server took the report from the turn\'s token');
+    assert.ok(store.listEvents(minion.id).some((e) => String(e.data).includes('Deployed abc1234: live now')), "the report is in the minion's chat");
+  } finally {
+    writeFileSync(go, '');
+    await first?.stop();
+    await next?.stop();
+    rmSync(root, { recursive: true, force: true });
   }
 });

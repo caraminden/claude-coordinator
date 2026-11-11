@@ -31,7 +31,8 @@ export const NO_CODE = '\n[land.sh ended without an exit code: it was stopped, o
 
 // The wrapper: notes its pid (by a rename, so a pid read is never a half-written one), takes the env the server gave it (a private file it deletes once read, as it
 // holds the minion's token), runs land.sh and writes the exit code last, by a rename, so a code on disk is whole.
-// `env -i` before it, so land.sh sees only that env, as it did as the server's child.
+// `env -i` before it, so land.sh sees only that env, as it did as the server's child. It goes in a file, not on
+// the command line: systemd expands `$` in a unit's command line, so `$$` there would reach bash as a bare `$`.
 const WRAPPER = 'echo $$ >"$1/pid.tmp"; mv "$1/pid.tmp" "$1/pid"; . "$1/env"; rm -f "$1/env"; { cd "$2" && bash tools/land.sh; } >"$1/output.log" 2>&1; echo $? >"$1/code.tmp"; mv "$1/code.tmp" "$1/code"';
 // Names bash won't take as exported variables, or that would change how the wrapper's own bash runs.
 const VALID = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -71,14 +72,15 @@ export class Landings {
     const lines = Object.entries(env).filter(([k, v]) => v !== undefined && VALID.test(k) && !SKIP.test(k)).map(([k, v]) => `export ${k}=${quote(String(v))}\n`);
     writeFileSync(join(dir, 'env'), lines.join(''), { mode: 0o600 });
     writeFileSync(join(dir, 'started'), String(Date.now()));
-    const wrapper = ['env', '-i', 'bash', '--noprofile', '--norc', '-c', WRAPPER, 'citadel-land', dir, cwd];
+    writeFileSync(join(dir, 'wrapper.sh'), WRAPPER);
+    const wrapper = ['env', '-i', 'bash', '--noprofile', '--norc', join(dir, 'wrapper.sh'), dir, cwd];
     if (!this.units()) {
       this.child(wrapper, dir);
       return { output: '', code: null };
     }
     this.starting.add(ticketId);
     const unit = `citadel-land-${this.unitTag}-${ticketId}-${Date.now()}`;
-    execFile('systemd-run', ['--user', '--collect', '--quiet', `--unit=${unit}`, `--slice=${TURN_SLICE}`, `--description=tools/land.sh for minion ${ticketId}`, ...wrapper], (err, _out, stderr) => {
+    execFile('systemd-run', ['--user', '--collect', '--quiet', `--unit=${unit}`, `--slice=${TURN_SLICE}`, '-p', 'UMask=0077', `--description=tools/land.sh for minion ${ticketId}`, ...wrapper], (err, _out, stderr) => {
       this.starting.delete(ticketId);
       if (!err) return;
       console.error(`Minion ${ticketId}: systemd-run failed (${String(stderr).trim() || err.message}), so its landing runs as a child of the server.`);
@@ -133,7 +135,7 @@ export class Landings {
     }
     try {
       // Its command line names its folder, so a pid the system reused for something else doesn't count. Bash
-      // execs the wrapper's last command, the mv of its code, in its place: that names a file in the folder.
+      // may exec the wrapper's last command, the mv of its code, in its place: that names a file in the folder.
       return readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').some((a) => a === dir || a.startsWith(`${dir}/`));
     } catch {
       return false;

@@ -17,7 +17,9 @@ const calls = join(root, 'calls');
 writeFileSync(join(bin, 'systemd-run'), `#!/usr/bin/env bash
 printf '%s\\n' "$*" >>${JSON.stringify(calls)}
 [ -e ${JSON.stringify(join(root, 'fail'))} ] && { echo 'Failed to connect to bus' >&2; exit 1; }
-while [ "\${1#--}" != "$1" ]; do shift; done
+# The real one expands $ in the command (\$\$ becomes \$), so a command with one would not run as written.
+for a in "$@"; do case $a in *'$'*) echo "systemd would expand the \$ in: $a" >&2; exit 1 ;; esac; done
+while [ "\${1#-}" != "$1" ]; do [ "$1" = -p ] && shift; shift; done
 setsid "$@" </dev/null >/dev/null 2>&1 &
 `);
 chmodSync(join(bin, 'systemd-run'), 0o755);
@@ -33,7 +35,8 @@ function setup() {
   mkdirSync(join(cwd, 'tools'), { recursive: true });
   const go = join(dir, 'go');
   writeFileSync(join(cwd, 'tools', 'land.sh'), `echo "token:$COORDINATOR_TOKEN in $PWD"
-while [ ! -e ${JSON.stringify(go)} ]; do sleep 0.05; done
+# At most 30 s, so a failed test leaves nothing running.
+for i in $(seq 600); do [ -e ${JSON.stringify(go)} ] && break; sleep 0.05; done
 echo "the user manager's env stays out: \${INVOCATION_ID:-none}"
 exit 3
 `);
@@ -50,7 +53,7 @@ test("a landing in a unit doesn't count as interruptible, outlives the Landings 
   await until('land.sh starts', () => first.get(1)!.output.includes('token:'));
   assert.equal(first.running(), 0, 'a restart would leave it running, so it does not hold one up');
   const call = readFileSync(calls, 'utf8').slice(before.length);
-  assert.match(call, /--user --collect --quiet --unit=citadel-land-[0-9a-f]{8}-1-\d+ --slice=citadel-turns\.slice/);
+  assert.match(call, /--user --collect --quiet --unit=citadel-land-[0-9a-f]{8}-1-\d+ --slice=citadel-turns\.slice -p UMask=0077 /);
   assert.doesNotMatch(call, /7\.s/, "the token stays off the command line, where anyone on the box could read it");
   assert.equal(existsSync(join(s.data, 'run', 'landings', '1', 'env')), false, 'the env file with the token is gone once read');
 

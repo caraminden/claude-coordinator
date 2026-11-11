@@ -1568,7 +1568,8 @@ export function tripwire(input: any, cfg: TripwireConfig): Verdict | null {
     if (/(^|:)ultrareview$/.test(skill) || (/(^|:)code-review$/.test(skill) && /(^|\s)ultra\b/.test(String(ti.args ?? '')))) return hard(`The ${skill} skill's ultra review is blocked. ${ULTRAREVIEW_WHY}`);
     return null;
   }
-  const file = ti.file_path ?? ti.notebook_path ?? ti.path;
+  // Glob with no path: an absolute pattern searches from its folder part (`~/.ssh/**` from ~/.ssh).
+  const file = ti.file_path ?? ti.notebook_path ?? ti.path ?? (tool === 'Glob' && /^[/~]/.test(String(ti.pattern)) ? String(ti.pattern).replace(/\/[^/]*[*?[{].*$/, '') || '/' : undefined);
   if (typeof file !== 'string' || !file) return null;
   const st = { cwd, vars: new Set<string>(), values: new Map<string, string[]>() };
   const [p] = pathsOf({ text: file, unknown: false }, st, cfg);

@@ -296,7 +296,9 @@ test('a project without rules or plugins still sends a minion\'s prompts to card
   const settings = JSON.parse(readFileSync(t.args[t.args.indexOf('--settings') + 1], 'utf8'));
   assert.deepEqual(Object.keys(settings), ['hooks', 'syncClaudeAiSkills', 'disableClaudeAiConnectors', 'autoCompactWindow', 'bashOutputMaxChars', 'permissions']);
   assert.deepEqual(settings.permissions.ask, ['mcp__*__merge_pull_request', 'mcp__*__enable_pr_auto_merge']);
-  assert.ok(settings.permissions.deny.includes(`Read(/${join(homedir(), '.ssh/**')})`), 'the logins stay out of reach (#185)');
+  assert.ok(settings.permissions.deny.includes(`Read(/${join(homedir(), '.config/gh/hosts.yml')})`), 'the logins stay out of reach (#185)');
+  // No folder-wide rule: Claude Code would refuse every Bash read after a cd it can't resolve; the tripwire guards those folders (#485).
+  assert.ok(!settings.permissions.deny.some((r: string) => r.endsWith('/**)')), settings.permissions.deny.join(' '));
   assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /"ask":true/);
   assert.ok(Number(t.timeout) >= 24 * 3600_000);
   assert.equal(t.approvals, '1');

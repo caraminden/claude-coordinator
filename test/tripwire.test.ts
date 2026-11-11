@@ -1022,3 +1022,15 @@ test('systemd-run --setenv counts for server.ts, a grep pattern is not a path, a
   assert.match(bash('node server.ts')!, /citadel-dev-copy start/);
   assert.match(bash('pkill -f server.ts')!, /citadel-dev-copy/);
 });
+
+test('the six folders turns no longer deny by Read rule stay refused here, for every way to read them (#485)', () => {
+  // Claude Code's folder-wide Read(…/**) deny rules refused any Bash read after a cd it couldn't resolve, so turn-launch dropped them: this is their guard now.
+  const t = (tool_name: string, tool_input: object) => tripwire({ tool_name, tool_input, cwd: worktree }, cfg)?.reason ?? null;
+  const dirs = [`${home}/.ssh`, `${home}/.config/claude-coordinator`, `${home}/.config/citadel-claude`, `${home}/.local/share/containers/storage`, '/run/user/1000/podman', '/run/user/1000/containers'];
+  for (const d of dirs) {
+    const f = `${d}/id_ed25519`;
+    for (const [tool, input] of [['Read', { file_path: f }], ['Grep', { pattern: 'x', path: d }], ['Grep', { pattern: 'x', path: f }], ['Glob', { pattern: '*', path: d }], ['Glob', { pattern: `${d}/**` }]] as const)
+      assert.ok(t(tool, input), `${tool} ${JSON.stringify(input)}`);
+    for (const command of [`cat ${f}`, `grep -r x ${d}`, `head ${f}`, `cd ${d} && cat id_ed25519`]) assert.ok(bash(command), command);
+  }
+});

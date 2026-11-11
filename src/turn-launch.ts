@@ -215,12 +215,13 @@ export const TASKMASTER_COMPACT_WINDOW = 180_000;
  * state.db with its backups (every minion's session) and the push key (vapid.json, #483). Claude Code enforces these, unlike the
  * tripwire's pattern match; Bash is the tripwire's.
  */
-export function credentialDenies(home: string, claudeConfig: string, dataDir: string, runtimeDir = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`): string[] {
-  // podman's storage and socket (#213): every person's Claude container and its sign-in. If Claude
-  // Code's sandbox is ever turned on for turns, these same paths go in its filesystem denyRead list.
-  const files = [join(home, '.claude/.credentials.json'), join(claudeConfig, '.credentials.json'), join(home, '.ssh/**'), join(home, '.config/claude-coordinator/**'),
-    join(home, '.config/gh/hosts.yml'), join(home, '.config/citadel-claude/**'), join(dataDir, 'state.db*'), join(dataDir, 'backups/state-*'), join(dataDir, 'vapid.json'),
-    join(home, '.local/share/containers/storage/**'), join(runtimeDir, 'podman/**'), join(runtimeDir, 'containers/**')];
+export function credentialDenies(home: string, claudeConfig: string, dataDir: string): string[] {
+  // Files only: a folder-wide Read(…/**) rule makes Claude Code refuse any Bash read after a cd it can't
+  // resolve (#485). The tripwire guards ~/.ssh, ~/.config/claude-coordinator, ~/.config/citadel-claude and
+  // podman's storage and socket (#213) for every tool. If Claude Code's sandbox is ever turned on for
+  // turns, those folders go in its filesystem denyRead list.
+  const files = [join(home, '.claude/.credentials.json'), join(claudeConfig, '.credentials.json'), join(home, '.config/gh/hosts.yml'),
+    join(dataDir, 'state.db*'), join(dataDir, 'backups/state-*'), join(dataDir, 'vapid.json')];
   // `//` makes the path absolute.
   return [...new Set(files)].map((f) => `Read(/${f})`);
 }

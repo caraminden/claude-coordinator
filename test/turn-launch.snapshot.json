@@ -120,16 +120,10 @@
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "ask": [
      "mcp__*__merge_pull_request",
@@ -315,16 +309,10 @@
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "ask": [
      "mcp__*__merge_pull_request",
@@ -614,16 +602,10 @@
      "Bash(uniq * *)",
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "allow": [
      "WebSearch",
@@ -1001,16 +983,10 @@
      "Bash(uniq * *)",
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "allow": [
      "WebSearch",
@@ -1265,16 +1241,10 @@
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "ask": [
      "mcp__*__merge_pull_request",
@@ -1452,16 +1422,10 @@
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "ask": [
      "mcp__*__merge_pull_request",
@@ -1646,16 +1610,10 @@
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "ask": [
      "mcp__*__merge_pull_request",
@@ -1854,16 +1812,10 @@
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "ask": [
      "mcp__*__merge_pull_request",
@@ -2065,16 +2017,10 @@
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "ask": [
      "mcp__*__merge_pull_request",
@@ -2259,16 +2205,10 @@
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "ask": [
      "mcp__*__merge_pull_request",
@@ -2456,16 +2396,10 @@
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "ask": [
      "mcp__*__merge_pull_request",
@@ -2655,16 +2589,10 @@
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "ask": [
      "mcp__*__merge_pull_request",
@@ -2846,16 +2774,10 @@
     "deny": [
      "Read(/<ROOT>/home/.claude/.credentials.json)",
      "Read(/<ROOT>/host-claude/.credentials.json)",
-     "Read(/<ROOT>/home/.ssh/**)",
-     "Read(/<ROOT>/home/.config/claude-coordinator/**)",
      "Read(/<ROOT>/home/.config/gh/hosts.yml)",
-     "Read(/<ROOT>/home/.config/citadel-claude/**)",
      "Read(/<ROOT>/state.db*)",
      "Read(/<ROOT>/backups/state-*)",
-     "Read(/<ROOT>/vapid.json)",
-     "Read(/<ROOT>/home/.local/share/containers/storage/**)",
-     "Read(//run/user/1000/podman/**)",
-     "Read(//run/user/1000/containers/**)"
+     "Read(/<ROOT>/vapid.json)"
     ],
     "ask": [
      "mcp__*__merge_pull_request",

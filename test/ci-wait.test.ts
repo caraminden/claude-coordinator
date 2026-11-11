@@ -234,6 +234,11 @@ test('a queued run counts the repo\'s older queued runs ahead of it, read once a
   assert.deepEqual([waits.wait(a.id)!.chip, waits.wait(a.id)!.text], ['CI · queued', 'PR #1 · queued for a runner (citadel-ci-linux), none ahead']);
   assert.deepEqual([waits.wait(b.id)!.chip, waits.wait(b.id)!.text], ['CI · 2 ahead', 'PR #2 · queued for a runner (citadel-ci-linux), 2 runs ahead']);
   assert.equal(gh.calls.filter((c) => c.startsWith('repos/o/r/actions/runs?status=queued')).length, 1);
+  // Over a page of queued runs: the oldest may be missing, so no count.
+  gh.answers.set('repos/o/r/actions/runs', { total_count: 101, workflow_runs: [{ id: 6, created_at: iso(-10) }, { id: 9, created_at: iso(5) }] });
+  await ci.tick();
+  assert.equal(waits.wait(a.id)!.chip, 'CI · queued');
+  assert.equal(waits.wait(a.id)!.text, 'PR #1 · queued for a runner (citadel-ci-linux)');
   // Started: no more queue reads, and no count.
   gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { created_at: iso(5), status: 'in_progress', steps: steps(0, 2) })] });
   gh.answers.set('repos/o/r/actions/runs/6/jobs', { jobs: [job('test', { created_at: iso(-10), status: 'in_progress', steps: steps(0, 2) })] });

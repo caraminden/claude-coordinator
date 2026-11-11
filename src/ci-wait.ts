@@ -135,7 +135,7 @@ export class CiRuns {
   private cache = new Map<string, { etag: string | null; body: any }>();
   private usuals = new Map<string, { at: number; usual: number | null }>();
   /** Each repo's queued runs, read once a poll while one of its watched runs is queued. */
-  private queues = new Map<string, { id: number; created_at: string }[]>();
+  private queues = new Map<string, { id: number; created_at: string }[] | null>();
   private shown = new Map<number, string>();
   private pausedUntil = 0;
   private busy = false;
@@ -274,15 +274,19 @@ export class CiRuns {
    */
   private async ahead(w: Watch, since: number): Promise<number | undefined> {
     let runs = this.queues.get(w.slug);
-    if (!runs) {
+    if (runs === undefined) {
       try {
-        runs = (await this.read(`repos/${w.slug}/actions/runs?status=queued&per_page=100`, w.as))?.workflow_runs ?? [];
+        const body = await this.read(`repos/${w.slug}/actions/runs?status=queued&per_page=100`, w.as);
+        runs = body?.workflow_runs ?? [];
+        // More than one page: the oldest may be missing, so no count rather than a wrong one.
+        if ((body?.total_count ?? 0) > runs!.length) runs = null;
       } catch (err: any) {
         if (err?.rateLimited) throw err;
-        return undefined; // "queued" alone
+        runs = null;
       }
       this.queues.set(w.slug, runs!);
     }
+    if (!runs) return undefined; // "queued" alone
     const mine = runs!.filter((r) => w.runs.includes(r.id)).map((r) => at(r.created_at));
     const from = mine.length ? Math.min(...mine) : since;
     return runs!.filter((r) => !w.runs.includes(r.id) && at(r.created_at) < from).length;

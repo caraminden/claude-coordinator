@@ -93,7 +93,7 @@ test('the Windows scripts start Windows PowerShell by its System32 path, not fro
 const REPO = 'caraminden/peek-auras';
 
 /** Runs remove-runner.ps1 over `root`'s folders; `refuse` is the runner name the fake Citadel won't delete. */
-async function removeRunners(dir: string, root: string, services: { Name: string; PathName: string }[], task: { name: string; dir: string } | null, refuse = '') {
+async function removeRunners(dir: string, root: string, services: { Name: string; PathName: string }[], task: { name: string; dir: string } | null, refuse = '', procs: { id: number; exe?: string; cmd?: string }[] = []) {
   const src = readFileSync(join(root0, 'tools/ci-runner/remove-runner.ps1'), 'utf8');
   const swapped = src.replace(/^\$admin = .*$/m, '$admin = $true').replace(/^\$root = 'C:\\'$/m, `$root = '${root}/'`);
   assert.equal(swapped.split('\n').filter((l, i) => l !== src.split('\n')[i]).length, 2, 'the admin check and the root, and nothing else, were swapped');
@@ -107,7 +107,9 @@ function Note([string]$Line) { Add-Content -LiteralPath '${log}' -Value $Line }
 function Get-CimInstance {
   param([string]$ClassName, [string]$Filter)
   if ($ClassName -eq 'Win32_Service') { $global:services | Where-Object { $_.Name -like ($Filter -replace "^Name\\s*(LIKE|=)\\s*'(.*)'$", '$2' -replace '%', '*') } }
+  if ($ClassName -eq 'Win32_Process') { ${procs.map((x) => `[pscustomobject]@{ ProcessId = ${x.id}; ExecutablePath = ${x.exe ? `'${x.exe}'` : '$null'}; CommandLine = ${x.cmd ? `'${x.cmd}'` : '$null'} }`).join('; ')} }
 }
+function Stop-Process { param([int]$Id, [switch]$Force, $ErrorAction) Note "Stop-Process $Id" }
 function sc.exe {
   Note "sc.exe $args"
   $verb, $name = $args
@@ -165,15 +167,19 @@ const svc = (name: string, dir: string) => ({ Name: `actions.runner.caraminden-p
 test('remove-runner.ps1 runs nothing from a runner\'s folder: Citadel takes it off GitHub, then the service and folder go', { skip: noPwsh, timeout: 120_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ps1-remove-'));
   try {
-    const root = join(dir, 'c');
+    // A folder name with wildcard characters in it is still only itself.
+    const root = join(dir, 'c[x]');
     const canary = join(dir, 'canary');
     const one = join(root, 'actions-runner-peek-auras');
+    const long = join(root, 'actions-runner-peek-auras-3');
     const session = join(root, 'actions-runner-peek-auras-desktop');
     const delve = join(root, 'actions-runner');
     const plantedDir = join(root, 'actions-runner-planted');
     // A job wrote its own .runner to name another runner: the service's name, which an admin made, is the one used.
     runnerFolder(one, canary, 'SOMEONE-ELSES', { label: 'peek-auras-ci' });
     runnerFolder(session, canary, 'DESK-desktop', { label: 'peek-auras-desktop', mode: 'session' });
+    // A service name of 80 characters may be one GitHub cut short: .runner names the runner, the label still says which kind.
+    runnerFolder(long, canary, 'LONGNAME', { label: 'peek-auras-ci' });
     runnerFolder(delve, canary, 'DELVE', { label: 'peek-auras-ci' });
     runnerFolder(plantedDir, canary, 'PLANTED', { label: 'peek-auras-ci' });
     // A job left a link out of its folder: what it points at stays.
@@ -184,25 +190,40 @@ test('remove-runner.ps1 runs nothing from a runner\'s folder: Citadel takes it o
     symlinkSync(outside, join(one, '_work', 'link'));
     writeFileSync(join(one, '_work', 'readonly.txt'), 'x', { mode: 0o444 });
 
-    const r = await removeRunners(dir, root, [svc('DESK', one), svc('DELVE', delve), { Name: 'actions.runner.caraminden-other.DESK', PathName: `"${plantedDir}/bin/RunnerService.exe"` }], { name: 'GitHub runner peek-auras-desktop', dir: session });
+    const r = await removeRunners(dir, root, [svc('DESK', one), svc('L'.repeat(43), long), svc('DELVE', delve), { Name: 'actions.runner.caraminden-other.DESK', PathName: `"${plantedDir}/bin/RunnerService.exe"` }], { name: 'GitHub runner peek-auras-desktop', dir: session }, '', [
+      { id: 101, exe: `${one}\\bin\\Runner.Listener.exe` },
+      { id: 102, cmd: `cmd.exe /c ${session}\\run.cmd` },
+      // Not in a runner folder being removed: the folder "cx" that "c[x]" matches as a wildcard, Delve's, and a name that only starts the same.
+      { id: 103, exe: `${join(dir, 'cx', 'actions-runner-peek-auras')}\\bin\\Runner.Listener.exe` },
+      { id: 104, cmd: `cmd.exe /c ${join(dir, 'cx', 'actions-runner-peek-auras-desktop')}\\run.cmd` },
+      { id: 105, exe: `${delve}\\bin\\Runner.Listener.exe` },
+      { id: 106, exe: `${one}-9\\bin\\Runner.Listener.exe` },
+    ]);
     assert.equal(existsSync(canary), false, `something in a runner folder was run:\n${r.out}`);
     // The planted folder (a marker, no service of this repo) is left alone and makes the run fail, as before.
     assert.equal(r.status, 1, r.out);
     assert.match(r.out, /actions-runner-planted has a marker .* left alone/);
     assert.match(r.out, /remove-runner: 1 runner folder\(s\) weren't removed; the lines above say why\./);
-    assert.deepEqual(r.asked.filter((a) => a.kind === 'delete').map((a) => [a.url, a.auth, a.scheme, a.name]).sort(), [
-      ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'DESK'],
-      ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'DESK-desktop'],
+    // Each ask carries the label of the kind of runner being removed: the scheme's for a service, the logon task's for a session runner.
+    assert.deepEqual(r.asked.filter((a) => a.kind === 'delete').map((a) => [a.url, a.auth, a.scheme, a.name, a.label]).sort(), [
+      ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'DESK', 'peek-auras-ci'],
+      ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'DESK-desktop', 'peek-auras-desktop'],
+      ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'LONGNAME', 'peek-auras-ci'],
     ]);
     assert.ok(r.asked.every((a) => a.mint !== true), 'no removal token is asked for any more');
     assert.deepEqual(r.calls, [
       'sc.exe stop actions.runner.caraminden-peek-auras.DESK',
       'sc.exe delete actions.runner.caraminden-peek-auras.DESK',
+      'Stop-Process 101',
+      `sc.exe stop actions.runner.caraminden-peek-auras.${'L'.repeat(43)}`,
+      `sc.exe delete actions.runner.caraminden-peek-auras.${'L'.repeat(43)}`,
       'Stop-ScheduledTask GitHub runner peek-auras-desktop',
+      'Stop-Process 102',
       'Unregister-ScheduledTask GitHub runner peek-auras-desktop',
     ]);
     assert.equal(existsSync(one), false, r.out);
     assert.equal(existsSync(session), false, r.out);
+    assert.equal(existsSync(long), false, r.out);
     assert.equal(readFileSync(join(outside, 'keep.txt'), 'utf8'), 'keep', 'a link in the folder was followed');
     assert.equal(existsSync(join(delve, 'config.cmd')), true, 'Delve\'s folder was touched');
     assert.equal(existsSync(join(plantedDir, 'config.cmd')), true, 'the planted folder was touched');

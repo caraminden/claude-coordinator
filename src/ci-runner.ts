@@ -105,15 +105,19 @@ export class RunnerTokens {
   /**
    * Take the runner named `name` off GitHub for `schemeRef`'s repo, as its owner, for `machine`'s remove-runner.ps1 (#476): that
    * script runs as SYSTEM and a CI job can write the runner's folder, so it no longer runs the folder's `config.cmd remove`.
-   * The name may come from a file a job wrote, so it only ever picks a runner of this repo carrying one of the scheme's own
-   * labels. A name GitHub doesn't list is already gone (`removed` false). Throws an HttpError saying why not.
+   * The name may come from a file a job wrote, so it only ever picks a runner of this repo carrying `label`: the one of the
+   * scheme's own labels that the kind of runner being removed has, which the script takes from what an admin made (the scheme's
+   * label for a service, the logon task's for a session runner). So a forged name reaches at most another runner of that same
+   * kind. A name GitHub doesn't list is already gone (`removed` false). Throws an HttpError saying why not.
    */
-  async unregister(machine: Machine, schemeRef: unknown, name: unknown): Promise<{ scheme: string; repo: string; name: string; removed: boolean }> {
+  async unregister(machine: Machine, schemeRef: unknown, name: unknown, label: unknown): Promise<{ scheme: string; repo: string; name: string; removed: boolean }> {
     const project = findScheme(this.store, schemeRef);
     if (!project || !mayFetch(this.store, machine, project)) throw new HttpError(404, `No scheme "${String(schemeRef ?? '')}" that machine ${machine.name} may remove a runner for`);
     // Only ever compared with the names GitHub lists, never put in a URL: GitHub's own limit is 64 characters.
     if (typeof name !== 'string' || !/^[^\p{Cc}]{1,64}$/u.test(name)) throw new HttpError(400, 'name must be the runner\'s name, 1 to 64 characters');
     const { slug, owner, ownerToken, hint } = this.repoOf(project);
+    const own = schemeLabels(project.name);
+    if (typeof label !== 'string' || !own.includes(label)) throw new HttpError(400, `label must be one of ${own.join(', ')}: the label the runner being removed carries`);
     const answer = { scheme: project.name, repo: slug, name };
     let found: { id?: unknown; labels?: unknown } | undefined;
     for (let page = 1; !found; page++) {
@@ -124,9 +128,8 @@ export class RunnerTokens {
       found = runners.find((x) => x?.name === name);
       if (!found && (runners.length < RUNNERS_PAGE || page >= RUNNERS_PAGES)) return { ...answer, removed: false };
     }
-    const own = schemeLabels(project.name);
-    if (!Array.isArray(found.labels) || !found.labels.some((l: any) => own.includes(l?.name))) {
-      throw new HttpError(403, `The runner ${name} of ${slug} carries none of the labels ${project.name} gives its runners (${own.join(', ')}), so Citadel won't remove it; nothing changed.`);
+    if (!Array.isArray(found.labels) || !found.labels.some((l: any) => l?.name === label)) {
+      throw new HttpError(403, `The runner ${name} of ${slug} doesn't carry the label ${label}, so it isn't the kind of runner being removed and Citadel won't remove it; nothing changed.`);
     }
     if (!Number.isSafeInteger(found.id)) throw new HttpError(502, `GitHub listed the runner ${name} without an id`);
     const r = await this.github(ownerToken, 'DELETE', `/repos/${slug}/actions/runners/${found.id}`);

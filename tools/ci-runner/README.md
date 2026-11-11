@@ -53,14 +53,18 @@ What keeps the agent narrow:
 - **Remove runs nothing from a runner's folder** (#476). CI jobs run as the runner's account
   (NETWORK SERVICE, or the person for a session runner) and can write that folder, while
   `remove-runner.ps1` runs as SYSTEM, so it never runs the runner's own `config.cmd remove`.
-  Instead it asks Citadel (`/api/machines/runner-token`, kind `delete`, with the runner's name)
-  to delete the runner on GitHub, which Citadel does with the scheme owner's GitHub login and
-  only for a runner carrying one of the scheme's labels (`-ci`, `-ci-linux`, `-desktop`); a
-  name GitHub no longer lists counts as removed. Then the script stops and deletes the Windows
+  Instead it asks Citadel (`/api/machines/runner-token`, kind `delete`, with the runner's name
+  and the label its kind carries) to delete the runner on GitHub, which Citadel does with the
+  scheme owner's GitHub login and only for a runner carrying that label: `<slug>-ci` for a
+  service runner, the logon task's `<slug>-desktop` for a session runner, both from what an
+  admin made. A name GitHub no longer lists counts as removed. Then the script stops and deletes the Windows
   service (`sc.exe`), ends what still runs from the folder and deletes the folder, without
   following a link in it. The name comes from the service's name, which only an admin sets;
   the folder's `.runner` is read (as JSON) only for a session runner, which has no service, or
-  a service name GitHub cut at 80 characters. If Citadel or GitHub refuses (GitHub won't
+  a service name GitHub cut at 80 characters. The remaining limit: Citadel can't tell two
+  runners with the same label on different PCs apart, so in those two cases a job that
+  rewrote `.runner` could make the removal take another PC's runner of the same kind off
+  GitHub instead. If Citadel or GitHub refuses (GitHub won't
   delete a runner in the middle of a job), that runner's service and folder stay, the script
   says why, and running it again finds it.
 - **Locked-down folder.** Its folder, `C:\ProgramData\citadel-runner-agent`, is writable only by

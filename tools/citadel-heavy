@@ -158,8 +158,13 @@ rm -f "$waitfile"
 [ -z "$forced" ] || say "the box is still busy ($(load_text)) after $(dur "$load_wait") waiting on it, so this starts anyway in slot $((slot + 1))"
 [ $((SECONDS - since)) -lt 2 ] || [ -n "$forced" ] || say "got slot $((slot + 1)) after $((SECONDS - since))s"
 
+# A Node test suite run through tools/citadel-node keeps slot-N.progress up to date with its file counts (#545),
+# which Citadel shows as the holder's wait; another command leaves it alone, and shows elapsed time only.
+progress="$dir/slot-$slot.progress"
+rm -f "$progress" "$progress.tmp" 2>/dev/null
 printf '%s: %s (since %s, pid %s)\n' "$who" "$what" "$(date +%H:%M)" "$$" >"$dir/slot-$slot.who" 2>/dev/null
-trap 'rm -f "$dir/slot-$slot.who" "$waitfile" "$waitfile.tmp"' EXIT
+trap 'rm -f "$dir/slot-$slot.who" "$waitfile" "$waitfile.tmp" "$progress" "$progress.tmp"' EXIT
+export CITADEL_TEST_PROGRESS=$progress
 # The command runs as a child without the lock's fd, so a daemon it leaves behind (sccache, a build
 # server) can't keep the slot; this shell holds it until the command ends.
 export CITADEL_HEAVY_HELD=1

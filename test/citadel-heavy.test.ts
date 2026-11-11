@@ -182,3 +182,12 @@ test('the slots file can carry comments, digits and all', async () => {
   }
   for (const j of jobs) assert.equal(await j.done, 0);
 });
+
+test('a job gets its slot\'s progress file for a test run\'s counts (#545), cleared before it starts and gone after', () => {
+  const { dir, env } = folder(1);
+  spawnSync(heavy, ['true'], { env });
+  writeFileSync(join(dir, 'slot-0.progress'), '1\n2\nstale\n');
+  const r = spawnSync(heavy, ['sh', '-c', 'cat "$CITADEL_TEST_PROGRESS" 2>/dev/null; echo "$CITADEL_TEST_PROGRESS"; echo 1 >"$CITADEL_TEST_PROGRESS"'], { env, encoding: 'utf8' });
+  assert.equal(r.stdout, `${join(dir, 'slot-0.progress')}\n`, "a run before this one left counts that aren't this run's");
+  assert.equal(existsSync(join(dir, 'slot-0.progress')), false);
+});

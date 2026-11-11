@@ -21,4 +21,30 @@ case " ${NODE_OPTIONS:-} " in
   *citadel-node.cjs*) ;;
   *) export NODE_OPTIONS="--require=\"$here/citadel-node.cjs\"${NODE_OPTIONS:+ $NODE_OPTIONS}" ;;
 esac
+# A test run's file counts for a minion's wait (#545): with CITADEL_TEST_PROGRESS naming a file (citadel-heavy and
+# run-tests.sh set it), tools/progress-reporter.ts keeps it up to date beside the run's own reporters. It leaves the
+# environment here, so a test that starts its own node --test can't write over the counts. Only when the options
+# before the first argument that isn't one include --test and pair every reporter with a destination, as node does
+# (ours goes first, and a run with none of its own keeps node's default, spec on stdout); else the run is unchanged.
+if [ -n "${CITADEL_TEST_PROGRESS:-}" ]; then
+  to=$CITADEL_TEST_PROGRESS
+  unset CITADEL_TEST_PROGRESS
+  is_test= reporters=0 dests=0
+  for a in "$@"; do
+    case $a in
+      --test) is_test=1 ;;
+      --test-reporter-destination | --test-reporter-destination=*) dests=$((dests + 1)) ;;
+      --test-reporter | --test-reporter=*) reporters=$((reporters + 1)) ;;
+      --) break ;;
+      -*) ;;
+      *) break ;;
+    esac
+  done
+  if [ -n "$is_test" ] && [ "$reporters" -eq "$dests" ] && [ -r "$here/progress-reporter.ts" ]; then
+    extra=(--test-reporter="$here/progress-reporter.ts" --test-reporter-destination=stdout)
+    [ "$reporters" -gt 0 ] || extra+=(--test-reporter=spec --test-reporter-destination=stdout)
+    export CITADEL_TEST_PROGRESS_TO=$to
+    set -- "${extra[@]}" "$@"
+  fi
+fi
 exec "$CITADEL_NODE" "$@"

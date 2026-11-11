@@ -39,6 +39,15 @@ test('fails, then hangs', () => {
   throw new Error('first run fails');
 });
 `;
+// Waits until the run's counts (#545) say the first file is done, then keeps them in seen-progress.
+FIXTURES['progress.test.mjs'] = `import test from 'node:test';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+test('watch', async () => {
+  const f = process.env.CITADEL_TEST_PROGRESS_TO;
+  for (let i = 0; i < 200 && !(f && existsSync(f) && readFileSync(f, 'utf8').startsWith('1\\n')); i++) await new Promise((r) => setTimeout(r, 25));
+  writeFileSync('seen-progress', f && existsSync(f) ? readFileSync(f, 'utf8') : 'none');
+});
+`;
 for (const name of ['once-then-hang', 'once-then-hang2', 'once-then-hang3']) FIXTURES[`${name}.test.mjs`] = onceThenHang(name);
 
 // Four files that each log "+" when they start and "-" when done, 700 ms apart: the log shows how many ran at once.
@@ -46,13 +55,14 @@ const OVERLAP = "import { appendFileSync } from 'node:fs';\nimport test from 'no
 for (const i of [1, 2, 3, 4]) FIXTURES[`overlap${i}.test.mjs`] = OVERLAP;
 
 let n = 0;
-async function run(files: string[], extra: Record<string, string> = {}) {
+async function run(files: string[], extra: Record<string, string> = {}, prep?: (dir: string) => void) {
   const dir = join(root, String(++n));
   mkdirSync(join(dir, 'tools'), { recursive: true });
   mkdirSync(join(dir, 'test'));
-  for (const f of ['run-tests.sh', 'failed-files-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(dir, 'tools', f));
+  for (const f of ['run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(dir, 'tools', f));
   // A name with no fixture of its own always fails.
   for (const f of files) writeFileSync(join(dir, 'test', f), FIXTURES[f] ?? FIXTURES['always.test.mjs']);
+  prep?.(dir);
   const shared = join(dir, 'shared');
   const log = join(dir, 'land-test.log');
   const { code, stderr } = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
@@ -167,4 +177,17 @@ test('CITADEL_TEST_CONCURRENCY caps how many test files run at once, and the def
   const r3 = await run(files, { CITADEL_TEST_CONCURRENCY: '', OVERLAP_LOG: def });
   assert.equal(r3.code, 0, r3.log);
   assert.equal(peakOverlap(readFileSync(def, 'utf8')), Math.min(4, Math.ceil(cores / 2)));
+});
+
+test("the full run's file counts sit beside its log while it runs (#545), and go when it ends", async () => {
+  const r = await run(['ok.test.mjs', 'progress.test.mjs'], { CITADEL_TEST_CONCURRENCY: '1' });
+  assert.equal(r.code, 0, r.log);
+  assert.equal(readFileSync(join(r.dir, 'seen-progress'), 'utf8'), `1\n2\ntest/progress.test.mjs\n`);
+  assert.equal(existsSync(join(r.dir, 'land-test.progress')), false);
+});
+
+test('counts that cannot be written never fail or change the run', async () => {
+  const r = await run(['ok.test.mjs'], {}, (dir) => mkdirSync(join(dir, 'land-test.progress.tmp')));
+  assert.equal(r.code, 0, r.log);
+  assert.doesNotMatch(r.log, /run-tests:|Error/);
 });

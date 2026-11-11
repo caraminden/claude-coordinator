@@ -1,7 +1,8 @@
 // What a minion waits on (#544): its place in the land line and that landing's phase, a heavy slot, or
 // the idle restart. One shape for every kind, read from what's already on disk or in the server: the
 // land line's ticket files (tools/deploy-queue.sh), citadel-heavy's slot and waiter files, and the ship
-// line's "deploying" stage. CI runs (#546, src/ci-wait.ts) fill the same record: a PR's run, and a landing's CI gate.
+// line's "deploying" stage. CI runs (#546, src/ci-wait.ts) fill the same record: a PR's run, and a landing's CI gate;
+// a test run's file counts (#545, tools/progress-reporter.ts) fill in done and total.
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -53,9 +54,26 @@ export function procAlive(pidStart: string): boolean {
   return !/^[ZXx]$/.test(f[0]) && f[19] === start;
 }
 
-export interface LandTicket { seq: number; proc: string; got: number; label: string; phase: string; mtime: number }
+/** A test run's files done, of how many, and the newest one running (tools/progress-reporter.ts). */
+export interface TestCounts { done: number; total: number; file: string }
 
-/** The land line in order, its gone processes left out, and the last landings' lengths in s. */
+/** The counts in a progress file written since `since` (ms): an older one is a run before this one. */
+export function readTestCounts(f: string, since: number): TestCounts | null {
+  const at = mtime(f), text = read(f);
+  if (at == null || at < since || text == null) return null;
+  const [done, total, file = ''] = text.split('\n');
+  const d = Number(done), t = Number(total);
+  return /^\d+$/.test(done) && /^\d+$/.test(total) && t > 0 && d <= t ? { done: d, total: t, file } : null;
+}
+
+const countsText = (c: TestCounts) => `${c.done} of ${c.total} files${c.file ? ` · ${c.file}` : ''}`;
+
+export interface LandTicket { seq: number; proc: string; got: number; label: string; phase: string; mtime: number; tests?: TestCounts | null }
+
+/**
+ * The land line in order, its gone processes left out, and the last landings' lengths in s. The holder running
+ * the tests gets tools/run-tests.sh's counts: land.sh's run logs to land-test.log, deploy.sh's to test.log.
+ */
 export function readLandLine(stateDir: string, alive = procAlive): { line: LandTicket[]; took: number[] } {
   const q = join(stateDir, 'queue');
   const line: LandTicket[] = [];
@@ -64,7 +82,10 @@ export function readLandLine(stateDir: string, alive = procAlive): { line: LandT
     if (text == null || at == null) continue;
     const [proc = '', got = '0', label = '', phase = ''] = text.split('\n');
     if (!alive(proc)) continue;
-    line.push({ seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at });
+    const ticket: LandTicket = { seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at };
+    const log = /^running the tests/.test(phase) ? 'land-test' : /^deploying: running the tests/.test(phase) ? 'test' : null;
+    if (ticket.got > 0 && log) ticket.tests = readTestCounts(join(stateDir, `${log}.progress`), at);
+    line.push(ticket);
   }
   const took = (read(join(q, '.took')) ?? '').split('\n').filter((l) => /^\d+$/.test(l)).map(Number);
   return { line, took };
@@ -89,8 +110,12 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
   const holder = line.find((t) => t.got > 0);
   line.forEach((t, i) => {
     if (t.got > 0) {
-      const ph = landPhase(t.phase);
-      out.set(t.label, { kind: 'land', stage: ph.stage, chip: `land · ${ph.word}`, text: ph.text, since: t.mtime, usual: usual(`land:${ph.key}`) });
+      const ph = landPhase(t.phase), c = t.tests;
+      out.set(t.label, {
+        kind: 'land', stage: ph.stage, since: t.mtime, usual: usual(`land:${ph.key}`),
+        chip: `land · ${c ? `${c.done}/${c.total}` : ph.word}`, text: c ? `${ph.text}: ${countsText(c)}` : ph.text,
+        ...(c && { done: c.done, total: c.total }),
+      });
       return;
     }
     const ahead = line.slice(0, i);
@@ -111,7 +136,7 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
   return out;
 }
 
-export interface HeavyJob { who: string; what: string; since: number; reason?: string; slot?: number }
+export interface HeavyJob { who: string; what: string; since: number; reason?: string; slot?: number; tests?: TestCounts | null }
 
 /** Whether a heavy slot's lock is held: a holder killed past its trap leaves its .who behind, but not the lock. */
 export function slotHeld(file: string): boolean {
@@ -124,7 +149,8 @@ const STALE_WAITER_MS = 60_000; // citadel-heavy freshens a waiter's file at lea
 
 /**
  * citadel-heavy's holders (slot-N.who: "who: what (since HH:MM, pid N)", while slot-N's lock is held) and
- * waiters (wait-<pid>-<random>: who, what, since s, reason; freshened while it waits).
+ * waiters (wait-<pid>-<random>: who, what, since s, reason; freshened while it waits). A holder running a Node test
+ * suite gets its counts from slot-N.progress, which citadel-heavy has tools/citadel-node write.
  */
 export function readHeavy(dir: string, now = Date.now(), held = slotHeld): { holders: HeavyJob[]; waiters: HeavyJob[] } {
   const holders: HeavyJob[] = [], waiters: HeavyJob[] = [];
@@ -134,7 +160,9 @@ export function readHeavy(dir: string, now = Date.now(), held = slotHeld): { hol
     if (m) {
       const text = read(f)?.trim(), at = mtime(f);
       const w = text?.match(/^(.*?): (.*) \(since \d\d:\d\d, pid \d+\)$/);
-      if (w && at != null && held(join(dir, `slot-${m[1]}`))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1 });
+      if (w && at != null && held(join(dir, `slot-${m[1]}`))) {
+        holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, tests: readTestCounts(join(dir, `slot-${m[1]}.progress`), at) });
+      }
       continue;
     }
     if (/^wait-\d+-\d+$/.test(name) && now - (mtime(f) ?? 0) < STALE_WAITER_MS) {
@@ -149,7 +177,15 @@ export function readHeavy(dir: string, now = Date.now(), held = slotHeld): { hol
 /** Each heavy job's wait, by its who ("Citadel #544 (cara)"). */
 export function heavyWaits({ holders, waiters }: ReturnType<typeof readHeavy>, usual: (key: string) => number | null, name: (who: string) => string): Map<string, Wait> {
   const out = new Map<string, Wait>();
-  for (const h of holders) out.set(h.who, { kind: 'heavy', stage: 'run', chip: 'heavy run', text: `running in heavy slot ${h.slot}: ${h.what}`, since: h.since, usual: usual(`heavy:run:${h.what}`) });
+  for (const h of holders) {
+    const c = h.tests, text = `running in heavy slot ${h.slot}: ${h.what}`;
+    out.set(h.who, {
+      kind: 'heavy', stage: 'run', since: h.since, usual: usual(`heavy:run:${h.what}`),
+      // Only a Node suite run through tools/citadel-node has counts; any other run shows elapsed against usual alone.
+      chip: c ? `tests ${c.done}/${c.total}` : 'heavy run', text: c ? `${text}: ${countsText(c)}` : text,
+      ...(c && { done: c.done, total: c.total }),
+    });
+  }
   waiters.forEach((w, i) => {
     const place = ordinal(i + 1);
     const busy = holders.map((h) => name(h.who)).join(', ');

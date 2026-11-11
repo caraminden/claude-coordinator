@@ -21,6 +21,9 @@
 # When it runs in a unit of the user manager (the landing turn, or the server for a container's land tool), the
 # scope is bound to it, so stopping that unit still stops the tests, as before. DEPLOY_TEST_CPU_WEIGHT sets the
 # weight (empty: no scope). Without a user systemd to ask (no bus, no such slice) it runs as before, unweighted.
+#
+# While the full run goes, <log without .log>.progress holds its file counts (#545: tools/citadel-node and
+# tools/progress-reporter.ts), for the landing's wait in Citadel; it goes once the full run ends, before any rerun.
 set -uo pipefail
 log=$1
 limit=${DEPLOY_TEST_TIMEOUT:-600}
@@ -37,10 +40,14 @@ scope=(systemd-run --user --scope --quiet --collect --slice=citadel.slice -p "CP
 scope+=(--)
 [ -n "$weight" ] && timeout 20 "${scope[@]}" true >/dev/null 2>&1 || scope=()
 failed=$(mktemp)
-trap 'rm -f "$failed"' EXIT
-timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-concurrency="$concurrency" --test-force-exit --test-reporter=spec --test-reporter-destination=stdout \
+progress=${log%.log}.progress
+unset CITADEL_TEST_PROGRESS # the reruns below count nothing
+rm -f "$progress"
+trap 'rm -f "$failed" "$progress" "$progress.tmp"' EXIT
+CITADEL_TEST_PROGRESS=$progress timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-concurrency="$concurrency" --test-force-exit --test-reporter=spec --test-reporter-destination=stdout \
   --test-reporter="$tools/failed-files-reporter.ts" --test-reporter-destination="$failed" test/ >"$log" 2>&1
 rc=$?
+rm -f "$progress" "$progress.tmp"
 load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || load='?'
 if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
   echo "run-tests: the tests ran past ${limit}s and were stopped: a test hung (the hung file is the one with no results above)." | tee -a "$log" >&2

@@ -173,3 +173,42 @@ test('a heavy slot reads as held only while someone holds its lock', async () =>
     await new Promise((r) => holder.once('exit', r));
   }
 });
+
+test("a test run's counts (#545): the landing's run and a heavy Node suite show files done of total; other runs show none", () => {
+  const { state, heavy, waits, ticket } = setup();
+  const a = minion(), b = minion(), c = minion(), d = minion();
+  const progress = (f: string, text: string, ago?: number) => {
+    writeFileSync(f, text);
+    if (ago != null) utimesSync(f, (now - ago * 1000) / 1000, (now - ago * 1000) / 1000);
+  };
+  ticket(1, a.branch, now / 1000 - 40, 'running the tests since 14:02', 30);
+  progress(join(state, 'land-test.progress'), '5\n200\ntest/old.test.ts\n', 31);
+  waits.poll();
+  assert.equal(waits.wait(a.id)!.chip, 'land · tests', "counts from before this phase are an earlier run's");
+  progress(join(state, 'land-test.progress'), '96\n212\ntest/runner.test.ts\n', 1);
+  waits.poll();
+  assert.deepEqual(waits.wait(a.id), {
+    kind: 'land', stage: 'test', chip: 'land · 96/212', text: 'running the tests on the rebased code: 96 of 212 files · test/runner.test.ts',
+    since: now - 30_000, usual: null, done: 96, total: 212,
+  });
+  // deploy.sh's own run logs to test.log, so its counts are in test.progress.
+  ticket(1, a.branch, now / 1000 - 40, 'deploying: running the tests since 14:05', 10);
+  progress(join(state, 'test.progress'), '212\n212\n\n', 1);
+  waits.poll();
+  assert.equal(waits.wait(a.id)!.chip, 'land · 212/212');
+  assert.equal(waits.wait(a.id)!.text, 'running the tests: 212 of 212 files');
+
+  writeFileSync(join(heavy, 'slot-0.who'), `Citadel #${b.number} (cara): npm test (since 14:00, pid 4242)\n`);
+  progress(join(heavy, 'slot-0.progress'), '3\n212\ntest/db.test.ts\n');
+  writeFileSync(join(heavy, 'slot-1.who'), `Citadel #${c.number} (cara): cargo test (since 14:00, pid 4243)\n`);
+  progress(join(heavy, 'slot-1.progress'), '9\n3\n'); // more done than there are: not counts
+  writeFileSync(join(heavy, 'slot-2.who'), `Citadel #${d.number} (cara): npm test (since 14:00, pid 4244)\n`);
+  waits.poll();
+  const wb = waits.wait(b.id)!;
+  assert.equal(wb.chip, 'tests 3/212');
+  assert.equal(wb.text, 'running in heavy slot 1: npm test: 3 of 212 files · test/db.test.ts');
+  assert.deepEqual([wb.done, wb.total], [3, 212]);
+  assert.deepEqual(waits.wait(c.id), { ...waits.wait(c.id)!, chip: 'heavy run', text: 'running in heavy slot 2: cargo test' });
+  assert.equal(waits.wait(c.id)!.done, undefined);
+  assert.equal(waits.wait(d.id)!.chip, 'heavy run');
+});

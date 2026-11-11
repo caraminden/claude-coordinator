@@ -116,6 +116,34 @@ function pcCard(pc) {
     pools(pc));
 }
 
+/** What the overview warns of (Cara, 2026-11-11): CI overloading the PC, a crash under load, or a PC that stopped reporting in the last day. */
+function trouble(pc) {
+  if (pc.verdict.kind === 'over') return 'CI is overloading its desktop';
+  if (pc.verdict.kind === 'crash') return 'CI desktop crashed under load';
+  if (pc.verdict.kind === 'none' && pc.series.some((s) => s[1] !== null)) return 'CI desktop is offline';
+  return '';
+}
+
+/** The overview's warning lines under the usage bar, one per PC in trouble and none otherwise; each opens the Machines page. */
+export function ciWarning(href) {
+  const el = h('div', { class: 'ci-warnings' });
+  const load = async () => {
+    if (el.dataset.loaded && !el.isConnected) return;
+    el.dataset.loaded = '1';
+    try {
+      const { pcs } = await api('api/ci-desktop');
+      el.replaceChildren(...pcs.filter(trouble).map((pc) => h('div', { class: 'machine-warning' },
+        h('span', { class: `dot ${pc.verdict.kind === 'none' ? 'fix' : 'down'}` }),
+        h('a', { href, title: `${pc.host}: ${pc.verdict.text}` }, trouble(pc)))));
+    } catch {
+      // The last answer stays: the next minute asks again.
+    }
+    setTimeout(load, REFRESH_MS);
+  };
+  load();
+  return el;
+}
+
 /** The panel: empty (and no heading) until a PC with a runner agent is there for this person to see. */
 export function ciDesktopPanel() {
   const el = h('div', { class: 'ci-desktops' });

@@ -1,6 +1,7 @@
 // A scheme's page: its side panels and the main panel, and switching between chats.
 import { account, api, h, isCoordinator, loadPanelState, me, savePanelState, schemeIcon, setView, threadHref, view } from './base.js';
 import { app, cachedEvents, crumbs, loadEvents, logout, onTicketUpdate, prefetchTopRows, renderUsage, routeSeq, usageMeter } from './core.js';
+import { ciWarning } from './ci-desktop.js';
 import { appInstructionsEditor, approvalsEditor, instructionsEditor, machinesPage, projectTitle, pushControls, renderGithubStrip, renderMachineWarning } from './settings.js';
 import { LAST_SCHEME, newTicketForm, renderSidebar, revealActiveRow, threadSearchBox } from './sidebar.js';
 import { artifactBrowser, artifactViewer, renderArtifactHead, setArtifacts, renderArtifactResults, renderSharedHead, renderSharedList, renderShelf, sharedList, sharedViewer } from './artifacts.js';
@@ -132,7 +133,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
       usageMeter(),
       pushControls(project),
       // Only while a machine this scheme's minions get needs a fix or is down (#437).
-      h('div', { id: 'machine-warning', class: 'machine-warning', hidden: true })),
+      h('div', { id: 'machine-warning', class: 'machine-warning', hidden: true }),
+      // Only while CI overloads its desktop, crashed it, or the desktop went offline (#534).
+      ciWarning(`#/p/${projectId}/machines`)),
     h('section', { class: 'column', id: 'schemes-shelf' }),
     h('div', { id: 'artifact-shelf' }));
   const sidebar = h('details', { class: 'sidebar', open: panelOpen('threads') },

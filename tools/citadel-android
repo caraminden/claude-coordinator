@@ -32,7 +32,8 @@ lock="$dir/android.lock" holder="$dir/android.who" used="$dir/android.used"
 CONSOLE_PORT=${CITADEL_ANDROID_CONSOLE_PORT:-$CONSOLE} # tests only
 SMS_MAX=500
 
-adb() { "$ADB" -s "$SERIAL" "$@"; }
+# 9>&-: an adb that finds no server starts one, which would hold the screen lock for as long as it runs (#496).
+adb() { "$ADB" -s "$SERIAL" "$@" 9>&-; }
 port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 booted() { port_open "$ADB_PORT" && [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; }
 # The adb server must be the service's: one started from a container has another key, and the emulator refuses it.
@@ -188,8 +189,7 @@ serve() {
   pid=$!
   # `adb emu kill` shuts it down cleanly, which saves the quick-boot snapshot; plain signals are the fallback.
   stop() {
-    # 9>&-: an adb that starts a server mustn't leave it holding the screen lock.
-    "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 9>&-
+    adb emu kill >/dev/null 2>&1
     for _ in $(seq 100); do kill -0 "$pid" 2>/dev/null || return 0; sleep 1; done
     kill "$pid" 2>/dev/null
   }
@@ -222,7 +222,8 @@ down() {
   say "stopping the emulator (saving its quick-boot snapshot)"
   adb emu kill >/dev/null 2>&1
   local t0=$SECONDS
-  while adb get-state >/dev/null 2>&1 && [ $((SECONDS - t0)) -lt 100 ]; do sleep 1; done
+  # Once the service ends its adb server goes too: asking again would start a stray one here.
+  while port_open "$ADB_PORT" && adb get-state >/dev/null 2>&1 && [ $((SECONDS - t0)) -lt 100 ]; do sleep 1; done
   : >"$holder"
 }
 

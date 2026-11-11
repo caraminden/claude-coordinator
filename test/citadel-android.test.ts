@@ -14,6 +14,8 @@ const calls = join(sdk, 'calls');
 // Stands in for a booted emulator; `emu kill` makes it go away (and ends the stub emulator, if one runs).
 const adb = `#!/bin/sh
 echo "$*" >>'${calls}'
+# A client that finds no server starts one, which lives on with whatever descriptors it inherited.
+[ -n "\${ADB_STUB_SERVER:-}" ] && { sleep 30 </dev/null >/dev/null 2>&1 & echo $! >>'${sdk}/server.pids'; }
 [ "$1" = -s ] && shift 2
 case "$*" in
   'shell getprop sys.boot_completed') echo 1 ;;
@@ -86,6 +88,21 @@ test('another caller waits for the holder, says who it is, and goes once the hol
   assert.equal(await done, 0, err);
   assert.equal(readFileSync(png, 'utf8'), 'PNG');
   assert.match(readFileSync(calls, 'utf8'), /emu kill/);
+});
+
+test('an adb server a step starts does not keep the screen locked after the step', () => {
+  const locks = join(root, 'stray-server');
+  const pids = join(sdk, 'server.pids');
+  for (const f of [join(sdk, 'killed'), pids]) rmSync(f, { force: true });
+  try {
+    // down is where it happened (#496): its wait for the emulator to go ran adb after the service, and its server, had gone.
+    const r = spawnSync(helper, ['down'], { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: 'a', ADB_STUB_SERVER: '1' }, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(existsSync(pids), 'the stub started a server');
+    assert.equal(spawnSync('flock', ['-n', join(locks, 'android.lock'), 'true']).status, 0, 'the screen is free');
+  } finally {
+    for (const pid of existsSync(pids) ? readFileSync(pids, 'utf8').trim().split('\n').map(Number) : []) if (alive(pid)) process.kill(pid);
+  }
 });
 
 // serve, the service's main process, with a 1-second idle time and its own lock folder.

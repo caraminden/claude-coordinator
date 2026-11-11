@@ -13,6 +13,8 @@
 # label, and its phase. A ticket whose process is gone is deleted by whoever waits behind it.
 # Outside the line, the queued restart (deploy.sh restart) and a land.sh from a branch older than this
 # take the flock directly; the head of the line waits for them like for anyone else.
+# The kit's land.sh template (kit/skills/scheme-setup/templates/land.sh) carries a copy of these functions
+# inline, so a scheme copies one file: a fix to either belongs in both.
 
 QUEUE_POLL=${DEPLOY_QUEUE_POLL:-1}
 # Give up after this long with no change at the head of the line. The floor is the holder's longest

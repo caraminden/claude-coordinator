@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -230,4 +230,155 @@ test('numbered things: a line that does not parse refuses and names it; "none" c
   r.commit(r.wt, 'db/migrations/0001-again.sql', 'dup\n');
   const ok = r.run();
   assert.equal(ok.status, 0, ok.stderr);
+});
+
+// The line for the land lock (the queue_* functions in the template, from Citadel's tools/deploy-queue.sh,
+// #502). The kernel grants a flock in no order, so several landings waiting on it at once (2026-11-10)
+// meant some lost every round and timed out. Fake work: the check waits for a file named in $GATE.
+const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+async function until(what: string, cond: () => boolean, ms = 30_000) {
+  for (const end = Date.now() + ms; !cond(); await sleep(20)) if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+}
+const gated = 'until [ -e "$GATE" ]; do sleep 0.05; done';
+function queueSetup(branches: number, check = gated) {
+  const r = setup(check);
+  const state = git(r.main, 'rev-parse', '--absolute-git-dir');
+  const gate = join(r.dir, 'gate');
+  const wts = [r.wt];
+  for (let i = 2; i <= branches; i++) git(r.main, 'worktree', 'add', '-q', '-b', `ticket/${i}-x`, wts[wts.push(join(r.dir, `wt${i}`)) - 1]);
+  wts.forEach((wt, i) => r.commit(wt, `f${i + 1}.txt`, `${i + 1}\n`));
+  const tickets = () => (existsSync(join(state, 'land-queue')) ? readdirSync(join(state, 'land-queue')).filter((f) => /^\d+$/.test(f)).sort() : []);
+  const issued = () => (existsSync(join(state, 'land-queue', '.seq')) ? Number(readFileSync(join(state, 'land-queue', '.seq'), 'utf8')) : 0);
+  const phase = (ticket: string) => { try { return readFileSync(join(state, 'land-queue', ticket), 'utf8').split('\n')[3]; } catch { return ''; } };
+  // Landing i (from 1), started and left running.
+  const land = (i: number, extra: Record<string, string> = {}) => {
+    const child = spawn('bash', [join(wts[i - 1], 'tools', 'land.sh')], { cwd: wts[i - 1], stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, GATE: gate, LAND_QUEUE_POLL: '0.05', ...extra } });
+    let stderr = '';
+    child.stderr!.on('data', (d) => (stderr += d));
+    const exit = new Promise<number | null>((ok) => child.on('close', ok));
+    return { child, exit, stderr: () => stderr };
+  };
+  const open = () => writeFileSync(gate, '');
+  const landed = () => git(r.main, 'log', '--reverse', '--format=%s', 'main').split('\n').slice(1);
+  return { ...r, state, wts, tickets, issued, phase, land, open, landed };
+}
+
+test('ten landings started together land in the order they arrived, each told its place in line', async () => {
+  const q = queueSetup(10);
+  const lands: ReturnType<typeof q.land>[] = [];
+  try {
+    for (let i = 1; i <= 10; i++) {
+      lands.push(q.land(i));
+      await until(`landing ${i}'s ticket`, () => q.issued() === i); // arrival order is the order of the tickets
+    }
+    // The first holds the lock, in its check, until all ten are in line and the last has been told its place.
+    await until('the last to say its place', () => /queue: 10th in line for the land lock, about 45 min \(ahead: ticket\/1-x, running the check since \d\d:\d\d\)/.test(lands[9].stderr()));
+  } finally {
+    q.open();
+  }
+  const codes = await Promise.all(lands.map((l) => l.exit));
+  codes.forEach((code, i) => assert.equal(code, 0, `landing ${i + 1}: ${lands[i].stderr()}`));
+  assert.deepEqual(q.landed(), lands.map((_, i) => `f${i + 1}.txt: ${i + 1}`));
+  assert.equal(git(q.origin, 'rev-parse', 'main'), git(q.main, 'rev-parse', 'main'), 'the last push carried them all');
+  assert.doesNotMatch(lands[0].stderr(), /in line/, 'the first had nobody to wait for');
+  assert.match(lands[9].stderr(), /queue: 2nd in line for the land lock, about \d+ min \(ahead: ticket\/9-x, /);
+  assert.match(lands[9].stderr(), /queue: got the land lock/);
+  assert.deepEqual(q.tickets(), [], 'every ticket is gone');
+  assert.equal(readFileSync(join(q.state, 'land-queue', '.took'), 'utf8').trim().split('\n').length, 5, 'the newest five landings were timed, for the estimate');
+  assert.ok(landLockFree(q), 'the land lock is free');
+});
+
+test('a waiter that is killed leaves the line, and the one behind it goes next', async () => {
+  const q = queueSetup(3);
+  const a = q.land(1);
+  try {
+    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
+    const b = q.land(2);
+    await until("b's ticket", () => q.issued() === 2);
+    const c = q.land(3);
+    await until('c to see its place', () => /3rd in line/.test(c.stderr()));
+    b.child.kill('SIGKILL');
+    await b.exit;
+    assert.equal(q.tickets().length, 3, 'a killed waiter leaves its ticket behind');
+    await until('c to move up past the dead ticket', () => /2nd in line/.test(c.stderr()));
+    assert.equal(q.tickets().length, 2, 'the waiter behind it removed it');
+    q.open();
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(await c.exit, 0, c.stderr());
+    assert.deepEqual(q.landed(), ['f1.txt: 1', 'f3.txt: 3']);
+  } finally {
+    q.open();
+  }
+});
+
+test('a holder that is killed leaves the line too, and its lock goes with it', async () => {
+  const q = queueSetup(2);
+  const a = q.land(1);
+  try {
+    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
+    const b = q.land(2);
+    await until('b to wait', () => /2nd in line/.test(b.stderr()));
+    a.child.kill('SIGKILL'); // its check runs on without the lock, until the gate opens below
+    await until('b to get the lock', () => /got the land lock/.test(b.stderr()));
+    q.open();
+    assert.equal(await b.exit, 0, b.stderr());
+    assert.deepEqual(q.landed(), ['f2.txt: 2']);
+  } finally {
+    q.open();
+  }
+});
+
+test('a waiter gives up once nothing has moved for the stall limit, with nothing landed', async () => {
+  const q = queueSetup(2);
+  const a = q.land(1);
+  try {
+    await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
+    const b = q.land(2, { LAND_CHECK_TIMEOUT: '1', LAND_QUEUE_SLACK: '1' });
+    assert.equal(await b.exit, 1, 'it gives up in the end');
+    assert.match(b.stderr(), /2nd in line for the land lock, about 5 min \(ahead: ticket\/1-x, running the check since/);
+    assert.match(b.stderr(), /nothing has moved for 1 min \(ahead: ticket\/1-x, running the check since .*\), so this gave up and nothing landed/);
+    assert.equal(q.tickets().length, 1, 'its ticket went with it');
+    q.open();
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.deepEqual(q.landed(), ['f1.txt: 1']);
+  } finally {
+    q.open();
+  }
+});
+
+test('the stall limit is longer than the check limit, so a waiter outlasts a check that runs to its limit', async () => {
+  // The holder's branch has a file that makes the check hang; the waiter's does not.
+  const q = queueSetup(2, '[ ! -e f1.txt ] || sleep 30');
+  const limits = { LAND_CHECK_TIMEOUT: '3', LAND_QUEUE_SLACK: '4' }; // slack to spare: bash counts whole seconds, and the box may be busy
+  const a = q.land(1, limits);
+  await until('a to run its check', () => /running the check/.test(q.phase(q.tickets()[0] ?? '')));
+  const b = q.land(2, limits);
+  assert.equal(await a.exit, 1);
+  assert.match(a.stderr(), /the check ran past 3s and was stopped/);
+  assert.equal(await b.exit, 0, b.stderr());
+  assert.match(b.stderr(), /2nd in line/);
+  assert.deepEqual(q.landed(), ['f2.txt: 2']);
+  assert.equal(spawnSync('bash', [join(q.wt, 'tools', 'land.sh')], { cwd: q.wt, encoding: 'utf8', env: { ...env, LAND_CHECK_TIMEOUT: '30m' } }).stderr.trim(), 'land: LAND_CHECK_TIMEOUT is in whole seconds, not "30m"');
+});
+
+test('the head of the line waits for a lock held outside it (an older land.sh), and the estimate comes from past landings', async () => {
+  const q = queueSetup(2, 'true');
+  mkdirSync(join(q.state, 'land-queue'));
+  writeFileSync(join(q.state, 'land-queue', '.took'), '100\n140\n');
+  const older = spawn('bash', ['-c', 'exec 9>"$0"; flock 9; exec sleep 600', join(q.state, 'land.lock')], { stdio: 'ignore' }); // one process, so killing it frees the lock
+  try {
+    await until('the lock to be held', () => !landLockFree(q));
+    const a = q.land(1);
+    await until('a to say it waits', () => /next in line for the land lock \(ahead: a landing started from a branch whose land.sh is older/.test(a.stderr()));
+    const b = q.land(2);
+    await until('b to say its place', () => /2nd in line for the land lock, about 2 min \(ahead: ticket\/1-x, waiting\)/.test(b.stderr()));
+    assert.deepEqual(q.landed(), []);
+    older.kill('SIGKILL');
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(await b.exit, 0, b.stderr());
+    assert.deepEqual(q.landed(), ['f1.txt: 1', 'f2.txt: 2']);
+    assert.equal(readFileSync(join(q.state, 'land-queue', '.took'), 'utf8').trim().split('\n').length, 4, 'each noted how long it held the lock');
+  } finally {
+    older.kill('SIGKILL');
+  }
 });

@@ -160,7 +160,9 @@ in `guard.sh`, to the `case` in `pre-push`, and to `BRANCH` in `land.sh`.
 When the plan names `tools/land.sh` as the pusher, copy `land.sh` there too (executable) and
 set its `CHECK` line to the check command from Project facts, or `true` while there is none
 (your done note says so). It rebases, runs the check, fast-forwards the main checkout and
-pushes main; read its header. Before the check it refuses a branch that takes a migration
+pushes main; read its header. Landings wait for its lock in a line, oldest first, with no time
+limit while the line moves: a minion runs it in the background with a long timeout, since a run
+that is stopped loses its place. Before the check it refuses a branch that takes a migration
 number, version or ledger id main already has, as the Numbered things line names them: look for
 each (`git log --diff-filter=A` on a migrations folder, version lines, numbered ledger entries), and
 check each regex matches what it should (`perl -ne 'print "$1\n" if /<regex>/' <file>`).

@@ -7,7 +7,8 @@
 # 2. Refuses when the branch takes a number main already has (a migration, a version, a ledger id),
 #    as the "Numbered things" line in Project facts names them. No line, or "none": no check.
 #    A refusal puts the branch back where it was, with main untouched.
-# 3. Runs the check command on the rebased branch. A failure stops here, with main untouched.
+# 3. Runs the check command on the rebased branch, within LAND_CHECK_TIMEOUT seconds (default 1800).
+#    A failure or overrun stops here, with main untouched.
 # 4. Fast-forwards main in the scheme's main checkout to the branch.
 # 5. Pushes main to origin from the main checkout, never forced. A failed push is reported and main
 #    stays moved; the next landing pushes it again.
@@ -152,7 +153,15 @@ fi
 
 say "running $CHECK"
 log="$state/land-check.log"
-if ! bash -c "$CHECK" >"$log" 2>&1; then
+# It runs under the lock, so it has a time limit (LAND_CHECK_TIMEOUT, in seconds), and 9>&- keeps a
+# process it leaves running from holding the lock after this script ends.
+limit=${LAND_CHECK_TIMEOUT:-1800}
+rc=0
+timeout -k 30 "$limit" bash -c "$CHECK" >"$log" 2>&1 9>&- || rc=$?
+if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+  echo "land: the check ran past ${limit}s and was stopped: something in it hung" >>"$log" # the tail below shows it
+fi
+if [ "$rc" != 0 ]; then
   tail -n 40 "$log" >&2
   refuse "the check failed on the rebased branch (full log: $log), so $BRANCH is untouched"
 fi

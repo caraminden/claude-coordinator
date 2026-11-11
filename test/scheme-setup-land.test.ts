@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -14,7 +14,7 @@ const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
 
 let n = 0;
-function setup() {
+function setup(check = 'test ! -e red') {
   const dir = join(root, String(++n));
   const main = join(dir, 'repo');
   mkdirSync(join(main, 'tools'), { recursive: true });
@@ -24,8 +24,9 @@ function setup() {
   copyFileSync(join(templates, 'pre-push'), join(main, '.githooks', 'pre-push'));
   chmodSync(join(main, 'tools', 'land.sh'), 0o755);
   chmodSync(join(main, '.githooks', 'pre-push'), 0o755);
-  // The check: red while a file named "red" exists.
-  execFileSync('sed', ['-i', "s/^CHECK=.*/CHECK='test ! -e red'/", join(main, 'tools', 'land.sh')]);
+  // The check (by default red while a file named "red" exists).
+  const landSh = join(main, 'tools', 'land.sh');
+  writeFileSync(landSh, readFileSync(landSh, 'utf8').replace(/^CHECK=.*$/m, () => `CHECK='${check}'`));
   writeFileSync(join(main, 'a.txt'), 'one\n');
   git(main, 'add', '-A');
   git(main, 'commit', '-qm', 'base');
@@ -41,7 +42,7 @@ function setup() {
     git(where, 'add', '-A');
     git(where, 'commit', '-qm', `${file}: ${text.trim()}`);
   };
-  const run = () => spawnSync('bash', [join(wt, 'tools', 'land.sh')], { cwd: join(wt, 'tools'), encoding: 'utf8', env });
+  const run = (extra: Record<string, string> = {}) => spawnSync('bash', [join(wt, 'tools', 'land.sh')], { cwd: join(wt, 'tools'), encoding: 'utf8', timeout: 90_000, env: { ...env, ...extra } });
   return { dir, main, origin, wt, commit, run };
 }
 
@@ -66,6 +67,38 @@ test('a red check leaves main and origin untouched', () => {
   assert.match(res.stderr, /check failed/);
   assert.equal(git(r.main, 'rev-parse', 'main'), before);
   assert.equal(git(r.origin, 'rev-parse', 'main'), before);
+});
+
+// The check runs under the land lock, so it must end and must not take the lock with it (#468 S10-2).
+const landLockFree = (r: ReturnType<typeof setup>) =>
+  spawnSync('flock', ['-n', join(git(r.main, 'rev-parse', '--absolute-git-dir'), 'land.lock'), 'true']).status === 0;
+
+test('a check that hangs is stopped at the time limit, says so, and lets go of the lock', () => {
+  const r = setup('sleep 30');
+  const before = git(r.main, 'rev-parse', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const t = Date.now();
+  const res = r.run({ LAND_CHECK_TIMEOUT: '2' });
+  assert.ok(Date.now() - t < 20_000, `stopped at the limit, not run out: ${Date.now() - t} ms`);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /the check ran past 2s and was stopped/);
+  assert.match(res.stderr, /check failed/);
+  assert.equal(git(r.main, 'rev-parse', 'main'), before);
+  assert.ok(landLockFree(r), 'the land lock is free');
+});
+
+test('a process the check leaves running does not hold the land lock', () => {
+  const pidFile = join(root, `left-${n + 1}.pid`);
+  const r = setup('sleep 30 >/dev/null 2>&1 & echo $! >"$LEFT_PID"');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const res = r.run({ LEFT_PID: pidFile });
+  const pid = Number(readFileSync(pidFile, 'utf8'));
+  try {
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(landLockFree(r), 'the land lock is free while the leftover process runs');
+  } finally {
+    process.kill(pid);
+  }
 });
 
 test('a rebase conflict aborts and leaves main untouched', () => {

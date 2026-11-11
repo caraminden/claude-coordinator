@@ -29,7 +29,8 @@ linked after `mockkit.css`. It sets the tokens, and may load fonts and style hea
 ```
 
 - Take every value from the scheme's own source (its stylesheet, its game's UI constants, its
-  design-system home) and comment where each came from.
+  design-system home) and comment where each came from. For a contraption, that is its own
+  stylesheet and, under Citadel UI, the `--citadel-*` tokens in `theme.css` (the `citadel:contraption-ui` skill).
 - Keep tones meaning what they mean in the kit: good is chosen or has, bad is cut or stops, warn is
   rework or waiting.
 - The theme styles the document. A mocked screen inside a board is drawn in the page's own styles

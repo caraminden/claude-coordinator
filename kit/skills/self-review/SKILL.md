@@ -55,6 +55,8 @@ stderr line, `Codex usage: 5-hour N%, weekly N%`, goes in the report line too. A
 `--check` prints means it isn't set up: skip it silently.
 
 A light review costs about 47k Grunt tokens and a minute (about $0.35); deep is about $1 to $1.50.
+Codex reads whatever repo the command runs in, so a review run from a scratch clone sends that
+diff to the person's plan too. That is by design; cost-check before running it on a throwaway diff.
 Don't re-review after fixes unless a fix grew past a few lines of high-row code.
 
 ## 3. Fix what's real

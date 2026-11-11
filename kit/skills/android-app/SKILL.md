@@ -22,7 +22,10 @@ is **read-only**.
 - **Debug builds sign with one committed debug keystore** (public, `android`/`androiddebugkey`, in the
   app's repo), not the home's `~/.android/debug.keystore`. Every home has its own, so builds from
   different homes can't update each other on the shared emulator. With the shared key they upgrade
-  over each other. Never `adb uninstall` another build to get past a signature error.
+  over each other. Never `adb uninstall` another build to get past a signature error. An app that
+  moves from per-home keys to the shared one still has the old-key build installed: that build can't
+  be updated in place, so its owner uninstalls it once (local data goes) before the first
+  shared-key install.
 - The first build in a home downloads Gradle and its dependencies, about 1 GB in `~/.gradle`.
 
 ## Pinned versions
@@ -108,7 +111,8 @@ citadel-android down               # when you're done
 - **One screen.** Each call takes the screen lock, and you keep the screen for 2 minutes after each
   call, so your install, open and shot run back to back. Anyone else waits, and it says whose turn
   holds it. Don't work around a wait: it ends when the holder's lease runs out or it runs `down`.
-- **Run `down` when you're done.** It holds about 4 GB of RAM while up. It also stops itself after
+- **Run `down` when you're done**, unless the emulator was already up when you started (someone
+  else's session may use it; it stops itself after the idle time below). It holds about 4 GB of RAM while up. It also stops itself after
   15 minutes with no `citadel-android` call.
 - The phone keeps its state between boots (apps, Chrome tabs, logins), from every scheme that used
   it. Don't rely on a clean device; uninstall what you need gone.

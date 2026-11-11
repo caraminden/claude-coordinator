@@ -64,6 +64,8 @@ mock.picks({ collection: 'questions', options: ['yes', 'no'], root: document.get
 - `options`: strings, or `{ v, label, done }` (`done` is how a made choice reads, "Picked").
 - `one: true` makes the choice exclusive across the items (choose one take).
 - The item's name in Send comes from `data-title`, else its first heading, else its id.
+- Each person's pick is saved under their own `by`, so to pick between takes per person, build one
+  row (one `data-pick` item) per person in the same collection.
 - One collection per question set; two sets on a page need two collections or separate roots.
 - The item gets `.picked` and `data-mk-v` when chosen, for styling.
 

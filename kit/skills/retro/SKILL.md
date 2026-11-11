@@ -66,7 +66,8 @@ Create either file when it is first needed.
    only where a check or a skill step reads it, never a note left to rot. A retro note is
    otherwise something to keep an eye out for, not a rule.
 7. **Write the retro** to `<retro folder>/<milestone>.md`, under a page: the fixes first, then the spec
-   gaps, then what to keep. Update the ledger in the same PR: add this retro to each row it
+   gaps, then what to keep. Committing the retro file is not the end: the ledger edit (`README.md`
+   in the retro folder) goes in the same commit. Update the ledger in the same PR: add this retro to each row it
    hit again, change a row's guard when a fix lands, and add a row for any finding that is
    now in two retros.
 8. **Land the fixes in the milestone's PR**, while it is still open, so the owner reviews

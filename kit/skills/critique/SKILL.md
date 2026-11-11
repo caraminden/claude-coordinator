@@ -87,6 +87,10 @@ its second round. A plain blocker on a first fail is yours to fix.
    same way) are one cause. Call `citadel:professor` once per cause, with the two or three plainest
    items, and apply its fix to every item that has it. On Delve, 24 fails that shared one cause never
    got a professor, and 26 hit frames reached Cara unfixed.
+   **Naming the cause yourself.** When you can name the cause (say, a flag already in the code),
+   write it in `critic.md` with the fix, and skip the professor for that round. The skip holds only if the
+   next round passes. A fail on that round calls the professor, with your named cause as one more
+   thing it checks.
 2. **Brief it:** "Follow `<kit>/agents/professor.md`." with the cause quoted, per item the brief,
    every critic report so far and your line on what changed between them, the latest artifacts and
    checks' output, the source paths that made it, the rubric, its `playbook:` and `<kit>`. At most 3

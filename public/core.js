@@ -327,14 +327,16 @@ const QUIET_MS = 5000;
 document.addEventListener('input', () => { lastInputAt = Date.now(); }, true);
 document.addEventListener('keydown', () => { lastInputAt = Date.now(); }, true);
 
-function hasUnsentWork() {
-  if (sending || Date.now() - lastInputAt < QUIET_MS) return true;
+/** What holds a new front end back, in the banner's words, or null when it can load now. */
+function unsentWork() {
+  const writing = 'once you have sent or cleared what you are writing';
+  if (sending || Date.now() - lastInputAt < QUIET_MS) return writing;
   // A contraption's typing never reaches this document, and a reload would rebuild its frame at its start.
-  if (framed()) return true;
+  if (framed()) return 'once you leave this app';
   // A page opened with Open saves through this tab, which a reload would forget.
-  if (tabBridgeOpen()) return true;
-  if (document.querySelector('.attachments:not([hidden])') || uploadsRunning()) return true;
-  return [...app.querySelectorAll('[data-draft]')].some((el) => el.value.trim());
+  if (tabBridgeOpen()) return 'once you close the page you opened with Open';
+  if (document.querySelector('.attachments:not([hidden])') || uploadsRunning()) return writing;
+  return [...app.querySelectorAll('[data-draft]')].some((el) => el.value.trim()) ? writing : null;
 }
 
 export function reloadNow() {
@@ -347,10 +349,14 @@ export function reloadNow() {
 
 export function reloadWhenIdle() {
   if (!reloadPending) return;
-  if (!hasUnsentWork()) return reloadNow();
-  if (!document.getElementById('update-banner')) {
+  const until = unsentWork();
+  if (!until) return reloadNow();
+  const words = `A new version is ready and will load ${until}. `;
+  const said = document.querySelector('#update-banner .update-until');
+  if (said) said.textContent = words;
+  else {
     const banner = h('div', { class: 'update-banner', id: 'update-banner' },
-      'A new version is ready and will load once you have sent or cleared what you are writing. ',
+      h('span', { class: 'update-until' }, words),
       h('button', { class: 'secondary small', onclick: reloadNow }, 'Refresh now'),
       h('span', { class: 'muted' }, ' (drafts are kept)'));
     document.querySelector('.topbar').after(banner);

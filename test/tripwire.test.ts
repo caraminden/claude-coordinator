@@ -1018,8 +1018,12 @@ test('systemd-run is a wrapper: the command it runs is checked past its options 
     `systemd-run --user --unit x --description 'clean up' -G rm -f ${db}`,
     `systemd-run --user -E A=1 --on-active 5 -qu x rm -f ${db}`,
     `systemd-run --user -P timeout 5 rm -f ${db}`,
+    `systemd-run --user --uni x --desc y rm -f ${db}`,
     'systemd-run --user --unit=x pkill node',
-    'systemd-run --user --unit x -- systemctl --user stop claude-coordinator',
+    'systemd-run --user -u x cat ~/.ssh/id_ed25519',
+    // A listing piped into a kill it runs; xargs's own -p is not systemd-run's.
+    'ss -ltnp | grep x | systemd-run --user --unit x -P xargs kill',
+    "ss -ltnp | grep 8573 | awk '{print}' | systemd-run --user -P xargs -p kill",
   ])
     assert.ok(verdict(command), command);
   for (const command of ['systemd-run --user --unit=x sleep 5', 'systemd-run --user --unit x -p MemoryMax=1G --collect sleep 5', 'systemd-run --user -P --wait -- ls /tmp'])

@@ -555,8 +555,10 @@ const SQL_WRITE = /\b(insert|update|delete|drop|alter|create|replace|vacuum|rein
 const METADATA = new Set(['ls', 'stat', 'test', '[', '[[', 'du', 'find', 'namei', 'realpath', 'readlink', 'getfacl', 'lsattr', 'chmod', 'chown']);
 // Prefixes that run the next word as the command.
 const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'time', 'timeout', 'stdbuf', 'xargs', 'ionice', 'chrt', 'flock', 'systemd-run']);
-// systemd-run's options that take the next word as their value (`--unit x`, `-p K=V`, `-qu x`; #513).
-const SYSTEMD_RUN_VALUE = /^(-[^-HMCupE]*[HMCupE]|--(host|machine|capsule|unit|property|description|slice|expand-environment|service-type|uid|gid|nice|working-directory|root-directory|setenv|output|json|job-mode|background|path-property|socket-property|timer-property|on-active|on-boot|on-startup|on-unit-active|on-unit-inactive|on-calendar))$/;
+// systemd-run's options that take the next word as their value (`--unit x`, `-p K=V`, `-qu x`, `--uni x`: getopt takes a
+// long option's prefix; one that's ambiguous makes systemd-run refuse, so skipping a word for it is harmless; #513).
+const SYSTEMD_RUN_LONG = ['host', 'machine', 'capsule', 'unit', 'property', 'description', 'slice', 'expand-environment', 'service-type', 'uid', 'gid', 'nice', 'working-directory', 'root-directory', 'setenv', 'output', 'json', 'job-mode', 'background', 'path-property', 'socket-property', 'timer-property', 'on-active', 'on-boot', 'on-startup', 'on-unit-active', 'on-unit-inactive', 'on-calendar'];
+const systemdRunValue = (opt: string) => /^-[^-HMCupE]*[HMCupE]$/.test(opt) || (/^--[a-z-]+$/.test(opt) && SYSTEMD_RUN_LONG.some((o) => `--${o}`.startsWith(opt)));
 const KEYWORDS = new Set(['!', '{', '}', 'then', 'do', 'else', 'if', 'while', 'until', 'elif', 'fi', 'done', 'esac']);
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
 // node, tsx, bun and deno options known to take no value; any other may take the next word as its value (#468 S01-11 review).
@@ -1103,7 +1105,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
           const env = /^(--setenv|-E)$/.test(opt) ? words[i]?.text ?? '' : /^(--setenv=|-E)/.test(opt) ? opt.replace(/^(--setenv=|-E)/, '') : '';
           const m = /^([A-Za-z_]\w*)=/.exec(env);
           if (m) runEnv.add(m[1]);
-          if (SYSTEMD_RUN_VALUE.test(opt)) i++;
+          if (systemdRunValue(opt)) i++;
           continue;
         }
         if (name === 'env' && (/^(-u|--unset)$/.test(opt) ? GH_VARS.test(words[i]?.text ?? '') : GH_VARS.test(opt.replace(/^(-u|--unset=)/, '')))) return hard(`Unsetting ${opt.replace(/^(-u|--unset=?)/, '') || words[i].text} is blocked. ${GH_ENV_WHY}`);
@@ -1314,8 +1316,8 @@ function commandOf(seg: Segment): { name: string; args: Word[] } {
     if (basename(t) === 'command' && /^-[pvV]*[vV]/.test(w[i + 1]?.text ?? '')) return { name: '', args: [] };
     // flock's lock file (#468 S01-15).
     if (lock && !t.startsWith('-') && !/^[\d.]+$/.test(t)) lock = false;
-    else if (WRAPPERS.has(basename(t))) (wrapped = true), (lock = basename(t) === 'flock'), (run ||= basename(t) === 'systemd-run');
-    else if (run && SYSTEMD_RUN_VALUE.test(w[i - 1].text)) continue;
+    else if (WRAPPERS.has(basename(t))) (wrapped = true), (lock = basename(t) === 'flock'), (run = basename(t) === 'systemd-run');
+    else if (run && systemdRunValue(w[i - 1].text)) continue;
     else if (!/^[A-Za-z_]\w*=/.test(t) && !KEYWORDS.has(t) && !(wrapped && (t.startsWith('-') || /^[\d.]+[smhd]?$/.test(t)))) break;
   }
   return { name: basename(w[i]?.text ?? ''), args: w.slice(i + 1) };

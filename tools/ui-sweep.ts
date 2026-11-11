@@ -11,7 +11,7 @@
 // scrubbed again). --keep leaves the server up and prints its URL and cookie, for poking at by hand.
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync, copyFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -186,7 +186,10 @@ async function main() {
     index.push({ name: s.name, about: s.about, flow: !!s.flow, hash, counts: r.counts, error: (r as any).error, shots: pages.flatMap((p: any) => [p.shot, p.shot_after_click].filter(Boolean)) });
     console.log(`${s.name}: ${(r as any).error ? `ERROR ${(r as any).error}` : r.ok ? 'clean' : Object.entries(r.counts).map(([k, v]) => `${v} ${k}`).join(', ')}`);
   }
-  writeFileSync(join(o.out, 'index.json'), JSON.stringify(index, null, 1) + '\n');
+  // --only re-shoots a few: keep the other screens' entries, in SCREENS order.
+  const prev: any[] = existsSync(join(o.out, 'index.json')) ? JSON.parse(readFileSync(join(o.out, 'index.json'), 'utf8')) : [];
+  const byName = new Map([...prev, ...index].map((e: any) => [e.name, e]));
+  writeFileSync(join(o.out, 'index.json'), JSON.stringify(SCREENS.map((s) => byName.get(s.name)).filter(Boolean), null, 1) + '\n');
   if (o.keep) {
     console.log('--keep: Ctrl-C (or kill this pid) stops the server');
     await new Promise(() => {});

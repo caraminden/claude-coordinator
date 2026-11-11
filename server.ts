@@ -796,7 +796,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 const app: App = {
   store, runner, auth, waiters, previews, machines, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, claude: claudeLink, codex: codexLink, contraptions, contraptionTurns, landings, services, ultrareviews,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
-  dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, bootCommit: BOOT_COMMIT,
+  dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT,
   get assetVersion() {
     return ASSET_VERSION;
   },
@@ -911,7 +911,8 @@ process.on('SIGHUP', () => {
       console.log(`Reloaded public/ on SIGHUP: front end ${before} → ${ASSET_VERSION}`);
       if (ASSET_VERSION !== before) broadcast({ type: 'hello', version: ASSET_VERSION });
       // tools/deploy.sh sends SIGHUP only for a change to public/ alone, so the checkout's HEAD is now live.
-      if (!BOOT_CHECK) liveOn(checkoutHead());
+      app.liveCommit = checkoutHead();
+      if (!BOOT_CHECK) liveOn(app.liveCommit);
     },
     (err) => console.error('Reloading public/ on SIGHUP failed; still serving the old front end:', err),
   );

@@ -84,6 +84,33 @@ test('SIGHUP swaps the served front end and its fingerprint, and tells open tabs
   await reader.cancel();
 });
 
+test("after a SIGHUP reload /api/health reports the checkout's new commit, so a revert of it is not \"nothing to deploy\" (#468 S10-1)", async () => {
+  const gitRoot = join(root, 'git-app');
+  const gitApp = join(gitRoot, 'app');
+  for (const d of ['server.ts', 'src', 'public']) cpSync(join(repo, d), join(gitApp, d), { recursive: true });
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: gitApp, encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  git('add', '-A');
+  git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'boot');
+  const booted = git('rev-parse', 'HEAD');
+  const srv = await bootServer({ root: gitRoot, script: join(gitApp, 'server.ts') });
+  procs.push(srv.proc);
+  const h = async () => (await fetch(`${srv.base}/api/health`)).json() as Promise<{ commit: string | null; version: string }>;
+  const first = await h();
+  assert.equal(first.commit, booted);
+  appendFileSync(join(gitApp, 'public', 'index.html'), '\n<!-- front end only -->\n');
+  git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qam', 'front end');
+  const deployed = git('rev-parse', 'HEAD');
+  srv.proc.kill('SIGHUP');
+  let after = first;
+  for (const end = Date.now() + 5000; after.version === first.version; await new Promise((r) => setTimeout(r, 50))) {
+    if (Date.now() > end) throw new Error('The front end did not change after SIGHUP');
+    after = await h();
+  }
+  assert.equal(after.commit, deployed);
+  await srv.stop();
+});
+
 test('a SIGHUP with a broken public/ keeps serving the old front end', async () => {
   const before = await health();
   writeFileSync(join(app, 'public', 'manifest.webmanifest'), '{ not json');

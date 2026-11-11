@@ -223,7 +223,8 @@ export interface App {
   dataDir: string;
   preview: boolean;
   machinesUrl: URL | null;
-  bootCommit: string | null;
+  /** The commit the server runs: its boot commit, moved on by each front-end-only reload (SIGHUP). */
+  liveCommit: string | null;
   readonly assetVersion: string;
   broadcast(msg: object): void;
   notify(ticketId: number, trigger: PushTrigger, except?: string | null): void;

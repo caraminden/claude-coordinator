@@ -69,7 +69,7 @@ export const appRoutes: Route[] = [
     // it serves, and that it reloads public/ on SIGHUP (an older server would exit on one).
     method: 'GET', path: '/api/health', who: 'anyone',
     // interruptible: running turns a restart would stop (they don't run in a unit of their own).
-    handler: ({ res, app }) => json(res, 200, { ok: true, commit: app.bootCommit, version: app.assetVersion, reload: 'sighup', interruptible: app.runner.interruptible(), preview: app.preview }),
+    handler: ({ res, app }) => json(res, 200, { ok: true, commit: app.liveCommit, version: app.assetVersion, reload: 'sighup', interruptible: app.runner.interruptible(), preview: app.preview }),
   },
   {
     method: 'GET', path: '/api/me', who: ['person', 'taskmaster', 'minion'],

@@ -107,6 +107,17 @@ test('a turn still running after an hour waits for its result, and is indexed wi
   store.db.close();
 });
 
+test('a turn still running after a day holds the mark no longer: its reply so far is indexed (#468 S05-2 review)', async () => {
+  const { store, A, a1 } = world(join(root, 'day.db'));
+  store.updateTicket(a1.id, { status: 'running' });
+  const long = turn(store, a1.id, 'Cara', 'A job about plums that waits on a card', 'Waiting on the approval.', false);
+  await store.memory.index(A.id, embed, 'fake', 32, Date.now() + 25 * 60 * 60_000);
+  const chunk = store.db.prepare("SELECT text FROM memory_chunks WHERE source_kind = 'turn' AND source_id = ?").get(long.id) as { text: string } | undefined;
+  assert.match(chunk?.text ?? '', /Reply: Waiting on the approval\./);
+  assert.ok(store.getSetting<number>(`memory_turns_after:${A.id}`)! >= long.id, 'the mark moves past it');
+  store.db.close();
+});
+
 test("a running turn waits, and holds the mark, until its result; then it's indexed once", async () => {
   const { store, A, a1, a2 } = world(join(root, 'two.db'));
   const running = turn(store, a1.id, 'Cara', 'Still thinking about kiwis', 'Half an answer', false);

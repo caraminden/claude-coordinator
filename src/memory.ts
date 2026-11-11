@@ -53,8 +53,10 @@ export function spokenText(kind: string, data: any): string {
 // About 600 tokens a chunk at most: embedding costs about 7 CPU-seconds per 500 tokens on perigee (#331's benchmark).
 const USER_MAX = 1000;
 const REPLY_MAX = 1500;
-/** A turn with no result and no later message counts as over after this, unless its minion still runs: its reply so far is what it said. */
+/** A turn with no result and no later message counts as over after this (LIVE_MS while its minion still runs): its reply so far is what it said. */
 const STUCK_MS = 60 * 60_000;
+/** A turn whose minion still runs holds the scheme's mark this long at most: past it, later turns past the window of 200 wait no more. */
+const LIVE_MS = 24 * 60 * 60_000;
 /** Messages that aren't a person's or a relay's ask: CI and server notices are noise. */
 const NOT_ASKS = new Set(['GitHub', 'System']);
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -165,7 +167,7 @@ export class Memory {
       const next = (this.db.prepare("SELECT MIN(id) AS id FROM events WHERE ticket_id = ? AND id > ? AND kind = 'user_message'").get(m.ticket_id, m.id) as { id: number | null }).id;
       // A turn still running past the hour is its minion's latest: it may yet reply.
       const live = next === null && this.store.getTicket(m.ticket_id)?.status === 'running';
-      if (live || now - m.created_at < STUCK_MS) return 'running';
+      if (now - m.created_at < (live ? LIVE_MS : STUCK_MS)) return 'running';
       end = next ?? Infinity;
     }
     // The turn's last words that aren't a Grunt's: its reply.

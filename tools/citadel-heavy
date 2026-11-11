@@ -6,7 +6,8 @@
 # A slot is a flock(1) lock on a file in $CITADEL_HEAVY_DIR (turns get Citadel's projects folder, which
 # every container mounts at the same path). The kernel drops a lock when its holder exits or dies, so
 # no slot is ever left stale. How many slots: the first number in $CITADEL_HEAVY_DIR/slots (edit it to
-# tune; the next job in line reads it; # starts a comment), else $CITADEL_HEAVY_SLOTS, else 2.
+# tune; the next job in line reads it; # starts a comment), else $CITADEL_HEAVY_SLOTS, else 2. Keep the
+# live file's comments free of digits: copies pinned in turns from before #503 read every digit in it.
 #
 # Box load (#503): a free slot isn't enough on its own. The job next in line also reads the host's CPU
 # pressure, /proc/pressure/cpu's "some avg60": the share of the last minute in which some task was

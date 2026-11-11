@@ -260,15 +260,15 @@ restart() {
     report fail "Deploy of $(short "$target") failed: $why, and there is no older last-good commit to roll back to. Check journalctl --user -u $SERVICE."
     exit 1
   fi
-  # For the deploy that waits on this restart, and for the landings after it while main keeps the commit (land.sh).
+  say "rolling back to last-good $(short "$good")"
+  git_live reset -q --hard "$good"
+  # Written once the checkout is back, so land.sh finds its commit gone from it. For the deploy that waits on this restart, and for the landings after it while main keeps the commit (land.sh).
   # The commit stays the first one that failed while it is still part of what failed now: a landing on top of it
   # that is rolled back too goes off main again, and the first is what main still holds.
   local held=
   [ ! -s "$STATE/bad" ] || read -r held _ <"$STATE/bad" || true
   { [ -n "$held" ] && git_live merge-base --is-ancestor "$held" "$target" 2>/dev/null && ! git_live merge-base --is-ancestor "$held" "$good" 2>/dev/null; } || held=$target
   echo "$held $good $(date +%s) $target" >"$STATE/bad"
-  say "rolling back to last-good $(short "$good")"
-  git_live reset -q --hard "$good"
   # Code from before turn units can't re-attach: it would resume turns that still run. Stop them, so
   # it resumes them alone.
   if ! git_live cat-file -e "$good:src/turn-wrapper.ts" 2>/dev/null; then
@@ -276,7 +276,7 @@ restart() {
     systemctl --user stop "$(turn_units)" || true
   fi
   if restart_healthy "$good"; then
-    report fail "Deploy of $(short "$target") failed: $why. Rolled back to last-good $(short "$good"), which is up and healthy.${saved:+ The database from before the deploy is in $saved, should the rollback have trouble with what the new code wrote.} main still has the bad commit: fix forward and deploy again. Details: journalctl --user -u $SERVICE."
+    report fail "Deploy of $(short "$target") failed: $why. Rolled back to last-good $(short "$good"), which is up and healthy.${saved:+ The database from before the deploy is in $saved, should the rollback have trouble with what the new code wrote.} A landing takes its commit back off main; after a deploy by hand main still has it: fix forward and deploy again. Details: journalctl --user -u $SERVICE."
   else
     touch "$STATE/FAILED"
     report fail "Deploy of $(short "$target") failed: $why, and the rollback to $(short "$good") did not come up healthy either. The service is likely down: check journalctl --user -u $SERVICE.${saved:+ The database from before the deploy is in $saved.}"

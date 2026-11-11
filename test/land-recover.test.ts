@@ -141,6 +141,28 @@ test('a landing killed outright while its deploy checks a commit that breaks the
   }
 });
 
+// Review of the fix: a restart queued by an earlier deploy restarts on whatever the checkout holds, the killed one's
+// commit included. Once it has come up healthy there (last-good), taking that commit away would undo a live deploy.
+test('a killed landing whose commit an earlier queued restart has since made live keeps the checkout and main', { timeout: 120_000 }, async (t) => {
+  const p = await pipe(t, 2);
+  const tip = p.commit(p.wts[0], 'a.txt', 'first\n');
+  p.commit(p.wts[1], 'b.txt', 'innocent\n');
+  const mark = join(p.dir, 'boot-started');
+  const first = p.start(land, p.wts[0], { BOOT_MARK: mark, BOOT_GATE: join(p.dir, 'boot-go') });
+  await until('the boot check to start', () => existsSync(mark));
+  process.kill(-first.pid, 'SIGKILL');
+  await first.done;
+  await until('the lock to be free', p.lockFree);
+  assert.equal(git(p.live, 'rev-parse', 'HEAD'), tip, 'the killed deploy had pulled it');
+  git(p.live, 'tag', '-f', 'last-good', tip); // what that restart does once the server stays healthy on it
+
+  const res = await p.run(land, p.wts[1]);
+  assert.equal(res.status, 0, res.stderr);
+  assert.doesNotMatch(res.stderr, /was killed/);
+  assert.deepEqual(subjects(p.source), ['b.txt: innocent', 'a.txt: first', 'base']);
+  assert.deepEqual(await p.restarts(1), ['0']);
+});
+
 // F9: the pull comes before the checks, and only a trap undid it. main_back took "the live checkout has it" for "deployed".
 test('a deploy killed outright before its checks end leaves neither the live checkout nor main on the unchecked commit', { timeout: 120_000 }, async (t) => {
   const p = await pipe(t, 1);

@@ -134,12 +134,13 @@ queue_lock() {
 #   unchecked   the commit the live checkout was on before a pull whose checks have not ended (tools/deploy.sh)
 #   moving      "<main before> <tip>" of a landing that moved main and has not seen its deploy end (tools/land.sh)
 
-# <state> <live>: a deploy died between its pull and the end of its checks, so the checkout goes back.
+# <state> <live>: a deploy died between its pull and the end of its checks, so the checkout goes back. Not when a
+# restart queued before it has since come up healthy on that commit (last-good holds it): the server runs it.
 deploy_unchecked_back() {
   local prev
   [ -s "$1/unchecked" ] || return 0
   prev=$(cat "$1/unchecked")
-  if git -C "$2" cat-file -e "$prev^{commit}" 2>/dev/null && [ "$(git -C "$2" rev-parse HEAD)" != "$prev" ]; then
+  if git -C "$2" cat-file -e "$prev^{commit}" 2>/dev/null && [ "$(git -C "$2" rev-parse HEAD)" != "$prev" ] && ! git -C "$2" merge-base --is-ancestor HEAD last-good 2>/dev/null; then
     echo "queue: an earlier deploy was killed before its checks ended; putting the live checkout back to $(git -C "$2" log -1 --format='%h "%s"' "$prev")" >&2
     git -C "$2" reset -q --hard "$prev"
   fi

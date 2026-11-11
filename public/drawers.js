@@ -212,7 +212,12 @@ export function initDrawers({ left, right, main } = {}) {
   // ---- the gesture ----
 
   document.addEventListener('touchstart', (e) => {
-    if (!narrow.matches || e.touches.length !== 1) { touch = null; return; }
+    if (!narrow.matches || e.touches.length !== 1) {
+      // A second finger mid-drag ends the drag where it began (as touchcancel does), not half out.
+      if (touch?.mode === 'drag' && drawer) settle(touch.from === 1);
+      touch = null;
+      return;
+    }
     const t = e.touches[0];
     if (drawer) {
       // A drag across an open drawer or its backdrop, toward its edge, pushes it back.

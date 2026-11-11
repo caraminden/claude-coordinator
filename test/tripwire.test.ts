@@ -312,6 +312,11 @@ const BLOCKED: [string, string?][] = [
   [`sqlite3 ${data}/projects/1/tickets/3/state.db "select 1"`],
   [`sqlite3 -readonly ${data}/projects/1/repo/app.db < q.sql`],
   ["sqlite3 ~/.local/share/claude-*/state.db 'select 1'"],
+  // #468 S01-9: after a cd the tripwire can't follow, a push still can't name main or force
+  ['cd "$WT" && git push origin main'],
+  ['cd "$WT" && git push --force origin main'],
+  ['cd "$WT" && git push --force origin topic'],
+  ['git -C "$WT" push origin HEAD:main'],
 ];
 
 const ALLOWED = [
@@ -497,6 +502,9 @@ const ALLOWED = [
   "sqlite3 dev.db 'select * from credentials'",
   "sqlite3 state.db 'create table t(x)'",
   "sqlite3 \"$TMPDIR/state.db\" 'select 1'",
+  // #468 S01-9: after a lost cd, a push of a named branch, or of HEAD (its branch unknown)
+  'cd "$WT" && git push -u origin ticket/9',
+  'cd "$WT" && git push --force-with-lease origin HEAD',
 ];
 
 // Things a person may reasonably allow once: a card for that exact call.

@@ -854,7 +854,9 @@ function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: Trip
       if (!has('--abort', '--continue', '--quit', '--skip')) move = `git ${sub}`;
       break;
     case 'push':
-      return dir && inWorktree(dir, cfg) ? pushReason(args, dir) : null;
+      // A folder it lost track of (a cd to a variable) may be a worktree: the words alone still show main
+      // or a plain force (#468 S01-9). A known folder outside one is left to the scheme.
+      return !dir || inWorktree(dir, cfg) ? pushReason(args, dir) : null;
   }
   if (!move || !dir || committed) return null;
   const st = git(dir, 'status', '--porcelain', '--untracked-files=no');
@@ -863,8 +865,8 @@ function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: Trip
   return hard(`Commit first: \`${move}\` with ${dirty.length} uncommitted tracked file(s) (${dirty.slice(0, 5).join(', ')}${dirty.length > 5 ? ', …' : ''}) can lose them. Commit (a WIP commit is fine) before any checkout, merge, rebase or reset; to see another version of a file, use \`git show <ref>:path\`.`);
 }
 
-/** Why a `git push` from a minion's worktree is blocked: it reaches main, or forces without a lease. */
-function pushReason(args: Word[], dir: string): Verdict | null {
+/** Why a `git push` from a minion's worktree is blocked: it reaches main, or forces without a lease. With dir null, the current branch is unknown. */
+function pushReason(args: Word[], dir: string | null): Verdict | null {
   const pos: Word[] = [];
   let repo = false;
   let tags = false;
@@ -884,7 +886,7 @@ function pushReason(args: Word[], dir: string): Verdict | null {
   }
   const refspecs = repo ? pos : pos.slice(1);
   let branch: string | undefined;
-  const current = () => (branch ??= git(dir, 'symbolic-ref', '--short', '-q', 'HEAD')?.out.trim() ?? '');
+  const current = () => (branch ??= (dir && git(dir, 'symbolic-ref', '--short', '-q', 'HEAD')?.out.trim()) || '');
   // With no refspec git pushes the current branch (--tags alone pushes only tags).
   if (!refspecs.length && !tags && PROTECTED.test(current())) return hard(`This push names no branch, and the current branch is ${current()}. ${MAIN_WHY}`);
   for (const w of refspecs) {

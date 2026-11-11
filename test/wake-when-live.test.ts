@@ -363,3 +363,19 @@ test('checks run one at a time, and a waiter added while one runs is kept (#526)
     store.setSetting('wake-when-live', []);
   }
 });
+
+test('a waiter set while a deploy goes live is checked against the new commit, not stored to wait for the one after (#526)', async () => {
+  const old = commit();
+  const work = commit();
+  const w = waiters(old);
+  // The live checkout doesn't run `work` yet, so add() asks GitHub; the deploy lands while it answers.
+  w.prs = {
+    branch: () => null,
+    commit: async () => {
+      if (w.head === old) await w.check(work);
+      return null;
+    },
+  };
+  assert.equal(await w.add(minion(), work, 'x'), false, 'live by the time it was set');
+  assert.equal(w.list().length, 0);
+});

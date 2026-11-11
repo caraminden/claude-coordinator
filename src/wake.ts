@@ -89,18 +89,21 @@ const UNMERGED_MS = 60_000;
 export function githubPrs(as: (repo: string) => GithubEnv = () => undefined): PrLookup {
   const merged = new Map<string, PrMerge>();
   const unmerged = new Map<string, number>();
+  // Counts forget()s: an answer asked for before one is too old to remember as "not merged".
+  let forgets = 0;
   const ask = async (repo: string, key: string, args: string[], parse: (json: any) => PrMerge | null): Promise<PrMerge | null> => {
     const hit = merged.get(key);
     if (hit) return hit;
     if ((unmerged.get(key) ?? 0) > Date.now() || !githubRepo((await git(repo, ['remote', 'get-url', 'origin'])) ?? '')) return null;
     let pr: PrMerge | null = null;
+    const asked = forgets;
     try {
       pr = parse(JSON.parse((await run('gh', args, { cwd: repo, env: asEnv(as(repo)), encoding: 'utf8', timeout: 8_000 })).stdout));
     } catch (err: any) {
       console.error(`Asking GitHub about ${key.split('\0').slice(1).join(' ')} failed:`, err.stderr?.trim() || err.message);
     }
     if (pr) merged.set(key, pr);
-    else unmerged.set(key, Date.now() + UNMERGED_MS);
+    else if (asked === forgets) unmerged.set(key, Date.now() + UNMERGED_MS);
     return pr;
   };
   return {
@@ -108,7 +111,10 @@ export function githubPrs(as: (repo: string) => GithubEnv = () => undefined): Pr
     branch: (repo, branch, tip) => ask(repo, `${repo}\0${branch}\0${tip}`,
       ['pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', 'number,state,headRefOid,mergeCommit'], mergedPr),
     commit: (repo, commit) => ask(repo, `${repo}\0${commit}`, ['api', `repos/{owner}/{repo}/commits/${commit}/pulls`], mergedPrOf),
-    forget: () => unmerged.clear(),
+    forget: () => {
+      forgets++;
+      unmerged.clear();
+    },
   };
 }
 
@@ -384,8 +390,12 @@ export class LiveWaiters {
    * it is live already. A second call for the same ticket and commit replaces the first.
    */
   async add(ticket: number, commit: string | null, reason: string): Promise<boolean> {
-    const w: Waiter = { ticket, commit, reason, since: this.head };
-    if (commit && (await this.live(w))) return false;
+    let w: Waiter;
+    // Asked again if a deploy went live meanwhile: its check has been and gone without this waiter.
+    do {
+      w = { ticket, commit, reason, since: this.head };
+      if (commit && (await this.live(w))) return false;
+    } while (w.since !== this.head);
     this.store.setSetting(KEY, [...this.list().filter((o) => o.ticket !== ticket || o.commit !== commit), w]);
     return true;
   }

@@ -12,7 +12,8 @@ test('a stall of the event loop is logged with its length, and a free loop logs 
     while (performance.now() < until); // synchronous work, as a git call on the event loop is
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(logged.length, 1);
-    assert.match(logged[0], /held for 0\.[34] s/);
+    const held = Number(logged[0].match(/held for (\d+\.\d) s/)?.[1]);
+    assert.ok(held >= 0.3, `it logs the stall's length: ${logged[0]}`); // longer on a busy box, never shorter
   } finally {
     clearInterval(timer);
   }

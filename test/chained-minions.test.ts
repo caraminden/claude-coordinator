@@ -634,3 +634,29 @@ test('through the server: start_after parks the minion with its brief held; the 
   await new Promise((r) => setTimeout(r, 200));
   assert.deepEqual(await said(later.id), ['what is this?', 'brief for Later'], 'its leader shipping later sends nothing more');
 });
+
+test('a "not merged" answer GitHub gave before forget() is not remembered: the next check asks again (#526)', async () => {
+  const dir = join(root, 'forgetful');
+  mkdirSync(dir);
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+  execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/cara/forgetful.git'], { cwd: dir });
+  // gh answers "no PR" slowly the first time, and a merged PR from then on.
+  const bin = join(root, 'forgetful-bin');
+  mkdirSync(bin);
+  const asked = join(root, 'forgetful-asked');
+  const mergedAnswer = JSON.stringify([{ number: 7, state: 'MERGED', headRefOid: 'a'.repeat(40), mergeCommit: { oid: 'b'.repeat(40) } }]);
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh\nif [ -e '${asked}' ]; then echo '${mergedAnswer}'; else touch '${asked}'; sleep 0.5; echo '[]'; fi\n`);
+  chmodSync(join(bin, 'gh'), 0o755);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    const lookup = githubPrs();
+    const first = lookup.branch(dir, 'work', 'a'.repeat(40));
+    await new Promise((r) => setTimeout(r, 250)); // gh is answering; the PR merges and its minion is dismissed
+    lookup.forget!();
+    assert.equal(await first, null);
+    assert.equal((await lookup.branch(dir, 'work', 'a'.repeat(40)))?.number, 7, 'asked again, not answered from the stale "not merged"');
+  } finally {
+    process.env.PATH = path;
+  }
+});

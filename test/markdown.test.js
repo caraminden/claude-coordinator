@@ -134,6 +134,11 @@ test('emphasis: underscores, bold italic, and what must stay plain', () => {
   assert.equal(md('C:\\Users\\x\\... and \\\\server'), '<p>C:\\Users\\x\\... and \\\\server</p>');
 });
 
+test('an escaped backtick is a backtick, not a code span; a backslash inside code stays', () => {
+  assert.equal(md('a \\`not code\\` b'), '<p>a `not code` b</p>');
+  assert.equal(md('in `C:\\` then'), '<p>in <code>C:\\</code> then</p>');
+});
+
 test('emphasis never reaches into URLs or link targets', () => {
   assert.equal(chat('see https://x.io/a_b_c and https://x.io/*y*'),
     '<p>see <a href="https://x.io/a_b_c" target="_blank" rel="noopener noreferrer">https://x.io/a_b_c</a> and <a href="https://x.io/*y" target="_blank" rel="noopener noreferrer">https://x.io/*y</a>*</p>');

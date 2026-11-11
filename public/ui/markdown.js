@@ -42,7 +42,7 @@ const startsBlock = (lines, i, breaks) => {
 };
 
 /** A code span (not across a blank line) or an HTML comment, for stripComments. */
-const CODE_OR_COMMENT = /(`+)(?!`)(?:(?!\n[ \t>]*\n)[\s\S])*?[^`]\1(?!`)|<!--[\s\S]*?-->/g;
+const CODE_OR_COMMENT = /(?<!\\)(`+)(?!`)(?:(?!\n[ \t>]*\n)[\s\S])*?[^`]\1(?!`)|<!--[\s\S]*?-->/g;
 
 /**
  * `src` without its HTML comments, except where they are code: inside a fenced block (tracked by
@@ -219,7 +219,8 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
     // An image's alt is an attribute, so what was held in it comes back as text.
     const plain = (html) => html.replace(MARK, (_, n) => at(n).replace(/<[^>]*>/g, ''));
     let s = escapeHtml(t)
-      .replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (_, _ticks, c) => hold(`<code>${/^ .*[^ ].* $/.test(c) ? c.slice(1, -1) : c}</code>`))
+      // An escaped backtick can't open a code span (the escape pass below keeps it); inside one a backslash is as typed.
+      .replace(/(?<!\\)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (_, _ticks, c) => hold(`<code>${/^ .*[^ ].* $/.test(c) ? c.slice(1, -1) : c}</code>`))
       // shortcut: only the escapes Markdown needs, not all punctuation, so Windows paths like
       // "C:\Users\x\..." and "\\server" read as typed; widen it if someone needs "\." or "\\".
       .replace(/\\(&lt;|&gt;|[*_`|[\]~#])/g, (_, c) => hold(c))

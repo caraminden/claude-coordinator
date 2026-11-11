@@ -269,6 +269,19 @@ const BLOCKED: [string, string?][] = [
   ['git push origin +ticket/9'],
   ['git push --delete origin main'],
   ['git push --repo origin main'],
+  // #468 S01-1: a command in a double-quoted $( … ) or backtick capture is checked like an unquoted one
+  ['x="$(pkill -f dev.ts)"'],
+  ['echo "$(git stash)"'],
+  [`out="$(rm -rf ${data}/state.db 2>&1)"`],
+  ['PIDS="$(ss -ltnp | grep node | cut -d= -f2)"; kill $PIDS'],
+  ['kill "$(ss -ltnp | grep ":$P " | grep -o \'pid=[0-9]*\' | cut -d= -f2)"'],
+  ['KEY="$(cat ~/.ssh/id_rsa)"'],
+  ['echo "$(cd ~/claude-coordinator && git reset --hard origin/main)"'],
+  ['if [ -n "$(systemctl --user restart claude-coordinator)" ]; then echo x; fi'],
+  ['echo "`pkill -f node`"'],
+  ['echo "a $(echo ")") b $(pkill -f node)"'],
+  ['echo "$(echo "$(cat ~/.ssh/id_rsa)")"'],
+  [`git commit -m "$(cat <<'EOF'\nA message (with a paren and a " quote\nEOF\n)" && git stash`],
 ];
 
 const ALLOWED = [
@@ -436,6 +449,11 @@ const ALLOWED = [
   'rm -rf $(pwd)/build',
   "bash <<'EOF'\nnpm test\nrm -rf /tmp/x\nEOF",
   'env -i PATH="$PATH" HOME="$HOME" DATA_DIR=/tmp/d PORT=8691 SESSION_SECRET=$(head -c 32 /dev/urandom | base64) node server.ts',
+  // #468 S01-1: quoted captures of harmless commands, and a quoted heredoc message that mentions anything
+  'echo "$(date +%F) on $(git rev-parse --short HEAD)"',
+  'x="$(echo \')\')"; echo "$x"',
+  'echo "`git rev-parse HEAD`"',
+  `git commit -m "$(cat <<'EOF'\nSay "run git push origin main" and fix the 5" width (and pkill -f node\nrm -rf ${data}/state.db\nEOF\n)" && git log -1`,
 ];
 
 // Things a person may reasonably allow once: a card for that exact call.

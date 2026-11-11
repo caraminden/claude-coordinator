@@ -211,6 +211,8 @@ export function lex(s: string, home: string): Tok[] {
   let unknown = false;
   let inWord = false;
   let quotedStart = false;
+  // Inside "…": a $( … ) or `…` in it is lexed as a command all the same (#468 S01-1), and the quotes pick up after it.
+  let dq = false;
   const put = (x: string) => {
     text += x;
     tmpl += x;
@@ -224,12 +226,12 @@ export function lex(s: string, home: string): Tok[] {
     quotedStart = false;
   };
   // Open parens: null for a plain ( … ), or the word a $( … ) or `…` sits in, to pick up again after it.
-  type Saved = { text: string; tmpl: string; unknown: boolean; quotedStart: boolean; backtick: boolean; start: number };
+  type Saved = { text: string; tmpl: string; unknown: boolean; quotedStart: boolean; backtick: boolean; start: number; dq: boolean };
   const parens: (Saved | null)[] = [];
   const open = (backtick: boolean, start: number) => {
-    parens.push({ text, tmpl, unknown, quotedStart, backtick, start });
+    parens.push({ text, tmpl, unknown, quotedStart, backtick, start, dq });
     text = tmpl = '';
-    unknown = inWord = quotedStart = false;
+    unknown = inWord = quotedStart = dq = false;
     toks.push({ kind: 'op', text: '$(' });
   };
   const close = (end: number) => {
@@ -237,32 +239,14 @@ export function lex(s: string, home: string): Tok[] {
     toks.push({ kind: 'op', text: ')' });
     const w = parens.pop();
     if (!w) return;
-    ({ text, tmpl, quotedStart } = w);
+    ({ text, tmpl, quotedStart, dq } = w);
     tmpl += mktempPath(s.slice(w.start, end), home) ?? '\0\0';
     unknown = inWord = true;
   };
   const n = s.length;
-  // Reads a $ expansion at s[i] ('$'); returns the next index.
+  // Reads a $ expansion at s[i] ('$', not '$('); returns the next index.
   const dollar = (i: number): number => {
     const c = s[i + 1];
-    if (c === '(') {
-      // Only reached inside double quotes: skip to the matching paren, stepping over heredoc bodies
-      // (the usual `git commit -m "$(cat <<'EOF' … EOF)"` message may hold unbalanced parens).
-      let depth = 0;
-      let j = i + 1;
-      for (; j < n; j++) {
-        const doc = s[j] === '<' ? /^<<-?[ \t]*(['"]?)([^\s'";&|<>()]+)\1[^\n]*\n/.exec(s.slice(j)) : null;
-        if (doc) {
-          const end = s.slice(j + doc[0].length).search(new RegExp(`^\\t*${doc[2].replace(/\W/g, '\\$&')}$`, 'm'));
-          if (end < 0) return n;
-          j += doc[0].length + end + doc[2].length;
-        } else if (s[j] === '(') depth++;
-        else if (s[j] === ')' && --depth === 0) break;
-      }
-      unknown = true;
-      tmpl += mktempPath(s.slice(i + 2, j), home) ?? '\0\0';
-      return j + 1;
-    }
     let name = '';
     let j = i + 1;
     if (c === '{') {
@@ -293,6 +277,24 @@ export function lex(s: string, home: string): Tok[] {
   let i = 0;
   while (i < n) {
     const c = s[i];
+    if (dq) {
+      // $( … ) and `…` open a command here as they do outside quotes. A heredoc in one (the usual
+      // `git commit -m "$(cat <<'EOF' … EOF\n)"`) is skipped at its line's end, so its message may hold quotes and parens.
+      if (c === '"') dq = false;
+      else if (c === '\\' && i + 1 < n && '"\\$`\n'.includes(s[i + 1])) {
+        if (s[i + 1] !== '\n') put(s[i + 1]);
+        i++;
+      } else if (c === '$' && s[i + 1] === '(') {
+        open(false, i + 2);
+        i++;
+      } else if (c === '`') open(true, i + 1);
+      else if (c === '$') {
+        i = dollar(i);
+        continue;
+      } else put(c);
+      i++;
+      continue;
+    }
     if (c === "'") {
       const end = s.indexOf("'", i + 1);
       put(s.slice(i + 1, end < 0 ? n : end));
@@ -312,19 +314,7 @@ export function lex(s: string, home: string): Tok[] {
     if (c === '"') {
       if (!inWord) quotedStart = true;
       inWord = true;
-      i++;
-      while (i < n && s[i] !== '"') {
-        if (s[i] === '\\' && i + 1 < n && '"\\$`\n'.includes(s[i + 1])) {
-          if (s[i + 1] !== '\n') put(s[i + 1]);
-          i += 2;
-        } else if (s[i] === '$') i = dollar(i);
-        else if (s[i] === '`') {
-          const end = s.indexOf('`', i + 1);
-          unknown = true;
-          tmpl += '\0\0';
-          i = end < 0 ? n : end + 1;
-        } else put(s[i++]);
-      }
+      dq = true;
       i++;
       continue;
     }

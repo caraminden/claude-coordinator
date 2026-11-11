@@ -12,7 +12,7 @@ export const isWorkTool = (name) => !TASK_TOOLS.has(name) && !HIDDEN_TOOLS.has(n
 
 export function createProgress() {
   return {
-    tasks: [], // { id, subject, activeForm, description, outcome, note, status: 'pending' | 'in_progress' | 'completed', actions }
+    tasks: [], // { id, subject, activeForm, description, outcome, note, status: 'pending' | 'in_progress' | 'completed', actions, estimate, startedAt }
     pendingCreates: new Map(), // tool_use_id -> TaskCreate input, until its result tells us the task id
     turnActions: 0,
     turnFailed: false, // the last turn ended in an error event (no init since)
@@ -291,9 +291,9 @@ function allDone(p) {
 
 /**
  * Apply one stored event. Returns the tool calls in it that count as work, each tagged with the id
- * of the step it belongs to (null when no step was in progress).
+ * of the step it belongs to (null when no step was in progress). `at` (the event's time) dates a step's start.
  */
-export function applyEvent(p, kind, data) {
+export function applyEvent(p, kind, data, at = null) {
   const actions = [];
   // A turn that died says so, rather than the "Done" of a plan an earlier turn finished.
   if (kind === 'error' && !p.turnOk) p.turnFailed = true;
@@ -328,7 +328,12 @@ export function applyEvent(p, kind, data) {
         if (idx < 0) continue;
         const task = p.tasks[idx];
         if (input.status === 'deleted') p.tasks.splice(idx, 1);
-        else if (input.status) task.status = input.status;
+        else if (input.status) {
+          if (input.status === 'in_progress' && task.status !== 'in_progress') task.startedAt = at;
+          task.status = input.status;
+        }
+        const est = estimateOf(input);
+        if (est) task.estimate = est;
         if (input.subject) task.subject = input.subject;
         if (input.activeForm) task.activeForm = input.activeForm;
         if (input.description) task.description = input.description;
@@ -340,8 +345,10 @@ export function applyEvent(p, kind, data) {
         const old = [...p.tasks];
         p.tasks = input.todos.map((t, n) => {
           const i = old.findIndex((o) => o.subject === t.content);
-          const id = i < 0 ? `todo-${block.id}-${n}` : old.splice(i, 1)[0].id;
-          return { id, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0 };
+          const was = i < 0 ? null : old.splice(i, 1)[0];
+          const id = was?.id ?? `todo-${block.id}-${n}`;
+          const startedAt = t.status !== 'in_progress' ? undefined : was?.status === 'in_progress' ? was.startedAt : at;
+          return { id, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0, startedAt };
         });
       } else if (isWorkTool(block.name)) {
         const task = stepInfo(p, true).current;
@@ -360,10 +367,30 @@ export function applyEvent(p, kind, data) {
       if (block.is_error || !id) continue;
       // A new plan starts once the previous one is finished; old finished steps drop off.
       if (p.tasks.length && allDone(p)) p.tasks = [];
-      p.tasks.push({ id, subject: input.subject || `Task ${id}`, activeForm: input.activeForm, description: input.description, status: 'pending', actions: 0 });
+      p.tasks.push({ id, subject: input.subject || `Task ${id}`, activeForm: input.activeForm, description: input.description, status: 'pending', actions: 0, estimate: estimateOf(input) });
     }
   }
   return actions;
+}
+
+/** A step's guessed minutes (metadata.estimate, #551), from Claude's own tool input: a sane number or nothing. */
+function estimateOf(input) {
+  const n = Number(input.metadata?.estimate);
+  return Number.isFinite(n) && n > 0 && n <= 24 * 60 ? n : undefined;
+}
+
+/**
+ * What the plan's guesses (#551) say while its step runs: the step's start and guessed seconds, for the
+ * bar, and the minutes left of the plan (what's left of this step's guess plus the steps not started).
+ * Null when the step underway has no guess or start.
+ */
+export function planEstimate(p, running, now = Date.now()) {
+  const { current } = stepInfo(p, running);
+  if (!current?.estimate || !current.startedAt) return null;
+  const usual = current.estimate * 60;
+  const pending = p.tasks.filter((t) => t.status === 'pending').reduce((s, t) => s + (t.estimate ?? 0), 0);
+  const left = Math.max(0, usual - (now - current.startedAt) / 1000) / 60 + pending;
+  return { since: current.startedAt, usual, left: Math.round(left) };
 }
 
 /**

@@ -131,13 +131,13 @@ test("each page carries the plan as it stood before it, so the readout matches a
   turn(store, t.id, 8, [update('1', 'completed'), update('2', 'in_progress')]);
   turn(store, t.id, 4);
   const full = createProgress();
-  for (const e of store.listEvents(t.id)) applyEvent(full, e.kind, JSON.parse(e.data));
+  for (const e of store.listEvents(t.id)) applyEvent(full, e.kind, JSON.parse(e.data), e.created_at);
 
   const page = historyPage(store, t.id, { limit: 12 });
   assert.equal(page.more, true);
   assert.deepEqual(page.tasks.map((x: any) => [x.subject, x.status]), [['Map', 'completed'], ['Build', 'in_progress']]);
   const seeded = { ...createProgress(), tasks: page.tasks };
-  for (const e of page.events) applyEvent(seeded, e.kind, JSON.parse(e.data));
+  for (const e of page.events) applyEvent(seeded, e.kind, JSON.parse(e.data), e.created_at);
   assert.deepEqual(seeded.tasks, full.tasks);
 });
 
@@ -154,13 +154,13 @@ test("a page of a running turn reads the same as a full replay, so a step left u
   store.addEvent(t.id, 'claude', { type: 'system', subtype: 'init', session_id: 's' });
   for (let i = 0; i < 20; i++) store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id: `w${++tool}`, name: 'Bash', input: { command: 'ls' } }] } });
   const full = createProgress();
-  for (const e of store.listEvents(t.id)) applyEvent(full, e.kind, JSON.parse(e.data));
+  for (const e of store.listEvents(t.id)) applyEvent(full, e.kind, JSON.parse(e.data), e.created_at);
 
   const page = historyPage(store, t.id, { limit: 10 });
   assert.equal(page.more, true);
   // Pages are whole turns, so the running turn's start comes with it and the seed needn't carry planMoved.
   const seeded = { ...createProgress(), tasks: page.tasks };
-  for (const e of page.events) applyEvent(seeded, e.kind, JSON.parse(e.data));
+  for (const e of page.events) applyEvent(seeded, e.kind, JSON.parse(e.data), e.created_at);
   assert.equal(progressLine(seeded, true), progressLine(full, true));
   assert.doesNotMatch(progressLine(seeded, true), /Wait/);
 });

@@ -33,7 +33,7 @@ function planBefore(store: Store, ticketId: number, eventId: number) {
   let tasks = plans.get(key);
   if (!tasks) {
     const p = createProgress();
-    for (const row of store.planEvents(ticketId, eventId)) applyEvent(p, row.kind, JSON.parse(row.data));
+    for (const row of store.planEvents(ticketId, eventId)) applyEvent(p, row.kind, JSON.parse(row.data), row.created_at);
     tasks = p.tasks;
     plans.set(key, tasks);
     if (plans.size > PLANS_KEPT) plans.delete(plans.keys().next().value!);

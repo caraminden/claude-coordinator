@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyEvent, createProgress, describeAction, nowDoing, stepName, progressLine, THINKING_AFTER, withoutCount } from '../public/progress.js';
+import { applyEvent, createProgress, describeAction, nowDoing, planEstimate, stepName, progressLine, THINKING_AFTER, withoutCount } from '../public/progress.js';
 
 // A plan of six steps with the given statuses: c(ompleted), i(n progress), p(ending).
 const plan = (statuses) => ({
@@ -165,4 +165,28 @@ test('the readout\'s step side names the step underway, not the last action (#55
   // A step an earlier turn left underway isn't this turn's until the plan moves.
   const stale = { ...plan('cipppp'), planMoved: false };
   assert.equal(stepName(stale, true), 'Working');
+});
+
+test("a step's guessed minutes fill the readout's bar from when it started, and what's left of the plan adds up (#551)", () => {
+  const p = createProgress();
+  const at = (min) => 1_000_000 + min * 60_000;
+  const ev = (data, t) => applyEvent(p, 'claude', data, t);
+  const call = (id, name, input, t) => ev({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } }, t);
+  const made = (id, n, t) => ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${n} created successfully` }] } }, t);
+  ev({ type: 'system', subtype: 'init' }, at(0));
+  call('c1', 'TaskCreate', { subject: 'Read', description: 'x', metadata: { estimate: 10 } }, at(0)); made('c1', 1, at(0));
+  call('c2', 'TaskCreate', { subject: 'Build', description: 'x', metadata: { estimate: '20' } }, at(0)); made('c2', 2, at(0));
+  call('c3', 'TaskCreate', { subject: 'Ship', description: 'x', metadata: { estimate: 'soon' } }, at(0)); made('c3', 3, at(0));
+  assert.deepEqual(p.tasks.map((t) => t.estimate), [10, 20, undefined], 'a guess that is not a number is dropped');
+  assert.equal(planEstimate(p, true, at(1)), null, 'nothing underway yet');
+  call('u1', 'TaskUpdate', { taskId: '1', status: 'in_progress' }, at(2));
+  assert.deepEqual(planEstimate(p, true, at(6)), { since: at(2), usual: 600, left: 26 }, '6 of 10 minutes left, plus the 20 not started');
+  call('u2', 'TaskUpdate', { taskId: '1', status: 'in_progress' }, at(5));
+  assert.equal(planEstimate(p, true, at(6)).since, at(2), 'marking it underway again keeps its start');
+  assert.equal(planEstimate(p, true, at(30)).left, 20, 'a step past its guess adds nothing more');
+  call('u3', 'TaskUpdate', { taskId: '1', status: 'completed' }, at(9));
+  call('u4', 'TaskUpdate', { taskId: '3', status: 'in_progress' }, at(9));
+  assert.equal(planEstimate(p, true, at(10)), null, 'a step with no guess shows no estimate');
+  call('u5', 'TaskUpdate', { taskId: '3', metadata: { estimate: 5 } }, at(10));
+  assert.deepEqual(planEstimate(p, true, at(10)), { since: at(9), usual: 300, left: 24 });
 });

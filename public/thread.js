@@ -19,7 +19,7 @@ import { askHeader } from './askcard.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
 import { payerChip, payerLine } from './payer.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
-import { actionLabel, applyEvent, createProgress, nowDoing, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
+import { actionLabel, applyEvent, createProgress, nowDoing, planEstimate, progressLine, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
 import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, speaker } from './cards.js';
 
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
@@ -767,6 +767,11 @@ function renderProgress() {
   // count shows only when no plan is underway.
   const count = stripped !== line ? `${done}/${total}` : !planned && live && p.turnActions ? `${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
   const time = w ? waitClock(w, 'time wait-time') : running && view.ticket.turnStartedAt ? waitClock({ since: view.ticket.turnStartedAt }, 'time wait-time') : '';
+  // The minion's own guesses for its steps (#551, Josh's pick): the bar fills against the step's, and the line
+  // says what's left of the plan's. Only while no wait has a real estimate of its own.
+  const est = !w && live ? planEstimate(p, running) : null;
+  const left = est && h('span', { class: 'time left', title: "The minion's own guess for the steps left" },
+    est.left ? `~${est.left >= 60 ? `${Math.floor(est.left / 60)}h ${est.left % 60}m` : `${est.left} min`} left` : 'past its guess');
 
   const bar = h('button', { class: 'progress-line', 'aria-expanded': String(view.ui.open), onclick: () => {
     view.ui.open = !view.ui.open;
@@ -779,9 +784,10 @@ function renderProgress() {
       now ? h('span', { class: 'doing', 'data-doing': doing }, now) : ''),
     count ? h('span', { class: 'count', title: count.includes('/') ? `${done} of ${total} steps done` : '' }, count) : '',
     time,
+    left || '',
     h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'));
   // With no plan the meter keeps its room, hidden, so a plan arriving doesn't push the chat (rule 13).
-  const meter = w && (w.total || w.usual) ? waitBar(w, 'wait-bar big') : h('progress', { class: total ? 'meter' : 'meter blank', max: total || 1, value: total ? done : 0 });
+  const meter = w && (w.total || w.usual) ? waitBar(w, 'wait-bar big') : est ? waitBar(est, 'wait-bar big') : h('progress', { class: total ? 'meter' : 'meter blank', max: total || 1, value: total ? done : 0 });
 
   const prevDetail = progressEl.querySelector('.progress-detail');
   const scrollTop = prevDetail?.scrollTop ?? 0;
@@ -838,7 +844,7 @@ export function appendEvent(event, scroll = true) {
   if (event.kind === 'claude' && data.type === 'assistant' && !grunt) {
     for (const b of data.message?.content ?? []) if (b.type === 'text' && b.text.trim()) view.turnNote = b.text.trim();
   }
-  for (const { block, taskId } of applyEvent(view.progress, event.kind, data)) {
+  for (const { block, taskId } of applyEvent(view.progress, event.kind, data, event.created_at)) {
     const action = { block, taskId, result: null };
     view.actions.set(block.id, action);
     view.turnActions.push(action);

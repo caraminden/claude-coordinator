@@ -403,7 +403,7 @@ div.recap { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line))
 .progress-line .time { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
 .progress .wait-bar.big { width: calc(100% - 0.4rem); margin: 0.25rem 0.2rem 0; }
 /* A phone gives the line to what's happening now: the step is in the opened readout. */
-@media (max-width: 800px) { .progress-line .text:has(.doing) > :is(.stepname, .arrow) { display: none; } }
+@media (max-width: 800px) { .progress-line .text:has(.doing) > :is(.stepname, .arrow), .progress-line .left { display: none; } }
 /* The opened readout's wait in full, under a landing's track */
 .wait-line { margin: 0.1rem 0.3rem 0.6rem; }
 .wait-full { margin: 0; font-size: 0.9em; }

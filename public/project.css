@@ -321,7 +321,8 @@ button.pin.on { color: var(--accent); }
 .pv-warn:empty { display: none; }
 .prop-new-key { margin-top: 1rem; }
 .props-main .ticket-head > .row > h2 { flex: 1 1 auto; }
-.props-main .ticket-head .meta { white-space: normal; overflow: visible; text-overflow: clip; }
+/* Settings intros and a file's info line say something whole: they wrap rather than end in "…" (#471). */
+.artifacts-main .ticket-head .meta { white-space: normal; overflow: visible; text-overflow: clip; }
 .props-main .small { font-size: 0.85em; }
 .props-main button.small { padding: 0.2rem 0.6rem; font-size: 0.85em; }
 .pv-add select { flex: none; width: auto; }

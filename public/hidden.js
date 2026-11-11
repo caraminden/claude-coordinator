@@ -55,7 +55,7 @@ function redrawHidden() {
 }
 
 const row = (p, button) => h('div', { class: 'scheme-row' },
-  h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}` },
+  h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, title: p.name },
     schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), p.hidden ? null : schemeCount(p)),
   button);
 

@@ -136,7 +136,7 @@ let closeSchemeMenu = () => {};
 export function toggleSchemeMenu(button) {
   if (document.getElementById('scheme-menu')) return closeSchemeMenu();
   const menu = h('div', { id: 'scheme-menu', class: 'scheme-menu' },
-    view.projects.filter((p) => !p.hidden || p.id === view.projectId).map((p) => h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, onclick: () => closeSchemeMenu() },
+    view.projects.filter((p) => !p.hidden || p.id === view.projectId).map((p) => h('a', { class: `nav-item${p.id === view.projectId ? ' active' : ''}`, href: `#/p/${p.id}`, title: p.name, onclick: () => closeSchemeMenu() },
       schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), schemeCount(p))),
     h('button', { type: 'button', class: 'nav-item add', onclick: () => { closeSchemeMenu(); openNewScheme(); } }, '+ New scheme'));
   const outside = (e) => { if (!menu.contains(e.target) && !button.contains(e.target)) closeSchemeMenu(); };

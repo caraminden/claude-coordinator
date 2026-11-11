@@ -359,7 +359,7 @@ function inPage(opts) {
       if (ellipsis) {
         if (box.scrollWidth > box.clientWidth + 1 || box.scrollHeight > box.clientHeight + 1) {
           seenClip.add(box);
-          truncated.push({ check: 'truncated', selector: sel(box), text: snip(box.textContent), full_text_in: box.hasAttribute('data-tip-overflow') ? 'data-tip-overflow' : box.title ? 'title' : null });
+          truncated.push({ check: 'truncated', selector: sel(box), text: snip(box.textContent), full_text_in: box.hasAttribute('data-tip-overflow') ? 'data-tip-overflow' : box.closest('[title]')?.title ? 'title' : null });
         }
       } else {
         const b = box.getBoundingClientRect();

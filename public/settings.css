@@ -6,7 +6,8 @@
 .shelf .account > .row:first-child > :is(a, button) { flex: none; }
 .settings-link .count, .settings-tabs a .count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 0.4rem; font-size: 0.85em; line-height: 1.4; }
 .settings-link .count[hidden], .settings-tabs a .count[hidden] { display: none; }
-.settings-tabs { display: flex; gap: 0.25rem; margin-top: 0.5rem; overflow-x: auto; }
+/* Every tab in sight: they wrap to a second line rather than scroll off the edge with no cue (#471). */
+.settings-tabs { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.5rem; }
 .settings-tabs a { display: inline-flex; align-items: center; min-height: 24px; box-sizing: border-box; padding: 0.3rem 0.7rem; border-radius: 6px; color: var(--muted); text-decoration: none; white-space: nowrap; font-size: 0.9em; }
 .settings-tabs a:hover { background: var(--panel); color: var(--ink); }
 @media (max-width: 800px) { .settings-tabs a { min-height: var(--control-h); } }

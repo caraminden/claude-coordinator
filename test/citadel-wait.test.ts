@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -71,4 +71,25 @@ test('gives up with 124 and says so; bad usage is 2', async () => {
   assert.ok(hung.ms < 10_000, `took ${hung.ms} ms`);
   assert.equal((await wait(['pid', 'abc'])).code, 2);
   assert.equal((await wait(['soon'])).code, 2);
+});
+
+test('cmd: a test that asks GitHub is checked every 20 s, not every 2 s, and still stops at the limit', async () => {
+  // A minion's `citadel-wait cmd '[ "$(gh run view …)" = completed ]'` at 2 s spent ~2,900 of a person's 5,000 GitHub calls an hour (#562).
+  const dir = join(root, 'ghbin');
+  const calls = join(root, 'gh-calls');
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir);
+  writeFileSync(join(dir, 'gh'), `#!/bin/sh\necho x >> '${calls}'\necho in_progress\n`, { mode: 0o755 });
+  const start = Date.now();
+  const child = spawn(bin, ['cmd', '[ "$(gh run view 1 --json status -q .status)" = completed ]'], {
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CITADEL_WAIT_SECONDS: '7' },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  let err = '';
+  child.stderr.on('data', (b) => (err += b));
+  const code = await new Promise((r) => child.on('close', r));
+  assert.equal(code, 124, err);
+  assert.ok(Date.now() - start < 12_000, 'the 20 s gap is cut short by the limit');
+  assert.equal(readFileSync(calls, 'utf8').split('\n').filter(Boolean).length, 1, 'one GitHub call in 7 s');
+  assert.match(err, /every 20s/);
 });

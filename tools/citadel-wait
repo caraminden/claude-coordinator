@@ -6,7 +6,8 @@
 #   citadel-wait file <path>    until that file exists
 #   citadel-wait cmd '<test>'   until the shell test exits 0
 # Exits 0 once it is true, 124 after $CITADEL_WAIT_SECONDS (default 590, under the Bash tool's
-# 10-minute cap), 2 on bad usage. Checks every 2 seconds.
+# 10-minute cap), 2 on bad usage. Checks every 2 seconds, or every 20 for a test that asks GitHub (#562: one
+# `gh run view` test at 2 s spent over half of a person's 5,000 GitHub API calls an hour).
 set -uo pipefail
 
 say() { echo "citadel-wait: $*" >&2; }
@@ -27,16 +28,21 @@ case $kind in
     what="$arg to exist" ;;
   # Bounded by what's left, so a test that hangs can't outlast the limit.
   cmd) done_yet() { [ "$SECONDS" -lt "$limit" ] && timeout "$((limit - SECONDS))" bash -c "$arg" >/dev/null 2>&1; }
-    what="\`$arg\` to succeed" ;;
+    what="\`$arg\` to succeed"
+    if [[ $arg =~ (^|[^[:alnum:]_.-])gh[[:space:]]|github|ci-status ]]; then
+      every=20
+      say "it asks GitHub, so it checks every ${every}s"
+    fi ;;
   *) usage ;;
 esac
 
 SECONDS=0
+every=${every:-2}
 until done_yet; do
   if [ "$SECONDS" -ge "$limit" ]; then
     say "still waiting for $what after ${SECONDS}s; run it again to keep waiting"
     exit 124
   fi
-  sleep 2
+  sleep "$((every < limit - SECONDS ? every : limit - SECONDS))"
 done
 say "done waiting for $what (${SECONDS}s)"

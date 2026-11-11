@@ -66,3 +66,24 @@ test("a notification click goes to a window on Citadel's own page, never a previ
   assert.deepEqual(citadel.sent, [{ type: 'open', url: 'https://citadel.example/c/#/p/2/t/9' }]);
   assert.deepEqual(preview.sent, []);
 });
+
+test("a page load that meets Caddy's 502 gets a page that says Citadel is restarting and retries, but not a preview's own (#493)", async () => {
+  const load = async (url: string, status: number) => {
+    const listeners: Record<string, (e: any) => void> = {};
+    const self = { addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn) };
+    const upstream = new Response(`upstream ${status}`, { status });
+    new Function('self', 'fetch', readFileSync(join(import.meta.dirname, '..', 'public', 'sw.js'), 'utf8'))(self, async () => upstream);
+    let answer: Promise<Response> | undefined;
+    listeners.fetch({ request: { url, mode: 'navigate' }, respondWith: (p: Promise<Response>) => (answer = p) });
+    const res = await answer!;
+    return { status: res.status, body: await res.text() };
+  };
+  for (const status of [502, 503, 504]) {
+    const { body } = await load('https://citadel.example/c/', status);
+    assert.match(body, /is restarting/);
+    assert.match(body, /http-equiv="refresh" content="3"/);
+  }
+  assert.deepEqual(await load('https://citadel.example/c/', 200), { status: 200, body: 'upstream 200' });
+  assert.deepEqual(await load('https://citadel.example/c/', 500), { status: 500, body: 'upstream 500' });
+  assert.deepEqual(await load('https://citadel.example/preview/3/c/', 502), { status: 502, body: 'upstream 502' });
+});

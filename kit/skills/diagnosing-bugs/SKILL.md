@@ -72,6 +72,14 @@ runs and flake hunts run on a CI or desktop runner (the scheme's stress or flake
 `citadel:run-on-windows` for Windows), because perigee carries every agent and the Citadel
 server: a Peek minion's 100-run loop there helped push its load to 88.
 
+**Stress runs don't share the land gate's queue.** A runner that serves landings is theirs first. A run in
+the gate workflow's concurrency group (Citadel's `citadel-tests`) holds it for the whole run, and a land
+that pushes meanwhile waits behind it. land.sh gives up on a runner after 90 s and falls back to the suite
+on the host: Citadel #564's probes, each started only while the group was idle, still sent two lands to
+perigee that way. So loop where landings don't wait (a stress workflow with its own group on a runner
+lands don't use), or ask a person for a quiet window first. Checking for a queued land before each push
+isn't enough, because the land arrives after the check.
+
 ### Flaky tests
 
 Sleeps help reproduce a race; they never fix one.

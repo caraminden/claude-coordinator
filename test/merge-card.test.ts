@@ -70,5 +70,7 @@ test('toInfo keeps what the card shows from gh pr view, and refuses what isn\'t 
   assert.deepEqual(info, { number: 192, title: 'Port the guard', url: 'https://github.com/o/r/pull/192', state: 'OPEN', draft: false, head: 'ticket/77', base: 'main', additions: 344, deletions: 30, files: 4, commits: 3, checks: 'passed' });
   assert.equal(toInfo({ number: 1, title: 't', url: 'javascript:alert(1)', statusCheckRollup: [] })?.url, '');
   assert.equal(toInfo({ number: 1, title: 't', statusCheckRollup: [] })?.checks, null);
+  const skipped = { __typename: 'CheckRun', name: 'windows', status: 'COMPLETED', conclusion: 'SKIPPED' };
+  assert.equal(toInfo({ number: 1, title: 't', statusCheckRollup: [skipped, { ...skipped, name: 'desktop' }] })?.checks, null, 'all skipped tested nothing (#558)');
   assert.equal(toInfo({ message: 'not found' }), null);
 });

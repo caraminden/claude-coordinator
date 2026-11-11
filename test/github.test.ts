@@ -191,6 +191,27 @@ test('a draft PR with no checks is not nudged, but a draft that conflicts still 
   assert.match(ready[0] ?? '', /^CI hasn't started on fff0000 in PR #12: no checks after 10 minutes\. /);
 });
 
+test('checks that all skipped tested nothing: no pass, and they count as no checks yet (#558)', () => {
+  // Peek's draft PRs run their workflows with every job skipped; that must not read as green.
+  const node = { __typename: 'CheckRun', name: 'windows', status: 'COMPLETED', detailsUrl: 'https://ci/windows' };
+  for (const conclusion of ['SKIPPED', 'NEUTRAL', 'STALE']) assert.equal(checkOf({ ...node, conclusion }).status, 'skipped', conclusion);
+  assert.equal(checkOf({ ...node, conclusion: 'SUCCESS' }).status, 'passed');
+  assert.equal(verdict([check('windows', 'skipped'), check('desktop', 'skipped')]), null);
+  assert.equal(verdict([check('windows', 'skipped'), check('lint', 'pending')]), 'pending');
+  assert.equal(verdict([check('windows', 'skipped'), check('lint', 'passed')]), 'passed', 'real checks passed alongside skipped ones');
+  assert.equal(verdict([check('windows', 'skipped'), check('lint', 'failed')]), 'failed');
+
+  const seen = new Set(['baseline']);
+  const ci = { hasCi: true, baseRef: 'main', mergeable: 'MERGEABLE' };
+  const skipped = [check('windows', 'skipped'), check('desktop', 'skipped')];
+  assert.deepEqual(decide(pr({ ...ci, checks: skipped }), seen, opts({ headFor: NO_CHECKS_MS - 1 })).messages, [], 'no "CI passed"');
+  assert.deepEqual(decide(pr({ ...ci, draft: true, checks: skipped }), seen, opts({ headFor: 3 * NO_CHECKS_MS })).messages, [], 'a draft is expected to test nothing');
+  const ready = decide(pr({ ...ci, checks: skipped }), seen, opts({ headFor: NO_CHECKS_MS })).messages;
+  assert.deepEqual(ready, ["CI hasn't tested abc1234 in PR #12: all 2 checks skipped after 10 minutes. If its workflows skip this change by design, nothing is wrong; otherwise look at https://github.com/o/r/pull/12/checks"]);
+  // Real checks that then finish green are still news.
+  assert.deepEqual(decide(pr({ ...ci, checks: [...skipped, check('lint', 'passed')] }), seen, opts()).messages, ['CI passed on abc1234 in PR #12 (3 checks).']);
+});
+
 test('the snapshot carries whether the PR is a draft (#554)', () => {
   const data = (isDraft: unknown) => ({ viewer: { login: 'cara' }, repository: { workflows: null, pullRequests: { nodes: [{ number: 67, url: 'u', state: 'OPEN', headRefOid: SHA, isDraft }] } } });
   assert.equal(parseSnapshot(data(true)).pr!.draft, true);

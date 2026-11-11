@@ -39,6 +39,9 @@ test('ciNow: queued, then a job by its steps or several by how many are done, th
   assert.deepEqual(ciNow([ok({})]), { stage: 'passed', short: 'passed', text: 'passed, its job green', since: T0, ended: T0 + 300_000 });
   assert.equal(ciNow([ok({}), ok({ name: 'b', conclusion: 'failure', steps: [{ name: 'the full suite', status: 'completed', conclusion: 'failure' }] })])!.text, 'failed in b (the full suite)');
   assert.equal(ciNow([ok({ conclusion: 'cancelled' })])!.stage, 'cancelled');
+  // Every job skipped (a draft's PR CI, #558) tested nothing: not green. A skip beside a real pass still is.
+  assert.deepEqual(ciNow([ok({ conclusion: 'skipped' }), ok({ name: 'b', conclusion: 'neutral' })]), { stage: 'skipped', short: 'skipped', text: 'ran nothing, all 2 jobs skipped', since: T0, ended: T0 + 300_000 });
+  assert.equal(ciNow([ok({}), ok({ name: 'b', conclusion: 'skipped' })])!.stage, 'passed');
 });
 
 test('pendingRuns: the Actions runs of a PR\'s pending checks', () => {

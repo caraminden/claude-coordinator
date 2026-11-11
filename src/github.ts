@@ -33,7 +33,8 @@ const INSIDERS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
 export interface Check {
   name: string;
-  status: 'pending' | 'passed' | 'failed';
+  /** skipped: finished without testing anything (GitHub's SKIPPED, NEUTRAL or STALE). */
+  status: 'pending' | 'passed' | 'skipped' | 'failed';
   url: string | null;
   /** An Actions job that failed without starting (no steps ran: a billing block, no runner): GitHub's reason, '' when it gave none. */
   notStarted?: string;
@@ -99,11 +100,14 @@ function during(spans: Span[], at: number): boolean {
   return spans.some(([start, end]) => at >= start - TURN_MARGIN_MS && at <= end + TURN_MARGIN_MS);
 }
 
-/** Where the checks on a head commit stand: failed as soon as any check fails, passed once all finish. */
+/**
+ * Where the checks on a head commit stand: failed as soon as any check fails, passed once all finish. null with no checks,
+ * or when all of them skipped: nothing was tested (#558).
+ */
 export function verdict(checks: Check[]): 'pending' | 'passed' | 'failed' | null {
-  if (!checks.length) return null;
   if (checks.some((c) => c.status === 'failed')) return 'failed';
-  return checks.some((c) => c.status === 'pending') ? 'pending' : 'passed';
+  if (checks.some((c) => c.status === 'pending')) return 'pending';
+  return checks.some((c) => c.status === 'passed') ? 'passed' : null;
 }
 
 /**
@@ -153,9 +157,13 @@ export function decide(
   // GitHub works out `mergeable` when first asked, so an UNKNOWN waits for the next look rather than leave out the cause.
   // A clean draft is left alone (its key unspent, for when it's marked ready); a conflicting one still hears why (#554).
   const expectNone = pr.draft && pr.mergeable !== 'CONFLICTING';
-  if (pr.state === 'OPEN' && !pr.checks.length && pr.hasCi && pr.mergeable !== 'UNKNOWN' && !expectNone && (opts.headFor ?? 0) >= NO_CHECKS_MS) {
+  // Checks that all skipped (a draft's PR CI) tested nothing, so they count as none yet (#558).
+  if (pr.state === 'OPEN' && result === null && pr.hasCi && pr.mergeable !== 'UNKNOWN' && !expectNone && (opts.headFor ?? 0) >= NO_CHECKS_MS) {
     consider(`nochecks:${pr.headSha}`, () => {
-      const head = `CI hasn't started on ${short(pr.headSha)} in PR #${pr.number}: no checks after ${NO_CHECKS_MS / 60_000} minutes`;
+      const n = pr.checks.length;
+      const head = n
+        ? `CI hasn't tested ${short(pr.headSha)} in PR #${pr.number}: ${n === 1 ? 'its check' : `all ${n} checks`} skipped after ${NO_CHECKS_MS / 60_000} minutes`
+        : `CI hasn't started on ${short(pr.headSha)} in PR #${pr.number}: no checks after ${NO_CHECKS_MS / 60_000} minutes`;
       if (pr.mergeable === 'CONFLICTING') return `${head}, because the PR conflicts with ${pr.baseRef ?? 'its base'} and GitHub runs no pull_request workflows on a conflicting PR. Rebase onto ${pr.baseRef ?? 'its base'} and push to get CI.`;
       return `${head}. If its workflows skip this change by design, nothing is wrong; otherwise look at ${pr.url}/checks`;
     });
@@ -242,14 +250,14 @@ const QUERY = `query($owner: String!, $name: String!, $branch: String!) {
   }
 }`;
 
-const PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED', 'STALE']);
+const SKIPPED = new Set(['NEUTRAL', 'SKIPPED', 'STALE']);
 
 export function check(node: any): Check {
   if (node.__typename === 'StatusContext') {
     const s = node.state;
     return { name: node.context, url: node.targetUrl ?? null, status: s === 'SUCCESS' ? 'passed' : s === 'PENDING' || s === 'EXPECTED' ? 'pending' : 'failed' };
   }
-  const status = node.status !== 'COMPLETED' ? 'pending' : PASSED.has(node.conclusion) ? 'passed' : 'failed';
+  const status = node.status !== 'COMPLETED' ? 'pending' : node.conclusion === 'SUCCESS' ? 'passed' : SKIPPED.has(node.conclusion) ? 'skipped' : 'failed';
   const out: Check = { name: node.name, url: node.detailsUrl ?? null, status };
   if (node.status === 'QUEUED') out.queued = true;
   // Only Actions jobs list steps; another app's check run has none even when it ran.

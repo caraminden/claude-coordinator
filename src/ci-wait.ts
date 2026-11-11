@@ -23,7 +23,7 @@ export const LAND_WORKFLOW = 'tests.yml';
 
 /** Where a CI run stands, in words for a wait. */
 export interface CiNow {
-  /** queued (no job started), jobs (some running), passed, failed, cancelled. */
+  /** queued (no job started), jobs (some running), passed, skipped (every job, so nothing tested), failed, cancelled. */
   stage: string;
   /** The shortest form: "queued", "1/3 jobs", "step 5/8", "passed". */
   short: string;
@@ -58,9 +58,11 @@ export function ciNow(jobs: Job[], over = true): CiNow | null {
   if (over && done.length === jobs.length) {
     const ended = Math.max(...jobs.map((j) => at(j.completed_at)).filter((t) => !Number.isNaN(t)));
     const failed = jobs.filter((j) => !PASSED.has(j.conclusion ?? ''));
-    const stage = !failed.length ? 'passed' : failed.every((j) => j.conclusion === 'cancelled') ? 'cancelled' : 'failed';
+    // Every job skipped or neutral (a draft's PR CI, #558) tested nothing: not green.
+    const stage = !failed.length ? (jobs.some((j) => j.conclusion === 'success') ? 'passed' : 'skipped') : failed.every((j) => j.conclusion === 'cancelled') ? 'cancelled' : 'failed';
     const bad = failed.filter((j) => j.conclusion !== 'cancelled');
     const text = stage === 'passed' ? `passed, ${jobs.length === 1 ? 'its job' : `all ${jobs.length} jobs`} green`
+      : stage === 'skipped' ? `ran nothing, ${jobs.length === 1 ? 'its job' : `all ${jobs.length} jobs`} skipped`
       : stage === 'cancelled' ? 'cancelled'
         : `failed in ${bad.map((j) => { const s = ((j.steps ?? []) as Step[]).find((x) => x.conclusion === 'failure'); return s ? `${j.name} (${s.name})` : j.name; }).join(', ')}`;
     return { stage, short: stage, text, since, ended: Number.isFinite(ended) ? ended : undefined };

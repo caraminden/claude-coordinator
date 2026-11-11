@@ -14,7 +14,9 @@
 import { execFileSync } from 'node:child_process';
 import type { Store } from './db.ts';
 import { githubRepo } from './github.ts';
+import type { Runner } from './runner.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
+import { catchUpTicketDir } from './workspace.ts';
 
 /** A minion waiting for a commit to be live, or (commit null) for the next deploy after `since`. */
 export interface Waiter {
@@ -405,4 +407,34 @@ export class LiveWaiters {
     }
     return ids;
   }
+}
+
+/**
+ * Start a chained minion (LiveWaiters.start, Start now): catch its branch up to what a new minion would
+ * branch from, so it builds on the work it waited for, then send its held brief. Both run on the minion's
+ * lane: after a turn running in its worktree now (a parked minion answering a message) and that turn's
+ * save, never under it, and before the brief's turn (#468 S07-2). The brief stays in the chain until it is
+ * sent, so a server that dies during the catch-up starts it after the restart. Resolves once it is sent,
+ * or at once while a turn runs, so Start now doesn't wait that turn out.
+ */
+export async function startChained(c: Chain, why: string, { store, runner, waiters }: { store: Store; runner: Pick<Runner, 'onLane' | 'isRunning' | 'emit' | 'send'>; waiters: LiveWaiters }): Promise<void> {
+  const t = store.getTicket(c.ticket);
+  if (!t) return waiters.end(c.ticket);
+  const repo = store.getProject(t.project_id)?.repo_dir ?? null;
+  const sent = runner.onLane(c.ticket, 'chained start', async () => {
+    try {
+      await catchUpTicketDir(t.cwd, repo).catch((err) => console.error(`Catching up #${t.number}'s branch failed:`, err));
+      if (!waiters.release(c.ticket)) return; // dismissed meanwhile
+      try {
+        runner.emit(c.ticket, 'note', { text: `${why}, so this minion started.` });
+        runner.send(c.ticket, c.from, c.message, [], { brief: true });
+      } catch (err) {
+        waiters.chain(c); // held again: the next check, or Start now, tries again
+        throw err;
+      }
+    } finally {
+      waiters.end(c.ticket);
+    }
+  });
+  if (!runner.isRunning(c.ticket)) await sent;
 }

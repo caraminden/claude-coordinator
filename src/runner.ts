@@ -604,6 +604,11 @@ export class Runner {
     return join(projectDir(this.dataDir, projectId), 'tmp');
   }
 
+  /** Run `step` on the minion's lane (src/lanes.ts): after a turn of its running now and that turn's save, before its next turn. */
+  onLane(ticketId: number, what: string, step: () => unknown): Promise<void> {
+    return this.lanes.run(ticketId, what, step);
+  }
+
   isRunning(ticketId: number): boolean {
     return this.turns.has(ticketId);
   }

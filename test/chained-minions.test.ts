@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { type Chain, githubPrs, LiveWaiters, mergedPr, mergedPrOf, type PrMerge } from '../src/wake.ts';
+import { type Chain, githubPrs, LiveWaiters, mergedPr, mergedPrOf, type PrMerge, startChained } from '../src/wake.ts';
 import { bootServer, stopTurns, stopProcs, testPins } from './helpers.ts';
 testPins();
 
@@ -503,6 +503,55 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   const after = store.getTicket(t.id)!;
   assert.equal(after.status, 'idle');
   assert.deepEqual([after.state, after.note], ['parked', 'starts when #1 is merged']);
+});
+
+test("a chained minion's branch is caught up after the turn running in its worktree ends, never under it, and before its brief's turn (#468 S07-2)", async () => {
+  const release = join(root, 'release-s07-2');
+  const fake = join(root, 'claude-held');
+  writeFileSync(fake, `#!${process.execPath}
+const { existsSync } = require('node:fs');
+require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
+  const t = setInterval(() => {
+    if (!existsSync(${JSON.stringify(release)})) return;
+    clearInterval(t);
+    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'answered' }));
+    process.exit(0);
+  }, 20);
+});
+`);
+  chmodSync(fake, 0o755);
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const { id, branch } = minion();
+  const cwd = join(root, `wt-${id}`);
+  live.git('worktree', 'add', '-q', cwd, branch);
+  store.setTicketDir(id, cwd, branch);
+  const head = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
+  const said = () => store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data).text);
+  const wait = async (what: string, ok: () => boolean) => {
+    for (let i = 0; !ok(); i++) {
+      assert.ok(i < 500, what);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  };
+
+  // A parked minion answers a message; meanwhile its leader's work lands on main and Start now is pressed.
+  runner.send(id, 'Cara', 'what is this?');
+  await wait('the turn starts', () => runner.isRunning(id));
+  const before = head();
+  const landed = live.commit();
+  const w = new LiveWaiters(store, live.dir, landed, () => {});
+  w.chain({ ticket: id, after: 0, when: 'merged', message: 'build part two', from: 'Taskmaster', base: before, since: 0 });
+  await startChained(w.claim(id)!, 'Cara started it', { store, runner, waiters: w });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(head(), before, 'the worktree stays put while its turn runs');
+  assert.deepEqual(said(), ['what is this?'], 'the brief waits too');
+
+  writeFileSync(release, '');
+  await wait('the brief is sent', () => said().length === 2);
+  assert.equal(head(), landed, 'caught up before the brief');
+  assert.deepEqual(said(), ['what is this?', 'build part two']);
+  await wait('its turn ends', () => !runner.isRunning(id));
+  assert.equal(w.claim(id), null, 'the chain is gone once sent');
 });
 
 test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or Start now starts it, a message only gets an answer; a brief is marked as one', async () => {

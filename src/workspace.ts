@@ -163,7 +163,9 @@ async function bornBase(repoDir: string, base: string): Promise<string> {
 /**
  * A chained minion starts later than it was created: fast-forward its branch to what a new minion
  * would branch from now, so it builds on the work it waited for. Only a fast-forward: a branch with
- * commits of its own, or a dirty worktree, is left as it is. Returns whether it moved.
+ * commits of its own, or uncommitted changes to a file the fast-forward would change, leaves it as it is;
+ * other uncommitted files don't stop it. So it runs only between turns (src/wake.ts startChained).
+ * Returns whether it moved.
  */
 export async function catchUpTicketDir(cwd: string, repoDir: string | null): Promise<boolean> {
   if (!repoDir) return false;

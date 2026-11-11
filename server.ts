@@ -26,9 +26,9 @@ import { pinTurnFiles, turnEnv } from './src/turn-launch.ts';
 import { Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { isBackupPath, serveBackup } from './src/backup.ts';
-import { type Chain, githubPrs, LiveWaiters } from './src/wake.ts';
+import { type Chain, githubPrs, LiveWaiters, startChained } from './src/wake.ts';
 import { errorText, followOrigins } from './src/scheme-repo.ts';
-import { catchUpTicketDir, createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
+import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { describeCron, pinForOwner, runBrief, runMinion, type Schedule } from './src/schedules.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, SECURITY_HEADERS, send, type App, type SharedFile } from './src/http.ts';
@@ -297,28 +297,9 @@ function notify(ticketId: number, trigger: PushTrigger, except: string | null = 
 
 runner.onTurnError = (ticketId, text, eventId) => notify(ticketId, { kind: 'error', text, eventId });
 
-// Chained minions (create_ticket's start_after): one starts with its held brief, on a branch caught
-// up to main so it builds on the work it waited for, once its leader's work is in.
-// The brief stays in the chain until it is sent, so a server that dies during the catch-up starts it after the restart.
-async function startChained(c: Chain, why: string) {
-  try {
-    const t = store.getTicket(c.ticket);
-    if (!t) return;
-    const repo = store.getProject(t.project_id)?.repo_dir ?? null;
-    await catchUpTicketDir(t.cwd, repo).catch((err) => console.error(`Catching up #${t.number}'s branch failed:`, err));
-    if (!waiters.release(c.ticket)) return; // dismissed meanwhile
-    try {
-      runner.emit(c.ticket, 'note', { text: `${why}, so this minion started.` });
-      runner.send(c.ticket, c.from, c.message, [], { brief: true });
-    } catch (err) {
-      waiters.chain(c); // held again: the next check, or Start now, tries again
-      throw err;
-    }
-  } finally {
-    waiters.end(c.ticket);
-  }
-}
-waiters.start = (c, why) => void startChained(c, why);
+// Chained minions (create_ticket's start_after): one starts with its held brief once its leader's work is in (src/wake.ts startChained).
+const startChain = (c: Chain, why: string) => startChained(c, why, { store, runner, waiters });
+waiters.start = (c, why) => void startChain(c, why).catch((err) => console.error(`Starting chained #${c.ticket} failed:`, err));
 runner.heldFor = (id) => waiters.heldFor(id);
 // Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.
 waiters.hold = (c, why) => {
@@ -816,7 +797,7 @@ const app: App = {
   get assetVersion() {
     return ASSET_VERSION;
   },
-  broadcast, notify, newMinion, startChained, ticketBranch, sharedFiles, sharedDir, registryChanged,
+  broadcast, notify, newMinion, startChained: startChain, ticketBranch, sharedFiles, sharedDir, registryChanged,
 };
 const routes = router([...appRoutes, ...peopleRoutes, ...projectRoutes, ...ticketRoutes, ...fileRoutes, ...machineRoutes, ...pushRoutes, ...contraptionRoutes]);
 

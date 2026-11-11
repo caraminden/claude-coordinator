@@ -643,6 +643,9 @@ export class WorkspaceHost {
       }
     }
     const argv = [...task.run.map((a) => expand(a, this.env)), ...(task.args && Array.isArray(extra) ? extra : [])];
+    // Before the locks: a jobs folder that can't be made must not leave them taken.
+    mkdirSync(this.jobsDir, { recursive: true });
+    this.prune();
     const lock = this.take(w, `task ${name}`, who);
     let screen = null;
     try {
@@ -652,8 +655,6 @@ export class WorkspaceHost {
       throw err;
     }
     const id = randomBytes(4).toString('hex');
-    mkdirSync(this.jobsDir, { recursive: true });
-    this.prune();
     const job = { id, workspace: w.name, task, name, who, started: Date.now(), ended: null, code: null, error: null, tail: [], partial: '', log: join(this.jobsDir, `${id}.log`) };
     lock.job = job;
     this.jobs.set(id, job);

@@ -250,6 +250,18 @@ test('stop_job also ends what the task started, off Windows (a shell running a l
   }
 });
 
+test('a task whose jobs folder can\'t be made fails without leaving its workspace busy', async () => {
+  const file = join(root, 'nojobs.json');
+  const jobsFile = join(root, 'jobs-is-a-file');
+  writeFileSync(jobsFile, 'x');
+  writeFileSync(file, JSON.stringify({ workspaces: { w: { path: clone, tasks: { t: { run: [node, '-e', '0'] } } } } }));
+  const h = new WorkspaceHost({ configFile: file, jobsDir: jobsFile });
+  const run = () => h.call('run_task', { workspace: 'w', task: 't' }, '#1', async () => '');
+  await refused(run(), /EEXIST/);
+  await refused(run(), /EEXIST/);
+  assert.deepEqual([...h.busy.keys()], []);
+});
+
 test('the screen lock: a live holder refuses screen tasks, a dead one is taken over', async () => {
   holdLock(process.ppid);
   await refused(boxCall('run_task', { workspace: 'peek', task: 'shell' }), /screen is busy: desktop CI job for GitHub Actions \(peek-auras\).*Nothing was started/);

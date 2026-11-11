@@ -1395,7 +1395,7 @@ export function renderTyping() {
     el.replaceChildren(
       h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
       h('span', { class: 'lead' }, lead),
-      t.queued ? [h('span', { class: 'sep' }, '·'), h('span', { class: 'queued', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, `${t.queued} queued`)] : '');
+      ...(t.queued ? [h('span', { class: 'sep' }, '·'), h('span', { class: 'queued', title: `${t.queued} message${t.queued === 1 ? '' : 's'} queued for the next turn` }, `${t.queued} queued`)] : []));
   }
   if (wasHidden && followChat) scrollToBottom();
 }

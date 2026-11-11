@@ -577,12 +577,19 @@ export async function loadEvents(ticketId) {
 }
 
 /** Add the page before the oldest loaded event to a thread's history; with `from`, reach back to that event. */
-export async function loadEarlier(ticketId, page, from) {
-  const older = await api(`api/tickets/${ticketId}/events?before=${page.events[0].id}${from ? `&from=${from}` : ''}`);
-  Object.assign(page, { events: older.events.concat(page.events), more: older.more, tasks: older.tasks });
-  remember(ticketId, page);
-  return page;
+export function loadEarlier(ticketId, page, from) {
+  // One at a time per page (Load earlier and Find can both ask), each going on from where the last got to.
+  const load = (earlierLoads.get(page) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    const first = page.events[0].id;
+    const older = await api(`api/tickets/${ticketId}/events?before=${first}${from ? `&from=${from}` : ''}`);
+    Object.assign(page, { events: older.events.filter((e) => e.id < first).concat(page.events), more: older.more, tasks: older.tasks });
+    remember(ticketId, page);
+    return page;
+  });
+  earlierLoads.set(page, load);
+  return load;
 }
+const earlierLoads = new WeakMap(); // page -> its load of earlier events in flight (or done)
 
 // Prefetching: a thread's newest page starts downloading when you point at (or touch) its row, and
 // the top two rows load quietly once a project page settles, so a first click opens from the cache.

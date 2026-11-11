@@ -47,7 +47,16 @@ setInterval(() => {
 
 const invite = location.hash.match(/^#\/invite\/([\w-]+)$/);
 if (invite) renderInvite(invite[1]);
-else api('api/me').then(start).catch(() => {});
+else boot();
+
+// A sign-in check that fails for any reason but "Not logged in" (which shows the login) used to leave
+// a blank page with only the refresh button: say so, with a retry.
+function boot() {
+  api('api/me').then(start).catch((err) => {
+    if (err.message === 'Not logged in') return;
+    app.replaceChildren(h('p', { class: 'error' }, `Couldn't open Citadel: ${err.message}`), h('button', { type: 'button', onclick: boot }, 'Try again'));
+  });
+}
 // The service worker makes the app installable (home screen, full screen) and shows push notifications; it caches nothing.
 // Absolute on purpose: a preview (/preview/N/) shares the live app's one worker instead of registering its own.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

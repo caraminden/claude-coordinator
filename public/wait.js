@@ -8,8 +8,8 @@ const OWN = { slot: 'Heavy slot', run: 'Heavy run' };
 /** Running over the usual by more than this turns the bar amber. */
 const LATE = 1.15;
 
-/** Doing (blue) while its own landing or run is under way, waiting (violet) in a line, a CI queue or on the restart; a CI run that ended green or red. */
-export const waitFam = (w) => (w.stage === 'passed' ? 'done' : w.stage === 'failed' || w.stage === 'cancelled' ? 'broken'
+/** Doing (blue) while its own landing or run is under way, waiting (violet) in a line, a CI queue or on the restart; a CI run that ended green or red, or grey with every job skipped (#558). */
+export const waitFam = (w) => (w.stage === 'passed' ? 'done' : w.stage === 'failed' || w.stage === 'cancelled' ? 'broken' : w.stage === 'skipped' ? 'idle'
   : ['rebase', 'test', 'deploy', 'run', 'jobs'].includes(w.stage) ? 'work' : 'wait');
 /** How long it has gone on: a CI run's stops when it ended. */
 const took = (w, now) => (w.ended ?? now) - w.since;

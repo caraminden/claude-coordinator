@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { scriptEnv } from './script-env.ts';
 
 // tools/run-tests.sh on throwaway fixture suites. A red full run reruns each failed file alone, once, only to label
 // it: "passed alone" is a likely flake with a retro-log line, and the run still fails (Cara, 2026-11-10, "Keep
@@ -13,7 +14,7 @@ const root = mkdtempSync(join(tmpdir(), 'run-tests-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 // NODE_TEST_CONTEXT would make the inner `node --test` report to this runner; COORDINATOR_SHARED_DIR would write
 // into the real scheme's retro log; an empty DEPLOY_TEST_CPU_WEIGHT makes no real systemd scope (run-tests-scope.test.ts).
-const env = { ...process.env, NODE_TEST_CONTEXT: undefined, COORDINATOR_SHARED_DIR: undefined, DEPLOY_TEST_CPU_WEIGHT: '', DEPLOY_TEST_TIMEOUT: undefined, DEPLOY_RERUN_TIMEOUT: undefined };
+const env = { ...scriptEnv(), NODE_TEST_CONTEXT: undefined, COORDINATOR_SHARED_DIR: undefined, DEPLOY_TEST_CPU_WEIGHT: '', DEPLOY_TEST_TIMEOUT: undefined, DEPLOY_RERUN_TIMEOUT: undefined };
 
 const FIXTURES: Record<string, string> = {
   'ok.test.mjs': "import test from 'node:test';\ntest('fine', () => {});\n",

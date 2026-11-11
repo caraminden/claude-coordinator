@@ -1,0 +1,46 @@
+import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { SCRIPT_ENV, scriptEnv } from './script-env.ts';
+
+const root = join(import.meta.dirname, '..');
+const tools = join(root, 'tools');
+
+test('scriptEnv drops every variable the scripts export and keeps the rest', () => {
+  for (const name of SCRIPT_ENV) process.env[name] = 'leaked';
+  process.env.SCRIPT_ENV_KEEP = 'yes';
+  try {
+    const env = scriptEnv({ EXTRA: 'x' });
+    for (const name of SCRIPT_ENV) assert.equal(env[name], undefined, `${name} leaked`);
+    assert.equal(env.SCRIPT_ENV_KEEP, 'yes');
+    assert.equal(env.EXTRA, 'x');
+  } finally {
+    for (const name of SCRIPT_ENV) delete process.env[name];
+    delete process.env.SCRIPT_ENV_KEEP;
+  }
+});
+
+test('the list covers everything the scripts export or pass to a child by assignment', () => {
+  const found = new Set<string>();
+  for (const f of readdirSync(tools).filter((n) => n === 'citadel-heavy' || n.endsWith('.sh'))) {
+    const text = readFileSync(join(tools, f), 'utf8');
+    // `export NAME=...` and `NAME=value command` / `LAND_REBASED=1 exec ...` prefixes on a DEPLOY_/LAND_/CITADEL_ name.
+    for (const m of text.matchAll(/^[^#\n]*?(?:\bexport\s+|(?:^|[;&|]\s*|\bif\s+!\s+|\s)(?=(?:DEPLOY|LAND|CITADEL)_\w+=\S+\s+[./"$\w]))((?:DEPLOY|LAND|CITADEL)_\w+)=/gm)) found.add(m[1]);
+  }
+  // CITADEL_NODE and NODE_OPTIONS come from citadel-node, which every test already runs under on purpose.
+  found.delete('CITADEL_NODE');
+  for (const name of found) assert.ok((SCRIPT_ENV as readonly string[]).includes(name), `tools/ sets ${name} for its children: add it to SCRIPT_ENV (test/script-env.ts), or say why not`);
+});
+
+// The suites that really run these scripts (the others only name their paths, or stand in for them). A new suite that
+// runs one belongs here.
+const RUNS_SCRIPTS = ['land.test.ts', 'deploy.test.ts', 'run-tests.test.ts', 'run-tests-scope.test.ts', 'scheme-setup-land.test.ts'];
+
+test('the suites that start land.sh, deploy.sh or run-tests.sh start them with scriptEnv', () => {
+  for (const f of RUNS_SCRIPTS) {
+    const text = readFileSync(join(import.meta.dirname, f), 'utf8');
+    assert.match(text, /from '\.\/script-env\.ts'/, `${f} must build its env with scriptEnv (test/script-env.ts)`);
+    assert.doesNotMatch(text, /\.\.\.process\.env\b(?![^}]*\bscriptEnv)/, `${f} spreads process.env itself: use scriptEnv()`);
+  }
+});

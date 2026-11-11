@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { scriptEnv } from './script-env.ts';
 
 // tools/run-tests.sh: a landing's test run gets a CPU-weighted systemd scope when it can (#503), with a stand-in
 // systemd-run, so no test makes a real scope.
@@ -22,7 +23,7 @@ let n = 0;
 function run(env: Record<string, string | undefined> = {}) {
   const calls = join(root, `calls-${n}`);
   const log = join(root, `log-${n++}`);
-  const r = spawnSync(runTests, [log], { cwd: repo, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_SYSTEMD_LOG: calls, DEPLOY_TEST_CPU_WEIGHT: undefined, NODE_TEST_CONTEXT: undefined, COORDINATOR_SHARED_DIR: undefined, ...env }, timeout: 60_000 });
+  const r = spawnSync(runTests, [log], { cwd: repo, encoding: 'utf8', env: { ...scriptEnv(), PATH: `${bin}:${process.env.PATH}`, FAKE_SYSTEMD_LOG: calls, DEPLOY_TEST_CPU_WEIGHT: undefined, NODE_TEST_CONTEXT: undefined, COORDINATOR_SHARED_DIR: undefined, ...env }, timeout: 60_000 });
   return { status: r.status, calls: existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n') : [], log: readFileSync(log, 'utf8') };
 }
 

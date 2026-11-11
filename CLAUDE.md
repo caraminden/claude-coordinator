@@ -11,6 +11,9 @@ directly; there are no dependencies and no build step.
   instructions ("Shipping fixes"). No plain force pushes: `--force-with-lease`, and only on your own
   branch. `tools/guard.sh` and `.githooks/pre-push` enforce the push rules.
 - PR descriptions follow `.github/pull_request_template.md`.
+- A land that refuses or fails is not a jammed lock. Read land.sh's `queue:` lines (they name the holder) and
+  `git log main` first: if lands are landing, yours failed for its own reason, so fix that and run it again. Only
+  `queue: nothing has moved for 15 min` means the holder is stuck; then message the Taskmaster and don't retry.
 - While your own background job runs (a test run, a build, a server you're checking), wait for
   it inside the turn with one blocking command rather than ending the turn: a minion's turn is one
   `claude -p` process, the board shows it idle once that exits, and the job may not outlive it.

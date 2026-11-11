@@ -282,6 +282,10 @@ const BLOCKED: [string, string?][] = [
   ['echo "a $(echo ")") b $(pkill -f node)"'],
   ['echo "$(echo "$(cat ~/.ssh/id_rsa)")"'],
   [`git commit -m "$(cat <<'EOF'\nA message (with a paren and a " quote\nEOF\n)" && git stash`],
+  // #468 S01-8: a heredoc opened with <<\EOF ends at EOF, and what follows it is checked
+  [`cat <<\\EOF > /tmp/x\nhi\nEOF\nrm -rf ${data}/state.db`],
+  ['cat <<\\EOF\nhi\nEOF\npkill -f node'],
+  ['git commit -m "$(cat <<\\EOF\nmsg\nEOF\n)" && git stash'],
 ];
 
 const ALLOWED = [
@@ -454,6 +458,8 @@ const ALLOWED = [
   'x="$(echo \')\')"; echo "$x"',
   'echo "`git rev-parse HEAD`"',
   `git commit -m "$(cat <<'EOF'\nSay "run git push origin main" and fix the 5" width (and pkill -f node\nrm -rf ${data}/state.db\nEOF\n)" && git log -1`,
+  // #468 S01-8: the body of a <<\EOF heredoc is still skipped
+  'cat <<\\EOF > /tmp/x\npkill -f node and rm -rf ~/claude-coordinator\nEOF\nls',
 ];
 
 // Things a person may reasonably allow once: a card for that exact call.

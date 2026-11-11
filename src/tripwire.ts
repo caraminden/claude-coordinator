@@ -394,7 +394,8 @@ export function lex(s: string, home: string): Tok[] {
         if (m) {
           // The body is filled in at the end of the line; only a shell reading it as its script looks at it.
           const body: Word = { text: '', unknown: false };
-          heredocs.push({ delim: m[2], strip: op === '<<-', body });
+          // `<<\EOF` (or E\OF) quotes the delimiter like `<<'EOF'`: the end line is EOF.
+          heredocs.push({ delim: m[2].replace(/\\/g, ''), strip: op === '<<-', body });
           toks.push({ kind: 'redir', op: '<<' }, { kind: 'word', word: body });
           i += m[0].length;
         }

@@ -8,6 +8,7 @@ import { imageHash, type ClaudeLink } from '../src/claude-link.ts';
 import { CodexLink, deviceCode } from '../src/codex-link.ts';
 import { Containers } from '../src/containers.ts';
 import { images, notReady, overPace, REQUIREMENTS, review, usageLine } from '../src/codex-review.ts';
+import { startTime } from '../src/codex-lock.ts';
 import { jsonLines } from './helpers.ts';
 // @ts-expect-error: a plain .mjs, shipped into the image as is.
 import { patchPaths } from '../deploy/claude-container/codex/citadel-hook.mjs';
@@ -16,6 +17,8 @@ import { patchPaths } from '../deploy/claude-container/codex/citadel-hook.mjs';
 // person's container, and the app-server driver behind citadel-codex-review.
 const root = mkdtempSync(join(tmpdir(), 'codex-'));
 after(() => rmSync(root, { recursive: true, force: true }));
+// Reviews take the person's Codex lock in CODEX_HOME: never the real ~/.codex's.
+process.env.CODEX_HOME = join(root, 'codex-home');
 const image = join(import.meta.dirname, '..', 'deploy', 'claude-container');
 const HOOK = join(image, 'codex', 'citadel-hook.mjs');
 const tripwire = join(import.meta.dirname, '..', 'src', 'tripwire.ts');
@@ -248,6 +251,29 @@ test('a review starts a read-only, ephemeral thread with no approvals, declines 
   assert.deepEqual(msgs.find((m) => m.id === 900).result, { decision: 'decline' });
 });
 
+test("a review waits behind the person's other Codex turn, but not behind the turn it runs inside (#468 S04-6)", async () => {
+  const codexHome = join(root, 'lock-home');
+  const lock = join(codexHome, 'citadel-turn.lock');
+  const holder = `${process.pid} ${startTime(process.pid)}`;
+  mkdirSync(lock, { recursive: true });
+  writeFileSync(join(lock, 'pid'), holder);
+  const env = { ...process.env, CODEX_HOME: codexHome, FAKE_CODEX: 'ok' };
+  // A review run by the Codex turn holding the lock passes, and leaves the lock to that turn.
+  const own = await review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env: { ...env, CITADEL_CODEX_LOCK: holder } });
+  assert.equal(own.code, 0);
+  assert.equal(readFileSync(join(lock, 'pid'), 'utf8'), holder, "its turn's lock stays");
+  // Any other review waits for that turn to end before it starts Codex.
+  rmSync(fakeLog, { force: true });
+  let waited = false;
+  const other = review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env, onWait: () => (waited = true) });
+  await new Promise((r) => setTimeout(r, 400));
+  assert.ok(waited, 'it says it waits');
+  assert.deepEqual(logged(), [], 'no app-server while the other turn runs');
+  rmSync(lock, { recursive: true, force: true });
+  assert.equal((await other).code, 0);
+  assert.equal(readdirSync(codexHome).includes('citadel-turn.lock'), false, 'it lets go when done');
+});
+
 test('images go to Codex after the brief, as local image inputs (#408)', async () => {
   rmSync(fakeLog, { force: true });
   const r = await review('Judge the sheet.', { cwd: root, timeoutMs: 10_000, images: ['/w/a.png', '/s/b.webp'], bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'ok' } });
@@ -416,6 +442,8 @@ const source = readFileSync(join(import.meta.dirname, '..', 'src', 'codex-review
 const unhooked = source.replace(`export const REQUIREMENTS = '${REQUIREMENTS}';`, `export const REQUIREMENTS = ${JSON.stringify(join(root, 'no-hook', 'requirements.toml'))};`);
 assert.notEqual(unhooked, source, "the pinned driver's REQUIREMENTS line moved: update the test's rewrite");
 writeFileSync(driver, unhooked);
+// With what it imports, as pinnedCopy lays them beside it.
+writeFileSync(join(turnDir, 'pin', 'codex-lock.ts'), readFileSync(join(import.meta.dirname, '..', 'src', 'codex-lock.ts')));
 mkdirSync(join(turnDir, 'pin', 'kit', 'agents'), { recursive: true });
 writeFileSync(join(turnDir, 'pin', 'kit', 'agents', 'reviewer.md'), 'the reviewer rules');
 const podBin = join(root, 'podbin');
@@ -487,9 +515,9 @@ test("a host turn's review runs in the Codex container the runner named, read-on
   assert.equal(call.kitSeen, 'the reviewer rules');
   assert.equal(call.env.HOME, '/home/u', "the container's environment, not the host turn's");
   assert.equal(call.env.FAKE_PODMAN, undefined);
-  // Its files sit in the person's mounted turns folder: the driver, the tripwire, and a review-mode config.
+  // Its files sit in the person's mounted turns folder: the driver and its lock, the tripwire, and a review-mode config.
   assert.ok(call.script.startsWith(personTurns + '/review-'), call.script);
-  assert.deepEqual(call.files, ['codex-review.ts', 'codex-tripwire.json', 'kit', 'tripwire.ts']);
+  assert.deepEqual(call.files, ['codex-lock.ts', 'codex-review.ts', 'codex-tripwire.json', 'kit', 'tripwire.ts']);
   assert.deepEqual(call.cfg, { script: join(dirname(call.script), 'tripwire.ts'), config }, 'the container turns\' review mode: no container, no turn mode');
   assert.equal(call.writable, false, 'read-only, as the runner writes it');
   assert.deepEqual(readdirSync(personTurns), [], 'the copy goes once the review ends');

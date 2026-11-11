@@ -20,6 +20,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
 import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { codexLock } from './codex-lock.ts';
 
 export const REQUIREMENTS = '/etc/codex/requirements.toml';
 const HOOK = '/etc/codex/citadel-hook.mjs';
@@ -126,7 +127,20 @@ export function usageLine(limits: RateLimits | null | undefined): string {
  * already refuses writes). It first reads the person's Codex usage and skips (code 4) when overPace says so;
  * `usage` is the latest usage line.
  */
-export function review(brief: string, opts: { cwd: string; timeoutMs: number; images?: string[]; bin?: string; env?: Record<string, string | undefined>; now?: () => number }): Promise<{ code: number; text: string; usage: string }> {
+export async function review(brief: string, opts: ReviewOptions & { onWait?: () => void }): Promise<{ code: number; text: string; usage: string }> {
+  // The person's Codex lock, as their Codex turns take it (#468 S04-6): one app-server at a time on their login.
+  const env = opts.env ?? process.env;
+  const unlock = await codexLock(env.CODEX_HOME || join(env.HOME || homedir(), '.codex'), opts.onWait ?? (() => {}), env);
+  try {
+    return await reviewNow(brief, opts);
+  } finally {
+    unlock();
+  }
+}
+
+interface ReviewOptions { cwd: string; timeoutMs: number; images?: string[]; bin?: string; env?: Record<string, string | undefined>; now?: () => number }
+
+function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; text: string; usage: string }> {
   const bin = opts.bin ?? 'codex';
   // file: the login stays in ~/.codex/auth.json (there's no keyring in a container); no history: CODEX_HOME grows fast otherwise.
   const child = spawn(bin, ['app-server', '-c', 'cli_auth_credentials_store="file"', '-c', 'history.persistence="none"'], { cwd: opts.cwd, env: opts.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -367,7 +381,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.stderr.write('usage: citadel-codex-review [--timeout seconds] [--image path]... < brief.md   (or --check)\n');
     process.exit(2);
   }
-  const r = await review(brief, { cwd: process.cwd(), timeoutMs, images: imgs.paths, bin: process.env.CITADEL_CODEX_BIN });
+  const onWait = () => process.stderr.write("citadel-codex-review: waiting for this person's other Codex turn to finish.\n");
+  const r = await review(brief, { cwd: process.cwd(), timeoutMs, images: imgs.paths, bin: process.env.CITADEL_CODEX_BIN, onWait });
   (r.code ? process.stderr : process.stdout).write(r.text + '\n');
   if (r.usage) process.stderr.write(`Codex usage: ${r.usage}\n`);
   process.exit(r.code);

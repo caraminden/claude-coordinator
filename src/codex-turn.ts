@@ -18,6 +18,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { callLine, CODEX_NOTE, codexModelFor, toCodexPreamble } from './codex.ts';
+import { codexLock, LOCK_ENV, startTime } from './codex-lock.ts';
 
 export const QUIET_MS = 30 * 60 * 1000;
 /** Codex's session files (rollouts) older than this are deleted when a turn starts. */
@@ -91,59 +92,6 @@ export function limitWords(limits: any, now = Date.now(), timeZone = Intl.DateTi
   return `You've hit your Codex usage limit · resets ${day}${time} (${timeZone})`;
 }
 
-/** A process's start time in clock ticks since boot (/proc/<pid>/stat field 22), or null off Linux or once it is gone. */
-function startTime(pid: number): string | null {
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    // Fields from the third on follow the command name, which may hold spaces and parentheses.
-    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** One Codex turn at a time per person: their ChatGPT login's refresh token is single-use, and two app-servers refreshing at once sign them out. */
-async function lock(home: string, onWait: () => void): Promise<() => void> {
-  mkdirSync(home, { recursive: true });
-  const dir = join(home, 'citadel-turn.lock');
-  for (let waited = false; ; ) {
-    try {
-      mkdirSync(dir);
-      // With its start time: a pid alone can be reused by an unrelated process once the holder died without unlocking (#468 S04-7).
-      writeFileSync(join(dir, 'pid'), `${process.pid} ${startTime(process.pid) ?? ''}`.trim());
-      return () => rmSync(dir, { recursive: true, force: true });
-    } catch (err: any) {
-      if (err.code !== 'EEXIST') throw err;
-      let pid = 0;
-      let started: string | undefined;
-      try {
-        const [p, s] = readFileSync(join(dir, 'pid'), 'utf8').trim().split(/\s+/);
-        pid = Number(p) || 0;
-        started = s;
-      } catch {}
-      let alive = false;
-      try {
-        if (pid) process.kill(pid, 0), (alive = true);
-      } catch (e: any) {
-        alive = e.code === 'EPERM';
-      }
-      if (alive && started && startTime(pid) !== started) alive = false;
-      let age = 0;
-      try {
-        age = Date.now() - statSync(dir).mtimeMs;
-      } catch {
-        continue; // its holder just unlocked: try again
-      }
-      // No pid yet: its holder is between mkdir and write, unless that was a while ago.
-      if (!alive && (pid || age > 10_000)) rmSync(dir, { recursive: true, force: true });
-      else {
-        if (!waited) (waited = true), onWait();
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-    }
-  }
-}
-
 /** Delete Codex session files older than ROLLOUT_DAYS: CODEX_HOME grows fast otherwise. */
 function pruneRollouts(dir: string, now = Date.now()) {
   if (!existsSync(dir)) return;
@@ -193,7 +141,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
   const timeoutSec = Math.ceil(Number(env.MCP_TOOL_TIMEOUT || 600_000) / 1000);
   const mcp = mcpServers(mcpFile && existsSync(mcpFile) ? JSON.parse(readFileSync(mcpFile, 'utf8')) : {}, env, timeoutSec);
 
-  const unlock = await lock(home, () => out({ type: 'codex_waiting' }));
+  const unlock = await codexLock(home, () => out({ type: 'codex_waiting' }), {});
   process.on('exit', unlock);
   pruneRollouts(join(home, 'sessions'));
   // The kit pins beside this file in a turn's folder, and sits one up in the repo.
@@ -213,7 +161,9 @@ export async function main(argv: string[], env: Record<string, string | undefine
       : [...c('features.shell_tool', false), ...c('features.view_image', false), ...c('project_doc_max_bytes', 0)]),
     ...JSON.parse(env.CITADEL_CODEX_EXTRA_ARGS || '[]'),
   ];
-  const child = spawn(env.CITADEL_CODEX_BIN || 'codex', codexArgs, { cwd, env: { ...env, ...mcp.env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  // Its shell's citadel-codex-review runs inside this turn, under this lock (#468 S04-6).
+  const lockEnv = { [LOCK_ENV]: `${process.pid} ${startTime(process.pid) ?? ''}`.trim() };
+  const child = spawn(env.CITADEL_CODEX_BIN || 'codex', codexArgs, { cwd, env: { ...env, ...mcp.env, ...lockEnv }, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stderr!.on('data', (b) => process.stderr.write(b));
   let nextId = 1;
   const waiting = new Map<number, (m: any) => void>();

@@ -19,7 +19,7 @@ export const README_INBOX_LINE = "- `inbox/` (written by Citadel): files people 
 /** A name that is safe as one path segment: no folders, no leading dot, letters, digits, dots, dashes and underscores only. */
 export function safeName(name: string): string {
   const last = name.split(/[\\/]/).pop() ?? '';
-  return last.replace(/[^\w.-]+/g, '-').replace(/^[.-]+/, '').slice(-100) || 'file';
+  return last.replace(/[^\w.-]+/g, '-').slice(-100).replace(/^[.-]+/, '') || 'file';
 }
 
 export interface AskFile {

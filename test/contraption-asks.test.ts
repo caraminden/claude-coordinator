@@ -48,6 +48,9 @@ test('safe names: one segment, no leading dot, nothing odd', () => {
   assert.equal(safeName('.bashrc'), 'bashrc');
   assert.equal(safeName('my clip (1).peekclip'), 'my-clip-1-.peekclip');
   assert.equal(safeName(''), 'file');
+  // Cut to its last 100 characters first, so the cut can't start it with a dot (#468 S04-10).
+  assert.equal(safeName(`${'a'.repeat(50)}.${'b'.repeat(99)}`), 'b'.repeat(99));
+  assert.equal(safeName(`${'a'.repeat(50)}-.${'b'.repeat(98)}`), 'b'.repeat(98));
 });
 
 test('a summary Citadel makes: the first sentence, cut at a word to 200', () => {

@@ -1,7 +1,7 @@
 # Background jobs out of server.ts
 
 `server.ts` is the boot file. It has no unit tests and is still one of the most edited files (151
-commits in the 14 days to 2026-11-10). About 330 of its lines were background jobs that could only be
+commits in the 14 days to 2026-11-10). About 240 of its lines were background jobs that could only be
 exercised by booting the whole server. The November 2026 architecture report listed moving them out
 as a leftover, and Cara approved the plan on #475's card on 2026-11-10 ("Plan approved: build it this
 way").

@@ -61,9 +61,8 @@ test('a due schedule starts one minion with its brief, records the run and tells
   assert.equal(after.last_ticket_id, sends[0].id);
   assert.ok(after.next_run_at! > now - 1000, 'the next run is in the future');
   assert.ok(sent.some((m: any) => m.type === 'schedules' && m.projectId === project.id));
-  // Not due again this minute: a second pass starts nothing.
-  await runs.runDue();
-  assert.equal(made.length, 1);
+  // Not due again until its next run.
+  assert.ok(!store.schedules.due(after.next_run_at! - 1).some((x) => x.id === sch.id));
 });
 
 test('a slot is skipped while the last run still works, and a start that throws is recorded, not thrown', async () => {
@@ -266,6 +265,21 @@ test('the poll re-reads only merged work that is not live, and a failed deploy s
   assert.equal(ship.ship(t.id)?.stage, 'failed');
   store.setSetting(DEPLOY_FAILURE, { text: 'old', head: 'other' });
   assert.notEqual(ship.ship(t.id)?.stage, 'failed');
+});
+
+test('a check after a turn looks up the PR again unless the minion is still running', async () => {
+  const { t, ship, lookups } = ships();
+  await ship.branch(t.id);
+  let running = true;
+  (ship as any).d.runner.isRunning = () => running;
+  ship.scheduleCheck(t.id);
+  ship.scheduleCheck(t.id); // coalesced
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(lookups, [true, false], 'running: the cached PR stands');
+  running = false;
+  ship.scheduleCheck(t.id);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(lookups, [true, false, true], 'turn over: the PR is looked up now');
 });
 
 test('the startup sweep looks at open minions with a branch only', async () => {

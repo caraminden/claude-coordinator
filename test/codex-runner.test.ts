@@ -51,7 +51,9 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   const codex = process.env.CITADEL_CODEX_TRIPWIRE ? JSON.parse(readFileSync(process.env.CITADEL_CODEX_TRIPWIRE, 'utf8')) : null;
   record({ resume, model, text, codex });
   if (existsSync(${JSON.stringify(mode)}) && readFileSync(${JSON.stringify(mode)}, 'utf8') === 'claude-limit') {
-    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your session limit · resets 3pm (UTC)" }));
+    // Five to six hours out, whenever it runs (a fixed time of day comes round moments away once a day, #569), and well clear of the Codex fake's two.
+    const h = new Date(Date.now() + 6 * 60 * 60 * 1000).getUTCHours();
+    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your session limit · resets " + (h % 12 || 12) + (h < 12 ? 'am' : 'pm') + ' (UTC)' }));
     process.exit(1);
   }
   const id = resume ?? 'sess-1';
@@ -275,7 +277,7 @@ test("switching on carries a minion waiting out Claude's limit on at once, on Co
   const said = calls().find((c) => c.method === 'turn/start').params.input.map((i: any) => i.text).join('\n');
   assert.match(said, /switched to Codex/);
   assert.ok(notes(t.id).includes('Resumed on Codex: its person switched to Codex'));
-  // Codex's window resets in two hours (the fake's), not Claude's 3pm.
+  // Codex's window resets in two hours (the fake's), not at Claude's stated reset, five to six hours out.
   const w = r.limitWait(t.id)!;
   assert.ok(Math.abs(w.at - (Date.now() + 7_200_000)) < 120_000, `waits for Codex's reset, ${new Date(w.at).toISOString()}`);
   r.cancelLimitWait(t.id);

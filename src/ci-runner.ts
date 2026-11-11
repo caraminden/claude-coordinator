@@ -13,6 +13,9 @@ import { repoSlug } from './prlinks.ts';
 
 const API = 'https://api.github.com';
 const GITHUB_WAIT_MS = 10_000;
+/** GitHub lists a repo's runners at most 100 to a page; ten pages is far past any repo here. */
+const RUNNERS_PAGE = 100;
+const RUNNERS_PAGES = 10;
 
 type Fetch = typeof fetch;
 
@@ -32,6 +35,12 @@ export interface RunnerToken {
 export function runnerLabel(schemeName: string): string {
   const slug = schemeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return slug ? `${slug}-ci` : '';
+}
+
+/** Every label a scheme's runners carry: its Windows service runners', its Linux runners' (#510) and its session runner's (add-runner.ps1 -Session); none when its name makes no label. */
+export function schemeLabels(schemeName: string): string[] {
+  const label = runnerLabel(schemeName);
+  return label ? [label, `${label}-linux`, `${label.replace(/-ci$/, '')}-desktop`] : [];
 }
 
 /** The scheme a caller names: its id, its name (any case) or its label's slug. Throws a 409 when that names more than one. */
@@ -64,7 +73,7 @@ export class RunnerTokens {
   private fetch: Fetch;
   /** False in a boot check or preview: they run on a copy of the data and must not reach GitHub. */
   private live: boolean;
-  /** Told after each token handed out, for a note in the scheme Taskmaster's chat (or a runner job's, when one asked for it). */
+  /** Told after each token handed out and each runner taken off GitHub, for a note in the scheme Taskmaster's chat (or a runner job's, when one asked for it). */
   onFetched: (project: Project, words: string, machine: Machine) => void = () => {};
 
   constructor(store: Store, link: GithubLink, live: boolean, fetch: Fetch = globalThis.fetch) {
@@ -75,7 +84,7 @@ export class RunnerTokens {
   }
 
   /**
-   * Mint a registration token (or, with kind 'remove', a removal token) for `schemeRef`'s repo as its owner, for `machine`'s
+   * Mint a registration token (or, with kind 'remove', a removal token: remove-runner.sh's, the Windows script asks `unregister`) for `schemeRef`'s repo as its owner, for `machine`'s
    * installer; with `mint` false, only the repo and label, after the same checks, asking GitHub nothing. Throws an HttpError saying why not.
    */
   async issue(machine: Machine, schemeRef: unknown, mint = true, kind: 'register' | 'remove' = 'register'): Promise<RunnerToken> {
@@ -91,6 +100,41 @@ export class RunnerTokens {
     const expires = typeof body.expires_at === 'string' ? body.expires_at : '';
     this.onFetched(project, `Machine ${machine.name} fetched a CI runner ${kind === 'remove' ? 'removal' : 'registration'} token for ${slug} (label ${label}), made with ${owner.name}'s GitHub login${expires ? `; it runs out at ${expires}` : ''}. Citadel didn't keep it.`, machine);
     return { scheme: project.name, repo: slug, label, token: body.token, expires_at: expires || null };
+  }
+
+  /**
+   * Take the runner named `name` off GitHub for `schemeRef`'s repo, as its owner, for `machine`'s remove-runner.ps1 (#476): that
+   * script runs as SYSTEM and a CI job can write the runner's folder, so it no longer runs the folder's `config.cmd remove`.
+   * The name may come from a file a job wrote, so it only ever picks a runner of this repo carrying one of the scheme's own
+   * labels. A name GitHub doesn't list is already gone (`removed` false). Throws an HttpError saying why not.
+   */
+  async unregister(machine: Machine, schemeRef: unknown, name: unknown): Promise<{ scheme: string; repo: string; name: string; removed: boolean }> {
+    const project = findScheme(this.store, schemeRef);
+    if (!project || !mayFetch(this.store, machine, project)) throw new HttpError(404, `No scheme "${String(schemeRef ?? '')}" that machine ${machine.name} may remove a runner for`);
+    // Only ever compared with the names GitHub lists, never put in a URL: GitHub's own limit is 64 characters.
+    if (typeof name !== 'string' || !/^[^\p{Cc}]{1,64}$/u.test(name)) throw new HttpError(400, 'name must be the runner\'s name, 1 to 64 characters');
+    const { slug, owner, ownerToken, hint } = this.repoOf(project);
+    const answer = { scheme: project.name, repo: slug, name };
+    let found: { id?: unknown; labels?: unknown } | undefined;
+    for (let page = 1; !found; page++) {
+      const r = await this.github(ownerToken, 'GET', `/repos/${slug}/actions/runners?per_page=${RUNNERS_PAGE}&page=${page}`);
+      if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
+      const body = (await r.json().catch(() => ({}))) as { runners?: any[] };
+      const runners = Array.isArray(body.runners) ? body.runners : [];
+      found = runners.find((x) => x?.name === name);
+      if (!found && (runners.length < RUNNERS_PAGE || page >= RUNNERS_PAGES)) return { ...answer, removed: false };
+    }
+    const own = schemeLabels(project.name);
+    if (!Array.isArray(found.labels) || !found.labels.some((l: any) => own.includes(l?.name))) {
+      throw new HttpError(403, `The runner ${name} of ${slug} carries none of the labels ${project.name} gives its runners (${own.join(', ')}), so Citadel won't remove it; nothing changed.`);
+    }
+    if (!Number.isSafeInteger(found.id)) throw new HttpError(502, `GitHub listed the runner ${name} without an id`);
+    const r = await this.github(ownerToken, 'DELETE', `/repos/${slug}/actions/runners/${found.id}`);
+    // Listed a moment ago and not there now: something else removed it meanwhile.
+    if (r.status === 404) return { ...answer, removed: false };
+    if (r.status !== 204) throw new HttpError(502, await refused(r, owner.name, slug, hint));
+    this.onFetched(project, `Machine ${machine.name} took the CI runner ${name} of ${slug} off GitHub, with ${owner.name}'s GitHub login.`, machine);
+    return { ...answer, removed: true };
   }
 
   /** The runners GitHub lists for a scheme's repo with its label, or `label` (a Linux runner's, #510), asked with the owner's login (#328). */

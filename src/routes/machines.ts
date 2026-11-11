@@ -84,11 +84,13 @@ export const agentRoutes: Route[] = [
     return json(res, 202, {});
   }),
   agent('POST', '/api/machines/upload', machineUpload),
-  // A CI runner registration token for a scheme's repo (#320): tools/ci-runner/add-runner.ps1 calls it.
+  // A CI runner registration token for a scheme's repo (#320): tools/ci-runner/add-runner.ps1 calls it. With kind 'delete' and
+  // a runner's name it hands out no token: Citadel takes that runner off GitHub itself (#476, remove-runner.ps1).
   agent('POST', '/api/machines/runner-token', async ({ req, res, app }, machine) => {
     const body = await readJson(req);
+    if (body.kind === 'delete') return json(res, 200, await app.runnerTokens.unregister(machine, body.scheme, body.name));
     if (body.mint !== undefined && typeof body.mint !== 'boolean') throw new HttpError(400, 'mint must be true or false');
-    if (body.kind !== undefined && body.kind !== 'register' && body.kind !== 'remove') throw new HttpError(400, 'kind must be register or remove');
+    if (body.kind !== undefined && body.kind !== 'register' && body.kind !== 'remove') throw new HttpError(400, 'kind must be register, remove or delete');
     return json(res, body.mint === false ? 200 : 201, await app.runnerTokens.issue(machine, body.scheme, body.mint !== false, body.kind ?? 'register'));
   }),
   // A CI runner agent's answer to a job (#328, public/runner-agent.mjs).

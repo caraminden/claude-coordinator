@@ -16,7 +16,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { APP_NAME } from './appname.ts';
-import { runnerLabel } from './ci-runner.ts';
+import { schemeLabels } from './ci-runner.ts';
 import type { Project, Store, User } from './db.ts';
 import { repoSlug } from './prlinks.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
@@ -321,8 +321,8 @@ export function addRunnerWaiter(store: Store, ticket: number, reason: string): v
 
 /** The online runners carrying a scheme's label: Windows or Linux, or its session runner's (add-runner.ps1 -Session). */
 export function onlineRunners(runners: Runner[], schemeName: string): Runner[] {
-  const label = runnerLabel(schemeName);
-  return label ? runners.filter((r) => r.status === 'online' && r.labels?.some((l) => [label, `${label}-linux`, `${label.replace(/-ci$/, '')}-desktop`].includes(l.name))) : [];
+  const labels = schemeLabels(schemeName);
+  return runners.filter((r) => r.status === 'online' && r.labels?.some((l) => labels.includes(l.name)));
 }
 
 // ---------- GitHub ----------

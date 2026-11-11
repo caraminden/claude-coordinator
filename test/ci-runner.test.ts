@@ -11,6 +11,8 @@ import { GithubLink } from '../src/github-link.ts';
 function fakeGithub(tokens: Record<string, string>, admins: Record<string, string>) {
   const calls: string[] = [];
   const opts = { scopes: 'repo, workflow', down: false };
+  /** The runners every faked repo lists. */
+  const runners: { id: number; name: string; status: string; busy: boolean; labels: { name: string }[] }[] = [];
   const fetch = (async (url: string, init?: RequestInit) => {
     const path = url.replace('https://api.github.com', '');
     calls.push(`${init?.method ?? 'GET'} ${path}`);
@@ -18,13 +20,26 @@ function fakeGithub(tokens: Record<string, string>, admins: Record<string, strin
     const me = tokens[String((init?.headers as any)?.Authorization ?? '').replace('Bearer ', '')];
     const headers = { 'X-OAuth-Scopes': opts.scopes };
     if (!me) return Response.json({ message: 'Bad credentials' }, { status: 401, headers });
-    const m = /^\/repos\/([^/]+\/[^/]+)\/actions\/runners\/registration-token$/.exec(path);
-    if (!m || init?.method !== 'POST') return Response.json({ message: 'unfaked' }, { status: 500 });
+    const m = /^\/repos\/([^/]+\/[^/]+)\/actions\/runners(?:\/(registration-token|\d+)|\?per_page=(\d+)&page=(\d+))$/.exec(path);
+    const method = init?.method ?? 'GET';
+    if (!m || method !== (m[3] ? 'GET' : m[2] === 'registration-token' ? 'POST' : 'DELETE')) return Response.json({ message: 'unfaked' }, { status: 500 });
     if (!opts.scopes.includes('repo')) return Response.json({ message: 'Resource not accessible by integration' }, { status: 403, headers });
     if (admins[m[1]] !== me) return Response.json({ message: 'Not Found' }, { status: 404, headers });
+    if (m[3]) {
+      // The repo's runners a page at a time, as GitHub lists them.
+      const per = Number(m[3]);
+      return Response.json({ total_count: runners.length, runners: runners.slice((Number(m[4]) - 1) * per, Number(m[4]) * per) }, { headers });
+    }
+    if (m[2] !== 'registration-token') {
+      const at = runners.findIndex((r) => r.id === Number(m[2]));
+      if (at < 0) return Response.json({ message: 'Not Found' }, { status: 404, headers });
+      if (runners[at].busy) return Response.json({ message: 'Runner is currently running a job and cannot be deleted.' }, { status: 422, headers });
+      runners.splice(at, 1);
+      return new Response(null, { status: 204, headers });
+    }
     return Response.json({ token: 'AREGTOKEN', expires_at: '2026-11-05T13:00:00Z' }, { status: 201, headers });
   }) as typeof globalThis.fetch;
-  return { fetch, calls, opts };
+  return { fetch, calls, opts, runners };
 }
 
 function world(live = true) {
@@ -139,4 +154,82 @@ test('an owner\'s limited link that can\'t reach the repo says the App isn\'t in
   w.creds.put(w.cara.id, 'github', 'gho_cara', { login: 'caraminden', id: 1, name: null, app: true });
   const other = w.store.createProject('Elsewhere', 'https://github.com/someone/else.git', w.cara.id);
   await assert.rejects(w.tokens.issue(w.machine('cara-pc', w.cara.id), other.id), { status: 502, message: /limited kind, which reaches someone\/else only once its owner has installed Citadel's GitHub App/ });
+});
+
+// ---------- taking a runner off GitHub (#476 B1) ----------
+// remove-runner.ps1 runs nothing from the runner's folder (a job can write there, and the script runs as SYSTEM), so
+// Citadel deletes the runner on GitHub itself, by name, with the scheme owner's login.
+
+const runner = (id: number, name: string, ...labels: string[]) => ({ id, name, status: 'online', busy: false, labels: ['self-hosted', 'Windows', ...labels].map((l) => ({ name: l })) });
+const RUNNERS = '/repos/caraminden/peek-auras/actions/runners';
+
+test('a machine takes a runner of its scheme off GitHub by name, with the owner\'s login, and the Taskmaster is told', async () => {
+  const w = world();
+  w.gh.runners.push(runner(7, 'DESK', 'peek-auras-ci'), runner(8, 'DESK-2', 'peek-auras-ci'), runner(9, 'DESK-desktop', 'peek-auras-desktop'), runner(10, 'wsl', 'peek-auras-ci-linux'));
+  const pc = w.machine('josh-pc', w.josh.id);
+  assert.deepEqual(await w.tokens.unregister(pc, 'Peek Auras', 'DESK-2'), { scheme: 'Peek Auras', repo: 'caraminden/peek-auras', name: 'DESK-2', removed: true });
+  assert.deepEqual(w.gh.calls, [`GET ${RUNNERS}?per_page=100&page=1`, `DELETE ${RUNNERS}/8`]);
+  assert.deepEqual(w.gh.runners.map((r) => r.name), ['DESK', 'DESK-desktop', 'wsl'], 'only the named one went');
+  assert.equal(w.notes.length, 1);
+  assert.match(w.notes[0], /^Peek Auras: Machine josh-pc took the CI runner DESK-2 of caraminden\/peek-auras off GitHub, with Cara's GitHub login/);
+  assert.doesNotMatch(w.notes[0], /gho_/);
+  // The session runner's and the Linux runner's labels are the scheme's too.
+  assert.equal((await w.tokens.unregister(pc, w.scheme.id, 'DESK-desktop')).removed, true);
+  assert.equal((await w.tokens.unregister(pc, w.scheme.id, 'wsl')).removed, true);
+  assert.deepEqual(w.gh.runners.map((r) => r.name), ['DESK']);
+  // Someone else's GitHub login is never the one asked with: a revoked owner link fails, whoever's machine asks.
+  w.creds.put(w.josh.id, 'github', 'gho_josh', { login: 'josh', id: 2, name: null });
+  w.creds.put(w.cara.id, 'github', 'gho_revoked', { login: 'caraminden', id: 1, name: null });
+  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'DESK'), { status: 502, message: /link stopped working/ });
+  assert.deepEqual(w.gh.runners.map((r) => r.name), ['DESK']);
+});
+
+test('a runner GitHub no longer lists is already gone: success, nothing deleted, nothing noted', async () => {
+  const w = world();
+  w.gh.runners.push(runner(7, 'DESK', 'peek-auras-ci'));
+  assert.deepEqual(await w.tokens.unregister(w.machine('cara-pc', w.cara.id), 'Peek Auras', 'DESK-2'), { scheme: 'Peek Auras', repo: 'caraminden/peek-auras', name: 'DESK-2', removed: false });
+  // An exact name: not a prefix, not another case.
+  assert.equal((await w.tokens.unregister(w.machine('cara-pc2', w.cara.id), 'Peek Auras', 'desk')).removed, false);
+  assert.deepEqual(w.gh.calls, [`GET ${RUNNERS}?per_page=100&page=1`, `GET ${RUNNERS}?per_page=100&page=1`]);
+  assert.equal(w.gh.runners.length, 1);
+  assert.equal(w.notes.length, 0);
+});
+
+test('a runner without one of the scheme\'s own labels is refused and stays', async () => {
+  const w = world();
+  // Delve's runner by hand on the same repo, another scheme's label, and a label that only starts like this scheme's.
+  w.gh.runners.push(runner(1, 'DESK-perf', 'delve-perf'), runner(2, 'OTHER', 'delve-ci'), runner(3, 'NEAR', 'peek-auras-ci-2'), runner(4, 'BARE'));
+  const pc = w.machine('cara-pc', w.cara.id);
+  for (const name of ['DESK-perf', 'OTHER', 'NEAR', 'BARE']) {
+    await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', name), { status: 403, message: new RegExp(`${name}.*none of the labels Peek Auras gives its runners \\(peek-auras-ci, peek-auras-ci-linux, peek-auras-desktop\\)`) });
+  }
+  assert.equal(w.gh.runners.length, 4);
+  assert.ok(w.gh.calls.every((c) => c.startsWith('GET ')), 'nothing was deleted');
+  assert.equal(w.notes.length, 0);
+});
+
+test('the runner is found on a later page of GitHub\'s list', async () => {
+  const w = world();
+  for (let i = 1; i <= 230; i++) w.gh.runners.push(runner(i, `R${i}`, 'peek-auras-ci'));
+  assert.equal((await w.tokens.unregister(w.machine('cara-pc', w.cara.id), 'Peek Auras', 'R215')).removed, true);
+  assert.deepEqual(w.gh.calls, [1, 2, 3].map((n) => `GET ${RUNNERS}?per_page=100&page=${n}`).concat(`DELETE ${RUNNERS}/215`));
+  assert.equal(w.gh.runners.length, 229);
+});
+
+test('taking a runner off GitHub meets the same checks as a token, and says why GitHub refused', async () => {
+  const w = world();
+  w.gh.runners.push({ ...runner(7, 'DESK', 'peek-auras-ci'), busy: true });
+  const pc = w.machine('cara-pc', w.cara.id);
+  // Not this machine's scheme, no repo, no name, a name that isn't one.
+  await assert.rejects(w.tokens.unregister(w.machine('olive-pc', w.olive.id), 'Peek Auras', 'DESK'), { status: 404 });
+  await assert.rejects(w.tokens.unregister(pc, 'No Repo', 'DESK'), { status: 409 });
+  for (const bad of [undefined, '', 7, 'a\nb', 'x'.repeat(65)]) await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', bad), { status: 400, message: /name/ });
+  assert.equal(w.gh.calls.length, 0);
+  // GitHub won't delete a runner in the middle of a job.
+  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'DESK'), { status: 502, message: /GitHub said "Runner is currently running a job and cannot be deleted\." \(422\)/ });
+  w.gh.opts.down = true;
+  await assert.rejects(w.tokens.unregister(pc, 'Peek Auras', 'DESK'), { status: 502, message: /Couldn't reach GitHub/ });
+  assert.equal(w.gh.runners.length, 1);
+  assert.equal(w.notes.length, 0);
+  await assert.rejects(world(false).tokens.unregister(pc, 'Peek Auras', 'DESK'), { status: 403 });
 });

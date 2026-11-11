@@ -5,9 +5,15 @@
 .DESCRIPTION
   Citadel #328. It acts only on folders C:\actions-runner-* holding a .citadel-runner marker (add-runner.ps1 writes
   one) that names the scheme's repo and that the repo's runner service runs from, and never on Delve's C:\actions-runner, -2, -3, -4 or -perf, marker or not. For
-  each, it runs the runner's own `config.cmd remove` with a removal token Citadel mints with the scheme owner's
-  GitHub login (about an hour, never stored), which takes the runner off GitHub and deletes its service, then
-  deletes the folder. A runner GitHub won't remove keeps its folder, and the script says why.
+  each, it asks Citadel to take the runner off GitHub, which Citadel does by the runner's name with the scheme owner's
+  GitHub login, and only for a runner carrying one of the scheme's own labels; then it stops and deletes the runner's
+  Windows service, ends what still runs from the folder, and deletes the folder. A runner Citadel or GitHub won't
+  remove keeps its service and folder, and the script says why, so running it again finds it.
+  It runs nothing from a runner's folder (#476): CI jobs can write there, and this script runs elevated, usually as
+  SYSTEM, so the runner's own `config.cmd remove` is never used. The folder's files are data: the marker and .runner
+  are read as JSON and nothing else is opened. The runner's name comes from its service's name
+  (actions.runner.<owner>-<repo>.<name>), which only an admin can set; .runner's agentName is used only where there is
+  no such name to read (a session runner, or a service name GitHub cut short at 80 characters).
   A session runner (add-runner.ps1 -Session, #370) has no service: it is removed when its logon task, "GitHub runner
   <its label>", starts it from that folder, and the task and the runner's processes go with it.
   It never touches another runner, never restarts or reboots the PC. Run it elevated (an admin PowerShell, or the
@@ -44,24 +50,60 @@ $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 if (-not $admin) { Stop-With 'Run this elevated: removing a runner service needs it.' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-function Get-RunnerToken([bool]$Mint) {
+# Asks Citadel's runner route; throws what Citadel said when it refuses.
+function Invoke-Citadel([hashtable]$Ask) {
   $uri = $CitadelUrl.TrimEnd('/') + '/api/machines/runner-token'
-  $body = @{ scheme = $Scheme; mint = $Mint; kind = 'remove' } | ConvertTo-Json
+  $body = (@{ scheme = $Scheme } + $Ask) | ConvertTo-Json
   try {
     return Invoke-RestMethod -Method Post -Uri $uri -Body $body -ContentType 'application/json' -Headers @{ Authorization = "Bearer $MachineToken" } -UseBasicParsing
   } catch {
     $said = if ($_.ErrorDetails) { $_.ErrorDetails.Message } else { $null }
     try { $said = ($said | ConvertFrom-Json).error } catch { $null = $_ } # not JSON: keep the text as it came
     if (-not $said) { $said = $_.Exception.Message }
-    Stop-With "Citadel refused: $said"
+    throw "$said"
   }
 }
 
-# Delve's runners, made by hand before Citadel had markers: never these, whatever is in them.
-$never = 'C:\actions-runner', 'C:\actions-runner-2', 'C:\actions-runner-3', 'C:\actions-runner-4', 'C:\actions-runner-perf'
+# Ends every process running from a runner's folder (run.cmd's cmd.exe, Runner.Listener, Runner.Worker), a job's too.
+function Stop-RunnerProcess([string]$Dir) {
+  Get-CimInstance -ClassName Win32_Process | Where-Object {
+    $_.ProcessId -ne $PID -and (($_.ExecutablePath -and $_.ExecutablePath -like "$Dir\*") -or ($_.CommandLine -and $_.CommandLine -like "*$Dir\run.cmd*"))
+  } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
 
-$names = Get-RunnerToken $false
-$mine = @(Get-ChildItem -Path 'C:\' -Directory -Filter 'actions-runner-*' | Where-Object {
+function Get-RunnerService([string]$Name) {
+  # A service's name can't hold a quote, and this one came from Win32_Service.
+  return Get-CimInstance -ClassName Win32_Service -Filter "Name = '$Name'"
+}
+
+# Waits up to $Seconds for the service to stop (or, with -Gone, to leave the list); false if it hasn't.
+function Wait-RunnerService([string]$Name, [int]$Seconds, [switch]$Gone) {
+  $until = (Get-Date).AddSeconds($Seconds)
+  for (;;) {
+    $s = Get-RunnerService $Name
+    if (-not $s -or (-not $Gone -and $s.State -eq 'Stopped')) { return $true }
+    if ((Get-Date) -ge $until) { return $false }
+    Start-Sleep -Milliseconds 500
+  }
+}
+
+# Deletes a folder without following a link in it: a job can leave a junction to anywhere, and Windows PowerShell 5.1's
+# Remove-Item -Recurse would empty what it points at. A link is removed as a link; a read-only file (git's objects) goes too.
+function Remove-Tree([IO.FileSystemInfo]$Item) {
+  $link = [bool]($Item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+  if ($Item -is [IO.DirectoryInfo] -and -not $link) {
+    foreach ($child in @(Get-ChildItem -LiteralPath $Item.FullName -Force)) { Remove-Tree $child }
+  }
+  if (-not $link -and ($Item.Attributes -band [IO.FileAttributes]::ReadOnly)) { $Item.Attributes = $Item.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly) }
+  $Item.Delete()
+}
+
+# Delve's runners, made by hand before Citadel had markers: never these, whatever is in them.
+$root = 'C:\'
+$never = '', '-2', '-3', '-4', '-perf' | ForEach-Object { Join-Path $root "actions-runner$_" }
+
+try { $names = Invoke-Citadel @{ mint = $false } } catch { Stop-With "Citadel refused: $($_.Exception.Message)" }
+$mine = @(Get-ChildItem -Path $root -Directory -Filter 'actions-runner-*' | Where-Object {
     if ($never -contains $_.FullName.TrimEnd('\')) { return $false }
     $marker = Join-Path $_.FullName '.citadel-runner'
     if (-not (Test-Path $marker)) { return $false }
@@ -72,22 +114,25 @@ if (-not $mine) {
   exit 0
 }
 
-# Anyone can make a folder in C:\ and write a marker, but only an admin makes a service: run config.cmd only in a folder
-# that the repo's runner service runs from, so a planted folder never gets its config.cmd run as SYSTEM.
+# Anyone can make a folder in C:\ and write a marker, but only an admin makes a service: act only on a folder that the
+# repo's runner service runs from, so a planted folder is never the reason a service or a GitHub runner goes.
 # A session runner's stand-in for the service is its logon task "GitHub runner <label>" starting it from that folder.
 # shortcut: a standard user could make such a task for themselves beside a planted folder, which a service can't be;
 # fine on Cara's one-person PC (Citadel is for trusted friends), check the task's user is an admin if that changes.
 $owner, $repoName = $names.repo -split '/', 2
-$serviced = @(Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'actions.runner.%'" |
-    Where-Object { $_.Name -like "actions.runner.$owner-$repoName.*" } |
-    ForEach-Object { Split-Path (Split-Path ($_.PathName -replace '^"([^"]+)".*$', '$1') -Parent) -Parent })
+$prefix = "actions.runner.$owner-$repoName."
+$services = @{}
+Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'actions.runner.%'" |
+  Where-Object { $_.Name -like "$prefix*" } |
+  ForEach-Object { $services[(Split-Path (Split-Path ($_.PathName -replace '^"([^"]+)".*$', '$1') -Parent) -Parent)] = $_.Name }
 $tasks = @{}
 foreach ($d in $mine) {
   $m = Get-Content -Raw (Join-Path $d.FullName '.citadel-runner') | ConvertFrom-Json
   if (-not ($m.PSObject.Properties['mode'] -and $m.mode -eq 'session')) { continue }
   $t = Get-ScheduledTask -TaskName "GitHub runner $($m.label)" -ErrorAction SilentlyContinue
-  if ($t -and @($t.Actions | Where-Object { $_.WorkingDirectory -eq $d.FullName }).Count) { $tasks[$d.FullName] = $t.TaskName; $serviced += $d.FullName }
+  if ($t -and @($t.Actions | Where-Object { $_.WorkingDirectory -eq $d.FullName }).Count) { $tasks[$d.FullName] = $t.TaskName }
 }
+$serviced = @($services.Keys) + @($tasks.Keys)
 $skipped = @($mine | Where-Object { $serviced -notcontains $_.FullName })
 foreach ($d in $skipped) { Write-Host "$($d.FullName) has a marker for $($names.repo) but no runner service or logon task of that repo runs from it, so it was left alone; look at it by hand." -ForegroundColor Yellow }
 $mine = @($mine | Where-Object { $serviced -contains $_.FullName })
@@ -96,32 +141,65 @@ if (-not $mine) {
   exit 0
 }
 
-$reg = Get-RunnerToken $true
 $failed = 0
 foreach ($d in $mine) {
   Write-Host "Removing the runner in $($d.FullName)"
+  $service = $services[$d.FullName]
   $task = $tasks[$d.FullName]
-  if ($task) {
-    # Stopping the task ends the launcher, not the run.cmd it started on its desktop.
-    Stop-ScheduledTask -TaskName $task
-    Get-CimInstance -ClassName Win32_Process | Where-Object {
-      ($_.ExecutablePath -and $_.ExecutablePath -like "$($d.FullName)\*") -or ($_.CommandLine -and $_.CommandLine -like "*$($d.FullName)\run.cmd*")
-    } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+  # 1. Its name on GitHub. The service's name ends with it, and only an admin sets that; GitHub cuts a service name
+  # short at 80 characters, so one that long isn't trusted for it. Then, and for a session runner, the folder's
+  # .runner says: a job can write that file, but Citadel only removes a runner of this repo with the scheme's label.
+  $name = if ($service -and $service.Length -lt 80) { $service.Substring($prefix.Length) } else { $null }
+  if (-not $name) {
+    try { $name = [string](Get-Content -Raw -LiteralPath (Join-Path $d.FullName '.runner') | ConvertFrom-Json).agentName } catch { $name = $null }
   }
-  Push-Location $d.FullName
-  try {
-    & .\config.cmd remove --unattended --token $reg.token
-    $code = $LASTEXITCODE
-  } finally {
-    Pop-Location
-  }
-  if ($code -ne 0) {
+  if (-not $name) {
     $failed++
-    Write-Host "config.cmd remove failed (exit $code); $($d.FullName) stays. Its _diag folder says why." -ForegroundColor Red
+    Write-Host "Can't tell the runner's name on GitHub (no readable .runner in the folder); $($d.FullName) stays. Remove the runner in the repo's settings on GitHub, then the folder by hand." -ForegroundColor Red
     continue
   }
-  if ($task) { Unregister-ScheduledTask -TaskName $task -Confirm:$false; Write-Host "Removed the logon task '$task'" }
-  Remove-Item -Recurse -Force $d.FullName
+
+  # 2. Off GitHub first: if that fails, nothing here has changed and running this again finds the runner.
+  try {
+    $gone = Invoke-Citadel @{ kind = 'delete'; name = $name }
+  } catch {
+    $failed++
+    Write-Host "Citadel couldn't take the runner $name off GitHub: $($_.Exception.Message) $($d.FullName) stays." -ForegroundColor Red
+    continue
+  }
+  if ($gone.removed) { Write-Host "Took the runner $name off GitHub" } else { Write-Host "GitHub no longer lists a runner $name" }
+
+  # 3. Its service: stopped, deleted (before its processes are ended, or its restart-on-failure would start it again), gone.
+  if ($service) {
+    & sc.exe stop $service | Out-Null
+    $null = Wait-RunnerService $service 30
+    & sc.exe delete $service | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      $failed++
+      Write-Host "Couldn't delete the service $service (sc.exe exit $LASTEXITCODE); $($d.FullName) stays." -ForegroundColor Red
+      continue
+    }
+    Stop-RunnerProcess $d.FullName
+    if (Wait-RunnerService $service 30 -Gone) { Write-Host "Removed the service $service" }
+    else { Write-Host "The service $service is marked for deletion and goes once Windows lets go of it (close Services, or at the next restart)." -ForegroundColor Yellow }
+  }
+  # Or its logon task. Stopping the task ends the launcher, not the run.cmd it started on its desktop.
+  if ($task) {
+    Stop-ScheduledTask -TaskName $task
+    Stop-RunnerProcess $d.FullName
+    Unregister-ScheduledTask -TaskName $task -Confirm:$false
+    Write-Host "Removed the logon task '$task'"
+  }
+
+  # 4. The folder.
+  try {
+    Remove-Tree $d
+  } catch {
+    $failed++
+    Write-Host "The runner is gone, but its folder couldn't be deleted ($($_.Exception.Message)); delete $($d.FullName) by hand." -ForegroundColor Red
+    continue
+  }
   Write-Host "Removed $($d.FullName)" -ForegroundColor Green
 }
 if ($failed -or $skipped) { Stop-With "$($failed + $skipped.Count) runner folder(s) weren't removed; the lines above say why." }

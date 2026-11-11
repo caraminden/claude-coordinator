@@ -334,6 +334,7 @@ if (process.env.KILL_MARK && realpathSync(process.cwd()) === realpathSync(proces
   git(r.wt, 'rebase', '-q', 'main');
   const base = git(r.source, 'rev-parse', 'main');
   r.commit(r.wt, 'b.txt', 'mine\n');
+  writeFileSync(join(r.wt, 'scratch.txt'), ''); // a file outside the commit, so the deploy runs its own tests (#500)
   const bin = join(r.dir, 'bin');
   mkdirSync(bin);
   writeFileSync(join(bin, 'systemctl'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });

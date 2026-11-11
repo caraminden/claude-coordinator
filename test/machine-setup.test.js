@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { machineSetupPosix, machineSetupRunnerAgent, machineSetupWindows } from '../public/machine-setup.js';
+import { machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from '../public/machine-setup.js';
 import { backgroundService, claudeServerNames, cmdLine, loadConfig } from '../public/machine-agent.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'machine-setup-'));
@@ -166,6 +166,11 @@ test('the runner agent line carries the real address and token, nothing to edit'
   assert.ok(t.startsWith("$u = 'http://10.0.0.5:8574';"));
   assert.match(t, /-CitadelUrl \$u -MachineToken 'ccm_12_abc'$/);
   assert.doesNotMatch(t, /perigee|…|</);
+});
+
+test('the Linux runner agent line (#510) fetches the installer from the address and hands it the token in its environment', () => {
+  const t = machineSetupRunnerAgentLinux('http://10.0.0.5:8574/', 'ccm_12_abc');
+  assert.equal(t, `u='http://10.0.0.5:8574'; curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o /tmp/install-runner-agent.sh && CC_MACHINE_TOKEN='ccm_12_abc' bash /tmp/install-runner-agent.sh "$u"`);
 });
 
 // Windows only (not run here): an MCP server from the config file, or after --, starts through cmd.exe, since

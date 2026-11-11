@@ -81,10 +81,12 @@ function world(idleMs = 10_000) {
 const tick = () => new Promise((r) => setTimeout(r, 30));
 
 test('asks are checked: an op, and a count of 1 to 4 for add only', () => {
-  assert.deepEqual(runnerAsk({ op: 'add' }), { op: 'add', count: 1 });
-  assert.deepEqual(runnerAsk({ op: 'add', count: 4 }), { op: 'add', count: 4 });
-  assert.deepEqual(runnerAsk({ op: 'list' }), { op: 'list', count: null });
-  for (const bad of [{ op: 'run' }, {}, { op: 'add', count: 5 }, { op: 'add', count: 0 }, { op: 'add', count: 1.5 }, { op: 'add', count: '2' }, { op: 'remove', count: 1 }]) {
+  assert.deepEqual(runnerAsk({ op: 'add', os: 'windows' }), { op: 'add', count: 1, os: 'windows' });
+  assert.deepEqual(runnerAsk({ op: 'add', count: 4, os: 'windows' }), { op: 'add', count: 4, os: 'windows' });
+  assert.deepEqual(runnerAsk({ op: 'list', os: 'windows' }), { op: 'list', count: null, os: 'windows' });
+  assert.deepEqual(runnerAsk({ op: 'add', count: 2, os: 'linux' }), { op: 'add', count: 2, os: 'linux' });
+  assert.deepEqual(runnerAsk({ op: 'remove', os: 'linux' }), { op: 'remove', count: null, os: 'linux' });
+  for (const bad of [{ op: 'run' }, {}, { op: 'add', count: 5 }, { op: 'add', count: 0 }, { op: 'add', count: 1.5 }, { op: 'add', count: '2' }, { op: 'remove', count: 1 }, { op: 'list', os: 'macos' }, { op: 'add', os: 'Linux' }]) {
     assert.throws(() => runnerAsk(bad), { status: 400 }, JSON.stringify(bad));
   }
 });
@@ -100,7 +102,7 @@ test('a runner agent is never offered to turns as an MCP machine, and whatever i
 
 test('a member\'s add goes to the agent, waits for GitHub to show the runners Idle, and posts one note when it ends', async () => {
   const w = world();
-  const started = await w.jobs.start(w.scheme, w.josh.id, { op: 'add', count: 2 });
+  const started = await w.jobs.start(w.scheme, w.josh.id, { op: 'add', count: 2, os: 'windows' });
   assert.equal(started.ok, null);
   assert.equal(started.machine, 'cara-desktop-runners');
   assert.equal(w.notes.length, 0, 'no note for the ask itself');
@@ -121,7 +123,7 @@ test('a member\'s add goes to the agent, waits for GitHub to show the runners Id
 
 test('an add whose runners never show Idle on GitHub fails, saying what GitHub showed', async () => {
   const w = world(200);
-  await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1 });
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1, os: 'windows' });
   w.answer(true, 'Done');
   w.gh.runners.push({ name: 'DESKTOP-G248IJ8', status: 'offline', busy: false, labels: [{ name: 'peek-auras-ci' }] });
   const done = (await w.jobs.wait(w.scheme.id, 2000))!;
@@ -132,16 +134,16 @@ test('an add whose runners never show Idle on GitHub fails, saying what GitHub s
 
 test('only members ask; one job per scheme and per agent; a failed or lost job comes back as failed', async () => {
   const w = world();
-  await assert.rejects(w.jobs.start(w.scheme, w.olive.id, { op: 'list', count: null }), { status: 403, message: /Only Peek Auras's members/ });
-  await assert.rejects(w.jobs.start(w.scheme, null, { op: 'list', count: null }), { status: 403 });
+  await assert.rejects(w.jobs.start(w.scheme, w.olive.id, { op: 'list', count: null, os: 'windows' }), { status: 403, message: /Only Peek Auras's members/ });
+  await assert.rejects(w.jobs.start(w.scheme, null, { op: 'list', count: null, os: 'windows' }), { status: 403 });
   w.store.updateUser(w.josh.id, { disabled_at: Date.now() });
-  await assert.rejects(w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null }), { status: 403 });
+  await assert.rejects(w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null, os: 'windows' }), { status: 403 });
   assert.equal(w.notes.length, 0, 'a refused ask reaches neither the PC nor the chat');
   assert.equal(w.agent.sent.filter((m) => m.runners).length, 0);
 
-  await w.jobs.start(w.scheme, w.cara.id, { op: 'remove', count: null });
-  await assert.rejects(w.jobs.start(w.scheme, w.cara.id, { op: 'list', count: null }), { status: 409, message: /already has a runner job running/ });
-  await assert.rejects(w.jobs.start(w.other, w.cara.id, { op: 'list', count: null }), { status: 409, message: /busy with another scheme's job/ });
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'remove', count: null, os: 'windows' });
+  await assert.rejects(w.jobs.start(w.scheme, w.cara.id, { op: 'list', count: null, os: 'windows' }), { status: 409, message: /already has a runner job running/ });
+  await assert.rejects(w.jobs.start(w.other, w.cara.id, { op: 'list', count: null, os: 'windows' }), { status: 409, message: /busy with another scheme's job/ });
   const job = w.answer(false, 'remove-runner: no runner of this scheme here');
   assert.deepEqual({ ...job, id: undefined }, { id: undefined, op: 'remove', scheme: w.scheme.id });
   const done = (await w.jobs.wait(w.scheme.id, 1000))!;
@@ -149,17 +151,17 @@ test('only members ask; one job per scheme and per agent; a failed or lost job c
   assert.match(done.text, /no runner of this scheme here/);
 
   // The agent drops mid-job: the job ends as failed instead of hanging.
-  await w.jobs.start(w.other, w.cara.id, { op: 'list', count: null });
+  await w.jobs.start(w.other, w.cara.id, { op: 'list', count: null, os: 'windows' });
   w.relay.disconnect(w.pc.id);
   const lost = (await w.jobs.wait(w.other.id, 1000))!;
   assert.equal(lost.ok, false);
   assert.match(lost.text, /went offline/);
-  await assert.rejects(w.jobs.start(w.other, w.cara.id, { op: 'list', count: null }), { status: 409, message: /No CI runner agent that may act for Other is online/ });
+  await assert.rejects(w.jobs.start(w.other, w.cara.id, { op: 'list', count: null, os: 'windows' }), { status: 409, message: /No CI runner agent that may act for Other is online/ });
 });
 
 test('an agent only answers its own jobs, and a machine that may not act for the scheme is never picked', async () => {
   const w = world();
-  await w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null });
+  await w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null, os: 'windows' });
   const job = w.agent.sent.find((m) => m.runners).runners;
   const stranger = w.store.createMachine('olive-pc', 'y', 'Olive', w.olive.id);
   assert.equal(w.relay.runnerResult(stranger, { id: job.id, ok: true, output: 'forged' }), false);
@@ -172,24 +174,24 @@ test('an agent only answers its own jobs, and a machine that may not act for the
   w2.relay.disconnect(w2.pc.id);
   const olivePc = w2.store.createMachine('olive-pc', 'y', 'Olive', w2.olive.id);
   w2.relay.connectAgent(olivePc, stream(), { host: 'h', command: 'c', runners: true });
-  await assert.rejects(w2.jobs.start(w2.scheme, w2.josh.id, { op: 'list', count: null }), { status: 409, message: /No CI runner agent/ });
+  await assert.rejects(w2.jobs.start(w2.scheme, w2.josh.id, { op: 'list', count: null, os: 'windows' }), { status: 409, message: /No CI runner agent/ });
 });
 
 test('a scheme with no repo or no owner GitHub link fails before the PC is asked', async () => {
   const w = world();
   const bare = w.store.createProject('Bare', null, w.cara.id);
-  await assert.rejects(w.jobs.start(bare, w.cara.id, { op: 'add', count: 1 }), { status: 409, message: /no GitHub repo/ });
+  await assert.rejects(w.jobs.start(bare, w.cara.id, { op: 'add', count: 1, os: 'windows' }), { status: 409, message: /no GitHub repo/ });
   assert.equal(w.agent.sent.filter((m) => m.runners).length, 0);
 });
 
 test('a list notes nothing; a remove notes once, failed or not; a token its scripts fetch goes under its note', async () => {
   const w = world();
-  await w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null });
+  await w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null, os: 'windows' });
   w.answer(true, 'actions.runner.a Running\nactions.runner.b Running');
   assert.equal((await w.jobs.wait(w.scheme.id, 1000))!.ok, true);
   assert.deepEqual(w.notes, [], 'a list changes nothing, and the caller already has its output');
 
-  await w.jobs.start(w.scheme, w.josh.id, { op: 'remove', count: null });
+  await w.jobs.start(w.scheme, w.josh.id, { op: 'remove', count: null, os: 'windows' });
   // The PC's remove script fetches a removal token with the agent's key while the job runs: no note of its own.
   assert.equal(w.jobs.absorb(w.scheme, w.pc, 'Machine cara-desktop-runners fetched a CI runner removal token'), true);
   const stranger = w.store.createMachine('olive-pc', 'y', 'Olive', w.olive.id);
@@ -201,10 +203,38 @@ test('a list notes nothing; a remove notes once, failed or not; a token its scri
   assert.equal(w.details[0], 'Machine cara-desktop-runners fetched a CI runner removal token\nRemoved actions.runner.a\nRemoved actions.runner.b');
   assert.equal(w.jobs.absorb(w.scheme, w.pc, 'later'), false, 'once the job ends, tokens are noted as before');
 
-  await w.jobs.start(w.scheme, w.cara.id, { op: 'remove', count: null });
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'remove', count: null, os: 'windows' });
   w.answer(false, Array.from({ length: 70 }, (_, i) => `line ${i + 1}`).join('\n'));
   await w.jobs.wait(w.scheme.id, 1000);
   assert.equal(w.notes[1], "Peek Auras: ✗ Cara tried to remove Peek Auras's CI runners on cara-desktop-runners, and it failed: line 70");
   const kept = w.details[1].split('\n');
   assert.deepEqual([kept[0], kept[1], kept.at(-1), kept.length], ['(10 earlier lines left out)', 'line 11', 'line 70', 61]);
+});
+
+test('a Linux ask (#510) goes only to the Linux agent in WSL, waits for the -ci-linux label, and says Linux in its note', async () => {
+  const w = world();
+  // With only the Windows agent online, a Linux ask has nowhere to go.
+  await assert.rejects(w.jobs.start(w.scheme, w.josh.id, { op: 'add', count: 1, os: 'linux' }), (e: any) => e.status === 409 && /Linux CI runner agent/.test(e.message));
+  const wsl = w.store.createMachine('cara-desktop-linux', 'y', 'Cara', w.cara.id);
+  const agent = stream();
+  w.relay.connectAgent(wsl, agent, { host: 'DESKTOP-G248IJ8', command: 'citadel runner agent', runners: true, os: 'linux' });
+  assert.deepEqual(w.relay.runnerMachines('linux').map((m) => m.name), ['cara-desktop-linux']);
+  assert.deepEqual(w.relay.runnerMachines().map((m) => m.name), ['cara-desktop-runners'], 'a Windows ask never reaches the Linux agent');
+
+  const started = await w.jobs.start(w.scheme, w.josh.id, { op: 'add', count: 1, os: 'linux' });
+  assert.equal(started.machine, 'cara-desktop-linux');
+  assert.equal(w.agent.sent.filter((m) => m.runners).length, 0, 'the Windows agent got nothing');
+  const job = agent.sent.filter((m) => m.runners).at(-1).runners;
+  assert.deepEqual({ ...job, id: undefined }, { id: undefined, op: 'add', scheme: w.scheme.id, count: 1 }, 'the same job shape: the agent picks its scripts');
+  assert.equal(w.relay.runnerResult(wsl, { id: job.id, ok: true, output: 'Added' }), true);
+  // A Windows runner with the scheme's -ci label doesn't count for a Linux add.
+  w.gh.runners.push({ name: 'DESKTOP-G248IJ8', status: 'online', busy: false, labels: [{ name: 'peek-auras-ci' }] });
+  await tick();
+  assert.equal((await w.jobs.wait(w.scheme.id, 0))!.ok, null);
+  w.gh.runners.push({ name: 'DESKTOP-G248IJ8-linux', status: 'online', busy: false, labels: [{ name: 'self-hosted' }, { name: 'Linux' }, { name: 'peek-auras-ci-linux' }] });
+  const done = (await w.jobs.wait(w.scheme.id, 5000))!;
+  assert.equal(done.ok, true, done.text);
+  assert.match(done.text, /On GitHub \(label peek-auras-ci-linux\): DESKTOP-G248IJ8-linux Idle$/);
+  assert.deepEqual(w.notes, ['Peek Auras: ✓ Josh added 1 Linux CI runner for Peek Auras on cara-desktop-linux']);
+  w.relay.disconnect(wsl.id);
 });

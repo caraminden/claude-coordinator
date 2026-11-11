@@ -33,13 +33,20 @@ test('it accepts add, list and remove with exactly their fields, and refuses eve
 test('each op runs its own script from the agent\'s folder in Windows PowerShell, with numbers for arguments', () => {
   const dir = 'C:\\ProgramData\\citadel-runner-agent';
   const ps = 'C:\\Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
-  const add = jobCommand({ op: 'add', scheme: 3, count: 2 }, dir, 'http://perigee:8574', 'C:\\Windows');
+  const add = jobCommand({ op: 'add', scheme: 3, count: 2 }, dir, 'http://perigee:8574', 'C:\\Windows', 'windows');
   assert.equal(add.command.replaceAll('\\', '/'), ps.replaceAll('\\', '/'));
   assert.deepEqual(add.args.slice(0, 5), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File']);
   assert.match(add.args[5], /add-runner\.ps1$/);
   assert.deepEqual(add.args.slice(6), ['-Scheme', '3', '-CitadelUrl', 'http://perigee:8574', '-Count', '2']);
-  assert.match(jobCommand({ op: 'remove', scheme: 3 }, dir, 'u').args[5], /remove-runner\.ps1$/);
-  assert.deepEqual(jobCommand({ op: 'list' }, dir, 'u').args.slice(5).map((a: string) => a.replace(/.*[\\/]/, '')), ['list-runners.ps1']);
+  assert.match(jobCommand({ op: 'remove', scheme: 3 }, dir, 'u', 'C:\\Windows', 'windows').args[5], /remove-runner\.ps1$/);
+  assert.deepEqual(jobCommand({ op: 'list' }, dir, 'u', 'C:\\Windows', 'windows').args.slice(5).map((a: string) => a.replace(/.*[\\/]/, '')), ['list-runners.ps1']);
+});
+
+test('the Linux agent (#510) runs the bash twin of each script from its folder, with the same checked numbers as arguments', () => {
+  assert.deepEqual(jobCommand({ op: 'add', scheme: 3, count: 2 }, '/opt/citadel-runner-agent', 'http://perigee:8574', undefined, 'linux'),
+    { command: '/bin/bash', args: ['/opt/citadel-runner-agent/add-runner.sh', '3', 'http://perigee:8574', '2'] });
+  assert.deepEqual(jobCommand({ op: 'remove', scheme: 3 }, '/a', 'u', undefined, 'linux').args, ['/a/remove-runner.sh', '3', 'u']);
+  assert.deepEqual(jobCommand({ op: 'list' }, '/a', 'u', undefined, 'linux').args, ['/a/list-runners.sh']);
 });
 
 test('tokens are blanked from what goes back to Citadel', () => {
@@ -99,7 +106,7 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     assert.equal(made.status, 201, JSON.stringify(made.data));
     const tokenFile = join(srv.root, 'machine-token');
     writeFileSync(tokenFile, `${made.data.token}\n`);
-    agent = spawn(process.execPath, [agentFile, srv.base, '--token-file', tokenFile], { env: { ...process.env, SystemRoot: join(srv.root, 'win') }, stdio: 'ignore' });
+    agent = spawn(process.execPath, [agentFile, srv.base, '--token-file', tokenFile, '--os', 'windows'], { env: { ...process.env, SystemRoot: join(srv.root, 'win') }, stdio: 'ignore' });
     const online = await until('the runner agent to connect', async () => (await srv.call('/api/machines')).data.find((m: any) => m.name === 'desk-runners' && m.online));
     assert.equal(online.runners, true);
     assert.deepEqual(online.servers, [], 'turns never get it as an MCP machine');
@@ -116,7 +123,8 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     assert.match(job.text, /token was ccm_…/);
     assert.doesNotMatch(job.text, new RegExp(made.data.token));
 
-    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1']) {
+    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'keep-wsl-up.ps1',
+      'install-runner-agent.sh', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh']) {
       assert.equal((await fetch(`${srv.base}/ci-runner/${name}`)).status, 200, name);
     }
     assert.match(await (await fetch(`${srv.base}/runner-agent.mjs`)).text(), /Citadel's CI runner agent/);

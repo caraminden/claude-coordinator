@@ -1,7 +1,7 @@
 // A scheme's settings: notifications, the Settings page's instructions and approvals tabs, and the Machines page.
 import { account, ago, api, h, icon, listGroupsOf, me, schemeIcon, view } from './base.js';
 import { openHash } from './core.js';
-import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupWindows } from './machine-setup.js';
+import { agentLog, machineSetupPosix, machineSetupRunnerAgent, machineSetupRunnerAgentLinux, machineSetupWindows } from './machine-setup.js';
 import { openNewScheme, renderSidebar, toggleSchemeMenu } from './sidebar.js';
 import { copyText } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
@@ -794,9 +794,12 @@ function renderMachineSetup() {
   const t = view.machineToken;
   if (!t) return el.replaceChildren();
   const ways = t.runners ? [
-    { os: 'runner', label: 'Administrator PowerShell on the Windows PC that hosts the CI runners (tools/ci-runner/README.md): installs the runner agent as a background task.',
+    { os: 'runner', tab: 'Windows', label: 'Administrator PowerShell on the Windows PC that hosts the CI runners (tools/ci-runner/README.md): installs the runner agent as a background task.',
       text: machineSetupRunnerAgent(t.url, t.token),
       note: 'It checks Node 18+ and Git for Windows, registers the task Citadel runner agent (SYSTEM, at startup), starts it and waits until this machine shows online. No reboot, and no runner is touched.' },
+    { os: 'runner-linux', tab: 'Linux in WSL', label: 'Root shell in the CI runners\' WSL distro on that PC (wsl -d citadel-ci -u root; tools/ci-runner/README.md, "Linux runners in WSL"): installs the Linux runner agent as a systemd service.',
+      text: machineSetupRunnerAgentLinux(t.url, t.token),
+      note: 'The first time, it sets up /etc/wsl.conf and asks you to restart the distro and paste this again. Then it installs Node, git and the runner\'s libraries, starts the agent and waits until this machine shows online. Use a host of its own for this, not the Windows agent\'s.' },
   ] : [
     { os: 'windows', tab: 'Windows', label: 'Windows PowerShell: runs in the background, also after you close the window, and starts at every logon. No reboot.',
       text: machineSetupWindows(t.url, t.name, t.token), log: agentLog('windows', t.name) },
@@ -805,13 +808,14 @@ function renderMachineSetup() {
   ];
   // Picked from this browser; the chips are for adding a computer from another one.
   view.machineSetupOs ??= guessOs();
-  const os = t.runners ? 'runner' : view.machineSetupOs;
+  const os = t.runners ? view.runnerSetupOs ?? 'runner' : view.machineSetupOs;
   const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
   copy.onclick = async () => {
     copy.textContent = await copyText(ways.find((w) => w.os === os).text) ? 'Copied' : 'Couldn\'t copy';
   };
   const pick = (to) => {
-    view.machineSetupOs = to;
+    if (t.runners) view.runnerSetupOs = to;
+    else view.machineSetupOs = to;
     renderMachineSetup();
   };
   el.replaceChildren(h('div', { class: 'machine-setup' },
@@ -819,7 +823,7 @@ function renderMachineSetup() {
     h('p', { class: 'small' }, "Don't screenshot this or paste it in a chat: the line holds the token, and anyone who has it can act as this machine."),
     h('p', { class: 'small' }, 'The token is shown only now; if you lose it, make a new one. Paste this on that computer:'),
     h('div', { class: 'row machine-setup-ways' },
-      t.runners ? '' : h('div', { class: 'row', role: 'group', 'aria-label': 'Which computer' },
+      h('div', { class: 'row', role: 'group', 'aria-label': 'Which computer' },
         ways.map((w) => h('button', { type: 'button', class: `chip${w.os === os ? ' on' : ''}`, 'aria-pressed': String(w.os === os), onclick: () => pick(w.os) }, w.tab))),
       h('span', { class: 'spacer' }), copy),
     ways.map((w) => h('div', { class: 'machine-setup-way', 'data-os': w.os, hidden: w.os !== os },

@@ -147,10 +147,16 @@ test('a machine set up before ticks shows what it lends as set on that computer,
 test('a CI runner host is added from its own button and gets its own install line', { skip }, async () => {
   await openMachines();
   await add('runner-pc', '.machine-add.runners');
-  assert.equal(await pressed(), '', 'no Windows or macOS choice: the runner agent is a Windows program');
+  // Windows first, whatever this browser runs on: the Windows agent is the usual one; Linux in WSL is a second host (#510).
+  assert.deepEqual(await page.eval<string[]>('[...document.querySelectorAll("#machine-setup .chip")].map((b) => b.textContent)'), ['Windows', 'Linux in WSL']);
+  assert.equal(await pressed(), 'Windows');
   const [line] = await shown();
   assert.ok(line.startsWith(`$u = '${srv.base}';`), line);
   assert.match(line, /-MachineToken 'ccm_\d+_[\w-]+'$/);
+  await page.eval('[...document.querySelectorAll("#machine-setup .chip")].find((b) => b.textContent === "Linux in WSL").click()');
+  await wait('the Linux line', 'document.querySelector("#machine-setup [aria-pressed=true]")?.textContent === "Linux in WSL"');
+  const [linux] = await shown();
+  assert.equal(linux, line.replace(/^\$u = '([^']+)'.*'(ccm_[^']+)'$/, `u='$1'; curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o /tmp/install-runner-agent.sh && CC_MACHINE_TOKEN='$2' bash /tmp/install-runner-agent.sh "$u"`), 'the same address and token');
   // It sits under CI runners from the start, before its agent has ever connected.
   assert.equal((await machine('runner-pc')).runners, true);
   await wait('its line under CI runners', `!!${row('runner-pc')}`);

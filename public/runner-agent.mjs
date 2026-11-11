@@ -9,6 +9,9 @@
 //
 //   node runner-agent.mjs <machines url> --token-file <file> [--log <file>]
 //
+// The same file runs as root inside a WSL distro on that PC (#510), where it adds Linux runners with bash scripts of the same
+// names (add-runner.sh, ...), installed by tools/ci-runner/install-runner-agent.sh.
+//
 // It dials out to Citadel like the machine agent (public/machine-agent.mjs) and holds an event stream open, so the
 // PC needs no open port. tools/ci-runner/install-runner-agent.ps1 installs it; tools/ci-runner/README.md says how.
 import { spawn } from 'node:child_process';
@@ -21,6 +24,8 @@ export const MAX_RUNNERS = 4;
 const JOB_LIMIT_MS = 15 * 60_000;
 const TAIL_LINES = 200;
 const SCRIPTS = { add: 'add-runner.ps1', list: 'list-runners.ps1', remove: 'remove-runner.ps1' };
+// The Linux agent (#510) runs as root inside a WSL distro on the same PC, with bash scripts of the same names.
+const LINUX_SCRIPTS = { add: 'add-runner.sh', list: 'list-runners.sh', remove: 'remove-runner.sh' };
 
 /** The job Citadel sent, checked field by field: anything else is refused, so the scripts only ever get a number or two. */
 export function checkJob(job) {
@@ -39,8 +44,17 @@ export function checkJob(job) {
   throw new Error(`refused: this agent only adds, lists and removes runners (got op ${JSON.stringify(job?.op)} with ${keys || 'nothing'})`);
 }
 
-/** What runs for a checked job: Windows PowerShell with the script from this agent's own folder, never a shell. */
-export function jobCommand(job, dir, appUrl, systemRoot = process.env.SystemRoot ?? 'C:\\Windows') {
+/** Which runners this agent adds: Linux ones where it runs on Linux (in WSL), Windows services everywhere else. */
+export const defaultOs = () => (process.platform === 'linux' ? 'linux' : 'windows');
+
+/** What runs for a checked job: the script from this agent's own folder, in Windows PowerShell, or in bash on Linux (#510); never a shell line. */
+export function jobCommand(job, dir, appUrl, systemRoot = process.env.SystemRoot ?? 'C:\\Windows', os = defaultOs()) {
+  if (os === 'linux') {
+    const args = [join(dir, LINUX_SCRIPTS[job.op])];
+    if (job.op !== 'list') args.push(String(job.scheme), appUrl);
+    if (job.op === 'add') args.push(String(job.count));
+    return { command: '/bin/bash', args };
+  }
   const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(dir, SCRIPTS[job.op])];
   if (job.op !== 'list') args.push('-Scheme', String(job.scheme), '-CitadelUrl', appUrl);
   if (job.op === 'add') args.push('-Count', String(job.count));
@@ -66,7 +80,8 @@ export function runCommand({ command, args }, env, limitMs = JOB_LIMIT_MS) {
     };
     let child;
     try {
-      child = spawn(command, args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      // Its own process group off Windows (#510), so the time limit ends config.sh and the rest with it.
+      child = spawn(command, args, { env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (err) {
       return resolve({ code: -1, output: `could not start ${command}: ${err.message}` });
     }
@@ -75,7 +90,7 @@ export function runCommand({ command, args }, env, limitMs = JOB_LIMIT_MS) {
     const timer = setTimeout(() => {
       keep(`\nStopped after ${Math.round(limitMs / 60_000)} minutes.`);
       if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-      else child.kill();
+      else try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill(); }
     }, limitMs);
     child.on('error', (err) => keep(`could not start ${command}: ${err.message}`));
     child.on('close', (code) => {
@@ -87,8 +102,8 @@ export function runCommand({ command, args }, env, limitMs = JOB_LIMIT_MS) {
 
 /** Jobs one at a time: a second that arrives while one runs is refused, not queued, so nothing runs that nobody waits on. */
 export class JobRunner {
-  constructor({ dir, appUrl, token, run = runCommand, log = () => {} }) {
-    Object.assign(this, { dir, appUrl, token, run, log, busy: null });
+  constructor({ dir, appUrl, token, run = runCommand, log = () => {}, os = defaultOs() }) {
+    Object.assign(this, { dir, appUrl, token, run, log, os, busy: null });
   }
 
   /** The answer for Citadel: { id, ok, output }, output redacted. */
@@ -107,7 +122,7 @@ export class JobRunner {
     try {
       // The scripts ask Citadel for tokens with this machine's token; it goes in their environment, never their arguments.
       const env = { ...process.env, CC_MACHINE_TOKEN: this.token };
-      const { code, output } = await this.run(jobCommand(job, this.dir, this.appUrl), env);
+      const { code, output } = await this.run(jobCommand(job, this.dir, this.appUrl, undefined, this.os), env);
       this.log(`Job ${what} ended: exit ${code}`);
       return { id: job.id, ok: code === 0, output: redact(output) };
     } finally {
@@ -140,9 +155,15 @@ async function main() {
   };
   const tokenFile = option('--token-file');
   const logFile = option('--log');
+  // Tests run a Windows agent on Linux; nothing else passes it.
+  const os = option('--os') ?? defaultOs();
+  if (os !== 'linux' && os !== 'windows') {
+    console.error('--os is linux or windows');
+    process.exit(2);
+  }
   const [appUrl] = opts;
   if (!appUrl || !tokenFile) {
-    console.error('Usage: node runner-agent.mjs <machines url> --token-file <file> [--log <file>]');
+    console.error('Usage: node runner-agent.mjs <machines url> --token-file <file> [--log <file>] [--os linux|windows]');
     process.exit(2);
   }
   const token = readFileSync(tokenFile, 'utf8').trim();
@@ -152,7 +173,7 @@ async function main() {
     if (logFile) try { appendFileSync(logFile, `${line}\n`); } catch {}
   };
   const auth = { Authorization: `Bearer ${token}` };
-  const jobs = new JobRunner({ dir: dirname(realpathSync(process.argv[1])), appUrl, token, log });
+  const jobs = new JobRunner({ dir: dirname(realpathSync(process.argv[1])), appUrl, token, log, os });
 
   async function answer(raw) {
     const reply = await jobs.handle(raw);
@@ -171,6 +192,8 @@ async function main() {
       url.searchParams.set('host', hostname());
       url.searchParams.set('command', 'citadel runner agent');
       url.searchParams.set('kind', 'runners');
+      // Which runners it adds (#510): Citadel sends Linux asks only to a Linux agent.
+      url.searchParams.set('os', os);
       const res = await fetch(url, { headers: { ...auth, Accept: 'text/event-stream' } });
       if (res.status === 401 || res.status === 403) {
         log(`Citadel refused this agent (${res.status}): ${(await res.json().catch(() => ({}))).error ?? ''} Make a new token on the Machines page and install again.`);
@@ -179,7 +202,7 @@ async function main() {
       if (!res.ok) throw new Error(`Citadel answered ${res.status}`);
       for await (const msg of events(res.body)) {
         if (msg.hello) {
-          log(`Connected to ${new URL(appUrl).host} as "${msg.hello}": adds, lists and removes CI runners when Citadel asks.`);
+          log(`Connected to ${new URL(appUrl).host} as "${msg.hello}": adds, lists and removes ${os === 'linux' ? 'Linux ' : ''}CI runners when Citadel asks.`);
           retry = 0;
         } else if (msg.replaced) {
           // Another agent took over with this token: trying again at once would drop it, and it this one, forever.

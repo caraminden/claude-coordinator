@@ -78,3 +78,9 @@ export function machineSetupRunnerAgent(url, token) {
   const u = url.replace(/\/$/, '');
   return `$u = '${u}'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\install-runner-agent.ps1" -CitadelUrl $u -MachineToken '${token}'`;
 }
+
+/** The Linux runner agent's install line (#510, tools/ci-runner/README.md "Linux runners in WSL"), for a root shell in the WSL distro on Cara's desktop. */
+export function machineSetupRunnerAgentLinux(url, token) {
+  const u = url.replace(/\/$/, '');
+  return `u='${u}'; curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o /tmp/install-runner-agent.sh && CC_MACHINE_TOKEN='${token}' bash /tmp/install-runner-agent.sh "$u"`;
+}

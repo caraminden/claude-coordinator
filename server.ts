@@ -240,7 +240,7 @@ function liveOn(head: string | null) {
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
 const runnerJobs = new RunnerJobs(store, runnerTokens, machines);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
-runner.refuseTurn = (ticket, author) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid));
+runner.refuseTurn = (ticket, author, from) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from);
 // Sender pays (#213): the server login's owner runs on the host, everyone else in their own container.
 runner.placeFor = (person) => {
   const user = person ? store.getUser(person) : undefined;

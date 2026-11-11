@@ -571,7 +571,7 @@ export class Runner {
   /** Other children of this server a restart would kill: landings (src/land.ts). */
   hostJobs?: () => number;
   /** Why a message can't start or steer a turn (src/access.ts turnRefusal), or null when it can. */
-  refuseTurn?: (ticket: Ticket, author: string) => string | null;
+  refuseTurn?: (ticket: Ticket, author: string, from?: number) => string | null;
   /** The person a message speaks for: its author, or for a relay (`from`), the sending turn's person. */
   personOf?: (author: string, from?: number) => number | null;
   /** A turn's GitHub env and prompt line for its person (src/github-link.ts forTurn); null with linking not set up. */
@@ -1211,7 +1211,7 @@ export class Runner {
     const { asker: askedBy, ...shown } = extra;
     extra = shown;
     const ticket = this.store.getTicket(ticketId);
-    const refused = ticket && this.refuseTurn?.(ticket, author);
+    const refused = ticket && this.refuseTurn?.(ticket, author, extra.from);
     if (refused) {
       this.emit(ticketId, 'user_message', { author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}), ...extra });
       this.emit(ticketId, 'note', { text: refused });

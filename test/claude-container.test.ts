@@ -498,3 +498,14 @@ test("a failed sign-in says Claude's own last words, without the link or the pas
   const said = signInOutcome(out, 'abc#def');
   assert.equal(said, 'Paste code here if prompted > [code] Login failed: Request failed with status code 400');
 });
+
+test('a relayed message is checked against the person its turn would run for, so refuseTurn gets the sending thread (#468 S02-2)', () => {
+  const id = newTicket();
+  const r = runner(inContainer);
+  const seenFrom: (number | undefined)[] = [];
+  r.refuseTurn = (_t, _a, from) => (seenFrom.push(from), 'held');
+  r.send(id, 'Taskmaster', 'relayed', [], { from: 77 });
+  r.send(id, 'GitHub', 'CI passed');
+  assert.deepEqual(seenFrom, [77, undefined]);
+  assert.ok(notes(id).includes('held'));
+});

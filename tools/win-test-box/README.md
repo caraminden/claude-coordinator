@@ -103,6 +103,7 @@ Nothing to do.
 - **Restarts look after themselves.** When her PC restarts, the box starts 2 minutes later, signs itself in, and its runners and agent come back. Windows Update in the box is told not to restart it while it's signed in (installs at 03:00, active hours 06:00–23:00), but Windows 11 Home isn't promised to honour that: an update may still restart it at night, and it signs itself in again.
 - **Restart the box gracefully, only ever from inside it:** `Restart-Computer` in the box, or from her PC `Invoke-Command -VMName citadel-test-box -Credential $cred { Restart-Computer -Force }` (there `-Force` only closes apps without asking). **Never `Restart-VM -Force` or a plain `Restart-VM`:** that is a hard reset, like pulling the plug. On 2026-11-10 one put the box into Automatic Repair and lost the settings written just before it.
 - **Adding a scheme** is step 7 again.
+- **Crash dumps are kept** (#549, Josh's pick for Peek Auras #223, 2026-11-11). `guest-setup.ps1` sets Windows Error Reporting LocalDumps: any program that crashes leaves a mini dump (stacks, a few hundred KB to a few MB) in `C:\CrashDumps`, the newest 20 kept, readable by `citadel`, the desktop runner's account. On an already-built box, run `guest-setup.ps1` again or just its "Keeping crash dumps" step.
 
 ## If something goes wrong
 

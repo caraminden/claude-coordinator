@@ -6,6 +6,7 @@
 #   - 125% display scaling, and Windows 11's rounded corners forced on (the Hyper-V display adapter
 #     draws square ones otherwise);
 #   - no notifications over tests, and Windows Update never restarts it while signed in;
+#   - keeps local crash dumps in C:\CrashDumps, readable by `citadel` (#549);
 #   - Git, Node (for Citadel's machine agent), mise and Tailscale;
 #   - then restarts the box once, so the scaling takes.
 # It writes each step to C:\citadel-box\guest-setup.log, then guest-setup.done, or guest-setup.failed
@@ -53,6 +54,16 @@ Set-Reg 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm' ForceEffectMode 2
 
 Log 'No notifications over tests'
 Set-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications' ToastEnabled 0
+
+Log 'Keeping crash dumps in C:\CrashDumps (WER LocalDumps, #549)'
+# Box-wide: any program that crashes leaves a mini dump (stacks), the newest 20 kept. The runner's
+# account `citadel` reads the folder; Users get read access explicitly rather than by inheritance.
+New-Item -ItemType Directory -Force C:\CrashDumps | Out-Null
+icacls C:\CrashDumps /grant '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+$ld = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+Set-Reg $ld DumpFolder 'C:\CrashDumps' ExpandString
+Set-Reg $ld DumpType 1
+Set-Reg $ld DumpCount 20
 
 Log 'Waiting for winget (the Store brings it in a few minutes after the first sign-in)'
 $deadline = (Get-Date).AddMinutes(15)

@@ -226,6 +226,30 @@ test('stop_job ends a launched app and frees the workspace and the screen', asyn
   await refused(boxCall('stop_job', { id: 'nope' }), /No job nope/);
 });
 
+test('stop_job also ends what the task started, off Windows (a shell running a launcher, say)', { skip: process.platform === 'win32' }, async () => {
+  const file = join(root, 'tree.json');
+  writeFileSync(file, JSON.stringify({ workspaces: { tree: { path: clone, tasks: { launch: { run: ['sh', '-c', 'sleep 47 & echo "child $!"; wait'] } } } } }));
+  const tree = new WorkspaceHost({ configFile: file, jobsDir: join(root, 'tree-jobs') });
+  const started = await tree.call('run_task', { workspace: 'tree', task: 'launch', wait: 1 }, '#1', async () => '');
+  const id = started.text.match(/job (\w+)\)/)[1];
+  const pid = Number(started.text.match(/child (\d+)/)[1]);
+  const alive = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  try {
+    assert.equal(alive(), true);
+    await tree.call('stop_job', { id }, '#1', async () => '');
+    assert.equal(alive(), false, 'the sleep the shell started is gone too');
+  } finally {
+    if (alive()) process.kill(pid, 'SIGKILL');
+  }
+});
+
 test('the screen lock: a live holder refuses screen tasks, a dead one is taken over', async () => {
   holdLock(process.ppid);
   await refused(boxCall('run_task', { workspace: 'peek', task: 'shell' }), /screen is busy: desktop CI job for GitHub Actions \(peek-auras\).*Nothing was started/);

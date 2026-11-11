@@ -236,11 +236,29 @@ function run(command, args, opts) {
   });
 }
 
+// Off Windows a task runs in a process group of its own, so stopping it reaches what it started too.
+const OWN_GROUP = process.platform !== 'win32';
+/** Task process groups still running: ended with the agent, which a Ctrl-C would no longer reach. */
+const liveGroups = new Set();
+
+/** Signals a process group; false once none of it is left. */
+function signalGroup(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Ends a job's process and whatever it started (Godot under cmd.exe, say); resolves once that's done. */
-function killTree(child) {
-  if (process.platform !== 'win32') {
-    child.kill();
-    return Promise.resolve();
+async function killTree(child) {
+  if (OWN_GROUP) {
+    // Its group: SIGTERM, then SIGKILL for whatever is left after 3 s.
+    if (!signalGroup(child.pid, 'SIGTERM')) return void child.kill();
+    for (let i = 0; i < 30 && signalGroup(child.pid, 0); i++) await sleep(100);
+    signalGroup(child.pid, 'SIGKILL');
+    return;
   }
   return new Promise((done) => spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('close', done).on('error', done));
 }
@@ -621,28 +639,35 @@ export class WorkspaceHost {
     file.write(`${argv.join(' ')}\n(in ${w.path}, for ${who})\n\n`);
     job.done = new Promise((resolveDone) => {
       let child;
+      // Why it is being stopped: it may exit while that is under way.
+      let stopping = null;
       const finish = (code, error) => {
         if (job.ended) return;
+        error ??= stopping;
         clearTimeout(limit);
         job.ended = Date.now();
         job.code = code;
         job.error = error;
         if (job.partial) job.tail.push(job.partial);
         file.end(error ? `\n${error}\n` : `\nexit ${code}\n`);
+        if (child && OWN_GROUP) liveGroups.delete(child.pid);
         this.release(w, lock);
         if (screen) releaseScreenLock(this.screenLock, screen);
         resolveDone();
       };
       job.stop = async (why) => {
+        stopping = why;
         if (child) await killTree(child);
         finish(null, why);
       };
       const limit = setTimeout(() => {
+        stopping = `Stopped after ${TASK_LIMIT_MS / 60_000} minutes`;
         if (child) killTree(child);
-        finish(null, `Stopped after ${TASK_LIMIT_MS / 60_000} minutes`);
+        finish(null, stopping);
       }, TASK_LIMIT_MS);
       try {
-        child = spawn(argv[0], argv.slice(1), { cwd: w.path, env: this.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        child = spawn(argv[0], argv.slice(1), { cwd: w.path, env: this.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: OWN_GROUP });
+        if (OWN_GROUP && child.pid) liveGroups.add(child.pid);
       } catch (err) {
         return finish(null, `Could not start ${argv[0]}: ${err.message}`);
       }
@@ -944,6 +969,19 @@ async function main() {
     console.error('Add --log <file> to copy its output to a file, or --install <machine name> to run it in the background (macOS, Linux).');
     console.error('Example: node machine-agent.mjs https://example.net ccm_1_… --config machine-agent.json');
     process.exit(2);
+  }
+  // A task runs in a process group of its own, which a Ctrl-C or a service stop doesn't reach: end those with the agent.
+  if (OWN_GROUP) {
+    const endTasks = () => {
+      for (const pid of liveGroups) signalGroup(pid, 'SIGTERM');
+    };
+    process.on('exit', endTasks);
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+      process.once(sig, () => {
+        endTasks();
+        process.kill(process.pid, sig);
+      });
+    }
   }
   // Set up the old way, its MCP server is fixed on this command line; otherwise the Machines page's ticks decide (#439).
   const lends = !!(command.length || claudeMcp);

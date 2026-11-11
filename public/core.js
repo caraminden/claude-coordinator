@@ -747,7 +747,11 @@ async function route() {
     else if ((m = hash.match(/^#\/t\/(\d+)$/))) await showTicket(Number(m[1]));
     else await openStartScheme();
   } catch (err) {
-    if (err.message !== 'Not logged in' && seq === routeSeq) app.replaceChildren(h('p', { class: 'error' }, err.message));
+    if (err.message !== 'Not logged in' && seq === routeSeq) {
+      app.replaceChildren(h('p', { class: 'error' }, err.message));
+      // The old view is gone from the page, so the next resync routes again instead of refreshing it in place.
+      setView(null);
+    }
   } finally {
     if (seq === routeSeq) document.body.classList.remove('navigating');
   }

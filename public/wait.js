@@ -14,7 +14,8 @@ export const waitFam = (w) => (w.stage === 'passed' ? 'done' : w.stage === 'fail
 /** How long it has gone on: a CI run's stops when it ended. */
 const took = (w, now) => (w.ended ?? now) - w.since;
 export const waitLate = (w, now = Date.now()) => !!w.usual && !w.ended && took(w, now) > w.usual * 1000 * LATE;
-const pct = (w, now) => (w.ended ? 100 : w.usual ? Math.min(100, (took(w, now) / (w.usual * 1000)) * 100) : 0);
+/** How full its bar is: by its counts (tests or CI jobs done, #551) when it has them, else elapsed against usual. */
+export const waitPct = (w, now) => (w.ended ? 100 : w.total ? (w.done / w.total) * 100 : w.usual ? Math.min(100, (took(w, now) / (w.usual * 1000)) * 100) : 0);
 
 /** "1m 05s" style, for how long something has run. */
 export function elapsedText(ms) {
@@ -27,12 +28,15 @@ export function waitTime(w, now = Date.now()) {
   return w.usual ? `${elapsedText(took(w, now))} of ~${elapsedText(w.usual * 1000)}` : elapsedText(took(w, now));
 }
 
-/** Elapsed against usual, as a thin bar that the ticker below moves on; none without a usual. */
+/** A thin bar: tests or jobs done of all of them, or elapsed against usual, which the ticker below moves on; none with neither. */
 export function waitBar(w, cls = 'wait-bar') {
-  if (!w.usual) return '';
+  if (!w.usual && !w.total) return '';
   const now = Date.now(), fam = waitFam(w);
-  return h('span', { class: `${cls}${waitLate(w, now) ? ' late' : ''}${fam === 'done' || fam === 'broken' ? ` f-${fam}` : ''}`, 'data-since': w.since, 'data-usual': w.usual, 'data-ended': w.ended ?? '', 'aria-hidden': 'true' },
-    h('i', { style: `width: ${pct(w, now)}%` }));
+  // A counted bar moves when the wait is sent again with new counts, not on the ticker.
+  const clock = w.total ? {} : { 'data-since': w.since, 'data-usual': w.usual, 'data-ended': w.ended ?? '' };
+  const fill = h('i');
+  fill.style.width = `${waitPct(w, now)}%`; // the page's CSP drops style attributes, not the style property
+  return h('span', { class: `${cls}${!w.total && waitLate(w, now) ? ' late' : ''}${fam === 'done' || fam === 'broken' ? ` f-${fam}` : ''}`, ...clock, 'aria-hidden': 'true' }, fill);
 }
 
 /** The wait's stage name and where it is on a landing's track. */
@@ -62,11 +66,11 @@ export function waitTrack(w) {
 /** Moves every wait's bar and elapsed time on, without rebuilding rows. */
 function tick() {
   const now = Date.now();
-  for (const el of document.querySelectorAll('.wait-time, .wait-bar')) {
+  for (const el of document.querySelectorAll('.wait-time, .wait-bar[data-since]')) {
     const w = { since: Number(el.dataset.since), usual: Number(el.dataset.usual) || null, ended: Number(el.dataset.ended) || undefined };
     if (el.classList.contains('wait-time')) el.textContent = waitTime(w, now);
     else {
-      el.firstChild.style.width = `${pct(w, now)}%`;
+      el.firstChild.style.width = `${waitPct(w, now)}%`;
       el.classList.toggle('late', waitLate(w, now));
     }
   }

@@ -781,7 +781,7 @@ function renderProgress() {
     time,
     h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'));
   // With no plan the meter keeps its room, hidden, so a plan arriving doesn't push the chat (rule 13).
-  const meter = w?.usual ? waitBar(w, 'wait-bar big') : h('progress', { class: total ? 'meter' : 'meter blank', max: total || 1, value: total ? done : 0 });
+  const meter = w && (w.total || w.usual) ? waitBar(w, 'wait-bar big') : h('progress', { class: total ? 'meter' : 'meter blank', max: total || 1, value: total ? done : 0 });
 
   const prevDetail = progressEl.querySelector('.progress-detail');
   const scrollTop = prevDetail?.scrollTop ?? 0;

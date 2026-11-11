@@ -113,6 +113,25 @@ test('rowState: a wait shows its chip while working or outside, never over a nee
   for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
 });
 
+// Josh, 2026-11-11: "it should instead show the progress of all tests, and the x/y should be the top level steps we always had before".
+test("rowState: a wait's counts go to its bar, so the chip's x/y is the plan's steps (#551)", () => {
+  const tests = { kind: 'land', stage: 'test', chip: 'land · 152/218', text: 'running the tests: 152 of 218 files', since: NOW - MIN, usual: 160, done: 152, total: 218 };
+  const rows = [
+    [{ status: 'running', steps: { done: 3, total: 5 }, wait: tests }, [1, 'work', 'land 3/5', 'pulse']],
+    [{ state: 'outside', wait: tests }, [2, 'work', 'land', 'pulse']],
+    [{ state: 'outside', steps: { done: 4, total: 5 }, wait: { ...tests, kind: 'heavy', stage: 'run', chip: 'tests 12/40', done: 12, total: 40 } }, [2, 'work', 'tests 4/5', 'pulse']],
+    [{ state: 'outside', steps: { done: 4, total: 5 }, wait: { ...tests, kind: 'ci', stage: 'jobs', chip: 'CI · 1/3 jobs', done: 1, total: 3 } }, [2, 'work', 'CI 4/5', 'pulse']],
+  ];
+  for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
+});
+
+test('a wait bar fills by its counts when it has them, by elapsed against usual otherwise (#551)', async () => {
+  const { waitPct } = await import('../public/wait.js');
+  assert.equal(waitPct({ since: NOW - 80_000, usual: 160, done: 152, total: 218 }, NOW).toFixed(1), '69.7');
+  assert.equal(waitPct({ since: NOW - 80_000, usual: 160 }, NOW), 50);
+  assert.equal(waitPct({ since: NOW - 80_000, usual: 160, done: 1, total: 3, ended: NOW - 1000 }, NOW), 100);
+});
+
 test('a wait reads elapsed against its usual, and runs late past 15% over', async () => {
   const { waitTime, waitLate } = await import('../public/wait.js');
   const w = { since: NOW - 59_000, usual: 160 };
